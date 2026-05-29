@@ -30,7 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -523,8 +523,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 }
 
 func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
-	log := log.Ctx(ctx)
-	log.Info("ClearReadTaskQueue request received",
+	mlog.Info(ctx, "ClearReadTaskQueue request received",
 		zap.String("taskType", req.GetTaskType()),
 		zap.String("reason", req.GetReason()))
 
@@ -589,7 +588,7 @@ func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearRe
 		resp.Status = merr.Status(err)
 	}
 
-	log.Info("cleared querynode read task queues",
+	mlog.Info(ctx, "cleared querynode read task queues",
 		zap.String("taskType", req.GetTaskType()),
 		zap.String("reason", req.GetReason()),
 		zap.Int("queryNodes", len(resp.GetResults())),

@@ -42,7 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -65,7 +65,7 @@ func createTextIndex(ctx context.Context,
 	taskID int64,
 	segment *datapb.CompactionSegment,
 ) (map[int64]*datapb.TextIndexStats, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID),
 		zap.Int64("segmentID", segmentID),
@@ -124,7 +124,7 @@ func createTextIndex(ctx context.Context,
 		if !h.EnableMatch() {
 			continue
 		}
-		log.Info("field enable match, ready to create text index", zap.Int64("field id", field.GetFieldID()))
+		log.Info(ctx, "field enable match, ready to create text index", zap.Int64("field id", field.GetFieldID()))
 
 		eg.Go(func() error {
 			files, err := getInsertFiles(field.GetFieldID())
@@ -205,7 +205,7 @@ func createTextIndex(ctx context.Context,
 			}
 			mu.Unlock()
 
-			log.Info("field enable match, create text index done",
+			log.Info(ctx, "field enable match, create text index done",
 				zap.Int64("segmentID", segmentID),
 				zap.Int64("field id", field.GetFieldID()),
 				zap.Strings("files", statsFiles),

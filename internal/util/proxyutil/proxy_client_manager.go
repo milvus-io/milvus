@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -368,7 +369,7 @@ func (p *ProxyClientManager) SetRates(ctx context.Context, request *proxypb.SetR
 
 func (p *ProxyClientManager) ClearReadTaskQueue(ctx context.Context, request *internalpb.ClearReadTaskQueueRequest) ([]*internalpb.ClearReadTaskQueueComponentResult, error) {
 	if p.proxyClient.Len() == 0 {
-		log.Warn("proxy client is empty, ClearReadTaskQueue will not send to any client")
+		mlog.Warn(ctx, "proxy client is empty, ClearReadTaskQueue will not send to any client")
 		return nil, nil
 	}
 

@@ -38,7 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -67,22 +67,22 @@ func (t *bumpSchemaVersionCompactionTask) Compact() (*datapb.CompactionPlanResul
 	defer span.End()
 
 	if err := t.preCompact(); err != nil {
-		log.Ctx(ctx).Warn("failed to preCompact", zap.Error(err))
+		mlog.Warn(ctx, "failed to preCompact", zap.Error(err))
 		return nil, err
 	}
 	compactStart := time.Now()
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("planID", t.GetPlanID()),
 		zap.Int64("collectionID", t.GetCollection()),
 	)
 
 	missingFunctions, droppedFieldIDs, existingFields, err := t.schemaBumpDecision()
 	if err != nil {
-		log.Warn("failed to decide schema bump action", zap.Error(err))
+		log.Warn(ctx, "failed to decide schema bump action", zap.Error(err))
 		return nil, err
 	}
 
-	log.Info("schema bump compact start",
+	log.Info(ctx, "schema bump compact start",
 		zap.Int64("segmentID", t.plan.GetSegmentBinlogs()[0].GetSegmentID()),
 		zap.Int32("collectionSchemaVersion", t.plan.GetSchema().GetVersion()),
 		zap.Int("missingFunctionCount", len(missingFunctions)),
@@ -98,11 +98,11 @@ func (t *bumpSchemaVersionCompactionTask) Compact() (*datapb.CompactionPlanResul
 		result, err = t.runMissingFunctionMaterialization(ctx, missingFunctions, existingFields)
 	}
 	if err != nil {
-		log.Warn("schema bump compact failed", zap.Error(err), zap.Duration("compact cost", time.Since(compactStart)))
+		log.Warn(ctx, "schema bump compact failed", zap.Error(err), zap.Duration("compact cost", time.Since(compactStart)))
 		return nil, err
 	}
 
-	log.Info("schema bump compact done", zap.Duration("compact cost", time.Since(compactStart)))
+	log.Info(ctx, "schema bump compact done", zap.Duration("compact cost", time.Since(compactStart)))
 	return result, nil
 }
 
@@ -302,7 +302,7 @@ func (t *bumpSchemaVersionCompactionTask) openRecordReader(segment *datapb.Compa
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 	)
 	if err != nil {
-		log.Ctx(t.ctx).Warn("failed to open compaction segment reader", zap.Error(err))
+		mlog.Warn(t.ctx, "failed to open compaction segment reader", zap.Error(err))
 	}
 	return reader, existingFields, err
 }
@@ -675,7 +675,7 @@ func (t *bumpSchemaVersionCompactionTask) setupWriter(outputFields []*schemapb.F
 		return nil, err
 	}
 	writerResult.writer.AsNewColumnGroups()
-	log.Ctx(t.ctx).Info("[schema-bump-partial-writer] writer setup",
+	mlog.Info(t.ctx, "[schema-bump-partial-writer] writer setup",
 		zap.Int64("baseVersion", existingVersion),
 		zap.String("basePath", basePath),
 		zap.Int("outputFieldCount", len(outputFields)),
@@ -701,7 +701,7 @@ func (t *bumpSchemaVersionCompactionTask) newV3WriterResult(schema *schemapb.Col
 	if err != nil {
 		return nil, err
 	}
-	log.Ctx(t.ctx).Info("[schema-bump-partial-writer] partial manifest writer created",
+	mlog.Info(t.ctx, "[schema-bump-partial-writer] partial manifest writer created",
 		zap.Int64("baseVersion", baseVersion),
 		zap.Int("schemaFieldCount", len(schema.GetFields())),
 		zap.Int("columnGroupCount", len(columnGroups)),
@@ -850,7 +850,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 		return nil, err
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("planID", t.plan.GetPlanID()),
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID),
@@ -872,7 +872,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 		return nil, err
 	}
 
-	log.Info("schema bump writer setup",
+	log.Info(ctx, "schema bump writer setup",
 		zap.Int64("effectiveStorageVersion", writerResult.storageVersion),
 		zap.Int64("clusterStorageVersion", t.compactionParams.StorageVersion),
 		zap.Bool("segmentHasManifest", segment.GetManifest() != ""),
@@ -946,7 +946,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 			return nil, err
 		}
 		writeDuration += time.Since(writeStart)
-		log.Info("[schema-bump-partial-writer] record batch written",
+		log.Info(ctx, "[schema-bump-partial-writer] record batch written",
 			zap.Int("rows", wrapped.Len()),
 			zap.Int64("totalRowsBeforeBatch", totalRows),
 			zap.Int("outputFieldCount", len(outputFields)),
@@ -969,7 +969,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 	}
 	span2.End()
 
-	log.Info("schema bump bm25 stats written",
+	log.Info(ctx, "schema bump bm25 stats written",
 		zap.Int("bm25StatsFieldCount", len(outputFieldIDs)),
 		zap.Int64("storageVersion", writerResult.storageVersion),
 		zap.Int("v3StatsCount", len(writerResult.v3Stats)),
@@ -1000,7 +1000,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to commit schema bump V3 manifest")
 	}
-	log.Info("[schema-bump-partial-writer] writer output and bm25 stats committed",
+	log.Info(ctx, "[schema-bump-partial-writer] writer output and bm25 stats committed",
 		zap.String("manifestPath", manifestPath),
 		zap.Int64("totalRows", totalRows),
 		zap.Int("mergedInsertLogsCount", len(mergedInsertLogs)),
@@ -1024,7 +1024,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 		},
 		Type: t.plan.GetType(),
 	}
-	log.Info("[schema-bump-partial-writer] compaction completed",
+	log.Info(ctx, "[schema-bump-partial-writer] compaction completed",
 		zap.Int64("numOfRows", totalRows),
 		zap.Int("mergedInsertLogsCount", len(mergedInsertLogs)),
 		zap.String("manifestPath", manifestPath),

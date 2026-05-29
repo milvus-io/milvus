@@ -32,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -227,7 +227,7 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 	defer storageVersionTicker.Stop()
 	bumpSchemaVersionTicker := time.NewTicker(Params.DataCoordCfg.BumpSchemaVersionCompactionTriggerInterval.GetAsDuration(time.Second))
 	defer bumpSchemaVersionTicker.Stop()
-	log.Info("Compaction trigger manager start")
+	mlog.Info(ctx, "Compaction trigger manager start")
 	for {
 		select {
 		case <-ctx.Done():
@@ -736,10 +736,10 @@ func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.C
 }
 
 func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx context.Context, view CompactionView) {
-	log := log.Ctx(ctx).With(zap.String("view", view.String()))
+	log := mlog.With(zap.String("view", view.String()))
 	bumpView, ok := view.(*BumpSchemaVersionView)
 	if !ok {
-		log.Warn("unexpected view type for schema bump trigger, expected *BumpSchemaVersionView",
+		log.Warn(ctx, "unexpected view type for schema bump trigger, expected *BumpSchemaVersionView",
 			zap.String("actualType", fmt.Sprintf("%T", view)))
 		return
 	}
@@ -753,12 +753,12 @@ func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx co
 		return
 	}
 	if collection.IsExternal() {
-		log.Info("skip submitting schema bump compaction for external collection", zap.Int64("collectionID", collection.ID))
+		log.Info(ctx, "skip submitting schema bump compaction for external collection", zap.Int64("collectionID", collection.ID))
 		return
 	}
 	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
 	if err != nil {
-		log.Warn("Failed to submit schema bump compaction because get collection ttl failed", zap.Error(err))
+		log.Warn(ctx, "Failed to submit schema bump compaction because get collection ttl failed", zap.Error(err))
 		return
 	}
 	var totalRows int64 = 0
@@ -799,7 +799,7 @@ func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx co
 			zap.Error(err))
 		return
 	}
-	log.Info("Finish to submit a schema bump compaction task",
+	log.Info(ctx, "Finish to submit a schema bump compaction task",
 		zap.Int64("triggerID", task.GetTriggerID()),
 		zap.Int64("planID", task.GetPlanID()),
 		zap.String("type", task.GetType().String()),

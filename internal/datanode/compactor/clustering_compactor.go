@@ -631,7 +631,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 	materializer, err := NewRecordMaterializer(t.plan.Schema, t.plan.Schema.GetFunctions(), existingFields)
 	if err != nil {
 		rr.Close()
-		log.Warn("new record materializer wrong", zap.Error(err))
+		log.Warn(ctx, "new record materializer wrong", zap.Error(err))
 		return err
 	}
 	rr = newMaterializedRecordReader(rr, materializer)

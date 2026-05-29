@@ -278,7 +278,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 
 	materializer, err := NewRecordMaterializer(writerSchema, writerSchema.GetFunctions(), existingFields)
 	if err != nil {
-		log.Warn("compact wrong, failed to init record materializer", zap.Error(err))
+		mlog.Warn(ctx, "compact wrong, failed to init record materializer", zap.Error(err))
 		return
 	}
 	defer materializer.Close()
@@ -303,7 +303,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		r, err = materializer.Wrap(baseRecord)
 		if err != nil {
 			baseRecord.Release()
-			log.Warn("compact wrong, failed to materialize record", zap.Error(err))
+			mlog.Warn(ctx, "compact wrong, failed to materialize record", zap.Error(err))
 			return
 		}
 

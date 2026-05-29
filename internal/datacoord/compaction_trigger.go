@@ -352,7 +352,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 	}
 
 	for _, group := range groups {
-		log := log.With(
+		log := mlog.With(
 			zap.Int64("group.partitionID", group.partitionID),
 			zap.String("group.channel", group.channelName),
 		)

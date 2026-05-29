@@ -1295,7 +1295,7 @@ func (s *mixCoordImpl) ClearReadTaskQueue(ctx context.Context, req *internalpb.C
 		resp.Status = merr.Status(err)
 	}
 
-	log.Ctx(ctx).Info("cleared cluster read task queues",
+	mlog.Info(ctx, "cleared cluster read task queues",
 		zap.String("taskType", req.GetTaskType()),
 		zap.String("reason", req.GetReason()),
 		zap.Int64("proxyQueuedCleared", resp.GetProxyQueuedCleared()),

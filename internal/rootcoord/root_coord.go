@@ -3002,7 +3002,7 @@ func (c *Core) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearRead
 		}
 	}
 
-	log.Ctx(ctx).Info("cleared proxy read task queues",
+	mlog.Info(ctx, "cleared proxy read task queues",
 		zap.String("taskType", req.GetTaskType()),
 		zap.String("reason", req.GetReason()),
 		zap.Int64("proxyQueuedCleared", resp.GetProxyQueuedCleared()),

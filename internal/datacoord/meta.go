@@ -3329,7 +3329,7 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	cloned.Binlogs = resultSegment.GetInsertLogs()
 	if newSchemaVersion > cloned.GetSchemaVersion() {
 		cloned.SchemaVersion = newSchemaVersion
-		log.Info("meta update: update schema version for schema bump compaction",
+		log.Info(m.ctx, "meta update: update schema version for schema bump compaction",
 			zap.Int64("segmentID", segmentID),
 			zap.Int32("oldSchemaVersion", oldSegment.GetSchemaVersion()),
 			zap.Int32("newSchemaVersion", newSchemaVersion))
@@ -3351,24 +3351,24 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 		zap.Int32("newSchemaVersion", cloned.GetSchemaVersion()),
 		zap.Int("newInsertLogsCount", len(resultSegment.GetInsertLogs())))
 
-	log.Info("meta update: prepare for complete schema bump compaction mutation - complete",
+	log.Info(m.ctx, "meta update: prepare for complete schema bump compaction mutation - complete",
 		zap.Int64("num rows", cloned.GetNumOfRows()))
 
 	// Save to catalog
 	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo}, binlogsIncrement); err != nil {
-		log.Warn("fail to alter segment for schema bump compaction", zap.Error(err))
+		log.Warn(m.ctx, "fail to alter segment for schema bump compaction", zap.Error(err))
 		return nil, nil, err
 	}
 
 	// Update in-memory meta
 	m.segments.SetSegment(segmentID, cloned)
-	log.Info("meta update: alter in memory meta after schema bump compaction - complete")
+	log.Info(m.ctx, "meta update: alter in memory meta after schema bump compaction - complete")
 
 	return []*SegmentInfo{cloned}, metricMutation, nil
 }
 
 func (m *meta) completeBumpSchemaVersionReplacementMutation(
-	log *log.MLogger,
+	log *mlog.Logger,
 	metricMutation *segMetricMutation,
 	t *datapb.CompactionTask,
 	oldSegment *SegmentInfo,
@@ -3431,16 +3431,16 @@ func (m *meta) completeBumpSchemaVersionReplacementMutation(
 		zap.Int32("newSchemaVersion", newSegment.GetSchemaVersion()),
 		zap.Int("newInsertLogsCount", len(resultSegment.GetInsertLogs())),
 	)
-	log.Info("meta update: prepare replacement for schema bump full rewrite", zap.Int64("num rows", newSegment.GetNumOfRows()))
+	log.Info(m.ctx, "meta update: prepare replacement for schema bump full rewrite", zap.Int64("num rows", newSegment.GetNumOfRows()))
 
 	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{dropped.SegmentInfo, newSegment.SegmentInfo}, binlogsIncrement); err != nil {
-		log.Warn("fail to alter replacement segments for schema bump compaction", zap.Error(err))
+		log.Warn(m.ctx, "fail to alter replacement segments for schema bump compaction", zap.Error(err))
 		return nil, nil, err
 	}
 
 	m.segments.SetSegment(dropped.GetID(), dropped)
 	m.segments.SetSegment(newSegment.GetID(), newSegment)
-	log.Info("meta update: alter in memory meta after schema bump full rewrite replacement - complete")
+	log.Info(m.ctx, "meta update: alter in memory meta after schema bump full rewrite replacement - complete")
 	return []*SegmentInfo{newSegment}, metricMutation, nil
 }
 

@@ -369,7 +369,7 @@ func (c *importChecker) checkSortingJob(job ImportJob) {
 		sortSegmentIDs := task.(*importTask).GetSortedSegmentIDs()
 		taskCnt += len(originSegmentIDs)
 		for i, originSegmentID := range originSegmentIDs {
-			logger := log.With(WrapTaskLog(task, zap.Int64("origin", originSegmentID), zap.Int64("target", sortSegmentIDs[i]))...)
+			logger := mlog.With(WrapTaskLog(task, zap.Int64("origin", originSegmentID), zap.Int64("target", sortSegmentIDs[i]))...)
 			originSegment := c.meta.GetHealthySegment(c.ctx, originSegmentID)
 			targetSegment := c.meta.GetHealthySegment(c.ctx, sortSegmentIDs[i])
 			if originSegment == nil {

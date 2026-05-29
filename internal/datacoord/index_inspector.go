@@ -199,7 +199,7 @@ func (i *indexInspector) canCreateIndexForSegment(ctx context.Context, segment *
 	if !i.isFunctionOutputField(segment.CollectionID, index.FieldID) || hasField {
 		return true
 	}
-	log.Ctx(ctx).Debug("function output field has no binlog, skip create index", zap.Int64("segmentID", segment.ID), zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID))
+	mlog.Debug(ctx, "function output field has no binlog, skip create index", zap.Int64("segmentID", segment.ID), zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID))
 	return false
 }
 

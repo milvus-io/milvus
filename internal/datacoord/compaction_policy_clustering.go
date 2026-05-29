@@ -159,7 +159,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 	views := make([]CompactionView, 0)
 	// partSegments is list of chanPartSegments, which is channel-partition organized segments
 	for _, group := range partSegments {
-		log := log.With(zap.Int64("partitionID", group.partitionID), zap.String("channel", group.channelName))
+		log := mlog.With(zap.Int64("partitionID", group.partitionID), zap.String("channel", group.channelName))
 
 		if !policy.checkAllL2SegmentsContains(ctx, group.collectionID, group.partitionID, group.channelName) {
 			log.Warn(ctx, "clustering compaction cannot be done, otherwise the performance will fall back")

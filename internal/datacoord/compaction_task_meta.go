@@ -99,7 +99,7 @@ func (csm *compactionTaskMeta) reloadFromKV() error {
 		if !isCompactionTaskFinished(task) &&
 			task.PreAllocatedSegmentIDs == nil &&
 			task.GetType() != datapb.CompactionType_Level0DeleteCompaction {
-			log.Warn("PreAllocatedSegmentIDs is nil, mark the task as failed",
+			mlog.Warn(csm.ctx, "PreAllocatedSegmentIDs is nil, mark the task as failed",
 				zap.Int64("taskID", task.GetPlanID()),
 				zap.String("type", task.GetType().String()),
 				zap.String("originalState", task.State.String()),

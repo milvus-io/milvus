@@ -1397,7 +1397,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 	removeActions := make([]*querypb.SyncAction, 0)
 	group, ctx := errgroup.WithContext(ctx)
 	for _, action := range req.GetActions() {
-		log := log.With(zap.String("Action",
+		log := mlog.With(zap.String("Action",
 			action.GetType().String()))
 		switch action.GetType() {
 		case querypb.SyncType_Remove:
@@ -1873,7 +1873,7 @@ func (node *QueryNode) ClearReadTaskQueue(ctx context.Context, req *internalpb.C
 		QueuedCleared:   result.QueuedCleared,
 		QueuedNqCleared: result.QueuedNQCleared,
 	})
-	log.Ctx(ctx).Info("cleared querynode read task queue",
+	mlog.Info(ctx, "cleared querynode read task queue",
 		zap.String("taskType", req.GetTaskType()),
 		zap.String("reason", req.GetReason()),
 		zap.Int64("queuedCleared", result.QueuedCleared),

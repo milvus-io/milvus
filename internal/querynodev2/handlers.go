@@ -152,7 +152,7 @@ func (node *QueryNode) loadIndex(ctx context.Context, req *querypb.LoadSegmentsR
 	log.Info(ctx, "start to load index")
 
 	for _, info := range req.GetInfos() {
-		log := log.With(zap.Int64("segmentID", info.GetSegmentID()))
+		log := mlog.With(zap.Int64("segmentID", info.GetSegmentID()))
 		segment := node.manager.Segment.GetSealed(info.GetSegmentID())
 		if segment == nil {
 			log.Warn(ctx, "segment not found for load index operation")

@@ -255,7 +255,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	}
 	materializer, err := NewRecordMaterializer(writerSchema, writerSchema.GetFunctions(), existingFields)
 	if err != nil {
-		log.Warn("error creating record materializer", zap.Error(err))
+		log.Warn(ctx, "error creating record materializer", zap.Error(err))
 		rr.Close()
 		srw.Close()
 		return nil, err
