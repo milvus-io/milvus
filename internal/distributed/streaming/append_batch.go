@@ -41,18 +41,19 @@ func (c appendBatchConfig) enabled() bool {
 }
 
 type appendBatchConfigProvider struct {
-	load    func() appendBatchConfig
-	current atomic.Pointer[appendBatchConfig]
+	load       func() appendBatchConfig
+	unregister func()
+	current    atomic.Pointer[appendBatchConfig]
 }
 
 func newAppendBatchConfigProvider(
 	load func() appendBatchConfig,
-	register func(paramtable.ParamChangeCallback),
+	register func(paramtable.ParamChangeCallback) func(),
 ) *appendBatchConfigProvider {
 	p := &appendBatchConfigProvider{load: load}
 	p.refresh()
 	if register != nil {
-		register(p.update)
+		p.unregister = register(p.update)
 	}
 	return p
 }
@@ -61,11 +62,15 @@ func newAppendBatchConfigProviderFromParams() *appendBatchConfigProvider {
 	return newAppendBatchConfigProvider(newAppendBatchConfigFromParams, registerAppendBatchConfigCallbacks)
 }
 
-func registerAppendBatchConfigCallbacks(callback paramtable.ParamChangeCallback) {
+func registerAppendBatchConfigCallbacks(callback paramtable.ParamChangeCallback) func() {
 	params := paramtable.Get()
-	params.WatchKeyPrefix("streaming.walAppendBatch", config.NewHandler("wal-append-batch-config-provider", func(event *config.Event) {
+	handler := config.NewHandler("wal-append-batch-config-provider", func(event *config.Event) {
 		_ = callback(context.Background(), event.Key, "", event.Value)
-	}))
+	})
+	params.WatchKeyPrefix("streaming.walAppendBatch", handler)
+	return func() {
+		params.Unwatch("streaming.walAppendBatch", handler)
+	}
 }
 
 func (p *appendBatchConfigProvider) get() appendBatchConfig {
@@ -90,6 +95,13 @@ func (p *appendBatchConfigProvider) update(ctx context.Context, key, oldValue, n
 func (p *appendBatchConfigProvider) refresh() {
 	cfg := p.load()
 	p.current.Store(&cfg)
+}
+
+func (p *appendBatchConfigProvider) close() {
+	if p.unregister != nil {
+		p.unregister()
+		p.unregister = nil
+	}
 }
 
 type appendBatchRequest struct {
