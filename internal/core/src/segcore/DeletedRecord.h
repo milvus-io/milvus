@@ -154,7 +154,10 @@ class DeletedRecord {
                     return;
                 }
                 // Skip delete when delete_ts <= insert_ts.
-                // For normal segments this handles the same-timestamp edge case.
+                // Normal segment callers search PKs with include_same_ts=false,
+                // so only rows with insert_ts < delete_ts reach this callback.
+                // This check is therefore redundant for normal production
+                // callers and keeps direct callers/tests on the same boundary.
                 // For import segments with commit_timestamp, insert_ts is set
                 // to commit_ts so that pre-commit deletes (delete_ts < commit_ts)
                 // are correctly rejected — the row's data only becomes visible

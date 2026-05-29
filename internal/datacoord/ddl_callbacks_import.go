@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/log"
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // importV1AckCallback handles the ack callback for import messages.
@@ -108,7 +110,40 @@ func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.Impor
 		return err
 	}
 
+	if err := s.validateImportReplication(ctx, options); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func (s *Server) validateImportReplication(ctx context.Context, options []*commonpb.KeyValuePair) error {
+	balancer, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	assignment, err := balancer.GetLatestChannelAssignment()
+	if err != nil {
+		return err
+	}
+	if assignment == nil {
+		return nil
+	}
+	if !isReplicatingCluster(assignment.ReplicateConfiguration) {
+		return nil
+	}
+
+	if !paramtable.Get().DataCoordCfg.ImportInReplicatingCluster.GetAsBool() {
+		return merr.WrapErrImportFailed("import in replicating cluster is not supported yet")
+	}
+	if importutilv2.IsAutoCommit(options) {
+		return merr.WrapErrImportFailed("auto_commit=true import in replicating cluster is not supported yet")
+	}
+	return nil
+}
+
+func isReplicatingCluster(cfg *commonpb.ReplicateConfiguration) bool {
+	return cfg != nil && (len(cfg.GetCrossClusterTopology()) > 0 || len(cfg.GetClusters()) > 1)
 }
 
 // broadcastImport broadcasts the import message to all vchannels.

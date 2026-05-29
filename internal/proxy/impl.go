@@ -34,6 +34,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
@@ -7374,13 +7375,18 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 
 	// Get the salvage checkpoint for the specified source cluster.
 	// Returns nil if source_cluster_id is not provided or no checkpoint exists for that cluster.
-	// GetSalvageCheckpoint is only meaningful after a force-promote on the local streaming node;
-	// treat any error (e.g. "not implemented for remote WAL") as "no salvage checkpoint".
+	// GetSalvageCheckpoint is only meaningful after a force-promote on the local streaming node.
+	// During rolling upgrade, old streaming nodes may not implement this RPC yet; treat only
+	// that compatibility case as "no salvage checkpoint".
 	var salvageCheckpointProto *commonpb.ReplicateCheckpoint
 	salvageCheckpoints, err := streaming.WAL().Replicate().GetSalvageCheckpoint(ctx, req.GetTargetPchannel())
 	if err != nil {
-		logger.Info("GetSalvageCheckpoint returned error, treating as no salvage checkpoint", zap.Error(err))
-		err = nil
+		if errors.Is(err, merr.ErrServiceUnimplemented) || funcutil.IsGrpcErr(err, codes.Unimplemented) {
+			logger.Info("GetSalvageCheckpoint is not implemented, treating as no salvage checkpoint", zap.Error(err))
+			err = nil
+		} else {
+			return nil, err
+		}
 	}
 	for _, cp := range salvageCheckpoints {
 		if cp.ClusterID == req.GetSourceClusterId() {
