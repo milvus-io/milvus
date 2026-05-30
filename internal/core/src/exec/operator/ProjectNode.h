@@ -70,6 +70,7 @@ class PhyProjectNode : public Operator {
     const segcore::SegmentInternalInterface* segment_;
     bool is_finished_{false};
     const std::vector<FieldId> fields_to_project_;
+    const std::vector<plan::ProjectNode::ProjectionMode> projection_modes_;
     OpContext* op_context_;
 };
 }  // namespace exec

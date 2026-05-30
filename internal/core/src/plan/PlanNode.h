@@ -318,6 +318,9 @@ class ElementFilterBitsNode : public PlanNode {
 
 class ProjectNode : public PlanNode {
  public:
+    // Existing project field lists only represented value materialization.
+    enum class ProjectionMode { Value, ValidityOnly };
+
     ProjectNode(const PlanNodeId& id,
                 std::vector<FieldId>&& field_ids,
                 std::vector<std::string>&& field_names,
@@ -325,9 +328,26 @@ class ProjectNode : public PlanNode {
                 std::vector<PlanNodePtr> sources = std::vector<PlanNodePtr>{})
         : PlanNode(id),
           sources_(std::move(sources)),
+          field_modes_(field_ids.size(), ProjectionMode::Value),
           field_ids_(std::move(field_ids)),
           output_type_(std::make_shared<RowType>(std::move(field_names),
                                                  std::move(field_types))) {
+    }
+
+    ProjectNode(const PlanNodeId& id,
+                std::vector<FieldId>&& field_ids,
+                std::vector<std::string>&& field_names,
+                std::vector<milvus::DataType>&& field_types,
+                std::vector<ProjectionMode>&& field_modes,
+                std::vector<PlanNodePtr> sources = std::vector<PlanNodePtr>{})
+        : PlanNode(id),
+          sources_(std::move(sources)),
+          field_modes_(std::move(field_modes)),
+          field_ids_(std::move(field_ids)),
+          output_type_(std::make_shared<RowType>(std::move(field_names),
+                                                 std::move(field_types))) {
+        AssertInfo(field_ids_.size() == field_modes_.size(),
+                   "Project field count and projection mode count must match");
     }
 
     std::vector<PlanNodePtr>
@@ -356,8 +376,14 @@ class ProjectNode : public PlanNode {
         return field_ids_;
     }
 
+    const std::vector<ProjectionMode>&
+    ProjectionModes() const {
+        return field_modes_;
+    }
+
  private:
     const std::vector<PlanNodePtr> sources_;
+    const std::vector<ProjectionMode> field_modes_;
     const std::vector<FieldId> field_ids_;
     const RowTypePtr output_type_;
 };
