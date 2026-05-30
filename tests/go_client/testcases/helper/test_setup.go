@@ -127,22 +127,20 @@ func teardown() {
 // derived from the gRPC addr flag (e.g. http://host:19530 -> http://host:9091).
 func managementBaseURL() string {
 	host := ""
-	if u, err := url.Parse(*addr); err == nil {
-		host = u.Hostname()
-	}
-	if host == "" {
-		host = *addr
-		if h, _, err := net.SplitHostPort(host); err == nil {
-			host = h
-		} else if idx := strings.LastIndexByte(host, ':'); idx >= 0 {
-			host = host[:idx]
+	rawAddr := strings.TrimSpace(*addr)
+	if rawAddr != "" {
+		parseAddr := rawAddr
+		if !strings.Contains(rawAddr, "://") {
+			parseAddr = "http://" + rawAddr
 		}
-		host = strings.Trim(host, "[]")
+		if u, err := url.Parse(parseAddr); err == nil {
+			host = u.Hostname()
+		}
 	}
 	if host == "" {
 		host = "localhost"
 	}
-	return fmt.Sprintf("http://%s:9091", host)
+	return fmt.Sprintf("http://%s", net.JoinHostPort(host, "9091"))
 }
 
 // AlterServerConfig changes a Milvus server config via the management HTTP API.
@@ -153,7 +151,8 @@ func AlterServerConfig(key, value string) (string, error) {
 	prev, _ := GetServerConfig(key)
 
 	body, _ := json.Marshal(map[string]string{"key": key, "value": value})
-	resp, err := http.Post(managementBaseURL()+"/management/config/alter",
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	resp, err := httpClient.Post(managementBaseURL()+"/management/config/alter",
 		"application/json", bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("management API unreachable: %w", err)
@@ -169,7 +168,8 @@ func AlterServerConfig(key, value string) (string, error) {
 
 // GetServerConfig reads a config value from the management API.
 func GetServerConfig(key string) (string, error) {
-	resp, err := http.Get(managementBaseURL() + "/management/config/get?keys=" + url.QueryEscape(key))
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	resp, err := httpClient.Get(managementBaseURL() + "/management/config/get?keys=" + url.QueryEscape(key))
 	if err != nil {
 		return "", err
 	}

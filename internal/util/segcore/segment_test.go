@@ -194,6 +194,7 @@ func TestConvertToSegcoreSegmentLoadInfo(t *testing.T) {
 		assert.Equal(t, int64(0), result.SegmentID)
 		assert.Equal(t, int64(0), result.PartitionID)
 		assert.Equal(t, int64(0), result.CollectionID)
+		assert.False(t, result.UseTakeForOutput)
 	})
 
 	t.Run("full conversion", func(t *testing.T) {
@@ -312,7 +313,8 @@ func TestConvertToSegcoreSegmentLoadInfo(t *testing.T) {
 					JsonKeyStatsDataFormat: 1,
 				},
 			},
-			Priority: commonpb.LoadPriority_HIGH,
+			Priority:         commonpb.LoadPriority_HIGH,
+			UseTakeForOutput: true,
 		}
 
 		// Convert to segcorepb.SegmentLoadInfo
@@ -333,6 +335,7 @@ func TestConvertToSegcoreSegmentLoadInfo(t *testing.T) {
 		assert.Equal(t, src.IsSorted, result.IsSorted)
 		assert.Equal(t, src.Priority, result.Priority)
 		assert.Equal(t, src.CompactionFrom, result.CompactionFrom)
+		assert.Equal(t, src.UseTakeForOutput, result.UseTakeForOutput)
 
 		// Validate BinlogPaths conversion
 		assert.Equal(t, len(src.BinlogPaths), len(result.BinlogPaths))

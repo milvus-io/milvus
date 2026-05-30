@@ -581,6 +581,13 @@ func TestComponentParam(t *testing.T) {
 		params.Save(Params.PartialResultRequiredDataRatio.Key, "0.8")
 		assert.Equal(t, 0.8, Params.PartialResultRequiredDataRatio.GetAsFloat())
 
+		assert.False(t, Params.InternalCollectionUseTakeForOutput.GetAsBool())
+		params.Save(Params.InternalCollectionUseTakeForOutput.Key, "true")
+		assert.True(t, Params.InternalCollectionUseTakeForOutput.GetAsBool())
+		assert.True(t, Params.ExternalCollectionUseTakeForOutput.GetAsBool())
+		params.Save(Params.ExternalCollectionUseTakeForOutput.Key, "false")
+		assert.False(t, Params.ExternalCollectionUseTakeForOutput.GetAsBool())
+
 		// test CatchUpStreamingDataTsLag parameter
 		assert.Equal(t, 1*time.Second, Params.CatchUpStreamingDataTsLag.GetAsDurationByParse())
 		params.Save(Params.CatchUpStreamingDataTsLag.Key, "5s")
