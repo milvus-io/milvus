@@ -41,6 +41,11 @@ SetIndexSliceSize(const int64_t size) {
 }
 
 void
+SetStreamBudgetRatio(const double ratio) {
+    milvus::SetStreamBudgetRatio(ratio);
+}
+
+void
 SetHighPriorityThreadCoreCoefficient(const float value) {
     milvus::SetHighPriorityThreadCoreCoefficient(value);
 }

@@ -504,6 +504,15 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
+		paramtable.Get().CommonCfg.StreamBudgetRatio.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			ratio, err := strconv.ParseFloat(newValue, 64)
+			if err != nil {
+				return err
+			}
+			UpdateStreamBudgetRatio(ratio)
+			return nil
+		})
+
 		paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			factor, err := strconv.ParseFloat(newValue, 64)
 			if err != nil {

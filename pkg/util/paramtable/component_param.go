@@ -41,6 +41,7 @@ import (
 const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize                      = 16
+	DefaultStreamBudgetRatio                   = 3.0
 	DefaultGracefulTime                        = 5000 // ms
 	DefaultGracefulStopTimeout                 = 1800 // s, for node
 	DefaultProxyGracefulStopTimeout            = 30   // s，for proxy
@@ -233,6 +234,7 @@ type commonConfig struct {
 	EntityExpirationTTL  ParamItem `refreshable:"true"`
 
 	IndexSliceSize                      ParamItem `refreshable:"false"`
+	StreamBudgetRatio                   ParamItem `refreshable:"true"`
 	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"true"`
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
@@ -575,6 +577,15 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.IndexSliceSize.Init(base.mgr)
+
+	p.StreamBudgetRatio = ParamItem{
+		Key:          "common.entryStream.streamBudgetRatio",
+		Version:      "3.0.0",
+		DefaultValue: fmt.Sprintf("%f", DefaultStreamBudgetRatio),
+		Doc:          "Multiplier for entry stream transient memory budget, relative to CPU core count",
+		Export:       true,
+	}
+	p.StreamBudgetRatio.Init(base.mgr)
 
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",
