@@ -242,6 +242,14 @@ func validateSupportedMissingFunctionMaterialization(functionSchema *schemapb.Fu
 			return errors.New("bm25 function should have output fields")
 		}
 		return nil
+	case schemapb.FunctionType_MinHash:
+		if len(functionSchema.GetInputFieldIds()) == 0 {
+			return errors.New("minhash function should have input fields")
+		}
+		if len(functionSchema.GetOutputFieldIds()) == 0 {
+			return errors.New("minhash function should have output fields")
+		}
+		return nil
 	default:
 		return errors.New("unsupported function type")
 	}
@@ -253,6 +261,10 @@ func validateMaterializationInputField(functionSchema *schemapb.FunctionSchema, 
 		if field.GetDataType() != schemapb.DataType_VarChar && field.GetDataType() != schemapb.DataType_Text {
 			return errors.New("input field data type must be varchar or text for bm25 materialization")
 		}
+	case schemapb.FunctionType_MinHash:
+		if field.GetDataType() != schemapb.DataType_VarChar && field.GetDataType() != schemapb.DataType_Text {
+			return errors.New("input field data type must be varchar or text for minhash materialization")
+		}
 	}
 	return nil
 }
@@ -262,6 +274,10 @@ func validateMaterializationOutputField(functionSchema *schemapb.FunctionSchema,
 	case schemapb.FunctionType_BM25:
 		if field.GetDataType() != schemapb.DataType_SparseFloatVector {
 			return errors.New("output field data type must be sparse float vector for bm25 materialization")
+		}
+	case schemapb.FunctionType_MinHash:
+		if field.GetDataType() != schemapb.DataType_BinaryVector {
+			return errors.New("output field data type must be binary vector for minhash materialization")
 		}
 	}
 	return nil
@@ -600,6 +616,27 @@ func appendBM25StatsFromArrowArray(stats *storage.BM25Stats, arr arrow.Array) (i
 	return memorySize, nil
 }
 
+func isBM25MaterializedOutputField(schema *schemapb.CollectionSchema, fieldID int64) bool {
+	for _, functionSchema := range schema.GetFunctions() {
+		if functionSchema.GetType() != schemapb.FunctionType_BM25 {
+			continue
+		}
+		for _, outputFieldID := range functionSchema.GetOutputFieldIds() {
+			if outputFieldID == fieldID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func arrowArrayMemorySize(arr arrow.Array) int {
+	if arr == nil || arr.Data() == nil {
+		return 0
+	}
+	return int(storage.ActualSizeInBytes(arr.Data()))
+}
+
 type bumpSchemaVersionBatchWriter interface {
 	Write(storage.Record) error
 	GetWrittenUncompressed() uint64
@@ -842,10 +879,12 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 		zap.Int64s("outputFieldIDs", outputFieldIDs),
 	)
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "BumpSchemaVersionCompact.batchProcess")
-	statsByField := make(map[int64]*storage.BM25Stats, len(outputFieldIDs))
-	sparseMemorySizeByField := make(map[int64]int, len(outputFieldIDs))
+	statsByField := make(map[int64]*storage.BM25Stats)
+	fieldMemorySizeByField := make(map[int64]int, len(outputFieldIDs))
 	for _, outputFieldID := range outputFieldIDs {
-		statsByField[outputFieldID] = storage.NewBM25Stats()
+		if isBM25MaterializedOutputField(t.plan.GetSchema(), outputFieldID) {
+			statsByField[outputFieldID] = storage.NewBM25Stats()
+		}
 	}
 	existingFields = partialMaterializerExistingFields(t.plan.GetSchema(), missingFunctions, existingFields)
 	materializer, err := NewRecordMaterializer(t.plan.GetSchema(), missingFunctions, existingFields)
@@ -886,13 +925,17 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 				span.End()
 				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("output field %d not found in materialized record", outputFieldID))
 			}
-			batchMemSize, err := appendBM25StatsFromArrowArray(statsByField[outputFieldID], outputCol)
-			if err != nil {
-				releaseWrappedRecord(wrapped, record)
-				span.End()
-				return nil, err
+			batchMemSize := arrowArrayMemorySize(outputCol)
+			if stats, ok := statsByField[outputFieldID]; ok {
+				bm25MemSize, err := appendBM25StatsFromArrowArray(stats, outputCol)
+				if err != nil {
+					releaseWrappedRecord(wrapped, record)
+					span.End()
+					return nil, err
+				}
+				batchMemSize = bm25MemSize
 			}
-			sparseMemorySizeByField[outputFieldID] += batchMemSize
+			fieldMemorySizeByField[outputFieldID] += batchMemSize
 		}
 
 		writeStart := time.Now()
@@ -914,9 +957,9 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 	span.End()
 
 	_, span2 := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "BumpSchemaVersionCompact.updateStats")
-	for _, outputFieldID := range outputFieldIDs {
+	for outputFieldID, stats := range statsByField {
 		startTime := time.Now()
-		err := t.updateStats(statsByField[outputFieldID], outputFieldID, writerResult)
+		err := t.updateStats(stats, outputFieldID, writerResult)
 		updateStatsDuration += time.Since(startTime)
 		if err != nil {
 			span2.End()
@@ -931,7 +974,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 		zap.Int("v3StatsCount", len(writerResult.v3Stats)),
 	)
 
-	mergedInsertLogs, err := t.buildMergedLogsV3(segment, writerResult, sparseMemorySizeByField, totalRows)
+	mergedInsertLogs, err := t.buildMergedLogsV3(segment, writerResult, fieldMemorySizeByField, totalRows)
 	if err != nil {
 		return nil, err
 	}
