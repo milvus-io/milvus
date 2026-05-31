@@ -198,8 +198,8 @@ TEST(Util_Segcore, TransformBitsetMasksNullableVectorRowsOutsideLogicalView) {
     using namespace milvus;
 
     std::array<bool, 3> valid_data = {true, true, true};
-    OffsetMapping mapping;
-    mapping.Build(valid_data.data(), valid_data.size());
+    GrowingOffsetMapping mapping;
+    mapping.Append(valid_data.data(), valid_data.size(), 0, 0);
 
     // Growing search passes a logical bitset sized by the query timestamp's
     // active row count. Rows beyond that logical view are not visible yet and
@@ -207,8 +207,10 @@ TEST(Util_Segcore, TransformBitsetMasksNullableVectorRowsOutsideLogicalView) {
     BitsetType logical_bitset(2);
     BitsetView logical_view(logical_bitset);
 
-    auto physical_bitset = query::TransformBitset(logical_view, mapping);
+    TargetBitmap physical_bitset;
+    auto status = mapping.TransformBitset(logical_view, physical_bitset);
 
+    EXPECT_EQ(status, OffsetMapping::BitsetTransformStatus::Transformed);
     ASSERT_EQ(physical_bitset.size(), 3);
     EXPECT_FALSE(physical_bitset[0]);
     EXPECT_FALSE(physical_bitset[1]);
@@ -218,12 +220,15 @@ TEST(Util_Segcore, TransformBitsetMasksNullableVectorRowsOutsideLogicalView) {
 TEST(Util_Segcore, TransformBitsetKeepsEmptyViewAsNoFilter) {
     using namespace milvus;
 
-    std::array<bool, 3> valid_data = {true, false, true};
-    OffsetMapping mapping;
+    std::array<bool, 3> valid_data = {true, true, true};
+    SealedOffsetMapping mapping;
     mapping.Build(valid_data.data(), valid_data.size());
 
-    auto physical_bitset = query::TransformBitset(BitsetView{}, mapping);
+    BitsetView all_visible;
+    TargetBitmap physical_bitset;
+    auto status = mapping.TransformBitset(all_visible, physical_bitset);
 
+    EXPECT_EQ(status, OffsetMapping::BitsetTransformStatus::NoFilter);
     EXPECT_TRUE(physical_bitset.empty());
 }
 

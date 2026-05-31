@@ -155,14 +155,23 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         // step 3: brute force search where small indexing is unavailable
         auto vec_ptr = record.get_data_base(vecfield_id);
         const auto& offset_mapping = vec_ptr->get_offset_mapping();
+        const auto has_offset_mapping = offset_mapping.IsEnabled();
 
         TargetBitmap transformed_bitset;
         BitsetView search_bitset = bitset;
-        if (offset_mapping.IsEnabled() && !bitset.empty()) {
-            transformed_bitset = TransformBitset(bitset, offset_mapping);
+        if (has_offset_mapping && !bitset.empty()) {
+            auto status =
+                offset_mapping.TransformBitset(bitset, transformed_bitset);
+            if (status == OffsetMapping::BitsetTransformStatus::AllFiltered) {
+                FillEmptySearchResult(search_result, num_queries, info.topk_);
+                return;
+            }
+            if (status == OffsetMapping::BitsetTransformStatus::NoFilter) {
+                search_bitset = BitsetView{};
+            }
         }
 
-        auto active_count = offset_mapping.IsEnabled()
+        auto active_count = has_offset_mapping
                                 ? offset_mapping.GetValidCount()
                                 : std::min(int64_t(bitset.size()),
                                            segment.get_active_count(timestamp));
@@ -170,14 +179,11 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         // Check for nullable vector field with all null values
         if (active_count == 0) {
             // All vectors are null, return empty result
-            auto total_num = num_queries * info.topk_;
-            search_result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
-            search_result.distances_.resize(total_num, 0.0f);
-            search_result.total_nq_ = num_queries;
-            search_result.unity_topK_ = info.topk_;
+            FillEmptySearchResult(search_result, num_queries, info.topk_);
             return;
         }
-        if (offset_mapping.IsEnabled() && !bitset.empty()) {
+        if (has_offset_mapping && !bitset.empty() &&
+            !transformed_bitset.empty()) {
             search_bitset =
                 search_result.PinBitset(std::move(transformed_bitset));
         }
@@ -195,9 +201,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                              search_bitset,
                                              data_type);
             cached_iter.NextBatch(info, search_result);
-            if (offset_mapping.IsEnabled()) {
-                TransformOffset(search_result.seg_offsets_, offset_mapping);
-            }
+            FinalizeVectorSearchOffsets(
+                search_result, offset_mapping, info.array_offsets_.get());
             return;
         }
 
@@ -285,6 +290,10 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                            "vector array(embedding list) is not supported for "
                            "vector iterator");
 
+                if (buf != nullptr) {
+                    search_result.chunk_buffers_.emplace_back(std::move(buf));
+                }
+
                 auto sub_qr = PackBruteForceSearchIteratorsIntoSubResult(
                     search_dataset,
                     sub_data,
@@ -311,12 +320,17 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 chunk_rows[i] = i * vec_size_per_chunk;
             }
             bool larger_is_closer = PositivelyRelated(info.metric_type_);
+            // Element-level search skips row-level mapping (element IDs are
+            // not row-aligned); see ChunkMergeIterator ctor.
+            const milvus::OffsetMapping* iter_offset_mapping =
+                (element_level_search || !has_offset_mapping) ? nullptr
+                                                              : &offset_mapping;
             search_result.AssembleChunkVectorIterators(
                 num_queries,
                 max_chunk,
                 chunk_rows,
                 final_qr.chunk_iterators(),
-                offset_mapping,
+                iter_offset_mapping,
                 larger_is_closer);
         } else {
             if (element_level_search) {
@@ -327,11 +341,12 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 search_result.element_indices_ = std::move(element_indices);
                 search_result.element_level_ = true;
             } else {
+                if (has_offset_mapping) {
+                    offset_mapping.TransformOffsets(
+                        final_qr.mutable_seg_offsets());
+                }
                 search_result.seg_offsets_ =
                     std::move(final_qr.mutable_seg_offsets());
-                if (offset_mapping.IsEnabled()) {
-                    TransformOffset(search_result.seg_offsets_, offset_mapping);
-                }
             }
             search_result.distances_ = std::move(final_qr.mutable_distances());
         }
