@@ -90,7 +90,7 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 		if commitTs := req.LoadInfo.GetCommitTimestamp(); commitTs != 0 {
 			if err := seg.SetCommitTimestamp(commitTs); err != nil {
 				C.DeleteSegment(ptr)
-				return nil, errors.Wrap(err, "failed to set commit timestamp on segment")
+				return nil, merr.Wrap(err, "failed to set commit timestamp on segment")
 			}
 		}
 	}
@@ -344,13 +344,13 @@ func (s *cSegmentImpl) Load(ctx context.Context) error {
 
 func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	if req == nil {
-		return errors.New("reopen request is nil")
+		return merr.WrapErrParameterInvalidMsg("reopen request is nil")
 	}
 	if req.LoadInfo == nil {
-		return errors.New("reopen load info is nil")
+		return merr.WrapErrParameterInvalidMsg("reopen load info is nil")
 	}
 	if req.Schema == nil {
-		return errors.New("reopen schema is nil")
+		return merr.WrapErrParameterInvalidMsg("reopen schema is nil")
 	}
 
 	traceCtx := ParseCTraceContext(ctx)
@@ -363,7 +363,7 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 		return err
 	}
 	if len(loadInfoBlob) == 0 {
-		return errors.New("reopen load info blob is empty")
+		return merr.WrapErrServiceInternalMsg("reopen load info blob is empty")
 	}
 
 	schemaBlob, err := proto.Marshal(req.Schema)
@@ -371,7 +371,7 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 		return err
 	}
 	if len(schemaBlob) == 0 {
-		return errors.New("reopen schema blob is empty")
+		return merr.WrapErrServiceInternalMsg("reopen schema blob is empty")
 	}
 	defer runtime.KeepAlive(schemaBlob)
 
