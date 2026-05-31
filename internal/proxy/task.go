@@ -826,7 +826,7 @@ func validateAddStructFieldRequest(schema *schemapb.CollectionSchema, structFiel
 
 	totalFieldsNum := typeutil.GetTotalFieldsNum(schema) + len(structFieldSchema.GetFields()) + 1
 	if totalFieldsNum > Params.ProxyCfg.MaxFieldNum.GetAsInt() {
-		return fmt.Errorf("maximum field's number should be limited to %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
+		return merr.WrapErrParameterInvalidMsg("maximum field's number should be limited to %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
 	}
 
 	vectorFields := len(typeutil.GetVectorFieldSchemas(schema))
@@ -836,7 +836,7 @@ func validateAddStructFieldRequest(schema *schemapb.CollectionSchema, structFiel
 		}
 	}
 	if vectorFields > Params.ProxyCfg.MaxVectorFieldNum.GetAsInt() {
-		return fmt.Errorf("maximum vector field's number should be limited to %d", Params.ProxyCfg.MaxVectorFieldNum.GetAsInt())
+		return merr.WrapErrParameterInvalidMsg("maximum vector field's number should be limited to %d", Params.ProxyCfg.MaxVectorFieldNum.GetAsInt())
 	}
 
 	return nil

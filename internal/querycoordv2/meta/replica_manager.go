@@ -22,7 +22,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -683,7 +682,7 @@ func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectio
 	defer m.collLock.Unlock(collectionID)
 
 	if _, ok := m.coll2Replicas.Get(collectionID); !ok {
-		return errors.Errorf("collection %d not loaded", collectionID)
+		return merr.WrapErrCollectionNotLoaded(collectionID)
 	}
 
 	// create a helper to do the recover.

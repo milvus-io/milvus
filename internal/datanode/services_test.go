@@ -594,7 +594,9 @@ func (s *DataNodeServicesSuite) TestCreateTask() {
 		}
 		status, err := s.node.CreateTask(s.ctx, req)
 		s.NoError(err)
-		s.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+		// taskcommon.GetTaskType now returns a ParameterInvalid (illegal argument)
+		// error for an unrecognized task type, instead of a generic error.
+		s.Equal(commonpb.ErrorCode_IllegalArgument, status.GetErrorCode())
 	})
 }
 
@@ -685,7 +687,9 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 		}
 		resp, err := s.node.QueryTask(s.ctx, req)
 		s.NoError(err)
-		s.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		// taskcommon.GetTaskType now returns a ParameterInvalid (illegal argument)
+		// error for an unrecognized task type, instead of a generic error.
+		s.Equal(commonpb.ErrorCode_IllegalArgument, resp.GetStatus().GetErrorCode())
 	})
 }
 
@@ -771,7 +775,9 @@ func (s *DataNodeServicesSuite) TestDropTask() {
 		}
 		status, err := s.node.DropTask(s.ctx, req)
 		s.NoError(err)
-		s.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+		// taskcommon.GetTaskType now returns a ParameterInvalid (illegal argument)
+		// error for an unrecognized task type, instead of a generic error.
+		s.Equal(commonpb.ErrorCode_IllegalArgument, status.GetErrorCode())
 	})
 }
 

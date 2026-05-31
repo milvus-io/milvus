@@ -500,7 +500,7 @@ func (pw *PackedManifestRecordWriter) Close() error {
 	}
 	newManifest, err := packed.CommitManifestUpdates(pw.basePath, packed.ManifestEarliest, pw.storageConfig, updates)
 	if err != nil {
-		return fmt.Errorf("PackedManifestRecordWriter.Close commit: %w", err)
+		return merr.Wrap(err, "PackedManifestRecordWriter.Close commit")
 	}
 	pw.manifest = newManifest
 	return nil
@@ -715,7 +715,7 @@ func (pw *PackedTextManifestRecordWriter) Close() error {
 	newManifest, err := packed.CommitManifestUpdates(pw.basePath, packed.ManifestEarliest, pw.storageConfig,
 		&packed.ManifestUpdates{NewFiles: out})
 	if err != nil {
-		return fmt.Errorf("PackedTextManifestRecordWriter.Close commit: %w", err)
+		return merr.Wrap(err, "PackedTextManifestRecordWriter.Close commit")
 	}
 	pw.manifest = newManifest
 	return pw.writeStats()

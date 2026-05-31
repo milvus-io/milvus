@@ -306,7 +306,7 @@ func (o *openerAdaptorImpl) handleAlterWAL(ctx context.Context, l walimpls.WALIm
 	}
 
 	targetWALName := snapshot.AlterWALInfo.TargetWALName
-	return nil, errors.Errorf("WAL switch success: %s switch to %s finish, re-opening required", opt.Channel.Name, targetWALName)
+	return nil, status.NewInner("WAL switch success: %s switch to %s finish, re-opening required", opt.Channel.Name, targetWALName)
 }
 
 func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt *wal.OpenOption, roWAL *roWALAdaptorImpl,

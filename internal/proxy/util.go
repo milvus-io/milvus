@@ -2232,10 +2232,10 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 		vectorElementWidth := func(subField *schemapb.FieldData, subFieldSchema *schemapb.FieldSchema) (int, error) {
 			dim, err := typeutil.GetDim(subFieldSchema)
 			if err != nil {
-				return 0, fmt.Errorf("sub-field '%s' in struct '%s': %w", subField.GetFieldName(), structName, err)
+				return 0, merr.WrapErrParameterInvalidErr(err, "sub-field '%s' in struct '%s'", subField.GetFieldName(), structName)
 			}
 			if dim <= 0 {
-				return 0, fmt.Errorf("sub-field '%s' in struct '%s': invalid dim %d", subField.GetFieldName(), structName, dim)
+				return 0, merr.WrapErrParameterInvalidMsg("sub-field '%s' in struct '%s': invalid dim %d", subField.GetFieldName(), structName, dim)
 			}
 			switch subFieldSchema.GetElementType() {
 			case schemapb.DataType_FloatVector, schemapb.DataType_Int8Vector:
@@ -2245,7 +2245,7 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 			case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 				return int(dim * 2), nil
 			default:
-				return 0, fmt.Errorf("sub-field '%s' in struct '%s': unsupported array-of-vector element type %s",
+				return 0, merr.WrapErrParameterInvalidMsg("sub-field '%s' in struct '%s': unsupported array-of-vector element type %s",
 					subField.GetFieldName(), structName, subFieldSchema.GetElementType().String())
 			}
 		}
@@ -2264,7 +2264,7 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 		for _, subField := range structArrays.StructArrays.Fields {
 			subFieldSchema := subFieldSchemaByName[subField.GetFieldName()]
 			if subFieldSchema == nil {
-				return fmt.Errorf("sub-field '%s' not found in struct schema '%s'", subField.GetFieldName(), structName)
+				return merr.WrapErrParameterInvalidMsg("sub-field '%s' not found in struct schema '%s'", subField.GetFieldName(), structName)
 			}
 
 			var currentArrayLen int
@@ -2279,7 +2279,7 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 							count: func(physicalRow int) (int, error) {
 								row := scalarArray.GetData()[physicalRow]
 								if row.GetData() == nil {
-									return 0, fmt.Errorf("nil array data")
+									return 0, merr.WrapErrParameterInvalidMsg("nil array data")
 								}
 								switch subFieldSchema.GetElementType() {
 								case schemapb.DataType_Bool:
@@ -2295,7 +2295,7 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 								case schemapb.DataType_VarChar, schemapb.DataType_String:
 									return len(row.GetStringData().GetData()), nil
 								default:
-									return 0, fmt.Errorf("unsupported array element type %s", subFieldSchema.GetElementType().String())
+									return 0, merr.WrapErrParameterInvalidMsg("unsupported array element type %s", subFieldSchema.GetElementType().String())
 								}
 							},
 						})
@@ -2321,7 +2321,7 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 								}
 								row := vectorArray.GetData()[physicalRow]
 								if row.GetData() == nil {
-									return 0, fmt.Errorf("nil vector array data")
+									return 0, merr.WrapErrParameterInvalidMsg("nil vector array data")
 								}
 								var payloadLen int
 								switch subFieldSchema.GetElementType() {
@@ -2337,7 +2337,7 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 									payloadLen = len(row.GetInt8Vector())
 								}
 								if payloadLen%vectorWidth != 0 {
-									return 0, fmt.Errorf("payload length %d is not divisible by vector width %d", payloadLen, vectorWidth)
+									return 0, merr.WrapErrParameterInvalidMsg("payload length %d is not divisible by vector width %d", payloadLen, vectorWidth)
 								}
 								return payloadLen / vectorWidth, nil
 							},
@@ -2370,7 +2370,7 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 					}
 				}
 				if len(physicalToLogical) != expectedArrayLen {
-					return fmt.Errorf("invalid ValidData for struct '%s': true count %d does not match payload row count %d",
+					return merr.WrapErrParameterInvalidMsg("invalid ValidData for struct '%s': true count %d does not match payload row count %d",
 						structName, len(physicalToLogical), expectedArrayLen)
 				}
 			}
@@ -2386,8 +2386,8 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 			for physicalRow := 0; physicalRow < expectedArrayLen; physicalRow++ {
 				count, err := refCounter.count(physicalRow)
 				if err != nil {
-					return fmt.Errorf("struct '%s' row %d sub-field '%s': %w",
-						structName, logicalRow(physicalRow), refCounter.name, err)
+					return merr.WrapErrParameterInvalidErr(err, "struct '%s' row %d sub-field '%s'",
+						structName, logicalRow(physicalRow), refCounter.name)
 				}
 				refElementCounts[physicalRow] = count
 			}
@@ -2395,11 +2395,11 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 				for physicalRow := 0; physicalRow < expectedArrayLen; physicalRow++ {
 					count, err := counter.count(physicalRow)
 					if err != nil {
-						return fmt.Errorf("struct '%s' row %d sub-field '%s': %w",
-							structName, logicalRow(physicalRow), counter.name, err)
+						return merr.WrapErrParameterInvalidErr(err, "struct '%s' row %d sub-field '%s'",
+							structName, logicalRow(physicalRow), counter.name)
 					}
 					if count != refElementCounts[physicalRow] {
-						return fmt.Errorf("inconsistent struct element count in struct '%s' at row %d: '%s' has %d, '%s' has %d",
+						return merr.WrapErrParameterInvalidMsg("inconsistent struct element count in struct '%s' at row %d: '%s' has %d, '%s' has %d",
 							structName, logicalRow(physicalRow), refCounter.name, refElementCounts[physicalRow], counter.name, count)
 					}
 				}
