@@ -19,8 +19,9 @@ import (
 	statsv1 "github.com/containerd/cgroups/v3/cgroup1/stats"
 	"github.com/containerd/cgroups/v3/cgroup2"
 	statsv2 "github.com/containerd/cgroups/v3/cgroup2/stats"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func getCgroupV1Stats() (*statsv1.Metrics, error) {

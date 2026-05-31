@@ -23,8 +23,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/samber/lo"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const (

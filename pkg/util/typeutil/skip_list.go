@@ -20,8 +20,9 @@ import (
 	"math/rand"
 	"sync"
 
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"golang.org/x/exp/constraints"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const (

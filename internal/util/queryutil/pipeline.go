@@ -21,8 +21,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // Well-known pipeline channel names

@@ -22,8 +22,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"go.uber.org/atomic"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // Flow Graph is no longer a graph rather than a simple pipeline, this simplified our code and increase recovery speed - xiaofan.
