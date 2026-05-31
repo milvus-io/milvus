@@ -14,6 +14,12 @@ type VersionedState = discoverer.VersionedState
 var (
 	ErrCanceled    = errors.New("canceled")
 	ErrInterrupted = errors.New("interrupted")
+
+	// errBuilderClosed / errResolverClosed are grpc-resolver-framework-facing
+	// errors returned when the builder/resolver is used after close. They stay
+	// cockroachdb errors (not milvus merr), consistent with the balancer layer.
+	errBuilderClosed  = errors.New("builder is closed")
+	errResolverClosed = errors.New("resolver is closed")
 )
 
 // Builder is the interface for the grpc resolver builder.

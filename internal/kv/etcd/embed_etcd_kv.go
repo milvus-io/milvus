@@ -22,7 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
@@ -100,7 +99,7 @@ func NewEmbededEtcdKV(cfg *embed.Config, rootPath string, options ...Option) (*E
 			return nil
 		case <-time.After(60 * time.Second):
 			e.Server.Stop() // trigger a shutdown
-			return errors.New("Embedded etcd took too long to start")
+			return merr.WrapErrServiceInternalMsg("Embedded etcd took too long to start")
 		}
 	})
 	if err != nil {
@@ -309,7 +308,7 @@ func (kv *EmbedEtcdKV) MultiLoad(ctx context.Context, keys []string) ([]string, 
 	if len(invalid) != 0 {
 		log.Ctx(ctx).Debug("MultiLoad: there are invalid keys",
 			zap.Strings("keys", invalid))
-		err = fmt.Errorf("there are invalid keys: %s", invalid)
+		err = merr.WrapErrIoKeyNotFound(fmt.Sprintf("%v", invalid))
 		return result, err
 	}
 	return result, nil
@@ -345,7 +344,7 @@ func (kv *EmbedEtcdKV) MultiLoadBytes(ctx context.Context, keys []string) ([][]b
 	if len(invalid) != 0 {
 		log.Ctx(ctx).Debug("MultiLoadBytes: there are invalid keys",
 			zap.Strings("keys", invalid))
-		err = fmt.Errorf("there are invalid keys: %s", invalid)
+		err = merr.WrapErrIoKeyNotFound(fmt.Sprintf("%v", invalid))
 		return result, err
 	}
 	return result, nil

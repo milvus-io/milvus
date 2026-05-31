@@ -23,8 +23,6 @@
 package balancer
 
 import (
-	"fmt"
-
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/balancer/base"
@@ -37,6 +35,11 @@ var (
 	_ balancer.ExitIdler = (*baseBalancer)(nil)
 	_ balancer.Builder   = (*baseBuilder)(nil)
 )
+
+// errProducedZeroAddresses is reported to the grpc ClientConn (via ResolverError)
+// to trigger a re-resolve when the resolver produces no addresses. It stays a
+// grpc-framework-facing error, deliberately not a milvus merr.
+var errProducedZeroAddresses = errors.New("produced zero addresses")
 
 type baseBuilder struct {
 	name          string
@@ -136,7 +139,7 @@ func (b *baseBalancer) UpdateClientConnState(s balancer.ClientConnState) error {
 	// the overall state turns transient failure, the error message will have
 	// the zero address information.
 	if len(s.ResolverState.Addresses) == 0 {
-		b.ResolverError(errors.New("produced zero addresses"))
+		b.ResolverError(errProducedZeroAddresses)
 		return balancer.ErrBadResolverState
 	}
 
@@ -151,12 +154,12 @@ func (b *baseBalancer) mergeErrors() error {
 	// connErr must always be non-nil unless there are no SubConns, in which
 	// case resolverErr must be non-nil.
 	if b.connErr == nil {
-		return fmt.Errorf("last resolver error: %v", b.resolverErr)
+		return errors.Wrap(b.resolverErr, "last resolver error")
 	}
 	if b.resolverErr == nil {
-		return fmt.Errorf("last connection error: %v", b.connErr)
+		return errors.Wrap(b.connErr, "last connection error")
 	}
-	return fmt.Errorf("last connection error: %v; last resolver error: %v", b.connErr, b.resolverErr)
+	return errors.Wrapf(b.connErr, "last connection error; last resolver error: %v", b.resolverErr)
 }
 
 // regeneratePicker takes a snapshot of the balancer, and generates a picker

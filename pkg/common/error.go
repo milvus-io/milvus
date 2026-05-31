@@ -27,7 +27,7 @@ var ErrNodeIDNotMatch = errors.New("target node id not match")
 
 // WrapNodeIDNotMatchError wraps `ErrNodeIDNotMatch` with targetID and sessionID.
 func WrapNodeIDNotMatchError(targetID, nodeID int64) error {
-	return fmt.Errorf("%w target id = %d, node id = %d", ErrNodeIDNotMatch, targetID, nodeID)
+	return errors.Wrapf(ErrNodeIDNotMatch, "target id = %d, node id = %d", targetID, nodeID)
 }
 
 // WrapNodeIDNotMatchMsg fmt error msg with `ErrNodeIDNotMatch`, targetID and sessionID.

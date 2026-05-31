@@ -274,7 +274,7 @@ func (kv *etcdKV) MultiLoad(ctx context.Context, keys []string) ([]string, error
 	}
 	if len(invalid) != 0 {
 		log.Ctx(ctx).Warn("MultiLoad: there are invalid keys", zap.Strings("keys", invalid))
-		err = fmt.Errorf("there are invalid keys: %s", invalid)
+		err = merr.WrapErrIoKeyNotFound(fmt.Sprintf("%v", invalid))
 		return result, err
 	}
 	CheckElapseAndWarn(ctx, start, "Slow etcd operation multi load", zap.Any("keys", keys))
@@ -309,7 +309,7 @@ func (kv *etcdKV) MultiLoadBytes(ctx context.Context, keys []string) ([][]byte, 
 	}
 	if len(invalid) != 0 {
 		log.Ctx(ctx).Warn("MultiLoad: there are invalid keys", zap.Strings("keys", invalid))
-		err = fmt.Errorf("there are invalid keys: %s", invalid)
+		err = merr.WrapErrIoKeyNotFound(fmt.Sprintf("%v", invalid))
 		return result, err
 	}
 	CheckElapseAndWarn(ctx, start, "Slow etcd operation multi load", zap.Strings("keys", keys))
