@@ -1,0 +1,351 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+
+namespace milvus::fastmem {
+
+#ifndef MILVUS_FASTCPY_MAX_SIZE
+#define MILVUS_FASTCPY_MAX_SIZE 64
+#endif
+
+inline constexpr size_t kFastMemcpyMaxSize = MILVUS_FASTCPY_MAX_SIZE;
+inline constexpr size_t kFastMemcpyDispatchMaxSize = 256;
+
+#if defined(MILVUS_ENABLE_FASTCPY) &&                                     \
+    (defined(__linux__) || defined(__APPLE__)) &&                         \
+    (defined(__x86_64__) || defined(__amd64__) || defined(__aarch64__) || \
+     defined(__arm64__))
+inline constexpr bool kFastMemcpyCompiled = true;
+#else
+inline constexpr bool kFastMemcpyCompiled = false;
+#endif
+
+template <size_t Size>
+inline void
+MemcpyFixed(void* dst, const void* src) noexcept {
+    if constexpr (Size != 0) {
+        std::memcpy(dst, src, Size);
+    }
+}
+
+inline bool
+FastMemcpyEnabled() noexcept {
+    return kFastMemcpyCompiled;
+}
+
+inline void
+AssertNonOverlapping(void* dst, const void* src, size_t size) noexcept {
+#ifndef NDEBUG
+    auto dst_begin = reinterpret_cast<uintptr_t>(dst);
+    auto src_begin = reinterpret_cast<uintptr_t>(src);
+    assert(size == 0 || dst_begin + size <= src_begin ||
+           src_begin + size <= dst_begin);
+#endif
+}
+
+// FastMemcpy requires non-overlapping ranges, matching std::memcpy.
+inline void
+FastMemcpy(void* dst, const void* src, size_t size) noexcept {
+    AssertNonOverlapping(dst, src, size);
+
+    if constexpr (!kFastMemcpyCompiled) {
+        if (size != 0) {
+            std::memcpy(dst, src, size);
+        }
+        return;
+    }
+
+    if (size > kFastMemcpyMaxSize) {
+        std::memcpy(dst, src, size);
+        return;
+    }
+
+    switch (size) {
+#define MILVUS_FASTMEM_COPY_CASE(N) \
+    case N:                         \
+        MemcpyFixed<N>(dst, src);   \
+        return
+        MILVUS_FASTMEM_COPY_CASE(0);
+        MILVUS_FASTMEM_COPY_CASE(1);
+        MILVUS_FASTMEM_COPY_CASE(2);
+        MILVUS_FASTMEM_COPY_CASE(3);
+        MILVUS_FASTMEM_COPY_CASE(4);
+        MILVUS_FASTMEM_COPY_CASE(5);
+        MILVUS_FASTMEM_COPY_CASE(6);
+        MILVUS_FASTMEM_COPY_CASE(7);
+        MILVUS_FASTMEM_COPY_CASE(8);
+        MILVUS_FASTMEM_COPY_CASE(9);
+        MILVUS_FASTMEM_COPY_CASE(10);
+        MILVUS_FASTMEM_COPY_CASE(11);
+        MILVUS_FASTMEM_COPY_CASE(12);
+        MILVUS_FASTMEM_COPY_CASE(13);
+        MILVUS_FASTMEM_COPY_CASE(14);
+        MILVUS_FASTMEM_COPY_CASE(15);
+        MILVUS_FASTMEM_COPY_CASE(16);
+        MILVUS_FASTMEM_COPY_CASE(17);
+        MILVUS_FASTMEM_COPY_CASE(18);
+        MILVUS_FASTMEM_COPY_CASE(19);
+        MILVUS_FASTMEM_COPY_CASE(20);
+        MILVUS_FASTMEM_COPY_CASE(21);
+        MILVUS_FASTMEM_COPY_CASE(22);
+        MILVUS_FASTMEM_COPY_CASE(23);
+        MILVUS_FASTMEM_COPY_CASE(24);
+        MILVUS_FASTMEM_COPY_CASE(25);
+        MILVUS_FASTMEM_COPY_CASE(26);
+        MILVUS_FASTMEM_COPY_CASE(27);
+        MILVUS_FASTMEM_COPY_CASE(28);
+        MILVUS_FASTMEM_COPY_CASE(29);
+        MILVUS_FASTMEM_COPY_CASE(30);
+        MILVUS_FASTMEM_COPY_CASE(31);
+        MILVUS_FASTMEM_COPY_CASE(32);
+        MILVUS_FASTMEM_COPY_CASE(33);
+        MILVUS_FASTMEM_COPY_CASE(34);
+        MILVUS_FASTMEM_COPY_CASE(35);
+        MILVUS_FASTMEM_COPY_CASE(36);
+        MILVUS_FASTMEM_COPY_CASE(37);
+        MILVUS_FASTMEM_COPY_CASE(38);
+        MILVUS_FASTMEM_COPY_CASE(39);
+        MILVUS_FASTMEM_COPY_CASE(40);
+        MILVUS_FASTMEM_COPY_CASE(41);
+        MILVUS_FASTMEM_COPY_CASE(42);
+        MILVUS_FASTMEM_COPY_CASE(43);
+        MILVUS_FASTMEM_COPY_CASE(44);
+        MILVUS_FASTMEM_COPY_CASE(45);
+        MILVUS_FASTMEM_COPY_CASE(46);
+        MILVUS_FASTMEM_COPY_CASE(47);
+        MILVUS_FASTMEM_COPY_CASE(48);
+        MILVUS_FASTMEM_COPY_CASE(49);
+        MILVUS_FASTMEM_COPY_CASE(50);
+        MILVUS_FASTMEM_COPY_CASE(51);
+        MILVUS_FASTMEM_COPY_CASE(52);
+        MILVUS_FASTMEM_COPY_CASE(53);
+        MILVUS_FASTMEM_COPY_CASE(54);
+        MILVUS_FASTMEM_COPY_CASE(55);
+        MILVUS_FASTMEM_COPY_CASE(56);
+        MILVUS_FASTMEM_COPY_CASE(57);
+        MILVUS_FASTMEM_COPY_CASE(58);
+        MILVUS_FASTMEM_COPY_CASE(59);
+        MILVUS_FASTMEM_COPY_CASE(60);
+        MILVUS_FASTMEM_COPY_CASE(61);
+        MILVUS_FASTMEM_COPY_CASE(62);
+        MILVUS_FASTMEM_COPY_CASE(63);
+        MILVUS_FASTMEM_COPY_CASE(64);
+        MILVUS_FASTMEM_COPY_CASE(65);
+        MILVUS_FASTMEM_COPY_CASE(66);
+        MILVUS_FASTMEM_COPY_CASE(67);
+        MILVUS_FASTMEM_COPY_CASE(68);
+        MILVUS_FASTMEM_COPY_CASE(69);
+        MILVUS_FASTMEM_COPY_CASE(70);
+        MILVUS_FASTMEM_COPY_CASE(71);
+        MILVUS_FASTMEM_COPY_CASE(72);
+        MILVUS_FASTMEM_COPY_CASE(73);
+        MILVUS_FASTMEM_COPY_CASE(74);
+        MILVUS_FASTMEM_COPY_CASE(75);
+        MILVUS_FASTMEM_COPY_CASE(76);
+        MILVUS_FASTMEM_COPY_CASE(77);
+        MILVUS_FASTMEM_COPY_CASE(78);
+        MILVUS_FASTMEM_COPY_CASE(79);
+        MILVUS_FASTMEM_COPY_CASE(80);
+        MILVUS_FASTMEM_COPY_CASE(81);
+        MILVUS_FASTMEM_COPY_CASE(82);
+        MILVUS_FASTMEM_COPY_CASE(83);
+        MILVUS_FASTMEM_COPY_CASE(84);
+        MILVUS_FASTMEM_COPY_CASE(85);
+        MILVUS_FASTMEM_COPY_CASE(86);
+        MILVUS_FASTMEM_COPY_CASE(87);
+        MILVUS_FASTMEM_COPY_CASE(88);
+        MILVUS_FASTMEM_COPY_CASE(89);
+        MILVUS_FASTMEM_COPY_CASE(90);
+        MILVUS_FASTMEM_COPY_CASE(91);
+        MILVUS_FASTMEM_COPY_CASE(92);
+        MILVUS_FASTMEM_COPY_CASE(93);
+        MILVUS_FASTMEM_COPY_CASE(94);
+        MILVUS_FASTMEM_COPY_CASE(95);
+        MILVUS_FASTMEM_COPY_CASE(96);
+        MILVUS_FASTMEM_COPY_CASE(97);
+        MILVUS_FASTMEM_COPY_CASE(98);
+        MILVUS_FASTMEM_COPY_CASE(99);
+        MILVUS_FASTMEM_COPY_CASE(100);
+        MILVUS_FASTMEM_COPY_CASE(101);
+        MILVUS_FASTMEM_COPY_CASE(102);
+        MILVUS_FASTMEM_COPY_CASE(103);
+        MILVUS_FASTMEM_COPY_CASE(104);
+        MILVUS_FASTMEM_COPY_CASE(105);
+        MILVUS_FASTMEM_COPY_CASE(106);
+        MILVUS_FASTMEM_COPY_CASE(107);
+        MILVUS_FASTMEM_COPY_CASE(108);
+        MILVUS_FASTMEM_COPY_CASE(109);
+        MILVUS_FASTMEM_COPY_CASE(110);
+        MILVUS_FASTMEM_COPY_CASE(111);
+        MILVUS_FASTMEM_COPY_CASE(112);
+        MILVUS_FASTMEM_COPY_CASE(113);
+        MILVUS_FASTMEM_COPY_CASE(114);
+        MILVUS_FASTMEM_COPY_CASE(115);
+        MILVUS_FASTMEM_COPY_CASE(116);
+        MILVUS_FASTMEM_COPY_CASE(117);
+        MILVUS_FASTMEM_COPY_CASE(118);
+        MILVUS_FASTMEM_COPY_CASE(119);
+        MILVUS_FASTMEM_COPY_CASE(120);
+        MILVUS_FASTMEM_COPY_CASE(121);
+        MILVUS_FASTMEM_COPY_CASE(122);
+        MILVUS_FASTMEM_COPY_CASE(123);
+        MILVUS_FASTMEM_COPY_CASE(124);
+        MILVUS_FASTMEM_COPY_CASE(125);
+        MILVUS_FASTMEM_COPY_CASE(126);
+        MILVUS_FASTMEM_COPY_CASE(127);
+        MILVUS_FASTMEM_COPY_CASE(128);
+        MILVUS_FASTMEM_COPY_CASE(129);
+        MILVUS_FASTMEM_COPY_CASE(130);
+        MILVUS_FASTMEM_COPY_CASE(131);
+        MILVUS_FASTMEM_COPY_CASE(132);
+        MILVUS_FASTMEM_COPY_CASE(133);
+        MILVUS_FASTMEM_COPY_CASE(134);
+        MILVUS_FASTMEM_COPY_CASE(135);
+        MILVUS_FASTMEM_COPY_CASE(136);
+        MILVUS_FASTMEM_COPY_CASE(137);
+        MILVUS_FASTMEM_COPY_CASE(138);
+        MILVUS_FASTMEM_COPY_CASE(139);
+        MILVUS_FASTMEM_COPY_CASE(140);
+        MILVUS_FASTMEM_COPY_CASE(141);
+        MILVUS_FASTMEM_COPY_CASE(142);
+        MILVUS_FASTMEM_COPY_CASE(143);
+        MILVUS_FASTMEM_COPY_CASE(144);
+        MILVUS_FASTMEM_COPY_CASE(145);
+        MILVUS_FASTMEM_COPY_CASE(146);
+        MILVUS_FASTMEM_COPY_CASE(147);
+        MILVUS_FASTMEM_COPY_CASE(148);
+        MILVUS_FASTMEM_COPY_CASE(149);
+        MILVUS_FASTMEM_COPY_CASE(150);
+        MILVUS_FASTMEM_COPY_CASE(151);
+        MILVUS_FASTMEM_COPY_CASE(152);
+        MILVUS_FASTMEM_COPY_CASE(153);
+        MILVUS_FASTMEM_COPY_CASE(154);
+        MILVUS_FASTMEM_COPY_CASE(155);
+        MILVUS_FASTMEM_COPY_CASE(156);
+        MILVUS_FASTMEM_COPY_CASE(157);
+        MILVUS_FASTMEM_COPY_CASE(158);
+        MILVUS_FASTMEM_COPY_CASE(159);
+        MILVUS_FASTMEM_COPY_CASE(160);
+        MILVUS_FASTMEM_COPY_CASE(161);
+        MILVUS_FASTMEM_COPY_CASE(162);
+        MILVUS_FASTMEM_COPY_CASE(163);
+        MILVUS_FASTMEM_COPY_CASE(164);
+        MILVUS_FASTMEM_COPY_CASE(165);
+        MILVUS_FASTMEM_COPY_CASE(166);
+        MILVUS_FASTMEM_COPY_CASE(167);
+        MILVUS_FASTMEM_COPY_CASE(168);
+        MILVUS_FASTMEM_COPY_CASE(169);
+        MILVUS_FASTMEM_COPY_CASE(170);
+        MILVUS_FASTMEM_COPY_CASE(171);
+        MILVUS_FASTMEM_COPY_CASE(172);
+        MILVUS_FASTMEM_COPY_CASE(173);
+        MILVUS_FASTMEM_COPY_CASE(174);
+        MILVUS_FASTMEM_COPY_CASE(175);
+        MILVUS_FASTMEM_COPY_CASE(176);
+        MILVUS_FASTMEM_COPY_CASE(177);
+        MILVUS_FASTMEM_COPY_CASE(178);
+        MILVUS_FASTMEM_COPY_CASE(179);
+        MILVUS_FASTMEM_COPY_CASE(180);
+        MILVUS_FASTMEM_COPY_CASE(181);
+        MILVUS_FASTMEM_COPY_CASE(182);
+        MILVUS_FASTMEM_COPY_CASE(183);
+        MILVUS_FASTMEM_COPY_CASE(184);
+        MILVUS_FASTMEM_COPY_CASE(185);
+        MILVUS_FASTMEM_COPY_CASE(186);
+        MILVUS_FASTMEM_COPY_CASE(187);
+        MILVUS_FASTMEM_COPY_CASE(188);
+        MILVUS_FASTMEM_COPY_CASE(189);
+        MILVUS_FASTMEM_COPY_CASE(190);
+        MILVUS_FASTMEM_COPY_CASE(191);
+        MILVUS_FASTMEM_COPY_CASE(192);
+        MILVUS_FASTMEM_COPY_CASE(193);
+        MILVUS_FASTMEM_COPY_CASE(194);
+        MILVUS_FASTMEM_COPY_CASE(195);
+        MILVUS_FASTMEM_COPY_CASE(196);
+        MILVUS_FASTMEM_COPY_CASE(197);
+        MILVUS_FASTMEM_COPY_CASE(198);
+        MILVUS_FASTMEM_COPY_CASE(199);
+        MILVUS_FASTMEM_COPY_CASE(200);
+        MILVUS_FASTMEM_COPY_CASE(201);
+        MILVUS_FASTMEM_COPY_CASE(202);
+        MILVUS_FASTMEM_COPY_CASE(203);
+        MILVUS_FASTMEM_COPY_CASE(204);
+        MILVUS_FASTMEM_COPY_CASE(205);
+        MILVUS_FASTMEM_COPY_CASE(206);
+        MILVUS_FASTMEM_COPY_CASE(207);
+        MILVUS_FASTMEM_COPY_CASE(208);
+        MILVUS_FASTMEM_COPY_CASE(209);
+        MILVUS_FASTMEM_COPY_CASE(210);
+        MILVUS_FASTMEM_COPY_CASE(211);
+        MILVUS_FASTMEM_COPY_CASE(212);
+        MILVUS_FASTMEM_COPY_CASE(213);
+        MILVUS_FASTMEM_COPY_CASE(214);
+        MILVUS_FASTMEM_COPY_CASE(215);
+        MILVUS_FASTMEM_COPY_CASE(216);
+        MILVUS_FASTMEM_COPY_CASE(217);
+        MILVUS_FASTMEM_COPY_CASE(218);
+        MILVUS_FASTMEM_COPY_CASE(219);
+        MILVUS_FASTMEM_COPY_CASE(220);
+        MILVUS_FASTMEM_COPY_CASE(221);
+        MILVUS_FASTMEM_COPY_CASE(222);
+        MILVUS_FASTMEM_COPY_CASE(223);
+        MILVUS_FASTMEM_COPY_CASE(224);
+        MILVUS_FASTMEM_COPY_CASE(225);
+        MILVUS_FASTMEM_COPY_CASE(226);
+        MILVUS_FASTMEM_COPY_CASE(227);
+        MILVUS_FASTMEM_COPY_CASE(228);
+        MILVUS_FASTMEM_COPY_CASE(229);
+        MILVUS_FASTMEM_COPY_CASE(230);
+        MILVUS_FASTMEM_COPY_CASE(231);
+        MILVUS_FASTMEM_COPY_CASE(232);
+        MILVUS_FASTMEM_COPY_CASE(233);
+        MILVUS_FASTMEM_COPY_CASE(234);
+        MILVUS_FASTMEM_COPY_CASE(235);
+        MILVUS_FASTMEM_COPY_CASE(236);
+        MILVUS_FASTMEM_COPY_CASE(237);
+        MILVUS_FASTMEM_COPY_CASE(238);
+        MILVUS_FASTMEM_COPY_CASE(239);
+        MILVUS_FASTMEM_COPY_CASE(240);
+        MILVUS_FASTMEM_COPY_CASE(241);
+        MILVUS_FASTMEM_COPY_CASE(242);
+        MILVUS_FASTMEM_COPY_CASE(243);
+        MILVUS_FASTMEM_COPY_CASE(244);
+        MILVUS_FASTMEM_COPY_CASE(245);
+        MILVUS_FASTMEM_COPY_CASE(246);
+        MILVUS_FASTMEM_COPY_CASE(247);
+        MILVUS_FASTMEM_COPY_CASE(248);
+        MILVUS_FASTMEM_COPY_CASE(249);
+        MILVUS_FASTMEM_COPY_CASE(250);
+        MILVUS_FASTMEM_COPY_CASE(251);
+        MILVUS_FASTMEM_COPY_CASE(252);
+        MILVUS_FASTMEM_COPY_CASE(253);
+        MILVUS_FASTMEM_COPY_CASE(254);
+        MILVUS_FASTMEM_COPY_CASE(255);
+        MILVUS_FASTMEM_COPY_CASE(256);
+#undef MILVUS_FASTMEM_COPY_CASE
+        default:
+            std::memcpy(dst, src, size);
+            return;
+    }
+}
+
+}  // namespace milvus::fastmem
