@@ -407,3 +407,38 @@ func badlock(m dsl.Matcher) {
 	m.Match(`$mu.Lock(); defer $mu.RUnlock()`).Report(`maybe $mu.RLock() was intended?`)
 	m.Match(`$mu.RLock(); defer $mu.Unlock()`).Report(`maybe $mu.Lock() was intended?`)
 }
+
+// Raw error constructors (fmt.Errorf / errors.New / errors.Errorf) must not be
+// returned directly from a function body. An error that reaches the gRPC
+// boundary has to carry a merr code, so originate it through the merr framework
+// (merr.WrapErr*Msg / merr.WrapErr*Err) and add context with merr.Wrap/Wrapf.
+//
+// Scope: this catches the direct-return form, the form that lets a raw error
+// escape to the boundary. Sentinels are expected to be package-level
+// (var Err... = errors.New(...)) — ValueSpec nodes that the statement patterns
+// below never match — so they are exempt automatically; function-local
+// sentinels should be lifted to package level rather than kept inline.
+// Assignment-then-return escapes (e := errors.New(); return e) cannot be
+// expressed as a ruleguard pattern and are backstopped at the gRPC boundary by
+// merr.Status. Test files, the cmd/ and tests/ trees, codegen and the walimpls
+// harness run outside the request path and are exempt.
+func rawmerrerror(m dsl.Matcher) {
+	m.Match(
+		`return errors.New($*_)`,
+		`return $*_, errors.New($*_)`,
+		`return errors.New($*_), $*_`,
+		`return fmt.Errorf($*_)`,
+		`return $*_, fmt.Errorf($*_)`,
+		`return fmt.Errorf($*_), $*_`,
+		`return errors.Errorf($*_)`,
+		`return $*_, errors.Errorf($*_)`,
+		`return errors.Errorf($*_), $*_`,
+	).
+		Where(!m.File().Name.Matches(`_test\.go$`) &&
+			!m.File().Name.Matches(`test_streaming\.go$`) &&
+			!m.File().PkgPath.Matches(`/milvus/cmd/`) &&
+			!m.File().PkgPath.Matches(`/milvus/tests/`) &&
+			!m.File().PkgPath.Matches(`codegen`) &&
+			!m.File().PkgPath.Matches(`walimplstest`)).
+		Report(`raw error returned from function body; originate through the merr framework (merr.WrapErr*/merr.Wrap) instead of fmt.Errorf/errors.New/errors.Errorf`)
+}
