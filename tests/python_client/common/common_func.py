@@ -15,10 +15,10 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import bm25s
-import jieba
 import numpy as np
 import pandas as pd
 import pytz
+import rjieba
 from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
 from bm25s.tokenization import Tokenizer
 from common import common_type as ct
@@ -238,7 +238,7 @@ def get_bm25_ground_truth(corpus, queries, top_k=100, language="en"):
     # Tokenize the corpus
     def jieba_split(text):
         text_without_punctuation = remove_punctuation(text)
-        return jieba.lcut(text_without_punctuation)
+        return rjieba.cut(text_without_punctuation)
 
     stopwords = "english" if language in ["en", "english"] else [" "]
     stemmer = None
@@ -264,7 +264,7 @@ def custom_tokenizer(language="en"):
     # Tokenize the corpus
     def jieba_split(text):
         text_without_punctuation = remove_punctuation(text)
-        return jieba.cut_for_search(text_without_punctuation)
+        return rjieba.cut_for_search(text_without_punctuation)
 
     def blank_space_split(text):
         text_without_punctuation = remove_punctuation(text)
