@@ -45,14 +45,6 @@ set_option_category("Milvus Build Option")
 
 define_option(MILVUS_GPU_VERSION "Build GPU version" OFF)
 define_option(ENABLE_FASTCPY "Enable fixed-size fast memcpy helper" ON)
-define_option_string(FASTCPY_MAX_SIZE
-        "Maximum byte size for fixed-size fast memcpy dispatch"
-        "64"
-        "32"
-        "48"
-        "64"
-        "128"
-        "256")
 
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")

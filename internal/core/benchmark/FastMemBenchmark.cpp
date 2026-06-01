@@ -68,37 +68,6 @@ FastMemcpyBenchmark(benchmark::State& state) {
 }
 
 void
-StdCopyBenchmark(benchmark::State& state) {
-    auto source = MakeBenchmarkSource();
-    std::vector<uint8_t> destination(kBufferSize);
-    auto count = static_cast<size_t>(state.range(0));
-    for (auto _ : state) {
-        auto end =
-            std::copy(source.data(), source.data() + count, destination.data());
-        benchmark::DoNotOptimize(end);
-        benchmark::DoNotOptimize(source.data());
-        benchmark::DoNotOptimize(destination.data());
-        benchmark::ClobberMemory();
-    }
-    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(count));
-}
-
-void
-StdCopyNBenchmark(benchmark::State& state) {
-    auto source = MakeBenchmarkSource();
-    std::vector<uint8_t> destination(kBufferSize);
-    auto count = static_cast<size_t>(state.range(0));
-    for (auto _ : state) {
-        auto end = std::copy_n(source.data(), count, destination.data());
-        benchmark::DoNotOptimize(end);
-        benchmark::DoNotOptimize(source.data());
-        benchmark::DoNotOptimize(destination.data());
-        benchmark::ClobberMemory();
-    }
-    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(count));
-}
-
-void
 ApplyFastMemArgs(benchmark::internal::Benchmark* benchmark) {
     for (auto size : std::array<int64_t, 9>{1, 2, 4, 8, 16, 32, 64, 128, 256}) {
         benchmark->Arg(size);
@@ -111,10 +80,6 @@ ApplyFastMemArgs(benchmark::internal::Benchmark* benchmark) {
 BENCHMARK(milvus::fastmem::StdMemcpyBenchmark)
     ->Apply(milvus::fastmem::ApplyFastMemArgs);
 BENCHMARK(milvus::fastmem::FastMemcpyBenchmark)
-    ->Apply(milvus::fastmem::ApplyFastMemArgs);
-BENCHMARK(milvus::fastmem::StdCopyBenchmark)
-    ->Apply(milvus::fastmem::ApplyFastMemArgs);
-BENCHMARK(milvus::fastmem::StdCopyNBenchmark)
     ->Apply(milvus::fastmem::ApplyFastMemArgs);
 
 BENCHMARK_MAIN();

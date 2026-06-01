@@ -210,8 +210,7 @@ if ( ENABLE_FASTCPY AND
      (LINUX OR APPLE) AND
      (CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64|aarch64|arm64)$") )
     add_compile_definitions( MILVUS_ENABLE_FASTCPY=1 )
-    add_compile_definitions( MILVUS_FASTCPY_MAX_SIZE=${FASTCPY_MAX_SIZE} )
-    message( STATUS "Fast memcpy enabled, max size: ${FASTCPY_MAX_SIZE}" )
+    message( STATUS "Fast memcpy enabled" )
 else ()
     message( STATUS "Fast memcpy disabled or unsupported on this platform" )
 endif ()
