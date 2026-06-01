@@ -17,4 +17,4 @@
 add_executable(fastmem_benchmark FastMemBenchmark.cpp)
 target_include_directories(fastmem_benchmark PRIVATE ${CMAKE_HOME_DIRECTORY}/src)
 target_link_libraries(fastmem_benchmark PRIVATE benchmark::benchmark)
-install(TARGETS fastmem_benchmark DESTINATION unittest)
+install(TARGETS fastmem_benchmark DESTINATION benchmark)

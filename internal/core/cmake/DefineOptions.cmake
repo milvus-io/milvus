@@ -44,7 +44,6 @@ endmacro()
 set_option_category("Milvus Build Option")
 
 define_option(MILVUS_GPU_VERSION "Build GPU version" OFF)
-define_option(ENABLE_FASTCPY "Enable fixed-size fast memcpy helper" ON)
 
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")

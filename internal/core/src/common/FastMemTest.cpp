@@ -83,15 +83,18 @@ TEST(FastMemTest, FastMemcpyHandlesUnalignedPointers) {
     }
 }
 
-TEST(FastMemTest, FastMemcpyEnabledReflectsBuildFlag) {
-#if defined(MILVUS_ENABLE_FASTCPY) &&                                     \
-    (defined(__linux__) || defined(__APPLE__)) &&                         \
-    (defined(__x86_64__) || defined(__amd64__) || defined(__aarch64__) || \
-     defined(__arm64__))
-    ASSERT_TRUE(FastMemcpyEnabled());
-#else
+TEST(FastMemTest, FastMemcpyEnabledReflectsMaxSize) {
+#if MILVUS_FASTCPY_MAX_SIZE == 0
     ASSERT_FALSE(FastMemcpyEnabled());
+#else
+    ASSERT_TRUE(kFastMemcpyPlatformSupported);
+    ASSERT_TRUE(FastMemcpyEnabled());
 #endif
+}
+
+TEST(FastMemTest, FastMemcpyDispatchLimitMatchesMaxSizeLimit) {
+    ASSERT_EQ(kFastMemcpyDispatchMaxSize, 1024);
+    ASSERT_LE(kFastMemcpyMaxSize, kFastMemcpyDispatchMaxSize);
 }
 
 TEST(FastMemTest, FastMemcpyKeepsZeroSizeDestinationUntouched) {
@@ -107,8 +110,8 @@ TEST(FastMemTest, FastMemcpyKeepsZeroSizeDestinationUntouched) {
 }
 
 TEST(FastMemTest, FastMemcpyMatchesStdMemcpyForComparisonCases) {
-    for (auto size :
-         std::array<size_t, 11>{0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 1024}) {
+    for (auto size : std::array<size_t, 13>{
+             0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 768, 1024}) {
         AssertCopyMatchesStdMemcpy(size, 1, 3);
     }
 }
