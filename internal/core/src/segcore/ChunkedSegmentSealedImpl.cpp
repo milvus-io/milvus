@@ -2427,9 +2427,9 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
     int64_t segment_id,
     bool is_sorted_by_pk)
     : segcore_config_(segcore_config),
-      field_data_ready_bitset_(schema->size()),
-      index_ready_bitset_(schema->size()),
-      binlog_index_bitset_(schema->size()),
+      field_data_ready_bitset_(schema->get_field_id_bitset_size()),
+      index_ready_bitset_(schema->get_field_id_bitset_size()),
+      binlog_index_bitset_(schema->get_field_id_bitset_size()),
       ngram_fields_(std::unordered_set<FieldId>(schema->size())),
       scalar_indexings_(std::unordered_map<FieldId, index::CacheIndexBasePtr>(
           schema->size())),
@@ -4432,9 +4432,9 @@ ChunkedSegmentSealedImpl::ApplySchemaForReopen(SchemaPtr sch) {
         return;
     }
 
-    field_data_ready_bitset_.resize(sch->size());
-    index_ready_bitset_.resize(sch->size());
-    binlog_index_bitset_.resize(sch->size());
+    field_data_ready_bitset_.resize(sch->get_field_id_bitset_size());
+    index_ready_bitset_.resize(sch->get_field_id_bitset_size());
+    binlog_index_bitset_.resize(sch->get_field_id_bitset_size());
     schema_ = std::move(sch);
 }
 
