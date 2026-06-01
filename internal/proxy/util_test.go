@@ -2320,6 +2320,8 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 }
 
 func Test_validateMaxCapacityPerRow(t *testing.T) {
+	paramtable.Init()
+
 	t.Run("normal case", func(t *testing.T) {
 		arrayField := &schemapb.FieldSchema{
 			DataType:    schemapb.DataType_Array,
@@ -2380,6 +2382,27 @@ func Test_validateMaxCapacityPerRow(t *testing.T) {
 
 		err := validateMaxCapacityPerRow("collection", arrayField)
 		assert.Error(t, err)
+	})
+
+	t.Run("custom max capacity", func(t *testing.T) {
+		paramtable.Init()
+		err := paramtable.Get().Save(paramtable.Get().ProxyCfg.MaxArrayCapacity.Key, "5000")
+		assert.NoError(t, err)
+		defer paramtable.Get().Reset(paramtable.Get().ProxyCfg.MaxArrayCapacity.Key)
+
+		arrayField := &schemapb.FieldSchema{
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int64,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxCapacityKey,
+					Value: "5000",
+				},
+			},
+		}
+
+		err = validateMaxCapacityPerRow("collection", arrayField)
+		assert.NoError(t, err)
 	})
 }
 

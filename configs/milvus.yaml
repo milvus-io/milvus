@@ -323,6 +323,7 @@ proxy:
   maxVectorFieldNum: 10 # The maximum number of vector fields that can be specified in a collection
   maxShardNum: 16 # The maximum number of shards can be created when creating in a collection.
   maxDimension: 32768 # The maximum number of dimensions of a vector can have when creating in a collection.
+  maxArrayCapacity: 4096 # The maximum number of elements in an array field for a single row.
   # Whether to produce gin logs.\n
   # please adjust in embedded Milvus: false
   ginLogging: true
