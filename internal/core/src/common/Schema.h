@@ -290,6 +290,22 @@ class Schema {
         return fields_.size();
     }
 
+    size_t
+    get_field_id_bitset_size() const {
+        size_t bitset_size = 0;
+        for (const auto& field_id : field_ids_) {
+            if (field_id.get() < START_USER_FIELDID) {
+                continue;
+            }
+            auto required_size =
+                static_cast<size_t>(field_id.get() - START_USER_FIELDID + 1);
+            if (required_size > bitset_size) {
+                bitset_size = required_size;
+            }
+        }
+        return bitset_size;
+    }
+
     const FieldMeta&
     operator[](FieldId field_id) const {
         Assert(field_id.get() >= 0);
