@@ -84,20 +84,6 @@ StdCopyBenchmark(benchmark::State& state) {
 }
 
 void
-FastMemcpyForCopyBenchmark(benchmark::State& state) {
-    auto source = MakeBenchmarkSource();
-    std::vector<uint8_t> destination(kBufferSize);
-    auto count = static_cast<size_t>(state.range(0));
-    for (auto _ : state) {
-        FastMemcpy(destination.data(), source.data(), count);
-        benchmark::DoNotOptimize(source.data());
-        benchmark::DoNotOptimize(destination.data());
-        benchmark::ClobberMemory();
-    }
-    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(count));
-}
-
-void
 StdCopyNBenchmark(benchmark::State& state) {
     auto source = MakeBenchmarkSource();
     std::vector<uint8_t> destination(kBufferSize);
@@ -105,20 +91,6 @@ StdCopyNBenchmark(benchmark::State& state) {
     for (auto _ : state) {
         auto end = std::copy_n(source.data(), count, destination.data());
         benchmark::DoNotOptimize(end);
-        benchmark::DoNotOptimize(source.data());
-        benchmark::DoNotOptimize(destination.data());
-        benchmark::ClobberMemory();
-    }
-    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(count));
-}
-
-void
-FastMemcpyForCopyNBenchmark(benchmark::State& state) {
-    auto source = MakeBenchmarkSource();
-    std::vector<uint8_t> destination(kBufferSize);
-    auto count = static_cast<size_t>(state.range(0));
-    for (auto _ : state) {
-        FastMemcpy(destination.data(), source.data(), count);
         benchmark::DoNotOptimize(source.data());
         benchmark::DoNotOptimize(destination.data());
         benchmark::ClobberMemory();
@@ -142,11 +114,7 @@ BENCHMARK(milvus::fastmem::FastMemcpyBenchmark)
     ->Apply(milvus::fastmem::ApplyFastMemArgs);
 BENCHMARK(milvus::fastmem::StdCopyBenchmark)
     ->Apply(milvus::fastmem::ApplyFastMemArgs);
-BENCHMARK(milvus::fastmem::FastMemcpyForCopyBenchmark)
-    ->Apply(milvus::fastmem::ApplyFastMemArgs);
 BENCHMARK(milvus::fastmem::StdCopyNBenchmark)
-    ->Apply(milvus::fastmem::ApplyFastMemArgs);
-BENCHMARK(milvus::fastmem::FastMemcpyForCopyNBenchmark)
     ->Apply(milvus::fastmem::ApplyFastMemArgs);
 
 BENCHMARK_MAIN();
