@@ -114,8 +114,12 @@ TEST_F(StorageV2IndexRawDataTest, TestDiskFileManger) {
     int64_t n_batch = 3;
     int64_t dim = 128;
     // Write data to storage v2
-    auto paths = std::vector<std::string>{path_ + "/0/19530.parquet",
-                                          path_ + "/101/19531.parquet"};
+    auto paths = std::vector<std::string>{path_ + "0/19530.parquet",
+                                          path_ + "101/19531.parquet"};
+    for (auto& p : paths) {
+        boost::filesystem::create_directories(
+            boost::filesystem::path(p).parent_path());
+    }
     auto column_groups = std::vector<std::vector<int>>{
         {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}, {15}};
     auto writer_memory = 16 * 1024 * 1024;
