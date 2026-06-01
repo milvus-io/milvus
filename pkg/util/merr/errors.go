@@ -97,6 +97,9 @@ var (
 	// go:deprecated
 	ErrResourceGroupNodeNotEnough      = newMilvusError("resource group node not enough", 304, false)
 	ErrResourceGroupServiceUnAvailable = newMilvusError("resource group service unavailable", 305, true)
+	// Deprecated: misspelled historical name kept as an alias for backward
+	// compatibility of the exported symbol; use ErrResourceGroupServiceUnAvailable.
+	ErrResourceGroupServiceAvailable = ErrResourceGroupServiceUnAvailable
 
 	// Replica related
 	ErrReplicaNotFound     = newMilvusError("replica not found", 400, false)

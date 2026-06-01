@@ -769,6 +769,12 @@ func WrapErrResourceGroupServiceUnAvailable(msg ...string) error {
 	return err
 }
 
+// Deprecated: misspelled historical name kept for backward compatibility of the
+// exported symbol; use WrapErrResourceGroupServiceUnAvailable.
+func WrapErrResourceGroupServiceAvailable(msg ...string) error {
+	return WrapErrResourceGroupServiceUnAvailable(msg...)
+}
+
 // Replica related
 func WrapErrReplicaNotFound(id int64, msg ...string) error {
 	err := wrapFields(ErrReplicaNotFound, value("replica", id))
@@ -1326,6 +1332,28 @@ func WrapErrPrivilegeNotPermitted(fmt string, args ...any) error {
 // segcore code table (see segcore.go).
 func WrapErrSegcoreMsg(format string, args ...any) error {
 	return errors.Wrap(ErrSegcore, fmt.Sprintf(format, args...))
+}
+
+// Deprecated: segcore error classification is now driven by the shared code
+// table; use WrapErrSegcoreMsg. Kept for backward compatibility of the exported
+// symbol.
+func WrapErrSegcore(code int32, msg ...string) error {
+	err := wrapFields(ErrSegcore, value("segcoreCode", code))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+// Deprecated: segcore error classification is now driven by the shared code
+// table; use WrapErrSegcoreMsg. Kept for backward compatibility of the exported
+// symbol.
+func WrapErrSegcoreUnsupported(code int32, msg ...string) error {
+	err := wrapFields(ErrSegcoreUnsupported, value("segcoreCode", code))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
 }
 
 // field related
