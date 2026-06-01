@@ -151,7 +151,7 @@ func PickSegment(segments []*datapb.ImportRequestSegment, vchannel string, parti
 	})
 
 	if len(candidates) == 0 {
-		return 0, fmt.Errorf("no candidate segments found for channel %s and partition %d",
+		return 0, merr.WrapErrServiceInternalMsg("no candidate segments found for channel %s and partition %d",
 			vchannel, partitionID)
 	}
 
@@ -392,7 +392,7 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 				}
 			}
 		default:
-			return fmt.Errorf("unexpected data type: %d, cannot be filled with default value", dataType)
+			return merr.WrapErrServiceInternalMsg("unexpected data type: %d, cannot be filled with default value", dataType)
 		}
 
 		if err != nil {

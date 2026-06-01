@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -65,11 +66,11 @@ func ExecuteFunctionsForSegment(
 	inputManifestPath, err := packed.CreateSegmentManifestWithBasePath(
 		ctx, basePath, format, sourceColumns, fragments, storageConfig)
 	if err != nil {
-		return "", fmt.Errorf("create input manifest: %w", err)
+		return "", merr.Wrap(err, "create input manifest")
 	}
 	_, inputVersion, err := packed.UnmarshalManifestPath(inputManifestPath)
 	if err != nil {
-		return "", fmt.Errorf("parse input manifest path: %w", err)
+		return "", merr.Wrap(err, "parse input manifest path")
 	}
 
 	outputFields, outputSchema, err := buildOutputSchema(schema)
@@ -94,7 +95,7 @@ func ExecuteFunctionsForSegment(
 	colGroups := []storagecommon.ColumnGroup{{Columns: lo.Range(len(outputFields))}}
 	writer, err := packed.NewFFIPackedWriter(basePath, outputArrow, colGroups, storageConfig, nil)
 	if err != nil {
-		return "", fmt.Errorf("open output writer: %w", err)
+		return "", merr.Wrap(err, "open output writer")
 	}
 	writer.AsNewColumnGroups()
 
@@ -108,7 +109,7 @@ func ExecuteFunctionsForSegment(
 
 	output, err := writer.Close()
 	if err != nil {
-		return "", fmt.Errorf("close output writer: %w", err)
+		return "", merr.Wrap(err, "close output writer")
 	}
 	if output != nil {
 		defer output.Destroy()
@@ -120,7 +121,7 @@ func ExecuteFunctionsForSegment(
 	}
 	manifestPath, err := packed.CommitManifestUpdates(basePath, inputVersion, storageConfig, updates)
 	if err != nil {
-		return "", fmt.Errorf("commit function output manifest: %w", err)
+		return "", merr.Wrap(err, "commit function output manifest")
 	}
 
 	log.Info("function execution completed",
@@ -139,7 +140,7 @@ func buildOutputSchema(schema *schemapb.CollectionSchema) ([]*schemapb.FieldSche
 		return nil, nil, err
 	}
 	if len(outputFields) == 0 {
-		return nil, nil, fmt.Errorf("no function output fields; executor should not have been invoked")
+		return nil, nil, merr.WrapErrServiceInternalMsg("no function output fields; executor should not have been invoked")
 	}
 	return outputFields, &schemapb.CollectionSchema{
 		Name:   schema.GetName(),
@@ -177,7 +178,7 @@ func functionOutputFields(schema *schemapb.CollectionSchema) ([]*schemapb.FieldS
 				continue
 			}
 			if _, ok := fieldsByID[fieldID]; !ok {
-				return nil, fmt.Errorf("function output field id %d not found in schema", fieldID)
+				return nil, merr.WrapErrParameterInvalidMsg("function output field id %d not found in schema", fieldID)
 			}
 			addOutputID(fieldID)
 		}
@@ -187,7 +188,7 @@ func functionOutputFields(schema *schemapb.CollectionSchema) ([]*schemapb.FieldS
 			}
 			field, ok := fieldsByName[fieldName]
 			if !ok {
-				return nil, fmt.Errorf("function output field %s not found in schema", fieldName)
+				return nil, merr.WrapErrParameterInvalidMsg("function output field %s not found in schema", fieldName)
 			}
 			addOutputID(field.GetFieldID())
 		}
@@ -222,7 +223,7 @@ func openInputReader(
 		}),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("open input manifest: %w", err)
+		return nil, merr.Wrap(err, "open input manifest")
 	}
 	return reader, nil
 }
@@ -236,7 +237,7 @@ func buildFunctionExecutionSchema(
 	schema *schemapb.CollectionSchema,
 ) (*schemapb.CollectionSchema, *schemapb.CollectionSchema, typeutil.Set[int64], error) {
 	if schema == nil {
-		return nil, nil, nil, fmt.Errorf("collection schema is nil")
+		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("collection schema is nil")
 	}
 	inputIDs := make(map[int64]struct{})
 	for _, fn := range schema.GetFunctions() {
@@ -291,24 +292,24 @@ func buildFunctionExecutionSchema(
 		inputSchema.Fields = append(inputSchema.Fields, f)
 
 		if schema.GetExternalSource() != "" && f.GetExternalField() == "" {
-			return nil, nil, nil, fmt.Errorf("function input field %s has no external_field", f.GetName())
+			return nil, nil, nil, merr.WrapErrParameterInvalidMsg("function input field %s has no external_field", f.GetName())
 		}
 	}
 
 	for inputID := range inputIDs {
 		if _, ok := seenInputFields[inputID]; !ok {
 			if _, ok := seenExecutionFields[inputID]; !ok {
-				return nil, nil, nil, fmt.Errorf("function input field id %d not found in schema", inputID)
+				return nil, nil, nil, merr.WrapErrParameterInvalidMsg("function input field id %d not found in schema", inputID)
 			}
 		}
 	}
 	for outputID := range outputIDs {
 		if _, ok := seenExecutionFields[outputID]; !ok {
-			return nil, nil, nil, fmt.Errorf("function output field id %d not found in schema", outputID)
+			return nil, nil, nil, merr.WrapErrParameterInvalidMsg("function output field id %d not found in schema", outputID)
 		}
 	}
 	if len(inputSchema.GetFields()) == 0 {
-		return nil, nil, nil, fmt.Errorf("no source input columns for function execution")
+		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("no source input columns for function execution")
 	}
 	return inputSchema, executionSchema, requiredInputFields, nil
 }
@@ -332,7 +333,7 @@ func streamBatches(
 			break
 		}
 		if err != nil {
-			return totalRows, fmt.Errorf("read input batch: %w", err)
+			return totalRows, merr.Wrap(err, "read input batch")
 		}
 		if rec == nil {
 			break
@@ -341,7 +342,7 @@ func streamBatches(
 		batch, err := storage.RecordToInsertData(rec, executionSchema, requiredInputFields)
 		rec.Release()
 		if err != nil {
-			return totalRows, fmt.Errorf("record to InsertData: %w", err)
+			return totalRows, merr.Wrap(err, "record to InsertData")
 		}
 		if batch.GetRowNum() == 0 {
 			continue
@@ -351,7 +352,7 @@ func streamBatches(
 			ClusterID: clusterID,
 			DBName:    schema.GetDbName(),
 		}); err != nil {
-			return totalRows, fmt.Errorf("execute functions: %w", err)
+			return totalRows, merr.Wrap(err, "execute functions")
 		}
 
 		if err := accumulateBM25Stats(batch, bm25Acc); err != nil {
@@ -359,7 +360,7 @@ func streamBatches(
 		}
 
 		if err := writeOutputBatch(batch, outputSchema, outputArrow, writer); err != nil {
-			return totalRows, fmt.Errorf("write output batch: %w", err)
+			return totalRows, merr.Wrap(err, "write output batch")
 		}
 		totalRows += int64(batch.GetRowNum())
 	}
@@ -404,13 +405,13 @@ func accumulateBM25Stats(batch *storage.InsertData, acc map[int64]*storage.BM25S
 	for outID, stats := range acc {
 		raw, present := batch.Data[outID]
 		if !present || raw == nil {
-			return fmt.Errorf(
+			return merr.WrapErrFunctionFailedMsg(
 				"BM25 output field %d missing from batch; executeFunctions did not populate it",
 				outID)
 		}
 		fd, ok := raw.(*storage.SparseFloatVectorFieldData)
 		if !ok {
-			return fmt.Errorf(
+			return merr.WrapErrFunctionFailedMsg(
 				"BM25 output field %d has wrong type %T (want *SparseFloatVectorFieldData)",
 				outID, raw)
 		}
@@ -431,18 +432,18 @@ func appendBM25Stats(
 	}
 	log := log.Ctx(ctx)
 	if updates == nil {
-		return fmt.Errorf("manifest updates is nil")
+		return merr.WrapErrServiceInternalMsg("manifest updates is nil")
 	}
 
 	entries := make([]packed.StatEntry, 0, len(acc))
 	for outID, stats := range acc {
 		blob, err := stats.Serialize()
 		if err != nil {
-			return fmt.Errorf("serialize bm25 stats for field %d: %w", outID, err)
+			return merr.Wrapf(err, "serialize bm25 stats for field %d", outID)
 		}
 		fullPath := path.Join(basePath, fmt.Sprintf("_stats/bm25.%d/%d", outID, 0))
 		if err := packed.WriteFile(storageConfig, fullPath, blob); err != nil {
-			return fmt.Errorf("write bm25 stats file %s: %w", fullPath, err)
+			return merr.Wrapf(err, "write bm25 stats file %s", fullPath)
 		}
 		entries = append(entries, packed.StatEntry{
 			Key:   fmt.Sprintf("bm25.%d", outID),
@@ -481,7 +482,7 @@ func finalizeBM25Stats(
 
 	basePath, version, err := packed.UnmarshalManifestPath(manifestPath)
 	if err != nil {
-		return "", fmt.Errorf("parse manifest path: %w", err)
+		return "", merr.Wrap(err, "parse manifest path")
 	}
 
 	updates := &packed.ManifestUpdates{}

@@ -266,7 +266,7 @@ func GetManifestFieldIDs(manifestPath string, storageConfig *indexpb.StorageConf
 	fields := make(map[int64]struct{})
 	cgroups := &manifest.column_groups
 	if cgroups.column_group_array == nil && cgroups.num_of_column_groups > 0 {
-		return nil, fmt.Errorf("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
+		return nil, merr.WrapErrServiceInternalMsg("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
 	}
 
 	cgArray := unsafe.Slice(cgroups.column_group_array, int(cgroups.num_of_column_groups))
@@ -283,7 +283,7 @@ func GetManifestFieldIDs(manifestPath string, storageConfig *indexpb.StorageConf
 			columnName := C.GoString(column)
 			fieldID, err := strconv.ParseInt(columnName, 10, 64)
 			if err != nil {
-				return nil, fmt.Errorf("invalid manifest column name %q: %w", columnName, err)
+				return nil, merr.WrapErrStorage(err, "invalid manifest column name %q", columnName)
 			}
 			fields[fieldID] = struct{}{}
 		}

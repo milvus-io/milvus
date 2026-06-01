@@ -19,6 +19,7 @@ package querycoordv2
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -552,7 +553,7 @@ func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearRe
 					Role:   typeutil.QueryNodeRole,
 					NodeID: nodeID,
 				}
-				return errors.Wrapf(err, "ClearReadTaskQueue failed, queryNodeID = %d", nodeID)
+				return merr.Wrapf(err, "ClearReadTaskQueue failed, queryNodeID = %d", nodeID)
 			}
 
 			if len(nodeResp.GetResults()) > 0 {
@@ -569,7 +570,7 @@ func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearRe
 				}
 			}
 			if !merr.Ok(nodeResp.GetStatus()) {
-				return errors.Wrapf(merr.Error(nodeResp.GetStatus()), "ClearReadTaskQueue failed, queryNodeID = %d", nodeID)
+				return merr.Wrapf(merr.Error(nodeResp.GetStatus()), "ClearReadTaskQueue failed, queryNodeID = %d", nodeID)
 			}
 			return nil
 		})

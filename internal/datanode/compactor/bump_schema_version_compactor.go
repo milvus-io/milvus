@@ -26,7 +26,6 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
@@ -115,12 +114,12 @@ func (t *bumpSchemaVersionCompactionTask) preCompact() error {
 
 	// Check segment binlogs: must have exactly one segment
 	if len(t.plan.GetSegmentBinlogs()) != 1 {
-		return errors.Newf("schema bump compaction plan is illegal, must have exactly one segment, but got %d segments, planID = %d", len(t.plan.GetSegmentBinlogs()), t.GetPlanID())
+		return merr.WrapErrParameterInvalidMsg("schema bump compaction plan is illegal, must have exactly one segment, but got %d segments, planID = %d", len(t.plan.GetSegmentBinlogs()), t.GetPlanID())
 	}
 
 	segment := t.plan.GetSegmentBinlogs()[0]
 	if segment.GetStorageVersion() < storage.StorageV3 || segment.GetManifest() == "" {
-		return errors.Newf("schema bump compaction requires a StorageV3 segment with manifest, planID = %d, segmentID = %d, storageVersion = %d", t.GetPlanID(), segment.GetSegmentID(), segment.GetStorageVersion())
+		return merr.WrapErrParameterInvalidMsg("schema bump compaction requires a StorageV3 segment with manifest, planID = %d, segmentID = %d, storageVersion = %d", t.GetPlanID(), segment.GetSegmentID(), segment.GetStorageVersion())
 	}
 
 	return nil
@@ -147,7 +146,7 @@ func (t *bumpSchemaVersionCompactionTask) missingFunctionInputSchema(missingFunc
 		for _, inputFieldID := range functionSchema.GetInputFieldIds() {
 			inputField := typeutil.GetField(schema, inputFieldID)
 			if inputField == nil {
-				return nil, nil, errors.New("input field not found in schema")
+				return nil, nil, merr.WrapErrParameterInvalidMsg("input field not found in schema")
 			}
 			if err := validateMaterializationInputField(functionSchema, inputField); err != nil {
 				return nil, nil, err
@@ -196,11 +195,11 @@ func bm25AdditionalInputFields(schema *schemapb.CollectionSchema, inputField *sc
 		return nil, err
 	}
 	if multiAnalyzerParams.ByField == "" {
-		return nil, errors.New("multi_analyzer_params missing required 'by_field' key")
+		return nil, merr.WrapErrParameterInvalidMsg("multi_analyzer_params missing required 'by_field' key")
 	}
 	byField := typeutil.GetFieldByName(schema, multiAnalyzerParams.ByField)
 	if byField == nil {
-		return nil, errors.New("input field not found in schema")
+		return nil, merr.WrapErrParameterInvalidMsg("input field not found in schema")
 	}
 	return []*schemapb.FieldSchema{byField}, nil
 }
@@ -217,7 +216,7 @@ func (t *bumpSchemaVersionCompactionTask) missingFunctionOutputFields(missingFun
 			outputFieldID := functionSchema.GetOutputFieldIds()[outputIndex]
 			outputField := typeutil.GetField(schema, outputFieldID)
 			if outputField == nil {
-				return nil, nil, errors.New("output field not found in schema")
+				return nil, nil, merr.WrapErrParameterInvalidMsg("output field not found in schema")
 			}
 			if err := validateMaterializationOutputField(functionSchema, outputField); err != nil {
 				return nil, nil, err
@@ -227,7 +226,7 @@ func (t *bumpSchemaVersionCompactionTask) missingFunctionOutputFields(missingFun
 		}
 	}
 	if len(fields) == 0 {
-		return nil, nil, errors.New("no missing function output fields")
+		return nil, nil, merr.WrapErrParameterInvalidMsg("no missing function output fields")
 	}
 	return fields, fieldIDs, nil
 }
@@ -236,10 +235,10 @@ func validateSupportedMissingFunctionMaterialization(functionSchema *schemapb.Fu
 	switch functionSchema.GetType() {
 	case schemapb.FunctionType_BM25:
 		if len(functionSchema.GetInputFieldIds()) == 0 {
-			return errors.New("bm25 function should have input fields")
+			return merr.WrapErrParameterInvalidMsg("bm25 function should have input fields")
 		}
 		if len(functionSchema.GetOutputFieldIds()) == 0 {
-			return errors.New("bm25 function should have output fields")
+			return merr.WrapErrParameterInvalidMsg("bm25 function should have output fields")
 		}
 		return nil
 	case schemapb.FunctionType_MinHash:
@@ -251,7 +250,7 @@ func validateSupportedMissingFunctionMaterialization(functionSchema *schemapb.Fu
 		}
 		return nil
 	default:
-		return errors.New("unsupported function type")
+		return merr.WrapErrParameterInvalidMsg("unsupported function type")
 	}
 }
 
@@ -259,7 +258,7 @@ func validateMaterializationInputField(functionSchema *schemapb.FunctionSchema, 
 	switch functionSchema.GetType() {
 	case schemapb.FunctionType_BM25:
 		if field.GetDataType() != schemapb.DataType_VarChar && field.GetDataType() != schemapb.DataType_Text {
-			return errors.New("input field data type must be varchar or text for bm25 materialization")
+			return merr.WrapErrParameterInvalidMsg("input field data type must be varchar or text for bm25 materialization")
 		}
 	case schemapb.FunctionType_MinHash:
 		if field.GetDataType() != schemapb.DataType_VarChar && field.GetDataType() != schemapb.DataType_Text {
@@ -273,7 +272,7 @@ func validateMaterializationOutputField(functionSchema *schemapb.FunctionSchema,
 	switch functionSchema.GetType() {
 	case schemapb.FunctionType_BM25:
 		if field.GetDataType() != schemapb.DataType_SparseFloatVector {
-			return errors.New("output field data type must be sparse float vector for bm25 materialization")
+			return merr.WrapErrParameterInvalidMsg("output field data type must be sparse float vector for bm25 materialization")
 		}
 	case schemapb.FunctionType_MinHash:
 		if field.GetDataType() != schemapb.DataType_BinaryVector {
@@ -602,7 +601,7 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 func appendBM25StatsFromArrowArray(stats *storage.BM25Stats, arr arrow.Array) (int, error) {
 	binaryArray, ok := arr.(*array.Binary)
 	if !ok {
-		return 0, errors.Newf("bm25 output field must be arrow binary array, got %T", arr)
+		return 0, merr.WrapErrParameterInvalidMsg("bm25 output field must be arrow binary array, got %T", arr)
 	}
 	memorySize := 0
 	for i := 0; i < binaryArray.Len(); i++ {
@@ -685,7 +684,7 @@ func (t *bumpSchemaVersionCompactionTask) setupWriter(outputFields []*schemapb.F
 
 func (t *bumpSchemaVersionCompactionTask) newV3WriterResult(schema *schemapb.CollectionSchema, columnGroups []storagecommon.ColumnGroup, segment *datapb.CompactionSegmentBinlogs, collectionID int64, basePath string, baseVersion int64) (*bumpSchemaVersionWriterResult, error) {
 	if segment.GetStorageVersion() < storage.StorageV3 || segment.GetManifest() == "" {
-		return nil, errors.New("schema bump compaction requires a StorageV3 segment with manifest")
+		return nil, merr.WrapErrParameterInvalidMsg("schema bump compaction requires a StorageV3 segment with manifest")
 	}
 
 	pluginContext, err := hookutil.GetCPluginContext(t.plan.GetPluginContext(), collectionID)

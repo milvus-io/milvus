@@ -329,7 +329,7 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 		var err error
 		outputColumns, err = functionOutputColumnNames(t.req.GetSchema())
 		if err != nil {
-			return nil, fmt.Errorf("resolve function output columns: %w", err)
+			return nil, merr.Wrap(err, "resolve function output columns")
 		}
 	}
 
@@ -455,7 +455,7 @@ func (t *RefreshExternalCollectionTask) segmentHasFunctionOutputColumns(seg *dat
 	}
 	hasColumns, err := packed.ManifestHasColumns(seg.GetManifestPath(), t.req.GetStorageConfig(), outputColumns)
 	if err != nil {
-		return false, fmt.Errorf("check function output columns for segment %d: %w", seg.GetID(), err)
+		return false, merr.Wrapf(err, "check function output columns for segment %d", seg.GetID())
 	}
 	return hasColumns, nil
 }
@@ -1032,7 +1032,7 @@ func estimateFunctionOutputBytesPerRow(schema *schemapb.CollectionSchema) (int64
 			Fields: []*schemapb.FieldSchema{field},
 		})
 		if err != nil {
-			return 0, fmt.Errorf("estimate function output field %s: %w", field.GetName(), err)
+			return 0, merr.Wrapf(err, "estimate function output field %s", field.GetName())
 		}
 		total += int64(size)
 	}

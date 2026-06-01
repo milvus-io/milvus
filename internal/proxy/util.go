@@ -1040,7 +1040,7 @@ func normalizeFunctionOutputFields(coll *schemapb.CollectionSchema) error {
 			}
 			field, ok := fieldsByID[fieldID]
 			if !ok {
-				return fmt.Errorf("function output field id %d not found in schema", fieldID)
+				return merr.WrapErrParameterInvalidMsg("function output field id %d not found in schema", fieldID)
 			}
 			field.IsFunctionOutput = true
 		}
@@ -1050,7 +1050,7 @@ func normalizeFunctionOutputFields(coll *schemapb.CollectionSchema) error {
 			}
 			field, ok := fieldsByName[name]
 			if !ok {
-				return fmt.Errorf("function output field not found: %s", name)
+				return merr.WrapErrParameterInvalidMsg("function output field not found: %s", name)
 			}
 			field.IsFunctionOutput = true
 		}
