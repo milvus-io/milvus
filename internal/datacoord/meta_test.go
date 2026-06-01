@@ -20,10 +20,12 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -51,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -3043,7 +3046,291 @@ func TestAlterSegmentsWithRecovery(t *testing.T) {
 	checkVersion(6, 3, 3, 3, 3)
 }
 
+func TestAddL0DeltalogsAndUpdateManifestOperator(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/200"
+	oldManifest := packed.MarshalManifestPath(basePath, 7)
+	newManifest := packed.MarshalManifestPath(basePath, 8)
+
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           200,
+		CollectionID: 1,
+		PartitionID:  10,
+		State:        commonpb.SegmentState_Flushed,
+		ManifestPath: oldManifest,
+	})))
+
+	deltalogs := []*datapb.FieldBinlog{{
+		Binlogs: []*datapb.Binlog{{
+			LogID:      9001,
+			LogPath:    basePath + "/_delta/9001",
+			EntriesNum: 3,
+			MemorySize: 128,
+		}},
+	}}
+
+	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
+		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+			require.Equal(t, oldManifest, manifestPath)
+			require.NotNil(t, storageConfig)
+			require.Len(t, deltaLogs, 1)
+			require.Equal(t, basePath+"/_delta/9001", deltaLogs[0].Path)
+			require.EqualValues(t, 3, deltaLogs[0].NumEntries)
+			return newManifest, nil
+		},
+	).Build()
+	defer patch.UnPatch()
+
+	cache := make(map[int64]string)
+	err = meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(
+		200,
+		deltalogs,
+		&indexpb.StorageConfig{},
+		cache,
+	))
+	require.NoError(t, err)
+
+	updated := meta.GetSegment(context.TODO(), 200)
+	require.Equal(t, newManifest, updated.GetManifestPath())
+	require.Equal(t, newManifest, cache[int64(200)])
+	require.Len(t, updated.GetDeltalogs(), 1)
+	require.Len(t, updated.GetDeltalogs()[0].GetBinlogs(), 1)
+	require.Empty(t, updated.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
+	require.EqualValues(t, 9001, updated.GetDeltalogs()[0].GetBinlogs()[0].GetLogID())
+	require.EqualValues(t, 3, updated.GetDeltalogs()[0].GetBinlogs()[0].GetEntriesNum())
+}
+
+func TestAddL0DeltalogsAndUpdateManifestOperatorCommitsManifestsConcurrently(t *testing.T) {
+	basePath1 := "/tmp/milvus/insert_log/1/10/200"
+	basePath2 := "/tmp/milvus/insert_log/1/10/201"
+	oldManifest1 := packed.MarshalManifestPath(basePath1, 7)
+	oldManifest2 := packed.MarshalManifestPath(basePath2, 11)
+	newManifest1 := packed.MarshalManifestPath(basePath1, 8)
+	newManifest2 := packed.MarshalManifestPath(basePath2, 12)
+
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           200,
+		CollectionID: 1,
+		PartitionID:  10,
+		State:        commonpb.SegmentState_Flushed,
+		ManifestPath: oldManifest1,
+	})))
+	require.NoError(t, meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           201,
+		CollectionID: 1,
+		PartitionID:  10,
+		State:        commonpb.SegmentState_Flushed,
+		ManifestPath: oldManifest2,
+	})))
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.Key, "2")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.Key)
+
+	entered := make(chan string, 2)
+	release := make(chan struct{})
+	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
+		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+			entered <- manifestPath
+			<-release
+			switch manifestPath {
+			case oldManifest1:
+				return newManifest1, nil
+			case oldManifest2:
+				return newManifest2, nil
+			default:
+				require.Failf(t, "unexpected manifest", manifestPath)
+				return "", nil
+			}
+		},
+	).Build()
+	defer patch.UnPatch()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- meta.UpdateSegmentsInfo(context.TODO(),
+			AddL0DeltalogsAndUpdateManifestOperator(200, []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: basePath1 + "/_delta/9001", EntriesNum: 3}}}}, &indexpb.StorageConfig{}, nil),
+			AddL0DeltalogsAndUpdateManifestOperator(201, []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: 9002, LogPath: basePath2 + "/_delta/9002", EntriesNum: 5}}}}, &indexpb.StorageConfig{}, nil),
+		)
+	}()
+
+	got := map[string]struct{}{}
+	for i := 0; i < 2; i++ {
+		select {
+		case manifestPath := <-entered:
+			got[manifestPath] = struct{}{}
+		case <-time.After(time.Second):
+			require.FailNow(t, "manifest updates did not run concurrently")
+		}
+	}
+	require.Contains(t, got, oldManifest1)
+	require.Contains(t, got, oldManifest2)
+	close(release)
+	require.NoError(t, <-errCh)
+
+	updated1 := meta.GetSegment(context.TODO(), 200)
+	require.Equal(t, newManifest1, updated1.GetManifestPath())
+	require.Empty(t, updated1.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
+	updated2 := meta.GetSegment(context.TODO(), 201)
+	require.Equal(t, newManifest2, updated2.GetManifestPath())
+	require.Empty(t, updated2.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
+}
+
+func TestAddL0DeltalogsAndUpdateManifestOperatorSerializesConcurrentUpdates(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/200"
+	oldManifest := packed.MarshalManifestPath(basePath, 7)
+	manifest8 := packed.MarshalManifestPath(basePath, 8)
+	manifest9 := packed.MarshalManifestPath(basePath, 9)
+
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           200,
+		CollectionID: 1,
+		PartitionID:  10,
+		State:        commonpb.SegmentState_Flushed,
+		ManifestPath: oldManifest,
+	})))
+
+	var mu sync.Mutex
+	calls := make([]string, 0, 2)
+	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
+		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			calls = append(calls, manifestPath)
+			if len(calls) == 1 {
+				return manifest8, nil
+			}
+			return manifest9, nil
+		},
+	).Build()
+	defer patch.UnPatch()
+
+	makeDelta := func(logID int64) []*datapb.FieldBinlog {
+		return []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{
+			LogID:      logID,
+			LogPath:    fmt.Sprintf("%s/_delta/%d", basePath, logID),
+			EntriesNum: 1,
+		}}}}
+	}
+
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		errs <- meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(200, makeDelta(9001), &indexpb.StorageConfig{}, nil))
+	}()
+	go func() {
+		defer wg.Done()
+		errs <- meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(200, makeDelta(9002), &indexpb.StorageConfig{}, nil))
+	}()
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	require.Equal(t, []string{oldManifest, manifest8}, calls)
+
+	updated := meta.GetSegment(context.TODO(), 200)
+	require.Equal(t, manifest9, updated.GetManifestPath())
+	require.Len(t, updated.GetDeltalogs(), 1)
+	require.Len(t, updated.GetDeltalogs()[0].GetBinlogs(), 2)
+}
+
+func TestAddL0DeltalogsAndUpdateManifestOperatorRequiresLogPath(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/200"
+	oldManifest := packed.MarshalManifestPath(basePath, 7)
+
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           200,
+		State:        commonpb.SegmentState_Flushed,
+		ManifestPath: oldManifest,
+	})))
+
+	err = meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(
+		200,
+		[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: 9001, EntriesNum: 3}}}},
+		&indexpb.StorageConfig{},
+		nil,
+	))
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "missing deltalog path")
+	updated := meta.GetSegment(context.TODO(), 200)
+	require.Equal(t, oldManifest, updated.GetManifestPath())
+	require.Empty(t, updated.GetDeltalogs())
+}
+
+func TestAddL0DeltalogsAndUpdateManifestOperatorCacheDoesNotRegressManifest(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/200"
+	manifest8 := packed.MarshalManifestPath(basePath, 8)
+	manifest9 := packed.MarshalManifestPath(basePath, 9)
+
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           200,
+		State:        commonpb.SegmentState_Flushed,
+		ManifestPath: manifest9,
+	})))
+
+	calls := 0
+	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
+		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+			calls++
+			return "", errors.New("should not be called")
+		},
+	).Build()
+	defer patch.UnPatch()
+
+	cache := map[int64]string{200: manifest8}
+	err = meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(
+		200,
+		[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: basePath + "/_delta/9001", EntriesNum: 3}}}},
+		&indexpb.StorageConfig{},
+		cache,
+	))
+
+	require.NoError(t, err)
+	require.Zero(t, calls)
+	updated := meta.GetSegment(context.TODO(), 200)
+	require.Equal(t, manifest9, updated.GetManifestPath())
+	require.Len(t, updated.GetDeltalogs(), 1)
+}
+
 func TestUpdateSegmentsInfo(t *testing.T) {
+	t.Run("operator error stops update", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		segment := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:    1,
+			State: commonpb.SegmentState_Flushed,
+		})
+		require.NoError(t, meta.AddSegment(context.TODO(), segment))
+
+		expectedErr := errors.New("operator failed")
+		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
+			func(pack *updateSegmentPack) bool {
+				pack.err = expectedErr
+				return false
+			},
+			UpdateStatusOperator(1, commonpb.SegmentState_Dropped),
+		)
+
+		require.ErrorIs(t, err, expectedErr)
+		updated := meta.GetSegment(context.TODO(), 1)
+		require.Equal(t, commonpb.SegmentState_Flushed, updated.GetState())
+	})
+
 	t.Run("normal", func(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)

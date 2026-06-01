@@ -5015,6 +5015,7 @@ type dataCoordConfig struct {
 	CompactionExpiryTolerance                  ParamItem `refreshable:"true"`
 	BumpSchemaVersionCompactionEnabled         ParamItem `refreshable:"true"`
 	BumpSchemaVersionCompactionTriggerInterval ParamItem `refreshable:"true"`
+	L0ManifestUpdatePoolSize                   ParamItem `refreshable:"true"`
 
 	SingleCompactionRatioThreshold    ParamItem `refreshable:"true"`
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
@@ -5400,6 +5401,21 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		Export:       true,
 	}
 	p.CompactionMaxParallelTasks.Init(base.mgr)
+
+	p.L0ManifestUpdatePoolSize = ParamItem{
+		Key:          "dataCoord.compaction.levelzero.manifestUpdatePoolSize",
+		Version:      "3.0.0",
+		DefaultValue: "16",
+		Doc:          "The goroutine pool size for committing L0 compaction manifest updates inside DataCoord meta update.",
+		Export:       false,
+		Formatter: func(v string) string {
+			if getAsInt(v) < 1 {
+				return "1"
+			}
+			return v
+		},
+	}
+	p.L0ManifestUpdatePoolSize.Init(base.mgr)
 
 	p.MinSegmentToMerge = ParamItem{
 		Key:          "dataCoord.compaction.min.segment",
