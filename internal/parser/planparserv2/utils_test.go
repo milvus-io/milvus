@@ -592,6 +592,14 @@ func Test_handleCompare(t *testing.T) {
 	})
 }
 
+func Test_checkValidPoint(t *testing.T) {
+	t.Run("valid non-point WKT", func(t *testing.T) {
+		err := checkValidPoint("POLYGON((0 0, 1 0, 1 1, 0 0))")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "only supports POINT geometry")
+	})
+}
+
 func TestParseISO8601Duration(t *testing.T) {
 	testCases := []struct {
 		name      string
