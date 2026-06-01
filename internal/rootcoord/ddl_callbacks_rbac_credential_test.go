@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -75,6 +76,7 @@ func TestDDLCallbacksRBACCredential(t *testing.T) {
 	status, err = core.UpdateCredential(context.Background(), &internalpb.CredentialInfo{
 		Username:          testUserName,
 		EncryptedPassword: "1234567",
+		Sha256Password:    "1234567-sha256",
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
 	getCredentialResp, err = core.GetCredential(context.Background(), &rootcoordpb.GetCredentialRequest{
@@ -147,4 +149,27 @@ func TestAlterUserV2AckCallbackUpdatesCredentialCacheForPasswordUpdate(t *testin
 
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), updateCacheCalls.Load())
+}
+
+func TestAlterUserV2AckCallbackReturnsCredentialCacheError(t *testing.T) {
+	meta := newMockMetaTable()
+	meta.AlterCredentialFunc = func(ctx context.Context, msg message.BroadcastResultAlterUserMessageV2) error {
+		return nil
+	}
+
+	core := newTestCore(withMeta(meta))
+	core.proxyClientManager = proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
+	proxy := newMockProxy()
+	proxy.UpdateCredentialCacheFunc = func(ctx context.Context, request *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error) {
+		return nil, errors.New("cache update failed")
+	}
+	core.proxyClientManager.GetProxyClients().Insert(TestProxyID, proxy)
+
+	err := (&DDLCallback{Core: core}).alterUserV2AckCallback(context.Background(), buildAlterUserMessage(&internalpb.CredentialInfo{
+		Username:       "desc_user",
+		Sha256Password: "sha256",
+	}, 1))
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "failed to update cred cache")
 }

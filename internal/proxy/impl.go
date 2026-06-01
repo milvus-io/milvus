@@ -5538,6 +5538,10 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 	if err := ValidateUserDescription(req.GetDescription()); err != nil {
 		return merr.Status(err), nil
 	}
+	if req.GetNewPassword() == "" && req.Description == nil {
+		err := merr.WrapErrParameterInvalidMsg("must update either password or description")
+		return merr.Status(err), nil
+	}
 
 	updateCredReq := &internalpb.CredentialInfo{
 		Username:    req.Username,

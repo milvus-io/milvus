@@ -109,6 +109,82 @@ func TestUpdateCredentialDescriptionOnlySkipsPasswordVerification(t *testing.T) 
 	assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 }
 
+func TestUpdateCredentialClearsDescriptionOnly(t *testing.T) {
+	paramtable.Init()
+
+	description := ""
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	mixCoord.EXPECT().
+		UpdateCredential(mock.Anything, mock.MatchedBy(func(cred *internalpb.CredentialInfo) bool {
+			return cred.GetUsername() == "desc_user" &&
+				cred.Description != nil &&
+				cred.GetDescription() == description &&
+				cred.GetEncryptedPassword() == "" &&
+				cred.GetSha256Password() == ""
+		})).
+		Return(merr.Success(), nil)
+
+	node := &Proxy{mixCoord: mixCoord}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	status, err := node.UpdateCredential(context.Background(), &milvuspb.UpdateCredentialRequest{
+		Username:    "desc_user",
+		Description: &description,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+}
+
+func TestUpdateCredentialRejectsEmptyUpdate(t *testing.T) {
+	paramtable.Init()
+
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	mixCoord.On("UpdateCredential", mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
+	node := &Proxy{mixCoord: mixCoord}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	status, err := node.UpdateCredential(context.Background(), &milvuspb.UpdateCredentialRequest{
+		Username: "desc_user",
+	})
+
+	require.NoError(t, err)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+	assert.Contains(t, status.GetReason(), "must update either password or description")
+	mixCoord.AssertNotCalled(t, "UpdateCredential", mock.Anything, mock.Anything)
+}
+
+func TestUpdateCredentialPasswordAndDescription(t *testing.T) {
+	paramtable.Init()
+	require.NoError(t, paramtable.Get().Save(Params.CommonCfg.SuperUsers.Key, "root"))
+	defer paramtable.Get().Reset(Params.CommonCfg.SuperUsers.Key)
+
+	description := "updated user description"
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	mixCoord.EXPECT().
+		UpdateCredential(mock.Anything, mock.MatchedBy(func(cred *internalpb.CredentialInfo) bool {
+			return cred.GetUsername() == "desc_user" &&
+				cred.Description != nil &&
+				cred.GetDescription() == description &&
+				cred.GetEncryptedPassword() != "" &&
+				cred.GetSha256Password() == crypto.SHA256("new_password", "desc_user")
+		})).
+		Return(merr.Success(), nil)
+
+	node := &Proxy{mixCoord: mixCoord}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	status, err := node.UpdateCredential(GetContext(context.Background(), "root:password"), &milvuspb.UpdateCredentialRequest{
+		Username:    "desc_user",
+		OldPassword: crypto.Base64Encode("old_password"),
+		NewPassword: crypto.Base64Encode("new_password"),
+		Description: &description,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+}
+
 func TestUpdateCredentialRejectsOverLimitDescription(t *testing.T) {
 	paramtable.Init()
 	require.NoError(t, paramtable.Get().Save(Params.CommonCfg.SuperUsers.Key, "root"))

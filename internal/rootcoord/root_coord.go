@@ -2199,6 +2199,9 @@ func (c *Core) CreateCredential(ctx context.Context, credInfo *internalpb.Creden
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	if err := validateCredentialDescription(credInfo); err != nil {
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_CreateCredentialFailure), nil
+	}
 
 	if err := c.broadcastAlterUserForCreateCredential(ctx, credInfo); err != nil {
 		ctxLog.Warn("CreateCredential failed", zap.Error(err))
@@ -2255,6 +2258,9 @@ func (c *Core) UpdateCredential(ctx context.Context, credInfo *internalpb.Creden
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	if err := validateCredentialDescription(credInfo); err != nil {
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_UpdateCredentialFailure), nil
+	}
 
 	if err := c.broadcastAlterUserForUpdateCredential(ctx, credInfo); err != nil {
 		ctxLog.Warn("UpdateCredential append message failed", zap.Error(err))
@@ -2265,6 +2271,13 @@ func (c *Core) UpdateCredential(ctx context.Context, credInfo *internalpb.Creden
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return merr.Success(), nil
+}
+
+func validateCredentialDescription(credInfo *internalpb.CredentialInfo) error {
+	if len(credInfo.GetDescription()) > Params.ProxyCfg.MaxUserDescriptionLength.GetAsInt() {
+		return merr.WrapErrParameterInvalidMsg("invalid user description with length %d, the length of user description must be less than or equal to %s", len(credInfo.GetDescription()), Params.ProxyCfg.MaxUserDescriptionLength.GetValue())
+	}
+	return nil
 }
 
 // DeleteCredential delete a user
