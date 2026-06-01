@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -655,7 +656,10 @@ func (t *bumpSchemaVersionCompactionTask) newV3WriterResult(schema *schemapb.Col
 		return nil, err
 	}
 
-	writer, err := storage.NewPartialPackedRecordBatchWriter(basePath, schema, int64(t.compactionParams.BinLogMaxSize), packed.DefaultMultiPartUploadSize, columnGroups, t.compactionParams.StorageConfig, pluginContext)
+	writerFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
+	columnGroups = storagecommon.FillColumnGroupFormats(columnGroups, writerFormat)
+	schemaBasedFormats := storagecommon.ColumnGroupFormats(columnGroups, writerFormat)
+	writer, err := storage.NewPartialPackedRecordBatchWriter(basePath, schema, int64(t.compactionParams.BinLogMaxSize), packed.DefaultMultiPartUploadSize, columnGroups, t.compactionParams.StorageConfig, pluginContext, writerFormat, schemaBasedFormats)
 	if err != nil {
 		return nil, err
 	}
@@ -714,6 +718,7 @@ func (t *bumpSchemaVersionCompactionTask) buildMergedLogsV3(segment *datapb.Comp
 		fieldBinlog := &datapb.FieldBinlog{
 			FieldID:     fieldID,
 			ChildFields: columnGroup.Fields,
+			Format:      columnGroup.Format,
 			Binlogs: []*datapb.Binlog{
 				{
 					MemorySize: int64(sparseFieldMemorySizes[fieldID]),

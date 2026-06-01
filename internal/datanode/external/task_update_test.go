@@ -491,7 +491,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_SameFragmentsM
 					{FieldID: 101, Name: "vec", ExternalField: "vec"},
 					{FieldID: 102, Name: "text", ExternalField: "text"},
 				},
-			}),
+			}, "parquet"),
 		}},
 	}
 	task := NewRefreshExternalCollectionTask(ctx, req)
@@ -590,7 +590,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_PatchedSegment
 						TypeParams:       []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
 					},
 				},
-			}),
+			}, "parquet"),
 		}},
 	}
 	task := NewRefreshExternalCollectionTask(ctx, req)
@@ -651,7 +651,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_SameFragmentsA
 					{FieldID: 100, Name: "id", ExternalField: "id"},
 					{FieldID: 101, Name: "vec", ExternalField: "vec"},
 				},
-			}),
+			}, "parquet"),
 		}},
 	}
 	task := NewRefreshExternalCollectionTask(ctx, req)
@@ -1943,6 +1943,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentSucce
 			columnGroups []storagecommon.ColumnGroup,
 			storageConfig *indexpb.StorageConfig,
 			storagePluginContext *indexcgopb.StoragePluginContext,
+			extraProperties ...map[string]string,
 		) (*packed.FFIPackedWriter, error) {
 			s.Require().NotNil(schema)
 			s.Equal("101", schema.Field(0).Name)
@@ -2822,11 +2823,12 @@ func (s *RefreshExternalCollectionTaskSuite) TestBuildFakeBinlogs() {
 		},
 	}
 
-	binlogs := buildFakeBinlogs(999, 1000, 512000, schema)
+	binlogs := buildFakeBinlogs(999, 1000, 512000, schema, "parquet")
 	s.Len(binlogs, 1)
 	fb := binlogs[0]
 	s.Equal(int64(0), fb.GetFieldID(), "should use DefaultShortColumnGroupID=0")
 	s.ElementsMatch([]int64{1, 100, 101}, fb.GetChildFields())
+	s.Equal("parquet", fb.GetFormat())
 	s.Len(fb.GetBinlogs(), 1)
 	s.Equal(int64(999), fb.GetBinlogs()[0].GetLogID(), "logID should be segmentID")
 	s.Equal(int64(1000), fb.GetBinlogs()[0].GetEntriesNum())
@@ -2835,9 +2837,10 @@ func (s *RefreshExternalCollectionTaskSuite) TestBuildFakeBinlogs() {
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestBuildFakeBinlogs_NilSchema() {
-	binlogs := buildFakeBinlogs(888, 500, 100000, nil)
+	binlogs := buildFakeBinlogs(888, 500, 100000, nil, "vortex")
 	s.Len(binlogs, 1)
 	s.Empty(binlogs[0].GetChildFields())
+	s.Equal("vortex", binlogs[0].GetFormat())
 	s.Equal(int64(500), binlogs[0].GetBinlogs()[0].GetEntriesNum())
 }
 

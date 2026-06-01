@@ -917,16 +917,28 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 			continue
 		}
 
-		field2Binlog := make(map[UniqueID][]*datapb.Binlog)
+		field2Binlog := make(map[UniqueID]*datapb.FieldBinlog)
 		for _, field := range binlogs {
-			field2Binlog[field.GetFieldID()] = append(field2Binlog[field.GetFieldID()], field.GetBinlogs()...)
+			fieldBinlog, ok := field2Binlog[field.GetFieldID()]
+			if !ok {
+				fieldBinlog = &datapb.FieldBinlog{
+					FieldID:     field.GetFieldID(),
+					ChildFields: field.GetChildFields(),
+					Format:      field.GetFormat(),
+				}
+				field2Binlog[field.GetFieldID()] = fieldBinlog
+			} else {
+				if len(fieldBinlog.ChildFields) == 0 {
+					fieldBinlog.ChildFields = field.GetChildFields()
+				}
+				if fieldBinlog.Format == "" {
+					fieldBinlog.Format = field.GetFormat()
+				}
+			}
+			fieldBinlog.Binlogs = append(fieldBinlog.Binlogs, field.GetBinlogs()...)
 		}
 
-		for f, paths := range field2Binlog {
-			fieldBinlogs := &datapb.FieldBinlog{
-				FieldID: f,
-				Binlogs: paths,
-			}
+		for _, fieldBinlogs := range field2Binlog {
 			segment2Binlogs[id] = append(segment2Binlogs[id], fieldBinlogs)
 		}
 

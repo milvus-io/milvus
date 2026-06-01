@@ -1590,6 +1590,12 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 
 	cConfig.read_version = C.int64_t(config.ReadVersion)
 	cConfig.retry_limit = C.uint32_t(3)
+	writerFormat := config.WriterFormat
+	if writerFormat != "" {
+		cWriterFormat := C.CString(writerFormat)
+		defer C.free(unsafe.Pointer(cWriterFormat))
+		cConfig.writer_format = cWriterFormat
+	}
 
 	// populate TEXT column configs
 	// All arrays must be C-allocated to avoid "Go pointer to unpinned Go pointer" panic
