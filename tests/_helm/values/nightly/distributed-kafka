@@ -82,6 +82,7 @@ log:
 extraConfigFiles:
   user.yaml: |+
     dataCoord:
+      targetVecIndexVersion: 10
       gc:
         interval: 1800
         missingTolerance: 1800

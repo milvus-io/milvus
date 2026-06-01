@@ -20,6 +20,8 @@ extraConfigFiles:
         dir: /var/lib/milvus/etcd
     common:
       storageType: local
+    dataCoord:
+      targetVecIndexVersion: 10
     queryNode:
       segcore:
         exprEvalBatchSize: 512

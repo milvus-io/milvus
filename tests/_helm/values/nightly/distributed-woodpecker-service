@@ -96,6 +96,7 @@ extraConfigFiles:
       storage:
         enablev2: true
     dataCoord:
+      targetVecIndexVersion: 10
       gc:
         interval: 1800
         missingTolerance: 1800
