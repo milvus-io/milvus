@@ -2085,6 +2085,7 @@ type proxyConfig struct {
 	ResolveAliasForPrivilege          ParamItem `refreshable:"true"`
 	MaxVarCharLength                  ParamItem `refreshable:"false"`
 	MaxTextLength                     ParamItem `refreshable:"false"`
+	MaxArrayCapacity                  ParamItem `refreshable:"true"`
 	MaxIndexParamsSize                ParamItem `refreshable:"true"`
 	MaxResultEntries                  ParamItem `refreshable:"true"`
 	EnableCachedServiceProvider       ParamItem `refreshable:"true"`
@@ -2563,6 +2564,19 @@ please adjust in embedded Milvus: false`,
 		Doc:          "maximum number of characters for a row of the text field",
 	}
 	p.MaxTextLength.Init(base.mgr)
+
+	p.MaxArrayCapacity = ParamItem{
+		Key:          "proxy.maxArrayCapacity",
+		Version:      "2.6.19",
+		DefaultValue: "4096",
+		PanicIfEmpty: true,
+		Doc:          "maximum number of elements in an array field for a single row",
+		Export:       true,
+	}
+	p.MaxArrayCapacity.Init(base.mgr)
+	if p.MaxArrayCapacity.GetAsInt64() <= 0 {
+		panic(fmt.Sprintf("proxy.maxArrayCapacity should be greater than 0, not %d", p.MaxArrayCapacity.GetAsInt64()))
+	}
 
 	p.MaxIndexParamsSize = ParamItem{
 		Key:          "proxy.maxIndexParamsSize",
