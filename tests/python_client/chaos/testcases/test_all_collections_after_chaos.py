@@ -1,12 +1,13 @@
 import time
+
 import pytest
-from faker import Faker
-from pymilvus import MilvusClient, CollectionSchema
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel
-from utils.util_log import test_log as log
+from faker import Faker
+from pymilvus import CollectionSchema, MilvusClient
 from utils.util_common import get_collections
+from utils.util_log import test_log as log
 
 fake = Faker()
 
@@ -49,8 +50,7 @@ class TestAllCollection:
 
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
-        log.info("[teardown_method] Start teardown test case %s..." %
-                 method.__name__)
+        log.info(f"[teardown_method] Start teardown test case {method.__name__}...")
         log.info("skip drop collection")
 
     @pytest.mark.tags(CaseLabel.L1)
