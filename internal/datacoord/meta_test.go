@@ -992,7 +992,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 		suite.EqualValues(0, infos[0].GetCommitTimestamp(), "normal segment compaction must not set commit_timestamp")
 	})
 
-	suite.Run("sort compaction rejects stale import fallback start position", func() {
+	suite.Run("sort compaction normalizes stale import fallback start position", func() {
 		latestSegments := NewSegmentsInfo()
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, CollectionID: 100, PartitionID: 10,
@@ -1008,6 +1008,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			InputSegments: []UniqueID{1},
 			Type:          datapb.CompactionType_SortCompaction,
 			Channel:       "ch-1",
+			Schema:        &schemapb.CollectionSchema{Version: 1},
 		}
 		m := &meta{
 			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
@@ -1015,9 +1016,10 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			chunkManager: mockChMgr,
 		}
 		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
-		suite.Error(err)
-		suite.Contains(err.Error(), "earlier than max input commit timestamp")
-		suite.Nil(infos)
+		suite.NoError(err)
+		suite.Require().Equal(1, len(infos))
+		suite.EqualValues(5000, infos[0].GetStartPosition().GetTimestamp())
+		suite.EqualValues(0, infos[0].GetCommitTimestamp(), "sort compaction normalizes commit_timestamp after rewriting row timestamps")
 	})
 
 	suite.Run("mix compaction rejects stale import fallback start position", func() {
@@ -1042,6 +1044,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			InputSegments: []UniqueID{1, 2},
 			Type:          datapb.CompactionType_MixCompaction,
 			Channel:       "ch-1",
+			Schema:        &schemapb.CollectionSchema{Version: 1},
 		}
 		m := &meta{
 			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
