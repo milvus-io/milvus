@@ -328,6 +328,7 @@ proxy:
   # please adjust in embedded Milvus: false
   ginLogging: true
   ginLogSkipPaths: / # skip url path for gin log
+  maxRoleDescriptionLength: 1024 # Maximum role description length in bytes.
   nameValidation:
     allowedChars: $ # Additional characters allowed in names beyond underscores, letters and numbers. To allow hyphens in names, add '-' here.
   roleNameValidation:
