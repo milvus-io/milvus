@@ -1,10 +1,10 @@
 package server
 
 import (
-	"github.com/zilliztech/milvus-catalog/pkg/milvuscompat"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	kvmetastore "github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
+	"github.com/milvus-io/milvus/internal/metastore/milvuscompat"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/service"
 	"github.com/milvus-io/milvus/internal/types"

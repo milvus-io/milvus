@@ -543,9 +543,11 @@ generate-mockery-flushcommon: getdeps
 	$(INSTALL_PATH)/mockery --name=FlowgraphManager --dir=$(PWD)/internal/flushcommon/pipeline --output=$(PWD)/internal/flushcommon/pipeline --filename=mock_fgmanager.go --with-expecter --structname=MockFlowgraphManager --outpkg=pipeline --inpackage
 
 generate-mockery-metastore: getdeps
-	$(INSTALL_PATH)/mockery --name=RootCoordCatalog --dir=$(PWD)/pkg/metastore --output=$(PWD)/internal/metastore/mocks --filename=mock_rootcoord_catalog.go --with-expecter --structname=RootCoordCatalog --outpkg=mocks
-	$(INSTALL_PATH)/mockery --name=DataCoordCatalog --dir=$(PWD)/pkg/metastore --output=$(PWD)/internal/metastore/mocks --filename=mock_datacoord_catalog.go --with-expecter --structname=DataCoordCatalog --outpkg=mocks
-	$(INSTALL_PATH)/mockery --name=QueryCoordCatalog --dir=$(PWD)/pkg/metastore --output=$(PWD)/internal/metastore/mocks --filename=mock_querycoord_catalog.go --with-expecter --structname=QueryCoordCatalog --outpkg=mocks
+	$(INSTALL_PATH)/mockery --name=RootCoordCatalog --dir=$(PWD)/internal/metastore --output=$(PWD)/internal/metastore/mocks --filename=mock_rootcoord_catalog.go --with-expecter --structname=RootCoordCatalog --outpkg=mocks
+	$(INSTALL_PATH)/mockery --name=DataCoordCatalog --dir=$(PWD)/internal/metastore --output=$(PWD)/internal/metastore/mocks --filename=mock_datacoord_catalog.go --with-expecter --structname=DataCoordCatalog --outpkg=mocks
+	$(INSTALL_PATH)/mockery --name=QueryCoordCatalog --dir=$(PWD)/internal/metastore --output=$(PWD)/internal/metastore/mocks --filename=mock_querycoord_catalog.go --with-expecter --structname=QueryCoordCatalog --outpkg=mocks
+	$(INSTALL_PATH)/mockery --name=StreamingCoordCatalog --dir=$(PWD)/internal/metastore --output=$(PWD)/internal/metastore/mocks --filename=mock_streamingcoord_catalog.go --with-expecter --structname=MockStreamingCoordCatalog --outpkg=mocks
+	$(INSTALL_PATH)/mockery --name=StreamingNodeCatalog --dir=$(PWD)/internal/metastore --output=$(PWD)/internal/metastore/mocks --filename=mock_streamingnode_catalog.go --with-expecter --structname=MockStreamingNodeCatalog --outpkg=mocks
 
 generate-mockery-utils: getdeps
 	# dependency.Factory

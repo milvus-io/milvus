@@ -86,16 +86,16 @@ packages:
   github.com/milvus-io/milvus/internal/streamingnode/server/walmanager:
     interfaces:
       Manager:
-  github.com/milvus-io/milvus/pkg/v3/metastore:
+  github.com/milvus-io/milvus/internal/metastore:
     interfaces:
       StreamingCoordCatalog:
         config:
-          dir: "internal/mocks/mock_metastore"
-          outpkg: "mock_metastore"
+          dir: "internal/metastore/mocks"
+          outpkg: "mocks"
       StreamingNodeCatalog:
         config:
-          dir: "internal/mocks/mock_metastore"
-          outpkg: "mock_metastore"
+          dir: "internal/metastore/mocks"
+          outpkg: "mocks"
   github.com/milvus-io/milvus/internal/util/segcore:
     interfaces:
       CSegment:

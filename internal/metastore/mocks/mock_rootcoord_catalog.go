@@ -5,7 +5,7 @@ package mocks
 import (
 	context "context"
 
-	metastore "github.com/milvus-io/milvus/pkg/v3/metastore"
+	metastore "github.com/milvus-io/milvus/internal/metastore"
 	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"

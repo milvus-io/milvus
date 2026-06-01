@@ -10,7 +10,7 @@ import (
 
 	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 
-	metastore "github.com/milvus-io/milvus/pkg/v3/metastore"
+	metastore "github.com/milvus-io/milvus/internal/metastore"
 
 	mock "github.com/stretchr/testify/mock"
 
