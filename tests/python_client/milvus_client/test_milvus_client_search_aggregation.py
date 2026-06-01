@@ -1333,10 +1333,6 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(
-        reason="Milvus issue #49840: search_aggregation fails on growing segment",
-        strict=True,
-    )
     def test_search_aggregation_on_growing_segment(self):
         """
         target: verify search_aggregation works on growing segment results.
