@@ -26,12 +26,8 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 
 	logMsg := fmt.Sprintf("%s, C Runtime Exception: %s\n", extraInfo, errorMsg)
 	log.Warn(logMsg)
-	if errorCode == 2003 {
-		return merr.WrapErrSegcoreUnsupported(int32(errorCode), logMsg)
-	}
-	if errorCode == 2033 {
+	if merr.IsSegcoreSignal(int32(errorCode)) {
 		log.Info("fake finished the task")
-		return merr.ErrSegcorePretendFinished
 	}
-	return merr.WrapErrSegcore(int32(errorCode), logMsg)
+	return merr.SegcoreError(int32(errorCode), logMsg)
 }

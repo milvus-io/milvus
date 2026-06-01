@@ -1,0 +1,121 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package merr
+
+import "github.com/cockroachdb/errors"
+
+// segcore error codes are produced by the C++ core (milvus::ErrorCode, defined
+// in milvus-common's EasyAssert.h, value range 2000-2099) and travel to Go via
+// the CGO CStatus{error_code, error_msg} boundary. Historically two Go paths
+// consumed them inconsistently:
+//
+//   - the direct path (SegcoreError) passed the raw C++ code straight through,
+//     so merr.Code returned an opaque number with no sentinel identity;
+//   - the wrapper path (the cgo helpers in analyzer/textmatch/index wrappers)
+//     hand-wrote `if errorCode == 2003/2033` switches, an drift-prone source.
+//
+// classifySegcoreError is the single source of truth shared by both paths. It
+// maps a C++ code to the right merr sentinel (so errors.Is works), carries the
+// original code in the segcoreCode field (so the precise code is never lost),
+// and applies the error-type classification. Codes not present in the table
+// fall back to ErrSegcore, so an unknown / newly-added C++ code is always
+// captured safely (non-retriable system error) rather than dropped — it is
+// simply unclassified until registered here.
+
+// segcoreClass describes how a single C++ ErrorCode is surfaced in Go.
+type segcoreClass struct {
+	// sentinel is the merr sentinel this code is mapped to. errors.Is against
+	// it must keep working for existing callers.
+	sentinel milvusError
+	// inputError marks codes that are the caller's fault (malformed request),
+	// so they are classified as InputError at the boundary.
+	inputError bool
+	// signal marks control-flow "errors" that the caller treats as a normal
+	// outcome (e.g. pretend-finished / cluster-skip), not a failure. Callers
+	// that need the signal semantics match on the sentinel directly.
+	signal bool
+}
+
+// segcoreCodeTable is the registry of known C++ segcore error codes. Codes
+// absent here fall back to ErrSegcore (see classifySegcoreError).
+//
+// NOTE on input-error scope: only codes whose C++ throw sites are unambiguously
+// caller-input errors are marked inputError. Codes whose single C++ value mixes
+// user-input and internal-unsupported semantics (e.g. DataTypeInvalid 2007,
+// OpTypeInvalid 2022, InvalidParameter 2042) are intentionally left as system
+// errors here; splitting those requires new C++ codes and is handled in a
+// later step.
+var segcoreCodeTable = map[int32]segcoreClass{
+	// Already-named segcore sentinels (identity preserved).
+	2000: {sentinel: ErrSegcore},
+	2001: {sentinel: ErrSegcoreUnsupported}, // Unsupported
+	2002: {sentinel: ErrSegcorePretendFinished, signal: true},
+	2037: {sentinel: ErrSegcoreFollyOtherException},       // FollyOtherException
+	2038: {sentinel: ErrSegcoreFollyCancel, signal: true}, // FollyCancel (converted to ctx error upstream)
+	2039: {sentinel: ErrSegcoreOutOfRange},                // OutOfRange (real out-of-bounds, not a signal)
+	2040: {sentinel: ErrSegcoreGCPNativeError},            // GcpNativeError
+	2099: {sentinel: KnowhereError},                       // KnowhereError
+
+	// Wrapper-path special cases (preserve existing errors.Is behavior that
+	// datanode/index/scheduler.go relies on):
+	//   2003 Unsupported    -> ErrSegcoreUnsupported (scheduler.go:221 matches)
+	//   2033 ClusterSkip     -> ErrSegcorePretendFinished signal (scheduler.go:224)
+	2003: {sentinel: ErrSegcoreUnsupported},
+	2033: {sentinel: ErrSegcorePretendFinished, signal: true},
+
+	// Clean caller-input errors (single, unambiguous C++ throw semantics).
+	2028: {sentinel: ErrSegcore, inputError: true}, // ExprInvalid: filter expression invalid
+	2032: {sentinel: ErrSegcore, inputError: true}, // DimNotMatch: query vector dim != schema
+}
+
+// classifySegcoreError converts a C++ segcore error code + message into a
+// classified merr error. It is the shared entry point for both the direct
+// (SegcoreError) and the wrapper cgo paths.
+//
+// The returned error:
+//   - matches errors.Is against the mapped sentinel (ErrSegcore as fallback);
+//   - carries the original C++ code in the segcoreCode field;
+//   - is marked InputError when the code is an unambiguous caller-input error;
+//   - is non-retriable (segcore failures are not retried at this boundary).
+func classifySegcoreError(code int32, msg string) error {
+	cls, ok := segcoreCodeTable[code]
+	if !ok {
+		cls = segcoreClass{sentinel: ErrSegcore}
+	}
+
+	// Stamp the original C++ code into the segcoreCode field on the sentinel,
+	// then optionally wrap the message. The InputError mark must be applied to
+	// the milvusError *before* the errors.Wrap below, because WrapErrAsInputError
+	// only recognizes a bare milvusError, not a wrapped one.
+	base := cls.sentinel
+	if cls.inputError {
+		WithErrorType(InputError)(&base)
+	}
+	err := wrapFields(base, value("segcoreCode", code))
+	if msg != "" {
+		err = errors.Wrap(err, msg)
+	}
+	return err
+}
+
+// IsSegcoreSignal reports whether a segcore error code is a control-flow signal
+// (pretend-finished / cluster-skip) that callers treat as a normal outcome
+// rather than a failure.
+func IsSegcoreSignal(code int32) bool {
+	cls, ok := segcoreCodeTable[code]
+	return ok && cls.signal
+}

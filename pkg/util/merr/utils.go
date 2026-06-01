@@ -308,9 +308,11 @@ func Error(status *commonpb.Status) error {
 	return newMilvusError(status.GetReason(), code, status.GetRetriable(), WithDetail(status.GetDetail()), WithErrorType(eType))
 }
 
-// SegcoreError returns a merr according to the given segcore error code and message
+// SegcoreError returns a merr according to the given segcore error code and
+// message. Classification (sentinel identity, input-vs-system error type) is
+// delegated to the shared segcore code table; see classifySegcoreError.
 func SegcoreError(code int32, msg string) error {
-	return newMilvusError(msg, code, false)
+	return classifySegcoreError(code, msg)
 }
 
 func IsHealthy(stateCode commonpb.StateCode) error {
@@ -1317,28 +1319,13 @@ func WrapErrPrivilegeNotPermitted(fmt string, args ...any) error {
 	return err
 }
 
-// Segcore related
-func WrapErrSegcore(code int32, msg ...string) error {
-	err := wrapFields(ErrSegcore, value("segcoreCode", code))
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "->"))
-	}
-	return err
-}
-
 // WrapErrSegcoreMsg creates a new ErrSegcore (2000) with a Sprintf-formatted
 // message. Use for Go-side segcore invariants where there's no C++ errorCode
-// available (otherwise use WrapErrSegcore(code int32, msg ...string)).
+// available. When a C++ errorCode is available (the CGO boundary), use
+// SegcoreError(code, msg) instead, which classifies the code via the shared
+// segcore code table (see segcore.go).
 func WrapErrSegcoreMsg(format string, args ...any) error {
 	return errors.Wrap(ErrSegcore, fmt.Sprintf(format, args...))
-}
-
-func WrapErrSegcoreUnsupported(code int32, msg ...string) error {
-	err := wrapFields(ErrSegcoreUnsupported, value("segcoreCode", code))
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "->"))
-	}
-	return err
 }
 
 // field related
