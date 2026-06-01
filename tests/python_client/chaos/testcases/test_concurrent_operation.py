@@ -4,8 +4,7 @@ from time import sleep
 
 import pytest
 from chaos import chaos_commons as cc
-from chaos import checker
-from chaos import constants
+from chaos import checker, constants
 from chaos.chaos_commons import assert_statistic
 from chaos.checker import (
     AddFieldChecker,
