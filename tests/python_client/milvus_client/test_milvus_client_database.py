@@ -1,13 +1,11 @@
+import numpy as np
 import pytest
-
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_pymilvus import *
-from common.constants import *
-from pymilvus import DataType
+from common.constants import *  # noqa: F403
+from utils.util_pymilvus import *  # noqa: F403
 
 prefix = "client_search"
 partition_prefix = "client_partition"
@@ -70,7 +68,7 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         client = self._client()
         # 1. create database
         db_name = "a".join("a" for i in range(256))
-        error = {ct.err_code: 802, ct.err_msg: f"the length of a database name must be less than 255 characters"}
+        error = {ct.err_code: 802, ct.err_msg: "the length of a database name must be less than 255 characters"}
         self.create_database(client, db_name,
                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -114,7 +112,7 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         target: test fast create db name with invalid properties
         method: create db name with invalid properties
         expected: raise exception
-        actual: Currently such errors are not very readable, 
+        actual: Currently such errors are not very readable,
                 and entries of numeric types such as 1.11, 111 are not blocked
         """
         client = self._client()
@@ -137,7 +135,7 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         client = self._client()
         # 1. create database
         db_name = cf.gen_unique_str(db_prefix)
-        error = {ct.err_code: 1, ct.err_msg: f""}
+        error = {ct.err_code: 1, ct.err_msg: ""}
         self.create_database(client, db_name, properties=properties,
                             check_task=CheckTasks.err_res, check_items=error)
         self.drop_database(client, db_name)
@@ -167,7 +165,7 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        error = {ct.err_code: 802, ct.err_msg: f""}
+        error = {ct.err_code: 802, ct.err_msg: ""}
         self.drop_database(client, db_name,
                            check_task=CheckTasks.err_res, check_items=error)
 
@@ -253,12 +251,12 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         self.create_database(client, db_name)
         dbs = self.list_databases(client)[0]
         assert db_name in dbs
-        error = {ct.err_code: 1, ct.err_msg: f"'str' object has no attribute 'items'"}
+        error = {ct.err_code: 1, ct.err_msg: "'str' object has no attribute 'items'"}
         self.alter_database_properties(client, db_name, properties,
                                      check_task=CheckTasks.err_res,
                                      check_items=error)
         self.drop_database(client, db_name)
-    
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_alter_database_properties_invalid_params(self):
         """
@@ -282,7 +280,6 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
                                             "database.replica.number": "3"})
         alter_properties = {"data.replica.number": 2}
         self.alter_database_properties(client, db_name, properties=alter_properties)
-        describe = self.describe_database(client, db_name)[0]
         self.drop_database(client, db_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -315,8 +312,8 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         self.create_database(client, db_name)
         dbs = self.list_databases(client)[0]
         assert db_name in dbs
-        error = {ct.err_code: 65535, ct.err_msg: f"alter database with empty properties and delete keys, "
-                                                 f"expected to set either properties or delete keys"}
+        error = {ct.err_code: 65535, ct.err_msg: "alter database with empty properties and delete keys, "
+                                                 "expected to set either properties or delete keys"}
         self.drop_database_properties(client, db_name, property_keys=properties,
                                       check_task=CheckTasks.err_res,
                                       check_items=error)
@@ -345,7 +342,6 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
                                             "database.replica.number": "3"})
         drop_properties = {"data.replica.number": 2}
         self.drop_database_properties(client, db_name, property_keys=drop_properties)
-        describe = self.describe_database(client, db_name)[0]
         self.drop_database(client, db_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -434,7 +430,6 @@ class TestMilvusClientDatabaseValid(TestMilvusClientV2Base):
         properties = {"database.force.deny.writing": "false",
                       "database.replica.number": "1"}
         self.create_database(client, db_name, properties=properties)
-        describe = self.describe_database(client, db_name)
         dbs = self.list_databases(client)[0]
         assert db_name in dbs
         self.describe_database(client, db_name,
@@ -534,13 +529,11 @@ class TestMilvusClientDatabaseValid(TestMilvusClientV2Base):
         self.using_database(client, db_name)
         drop1 = {"database.replica.number"}
         self.drop_database_properties(client, db_name, property_keys=drop1)
-        describe = self.describe_database(client, db_name)[0]
         self.describe_database(client, db_name,
                                check_task=CheckTasks.check_describe_database_property,
                                check_items={"database.replica.number": "Missing"})
         drop2 = ["database.force.deny.writing", "database.force.deny.reading"]
         self.drop_database_properties(client, db_name, property_keys=drop2)
-        describe = self.describe_database(client, db_name)[0]
         self.describe_database(client, db_name,
                                check_task=CheckTasks.check_describe_database_property,
                                check_items={"database.force.deny.writing": "Missing",
@@ -549,7 +542,7 @@ class TestMilvusClientDatabaseValid(TestMilvusClientV2Base):
         # drop3 = "database.max.collections"
         # self.drop_database_properties(client, db_name, property_keys=drop3)
         # it doesn't work, but no error reported
-        
+
         # 6. drop action
         self.drop_database(client, db_name)
 
@@ -576,7 +569,7 @@ class TestMilvusClientDatabaseValid(TestMilvusClientV2Base):
         collections = self.list_collections(client)[0]
         assert collection_name in collections
         assert collections_default_db not in collections
-        
+
         # 6. drop action
         self.drop_collection(client, collection_name)
         self.drop_database(client, db_name)

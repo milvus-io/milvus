@@ -1,16 +1,14 @@
 import time
+
 import numpy as np
-
 import pytest
-from pymilvus import DataType
-
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_pymilvus import *
-
+from pymilvus import DataType
+from utils.util_log import test_log as log
+from utils.util_pymilvus import *  # noqa: F403
 
 prefix = "client_rbac"
 
@@ -544,8 +542,8 @@ class TestMilvusClientRbacInvalid(TestMilvusClientV2Base):
                              new_password=new_password,
                              check_task=CheckTasks.err_res,
                              check_items={ct.err_code: 1400,
-                                          ct.err_msg: "old password not correct for %s: "
-                                                      "not authenticated" % user_name})
+                                          ct.err_msg: f"old password not correct for {user_name}: "
+                                                      "not authenticated"})
 
     def test_milvus_client_update_password_password_wrong(self, host, port):
         """
@@ -562,8 +560,8 @@ class TestMilvusClientRbacInvalid(TestMilvusClientV2Base):
         self.update_password(client, user_name=user_name, old_password=wrong_password,
                              new_password=new_password, check_task=CheckTasks.err_res,
                              check_items={ct.err_code: 1400,
-                                          ct.err_msg: "old password not correct for %s: "
-                                                      "not authenticated" % user_name})
+                                          ct.err_msg: f"old password not correct for {user_name}: "
+                                                      "not authenticated"})
 
     def test_milvus_client_update_password_new_password_same(self, host, port):
         """
@@ -1811,7 +1809,6 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         assert user_name not in role_users
 
         # try to revoke user from role (should fail since user is not in the role)
-        error_msg = "not found the role, maybe the role isn't existed or internal system error"
         self.revoke_role(client, user_name=user_name, role_name=role_name)
 
         # verify user is still not in the role

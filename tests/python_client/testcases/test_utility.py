@@ -1,22 +1,19 @@
 import threading
 import time
+from concurrent.futures import ALL_COMPLETED, ThreadPoolExecutor, wait
 
 import pytest
-from pymilvus import DefaultConfig
-from pymilvus.exceptions import MilvusException
 from base.client_base import TestcaseBase
 from base.collection_wrapper import ApiCollectionWrapper
 from base.utility_wrapper import ApiUtilityWrapper
-from common.common_params import FieldParams, DefaultVectorIndexParams, DefaultVectorSearchParams
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
+from common.common_params import DefaultVectorIndexParams, DefaultVectorSearchParams, FieldParams
 from common.common_type import CaseLabel, CheckTasks
 from common.milvus_sys import MilvusSys
+from pymilvus.exceptions import MilvusException
 from pymilvus.grpc_gen.common_pb2 import SegmentState
-import random
-from pymilvus.client.types import ResourceGroupConfig
-import copy
+from utils.util_log import test_log as log
 
 prefix = "utility"
 default_schema = cf.gen_default_collection_schema()
@@ -260,7 +257,7 @@ class TestUtilityParams(TestcaseBase):
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name)
         self.collection_wrap.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         self.collection_wrap.load()
-        error = {ct.err_code: 1, ct.err_msg: "Invalid collection name: {}".format(invalid_c_name)}
+        error = {ct.err_code: 1, ct.err_msg: f"Invalid collection name: {invalid_c_name}"}
         self.utility_wrap.loading_progress(invalid_c_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -308,7 +305,7 @@ class TestUtilityParams(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, nb=10)[0]
         collection_w.load()
-        err_msg = {ct.err_code: 15, ct.err_msg: f"partition not found"}
+        err_msg = {ct.err_code: 15, ct.err_msg: "partition not found"}
         self.utility_wrap.loading_progress(collection_w.name, partition_names,
                                            check_task=CheckTasks.err_res, check_items=err_msg)
 
@@ -324,8 +321,8 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.wait_for_loading_complete(
             c_name,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 100, ct.err_msg: "collection not found[database=default]"
-                                                       "[collection={}]".format(c_name)})
+            check_items={ct.err_code: 100, ct.err_msg: f"collection not found[database=default]"
+                                                       f"[collection={c_name}]"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_wait_for_loading_partition_not_existed(self):
@@ -371,8 +368,8 @@ class TestUtilityParams(TestcaseBase):
             self.utility_wrap.calc_distance(invalid_vector, invalid_vector,
                                             check_task=CheckTasks.err_res,
                                             check_items={"err_code": 1,
-                                                         "err_msg": "vectors_left value {} "
-                                                                    "is illegal".format(invalid_vector)})
+                                                         "err_msg": f"vectors_left value {invalid_vector} "
+                                                                    "is illegal"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="calc_distance interface is no longer supported")
@@ -388,8 +385,8 @@ class TestUtilityParams(TestcaseBase):
             self.utility_wrap.calc_distance(invalid_vector, invalid_vector,
                                             check_task=CheckTasks.err_res,
                                             check_items={"err_code": 1,
-                                                         "err_msg": "vectors_left value {} "
-                                                                    "is illegal".format(invalid_vector)})
+                                                         "err_msg": f"vectors_left value {invalid_vector} "
+                                                                    "is illegal"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="calc_distance interface is no longer supported")
@@ -407,8 +404,8 @@ class TestUtilityParams(TestcaseBase):
             self.utility_wrap.calc_distance(op_l, invalid_vector,
                                             check_task=CheckTasks.err_res,
                                             check_items={"err_code": 1,
-                                                         "err_msg": "vectors_right value {} "
-                                                                    "is illegal".format(invalid_vector)})
+                                                         "err_msg": f"vectors_right value {invalid_vector} "
+                                                                    "is illegal"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="calc_distance interface is no longer supported")
@@ -426,8 +423,8 @@ class TestUtilityParams(TestcaseBase):
             self.utility_wrap.calc_distance(op_l, invalid_vector,
                                             check_task=CheckTasks.err_res,
                                             check_items={"err_code": 1,
-                                                         "err_msg": "vectors_right value {} "
-                                                                    "is illegal".format(invalid_vector)})
+                                                         "err_msg": f"vectors_right value {invalid_vector} "
+                                                                    "is illegal"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_rename_collection_old_invalid_type(self, get_invalid_type_collection_name):
@@ -443,8 +440,7 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
                                             check_task=CheckTasks.err_res,
                                             check_items={"err_code": 999,
-                                                         "err_msg": "`collection_name` value {} is illegal".format(
-                                                             old_collection_name)})
+                                                         "err_msg": f"`collection_name` value {old_collection_name} is illegal"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_rename_collection_old_invalid_value(self, get_invalid_value_collection_name):
@@ -478,8 +474,8 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
                                             check_task=CheckTasks.err_res,
                                             check_items={"err_code": 1,
-                                                         "err_msg": "`collection_name` value {} is "
-                                                                    "illegal".format(new_collection_name)})
+                                                         "err_msg": f"`collection_name` value {new_collection_name} is "
+                                                                    "illegal"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_rename_collection_new_invalid_value(self, get_invalid_value_collection_name):
@@ -562,8 +558,8 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.rename_collection(alias, new_collection_name,
                                             check_task=CheckTasks.err_res,
                                             check_items={"err_code": 1,
-                                                         "err_msg": "unsupported use an alias to "
-                                                                    "rename collection, alias:{}".format(alias)})
+                                                         "err_msg": f"unsupported use an alias to "
+                                                                    f"rename collection, alias:{alias}"})
 
 
 class TestUtilityBase(TestcaseBase):
@@ -790,7 +786,7 @@ class TestUtilityBase(TestcaseBase):
             if 0 < res['indexed_rows'] <= nb:
                 break
             if time.time() - start > 5:
-                raise MilvusException(1, f"Index build completed in more than 5s")
+                raise MilvusException(1, "Index build completed in more than 5s")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_wait_index_collection_not_existed(self):
@@ -1727,7 +1723,6 @@ class TestUtilityAdvanced(TestcaseBase):
         # get segments distribution after load balance
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         segment_distribution = cf.get_segment_distribution(res)
-        sealed_segment_ids_after_load_balance = segment_distribution[src_node_id]["sealed"]
         # assert src node has no sealed segments
         # assert sealed_segment_ids_after_load_balance == []
         des_sealed_segment_ids = []
@@ -1811,7 +1806,7 @@ class TestUtilityAdvanced(TestcaseBase):
             if len(segment_infos) == 1 and segment_infos[0].state == SegmentState.Sealed:
                 break
             if time.time() - start > 20:
-                raise MilvusException(1, f"Get query segment info after handoff cost more than 20s")
+                raise MilvusException(1, "Get query segment info after handoff cost more than 20s")
 
         # query and search from handoff segments
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results,
@@ -2023,7 +2018,6 @@ class TestUtilityFlushAll(TestcaseBase):
                 2. flush_all while inserting and deleting
         expected:
         """
-        from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
         collection_num = 5
         collection_names = []
         delete_num = 100

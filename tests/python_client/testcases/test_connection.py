@@ -1,11 +1,9 @@
-import pytest
-from pymilvus import DefaultConfig
-
-from base.client_base import TestcaseBase
-import common.common_type as ct
 import common.common_func as cf
-from common.common_type import CaseLabel, CheckTasks
+import common.common_type as ct
+import pytest
+from base.client_base import TestcaseBase
 from common.code_mapping import ConnectionErrorMessage as cem
+from pymilvus import DefaultConfig
 
 # CONNECT_TIMEOUT = 12
 
@@ -457,7 +455,6 @@ class TestConnectionOperation(TestcaseBase):
                                               check_items={ct.list_content: [(DefaultConfig.DEFAULT_USING, None)]})
 
         # using default alias to create connection, the connection does not exist
-        err_msg = cem.FailConnect % ("host", str(port))
         self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.err_res,
                                      check_items={ct.err_code: 999,
                                                   ct.err_msg: "illegal connection params or server unavailable"})
@@ -852,7 +849,7 @@ class TestConnect(TestcaseBase):
         expected: connected is True
         """
 
-        uri = "{}://{}:{}".format(protocol, host, port)
+        uri = f"{protocol}://{host}:{port}"
         self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.ccr)
 
     @pytest.mark.tags(ct.CaseLabel.L2)
@@ -865,7 +862,7 @@ class TestConnect(TestcaseBase):
         expected: connected is True
         """
 
-        uri = "{}://{}:{}".format(protocol, host, port)
+        uri = f"{protocol}://{host}:{port}"
         self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
                                      check_items={ct.err_code: 999,
                                                   ct.err_msg: "needs start with [unix, http, https, tcp] "
@@ -879,7 +876,7 @@ class TestConnect(TestcaseBase):
         method: get a connection with the address parameter
         expected: connected is True
         """
-        address = "{}:{}".format(host, port)
+        address = f"{host}:{port}"
         self.connection_wrap.connect(alias=connect_name, address=address, check_task=ct.CheckTasks.ccr)
 
     @pytest.mark.tags(ct.CaseLabel.RBAC)
@@ -947,7 +944,7 @@ class TestConnectUriInvalid(TestcaseBase):
         expected: the connection is false
         """
 
-        uri = "{}://{}:{}".format(protocol, host, port)
+        uri = f"{protocol}://{host}:{port}"
         self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
                                      check_items={ct.err_code: 999,
                                                   ct.err_msg: "needs start with [unix, http, https, tcp] or a local file endswith [.db]"})
@@ -963,7 +960,7 @@ class TestConnectUriInvalid(TestcaseBase):
         expected: connection is False
         """
 
-        uri = "{}://{}:{}".format(protocol, host, port)
+        uri = f"{protocol}://{host}:{port}"
         self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
                                      check_items={ct.err_code: 999,
                                                   ct.err_msg: "illegal connection params or server unavailable"})
@@ -979,7 +976,7 @@ class TestConnectUriInvalid(TestcaseBase):
         expected: connection is False
         """
 
-        uri = "{}://{}:{}".format(protocol, host, port)
+        uri = f"{protocol}://{host}:{port}"
         self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
                                      check_items={ct.err_code: 999,
                                                   ct.err_msg: "illegal connection params or server unavailable"})
@@ -996,7 +993,7 @@ class TestConnectUriInvalid(TestcaseBase):
         expected: connection is False
         """
 
-        uri = "{}://{}:{}".format(protocol, host, port)
+        uri = f"{protocol}://{host}:{port}"
         self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
                                      check_items={ct.err_code: 999,
                                                   ct.err_msg: "illegal connection params or server unavailable"})
@@ -1015,7 +1012,7 @@ class TestConnectAddressInvalid(TestcaseBase):
         method: get a connection with the address parameter
         expected: connected is False
         """
-        address = "{}:{}".format(host, port)
+        address = f"{host}:{port}"
         self.connection_wrap.connect(alias=connect_name, address=address, check_task=ct.CheckTasks.err_res,
                                      check_items={ct.err_code: 999,
                                                   ct.err_msg: "illegal connection params or server unavailable"})
@@ -1029,7 +1026,7 @@ class TestConnectAddressInvalid(TestcaseBase):
         method: get a connection with the address parameter
         expected: connected is False
         """
-        address = "{}:{}".format(host, port)
+        address = f"{host}:{port}"
         self.connection_wrap.connect(alias=connect_name, address=address, check_task=ct.CheckTasks.err_res,
                                      check_items={ct.err_code: 999,
                                                   ct.err_msg: "illegal connection params or server unavailable"})
