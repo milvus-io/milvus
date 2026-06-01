@@ -1145,3 +1145,28 @@ func TestBroadcastCommitImportMessage_TargetsDataVchannels(t *testing.T) {
 func TestBroadcastRollbackImportMessage_TargetsDataVchannels(t *testing.T) {
 	testBroadcastTargetsDataVchannels(t, (*Server).broadcastRollbackImportMessage)
 }
+
+func testBroadcastRequiresVchannels(t *testing.T, broadcastFn func(*Server, context.Context, ImportJob) error) {
+	ctx := context.Background()
+	server := &Server{}
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        7,
+			CollectionID: 7,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+
+	err := broadcastFn(server, ctx, job)
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrImportFailed))
+	assert.Contains(t, err.Error(), "job 7 has no vchannels")
+}
+
+func TestBroadcastCommitImportMessage_RequiresVchannels(t *testing.T) {
+	testBroadcastRequiresVchannels(t, (*Server).broadcastCommitImportMessage)
+}
+
+func TestBroadcastRollbackImportMessage_RequiresVchannels(t *testing.T) {
+	testBroadcastRequiresVchannels(t, (*Server).broadcastRollbackImportMessage)
+}

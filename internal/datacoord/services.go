@@ -2858,9 +2858,7 @@ func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *dat
 func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob) error {
 	vchannels := job.GetVchannels()
 	if len(vchannels) == 0 {
-		log.Ctx(ctx).Warn("broadcastCommitImportMessage: job has no vchannels, skipping",
-			zap.Int64("jobID", job.GetJobID()))
-		return nil
+		return merr.WrapErrImportFailed(fmt.Sprintf("job %d has no vchannels", job.GetJobID()))
 	}
 
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
@@ -2887,9 +2885,7 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJob) error {
 	vchannels := job.GetVchannels()
 	if len(vchannels) == 0 {
-		log.Ctx(ctx).Warn("broadcastRollbackImportMessage: job has no vchannels, skipping",
-			zap.Int64("jobID", job.GetJobID()))
-		return nil
+		return merr.WrapErrImportFailed(fmt.Sprintf("job %d has no vchannels", job.GetJobID()))
 	}
 
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
