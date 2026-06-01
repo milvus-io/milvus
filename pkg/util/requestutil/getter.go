@@ -19,6 +19,8 @@
 package requestutil
 
 import (
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -212,10 +214,19 @@ var retryableCode typeutil.Set[int32] = typeutil.NewSet(
 // 	)
 // }
 
+// ParseMetricLabel determines the final Prometheus status label based on the
+// response and error. It implements the composite-label scheme: the coarse
+// "fail"/"rejected" values are split into fine-grained labels (fail_input /
+// fail_system / rejected_system) so monitoring can tell the responsible party
+// apart. The split is encoded into the existing status label's value domain
+// (additive cardinality) rather than a new dimension label (which would be
+// multiplicative). Retryability takes priority over classification.
 func ParseMetricLabel(resp any, err error) string {
-	// err only returned by interceptors
+	// err is only returned by interceptors (context cancellation, flow
+	// control, transport issues). These are immediate rejections, classified
+	// as a system-side rejection.
 	if err != nil {
-		return metrics.RejectedLabel
+		return metrics.RejectedSystemLabel
 	}
 
 	// check response status code
@@ -227,13 +238,24 @@ func ParseMetricLabel(resp any, err error) string {
 		status = resp
 	}
 
-	// check if retry
 	if !merr.Ok(status) {
-		// TODO use retriable if all set
+		// Retryability takes priority over input/system classification.
 		if retryableCode.Contain(status.GetCode()) {
 			return metrics.RetryLabel
 		}
-		return metrics.FailLabel
+
+		// Hard failure: classify by responsible party. merr.Error reconstructs
+		// the ErrorType from status.ExtraInfo[is_input_error].
+		classifiedErr := merr.Error(status)
+		var classifier merr.ErrorClassifier
+		if errors.As(classifiedErr, &classifier) {
+			if classifier.GetErrorType() == merr.InputError {
+				return metrics.FailInputLabel
+			}
+			return metrics.FailSystemLabel
+		}
+		// Fallback (should not happen): treat as a system error.
+		return metrics.FailSystemLabel
 	}
 	return metrics.SuccessLabel
 }

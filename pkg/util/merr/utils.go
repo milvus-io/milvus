@@ -124,6 +124,12 @@ func Status(err error) *commonpb.Status {
 
 	if GetErrorType(err) == InputError {
 		status.ExtraInfo = map[string]string{InputErrorFlagKey: "true"}
+		// Invariant enforced at the proxy boundary: an input error means the
+		// request is malformed, so retrying it unchanged can never succeed.
+		// Force Retriable=false even if the underlying sentinel is retriable,
+		// so clients never receive the self-contradictory "your input is wrong
+		// but you may retry" signal.
+		status.Retriable = false
 	}
 	return status
 }
