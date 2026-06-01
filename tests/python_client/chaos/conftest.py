@@ -24,10 +24,30 @@ def pytest_addoption(parser):
         default="",
         help="consistency level for chaos query requests",
     )
-    parser.addoption("--target_rgs", action="store", default="", help="comma-separated resource group names to target for chaos (e.g. rg1,rg2)")
-    parser.addoption("--chaos_mode", action="store", default="one", help="chaos mode: 'one' (random single pod) or 'all' (all matching pods)")
-    parser.addoption("--target_components", action="store", default="querynode,streamingnode", help="comma-separated components to inject chaos (e.g. querynode,streamingnode)")
-    parser.addoption("--chaos_template", action="store", default="", help="path to external ChaosMesh YAML template (overrides built-in config)")
+    parser.addoption(
+        "--target_rgs",
+        action="store",
+        default="",
+        help="comma-separated resource group names to target for chaos (e.g. rg1,rg2)",
+    )
+    parser.addoption(
+        "--chaos_mode",
+        action="store",
+        default="one",
+        help="chaos mode: 'one' (random single pod) or 'all' (all matching pods)",
+    )
+    parser.addoption(
+        "--target_components",
+        action="store",
+        default="querynode,streamingnode",
+        help="comma-separated components to inject chaos (e.g. querynode,streamingnode)",
+    )
+    parser.addoption(
+        "--chaos_template",
+        action="store",
+        default="",
+        help="path to external ChaosMesh YAML template (overrides built-in config)",
+    )
     parser.addoption("--collection_num", action="store", default="1", help="collection_num")
     parser.addoption(
         "--search_timeout",
