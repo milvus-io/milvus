@@ -163,9 +163,9 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 				zap.String("channel", channelInfo.GetChannelName()),
 				zap.Uint64("seekTs", channelInfo.GetSeekPosition().GetTimestamp()),
 			)
-			return merr.WrapErrChannelNotAvailable(
+			return merr.WrapErrChannelDroppedSentinel(
 				channelInfo.GetChannelName(),
-				"channel has dropped checkpoint sentinel; refuse to build next target",
+				"refuse to build next target",
 			)
 		}
 	}
