@@ -207,3 +207,59 @@ func TestUpdateCredentialRejectsOverLimitDescription(t *testing.T) {
 	assert.NotEqual(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 	mixCoord.AssertNotCalled(t, "UpdateCredential", mock.Anything, mock.Anything)
 }
+
+func TestUpdateCredentialPasswordValidationErrors(t *testing.T) {
+	paramtable.Init()
+
+	tests := []struct {
+		name        string
+		oldPassword string
+		newPassword string
+		reason      string
+	}{
+		{
+			name:        "invalid old password base64",
+			oldPassword: "not-base64!!",
+			newPassword: crypto.Base64Encode("new_password"),
+			reason:      "decode old password failed",
+		},
+		{
+			name:        "invalid new password base64",
+			oldPassword: crypto.Base64Encode("old_password"),
+			newPassword: "not-base64!!",
+			reason:      "decode password failed",
+		},
+		{
+			name:        "invalid new password length",
+			oldPassword: crypto.Base64Encode("old_password"),
+			newPassword: crypto.Base64Encode("short"),
+			reason:      "invalid password length",
+		},
+		{
+			name:        "old password verification failed",
+			oldPassword: crypto.Base64Encode("old_password"),
+			newPassword: crypto.Base64Encode("new_password"),
+			reason:      "old password not correct",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mixCoord := mocks.NewMockMixCoordClient(t)
+			mixCoord.On("UpdateCredential", mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
+			node := &Proxy{mixCoord: mixCoord}
+			node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+			status, err := node.UpdateCredential(context.Background(), &milvuspb.UpdateCredentialRequest{
+				Username:    "desc_user",
+				OldPassword: test.oldPassword,
+				NewPassword: test.newPassword,
+			})
+
+			require.NoError(t, err)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+			assert.Contains(t, status.GetReason(), test.reason)
+			mixCoord.AssertNotCalled(t, "UpdateCredential", mock.Anything, mock.Anything)
+		})
+	}
+}
