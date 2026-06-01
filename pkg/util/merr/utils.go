@@ -1616,14 +1616,14 @@ func WrapErrSnapshotPinned(name any, msg ...string) error {
 	return err
 }
 
-// WrapErrOperationNotSupportedMsg creates a new ErrOperationNotSupported with a detail message (Code 14).
+// WrapErrOperationNotSupportedMsg creates a new ErrOperationNotSupported with a detail message (Code 3000).
 // This is the primary replacement for fmt.Errorf/errors.New for operations that are
 // currently not supported by the system.
 func WrapErrOperationNotSupportedMsg(format string, args ...any) error {
 	return errors.Wrapf(ErrOperationNotSupported, format, args...)
 }
 
-// WrapErrOperationNotSupported wraps an existing error 'err' with ErrOperationNotSupported (Code 14).
+// WrapErrOperationNotSupported wraps an existing error 'err' with ErrOperationNotSupported (Code 3000).
 func WrapErrOperationNotSupported(err error, format string, args ...any) error {
 	if err == nil {
 		return WrapErrOperationNotSupportedMsg(format, args...)

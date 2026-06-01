@@ -66,8 +66,6 @@ var (
 	ErrServiceUnimplemented        = newMilvusError("service unimplemented", 10, false)
 	ErrServiceTimeTickLongDelay    = newMilvusError("time tick long delay", 11, false)
 	ErrServiceResourceInsufficient = newMilvusError("service resource insufficient", 12, true)
-	ErrOldSessionExists            = newMilvusError("old session exists", 13, false)
-	ErrOperationNotSupported       = newMilvusError("unsupported operation", 14, false)
 
 	// Collection related
 	ErrCollectionNotFound                      = newMilvusError("collection not found", 100, false, WithErrorType(InputError))
@@ -295,6 +293,11 @@ var (
 	// Snapshot related
 	ErrSnapshotNotFound = newMilvusError("snapshot not found", 2600, false)
 	ErrSnapshotPinned   = newMilvusError("snapshot is pinned", 2601, false)
+
+	// General
+	ErrOperationNotSupported = newMilvusError("unsupported operation", 3000, false)
+
+	ErrOldSessionExists = newMilvusError("old session exists", 3001, false)
 )
 
 type errorOption func(*milvusError)
