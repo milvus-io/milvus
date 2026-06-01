@@ -805,7 +805,7 @@ func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID
 		log.Warn("GC segment meta failed to drop segment", zap.Error(err))
 		return
 	}
-	log.Info("GC segment meta drop segment done", zap.Int("segmentIndexes", len(segIndexes)))
+	log.Info("GC segment meta drop segment done", zap.Int("indexMetaCleaned", len(segIndexes)))
 }
 
 func (gc *garbageCollector) getDroppedSegmentIndexFiles(segmentID int64) ([]*model.SegmentIndex, map[string]struct{}) {
@@ -863,6 +863,16 @@ func (gc *garbageCollector) removeDroppedSegmentFiles(ctx context.Context, clone
 	return nil
 }
 
+// removeDroppedSegmentIndexMeta removes the segment-index meta for every
+// build of a dropped segment, one RemoveSegmentIndex at a time.
+//
+// Partial failure converges: RemoveSegmentIndex updates in-memory state
+// (segmentIndexes + segmentBuildInfo) only after its catalog write succeeds,
+// so if the k-th call succeeds but the (k+1)-th fails, the first k entries are
+// already gone from meta. recycleDroppedSegment then bails out (segment meta is
+// kept), and on the next GC cycle GetAllSegmentIndexes returns only the
+// remaining entries — the retry covers exactly what is left and eventually
+// drains to empty.
 func (gc *garbageCollector) removeDroppedSegmentIndexMeta(ctx context.Context, segIndexes []*model.SegmentIndex) error {
 	if len(segIndexes) == 0 {
 		return nil

@@ -1857,6 +1857,9 @@ func setupDroppedSegmentWithIndexForGC(t *testing.T) (*meta, *SegmentInfo, *mode
 	}
 	require.NoError(t, m.AddSegment(ctx, segment))
 
+	// Write through fieldIndexLock so this helper does not race with the GC
+	// goroutine that reads indexMeta.indexes under the same lock (go test -race).
+	m.indexMeta.fieldIndexLock.Lock()
 	if m.indexMeta.indexes == nil {
 		m.indexMeta.indexes = make(map[UniqueID]map[UniqueID]*model.Index)
 	}
@@ -1869,6 +1872,7 @@ func setupDroppedSegmentWithIndexForGC(t *testing.T) (*meta, *SegmentInfo, *mode
 			IsDeleted:    true,
 		},
 	}
+	m.indexMeta.fieldIndexLock.Unlock()
 	segIdx := &model.SegmentIndex{
 		SegmentID:     segID,
 		CollectionID:  collID,
