@@ -74,7 +74,76 @@ class StorageV2IndexRawDataTest : public ::testing::Test {
     int64_t segment_id = 3;
     int64_t index_build_id = 4001;
     int64_t index_version = 4001;
+
+    void
+    test_disk_file_manager(int64_t dim,
+                           std::vector<std::string> paths,
+                           FieldId float_field) {
+        milvus::Config config;
+        config["index_type"] = milvus::index::INVERTED_INDEX_TYPE;
+        config[SEGMENT_INSERT_FILES_KEY] =
+            std::vector<std::vector<std::string>>{paths};
+        config[STORAGE_VERSION_KEY] = STORAGE_V2;
+        config[DATA_TYPE_KEY] = milvus::DataType::FLOAT;
+        config[DIM_KEY] = dim;
+        config[ELEMENT_TYPE_KEY] = DataType::VECTOR_FLOAT;
+        IndexMeta index_meta = {segment_id,
+                                float_field.get(),
+                                index_build_id,
+                                index_version,
+                                "opt_fields",
+                                "field_name",
+                                milvus::DataType::VECTOR_FLOAT,
+                                dim};
+        FieldDataMeta field_data_meta = {
+            collection_id, partition_id, segment_id, float_field.get()};
+        auto file_manager =
+            std::make_shared<milvus::storage::DiskFileManagerImpl>(
+                storage::FileManagerContext(
+                    field_data_meta, index_meta, cm_, fs_));
+        auto res = file_manager->CacheRawDataToDisk<float>(config);
+        ASSERT_EQ(res, TestLocalPath + "raw_datas/3_105/raw_data");
+    }
 };
+
+TEST_F(StorageV2IndexRawDataTest, TestDiskFileManger) {
+    auto schema = gen_all_data_types_schema();
+    schema->get_field_id(FieldName("embeddings"));
+
+    int64_t per_batch = 1000;
+    int64_t n_batch = 3;
+    int64_t dim = 128;
+    // Write data to storage v2
+    auto paths = std::vector<std::string>{path_ + "/0/19530.parquet",
+                                          path_ + "/101/19531.parquet"};
+    auto column_groups = std::vector<std::vector<int>>{
+        {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}, {15}};
+    auto writer_memory = 16 * 1024 * 1024;
+    auto storage_config = milvus_storage::StorageConfig();
+    auto arrow_schema = schema->ConvertToArrowSchema();
+    auto result = milvus_storage::PackedRecordBatchWriter::Make(
+        fs_,
+        paths,
+        arrow_schema,
+        storage_config,
+        column_groups,
+        writer_memory,
+        ::parquet::default_writer_properties());
+    EXPECT_TRUE(result.ok());
+    auto writer = result.ValueOrDie();
+    for (int64_t i = 0; i < n_batch; i++) {
+        auto dataset = DataGen(schema, per_batch);
+        auto record_batch =
+            ConvertToArrowRecordBatch(dataset, dim, arrow_schema);
+        EXPECT_TRUE(writer->Write(record_batch).ok());
+    }
+    EXPECT_TRUE(writer->Close().ok());
+    {
+        // test disk file manager
+        auto float_field = schema->get_field_id(FieldName("float"));
+        test_disk_file_manager(dim, paths, float_field);
+    }
+}
 
 TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
     GTEST_SKIP() << "TODO: fix ut logic after behavior change";
