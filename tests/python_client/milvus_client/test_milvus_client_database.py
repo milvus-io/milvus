@@ -35,6 +35,7 @@ default_string_field_name = ct.default_string_field_name
 default_int32_array_field_name = ct.default_int32_array_field_name
 default_string_array_field_name = ct.default_string_array_field_name
 
+
 class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
     """ Test case of database """
 
@@ -361,6 +362,7 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
                            check_task=CheckTasks.err_res, check_items=error)
         self.using_database(client, db_name,
                            check_task=CheckTasks.err_res, check_items=error)
+
 
 class TestMilvusClientDatabaseValid(TestMilvusClientV2Base):
     """ Test case of database interface """
