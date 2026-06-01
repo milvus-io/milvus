@@ -61,14 +61,13 @@ class TestBase:
     expect_compact = constants.SUCC
     expect_search = constants.SUCC
     expect_query = constants.SUCC
-    host = '127.0.0.1'
+    host = "127.0.0.1"
     port = 19530
     _chaos_config = None
     health_checkers = {}
 
 
 class TestOperations(TestBase):
-
     @pytest.fixture(scope="function", autouse=True)
     def connection(self, host, port, user, password, uri, token, milvus_ns):
         # Prioritize uri and token for connection
@@ -83,9 +82,9 @@ class TestOperations(TestBase):
             actual_token = f"{user}:{password}" if user and password else None
 
         if actual_token:
-            connections.connect('default', uri=actual_uri, token=actual_token)
+            connections.connect("default", uri=actual_uri, token=actual_token)
         else:
-            connections.connect('default', uri=actual_uri)
+            connections.connect("default", uri=actual_uri)
 
         if connections.has_connection("default") is False:
             raise Exception("no connections")
@@ -96,7 +95,7 @@ class TestOperations(TestBase):
         self.password = password
         self.uri = actual_uri
         self.token = actual_token
-        self.milvus_sys = MilvusSys(alias='default')
+        self.milvus_sys = MilvusSys(alias="default")
         self.milvus_ns = milvus_ns
         self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
 
@@ -147,7 +146,7 @@ class TestOperations(TestBase):
     ):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
-        log.info(connections.get_connection_addr('default'))
+        log.info(connections.get_connection_addr("default"))
         checker.configure_request_options(
             search_timeout_value=search_timeout,
             query_timeout_value=query_timeout,
@@ -166,7 +165,7 @@ class TestOperations(TestBase):
             request_duration = request_duration[:-1]
         request_duration = eval(request_duration)
         for i in range(10):
-            sleep(request_duration//10)
+            sleep(request_duration // 10)
             for k, v in self.health_checkers.items():
                 v.check_result()
                 # log.info(v.check_result())

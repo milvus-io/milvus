@@ -23,7 +23,7 @@ def _request_options(timeout_value, consistency_level, default_consistency_level
 
 
 class TestAllCollection:
-    """ Test case of end to end"""
+    """Test case of end to end"""
 
     @pytest.fixture(scope="function", params=get_collections(file_name="chaos_test_all_collections.json"))
     def collection_name(self, request):
@@ -73,7 +73,7 @@ class TestAllCollection:
         collection_info = milvus_client.describe_collection(collection_name=name)
         schema = CollectionSchema.construct_from_dict(collection_info)
         tt = time.time() - t0
-        assert collection_info['collection_name'] == name
+        assert collection_info["collection_name"] == name
 
         # get collection info
         dim = cf.get_dim_by_schema(schema=schema)
@@ -106,7 +106,7 @@ class TestAllCollection:
         res = milvus_client.insert(collection_name=name, data=data)
         tt = time.time() - t0
         log.info(f"assert insert: {tt}")
-        assert res.get('insert_count', 0) > 0
+        assert res.get("insert_count", 0) > 0
 
         # flush
         t0 = time.time()
@@ -122,8 +122,8 @@ class TestAllCollection:
         for idx_name in index_names:
             try:
                 idx_info = milvus_client.describe_index(collection_name=name, index_name=idx_name)
-                if 'field_name' in idx_info:
-                    fields_created_index.append(idx_info['field_name'])
+                if "field_name" in idx_info:
+                    fields_created_index.append(idx_info["field_name"])
             except Exception as e:
                 log.debug(f"Failed to describe index {idx_name}: {e}")
 
@@ -133,15 +133,9 @@ class TestAllCollection:
             if f not in fields_created_index:
                 t0 = time.time()
                 index_params.add_index(
-                    field_name=f,
-                    index_type="HNSW",
-                    metric_type="L2",
-                    params={"M": 48, "efConstruction": 500}
+                    field_name=f, index_type="HNSW", metric_type="L2", params={"M": 48, "efConstruction": 500}
                 )
-                milvus_client.create_index(
-                    collection_name=name,
-                    index_params=index_params
-                )
+                milvus_client.create_index(collection_name=name, index_params=index_params)
                 tt = time.time() - t0
                 log.info(f"create index for field {f} cost: {tt} seconds")
                 index_params = milvus_client.prepare_index_params()  # reset for next field
@@ -187,7 +181,7 @@ class TestAllCollection:
             assert len(res_2) == 1
 
         # query
-        term_expr = f'{int64_field_name} in {[i for i in range(offset, 0)]}'
+        term_expr = f"{int64_field_name} in {[i for i in range(offset, 0)]}"
         t0 = time.time()
         res = milvus_client.query(
             collection_name=name,
@@ -261,7 +255,7 @@ class TestAllCollection:
             assert len(res_2) == 1
 
         # query
-        term_expr = f'{int64_field_name} > -3000'
+        term_expr = f"{int64_field_name} > -3000"
         t0 = time.time()
         res = milvus_client.query(
             collection_name=name,

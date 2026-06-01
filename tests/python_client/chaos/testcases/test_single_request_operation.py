@@ -50,14 +50,13 @@ class TestBase:
     expect_index = constants.SUCC
     expect_search = constants.SUCC
     expect_query = constants.SUCC
-    host = '127.0.0.1'
+    host = "127.0.0.1"
     port = 19530
     _chaos_config = None
     health_checkers = {}
 
 
 class TestOperations(TestBase):
-
     @pytest.fixture(scope="function", autouse=True)
     def connection(self, host, port, user, password, uri, token, milvus_ns, minio_host, enable_import, minio_bucket):
         # Prioritize uri and token for connection
@@ -72,9 +71,9 @@ class TestOperations(TestBase):
             actual_token = f"{user}:{password}" if user and password else None
 
         if actual_token:
-            connections.connect('default', uri=actual_uri, token=actual_token)
+            connections.connect("default", uri=actual_uri, token=actual_token)
         else:
-            connections.connect('default', uri=actual_uri)
+            connections.connect("default", uri=actual_uri)
 
         if connections.has_connection("default") is False:
             raise Exception("no connections")
@@ -89,7 +88,7 @@ class TestOperations(TestBase):
         self.password = password
         self.uri = actual_uri
         self.token = actual_token
-        self.milvus_sys = MilvusSys(alias='default')
+        self.milvus_sys = MilvusSys(alias="default")
         self.milvus_ns = milvus_ns
         self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
         self.enable_import = enable_import
@@ -101,7 +100,7 @@ class TestOperations(TestBase):
         checkers = {
             Op.create: CollectionCreateChecker(collection_name=c_name),
             Op.insert: InsertChecker(collection_name=c_name),
-            Op.tensor_search :TensorSearchChecker(collection_name=c_name),
+            Op.tensor_search: TensorSearchChecker(collection_name=c_name),
             Op.upsert: UpsertChecker(collection_name=c_name),
             Op.partial_update: PartialUpdateChecker(collection_name=c_name),
             Op.flush: FlushChecker(collection_name=c_name),
@@ -124,9 +123,9 @@ class TestOperations(TestBase):
             Op.entity_ttl: EntityTTLChecker(),
         }
         if bool(self.enable_import):
-            checkers[Op.bulk_insert] = BulkInsertChecker(collection_name=c_name,
-                                                         bucket_name=self.bucket_name,
-                                                         minio_endpoint=self.minio_endpoint)
+            checkers[Op.bulk_insert] = BulkInsertChecker(
+                collection_name=c_name, bucket_name=self.bucket_name, minio_endpoint=self.minio_endpoint
+            )
         self.health_checkers = checkers
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -141,7 +140,7 @@ class TestOperations(TestBase):
     ):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
-        log.info(connections.get_connection_addr('default'))
+        log.info(connections.get_connection_addr("default"))
         checker.configure_request_options(
             search_timeout_value=search_timeout,
             query_timeout_value=query_timeout,
