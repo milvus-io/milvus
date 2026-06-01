@@ -172,8 +172,8 @@ Across `internal/{datacoord,rootcoord,querycoordv2}` there are 28
 ## Future linter ideas
 
 Three candidates, in order of how cheap they are to implement and how
-hard the enforcement is. **Not yet implemented — recorded here as design
-queue.**
+hard the enforcement is. **Tier 1.5's return form is now implemented (see
+below); Tier 1 and Tier 2 remain a design queue.**
 
 ### Tier 1 — exported-sentinel ban (1 hour to write)
 
@@ -198,6 +198,16 @@ context, but it's not enforced — the visibility rule already prevents the
 worst-case (`Err*` collision with `merr.ErrXxx`).
 
 ### Tier 1.5 — bare-usage ban (1 hour grep, half-day AST for 100% precision)
+
+> **Status — return form implemented.** The **return** form of this ban is now
+> enforced by a `gocritic`/`ruleguard` rule (`rawmerrerror` in `rules.go`), run
+> under `make verifiers`: it rejects `return errors.New / fmt.Errorf /
+> errors.Errorf` from function bodies (package-level sentinels, `cmd/`, `tests/`,
+> codegen and the walimpls harness exempt). The day-to-day guide is
+> [error_handling_guide.md](./error_handling_guide.md). The **no-exceptions**
+> form below (local `:=`, `panic(...)`, function argument) is *not* covered:
+> ruleguard's DSL cannot match "a call anywhere in a function body but not in a
+> `ValueSpec`", so the full ban still needs the AST-based Tier 2 linter.
 
 **Hardest enforcement, no exceptions.** `internal/...` packages may not
 use `errors.New(...)` or `errors.Errorf(...)` **inline inside a function
