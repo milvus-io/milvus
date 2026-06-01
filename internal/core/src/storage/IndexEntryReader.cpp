@@ -33,6 +33,7 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "common/FastMem.h"
 #include "nlohmann/json.hpp"
 #include "storage/EntryStreamUtils.h"
 #include "storage/Crc32cUtil.h"
@@ -277,9 +278,10 @@ IndexEntryReader::ReadFooterAndDirectory() {
     uint32_t meta_entry_size;
     uint32_t dir_size;
 
-    std::memcpy(&version, footer_ptr + 0, sizeof(uint16_t));
-    std::memcpy(&meta_entry_size, footer_ptr + 24, sizeof(uint32_t));
-    std::memcpy(&dir_size, footer_ptr + 28, sizeof(uint32_t));
+    milvus::fastmem::FastMemcpy(&version, footer_ptr + 0, sizeof(uint16_t));
+    milvus::fastmem::FastMemcpy(
+        &meta_entry_size, footer_ptr + 24, sizeof(uint32_t));
+    milvus::fastmem::FastMemcpy(&dir_size, footer_ptr + 28, sizeof(uint32_t));
 
     AssertInfo(version == MILVUS_V3_FORMAT_VERSION,
                "Unsupported V3 format version: {}",
@@ -308,7 +310,7 @@ IndexEntryReader::ReadFooterAndDirectory() {
         AssertInfo(additional_read == need_more,
                    "Failed to read additional directory data");
 
-        std::memcpy(
+        milvus::fastmem::FastMemcpy(
             full_tail_data.data() + need_more, tail_data.data(), tail_size);
 
         tail_data = std::move(full_tail_data);
@@ -496,7 +498,7 @@ IndexEntryReader::ReadEncryptedEntry(const EntryMeta& meta) {
                            "Decrypted size mismatch: expected {}, got {}",
                            plain_len,
                            plain.size());
-                std::memcpy(
+                milvus::fastmem::FastMemcpy(
                     dest + this_output_offset, plain.data(), plain.size());
             }));
     }

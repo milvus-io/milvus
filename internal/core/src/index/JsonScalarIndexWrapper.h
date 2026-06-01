@@ -17,6 +17,7 @@
 #pragma once
 
 #include <algorithm>
+#include "common/FastMem.h"
 #include <cstring>
 #include <optional>
 #include <string>
@@ -148,14 +149,16 @@ class JsonScalarIndexWrapper : public BaseIndex {
             auto null_len = this->null_offset_.size() * sizeof(size_t);
             if (null_len > 0) {
                 std::shared_ptr<uint8_t[]> null_data(new uint8_t[null_len]);
-                memcpy(null_data.get(), this->null_offset_.data(), null_len);
+                milvus::fastmem::FastMemcpy(
+                    null_data.get(), this->null_offset_.data(), null_len);
                 res_set.Append(
                     INDEX_NULL_OFFSET_FILE_NAME, null_data, null_len);
             }
             auto ne_len = non_exist_offsets_.size() * sizeof(size_t);
             if (ne_len > 0) {
                 std::shared_ptr<uint8_t[]> ne_data(new uint8_t[ne_len]);
-                memcpy(ne_data.get(), non_exist_offsets_.data(), ne_len);
+                milvus::fastmem::FastMemcpy(
+                    ne_data.get(), non_exist_offsets_.data(), ne_len);
                 res_set.Append(
                     INDEX_NON_EXIST_OFFSET_FILE_NAME, ne_data, ne_len);
             }
@@ -192,7 +195,7 @@ class JsonScalarIndexWrapper : public BaseIndex {
         if (has_non_exist) {
             auto e = reader.ReadEntry(INDEX_NON_EXIST_OFFSET_FILE_NAME);
             non_exist_offsets_.resize(e.data.size() / sizeof(size_t));
-            std::memcpy(
+            milvus::fastmem::FastMemcpy(
                 non_exist_offsets_.data(), e.data.data(), e.data.size());
         }
         LOG_INFO("LoadEntries JsonScalarIndexWrapper done, has_non_exist: {}",
@@ -247,7 +250,8 @@ class JsonScalarIndexWrapper : public BaseIndex {
 
             auto fill = [&](const uint8_t* data, int64_t size) {
                 non_exist_offsets_.resize((size_t)size / sizeof(size_t));
-                memcpy(non_exist_offsets_.data(), data, (size_t)size);
+                milvus::fastmem::FastMemcpy(
+                    non_exist_offsets_.data(), data, (size_t)size);
             };
 
             auto load_priority =

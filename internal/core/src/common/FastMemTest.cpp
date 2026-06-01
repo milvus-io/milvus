@@ -106,4 +106,11 @@ TEST(FastMemTest, FastMemcpyKeepsZeroSizeDestinationUntouched) {
     }
 }
 
+TEST(FastMemTest, FastMemcpyMatchesStdMemcpyForComparisonCases) {
+    for (auto size :
+         std::array<size_t, 11>{0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 1024}) {
+        AssertCopyMatchesStdMemcpy(size, 1, 3);
+    }
+}
+
 }  // namespace milvus::fastmem

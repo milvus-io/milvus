@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <simdjson.h>
+#include "common/FastMem.h"
 #include <string.h>
 #include <algorithm>
 #include <cstdint>
@@ -271,7 +272,7 @@ BsonBuilder::ExtractOffsetsRecursive(
     const std::string& current_path,
     std::vector<std::pair<std::string, size_t>>& result) {
     uint32_t length;
-    memcpy(&length, current_base_ptr, 4);
+    milvus::fastmem::FastMemcpy(&length, current_base_ptr, 4);
 
     const uint8_t* end_ptr = current_base_ptr + length - 1;
     AssertInfo(*(end_ptr) == 0x00, "miss bson document terminator");
@@ -304,7 +305,7 @@ BsonBuilder::ExtractOffsetsRecursive(
                 ExtractOffsetsRecursive(root_base_ptr, ptr, key_path, result);
                 // skip sub doc
                 uint32_t child_len;
-                memcpy(&child_len, ptr, 4);
+                milvus::fastmem::FastMemcpy(&child_len, ptr, 4);
                 ptr += child_len;
                 break;
             }
@@ -312,13 +313,13 @@ BsonBuilder::ExtractOffsetsRecursive(
                 // not parse array
                 // skip sub doc
                 uint32_t child_len;
-                memcpy(&child_len, ptr, 4);
+                milvus::fastmem::FastMemcpy(&child_len, ptr, 4);
                 ptr += child_len;
                 break;
             }
             case bsoncxx::type::k_string: {
                 uint32_t str_len;
-                memcpy(&str_len, ptr, 4);
+                milvus::fastmem::FastMemcpy(&str_len, ptr, 4);
                 ptr += 4 + str_len;
                 break;
             }

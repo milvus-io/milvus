@@ -23,6 +23,7 @@
 
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
+#include "common/FastMem.h"
 #include "segcore/Utils.h"
 
 namespace milvus::segcore::storagev2translator {
@@ -195,9 +196,10 @@ TimestampIndexTranslator::get_cells(
         for (auto& pin : all_chunks) {
             auto* fixed_chunk = static_cast<FixedWidthChunk*>(pin.get());
             auto span = fixed_chunk->Span();
-            std::copy_n(static_cast<const Timestamp*>(span.data()),
-                        span.row_count(),
-                        temp.data() + offset);
+            milvus::fastmem::FastMemcpy(
+                temp.data() + offset,
+                static_cast<const Timestamp*>(span.data()),
+                span.row_count() * sizeof(*temp.data()));
             offset += span.row_count();
         }
         AssertInfo(static_cast<int64_t>(offset) == num_rows_,

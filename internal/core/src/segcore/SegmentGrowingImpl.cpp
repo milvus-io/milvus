@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <boost/iterator/counting_iterator.hpp>
+#include "common/FastMem.h"
 #include <cxxabi.h>
 #include <algorithm>
 #include <cstring>
@@ -1711,7 +1712,7 @@ SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
                 auto dst = output_base + i * element_sizeof;
                 auto offset = seg_offsets[i];
                 auto src = (const uint8_t*)vec.get_physical_element(offset);
-                memcpy(dst, src, element_sizeof);
+                milvus::fastmem::FastMemcpy(dst, src, element_sizeof);
             }
             return;
         }

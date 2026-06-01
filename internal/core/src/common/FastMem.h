@@ -52,13 +52,18 @@ FastMemcpyEnabled() noexcept {
     return kFastMemcpyCompiled;
 }
 
+inline bool
+IsNonOverlapping(const void* dst, const void* src, size_t size) noexcept {
+    auto dst_begin = reinterpret_cast<uintptr_t>(dst);
+    auto src_begin = reinterpret_cast<uintptr_t>(src);
+    return size == 0 || dst_begin + size <= src_begin ||
+           src_begin + size <= dst_begin;
+}
+
 inline void
 AssertNonOverlapping(void* dst, const void* src, size_t size) noexcept {
 #ifndef NDEBUG
-    auto dst_begin = reinterpret_cast<uintptr_t>(dst);
-    auto src_begin = reinterpret_cast<uintptr_t>(src);
-    assert(size == 0 || dst_begin + size <= src_begin ||
-           src_begin + size <= dst_begin);
+    assert(IsNonOverlapping(dst, src, size));
 #endif
 }
 

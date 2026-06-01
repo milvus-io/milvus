@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <google/protobuf/text_format.h>
+#include "common/FastMem.h"
 #include <sys/stat.h>
 #include <unistd.h>
 #include <algorithm>
@@ -390,9 +391,9 @@ AssembleIndexDataCodec(const IndexDataCodec& index_slices) {
     auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[index_size]);
     int64_t offset = 0;
     for (const auto& index_slice : index_slices.codecs_) {
-        std::memcpy(buf.get() + offset,
-                    index_slice->PayloadData(),
-                    index_slice->PayloadSize());
+        milvus::fastmem::FastMemcpy(buf.get() + offset,
+                                    index_slice->PayloadData(),
+                                    index_slice->PayloadSize());
         offset += index_slice->PayloadSize();
     }
     AssertInfo(offset == index_size,
@@ -432,9 +433,9 @@ AssembleIndexDatas(std::map<std::string, IndexDataCodec>& index_file_slices,
         auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[index_size]);
         int64_t offset = 0;
         for (auto&& index_slice : index_slices.codecs_) {
-            std::memcpy(buf.get() + offset,
-                        index_slice->PayloadData(),
-                        index_slice->PayloadSize());
+            milvus::fastmem::FastMemcpy(buf.get() + offset,
+                                        index_slice->PayloadData(),
+                                        index_slice->PayloadSize());
             offset += index_slice->PayloadSize();
         }
         index_binary_set.Append(key, buf, index_size);

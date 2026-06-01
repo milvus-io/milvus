@@ -17,6 +17,7 @@
 #pragma once
 
 #include <algorithm>
+#include "common/FastMem.h"
 #include <cstring>
 #include <string>
 #include <vector>
@@ -180,7 +181,7 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
         if (has_non_exist) {
             auto e = reader.ReadEntry(INDEX_NON_EXIST_OFFSET_FILE_NAME);
             non_exist_offsets_.resize(e.data.size() / sizeof(size_t));
-            std::memcpy(
+            milvus::fastmem::FastMemcpy(
                 non_exist_offsets_.data(), e.data.data(), e.data.size());
         }
         LOG_INFO("LoadEntries JsonHybridScalarIndex done, has_non_exist: {}",

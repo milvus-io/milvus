@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <cxxabi.h>
+#include "common/FastMem.h"
 #include <string.h>
 #include <algorithm>
 #include <atomic>
@@ -706,7 +707,8 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
             }
 
             if (size > 0) {
-                std::memcpy(buf.get() + buf_offset, vec_array->data(), size);
+                milvus::fastmem::FastMemcpy(
+                    buf.get() + buf_offset, vec_array->data(), size);
             }
             buf_offset += size;
             physical_row++;

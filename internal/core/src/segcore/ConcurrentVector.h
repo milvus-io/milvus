@@ -14,6 +14,7 @@
 #include <fmt/core.h>
 #include <tbb/concurrent_vector.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <deque>
