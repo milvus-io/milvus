@@ -101,9 +101,7 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 		return nil, 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("targetSize %d MB should be greater than or equal to configMaxSize %d MB", targetSize, configMaxSize/(1024*1024)))
 	}
 
-	segments := policy.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
-		return isNormalManualCompactionCandidate(segment)
-	}))
+	segments := policy.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(isNormalManualCompactionCandidate))
 
 	if len(segments) == 0 {
 		log.Info("no eligible segments for force merge")

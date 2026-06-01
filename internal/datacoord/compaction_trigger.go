@@ -544,9 +544,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartSegments, error) {
 	// default filter, select segments which could be compacted
 	filters := []SegmentFilter{
-		SegmentFilterFunc(func(segment *SegmentInfo) bool {
-			return isNormalManualCompactionCandidate(segment)
-		}),
+		SegmentFilterFunc(isNormalManualCompactionCandidate),
 	}
 
 	// add segment filter if criterion provided
