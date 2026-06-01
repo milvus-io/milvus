@@ -1295,7 +1295,7 @@ func (m *MetaCache) RemovePartition(ctx context.Context, database string, collec
 		m.collectionCacheVersion[collectionID] = version
 	}
 
-	log.Ctx(ctx).Debug("remove partition", zap.String("db", database), zap.Int64("collectionID", collectionID), zap.String("collection", collectionName), zap.String("partition", partitionName), zap.Uint64("version", version))
+	mlog.Debug(ctx, "remove partition", zap.String("db", database), zap.Int64("collectionID", collectionID), zap.String("collection", collectionName), zap.String("partition", partitionName), zap.Uint64("version", version))
 }
 
 func (m *MetaCache) ensureCollectionForPartitionInvalidation(ctx context.Context, database string, collectionID UniqueID, collectionName string) {

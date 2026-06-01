@@ -1244,7 +1244,7 @@ type l0ManifestUpdate struct {
 func (u *l0ManifestUpdate) prepare(modPack *updateSegmentPack) bool {
 	u.segment = modPack.Get(u.segmentID)
 	if u.segment == nil {
-		log.Ctx(context.TODO()).Warn("meta update: add L0 deltalog failed - segment not found",
+		mlog.Warn(context.TODO(), "meta update: add L0 deltalog failed - segment not found",
 			zap.Int64("segmentID", u.segmentID))
 		return false
 	}
