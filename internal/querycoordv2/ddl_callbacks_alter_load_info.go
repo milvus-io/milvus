@@ -24,7 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -42,7 +42,7 @@ func (s *Server) alterLoadConfigV2AckCallback(ctx context.Context, result messag
 		// pending rootcoord meta cleanup can complete. Mirrors the
 		// ErrCollectionNotFound early-return inside LoadCollectionJob.Execute().
 		if errors.Is(err, merr.ErrChannelDroppedSentinel) {
-			log.Ctx(ctx).Warn("ack alter load config: collection channel is dropped sentinel",
+			mlog.Warn(ctx, "ack alter load config: collection channel is dropped sentinel",
 				zap.Int64("collectionID", result.Message.Header().GetCollectionId()),
 				zap.Error(err))
 			return nil
