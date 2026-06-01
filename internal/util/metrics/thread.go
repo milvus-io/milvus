@@ -62,6 +62,9 @@ var threadNameGroupRules = []struct {
 	{prefix: "knowhere_build", group: "knowhere_build"},
 	{prefix: "knowhere_search", group: "knowhere_search"},
 	{prefix: "knowhere_fetch", group: "knowhere_fetch"},
+	{prefix: "rocksdb:high", group: "rocksdb_high"},
+	{prefix: "rocksdb:low", group: "rocksdb_low"},
+	{prefix: "rocksdb:bottom", group: "rocksdb_bottom"},
 	{prefix: "MILVUS_FL_WR", group: "file_write"},
 	{prefix: "MILVUS_SEARCH", group: "milvus_search"},
 	{prefix: "MILVUS_LOAD", group: "milvus_load"},
@@ -74,7 +77,10 @@ var threadNameGroupRules = []struct {
 	{prefix: "CGO_WARMUP", group: "cgo_warmup"},
 }
 
-const threadWatcherInterval = 5 * time.Second
+const (
+	threadWatcherInterval  = 5 * time.Second
+	unclassifiedThreadPool = "unclassified"
+)
 
 func NewThreadWatcher() *threadWatcher {
 	return &threadWatcher{
@@ -131,31 +137,37 @@ func (thw *threadWatcher) updateNamedThreadCPUActiveNum() {
 		return
 	}
 
+	activeByGroup, nextSamples := collectActiveThreadGroups(current, thw.samples)
+
+	for _, rule := range threadNameGroupRules {
+		metrics.ThreadCPUActiveNumByPool.WithLabelValues(rule.group).Set(float64(activeByGroup[rule.group]))
+	}
+	metrics.ThreadCPUActiveNumByPool.WithLabelValues(unclassifiedThreadPool).Set(float64(activeByGroup[unclassifiedThreadPool]))
+	thw.samples = nextSamples
+}
+
+func collectActiveThreadGroups(current []threadStat, previous map[int32]threadSample) (map[string]int, map[int32]threadSample) {
 	activeByGroup := make(map[string]int)
 	nextSamples := make(map[int32]threadSample, len(current))
 	for _, stat := range current {
-		group, ok := classifyThreadName(stat.name)
-		if !ok {
-			continue
+		group, classified := classifyThreadName(stat.name)
+		if !classified {
+			group = unclassifiedThreadPool
 		}
 		nextSamples[stat.tid] = threadSample{
 			group: group,
 			cpu:   stat.cpu,
 		}
 
-		previous, existed := thw.samples[stat.tid]
+		previousSample, existed := previous[stat.tid]
 		if !existed {
 			continue
 		}
-		if previous.group == group && (stat.cpu > previous.cpu || stat.state == 'R' || stat.state == 'D') {
+		if previousSample.group == group && (stat.cpu > previousSample.cpu || stat.state == 'R' || stat.state == 'D') {
 			activeByGroup[group]++
 		}
 	}
-
-	for _, rule := range threadNameGroupRules {
-		metrics.ThreadCPUActiveNumByPool.WithLabelValues(rule.group).Set(float64(activeByGroup[rule.group]))
-	}
-	thw.samples = nextSamples
+	return activeByGroup, nextSamples
 }
 
 func collectNamedThreadStats() ([]threadStat, error) {
@@ -224,7 +236,7 @@ func classifyThreadName(name string) (string, bool) {
 			return rule.group, true
 		}
 	}
-	return "", false
+	return unclassifiedThreadPool, false
 }
 
 func (thw *threadWatcher) Stop() {
