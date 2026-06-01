@@ -394,6 +394,22 @@ func (w *wrappedMilvusError) Is(target error) bool {
 	return errors.Is(w.sentinel, target)
 }
 
+// As resolves errors.As(w, *milvusError) to the sentinel so the package-level
+// classification helpers (GetErrorType / IsRetryableErr / Status's
+// is_input_error) — which walk via errors.As(err, &milvusError) — observe the
+// sentinel's errType and retriable, consistent with merr.Code returning the
+// sentinel's code. Without this, errors.As (which does not consult Is) skips the
+// sentinel because it is deliberately kept out of the Unwrap chain (Unwrap
+// returns inner so errors.Is(w, inner) still matches), and the InputError /
+// retriable classification carried by the sentinel would be silently lost.
+func (w *wrappedMilvusError) As(target any) bool {
+	if p, ok := target.(*milvusError); ok {
+		*p = w.sentinel
+		return true
+	}
+	return false
+}
+
 // code lets merr.Code retrieve the milvus error code without needing to
 // resolve the cause chain (which has been redirected to the inner error).
 func (w *wrappedMilvusError) code() int32 {

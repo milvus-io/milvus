@@ -342,6 +342,20 @@ func TestWrapErrPreservesInnerChain(t *testing.T) {
 			assert.False(t, errors.Is(w, tc.other), "must not match unrelated sentinel")
 			assert.Equal(t, tc.code, Code(w), "Code() must report sentinel's code")
 			assert.Contains(t, w.Error(), inner.Error(), "message must include inner")
+
+			// The wrapped error must carry the SENTINEL's classification, not the
+			// inner error's. These walk via errors.As(err, &milvusError); without
+			// wrappedMilvusError.As they would resolve to the inner error and drop
+			// the sentinel's InputError / retriable marks.
+			assert.Equal(t, GetErrorType(tc.sentinel), GetErrorType(w),
+				"GetErrorType must match the sentinel's classification")
+			assert.Equal(t, IsRetryableErr(tc.sentinel), IsRetryableErr(w),
+				"IsRetryableErr must match the sentinel's retriable flag")
+			if GetErrorType(tc.sentinel) == InputError {
+				assert.Equal(t, "true", Status(w).ExtraInfo[InputErrorFlagKey],
+					"Status must surface is_input_error for an InputError sentinel")
+				assert.False(t, Status(w).Retriable, "InputError status must be non-retriable")
+			}
 		})
 	}
 
