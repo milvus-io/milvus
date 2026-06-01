@@ -193,32 +193,23 @@ class ScalarIndex : public IndexBase {
     virtual int64_t
     Size() = 0;
 
-    // Whether this index can execute a LIKE-pattern query internally.
-    // When true, the framework calls PatternQuery() directly instead of
-    // falling back to brute-force scan.
-    // NOTE: PatternQuery() always accepts a raw SQL LIKE pattern (e.g. "%hello%").
-    // Each index implementation is responsible for converting it to whatever
-    // internal format it needs (e.g., regex for tantivy).
+    // Planner policy for scalar-index execution. Most scalar ops can use the
+    // index directly. Pattern ops need extra capability checks:
+    // - PatternMatch is the public index capability for all pattern ops.
+    // - PatternQuery is an implementation detail used inside PatternMatch.
     virtual bool
-    SupportPatternQuery() const {
-        return false;
-    }
-
-    // Whether the framework should *attempt* to use PatternQuery() for
-    // Match operations. Inverted indexes return false here because they
-    // handle Match via PatternMatch() dispatch instead.
-    virtual bool
-    TryUsePatternQuery() const {
-        return true;
-    }
-
-    // Execute a LIKE-pattern query on the index.
-    // @param pattern: a raw SQL LIKE pattern (e.g. "%hello%", "abc_def"),
-    //   NOT a regex. Implementations must convert internally if needed
-    //   (e.g., tantivy converts to regex via PatternMatchTranslator).
-    virtual const TargetBitmap
-    PatternQuery(const std::string& pattern) {
-        ThrowInfo(Unsupported, "pattern query is not supported");
+    ShouldUseOp(proto::plan::OpType op) const {
+        switch (op) {
+            case proto::plan::OpType::Match:
+            case proto::plan::OpType::PrefixMatch:
+            case proto::plan::OpType::PostfixMatch:
+            case proto::plan::OpType::InnerMatch:
+            case proto::plan::OpType::RegexMatch:
+                return std::is_same_v<T, std::string> &&
+                       (SupportPatternMatch() || HasRawData());
+            default:
+                return true;
+        }
     }
 
     virtual void
@@ -257,6 +248,15 @@ class ScalarIndex : public IndexBase {
     }
 
  protected:
+    // Execute a LIKE-pattern query inside PatternMatch implementations.
+    // @param pattern: a raw SQL LIKE pattern (e.g. "%hello%", "abc_def"),
+    //   NOT a regex. Implementations must convert internally if needed
+    //   (e.g., tantivy converts to regex via PatternMatchTranslator).
+    virtual const TargetBitmap
+    PatternQuery(const std::string& pattern) {
+        ThrowInfo(Unsupported, "pattern query is not supported");
+    }
+
     // File manager for V3 upload/load operations
     storage::MemFileManagerImplPtr file_manager_;
 

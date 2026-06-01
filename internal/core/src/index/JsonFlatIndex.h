@@ -156,6 +156,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         return bitset;
     }
 
+ protected:
     const TargetBitmap
     PatternQuery(const std::string& pattern) override {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::PatternQuery",
