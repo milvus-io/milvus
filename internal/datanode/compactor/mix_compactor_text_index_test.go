@@ -124,6 +124,9 @@ func TestMixCompaction_createTextIndex_PopulatesStatsForEnableMatchFields(t *tes
 			assert.Equal(t, segmentID, args.segmentID)
 			assert.Equal(t, planID, args.taskID)
 			assert.Equal(t, plan, args.plan)
+			// The wrapper must forward the OUTPUT segment's own manifest, which
+			// BuildTextIndex consumes for StorageV2 segments.
+			assert.Equal(t, "out-seg-manifest", args.manifest)
 			return map[int64]*datapb.TextIndexStats{
 				textFieldID: {
 					FieldID:    textFieldID,
@@ -136,7 +139,7 @@ func TestMixCompaction_createTextIndex_PopulatesStatsForEnableMatchFields(t *tes
 		}).Build()
 	defer mockBuild.UnPatch()
 
-	out := &datapb.CompactionSegment{SegmentID: segmentID, NumOfRows: 100}
+	out := &datapb.CompactionSegment{SegmentID: segmentID, NumOfRows: 100, Manifest: "out-seg-manifest"}
 
 	got, err := task.createTextIndex(context.Background(), out)
 	assert.NoError(t, err)
@@ -329,6 +332,7 @@ func TestBuildTextIndexesForSegment_V2(t *testing.T) {
 		segmentID:        3,
 		taskID:           6,
 		storageVersion:   storage.StorageV2,
+		manifest:         "seg-manifest",
 		insertBinlogs:    []*datapb.FieldBinlog{{FieldID: 101, Binlogs: []*datapb.Binlog{{LogID: 9}}}},
 	}
 
@@ -338,6 +342,9 @@ func TestBuildTextIndexesForSegment_V2(t *testing.T) {
 	// V2: getInsertFiles returns empty, SegmentInsertFiles populated instead.
 	assert.Empty(t, captured.info.GetInsertFiles())
 	assert.NotNil(t, captured.info.GetSegmentInsertFiles())
+	// The manifest must be forwarded to BuildIndexInfo — BuildTextIndex consumes
+	// it for StorageV2 (config[SEGMENT_MANIFEST_KEY] + loon FFI properties).
+	assert.Equal(t, "seg-manifest", captured.info.GetManifest())
 }
 
 // TestBuildTextIndexesForSegment_CreateError ensures CGO build errors propagate.
