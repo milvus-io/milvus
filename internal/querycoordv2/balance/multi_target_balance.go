@@ -9,7 +9,6 @@ import (
 	"sort"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
@@ -524,17 +523,17 @@ type MultiTargetBalancer struct {
 // using multiple optimization strategies in sequence.
 func (b *MultiTargetBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) (segmentPlans []assign.SegmentAssignPlan, channelPlans []assign.ChannelAssignPlan) {
 	log := mlog.With(
-		zap.Int64("collection", replica.GetCollectionID()),
-		zap.Int64("replica id", replica.GetID()),
-		zap.String("replica group", replica.GetResourceGroup()),
+		mlog.Int64("collection", replica.GetCollectionID()),
+		mlog.Int64("replica id", replica.GetID()),
+		mlog.String("replica group", replica.GetResourceGroup()),
 	)
 	br := NewBalanceReport()
 	defer func() {
 		if len(segmentPlans) == 0 && len(channelPlans) == 0 {
 			log.
-				RatedDebug(ctx, rate.Limit(60), "no plan generated, balance report", zap.Stringers("records", br.detailRecords))
+				RatedDebug(ctx, rate.Limit(60), "no plan generated, balance report", mlog.Stringers("records", br.detailRecords))
 		} else {
-			log.Info(ctx, "balance plan generated", zap.Stringers("report details", br.records))
+			log.Info(ctx, "balance plan generated", mlog.Stringers("report details", br.records))
 		}
 	}()
 

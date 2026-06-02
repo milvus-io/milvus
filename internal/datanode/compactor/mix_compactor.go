@@ -28,7 +28,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -139,11 +138,11 @@ func (t *mixCompactionTask) preCompact() error {
 
 	t.estimatedOutputSegmentCount = int64(math.Ceil(float64(currSize) / float64(t.targetSize)))
 	mlog.Info(t.ctx, "preCompaction analyze",
-		zap.Int64("planID", t.GetPlanID()),
-		zap.Int64("inputSize", currSize),
-		zap.Int64("targetSize", t.targetSize),
-		zap.Int("inputSegmentCount", len(t.plan.GetSegmentBinlogs())),
-		zap.Int64("estimatedOutputSegmentCount", t.estimatedOutputSegmentCount),
+		mlog.Int64("planID", t.GetPlanID()),
+		mlog.Int64("inputSize", currSize),
+		mlog.Int64("targetSize", t.targetSize),
+		mlog.Int("inputSegmentCount", len(t.plan.GetSegmentBinlogs())),
+		mlog.Int64("estimatedOutputSegmentCount", t.estimatedOutputSegmentCount),
 	)
 
 	return nil
@@ -157,7 +156,7 @@ func (t *mixCompactionTask) mergeSplit(
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "MergeSplit")
 	defer span.End()
 
-	log := mlog.With(zap.Int64("planID", t.GetPlanID()))
+	log := mlog.With(mlog.Int64("planID", t.GetPlanID()))
 
 	if err := t.initLOBCompactionContext(ctx); err != nil {
 		return nil, err
@@ -189,7 +188,7 @@ func (t *mixCompactionTask) mergeSplit(
 		if len(textColumnConfigs) > 0 {
 			writerOpts = append(writerOpts, storage.WithTextColumnConfigs(textColumnConfigs))
 			log.Info(ctx, "TEXT column REWRITE_ALL mode enabled",
-				zap.Int("rewriteFieldCount", len(textColumnConfigs)),
+				mlog.Int("rewriteFieldCount", len(textColumnConfigs)),
 			)
 		}
 	}
@@ -222,7 +221,7 @@ func (t *mixCompactionTask) mergeSplit(
 		expiredRowCount += exp
 	}
 	if err := mWriter.Close(); err != nil {
-		log.Warn(ctx, "compact wrong, failed to finish writer", zap.Error(err))
+		log.Warn(ctx, "compact wrong, failed to finish writer", mlog.Err(err))
 		return nil, err
 	}
 	res := mWriter.GetCompactionSegments()
@@ -241,9 +240,9 @@ func (t *mixCompactionTask) mergeSplit(
 
 	totalElapse := t.tr.RecordSpan()
 	log.Info(ctx, "compact mergeSplit end",
-		zap.Int64("deleted row count", deletedRowCount),
-		zap.Int64("expired entities", expiredRowCount),
-		zap.Duration("total elapse", totalElapse))
+		mlog.Int64("deleted row count", deletedRowCount),
+		mlog.Int64("expired entities", expiredRowCount),
+		mlog.Duration("total elapse", totalElapse))
 
 	return res, nil
 }
@@ -257,7 +256,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig))
 	if err != nil {
-		mlog.Warn(ctx, "compact wrong, fail to merge deltalogs", zap.Error(err))
+		mlog.Warn(ctx, "compact wrong, fail to merge deltalogs", mlog.Err(err))
 		return deletedRowCount, expiredRowCount, err
 	}
 	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime, seg.GetCommitTimestamp())
@@ -269,14 +268,14 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 	)
 	if err != nil {
-		mlog.Warn(ctx, "compact wrong, failed to new insert binlogs reader", zap.Error(err))
+		mlog.Warn(ctx, "compact wrong, failed to new insert binlogs reader", mlog.Err(err))
 		return deletedRowCount, expiredRowCount, err
 	}
 	defer reader.Close()
 
 	materializer, err := NewRecordMaterializer(writerSchema, writerSchema.GetFunctions(), existingFields)
 	if err != nil {
-		mlog.Warn(ctx, "compact wrong, failed to init record materializer", zap.Error(err))
+		mlog.Warn(ctx, "compact wrong, failed to init record materializer", mlog.Err(err))
 		return
 	}
 	defer materializer.Close()
@@ -292,7 +291,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 				err = nil
 				break
 			} else {
-				mlog.Warn(ctx, "compact wrong, failed to iter through data", zap.Error(err))
+				mlog.Warn(ctx, "compact wrong, failed to iter through data", mlog.Err(err))
 				return deletedRowCount, expiredRowCount, err
 			}
 		}
@@ -301,7 +300,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		r, err = materializer.Wrap(baseRecord)
 		if err != nil {
 			baseRecord.Release()
-			mlog.Warn(ctx, "compact wrong, failed to materialize record", zap.Error(err))
+			mlog.Warn(ctx, "compact wrong, failed to materialize record", mlog.Err(err))
 			return
 		}
 
@@ -410,17 +409,17 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	defer span.End()
 	compactStart := time.Now()
 
-	mlog.Info(t.ctx, "compact start", zap.Any("compactionParams", t.compactionParams),
-		zap.Any("plan", t.plan))
+	mlog.Info(t.ctx, "compact start", mlog.Any("compactionParams", t.compactionParams),
+		mlog.Any("plan", t.plan))
 
 	if err := t.preCompact(); err != nil {
-		mlog.Warn(t.ctx, "compact wrong, failed to preCompact", zap.Error(err))
+		mlog.Warn(t.ctx, "compact wrong, failed to preCompact", mlog.Err(err))
 		return nil, err
 	}
 
-	log := mlog.With(zap.Int64("planID", t.GetPlanID()),
-		zap.Int64("collectionID", t.collectionID),
-		zap.Int64("partitionID", t.partitionID))
+	log := mlog.With(mlog.Int64("planID", t.GetPlanID()),
+		mlog.FieldCollectionID(t.collectionID),
+		mlog.FieldPartitionID(t.partitionID))
 
 	ctxTimeout, cancelAll := context.WithCancel(ctx)
 	defer cancelAll()
@@ -428,7 +427,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	log.Info(t.ctx, "compact start")
 	// Decompress compaction binlogs first
 	if err := binlog.DecompressCompactionBinlogsWithRootPath(t.compactionParams.StorageConfig.GetRootPath(), t.plan.SegmentBinlogs); err != nil {
-		log.Warn(t.ctx, "compact wrong, fail to decompress compaction binlogs", zap.Error(err))
+		log.Warn(t.ctx, "compact wrong, fail to decompress compaction binlogs", mlog.Err(err))
 		return nil, err
 	}
 	// Unable to deal with all empty segments cases, so return error
@@ -465,18 +464,18 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
 			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams, t.sortByFieldIDs)
 		if err != nil {
-			log.Warn(t.ctx, "compact wrong, fail to merge sort segments", zap.Error(err))
+			log.Warn(t.ctx, "compact wrong, fail to merge sort segments", mlog.Err(err))
 			return nil, err
 		}
 	} else {
 		res, err = t.mergeSplit(ctxTimeout)
 		if err != nil {
-			log.Warn(t.ctx, "compact wrong, failed to mergeSplit", zap.Error(err))
+			log.Warn(t.ctx, "compact wrong, failed to mergeSplit", mlog.Err(err))
 			return nil, err
 		}
 	}
 
-	log.Info(t.ctx, "compact done", zap.Duration("compact elapse", time.Since(compactStart)), zap.Any("res", res))
+	log.Info(t.ctx, "compact done", mlog.Duration("compact elapse", time.Since(compactStart)), mlog.Any("res", res))
 
 	metrics.DataNodeCompactionLatency.WithLabelValues(paramtable.GetStringNodeID(), t.plan.GetType().String()).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
 	metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(durInQueue.Milliseconds()))
@@ -552,7 +551,7 @@ func (t *mixCompactionTask) applyLOBCompaction(ctx context.Context, outputSegmen
 		return nil
 	}
 
-	log := mlog.With(zap.Int64("planID", t.GetPlanID()))
+	log := mlog.With(mlog.Int64("planID", t.GetPlanID()))
 
 	if !t.lobContext.HasReuseAllFields() {
 		log.Info(ctx, "all TEXT fields use REWRITE_ALL, no LOB file merging needed")
@@ -586,10 +585,10 @@ func (t *mixCompactionTask) applyLOBCompaction(ctx context.Context, outputSegmen
 	reuseAllFieldIDs := t.lobContext.GetReuseAllFieldIDs()
 	rewriteAllFieldIDs := t.lobContext.GetRewriteAllFieldIDs()
 	log.Info(ctx, "LOB file references merged to output manifests",
-		zap.Int("outputSegmentCount", len(outputManifests)),
-		zap.Int64s("reuseAllFieldIDs", reuseAllFieldIDs),
-		zap.Int64s("rewriteAllFieldIDs", rewriteAllFieldIDs),
-		zap.Any("updatedManifests", updatedManifests),
+		mlog.Int("outputSegmentCount", len(outputManifests)),
+		mlog.Int64s("reuseAllFieldIDs", reuseAllFieldIDs),
+		mlog.Int64s("rewriteAllFieldIDs", rewriteAllFieldIDs),
+		mlog.Any("updatedManifests", updatedManifests),
 	)
 
 	return nil
@@ -617,8 +616,8 @@ func (t *mixCompactionTask) initLOBCompactionContext(ctx context.Context) error 
 	}
 
 	log := mlog.With(
-		zap.Int64("planID", t.GetPlanID()),
-		zap.Int64s("textFieldIDs", textFieldIDs),
+		mlog.Int64("planID", t.GetPlanID()),
+		mlog.Int64s("textFieldIDs", textFieldIDs),
 	)
 	log.Info(ctx, "initializing LOB compaction context for TEXT columns")
 
@@ -668,19 +667,19 @@ func (t *mixCompactionTask) initLOBCompactionContext(ctx context.Context) error 
 	// log strategy decisions
 	for fieldID, decision := range t.lobContext.Decisions {
 		log.Info(ctx, "LOB compaction strategy decided",
-			zap.Int64("fieldID", fieldID),
-			zap.String("strategy", func() string {
+			mlog.FieldFieldID(fieldID),
+			mlog.String("strategy", func() string {
 				if decision.Strategy == compaction.LOBStrategyReuseAll {
 					return "REUSE_ALL"
 				}
 				return "REWRITE_ALL"
 			}()),
-			zap.Bool("isForced", t.lobContext.IsForced),
-			zap.Int("sourceSegmentCount", sourceSegmentCount),
-			zap.Int("targetSegmentCount", targetSegmentCount),
-			zap.Float64("holeRatio", decision.OverallHoleRatio),
-			zap.Int64("validRows", decision.TotalValidRows),
-			zap.Int64("totalRows", decision.TotalRows),
+			mlog.Bool("isForced", t.lobContext.IsForced),
+			mlog.Int("sourceSegmentCount", sourceSegmentCount),
+			mlog.Int("targetSegmentCount", targetSegmentCount),
+			mlog.Float64("holeRatio", decision.OverallHoleRatio),
+			mlog.Int64("validRows", decision.TotalValidRows),
+			mlog.Int64("totalRows", decision.TotalRows),
 		)
 	}
 

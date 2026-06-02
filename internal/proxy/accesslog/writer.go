@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -176,7 +175,7 @@ func NewRotateWriter(logCfg *paramtable.AccessLogConfig, minioCfg *paramtable.Mi
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		mlog.Info(context.TODO(), "Access log will backup files to minio", zap.String("remote", logCfg.RemotePath.GetValue()), zap.String("maxBackups", logCfg.MaxBackups.GetValue()))
+		mlog.Info(context.TODO(), "Access log will backup files to minio", mlog.String("remote", logCfg.RemotePath.GetValue()), mlog.String("maxBackups", logCfg.MaxBackups.GetValue()))
 		handler, err := NewMinioHandler(ctx, minioCfg, logCfg.RemotePath.GetValue(), logCfg.MaxBackups.GetAsInt())
 		if err != nil {
 			return nil, err

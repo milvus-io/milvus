@@ -22,8 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
@@ -138,14 +136,14 @@ func (s *importInspector) processFailed(task ImportTask) {
 			op := UpdateStatusOperator(segment, commonpb.SegmentState_Dropped)
 			err := s.meta.UpdateSegmentsInfo(s.ctx, op)
 			if err != nil {
-				mlog.Warn(s.ctx, "drop import segment failed", WrapTaskLog(task, zap.Int64("segment", segment), zap.Error(err))...)
+				mlog.Warn(s.ctx, "drop import segment failed", WrapTaskLog(task, mlog.Int64("segment", segment), mlog.Err(err))...)
 				return
 			}
 		}
 		if len(segments) > 0 {
 			err := s.importMeta.UpdateTask(s.ctx, task.GetTaskID(), UpdateSegmentIDs(nil), UpdateStatsSegmentIDs(nil))
 			if err != nil {
-				mlog.Warn(s.ctx, "update import task segments failed", WrapTaskLog(task, zap.Error(err))...)
+				mlog.Warn(s.ctx, "update import task segments failed", WrapTaskLog(task, mlog.Err(err))...)
 			}
 		}
 	}

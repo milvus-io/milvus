@@ -21,8 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -138,7 +136,7 @@ func (scheduler *Scheduler) processQueue(collection int64, queue jobQueue) {
 
 func (scheduler *Scheduler) process(job Job) {
 	log := mlog.With(
-		zap.Int64("collectionID", job.CollectionID()))
+		mlog.FieldCollectionID(job.CollectionID()))
 
 	defer func() {
 		log.Info(context.TODO(), "start to post-execute job")
@@ -150,7 +148,7 @@ func (scheduler *Scheduler) process(job Job) {
 	log.Info(context.TODO(), "start to pre-execute job")
 	err := job.PreExecute()
 	if err != nil {
-		log.Warn(context.TODO(), "failed to pre-execute job", zap.Error(err))
+		log.Warn(context.TODO(), "failed to pre-execute job", mlog.Err(err))
 		job.SetError(err)
 		return
 	}
@@ -158,7 +156,7 @@ func (scheduler *Scheduler) process(job Job) {
 	log.Info(context.TODO(), "start to execute job")
 	err = job.Execute()
 	if err != nil {
-		log.Warn(context.TODO(), "failed to execute job", zap.Error(err))
+		log.Warn(context.TODO(), "failed to execute job", mlog.Err(err))
 		job.SetError(err)
 	}
 }

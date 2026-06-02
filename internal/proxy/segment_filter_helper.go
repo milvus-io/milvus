@@ -19,8 +19,6 @@ package proxy
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -33,7 +31,7 @@ func checkSegmentFilter(plan *planpb.PlanNode) int32 {
 	predicates, err := exprutil.ParseExprFromPlan(plan)
 	if err != nil {
 		mlog.Warn(context.TODO(), "checkSegmentFilter: failed to parse expr from plan, fallback to no PK filter",
-			zap.Error(err))
+			mlog.Err(err))
 		return common.PkFilterNoPkFilter
 	}
 	if predicates != nil && exprutil.HasOptimizablePkPredicate(predicates) {

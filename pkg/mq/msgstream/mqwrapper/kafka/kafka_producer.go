@@ -7,7 +7,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -35,7 +34,7 @@ func (kp *kafkaProducer) Send(ctx context.Context, message *mqcommon.ProducerMes
 
 	if kp.isClosed {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
-		mlog.Error(ctx, "kafka produce message fail because the producer has been closed", zap.String("topic", kp.topic))
+		mlog.Error(ctx, "kafka produce message fail because the producer has been closed", mlog.String("topic", kp.topic))
 		return nil, common.NewIgnorableError(errors.New("kafka producer is closed"))
 	}
 
@@ -60,7 +59,7 @@ func (kp *kafkaProducer) Send(ctx context.Context, message *mqcommon.ProducerMes
 	select {
 	case <-kp.stopCh:
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
-		mlog.Error(ctx, "kafka produce message fail because of kafka producer is closed", zap.String("topic", kp.topic))
+		mlog.Error(ctx, "kafka produce message fail because of kafka producer is closed", mlog.String("topic", kp.topic))
 		return nil, common.NewIgnorableError(errors.New("kafka producer is closed"))
 	case e := <-resultCh:
 		m = e.(*kafka.Message)
@@ -86,13 +85,13 @@ func (kp *kafkaProducer) Close() {
 		// flush in-flight msg within queue.
 		i := kp.p.Flush(10000)
 		if i > 0 {
-			mlog.Warn(context.TODO(), "There are still un-flushed outstanding events", zap.Int("event_num", i), zap.String("topic", kp.topic))
+			mlog.Warn(context.TODO(), "There are still un-flushed outstanding events", mlog.Int("event_num", i), mlog.String("topic", kp.topic))
 		}
 
 		close(kp.stopCh)
 		cost := time.Since(start).Milliseconds()
 		if cost > 500 {
-			mlog.Debug(context.TODO(), "kafka producer is closed", zap.String("topic", kp.topic), zap.Int64("time cost(ms)", cost))
+			mlog.Debug(context.TODO(), "kafka producer is closed", mlog.String("topic", kp.topic), mlog.Int64("time cost(ms)", cost))
 		}
 	})
 }

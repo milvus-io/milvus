@@ -4,8 +4,6 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
@@ -126,7 +124,7 @@ func (w *roWALAdaptorImpl) checkReadOptWALName(opts wal.ReadOption) error {
 			if msgWALName != currentWALName {
 				w.Logger().Info(context.TODO(),
 
-					"WAL name mismatch", zap.String("msgIDWALName", msgWALName.String()), zap.String("currentWALName", currentWALName.String()))
+					"WAL name mismatch", mlog.String("msgIDWALName", msgWALName.String()), mlog.String("currentWALName", currentWALName.String()))
 				return status.NewWALNameMismatchError(currentWALName.String(), msgWALName.String())
 			}
 		}
@@ -161,7 +159,7 @@ func (w *roWALAdaptorImpl) Close() {
 	// close all wal instances.
 	w.scanners.Range(func(id int64, s wal.Scanner) bool {
 		s.Close()
-		mlog.Info(context.TODO(), "close scanner by wal adaptor", zap.Int64("id", id), zap.Any("channel", w.Channel()))
+		mlog.Info(context.TODO(), "close scanner by wal adaptor", mlog.Int64("id", id), mlog.Any("channel", w.Channel()))
 		return true
 	})
 

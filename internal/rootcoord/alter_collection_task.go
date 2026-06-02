@@ -20,8 +20,6 @@ import (
 	"context"
 	"strconv"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -131,11 +129,11 @@ func UpdateFieldPropertyParams(oldProps, updatedProps []*commonpb.KeyValuePair) 
 	for _, prop := range oldProps {
 		props[prop.Key] = prop.Value
 	}
-	mlog.Info(context.TODO(), "UpdateFieldPropertyParams", zap.Any("oldprops", props), zap.Any("newprops", updatedProps))
+	mlog.Info(context.TODO(), "UpdateFieldPropertyParams", mlog.Any("oldprops", props), mlog.Any("newprops", updatedProps))
 	for _, prop := range updatedProps {
 		props[prop.Key] = prop.Value
 	}
-	mlog.Info(context.TODO(), "UpdateFieldPropertyParams", zap.Any("newprops", props))
+	mlog.Info(context.TODO(), "UpdateFieldPropertyParams", mlog.Any("newprops", props))
 	propKV := make([]*commonpb.KeyValuePair, 0)
 	for key, value := range props {
 		propKV = append(propKV, &commonpb.KeyValuePair{

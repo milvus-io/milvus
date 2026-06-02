@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -114,11 +113,11 @@ func (s *MiniClusterSuite) CreateCollection(ctx context.Context, cfg *CreateColl
 	s.NoError(err)
 	s.True(merr.Ok(createCollectionStatus))
 
-	mlog.Info(ctx, "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(ctx, "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := s.Cluster.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{DbName: cfg.DBName})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.Status))
-	mlog.Info(ctx, "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(ctx, "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	nextStartPK := int64(1)
 	for i := 0; i < cfg.SegmentNum; i++ {

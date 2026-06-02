@@ -30,7 +30,6 @@ import (
 	"unsafe"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
@@ -54,7 +53,7 @@ func initDynamicPool() {
 		)
 
 		dp.Store(pool)
-		mlog.Info(context.TODO(), "init dynamicPool done", zap.Int("size", hardware.GetCPUNum()))
+		mlog.Info(context.TODO(), "init dynamicPool done", mlog.Int("size", hardware.GetCPUNum()))
 	})
 }
 

@@ -32,8 +32,6 @@ import (
 	"strconv"
 	"unsafe"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -297,7 +295,7 @@ func PublishDefaultFilesystemMetrics() (*FilesystemMetrics, error) {
 func PublishFilesystemMetricsWithConfig(storageConfig *indexpb.StorageConfig) (*FilesystemMetrics, error) {
 	metricSnapshot, err := GetFilesystemMetricsWithConfig(storageConfig)
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to get filesystem metrics with config", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to get filesystem metrics with config", mlog.Err(err))
 		return nil, err
 	}
 

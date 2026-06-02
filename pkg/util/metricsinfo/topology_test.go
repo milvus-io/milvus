@@ -16,7 +16,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -33,7 +32,7 @@ func Test_ConstructComponentName(t *testing.T) {
 	for _, role := range roleList {
 		for _, id := range idList {
 			mlog.Info(context.TODO(), "TestConstructComponentName",
-				zap.String("ComponentName", ConstructComponentName(role, id)))
+				mlog.String("ComponentName", ConstructComponentName(role, id)))
 		}
 	}
 }
@@ -64,7 +63,7 @@ func TestQueryClusterTopology_Codec(t *testing.T) {
 	s, err := MarshalTopology(topology1)
 	assert.Equal(t, nil, err)
 	mlog.Info(context.TODO(), "TestQueryClusterTopology_Codec",
-		zap.String("marshaled_result", s))
+		mlog.String("marshaled_result", s))
 	var topology2 QueryClusterTopology
 	err = UnmarshalTopology(s, &topology2)
 	assert.Equal(t, nil, err)
@@ -111,7 +110,7 @@ func TestQueryCoordTopology_Codec(t *testing.T) {
 	s, err := MarshalTopology(topology1)
 	assert.Equal(t, nil, err)
 	mlog.Info(context.TODO(), "TestQueryCoordTopology_Codec",
-		zap.String("marshaled_result", s))
+		mlog.String("marshaled_result", s))
 	var topology2 QueryCoordTopology
 	err = UnmarshalTopology(s, &topology2)
 	assert.Equal(t, nil, err)
@@ -165,7 +164,7 @@ func TestDataClusterTopology_Codec(t *testing.T) {
 	s, err := MarshalTopology(topology1)
 	assert.Equal(t, nil, err)
 	mlog.Info(context.TODO(), "TestDataClusterTopology_Codec",
-		zap.String("marshaled_result", s))
+		mlog.String("marshaled_result", s))
 	var topology2 DataClusterTopology
 	err = UnmarshalTopology(s, &topology2)
 	assert.Equal(t, nil, err)
@@ -224,7 +223,7 @@ func TestDataCoordTopology_Codec(t *testing.T) {
 	s, err := MarshalTopology(topology1)
 	assert.Equal(t, nil, err)
 	mlog.Info(context.TODO(), "TestDataCoordTopology_Codec",
-		zap.String("marshaled_result", s))
+		mlog.String("marshaled_result", s))
 	var topology2 DataCoordTopology
 	err = UnmarshalTopology(s, &topology2)
 	assert.Equal(t, nil, err)
@@ -256,7 +255,7 @@ func TestRootCoordTopology_Codec(t *testing.T) {
 	s, err := MarshalTopology(topology1)
 	assert.Equal(t, nil, err)
 	mlog.Info(context.TODO(), "TestRootCoordTopology_Codec",
-		zap.String("marshaled_result", s))
+		mlog.String("marshaled_result", s))
 	var topology2 RootCoordTopology
 	err = UnmarshalTopology(s, &topology2)
 	assert.Equal(t, nil, err)
@@ -286,7 +285,7 @@ func TestConnTopology_Codec(t *testing.T) {
 	s, err := MarshalTopology(topology1)
 	assert.Equal(t, nil, err)
 	mlog.Info(context.TODO(), "TestConnTopology_Codec",
-		zap.String("marshaled_result", s))
+		mlog.String("marshaled_result", s))
 	var topology2 ConnTopology
 	err = UnmarshalTopology(s, &topology2)
 	assert.Equal(t, nil, err)
@@ -331,6 +330,6 @@ func TestSystemTopology_Codec(t *testing.T) {
 	s, err := MarshalTopology(topology1)
 	assert.Equal(t, nil, err)
 	mlog.Info(context.TODO(), "TestSystemTopology_Codec",
-		zap.String("marshaled_result", s))
+		mlog.String("marshaled_result", s))
 	// no need to test unmarshal
 }

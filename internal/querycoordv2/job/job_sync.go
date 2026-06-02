@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
@@ -65,8 +64,8 @@ func (job *SyncNewCreatedPartitionJob) PreExecute() error {
 func (job *SyncNewCreatedPartitionJob) Execute() error {
 	req := job.req
 	log := mlog.With(
-		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Int64("partitionID", req.GetPartitionID()),
+		mlog.FieldCollectionID(req.GetCollectionID()),
+		mlog.FieldPartitionID(req.GetPartitionID()),
 	)
 
 	// check if collection not load or loadType is loadPartition
@@ -92,7 +91,7 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 	if err != nil {
 		msg := "failed to store partitions"
 		log.Warn(context.TODO(),
-			msg, zap.Error(err))
+			msg, mlog.Err(err))
 		return errors.Wrap(err, msg)
 	}
 

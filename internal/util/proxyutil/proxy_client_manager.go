@@ -23,7 +23,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -127,7 +126,7 @@ func (p *ProxyClientManager) SetProxyClients(sessions []*sessionutil.Session) {
 		if _, ok := aliveSessions[key]; !ok {
 			if cli, loaded := p.proxyClient.GetAndRemove(key); loaded {
 				cli.Close()
-				mlog.Info(context.TODO(), "remove stale proxy client", zap.Int64("serverID", key))
+				mlog.Info(context.TODO(), "remove stale proxy client", mlog.Int64("serverID", key))
 			}
 		}
 		return true
@@ -166,7 +165,7 @@ func (p *ProxyClientManager) updateProxyNumMetric() {
 func (p *ProxyClientManager) connect(session *sessionutil.Session) {
 	pc, err := p.creator(context.Background(), session.Address, session.ServerID)
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to create proxy client", zap.String("address", session.Address), zap.Int64("serverID", session.ServerID), zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to create proxy client", mlog.String("address", session.Address), mlog.Int64("serverID", session.ServerID), mlog.Err(err))
 		return
 	}
 
@@ -175,7 +174,7 @@ func (p *ProxyClientManager) connect(session *sessionutil.Session) {
 		pc.Close()
 		return
 	}
-	mlog.Info(context.TODO(), "succeed to create proxy client", zap.String("address", session.Address), zap.Int64("serverID", session.ServerID))
+	mlog.Info(context.TODO(), "succeed to create proxy client", mlog.String("address", session.Address), mlog.Int64("serverID", session.ServerID))
 	p.helper.afterConnect()
 }
 
@@ -186,7 +185,7 @@ func (p *ProxyClientManager) DelProxyClient(s *sessionutil.Session) {
 	}
 
 	p.updateProxyNumMetric()
-	mlog.Info(context.TODO(), "remove proxy client", zap.String("proxy address", s.Address), zap.Int64("proxy id", s.ServerID))
+	mlog.Info(context.TODO(), "remove proxy client", mlog.String("proxy address", s.Address), mlog.Int64("proxy id", s.ServerID))
 }
 
 func (p *ProxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest, opts ...ExpireCacheOpt) error {
@@ -208,7 +207,7 @@ func (p *ProxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 			sta, err := v.InvalidateCollectionMetaCache(ctx, request)
 			if err != nil {
 				if errors.Is(err, merr.ErrNodeNotFound) {
-					mlog.Warn(ctx, "InvalidateCollectionMetaCache failed due to proxy service not found", zap.Error(err))
+					mlog.Warn(ctx, "InvalidateCollectionMetaCache failed due to proxy service not found", mlog.Err(err))
 					return nil
 				}
 
@@ -458,7 +457,7 @@ func (p *ProxyClientManager) InvalidateShardLeaderCache(ctx context.Context, req
 			sta, err := v.InvalidateShardLeaderCache(ctx, request)
 			if err != nil {
 				if errors.Is(err, merr.ErrNodeNotFound) {
-					mlog.Warn(ctx, "InvalidateShardLeaderCache failed due to proxy service not found", zap.Error(err))
+					mlog.Warn(ctx, "InvalidateShardLeaderCache failed due to proxy service not found", mlog.Err(err))
 					return nil
 				}
 				return fmt.Errorf("InvalidateShardLeaderCache failed, proxyID = %d, err = %s", k, err)

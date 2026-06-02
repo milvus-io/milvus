@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -57,7 +56,7 @@ func (p *ReplicateStreamServer) sendLoop() (err error) {
 	ctx := p.streamServer.Context()
 	defer func() {
 		if err != nil {
-			mlog.Warn(ctx, "send arm of stream closed by unexpected error", zap.Error(err))
+			mlog.Warn(ctx, "send arm of stream closed by unexpected error", mlog.Err(err))
 			return
 		}
 		mlog.Info(ctx, "send arm of stream closed")
@@ -85,7 +84,7 @@ func (p *ReplicateStreamServer) recvLoop() (err error) {
 		p.wg.Wait()
 		close(p.replicateRespCh)
 		if err != nil {
-			mlog.Warn(ctx, "recv arm of stream closed by unexpected error", zap.Error(err))
+			mlog.Warn(ctx, "recv arm of stream closed by unexpected error", mlog.Err(err))
 			return
 		}
 		mlog.Info(ctx, "recv arm of stream closed")
@@ -106,7 +105,7 @@ func (p *ReplicateStreamServer) recvLoop() (err error) {
 				return err
 			}
 		default:
-			mlog.Warn(ctx, "unknown request type", zap.Any("request", req))
+			mlog.Warn(ctx, "unknown request type", mlog.Any("request", req))
 		}
 	}
 }
@@ -123,8 +122,8 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 	sourceTs := msg.ReplicateHeader().TimeTick
 	ctx := p.streamServer.Context()
 	mlog.Debug(ctx, "recv replicate message from client",
-		zap.String("messageID", reqMsg.GetId().GetId()),
-		zap.Uint64("sourceTimeTick", sourceTs),
+		mlog.String("messageID", reqMsg.GetId().GetId()),
+		mlog.Uint64("sourceTimeTick", sourceTs),
 		mlog.FieldMessage(msg),
 	)
 
@@ -135,12 +134,12 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 		return nil
 	}
 	if status.AsStreamingError(err).IsIgnoredOperation() {
-		mlog.Info(ctx, "append replicate message to wal ignored", mlog.FieldMessage(msg), zap.Error(err))
+		mlog.Info(ctx, "append replicate message to wal ignored", mlog.FieldMessage(msg), mlog.Err(err))
 		p.sendReplicateResult(sourceTs, msg)
 		return nil
 	}
 	// unexpected error, will close the stream and wait for client to reconnect.
-	mlog.Warn(ctx, "append replicate message to wal failed", mlog.FieldMessage(msg), zap.Error(err))
+	mlog.Warn(ctx, "append replicate message to wal failed", mlog.FieldMessage(msg), mlog.Err(err))
 	return err
 }
 
@@ -162,9 +161,9 @@ func (p *ReplicateStreamServer) sendReplicateResult(sourceTimeTick uint64, msg m
 	// all pending response message should be dropped, client side will handle it.
 	select {
 	case p.replicateRespCh <- resp:
-		mlog.Debug(ctx, "send replicate message response to client", zap.Uint64("confirmedTimeTick", sourceTimeTick))
+		mlog.Debug(ctx, "send replicate message response to client", mlog.Uint64("confirmedTimeTick", sourceTimeTick))
 	case <-ctx.Done():
-		mlog.Warn(ctx, "stream closed before replicate message response sent", zap.Uint64("confirmedTimeTick", sourceTimeTick))
+		mlog.Warn(ctx, "stream closed before replicate message response sent", mlog.Uint64("confirmedTimeTick", sourceTimeTick))
 		return
 	}
 }

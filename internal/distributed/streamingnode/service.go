@@ -26,7 +26,6 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
@@ -108,11 +107,11 @@ func (s *Server) Prepare() error {
 		netutil.OptHighPriorityToUsePort(paramtable.Get().StreamingNodeGrpcServerCfg.Port.GetAsInt()),
 	)
 	if err != nil {
-		mlog.Warn(s.ctx, "StreamingNode fail to create net listener", zap.Error(err))
+		mlog.Warn(s.ctx, "StreamingNode fail to create net listener", mlog.Err(err))
 		return err
 	}
 	s.listener = listener
-	mlog.Info(s.ctx, "StreamingNode listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
+	mlog.Info(s.ctx, "StreamingNode listen on", mlog.String("address", listener.Addr().String()), mlog.Int("port", listener.Port()))
 	paramtable.Get().Save(
 		paramtable.Get().StreamingNodeGrpcServerCfg.Port.Key,
 		strconv.FormatInt(int64(listener.Port()), 10))
@@ -143,12 +142,12 @@ func (s *Server) Stop() (err error) {
 func (s *Server) stop() {
 	s.componentState.OnStopping()
 
-	mlog.Info(s.ctx, "streamingnode stop", zap.String("Address", s.listener.Address()))
+	mlog.Info(s.ctx, "streamingnode stop", mlog.String("Address", s.listener.Address()))
 
 	// Unregister current server from etcd.
 	mlog.Info(s.ctx, "streamingnode unregister session from etcd...")
 	if err := s.session.GoingStop(); err != nil {
-		mlog.Warn(s.ctx, "streamingnode unregister session failed", zap.Error(err))
+		mlog.Warn(s.ctx, "streamingnode unregister session failed", mlog.Err(err))
 	}
 
 	// Stop StreamingNode service.
@@ -168,14 +167,14 @@ func (s *Server) stop() {
 
 	if s.mixCoord.Ready() {
 		if err := s.mixCoord.Get().Close(); err != nil {
-			mlog.Warn(s.ctx, "streamingnode stop mixCoord client failed", zap.Error(err))
+			mlog.Warn(s.ctx, "streamingnode stop mixCoord client failed", mlog.Err(err))
 		}
 	}
 
 	// Stop tikv
 	if s.tikvCli != nil {
 		if err := s.tikvCli.Close(); err != nil {
-			mlog.Warn(s.ctx, "streamingnode stop tikv client failed", zap.Error(err))
+			mlog.Warn(s.ctx, "streamingnode stop tikv client failed", mlog.Err(err))
 		}
 	}
 
@@ -186,7 +185,7 @@ func (s *Server) stop() {
 
 	s.cancel()
 	if err := s.listener.Close(); err != nil {
-		mlog.Warn(s.ctx, "streamingnode stop listener failed", zap.Error(err))
+		mlog.Warn(s.ctx, "streamingnode stop listener failed", mlog.Err(err))
 	}
 }
 
@@ -199,7 +198,7 @@ func (s *Server) Health(ctx context.Context) commonpb.StateCode {
 func (s *Server) init() (err error) {
 	defer func() {
 		if err != nil {
-			mlog.Error(s.ctx, "StreamingNode init failed", zap.Error(err))
+			mlog.Error(s.ctx, "StreamingNode init failed", mlog.Err(err))
 			return
 		}
 		mlog.Info(s.ctx, "init StreamingNode server finished")
@@ -235,7 +234,7 @@ func (s *Server) init() (err error) {
 func (s *Server) start() (err error) {
 	defer func() {
 		if err != nil {
-			mlog.Error(s.ctx, "StreamingNode start failed", zap.Error(err))
+			mlog.Error(s.ctx, "StreamingNode start failed", mlog.Err(err))
 			return
 		}
 		mlog.Info(s.ctx, "start StreamingNode server finished")
@@ -259,7 +258,7 @@ func (s *Server) initSession() error {
 	}
 	s.session.Init(typeutil.StreamingNodeRole, s.listener.Address(), false)
 	paramtable.SetNodeID(s.session.ServerID)
-	mlog.Info(s.ctx, "StreamingNode init session", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("node address", s.listener.Address()))
+	mlog.Info(s.ctx, "StreamingNode init session", mlog.FieldNodeID(paramtable.GetNodeID()), mlog.String("node address", s.listener.Address()))
 	return nil
 }
 
@@ -267,14 +266,14 @@ func (s *Server) initMeta() error {
 	params := paramtable.Get()
 	metaType := params.MetaStoreCfg.MetaStoreType.GetValue()
 
-	mlog.Info(s.ctx, "data coordinator connecting to metadata store", zap.String("metaType", metaType))
+	mlog.Info(s.ctx, "data coordinator connecting to metadata store", mlog.String("metaType", metaType))
 	metaRootPath := ""
 	switch metaType {
 	case util.MetaStoreTypeTiKV:
 		var err error
 		s.tikvCli, err = tikv.GetTiKVClient(&paramtable.Get().TiKVCfg)
 		if err != nil {
-			mlog.Warn(s.ctx, "Streamingnode init tikv client failed", zap.Error(err))
+			mlog.Warn(s.ctx, "Streamingnode init tikv client failed", mlog.Err(err))
 			return err
 		}
 		metaRootPath = params.TiKVCfg.MetaRootPath.GetValue()

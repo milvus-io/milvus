@@ -22,7 +22,6 @@ import (
 	"math"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -211,7 +210,7 @@ func getChannelJSON(node *QueryNode, collectionID int64) string {
 	stats := node.pipelineManager.GetChannelStats(collectionID)
 	ret, err := json.Marshal(stats)
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to marshal channels", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to marshal channels", mlog.Err(err))
 		return ""
 	}
 	return string(ret)
@@ -253,7 +252,7 @@ func getSegmentJSON(node *QueryNode, collectionID int64) string {
 
 	ret, err := json.Marshal(ms)
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to marshal segments", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to marshal segments", mlog.Err(err))
 		return ""
 	}
 	return string(ret)
@@ -266,12 +265,12 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 
 	usedDiskGB, totalDiskGB, err := hardware.GetDiskUsage(paramtable.Get().LocalStorageCfg.Path.GetValue())
 	if err != nil {
-		mlog.Warn(ctx, "get disk usage failed", zap.Error(err))
+		mlog.Warn(ctx, "get disk usage failed", mlog.Err(err))
 	}
 
 	ioWait, err := hardware.GetIOWait()
 	if err != nil {
-		mlog.Warn(ctx, "get iowait failed", zap.Error(err))
+		mlog.Warn(ctx, "get iowait failed", mlog.Err(err))
 	}
 
 	// Get jemalloc memory statistics

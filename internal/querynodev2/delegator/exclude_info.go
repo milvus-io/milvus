@@ -64,9 +64,9 @@ func (s *ExcludedSegments) logExcludeInfo(excludeInfo map[int64]uint64) {
 		timeTicks = append(timeTicks, ts)
 	}
 	mlog.Debug(context.TODO(), "add exclude info",
-		zap.Int("count", len(excludeInfo)),
-		zap.Int64s("segmentIDs", segmentIDs),
-		zap.Uint64s("timeTicks", timeTicks),
+		mlog.Int("count", len(excludeInfo)),
+		mlog.Int64s("segmentIDs", segmentIDs),
+		mlog.Uint64s("timeTicks", timeTicks),
 	)
 }
 
@@ -85,9 +85,9 @@ func (s *ExcludedSegments) CleanInvalid(ts uint64) {
 	if mlog.LevelEnabled(zap.DebugLevel) {
 		defer func() {
 			mlog.Debug(context.TODO(), "remove segment from exclude info",
-				zap.Int("count", len(removedSegmentIDs)),
-				zap.Uint64("ts", ts),
-				zap.Int64s("segmentIDs", removedSegmentIDs),
+				mlog.Int("count", len(removedSegmentIDs)),
+				mlog.Uint64("ts", ts),
+				mlog.Int64s("segmentIDs", removedSegmentIDs),
 			)
 		}()
 	}

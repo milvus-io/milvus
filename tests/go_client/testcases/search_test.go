@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
@@ -1148,7 +1147,7 @@ func TestSearchInvalidExpr(t *testing.T) {
 	// search with invalid expr
 	vectors := hp.GenSearchVectors(1, common.DefaultDim, entity.FieldTypeFloatVector)
 	for _, exprStruct := range common.InvalidExpressions {
-		mlog.Debug(context.TODO(), "TestSearchInvalidExpr", zap.String("expr", exprStruct.Expr))
+		mlog.Debug(context.TODO(), "TestSearchInvalidExpr", mlog.String("expr", exprStruct.Expr))
 		_, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
 			WithFilter(exprStruct.Expr).WithANNSField(common.DefaultFloatVecFieldName))
 		common.CheckErr(t, errSearch, exprStruct.ErrNil, exprStruct.ErrMsg)
@@ -1192,7 +1191,7 @@ func TestSearchJsonFieldExpr(t *testing.T) {
 		// search with jsonField expr key datatype and json data type mismatch
 		for _, expr := range exprs {
 			t.Run(fmt.Sprintf("expr=%s_dynamic-%t", expr, dynamicField), func(t *testing.T) {
-				mlog.Debug(context.TODO(), "TestSearchJsonFieldExpr", zap.String("expr", expr))
+				mlog.Debug(context.TODO(), "TestSearchJsonFieldExpr", mlog.String("expr", expr))
 				vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 				searchRes, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
 					WithFilter(expr).WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields(common.DefaultInt64FieldName, common.DefaultJSONFieldName))
@@ -1230,7 +1229,7 @@ func TestSearchDynamicFieldExpr(t *testing.T) {
 
 	// search with jsonField expr key datatype and json data type mismatch
 	for _, expr := range exprs {
-		mlog.Debug(context.TODO(), "TestSearchDynamicFieldExpr", zap.String("expr", expr))
+		mlog.Debug(context.TODO(), "TestSearchDynamicFieldExpr", mlog.String("expr", expr))
 		vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 		searchRes, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
 			WithFilter(expr).WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields(common.DefaultInt64FieldName, "dynamicNumber", "number"))
@@ -1613,7 +1612,7 @@ func TestRangeSearchSparseVector(t *testing.T) {
 	common.CheckErr(t, errSearch, true)
 	require.Len(t, resRange, common.DefaultNq)
 	for _, res := range resRange {
-		mlog.Info(context.TODO(), "default search", zap.Any("score", res.Scores))
+		mlog.Info(context.TODO(), "default search", mlog.Any("score", res.Scores))
 	}
 
 	annParams := index.NewSparseAnnParam()
@@ -1626,7 +1625,7 @@ func TestRangeSearchSparseVector(t *testing.T) {
 	common.CheckErr(t, errSearch, true)
 	require.Len(t, resRange, common.DefaultNq)
 	for _, res := range resRange {
-		mlog.Info(context.TODO(), "range search", zap.Any("score", res.Scores))
+		mlog.Info(context.TODO(), "range search", mlog.Any("score", res.Scores))
 	}
 	for _, res := range resRange {
 		for _, s := range res.Scores {

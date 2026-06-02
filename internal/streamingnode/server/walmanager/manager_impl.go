@@ -3,8 +3,6 @@ package walmanager
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor"
@@ -69,10 +67,10 @@ func (m *managerImpl) Open(ctx context.Context, channel types.PChannelInfo) (err
 	defer func() {
 		m.lifetime.Done()
 		if err != nil {
-			m.logger.Warn(ctx, "open wal failed", zap.Error(err), zap.String("channel", channel.String()))
+			m.logger.Warn(ctx, "open wal failed", mlog.Err(err), mlog.String("channel", channel.String()))
 			return
 		}
-		m.logger.Info(ctx, "open wal success", zap.String("channel", channel.String()))
+		m.logger.Info(ctx, "open wal success", mlog.String("channel", channel.String()))
 	}()
 
 	return m.getWALLifetime(channel.Name).Open(ctx, channel)
@@ -87,10 +85,10 @@ func (m *managerImpl) Remove(ctx context.Context, channel types.PChannelInfo) (e
 	defer func() {
 		m.lifetime.Done()
 		if err != nil {
-			m.logger.Warn(ctx, "remove wal failed", zap.Error(err), zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
+			m.logger.Warn(ctx, "remove wal failed", mlog.Err(err), mlog.String("channel", channel.Name), mlog.Int64("term", channel.Term))
 			return
 		}
-		m.logger.Info(ctx, "remove wal success", zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
+		m.logger.Info(ctx, "remove wal success", mlog.String("channel", channel.Name), mlog.Int64("term", channel.Term))
 	}()
 
 	return m.getWALLifetime(channel.Name).Remove(ctx, channel.Term)

@@ -22,7 +22,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -79,10 +78,10 @@ func WaitCollectionReleased(ctx context.Context, dist *meta.DistributionManager,
 		}
 
 		mlog.Info(ctx, "waitting for release...",
-			zap.Int64("collection", collection),
-			zap.Int64s("partitions", partitions),
-			zap.Int("channel", currentChannelCount),
-			zap.Int("segments", currentSegmentCount),
+			mlog.Int64("collection", collection),
+			mlog.Int64s("partitions", partitions),
+			mlog.Int("channel", currentChannelCount),
+			mlog.Int("segments", currentSegmentCount),
 		)
 
 		lastChannelCount = currentChannelCount

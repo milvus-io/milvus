@@ -14,7 +14,6 @@ import (
 	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
@@ -155,10 +154,10 @@ func (c *MiniClusterV3) init() {
 	}
 	c.SetLogger(c.Logger().With(
 		mlog.FieldComponent(process.MilvusClusterComponent),
-		zap.String("rootPath", c.rootPath)))
+		mlog.String("rootPath", c.rootPath)))
 
-	logger := c.Logger().With(zap.String("operation", "Init"))
-	logger.Info(c.ctx, "init mini cluster v3...", zap.Any("extraEnv", c.extraEnv))
+	logger := c.Logger().With(mlog.String("operation", "Init"))
+	logger.Info(c.ctx, "init mini cluster v3...", mlog.Any("extraEnv", c.extraEnv))
 	now := time.Now()
 
 	c.defaultMixCoord = c.AddMixCoord(WithoutWaitForReady())
@@ -168,11 +167,11 @@ func (c *MiniClusterV3) init() {
 	c.defaultStreamingNode = c.AddStreamingNode(WithoutWaitForReady())
 	c.Logger().Info(c.ctx,
 
-		"set default node for mini cluster v3 done", zap.Duration("cost", time.Since(now)))
+		"set default node for mini cluster v3 done", mlog.Duration("cost", time.Since(now)))
 	now = time.Now()
 
 	c.initClients()
-	logger.Info(c.ctx, "wait for all client ready", zap.Duration("cost", time.Since(now)))
+	logger.Info(c.ctx, "wait for all client ready", mlog.Duration("cost", time.Since(now)))
 	now = time.Now()
 
 	c.metaWatcher = &EtcdMetaWatcher{
@@ -187,7 +186,7 @@ func (c *MiniClusterV3) init() {
 		panic(err)
 	}
 	c.ChunkManager = cli
-	logger.Info(c.ctx, "init mini cluster v3 done", zap.Duration("cost", time.Since(now)))
+	logger.Info(c.ctx, "init mini cluster v3 done", mlog.Duration("cost", time.Since(now)))
 }
 
 // initClients initializes the clients.
@@ -249,7 +248,7 @@ func (c *MiniClusterV3) MustModifyMilvusConfig(kvs map[string]string) func() {
 		}
 		c.Logger().Info(c.ctx,
 
-			"modify milvus config done", zap.String("key", key), zap.String("value", value))
+			"modify milvus config done", mlog.String("key", key), mlog.String("value", value))
 		keys = append(keys, key)
 	}
 	// wait for the config to be refreshed.
@@ -262,7 +261,7 @@ func (c *MiniClusterV3) MustModifyMilvusConfig(kvs map[string]string) func() {
 			}
 			c.Logger().Info(c.ctx,
 
-				"revert milvus config done", zap.String("key", key))
+				"revert milvus config done", mlog.String("key", key))
 		}
 		// wait for the config to be reverted.
 		time.Sleep(c.configRefreshInterval * 2)
@@ -297,22 +296,22 @@ func (c *MiniClusterV3) GetContext() context.Context {
 }
 
 func (c *MiniClusterV3) Reset() {
-	logger := c.Logger().With(zap.String("operation", "Reset"))
+	logger := c.Logger().With(mlog.String("operation", "Reset"))
 
 	logger.Info(c.ctx, "reset mini cluster v3...")
 	now := time.Now()
 
 	c.clearRedundantNodes()
-	logger.Info(c.ctx, "clear redundant nodes done", zap.Duration("cost", time.Since(now)))
+	logger.Info(c.ctx, "clear redundant nodes done", mlog.Duration("cost", time.Since(now)))
 	now = time.Now()
 
 	c.resetDefaultNodes()
-	logger.Info(c.ctx, "reset default nodes done", zap.Duration("cost", time.Since(now)))
+	logger.Info(c.ctx, "reset default nodes done", mlog.Duration("cost", time.Since(now)))
 	now = time.Now()
 
 	c.initClients()
 	// wait for all client ready.
-	logger.Info(c.ctx, "wait for all client ready", zap.Duration("cost", time.Since(now)))
+	logger.Info(c.ctx, "wait for all client ready", mlog.Duration("cost", time.Since(now)))
 }
 
 // clearRedundantNodes clears redundant nodes, only keep one working node for each role.
@@ -530,7 +529,7 @@ func (c *MiniClusterV3) AddMixCoord(opts ...ClusterOperationOpt) (mp *process.Mi
 func (c *MiniClusterV3) AddQueryNodes(num int, opts ...ClusterOperationOpt) (mps []*process.QueryNodeProcess) {
 	c.Logger().Info(c.ctx,
 
-		"add query nodes to the cluster", zap.Int("num", num))
+		"add query nodes to the cluster", mlog.Int("num", num))
 
 	opt := c.getClusterOperationOpt(opts...)
 	defer func() {

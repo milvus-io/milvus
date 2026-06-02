@@ -25,7 +25,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -129,7 +128,7 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 	if err != nil {
 		return err
 	}
-	mlog.Info(ctx, "recover collections from kv store", zap.Duration("dur", time.Since(start)))
+	mlog.Info(ctx, "recover collections from kv store", mlog.Duration("dur", time.Since(start)))
 
 	start = time.Now()
 	partitions, err := m.catalog.GetPartitions(ctx, lo.Map(collections, func(collection *querypb.CollectionLoadInfo, _ int) int64 {
@@ -139,13 +138,13 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 		return err
 	}
 
-	mlog.Info(ctx, "recover partitions from kv store", zap.Duration("dur", time.Since(start)))
+	mlog.Info(ctx, "recover partitions from kv store", mlog.Duration("dur", time.Since(start)))
 
 	for _, collection := range collections {
 		if collection.GetReplicaNumber() <= 0 {
 			mlog.Info(ctx, "skip recovery and release collection due to invalid replica number",
-				zap.Int64("collectionID", collection.GetCollectionID()),
-				zap.Int32("replicaNumber", collection.GetReplicaNumber()))
+				mlog.FieldCollectionID(collection.GetCollectionID()),
+				mlog.Int32("replicaNumber", collection.GetReplicaNumber()))
 			m.catalog.ReleaseCollection(ctx, collection.GetCollectionID())
 			continue
 		}
@@ -154,8 +153,8 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 			if collection.RecoverTimes >= paramtable.Get().QueryCoordCfg.CollectionRecoverTimesLimit.GetAsInt32() {
 				m.catalog.ReleaseCollection(ctx, collection.CollectionID)
 				mlog.Info(ctx, "recover loading collection times reach limit, release collection",
-					zap.Int64("collectionID", collection.CollectionID),
-					zap.Int32("recoverTimes", collection.RecoverTimes))
+					mlog.FieldCollectionID(collection.CollectionID),
+					mlog.Int32("recoverTimes", collection.RecoverTimes))
 				break
 			}
 			// update recoverTimes meta in etcd
@@ -169,7 +168,7 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 			if errors.Is(err, merr.ErrCollectionNotFound) {
 				mlog.Warn(ctx, "collection not found, skip upgrade logic and wait for release")
 			} else {
-				mlog.Warn(ctx, "upgrade load field failed", zap.Error(err))
+				mlog.Warn(ctx, "upgrade load field failed", mlog.Err(err))
 				return err
 			}
 		}
@@ -191,8 +190,8 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 				if partition.RecoverTimes >= paramtable.Get().QueryCoordCfg.CollectionRecoverTimesLimit.GetAsInt32() {
 					m.catalog.ReleaseCollection(ctx, collection)
 					mlog.Info(ctx, "recover loading partition times reach limit, release collection",
-						zap.Int64("collectionID", collection),
-						zap.Int32("recoverTimes", partition.RecoverTimes))
+						mlog.FieldCollectionID(collection),
+						mlog.Int32("recoverTimes", partition.RecoverTimes))
 					released = true
 					break
 				}

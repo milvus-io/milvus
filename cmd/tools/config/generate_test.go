@@ -39,7 +39,7 @@ func TestYamlFile(t *testing.T) {
 	base := paramtable.NewBaseTable()
 	f, err := os.Open(fmt.Sprintf("%s/%s", base.GetConfigDir(), "milvus.yaml"))
 	assert.NoError(t, err, "expecting configs/milvus.yaml")
-	mlog.Info(context.TODO(), "Verifying config", zap.String("file", f.Name()))
+	mlog.Info(context.TODO(), "Verifying config", mlog.String("file", f.Name()))
 	defer f.Close()
 	fileScanner := bufio.NewScanner(f)
 	codeScanner := bufio.NewScanner(&w)

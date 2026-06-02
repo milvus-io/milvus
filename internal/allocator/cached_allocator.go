@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
@@ -256,8 +255,8 @@ func (ta *CachedAllocator) failRemainRequest() {
 	}
 	if len(ta.ToDoReqs) > 0 {
 		mlog.Warn(context.TODO(), "Allocator has some reqs to fail",
-			zap.String("Role", ta.Role),
-			zap.Int("reqLen", len(ta.ToDoReqs)))
+			mlog.String("Role", ta.Role),
+			mlog.Int("reqLen", len(ta.ToDoReqs)))
 	}
 	for _, req := range ta.ToDoReqs {
 		if req != nil {

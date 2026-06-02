@@ -26,7 +26,6 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -429,8 +428,8 @@ func (s *DataNodeServicesSuite) TestGetMetrics() {
 	s.Assert().NoError(err)
 	s.Assert().True(merr.Ok(resp.GetStatus()))
 	mlog.Info(s.ctx, "Test DataNode.GetMetrics",
-		zap.String("name", resp.ComponentName),
-		zap.String("response", resp.Response))
+		mlog.String("name", resp.ComponentName),
+		mlog.String("response", resp.Response))
 }
 
 func (s *DataNodeServicesSuite) TestResendSegmentStats() {

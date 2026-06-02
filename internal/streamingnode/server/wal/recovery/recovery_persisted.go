@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -29,8 +28,8 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 	r.metrics.ObserveStateChange(recoveryStorageStatePersistRecovering)
 	r.SetLogger(resource.Resource().Logger().With(
 		mlog.FieldComponent(componentRecoveryStorage),
-		zap.String("channel", channelInfo.String()),
-		zap.String("state", recoveryStorageStatePersistRecovering),
+		mlog.String("channel", channelInfo.String()),
+		mlog.String("state", recoveryStorageStatePersistRecovering),
 	))
 
 	catalog := resource.Resource().StreamingNodeCatalog()
@@ -43,9 +42,9 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 		r.checkpoint = utility.NewWALCheckpointFromProto(cpProto)
 	}
 	r.Logger().Info(ctx, "recover checkpoint done",
-		zap.String("checkpoint", r.checkpoint.MessageID.String()),
-		zap.Uint64("timetick", r.checkpoint.TimeTick),
-		zap.Int64("magic", r.checkpoint.Magic),
+		mlog.String("checkpoint", r.checkpoint.MessageID.String()),
+		mlog.Uint64("timetick", r.checkpoint.TimeTick),
+		mlog.Int64("magic", r.checkpoint.Magic),
 	)
 
 	fVChannel := conc.Go(func() (struct{}, error) {
@@ -55,7 +54,7 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 			return struct{}{}, errors.Wrap(err, "failed to get vchannel from catalog")
 		}
 		r.vchannels = newVChannelRecoveryInfoFromVChannelMeta(vchannels)
-		r.Logger().Info(ctx, "recovery vchannel info done", zap.Int("vchannels", len(r.vchannels)))
+		r.Logger().Info(ctx, "recovery vchannel info done", mlog.Int("vchannels", len(r.vchannels)))
 		return struct{}{}, nil
 	})
 
@@ -66,7 +65,7 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 			return struct{}{}, errors.Wrap(err, "failed to get segment assignment from catalog")
 		}
 		r.segments = newSegmentRecoveryInfoFromSegmentAssignmentMeta(segmentAssign)
-		r.Logger().Info(ctx, "recover segment info done", zap.Int("segments", len(r.segments)))
+		r.Logger().Info(ctx, "recover segment info done", mlog.Int("segments", len(r.segments)))
 		return struct{}{}, nil
 	})
 	if err := conc.BlockOnAll(fVChannel, fSegment); err != nil {
@@ -161,11 +160,11 @@ func (r *recoveryStorageImpl) initializeRecoverInfo(ctx context.Context, channel
 		return nil, errors.Wrap(err, "failed to save checkpoint to catalog")
 	}
 	r.Logger().Info(ctx, "initialize checkpoint done",
-		zap.Int("vchannels", len(vchannels)),
-		zap.String("checkpoint", checkpoint.MessageId.String()),
-		zap.Uint64("timetick", checkpoint.TimeTick),
-		zap.Int64("magic", checkpoint.RecoveryMagic),
-		zap.Any("alterWALState", checkpoint.AlterWalState),
+		mlog.Int("vchannels", len(vchannels)),
+		mlog.String("checkpoint", checkpoint.MessageId.String()),
+		mlog.Uint64("timetick", checkpoint.TimeTick),
+		mlog.Int64("magic", checkpoint.RecoveryMagic),
+		mlog.Any("alterWALState", checkpoint.AlterWalState),
 	)
 	return checkpoint, nil
 }

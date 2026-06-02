@@ -21,7 +21,6 @@ import (
 	"crypto/tls"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -61,8 +60,8 @@ func NewMilvusClient(ctx context.Context, cluster *commonpb.MilvusCluster) (Milv
 	if authority := paramtable.Get().ProxyGrpcServerCfg.GetClusterAuthority(cluster.GetClusterId()); authority != "" {
 		config.WithGrpcAuthority(authority)
 		mlog.Info(ctx, "CDC outbound gRPC authority set",
-			zap.String("targetCluster", cluster.GetClusterId()),
-			zap.String("authority", authority))
+			mlog.String("targetCluster", cluster.GetClusterId()),
+			mlog.String("authority", authority))
 	}
 
 	cli, err := milvusclient.New(ctx, config)
@@ -83,10 +82,10 @@ func buildCDCTLSConfig(clusterID string) (*tls.Config, error) {
 	}
 
 	mlog.Info(context.TODO(), "CDC outbound TLS enabled",
-		zap.String("targetCluster", clusterID),
-		zap.String("caPemPath", caPemPath),
-		zap.String("clientPemPath", clientPemPath),
-		zap.String("clientKeyPath", clientKeyPath))
+		mlog.String("targetCluster", clusterID),
+		mlog.String("caPemPath", caPemPath),
+		mlog.String("clientPemPath", clientPemPath),
+		mlog.String("clientKeyPath", clientKeyPath))
 
 	return milvusclient.BuildTLSConfig(caPemPath, clientPemPath, clientKeyPath)
 }

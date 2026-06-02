@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 	// "github.com/twpayne/go-geom/encoding/wkb"
 	// "github.com/twpayne/go-geom/encoding/wkt"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
@@ -44,7 +43,7 @@ func CheckErr(t *testing.T, actualErr error, expErrNil bool, expErrorMsg ...stri
 		require.Error(t, actualErr, trace())
 		switch len(expErrorMsg) {
 		case 0:
-			mlog.Fatal(context.TODO(), "expect error message should not be empty", zap.String("trace", trace()))
+			mlog.Fatal(context.TODO(), "expect error message should not be empty", mlog.String("trace", trace()))
 		case 1:
 			require.ErrorContains(t, actualErr, expErrorMsg[0], trace())
 		default:
@@ -115,8 +114,8 @@ func EqualColumn(t *testing.T, columnA column.Column, columnB column.Column) {
 	case entity.FieldTypeVarChar:
 		require.ElementsMatch(t, columnA.(*column.ColumnVarChar).Data(), columnB.(*column.ColumnVarChar).Data())
 	case entity.FieldTypeJSON:
-		mlog.Debug(context.TODO(), "data", zap.String("name", columnA.Name()), zap.Any("type", columnA.Type()), zap.Any("data", columnA.FieldData()))
-		mlog.Debug(context.TODO(), "data", zap.String("name", columnB.Name()), zap.Any("type", columnB.Type()), zap.Any("data", columnB.FieldData()))
+		mlog.Debug(context.TODO(), "data", mlog.String("name", columnA.Name()), mlog.Any("type", columnA.Type()), mlog.Any("data", columnA.FieldData()))
+		mlog.Debug(context.TODO(), "data", mlog.String("name", columnB.Name()), mlog.Any("type", columnB.Type()), mlog.Any("data", columnB.FieldData()))
 		require.Equal(t, reflect.TypeOf(columnA), reflect.TypeOf(columnB))
 		switch _v := columnA.(type) {
 		case *column.ColumnDynamic:
@@ -124,7 +123,7 @@ func EqualColumn(t *testing.T, columnA column.Column, columnB column.Column) {
 		case *column.ColumnJSONBytes:
 			require.ElementsMatch(t, columnA.(*column.ColumnJSONBytes).Data(), columnB.(*column.ColumnJSONBytes).Data())
 		default:
-			mlog.Warn(context.TODO(), "columnA type", zap.String("name", columnB.Name()), zap.Any("type", _v))
+			mlog.Warn(context.TODO(), "columnA type", mlog.String("name", columnB.Name()), mlog.Any("type", _v))
 		}
 	// case entity.FieldTypeGeometry:
 	// 	// currently proxy transform wkb to wkt,the query output wkt has different precision with client input(omit trailing zeros),and omit omissible bracket
@@ -151,7 +150,7 @@ func EqualColumn(t *testing.T, columnA column.Column, columnB column.Column) {
 	case entity.FieldTypeArray:
 		EqualArrayColumn(t, columnA, columnB)
 	default:
-		mlog.Info(context.TODO(), "Support column type is:", zap.Any("FieldType", []entity.FieldType{
+		mlog.Info(context.TODO(), "Support column type is:", mlog.Any("FieldType", []entity.FieldType{
 			entity.FieldTypeBool,
 			entity.FieldTypeInt8, entity.FieldTypeInt16, entity.FieldTypeInt32,
 			entity.FieldTypeInt64, entity.FieldTypeFloat, entity.FieldTypeDouble, entity.FieldTypeString,
@@ -183,8 +182,8 @@ func EqualArrayColumn(t *testing.T, columnA column.Column, columnB column.Column
 	case *column.ColumnVarCharArray:
 		require.ElementsMatch(t, columnA.(*column.ColumnVarCharArray).Data(), columnB.(*column.ColumnVarCharArray).Data())
 	default:
-		mlog.Debug(context.TODO(), "columnA type is", zap.Any("type", _type))
-		mlog.Info(context.TODO(), "Support array element type is:", zap.Any("FieldType", []entity.FieldType{
+		mlog.Debug(context.TODO(), "columnA type is", mlog.Any("type", _type))
+		mlog.Info(context.TODO(), "Support array element type is:", mlog.Any("FieldType", []entity.FieldType{
 			entity.FieldTypeBool, entity.FieldTypeInt8, entity.FieldTypeInt16,
 			entity.FieldTypeInt32, entity.FieldTypeInt64, entity.FieldTypeFloat, entity.FieldTypeDouble, entity.FieldTypeVarChar,
 		}))
@@ -208,7 +207,7 @@ func CheckFieldsDefaultValue(t *testing.T, expDefaultValueFields map[string]inte
 		mlog.Warn(context.TODO(), "expDefaultValueFields is empty")
 		return
 	}
-	mlog.Info(context.TODO(), "CheckFieldsDefaultValue", zap.Any("expDefaultValueFields", expDefaultValueFields), zap.Any("actualSchema", actualSchema))
+	mlog.Info(context.TODO(), "CheckFieldsDefaultValue", mlog.Any("expDefaultValueFields", expDefaultValueFields), mlog.Any("actualSchema", actualSchema))
 	actualDefaultValueFields := make([]string, 0)
 	// check expDefaultValueFields is in actualSchema.Fields and default value is equal to expDefaultValueFields
 	for _, field := range actualSchema.Fields {
@@ -229,7 +228,7 @@ func CheckFieldsDefaultValue(t *testing.T, expDefaultValueFields map[string]inte
 				require.Equal(t, expDefaultValueFields[field.Name], field.DefaultValue.GetStringData())
 			}
 		} else {
-			mlog.Warn(context.TODO(), "CheckFieldsDefaultValue: field skip check", zap.String("fieldName", field.Name))
+			mlog.Warn(context.TODO(), "CheckFieldsDefaultValue: field skip check", mlog.String("fieldName", field.Name))
 		}
 	}
 	actualDefaultValueFieldsKeys := make([]string, 0, len(expDefaultValueFields))
@@ -251,7 +250,7 @@ func CheckInsertResult(t *testing.T, expIDs column.Column, insertRes client.Inse
 	case entity.FieldTypeVarChar:
 		require.ElementsMatch(t, actualIDs.(*column.ColumnVarChar).Data(), expIDs.(*column.ColumnVarChar).Data())
 	default:
-		mlog.Info(context.TODO(), "The primary field only support ", zap.Any("type", []entity.FieldType{entity.FieldTypeInt64, entity.FieldTypeVarChar}))
+		mlog.Info(context.TODO(), "The primary field only support ", mlog.Any("type", []entity.FieldType{entity.FieldTypeInt64, entity.FieldTypeVarChar}))
 	}
 }
 
@@ -261,7 +260,7 @@ func CheckOutputFields(t *testing.T, expFields []string, actualColumns []column.
 	for _, actualColumn := range actualColumns {
 		actualFields = append(actualFields, actualColumn.Name())
 	}
-	mlog.Debug(context.TODO(), "CheckOutputFields", zap.Any("expFields", expFields), zap.Any("actualFields", actualFields))
+	mlog.Debug(context.TODO(), "CheckOutputFields", mlog.Any("expFields", expFields), mlog.Any("actualFields", actualFields))
 	require.ElementsMatchf(t, expFields, actualFields, fmt.Sprintf("Expected search output fields: %v, actual: %v", expFields, actualFields))
 }
 
@@ -289,7 +288,7 @@ func CheckQueryResult(t *testing.T, expColumns []column.Column, actualColumns []
 			}
 		}
 		if !exist {
-			mlog.Error(context.TODO(), "CheckQueryResult actualColumns no column", zap.String("name", expColumn.Name()))
+			mlog.Error(context.TODO(), "CheckQueryResult actualColumns no column", mlog.String("name", expColumn.Name()))
 		}
 	}
 }
@@ -327,7 +326,7 @@ func CheckSearchIteratorResult(ctx context.Context, t *testing.T, itr client.Sea
 			if err == io.EOF {
 				break
 			} else {
-				mlog.Error(ctx, "SearchIterator next gets error", zap.Error(err))
+				mlog.Error(ctx, "SearchIterator next gets error", mlog.Err(err))
 				break
 			}
 		}
@@ -346,7 +345,7 @@ func CheckSearchIteratorResult(ctx context.Context, t *testing.T, itr client.Sea
 	}
 	require.Equal(t, expLimit, actualLimit)
 	if opt.expBatchSize != nil {
-		mlog.Debug(ctx, "SearchIterator result len", zap.Any("result len", actualBatchSize))
+		mlog.Debug(ctx, "SearchIterator result len", mlog.Any("result len", actualBatchSize))
 		require.True(t, EqualIntSlice(opt.expBatchSize, actualBatchSize))
 	}
 }
@@ -365,7 +364,7 @@ func CheckQueryIteratorResult(ctx context.Context, t *testing.T, itr client.Quer
 			if err == io.EOF {
 				break
 			} else {
-				mlog.Error(ctx, "QueryIterator next gets error", zap.Error(err))
+				mlog.Error(ctx, "QueryIterator next gets error", mlog.Err(err))
 				break
 			}
 		}
@@ -384,7 +383,7 @@ func CheckQueryIteratorResult(ctx context.Context, t *testing.T, itr client.Quer
 	}
 	require.Equal(t, expLimit, actualLimit)
 	if opt.expBatchSize != nil {
-		mlog.Debug(ctx, "QueryIterator result len", zap.Any("result len", actualBatchSize))
+		mlog.Debug(ctx, "QueryIterator result len", mlog.Any("result len", actualBatchSize))
 		require.True(t, EqualIntSlice(opt.expBatchSize, actualBatchSize))
 	}
 }
@@ -400,7 +399,7 @@ func CheckPartialResult(t *testing.T, expColumns []column.Column, actualColumns 
 			}
 		}
 		if !exist {
-			mlog.Error(context.TODO(), "CheckQueryResult actualColumns no column", zap.String("name", expColumn.Name()))
+			mlog.Error(context.TODO(), "CheckQueryResult actualColumns no column", mlog.String("name", expColumn.Name()))
 		}
 	}
 }

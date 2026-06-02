@@ -83,7 +83,7 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 	for partitionID := range collectionInfo.PartitionIDs {
 		uniqueKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
 		if _, ok := m.partitionManagers[uniqueKey]; ok {
-			logger.Warn(m.ctx, "partition already exists", zap.Int64("partitionID", partitionID))
+			logger.Warn(m.ctx, "partition already exists", mlog.FieldPartitionID(partitionID))
 			continue
 		}
 		m.partitionManagers[uniqueKey] = newPartitionSegmentManager(
@@ -100,7 +100,7 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 			m.metrics,
 		)
 	}
-	logger.Info(m.ctx, "collection created in segment assignment service", zap.Int64s("partitionIDs", partitionIDs))
+	logger.Info(m.ctx, "collection created in segment assignment service", mlog.Int64s("partitionIDs", partitionIDs))
 	m.updateMetrics()
 }
 
@@ -128,7 +128,7 @@ func (m *shardManagerImpl) DropCollection(msg message.ImmutableDropCollectionMes
 		uniqueKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
 		pm, ok := m.partitionManagers[uniqueKey]
 		if !ok {
-			logger.Warn(m.ctx, "partition not exists", zap.Int64("partitionID", partitionID))
+			logger.Warn(m.ctx, "partition not exists", mlog.FieldPartitionID(partitionID))
 			continue
 		}
 		// Flush all segments and fence assign to the partition manager.
@@ -137,7 +137,7 @@ func (m *shardManagerImpl) DropCollection(msg message.ImmutableDropCollectionMes
 		segmentIDs = append(segmentIDs, segments...)
 		delete(m.partitionManagers, uniqueKey)
 	}
-	logger.Info(m.ctx, "collection removed", zap.Int64s("partitionIDs", partitionIDs), zap.Int64s("segmentIDs", segmentIDs))
+	logger.Info(m.ctx, "collection removed", mlog.Int64s("partitionIDs", partitionIDs), mlog.Int64s("segmentIDs", segmentIDs))
 	m.updateMetrics()
 }
 
@@ -153,7 +153,7 @@ func (m *shardManagerImpl) AlterCollection(msg message.MutableAlterCollectionMes
 	defer m.mu.Unlock()
 
 	if err := m.checkIfCollectionExists(collectionID); err != nil {
-		logger.Warn(m.ctx, "collection not found when altering collection", zap.Int64("collectionID", collectionID))
+		logger.Warn(m.ctx, "collection not found when altering collection", mlog.FieldCollectionID(collectionID))
 		return nil, err
 	}
 
@@ -167,7 +167,7 @@ func (m *shardManagerImpl) AlterCollection(msg message.MutableAlterCollectionMes
 		if err != nil {
 			return nil, err
 		}
-		logger.Info(m.ctx, "flushed segments on schema change", zap.Int64s("segmentIDs", segmentIDs))
+		logger.Info(m.ctx, "flushed segments on schema change", mlog.Int64s("segmentIDs", segmentIDs))
 
 		schema := msg.MustBody().Updates.Schema
 		if schema == nil {
@@ -175,7 +175,7 @@ func (m *shardManagerImpl) AlterCollection(msg message.MutableAlterCollectionMes
 			// malformed message; fail fast to avoid nil-pointer dereferences
 			// in downstream GetSchema paths.
 			logger.Error(m.ctx, "schema change indicated by UpdateMask but schema body is nil",
-				zap.Int64("collectionID", collectionID))
+				mlog.FieldCollectionID(collectionID))
 			return nil, errors.New("schema change message has nil schema body")
 		}
 		collectionInfo := m.collections[collectionID]
@@ -185,9 +185,9 @@ func (m *shardManagerImpl) AlterCollection(msg message.MutableAlterCollectionMes
 			State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
 		}
 		logger.Info(m.ctx, "updated collection schema in shard manager",
-			zap.Int64("collectionID", collectionID),
-			zap.Int32("schemaVersion", schema.GetVersion()),
-			zap.Uint64("checkpointTimeTick", timetick))
+			mlog.FieldCollectionID(collectionID),
+			mlog.Int32("schemaVersion", schema.GetVersion()),
+			mlog.Uint64("checkpointTimeTick", timetick))
 	}
 
 	return segmentIDs, nil
@@ -204,7 +204,7 @@ func (m *shardManagerImpl) checkIfCollectionSchemaVersionMatch(header *message.I
 	collectionID := header.GetCollectionId()
 	collectionInfo, ok := m.collections[collectionID]
 	if !ok {
-		m.Logger().Warn(m.ctx, "collection not found", zap.Int64("collectionID", collectionID))
+		m.Logger().Warn(m.ctx, "collection not found", mlog.FieldCollectionID(collectionID))
 		return -1, ErrCollectionNotFound
 	}
 	// Input schemaVersion 0 means the proxy did not set it (old proxy or old SDK).
@@ -215,15 +215,15 @@ func (m *shardManagerImpl) checkIfCollectionSchemaVersionMatch(header *message.I
 	}
 
 	if collectionInfo.Schema == nil || collectionInfo.Schema.GetSchema() == nil {
-		m.Logger().Warn(m.ctx, "collection schema not found", zap.Int64("collectionID", collectionID))
+		m.Logger().Warn(m.ctx, "collection schema not found", mlog.FieldCollectionID(collectionID))
 		return -1, ErrCollectionSchemaNotFound
 	}
 
 	collectionSchemaVersion := collectionInfo.SchemaVersion()
 	if collectionSchemaVersion != header.GetSchemaVersion() {
-		m.Logger().Warn(m.ctx, "collection schema version not match", zap.Int64("collectionID", collectionID),
-			zap.Int32("schemaVersion", header.GetSchemaVersion()),
-			zap.Int32("collectionSchemaVersion", collectionSchemaVersion))
+		m.Logger().Warn(m.ctx, "collection schema version not match", mlog.FieldCollectionID(collectionID),
+			mlog.Int32("schemaVersion", header.GetSchemaVersion()),
+			mlog.Int32("collectionSchemaVersion", collectionSchemaVersion))
 		return collectionSchemaVersion, ErrCollectionSchemaVersionNotMatch
 	}
 

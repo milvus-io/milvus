@@ -21,7 +21,6 @@ import (
 	"sync"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
@@ -154,7 +153,7 @@ func (c *metaCacheImpl) addSegment(segment *SegmentInfo) {
 
 func (c *metaCacheImpl) RemoveSegments(filters ...SegmentFilter) []int64 {
 	if len(filters) == 0 {
-		mlog.Warn(context.TODO(), "remove segment without filters is not allowed", zap.Stack("callstack"))
+		mlog.Warn(context.TODO(), "remove segment without filters is not allowed", mlog.Stack("callstack"))
 		return nil
 	}
 	c.mu.Lock()
@@ -303,7 +302,7 @@ func (c *metaCacheImpl) UpdateSegmentView(partitionID int64,
 			}
 			c.segmentInfos[info.GetSegmentId()] = segInfo
 			c.stateSegments[info.GetState()][info.GetSegmentId()] = segInfo
-			mlog.Info(context.TODO(), "metacache does not have segment, add it", zap.Int64("segmentID", info.GetSegmentId()))
+			mlog.Info(context.TODO(), "metacache does not have segment, add it", mlog.FieldSegmentID(info.GetSegmentId()))
 		}
 	}
 
@@ -315,7 +314,7 @@ func (c *metaCacheImpl) UpdateSegmentView(partitionID int64,
 			continue
 		}
 		if _, ok := allSegments[segID]; !ok {
-			mlog.Info(context.TODO(), "remove dropped segment", zap.Int64("segmentID", segID))
+			mlog.Info(context.TODO(), "remove dropped segment", mlog.FieldSegmentID(segID))
 			delete(c.segmentInfos, segID)
 			delete(c.stateSegments[info.State()], segID)
 		}

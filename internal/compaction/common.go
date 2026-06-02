@@ -21,7 +21,6 @@ import (
 	"io"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -108,7 +107,7 @@ func readDeltalogsV1(
 		}
 	}
 
-	mlog.Info(ctx, "read V1 deltalogs", zap.Int("entries", len(allPks)))
+	mlog.Info(ctx, "read V1 deltalogs", mlog.Int("entries", len(allPks)))
 	return allPks, allTss, nil
 }
 
@@ -131,7 +130,7 @@ func readDeltalogsV2(
 		return nil, nil, err
 	}
 
-	mlog.Info(ctx, "read V2 deltalogs", zap.Int("entries", len(pks)))
+	mlog.Info(ctx, "read V2 deltalogs", mlog.Int("entries", len(pks)))
 	return pks, tss, nil
 }
 

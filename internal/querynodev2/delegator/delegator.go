@@ -30,7 +30,6 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 
@@ -193,9 +192,9 @@ type shardDelegator struct {
 // getLogger returns the zap logger with pre-defined shard attributes.
 func (sd *shardDelegator) getLogger(ctx context.Context) *mlog.Logger {
 	return mlog.With(
-		zap.Int64("collectionID", sd.collectionID),
-		zap.String("channel", sd.vchannelName),
-		zap.Int64("replicaID", sd.replicaID),
+		mlog.FieldCollectionID(sd.collectionID),
+		mlog.String("channel", sd.vchannelName),
+		mlog.Int64("replicaID", sd.replicaID),
 	)
 }
 
@@ -338,7 +337,7 @@ func (sd *shardDelegator) executeSearchSubTasks(
 	log := sd.getLogger(ctx)
 	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, sd.modifySearchRequest)
 	if err != nil {
-		mlog.Warn(ctx, "Search organizeSubTask failed", zap.Error(err))
+		mlog.Warn(ctx, "Search organizeSubTask failed", mlog.Err(err))
 		return nil, err
 	}
 
@@ -352,11 +351,11 @@ func (sd *shardDelegator) executeSearchSubTasks(
 			return resp, err
 		}, "Search", log)
 	if err != nil {
-		mlog.Warn(ctx, "Delegator search failed", zap.Error(err))
+		mlog.Warn(ctx, "Delegator search failed", mlog.Err(err))
 		return nil, err
 	}
 
-	mlog.Debug(ctx, "Delegator search done", zap.Int("results", len(results)))
+	mlog.Debug(ctx, "Delegator search done", mlog.Int("results", len(results)))
 	return results, nil
 }
 
@@ -406,9 +405,9 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 	effectiveSegmentNum := optimizers.CalculateEffectiveSegmentNum(sd.queryHook, rowCounts, req.GetReq().GetTopk())
 
 	mlog.Debug(ctx, "search segments...",
-		zap.Int("sealedNum", sealedNum),
-		zap.Int("growingNum", len(growing)),
-		zap.Int("effectiveSegmentNum", effectiveSegmentNum),
+		mlog.Int("sealedNum", sealedNum),
+		mlog.Int("growingNum", len(growing)),
+		mlog.Int("effectiveSegmentNum", effectiveSegmentNum),
 	)
 
 	if optimizers.ShouldUseTwoStageSearch(req, effectiveSegmentNum) {
@@ -426,7 +425,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 	const isSecondStageSearch = false
 	req, err = optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch, sd.getVectorFieldDim)
 	if err != nil {
-		mlog.Warn(ctx, "failed to optimize search params", zap.Error(err))
+		mlog.Warn(ctx, "failed to optimize search params", mlog.Err(err))
 		return nil, err
 	}
 	return sd.executeSearchSubTasks(ctx, req, sealed, growing, sealedRowCount)
@@ -455,7 +454,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
 		mlog.Warn(ctx, "delegator received search request not belongs to it",
-			zap.Strings("reqChannels", req.GetDmlChannels()),
+			mlog.Strings("reqChannels", req.GetDmlChannels()),
 		)
 		return nil, fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
 	}
@@ -485,7 +484,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
 	if err != nil {
-		mlog.Warn(ctx, "delegator search failed to wait tsafe", zap.Error(err))
+		mlog.Warn(ctx, "delegator search failed to wait tsafe", mlog.Err(err))
 		return nil, err
 	}
 
@@ -496,7 +495,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 
 	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(partialResultRequiredDataRatio, req.GetReq().GetPartitionIDs()...)
 	if err != nil {
-		mlog.Warn(ctx, "delegator failed to search, current distribution is not serviceable", zap.Error(err))
+		mlog.Warn(ctx, "delegator failed to search, current distribution is not serviceable", mlog.Err(err))
 		return nil, err
 	}
 	defer sd.distribution.Unpin(version)
@@ -571,7 +570,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 			result := future.Value()
 			if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 				mlog.Debug(ctx, "delegator hybrid search failed",
-					zap.String("reason", result.GetStatus().GetReason()))
+					mlog.String("reason", result.GetStatus().GetReason()))
 				return nil, merr.Error(result.GetStatus())
 			}
 			results[i] = result
@@ -581,7 +580,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 
 	results, err := sd.search(ctx, req, sealed, growing, sealedRowCount)
 	if err != nil {
-		mlog.Warn(ctx, "delegator common search failed", zap.Error(err))
+		mlog.Warn(ctx, "delegator common search failed", mlog.Err(err))
 		return nil, err
 	}
 	return results, nil
@@ -595,7 +594,7 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
 		mlog.Warn(ctx, "deletgator received query request not belongs to it",
-			zap.Strings("reqChannels", req.GetDmlChannels()),
+			mlog.Strings("reqChannels", req.GetDmlChannels()),
 		)
 		return fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
 	}
@@ -615,7 +614,7 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		paramtable.GetStringNodeID(), contextutil.GetQueryLabel(ctx)).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 	if err != nil {
-		mlog.Warn(ctx, "delegator query failed to wait tsafe", zap.Error(err))
+		mlog.Warn(ctx, "delegator query failed to wait tsafe", mlog.Err(err))
 		return err
 	}
 
@@ -626,7 +625,7 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 
 	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(float64(1.0), req.GetReq().GetPartitionIDs()...)
 	if err != nil {
-		mlog.Warn(ctx, "delegator failed to query, current distribution is not serviceable", zap.Error(err))
+		mlog.Warn(ctx, "delegator failed to query, current distribution is not serviceable", mlog.Err(err))
 		return err
 	}
 	defer sd.distribution.Unpin(version)
@@ -646,12 +645,12 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 	}
 
 	mlog.Info(ctx, "query stream segments...",
-		zap.Int("sealedNum", len(sealed)),
-		zap.Int("growingNum", len(growing)),
+		mlog.Int("sealedNum", len(sealed)),
+		mlog.Int("growingNum", len(growing)),
 	)
 	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, sd.modifyQueryRequest)
 	if err != nil {
-		mlog.Warn(ctx, "query organizeSubTask failed", zap.Error(err))
+		mlog.Warn(ctx, "query organizeSubTask failed", mlog.Err(err))
 		return err
 	}
 
@@ -664,7 +663,7 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		return nil, err
 	}, "QueryStream", log)
 	if err != nil {
-		mlog.Warn(ctx, "Delegator query stream failed", zap.Error(err))
+		mlog.Warn(ctx, "Delegator query stream failed", mlog.Err(err))
 		return err
 	}
 
@@ -683,7 +682,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
 		mlog.Warn(ctx, "delegator received query request not belongs to it",
-			zap.Strings("reqChannels", req.GetDmlChannels()),
+			mlog.Strings("reqChannels", req.GetDmlChannels()),
 		)
 		return nil, fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
 	}
@@ -705,7 +704,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
 	if err != nil {
-		mlog.Warn(ctx, "delegator query failed to wait tsafe", zap.Error(err))
+		mlog.Warn(ctx, "delegator query failed to wait tsafe", mlog.Err(err))
 		return nil, err
 	}
 
@@ -716,7 +715,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 
 	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(float64(1.0), req.GetReq().GetPartitionIDs()...)
 	if err != nil {
-		mlog.Warn(ctx, "delegator failed to query, current distribution is not serviceable", zap.Error(err))
+		mlog.Warn(ctx, "delegator failed to query, current distribution is not serviceable", mlog.Err(err))
 		return nil, err
 	}
 	defer sd.distribution.Unpin(version)
@@ -745,13 +744,13 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 
 	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
 	mlog.Debug(ctx, "query segments...",
-		zap.Uint64("mvcc", req.GetReq().GetMvccTimestamp()),
-		zap.Int("sealedNum", sealedNum),
-		zap.Int("growingNum", len(growing)),
+		mlog.Uint64("mvcc", req.GetReq().GetMvccTimestamp()),
+		mlog.Int("sealedNum", sealedNum),
+		mlog.Int("growingNum", len(growing)),
 	)
 	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, sd.modifyQueryRequest)
 	if err != nil {
-		mlog.Warn(ctx, "query organizeSubTask failed", zap.Error(err))
+		mlog.Warn(ctx, "query organizeSubTask failed", mlog.Err(err))
 		return nil, err
 	}
 
@@ -764,7 +763,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		return resp, err
 	}, "Query", log)
 	if err != nil {
-		mlog.Warn(ctx, "Delegator query failed", zap.Error(err))
+		mlog.Warn(ctx, "Delegator query failed", mlog.Err(err))
 		return nil, err
 	}
 
@@ -781,8 +780,8 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		})
 		slices.Sort(growingIDs)
 		mlog.Debug(ctx, "execute count on segments...",
-			zap.Int64s("sealedIDs", sealedIDs),
-			zap.Int64s("growingIDs", growingIDs),
+			mlog.Int64s("sealedIDs", sealedIDs),
+			mlog.Int64s("growingIDs", growingIDs),
 		)
 	}
 
@@ -799,7 +798,7 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
 		mlog.Warn(ctx, "delegator received GetStatistics request not belongs to it",
-			zap.Strings("reqChannels", req.GetDmlChannels()),
+			mlog.Strings("reqChannels", req.GetDmlChannels()),
 		)
 		return nil, fmt.Errorf("dml channel not match, delegator channel %s, GetStatistics channels %v", sd.vchannelName, req.GetDmlChannels())
 	}
@@ -808,7 +807,7 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 	sd.updateLatestRequiredMVCCTimestamp(req.Req.GuaranteeTimestamp)
 	_, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
 	if err != nil {
-		mlog.Warn(ctx, "delegator GetStatistics failed to wait tsafe", zap.Error(err))
+		mlog.Warn(ctx, "delegator GetStatistics failed to wait tsafe", mlog.Err(err))
 		return nil, err
 	}
 
@@ -839,7 +838,7 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 		}
 	})
 	if err != nil {
-		mlog.Warn(ctx, "Get statistics organizeSubTask failed", zap.Error(err))
+		mlog.Warn(ctx, "Get statistics organizeSubTask failed", mlog.Err(err))
 		return nil, err
 	}
 
@@ -848,7 +847,7 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 		return worker.GetStatistics(ctx, req)
 	}, "GetStatistics", log)
 	if err != nil {
-		mlog.Warn(ctx, "Delegator get statistics failed", zap.Error(err))
+		mlog.Warn(ctx, "Delegator get statistics failed", mlog.Err(err))
 		return nil, err
 	}
 
@@ -889,9 +888,9 @@ func organizeSubTask[T any](ctx context.Context,
 		worker, err := sd.workerManager.GetWorker(ctx, workerID)
 		if err != nil {
 			mlog.Warn(ctx, "failed to get worker for sub task",
-				zap.Int64("nodeID", workerID),
-				zap.Int64s("segments", segmentIDs),
-				zap.Error(err),
+				mlog.FieldNodeID(workerID),
+				mlog.Int64s("segments", segmentIDs),
+				mlog.Err(err),
 			)
 		}
 
@@ -960,9 +959,9 @@ func executeSubTasks[T any, R interface {
 
 			if err != nil {
 				mlog.Warn(ctx, "failed to execute sub task",
-					zap.String("taskType", taskType),
-					zap.Int64("nodeID", task.targetID),
-					zap.Error(err),
+					mlog.String("taskType", taskType),
+					mlog.FieldNodeID(task.targetID),
+					mlog.Err(err),
 				)
 				// check if partial result is disabled, if so, let all sub tasks fail fast
 				if partialResultRequiredDataRatio == 1 {
@@ -986,8 +985,8 @@ func executeSubTasks[T any, R interface {
 	// Wait for all tasks to complete
 	if err := wg.Wait(); err != nil {
 		mlog.Warn(ctx, "some tasks failed to complete",
-			zap.String("taskType", taskType),
-			zap.Error(err),
+			mlog.String("taskType", taskType),
+			mlog.Err(err),
 		)
 		return nil, err
 	}
@@ -1018,9 +1017,9 @@ func executeSubTasks[T any, R interface {
 		shouldReturnPartial, accessedDataRatio := evaluator(taskType, successSegmentList, failureSegmentList, errors)
 		if shouldReturnPartial {
 			mlog.Info(ctx, "partial result executed successfully",
-				zap.String("taskType", taskType),
-				zap.Float64("accessedDataRatio", accessedDataRatio),
-				zap.Int64s("failureSegmentList", failureSegmentList),
+				mlog.String("taskType", taskType),
+				mlog.Float64("accessedDataRatio", accessedDataRatio),
+				mlog.Int64s("failureSegmentList", failureSegmentList),
 			)
 			return results, nil
 		}
@@ -1074,7 +1073,7 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 
 	// check whether tsafe downgraded
 	if paramtable.Get().QueryNodeCfg.DowngradeTsafe.GetAsBool() {
-		log.RatedWarn(ctx, rate.Limit(10), "downgrade tsafe", zap.Uint64("latestTSafe", latestTSafe), zap.Uint64("ts", ts))
+		log.RatedWarn(ctx, rate.Limit(10), "downgrade tsafe", mlog.Uint64("latestTSafe", latestTSafe), mlog.Uint64("ts", ts))
 		return latestTSafe, nil
 	}
 	// check lag duration too large
@@ -1084,10 +1083,10 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 	maxLag := paramtable.Get().QueryNodeCfg.MaxTimestampLag.GetAsDuration(time.Second)
 	if lag > maxLag {
 		mlog.Warn(ctx, "guarantee and serviceable ts larger than MaxLag",
-			zap.Time("guaranteeTime", gt),
-			zap.Time("serviceableTime", st),
-			zap.Duration("lag", lag),
-			zap.Duration("maxTsLag", maxLag),
+			mlog.Time("guaranteeTime", gt),
+			mlog.Time("serviceableTime", st),
+			mlog.Duration("lag", lag),
+			mlog.Duration("maxTsLag", maxLag),
 		)
 		return 0, WrapErrTsLagTooLarge(sd.vchannelName, lag, maxLag)
 	}
@@ -1111,9 +1110,9 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 			}
 			// No broadcast within stallTimeout — tSafe is stalled.
 			mlog.Warn(ctx, "tsafe stall detected, fast-fail to allow proxy failover",
-				zap.Uint64("currentTsafe", sd.latestTsafe.Load()),
-				zap.Uint64("targetTs", ts),
-				zap.Duration("stallTimeout", stallTimeout),
+				mlog.Uint64("currentTsafe", sd.latestTsafe.Load()),
+				mlog.Uint64("targetTs", ts),
+				mlog.Duration("stallTimeout", stallTimeout),
 			)
 			return 0, WrapErrTsLagTooLarge(sd.vchannelName, gt.Sub(st), stallTimeout)
 		}
@@ -1158,10 +1157,10 @@ func (sd *shardDelegator) updateLatestRequiredMVCCTimestamp(ts uint64) {
 func (sd *shardDelegator) UpdateTSafe(tsafe uint64) {
 	log := sd.getLogger(context.TODO())
 	log.RatedInfo(context.TODO(), rate.Limit(10), "update tsafe",
-		zap.Int64("collectionID", sd.collectionID),
-		zap.String("vchannel", sd.vchannelName),
-		zap.Time("tsafe", tsoutil.PhysicalTime(tsafe)),
-		zap.Time("latestTSafe", tsoutil.PhysicalTime(sd.latestTsafe.Load())))
+		mlog.FieldCollectionID(sd.collectionID),
+		mlog.FieldVChannel(sd.vchannelName),
+		mlog.Time("tsafe", tsoutil.PhysicalTime(tsafe)),
+		mlog.Time("latestTSafe", tsoutil.PhysicalTime(sd.latestTsafe.Load())))
 	if tsafe <= sd.latestTsafe.Load() {
 		return
 	}
@@ -1181,10 +1180,10 @@ func (sd *shardDelegator) UpdateTSafe(tsafe uint64) {
 			lag := time.Since(tsafeTime)
 			caughtUp := lag <= lagThreshold
 			log.RatedInfo(context.TODO(), rate.Limit(10), "delegator catching up streaming data progress",
-				zap.String("channel", sd.vchannelName),
-				zap.Duration("lag", lag),
-				zap.Duration("threshold", lagThreshold),
-				zap.Bool("caughtUp", caughtUp))
+				mlog.String("channel", sd.vchannelName),
+				mlog.Duration("lag", lag),
+				mlog.Duration("threshold", lagThreshold),
+				mlog.Bool("caughtUp", caughtUp))
 			if caughtUp {
 				sd.catchingUpStreamingData.Store(false)
 			}
@@ -1234,8 +1233,8 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	defer sd.distribution.Unpin(version)
 
 	mlog.Info(ctx, "update schema targets...",
-		zap.Int("sealedNum", len(sealed)),
-		zap.Int("growingNum", len(growing)),
+		mlog.Int("sealedNum", len(sealed)),
+		mlog.Int("growingNum", len(growing)),
 	)
 
 	tasks, err := organizeSubTask(ctx, &querypb.UpdateSchemaRequest{
@@ -1335,7 +1334,7 @@ func (sd *shardDelegator) Close() {
 	// clean up l0 segment in delete buffer
 	start := time.Now()
 	sd.deleteBuffer.Clear()
-	mlog.Info(context.TODO(), "unregister all l0 segments", zap.Duration("cost", time.Since(start)))
+	mlog.Info(context.TODO(), "unregister all l0 segments", mlog.Duration("cost", time.Since(start)))
 
 	metrics.QueryNodeDeleteBufferSize.DeleteLabelValues(paramtable.GetStringNodeID(), sd.vchannelName)
 	metrics.QueryNodeDeleteBufferRowNum.DeleteLabelValues(paramtable.GetStringNodeID(), sd.vchannelName)
@@ -1360,9 +1359,9 @@ func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersi
 		}()
 		if exist && curStats != nil && curStats.Version >= newVersion {
 			mlog.RatedWarn(ctx, rate.Limit(60), "Input partition stats' version is less or equal than current partition stats, skip",
-				zap.Int64("partID", partID),
-				zap.Int64("curVersion", curStats.Version),
-				zap.Int64("inputVersion", newVersion),
+				mlog.Int64("partID", partID),
+				mlog.Int64("curVersion", curStats.Version),
+				mlog.Int64("inputVersion", newVersion),
 			)
 			continue
 		}
@@ -1371,13 +1370,13 @@ func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersi
 		statsFilePath := path.Join(sd.chunkManager.RootPath(), common.PartitionStatsPath, idPath, strconv.FormatInt(newVersion, 10))
 		statsBytes, err := sd.chunkManager.Read(ctx, statsFilePath)
 		if err != nil {
-			mlog.Error(ctx, "failed to read stats file from object storage", zap.String("path", statsFilePath))
+			mlog.Error(ctx, "failed to read stats file from object storage", mlog.String("path", statsFilePath))
 			continue
 		}
 		partStats, err := storage.DeserializePartitionsStatsSnapshot(statsBytes)
 		if err != nil {
 			mlog.Error(ctx, "failed to parse partition stats from bytes",
-				zap.Int("bytes_length", len(statsBytes)), zap.Error(err))
+				mlog.Int("bytes_length", len(statsBytes)), mlog.Err(err))
 			continue
 		}
 		partStats.SetVersion(newVersion)
@@ -1386,8 +1385,8 @@ func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersi
 			defer sd.partitionStatsMut.Unlock()
 			sd.partitionStats[partID] = partStats
 		}()
-		mlog.Info(ctx, "Updated partitionStats for partition", zap.Int64("collectionID", sd.collectionID), zap.Int64("partitionID", partID),
-			zap.Int64("newVersion", newVersion), zap.Int64("oldVersion", curStats.GetVersion()))
+		mlog.Info(ctx, "Updated partitionStats for partition", mlog.FieldCollectionID(sd.collectionID), mlog.FieldPartitionID(partID),
+			mlog.Int64("newVersion", newVersion), mlog.Int64("oldVersion", curStats.GetVersion()))
 	}
 }
 
@@ -1397,11 +1396,11 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	queryView *channelQueryView,
 	binlogSaver segments.BinlogSaver,
 ) (ShardDelegator, error) {
-	log := mlog.With(zap.Int64("collectionID", collectionID),
-		zap.Int64("replicaID", replicaID),
-		zap.String("channel", channel),
-		zap.Int64("version", version),
-		zap.Uint64("startTs", startTs),
+	log := mlog.With(mlog.FieldCollectionID(collectionID),
+		mlog.Int64("replicaID", replicaID),
+		mlog.String("channel", channel),
+		mlog.Int64("version", version),
+		mlog.Uint64("startTs", startTs),
 	)
 
 	collection := manager.Collection.Get(collectionID)
@@ -1410,18 +1409,18 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	}
 
 	sizePerBlock := paramtable.Get().QueryNodeCfg.DeleteBufferBlockSize.GetAsInt64()
-	log.Info(ctx, "Init delete cache with list delete buffer", zap.Int64("sizePerBlock", sizePerBlock), zap.Time("startTime", tsoutil.PhysicalTime(startTs)))
+	log.Info(ctx, "Init delete cache with list delete buffer", mlog.Int64("sizePerBlock", sizePerBlock), mlog.Time("startTime", tsoutil.PhysicalTime(startTs)))
 
 	excludedSegments := NewExcludedSegments(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.GetAsDuration(time.Second))
 
 	policy := paramtable.Get().QueryNodeCfg.LevelZeroForwardPolicy.GetValue()
-	log.Info(ctx, "shard delegator setup l0 forward policy", zap.String("policy", policy))
+	log.Info(ctx, "shard delegator setup l0 forward policy", mlog.String("policy", policy))
 	postLoadSem := syncutil.NewSemaphore(paramtable.Get().QueryNodeCfg.DelegatorPostLoadConcurrencyFactor.GetAsInt())
 	postLoadConfigHandler := config.NewHandler(fmt.Sprintf("qn.delegator.postload.%s.%p", channel, postLoadSem), func(event *config.Event) {
 		if event.HasUpdated {
 			concurrency := paramtable.Get().QueryNodeCfg.DelegatorPostLoadConcurrencyFactor.GetAsInt()
 			postLoadSem.SetCapacity(concurrency)
-			log.Info(ctx, "resize delegator post-load concurrency", zap.Int("concurrency", concurrency))
+			log.Info(ctx, "resize delegator post-load concurrency", mlog.Int("concurrency", concurrency))
 		}
 	})
 

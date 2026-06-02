@@ -21,7 +21,6 @@ import (
 	"strconv"
 
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -38,8 +37,8 @@ func (node *Proxy) CreateSnapshot(ctx context.Context, req *milvuspb.CreateSnaps
 	defer sp.End()
 
 	log := mlog.With(
-		zap.String("snapshotName", req.GetName()),
-		zap.String("collectionName", req.GetCollectionName()),
+		mlog.String("snapshotName", req.GetName()),
+		mlog.FieldCollectionName(req.GetCollectionName()),
 	)
 
 	method := "CreateSnapshot"
@@ -58,14 +57,14 @@ func (node *Proxy) CreateSnapshot(ctx context.Context, req *milvuspb.CreateSnaps
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "CreateSnapshot failed to Enqueue",
-			zap.Error(err))
+			mlog.Err(err))
 		return merr.Status(err), nil
 	}
 
 	if err := t.WaitToFinish(); err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "CreateSnapshot failed to WaitToFinish",
-			zap.Error(err))
+			mlog.Err(err))
 		return merr.Status(err), nil
 	}
 
@@ -79,7 +78,7 @@ func (node *Proxy) DropSnapshot(ctx context.Context, req *milvuspb.DropSnapshotR
 	defer sp.End()
 
 	log := mlog.With(
-		zap.String("snapshotName", req.GetName()),
+		mlog.String("snapshotName", req.GetName()),
 	)
 
 	method := "DropSnapshot"
@@ -98,14 +97,14 @@ func (node *Proxy) DropSnapshot(ctx context.Context, req *milvuspb.DropSnapshotR
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "DropSnapshot failed to Enqueue",
-			zap.Error(err))
+			mlog.Err(err))
 		return merr.Status(err), nil
 	}
 
 	if err := t.WaitToFinish(); err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "DropSnapshot failed to WaitToFinish",
-			zap.Error(err))
+			mlog.Err(err))
 		return merr.Status(err), nil
 	}
 
@@ -119,7 +118,7 @@ func (node *Proxy) DescribeSnapshot(ctx context.Context, req *milvuspb.DescribeS
 	defer sp.End()
 
 	log := mlog.With(
-		zap.String("snapshotName", req.GetName()),
+		mlog.String("snapshotName", req.GetName()),
 	)
 
 	method := "DescribeSnapshot"
@@ -138,7 +137,7 @@ func (node *Proxy) DescribeSnapshot(ctx context.Context, req *milvuspb.DescribeS
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "DescribeSnapshot failed to Enqueue",
-			zap.Error(err))
+			mlog.Err(err))
 		return &milvuspb.DescribeSnapshotResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -147,7 +146,7 @@ func (node *Proxy) DescribeSnapshot(ctx context.Context, req *milvuspb.DescribeS
 	if err := t.WaitToFinish(); err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "DescribeSnapshot failed to WaitToFinish",
-			zap.Error(err))
+			mlog.Err(err))
 		return &milvuspb.DescribeSnapshotResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -163,7 +162,7 @@ func (node *Proxy) ListSnapshots(ctx context.Context, req *milvuspb.ListSnapshot
 	defer sp.End()
 
 	log := mlog.With(
-		zap.String("collectionName", req.GetCollectionName()))
+		mlog.FieldCollectionName(req.GetCollectionName()))
 
 	method := "ListSnapshots"
 	tr := timerecord.NewTimeRecorder(method)
@@ -181,7 +180,7 @@ func (node *Proxy) ListSnapshots(ctx context.Context, req *milvuspb.ListSnapshot
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "ListSnapshots failed to Enqueue",
-			zap.Error(err))
+			mlog.Err(err))
 		return &milvuspb.ListSnapshotsResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -190,7 +189,7 @@ func (node *Proxy) ListSnapshots(ctx context.Context, req *milvuspb.ListSnapshot
 	if err := t.WaitToFinish(); err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "ListSnapshots failed to WaitToFinish",
-			zap.Error(err))
+			mlog.Err(err))
 		return &milvuspb.ListSnapshotsResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -206,7 +205,7 @@ func (node *Proxy) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSna
 	defer sp.End()
 
 	log := mlog.With(
-		zap.String("snapshotName", req.GetName()),
+		mlog.String("snapshotName", req.GetName()),
 	)
 
 	method := "RestoreSnapshot"
@@ -225,14 +224,14 @@ func (node *Proxy) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSna
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "RestoreSnapshot failed to Enqueue",
-			zap.Error(err))
+			mlog.Err(err))
 		return &milvuspb.RestoreSnapshotResponse{Status: merr.Status(err)}, nil
 	}
 
 	if err := t.WaitToFinish(); err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "RestoreSnapshot failed to WaitToFinish",
-			zap.Error(err))
+			mlog.Err(err))
 		return &milvuspb.RestoreSnapshotResponse{Status: merr.Status(err)}, nil
 	}
 
@@ -246,7 +245,7 @@ func (node *Proxy) GetRestoreSnapshotState(ctx context.Context, req *milvuspb.Ge
 	defer sp.End()
 
 	log := mlog.With(
-		zap.Int64("jobID", req.GetJobId()),
+		mlog.FieldJobID(req.GetJobId()),
 	)
 
 	method := "GetRestoreSnapshotState"
@@ -265,7 +264,7 @@ func (node *Proxy) GetRestoreSnapshotState(ctx context.Context, req *milvuspb.Ge
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, "", "").Inc()
 		log.Warn(ctx, "GetRestoreSnapshotState failed to Enqueue",
-			zap.Error(err))
+			mlog.Err(err))
 		return &milvuspb.GetRestoreSnapshotStateResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -274,7 +273,7 @@ func (node *Proxy) GetRestoreSnapshotState(ctx context.Context, req *milvuspb.Ge
 	if err := t.WaitToFinish(); err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, "", "").Inc()
 		log.Warn(ctx, "GetRestoreSnapshotState failed to WaitToFinish",
-			zap.Error(err))
+			mlog.Err(err))
 		return &milvuspb.GetRestoreSnapshotStateResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -290,7 +289,7 @@ func (node *Proxy) ListRestoreSnapshotJobs(ctx context.Context, req *milvuspb.Li
 	defer sp.End()
 
 	log := mlog.With(
-		zap.String("collectionName", req.GetCollectionName()),
+		mlog.FieldCollectionName(req.GetCollectionName()),
 	)
 
 	method := "ListRestoreSnapshotJobs"
@@ -309,7 +308,7 @@ func (node *Proxy) ListRestoreSnapshotJobs(ctx context.Context, req *milvuspb.Li
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "ListRestoreSnapshotJobs failed to Enqueue",
-			zap.Error(err))
+			mlog.Err(err))
 		return &milvuspb.ListRestoreSnapshotJobsResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -318,7 +317,7 @@ func (node *Proxy) ListRestoreSnapshotJobs(ctx context.Context, req *milvuspb.Li
 	if err := t.WaitToFinish(); err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "ListRestoreSnapshotJobs failed to WaitToFinish",
-			zap.Error(err))
+			mlog.Err(err))
 		return &milvuspb.ListRestoreSnapshotJobsResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -334,9 +333,9 @@ func (node *Proxy) PinSnapshotData(ctx context.Context, req *milvuspb.PinSnapsho
 	defer sp.End()
 
 	log := mlog.With(
-		zap.String("snapshotName", req.GetName()),
-		zap.String("collectionName", req.GetCollectionName()),
-		zap.String("dbName", req.GetDbName()),
+		mlog.String("snapshotName", req.GetName()),
+		mlog.FieldCollectionName(req.GetCollectionName()),
+		mlog.FieldDbName(req.GetDbName()),
 	)
 
 	method := "PinSnapshotData"
@@ -354,7 +353,7 @@ func (node *Proxy) PinSnapshotData(ctx context.Context, req *milvuspb.PinSnapsho
 	if err := node.sched.ddQueue.Enqueue(t); err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "PinSnapshotData failed to Enqueue",
-			zap.Error(err))
+			mlog.Err(err))
 		return &milvuspb.PinSnapshotDataResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -363,7 +362,7 @@ func (node *Proxy) PinSnapshotData(ctx context.Context, req *milvuspb.PinSnapsho
 	if err := t.WaitToFinish(); err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "PinSnapshotData failed to WaitToFinish",
-			zap.Error(err))
+			mlog.Err(err))
 		return &milvuspb.PinSnapshotDataResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -379,7 +378,7 @@ func (node *Proxy) UnpinSnapshotData(ctx context.Context, req *milvuspb.UnpinSna
 	defer sp.End()
 
 	log := mlog.With(
-		zap.Int64("pinID", req.GetPinId()),
+		mlog.Int64("pinID", req.GetPinId()),
 	)
 
 	method := "UnpinSnapshotData"
@@ -397,14 +396,14 @@ func (node *Proxy) UnpinSnapshotData(ctx context.Context, req *milvuspb.UnpinSna
 	if err := node.sched.ddQueue.Enqueue(t); err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, "", "").Inc()
 		log.Warn(ctx, "UnpinSnapshotData failed to Enqueue",
-			zap.Error(err))
+			mlog.Err(err))
 		return merr.Status(err), nil
 	}
 
 	if err := t.WaitToFinish(); err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, "", "").Inc()
 		log.Warn(ctx, "UnpinSnapshotData failed to WaitToFinish",
-			zap.Error(err))
+			mlog.Err(err))
 		return merr.Status(err), nil
 	}
 

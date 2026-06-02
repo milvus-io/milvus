@@ -20,8 +20,6 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	grpcproxy "github.com/milvus-io/milvus/internal/distributed/proxy"
@@ -58,7 +56,7 @@ func (n *Proxy) Prepare() error {
 // Run starts service
 func (n *Proxy) Run() error {
 	if err := n.svr.Run(); err != nil {
-		mlog.Error(context.TODO(), "Proxy starts error", zap.Error(err))
+		mlog.Error(context.TODO(), "Proxy starts error", mlog.Err(err))
 		return err
 	}
 	mlog.Info(context.TODO(), "Proxy successfully started")

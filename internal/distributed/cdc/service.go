@@ -21,7 +21,6 @@ import (
 	"sync"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -107,7 +106,7 @@ func (s *Server) Health(ctx context.Context) commonpb.StateCode {
 func (s *Server) init() (err error) {
 	defer func() {
 		if err != nil {
-			mlog.Error(s.ctx, "cdc init failed", zap.Error(err))
+			mlog.Error(s.ctx, "cdc init failed", mlog.Err(err))
 			return
 		}
 		mlog.Info(s.ctx, "init cdc server finished")
@@ -128,7 +127,7 @@ func (s *Server) init() (err error) {
 func (s *Server) start() (err error) {
 	defer func() {
 		if err != nil {
-			mlog.Error(s.ctx, "CDC start failed", zap.Error(err))
+			mlog.Error(s.ctx, "CDC start failed", mlog.Err(err))
 			return
 		}
 		mlog.Info(s.ctx, "start CDC server finished")

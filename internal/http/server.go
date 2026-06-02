@@ -27,8 +27,6 @@ import (
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/eventlog"
@@ -153,14 +151,14 @@ func RegisterStopComponent(triggerComponentStop func(role string) error) {
 		Path: RouteTriggerStopPath,
 		HandlerFunc: func(w http.ResponseWriter, req *http.Request) {
 			role := req.URL.Query().Get("role")
-			mlog.Info(context.TODO(), "start to trigger component stop", zap.String("role", role))
+			mlog.Info(context.TODO(), "start to trigger component stop", mlog.String("role", role))
 			if err := triggerComponentStop(role); err != nil {
-				mlog.Warn(context.TODO(), "failed to trigger component stop", zap.Error(err))
+				mlog.Warn(context.TODO(), "failed to trigger component stop", mlog.Err(err))
 				w.WriteHeader(http.StatusInternalServerError)
 				fmt.Fprintf(w, `{"msg": "failed to trigger component stop, %s"}`, err.Error())
 				return
 			}
-			mlog.Info(context.TODO(), "finish to trigger component stop", zap.String("role", role))
+			mlog.Info(context.TODO(), "finish to trigger component stop", mlog.String("role", role))
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"msg": "OK"}`))
 		},
@@ -173,14 +171,14 @@ func RegisterCheckComponentReady(checkActive func(role string) error) {
 		Path: RouteCheckComponentReady,
 		HandlerFunc: func(w http.ResponseWriter, req *http.Request) {
 			role := req.URL.Query().Get("role")
-			mlog.Info(context.TODO(), "start to check component ready", zap.String("role", role))
+			mlog.Info(context.TODO(), "start to check component ready", mlog.String("role", role))
 			if err := checkActive(role); err != nil {
-				mlog.Warn(context.TODO(), "failed to check component ready", zap.Error(err))
+				mlog.Warn(context.TODO(), "failed to check component ready", mlog.Err(err))
 				w.WriteHeader(http.StatusInternalServerError)
 				fmt.Fprintf(w, `{"msg": "failed to to check component ready, %s"}`, err.Error())
 				return
 			}
-			mlog.Info(context.TODO(), "finish to check component ready", zap.String("role", role))
+			mlog.Info(context.TODO(), "finish to check component ready", mlog.String("role", role))
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"msg": "OK"}`))
 		},
@@ -288,7 +286,7 @@ func ServeHTTP() {
 	registerDefaults()
 	go func() {
 		bindAddr := getHTTPAddr()
-		mlog.Info(context.TODO(), "management listen", zap.String("addr", bindAddr))
+		mlog.Info(context.TODO(), "management listen", mlog.String("addr", bindAddr))
 		server = &http.Server{Handler: metricsServer, Addr: bindAddr, ReadTimeout: 10 * time.Second}
 
 		if runtime.GOARCH != "arm64" {
@@ -298,7 +296,7 @@ func ServeHTTP() {
 		}
 
 		if err := server.ListenAndServe(); err != nil {
-			mlog.Error(context.TODO(), "handle metrics failed", zap.Error(err))
+			mlog.Error(context.TODO(), "handle metrics failed", mlog.Err(err))
 		}
 	}()
 }
@@ -336,7 +334,7 @@ func checkExprRootAuth(req *http.Request) error {
 
 	// Only root user can access /expr
 	if username != "root" {
-		mlog.Warn(context.TODO(), "non-root user attempted to access /expr", zap.String("username", username))
+		mlog.Warn(context.TODO(), "non-root user attempted to access /expr", mlog.String("username", username))
 		return fmt.Errorf("only root user can access /expr endpoint")
 	}
 

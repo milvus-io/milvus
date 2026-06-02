@@ -32,7 +32,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -92,17 +91,17 @@ func cleanLocalDir(path string) {
 	_, statErr := os.Stat(path)
 	// path exist, but stat error
 	if statErr != nil && !os.IsNotExist(statErr) {
-		mlog.Warn(context.TODO(), "Check if path exists failed when clean local data cache", zap.Error(statErr))
+		mlog.Warn(context.TODO(), "Check if path exists failed when clean local data cache", mlog.Err(statErr))
 		panic(statErr)
 	}
 	// path exist, remove all
 	if statErr == nil {
 		err := os.RemoveAll(path)
 		if err != nil {
-			mlog.Warn(context.TODO(), "Clean local data cache failed", zap.Error(err))
+			mlog.Warn(context.TODO(), "Clean local data cache failed", mlog.Err(err))
 			panic(err)
 		}
-		mlog.Info(context.TODO(), "Clean local data cache", zap.String("path", path))
+		mlog.Info(context.TODO(), "Clean local data cache", mlog.String("path", path))
 	}
 }
 
@@ -179,7 +178,7 @@ func (mr *MilvusRoles) printLDPreLoad() {
 	const LDPreLoad = "LD_PRELOAD"
 	val, ok := os.LookupEnv(LDPreLoad)
 	if ok {
-		mlog.Info(context.TODO(), "Enable Jemalloc", zap.String("Jemalloc Path", val))
+		mlog.Info(context.TODO(), "Enable Jemalloc", mlog.String("Jemalloc Path", val))
 	}
 }
 
@@ -249,11 +248,11 @@ func (mr *MilvusRoles) waitForAllComponentsReady(cancel context.CancelFunc, comp
 			readyCount++
 			if err != nil {
 				cancel()
-				mlog.Warn(context.TODO(), "component is not ready before closing", zap.String("role", role), zap.Error(err))
+				mlog.Warn(context.TODO(), "component is not ready before closing", mlog.String("role", role), mlog.Err(err))
 				return nil, err
 			} else {
 				componentMap[role] = component
-				mlog.Info(context.TODO(), "component is ready", zap.String("role", role))
+				mlog.Info(context.TODO(), "component is ready", mlog.String("role", role))
 			}
 		}
 		selectCases[index] = reflect.SelectCase{
@@ -310,11 +309,11 @@ func (mr *MilvusRoles) setupLogger() {
 		}
 		logLevel, err := zapcore.ParseLevel(v)
 		if err != nil {
-			mlog.Warn(context.TODO(), "failed to parse log level", zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to parse log level", mlog.Err(err))
 			return
 		}
 		mlog.SetLevel(logLevel)
-		mlog.Info(context.TODO(), "log level changed", zap.String("level", event.Value))
+		mlog.Info(context.TODO(), "log level changed", mlog.String("level", event.Value))
 	}))
 }
 
@@ -350,7 +349,7 @@ func (mr *MilvusRoles) handleSignals() func() {
 				mlog.Info(context.TODO(), "All cleanup done, handleSignals goroutine quit")
 				return
 			case sig := <-sc:
-				mlog.Warn(context.TODO(), "Get signal to exit", zap.String("signal", sig.String()))
+				mlog.Warn(context.TODO(), "Get signal to exit", mlog.String("signal", sig.String()))
 				mr.once.Do(func() {
 					close(mr.closed)
 					// reset other signals, only handle SIGINT from now
@@ -385,7 +384,7 @@ func (mr *MilvusRoles) Run() {
 	// only standalone enable localMsg
 	if mr.Local {
 		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode); err != nil {
-			mlog.Error(context.TODO(), "Failed to set deploy mode: ", zap.Error(err))
+			mlog.Error(context.TODO(), "Failed to set deploy mode: ", mlog.Err(err))
 		}
 
 		if mr.Embedded {
@@ -410,7 +409,7 @@ func (mr *MilvusRoles) Run() {
 		defer stopRocksmqIfUsed()
 	} else {
 		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode); err != nil {
-			mlog.Error(context.TODO(), "Failed to set deploy mode: ", zap.Error(err))
+			mlog.Error(context.TODO(), "Failed to set deploy mode: ", mlog.Err(err))
 		}
 		paramtable.Init()
 		paramtable.SetRole(mr.ServerType)
@@ -422,7 +421,7 @@ func (mr *MilvusRoles) Run() {
 		util.InitAndSelectWALName()
 		// persist immutable configs if necessary
 		if err := paramtable.GetBaseTable().Manager().ProcessImmutableConfigs(); err != nil {
-			mlog.Error(context.TODO(), "failed to process immutable configs", zap.Error(err))
+			mlog.Error(context.TODO(), "failed to process immutable configs", mlog.Err(err))
 			return
 		}
 	}
@@ -475,7 +474,7 @@ func (mr *MilvusRoles) Run() {
 		streaming.Init()
 		defer func() {
 			if err := streaming.Release(); err != nil {
-				mlog.Warn(context.TODO(), "release streaming service failed", zap.Error(err))
+				mlog.Warn(context.TODO(), "release streaming service failed", mlog.Err(err))
 			}
 		}()
 	}
@@ -522,17 +521,17 @@ func (mr *MilvusRoles) Run() {
 
 	componentMap, err := mr.waitForAllComponentsReady(cancel, componentFutureMap)
 	if err != nil {
-		mlog.Warn(context.TODO(), "Failed to wait for all components ready", zap.Error(err))
+		mlog.Warn(context.TODO(), "Failed to wait for all components ready", mlog.Err(err))
 		return
 	}
-	mlog.Info(context.TODO(), "All components are ready", zap.Strings("roles", lo.Keys(componentMap)))
+	mlog.Info(context.TODO(), "All components are ready", mlog.Strings("roles", lo.Keys(componentMap)))
 
 	http.RegisterStopComponent(func(role string) error {
 		if len(role) == 0 || componentMap[role] == nil {
 			return fmt.Errorf("stop component [%s] in [%s] is not supported", role, mr.ServerType)
 		}
 
-		mlog.Info(context.TODO(), "unregister component before stop", zap.String("role", role))
+		mlog.Info(context.TODO(), "unregister component before stop", mlog.String("role", role))
 		healthz.UnRegister(role)
 		return componentMap[role].Stop()
 	})
@@ -556,25 +555,25 @@ func (mr *MilvusRoles) Run() {
 
 		exp, err := tracer.CreateTracerExporter(params)
 		if err != nil {
-			mlog.Warn(context.TODO(), "Init tracer failed", zap.Error(err))
+			mlog.Warn(context.TODO(), "Init tracer failed", mlog.Err(err))
 			return
 		}
 
 		// close old provider
 		err = tracer.CloseTracerProvider(context.Background())
 		if err != nil {
-			mlog.Warn(context.TODO(), "Close old provider failed, stop reset", zap.Error(err))
+			mlog.Warn(context.TODO(), "Close old provider failed, stop reset", mlog.Err(err))
 			return
 		}
 
 		tracer.SetTracerProvider(exp, params.TraceCfg.SampleFraction.GetAsFloat())
-		mlog.Info(context.TODO(), "Reset tracer finished", zap.String("Exporter", params.TraceCfg.Exporter.GetValue()), zap.Float64("SampleFraction", params.TraceCfg.SampleFraction.GetAsFloat()))
+		mlog.Info(context.TODO(), "Reset tracer finished", mlog.String("Exporter", params.TraceCfg.Exporter.GetValue()), mlog.Float64("SampleFraction", params.TraceCfg.SampleFraction.GetAsFloat()))
 
 		tracer.NotifyTracerProviderUpdated()
 
 		if paramtable.GetRole() == typeutil.QueryNodeRole || paramtable.GetRole() == typeutil.StandaloneRole {
 			initcore.ResetTraceConfig(params)
-			mlog.Info(context.TODO(), "Reset segcore tracer finished", zap.String("Exporter", params.TraceCfg.Exporter.GetValue()))
+			mlog.Info(context.TODO(), "Reset segcore tracer finished", mlog.String("Exporter", params.TraceCfg.Exporter.GetValue()))
 		}
 	}))
 
@@ -595,7 +594,7 @@ func (mr *MilvusRoles) Run() {
 	for idx, coord := range coordinators {
 		mlog.Warn(context.TODO(), "stop processing")
 		if coord != nil {
-			mlog.Info(context.TODO(), "stop coord", zap.Int("idx", idx), zap.Any("coord", coord))
+			mlog.Info(context.TODO(), "stop coord", mlog.Int("idx", idx), mlog.Any("coord", coord))
 			coord.Stop()
 		}
 	}
@@ -610,9 +609,9 @@ func (mr *MilvusRoles) Run() {
 			go func() {
 				defer func() {
 					stopNodeWG.Done()
-					mlog.Info(context.TODO(), "stop node done", zap.Any("node", node))
+					mlog.Info(context.TODO(), "stop node done", mlog.Any("node", node))
 				}()
-				mlog.Info(context.TODO(), "stop node...", zap.Any("node", node))
+				mlog.Info(context.TODO(), "stop node...", mlog.Any("node", node))
 				node.Stop()
 			}()
 		}

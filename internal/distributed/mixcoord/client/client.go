@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	grpcCodes "google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
@@ -70,7 +69,7 @@ func NewClient(ctx context.Context) (types.MixCoordClient, error) {
 	sess := sessionutil.NewSession(context.Background())
 	if sess == nil {
 		err := errors.New("new session error, maybe can not connect to etcd")
-		mlog.Debug(ctx, "New MixCoord Client failed", zap.Error(err))
+		mlog.Debug(ctx, "New MixCoord Client failed", mlog.Err(err))
 		return nil, err
 	}
 	config := &Params.RootCoordGrpcClientCfg
@@ -110,7 +109,7 @@ func (c *Client) getMixCoordAddr() (string, error) {
 	key := c.grpcClient.GetRole()
 	msess, _, err := c.sess.GetSessions(c.ctx, key)
 	if err != nil {
-		mlog.Debug(c.ctx, "MixCoordClient GetSessions failed", zap.Any("key", key))
+		mlog.Debug(c.ctx, "MixCoordClient GetSessions failed", mlog.Any("key", key))
 		return "", err
 	}
 	ms, ok := msess[key]
@@ -118,14 +117,14 @@ func (c *Client) getMixCoordAddr() (string, error) {
 		if paramtable.GetRole() == typeutil.StandaloneRole {
 			return c.getCompatibleMixCoordAddr()
 		} else {
-			mlog.Warn(c.ctx, "MixCoordClient mess key not exist", zap.Any("key", key))
+			mlog.Warn(c.ctx, "MixCoordClient mess key not exist", mlog.Any("key", key))
 			return "", errors.New("find no available mixcoord, check mixcoord state")
 		}
 	}
 	mlog.Debug(c.ctx, "MixCoordClient GetSessions success",
-		zap.String("address", ms.Address),
-		zap.Int64("serverID", ms.ServerID),
-		zap.String("role", key))
+		mlog.String("address", ms.Address),
+		mlog.Int64("serverID", ms.ServerID),
+		mlog.String("role", key))
 	c.grpcClient.SetNodeID(ms.ServerID)
 	return ms.Address, nil
 }
@@ -134,15 +133,15 @@ func (c *Client) getMixCoordAddr() (string, error) {
 func (c *Client) getCompatibleMixCoordAddr() (string, error) {
 	msess, _, err := c.sess.GetSessions(c.ctx, typeutil.RootCoordRole)
 	if err != nil {
-		mlog.Debug(c.ctx, "mixCoordClient getSessions failed", zap.Any("key", typeutil.RootCoordRole), zap.Error(err))
+		mlog.Debug(c.ctx, "mixCoordClient getSessions failed", mlog.Any("key", typeutil.RootCoordRole), mlog.Err(err))
 		return "", errors.New("find no available mixcoord, check mixcoord state")
 	}
 	ms, ok := msess[typeutil.RootCoordRole]
 	if !ok {
-		mlog.Warn(c.ctx, "MixCoordClient mess key not exist", zap.Any("key", typeutil.RootCoordRole))
+		mlog.Warn(c.ctx, "MixCoordClient mess key not exist", mlog.Any("key", typeutil.RootCoordRole))
 		return "", errors.New("find no available mixcoord, check mixcoord state")
 	}
-	mlog.Debug(c.ctx, "MixCoordClient GetSessions use rootCoord", zap.Any("key", typeutil.RootCoordRole))
+	mlog.Debug(c.ctx, "MixCoordClient GetSessions use rootCoord", mlog.Any("key", typeutil.RootCoordRole))
 	c.grpcClient.SetNodeID(ms.ServerID)
 	return ms.Address, nil
 }

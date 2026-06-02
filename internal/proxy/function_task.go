@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -104,9 +103,9 @@ func (t *addCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	coll, err := getCollectionInfo(ctx, t.GetDbName(), t.GetCollectionName())
 	if err != nil {
 		mlog.Error(t.ctx, "AddCollectionTask, get collection info failed",
-			zap.String("dbName", t.GetDbName()),
-			zap.String("collectionName", t.GetCollectionName()),
-			zap.Error(err))
+			mlog.FieldDbName(t.GetDbName()),
+			mlog.FieldCollectionName(t.GetCollectionName()),
+			mlog.Err(err))
 		return err
 	}
 	newColl := proto.Clone(coll.schema.CollectionSchema).(*schemapb.CollectionSchema)
@@ -193,9 +192,9 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	coll, err := getCollectionInfo(ctx, t.GetDbName(), t.GetCollectionName())
 	if err != nil {
 		mlog.Error(t.ctx, "AddCollectionTask, get collection info failed",
-			zap.String("dbName", t.GetDbName()),
-			zap.String("collectionName", t.GetCollectionName()),
-			zap.Error(err))
+			mlog.FieldDbName(t.GetDbName()),
+			mlog.FieldCollectionName(t.GetCollectionName()),
+			mlog.Err(err))
 		return err
 	}
 	if err := rejectExternalCollectionFunctionMutation(coll.schema.CollectionSchema); err != nil {
@@ -295,9 +294,9 @@ func (t *dropCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	coll, err := getCollectionInfo(ctx, t.GetDbName(), t.GetCollectionName())
 	if err != nil {
 		mlog.Error(t.ctx, "DropFunctionTask, get collection info failed",
-			zap.String("dbName", t.GetDbName()),
-			zap.String("collectionName", t.GetCollectionName()),
-			zap.Error(err))
+			mlog.FieldDbName(t.GetDbName()),
+			mlog.FieldCollectionName(t.GetCollectionName()),
+			mlog.Err(err))
 		return err
 	}
 	if err := rejectExternalCollectionFunctionMutation(coll.schema.CollectionSchema); err != nil {

@@ -28,7 +28,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
-	"go.uber.org/zap"
 	"golang.org/x/exp/mmap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/api/googleapi"
@@ -92,7 +91,7 @@ func NewRemoteChunkManager(ctx context.Context, c *objectstorage.Config) (*Remot
 		rootPath:          strings.TrimLeft(c.RootPath, "/"),
 		readRetryAttempts: c.ReadRetryAttempts,
 	}
-	mlog.Info(ctx, "remote chunk manager init success.", zap.String("remote", c.CloudProvider), zap.String("bucketname", c.BucketName), zap.String("root", mcm.RootPath()))
+	mlog.Info(ctx, "remote chunk manager init success.", mlog.String("remote", c.CloudProvider), mlog.String("bucketname", c.BucketName), mlog.String("root", mcm.RootPath()))
 	return mcm, nil
 }
 
@@ -138,7 +137,7 @@ func (mcm *RemoteChunkManager) Path(ctx context.Context, filePath string) (strin
 func (mcm *RemoteChunkManager) Reader(ctx context.Context, filePath string) (FileReader, error) {
 	reader, err := mcm.getObject(ctx, mcm.bucketName, filePath, int64(0), int64(0))
 	if err != nil {
-		mlog.Warn(ctx, "failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+		mlog.Warn(ctx, "failed to get object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 		return nil, err
 	}
 	return reader, nil
@@ -151,7 +150,7 @@ func (mcm *RemoteChunkManager) ReaderAtOffset(ctx context.Context, filePath stri
 
 	reader, err := mcm.getObject(ctx, mcm.bucketName, filePath, offset, int64(0))
 	if err != nil {
-		mlog.Warn(ctx, "failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Int64("offset", offset), zap.Error(err))
+		mlog.Warn(ctx, "failed to get object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Int64("offset", offset), mlog.Err(err))
 		return nil, err
 	}
 	return reader, nil
@@ -165,7 +164,7 @@ func (mcm *RemoteChunkManager) Size(ctx context.Context, filePath string) (int64
 		if err == nil {
 			return false, nil
 		}
-		mlog.Warn(ctx, "failed to get object size", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+		mlog.Warn(ctx, "failed to get object size", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 		err = mapObjectStorageError(filePath, err)
 		if merr.IsRetryableErr(err) {
 			return true, err
@@ -179,7 +178,7 @@ func (mcm *RemoteChunkManager) Size(ctx context.Context, filePath string) (int64
 func (mcm *RemoteChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
 	err := mcm.putObject(ctx, mcm.bucketName, filePath, bytes.NewReader(content), int64(len(content)))
 	if err != nil {
-		mlog.Warn(ctx, "failed to put object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+		mlog.Warn(ctx, "failed to put object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 		return err
 	}
 
@@ -207,7 +206,7 @@ func (mcm *RemoteChunkManager) Exist(ctx context.Context, filePath string) (bool
 		if errors.Is(err, merr.ErrIoKeyNotFound) {
 			return false, nil
 		}
-		mlog.Warn(ctx, "failed to stat object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+		mlog.Warn(ctx, "failed to stat object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 		return false, err
 	}
 	return true, nil
@@ -219,7 +218,7 @@ func (mcm *RemoteChunkManager) Read(ctx context.Context, filePath string) ([]byt
 	err := retry.Do(ctx, func() error {
 		object, err := mcm.getObject(ctx, mcm.bucketName, filePath, int64(0), int64(0))
 		if err != nil {
-			mlog.Warn(ctx, "failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+			mlog.Warn(ctx, "failed to get object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 			return err
 		}
 		defer object.Close()
@@ -229,18 +228,18 @@ func (mcm *RemoteChunkManager) Read(ctx context.Context, filePath string) ([]byt
 		_, err = object.Read(empty)
 		err = mapObjectStorageError(filePath, err)
 		if err != nil {
-			mlog.Warn(ctx, "failed to read object", zap.String("path", filePath), zap.Error(err))
+			mlog.Warn(ctx, "failed to read object", mlog.String("path", filePath), mlog.Err(err))
 			return err
 		}
 		size, err := object.Size()
 		if err != nil {
-			mlog.Warn(ctx, "failed to stat object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+			mlog.Warn(ctx, "failed to stat object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 			return err
 		}
 		data, err = read(object, size)
 		err = mapObjectStorageError(filePath, err)
 		if err != nil {
-			mlog.Warn(ctx, "failed to read object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+			mlog.Warn(ctx, "failed to read object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 			return err
 		}
 		metrics.PersistentDataKvSize.WithLabelValues(metrics.DataGetLabel).Observe(float64(size))
@@ -279,7 +278,7 @@ func (mcm *RemoteChunkManager) ReadAt(ctx context.Context, filePath string, off 
 
 	object, err := mcm.getObject(ctx, mcm.bucketName, filePath, off, length)
 	if err != nil {
-		mlog.Warn(ctx, "failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+		mlog.Warn(ctx, "failed to get object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 		return nil, err
 	}
 	defer object.Close()
@@ -287,7 +286,7 @@ func (mcm *RemoteChunkManager) ReadAt(ctx context.Context, filePath string, off 
 	data, err := read(object, length)
 	err = mapObjectStorageError(filePath, err)
 	if err != nil {
-		mlog.Warn(ctx, "failed to read object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+		mlog.Warn(ctx, "failed to read object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 		return nil, err
 	}
 	metrics.PersistentDataKvSize.WithLabelValues(metrics.DataGetLabel).Observe(float64(length))
@@ -298,7 +297,7 @@ func (mcm *RemoteChunkManager) ReadAt(ctx context.Context, filePath string, off 
 func (mcm *RemoteChunkManager) Remove(ctx context.Context, filePath string) error {
 	err := mcm.removeObject(ctx, mcm.bucketName, filePath)
 	if err != nil {
-		mlog.Warn(ctx, "failed to remove object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+		mlog.Warn(ctx, "failed to remove object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 		return err
 	}
 	return nil
@@ -326,7 +325,7 @@ func (mcm *RemoteChunkManager) RemoveWithPrefix(ctx context.Context, prefix stri
 		runningGroup.Go(func() error {
 			err := mcm.removeObject(ctx, mcm.bucketName, key)
 			if err != nil {
-				mlog.Warn(ctx, "failed to remove object", zap.String("path", key), zap.Error(err))
+				mlog.Warn(ctx, "failed to remove object", mlog.String("path", key), mlog.Err(err))
 			}
 			return err
 		})
@@ -343,12 +342,12 @@ func (mcm *RemoteChunkManager) RemoveWithPrefix(ctx context.Context, prefix stri
 func (mcm *RemoteChunkManager) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) (err error) {
 	start := timerecord.NewTimeRecorder("WalkWithPrefix")
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.TotalLabel).Inc()
-	logger := mlog.With(zap.String("prefix", prefix), zap.Bool("recursive", recursive))
+	logger := mlog.With(mlog.String("prefix", prefix), mlog.Bool("recursive", recursive))
 
 	logger.Info(ctx, "start walk through objects")
 	if err := mcm.client.WalkWithObjects(ctx, mcm.bucketName, prefix, recursive, walkFunc); err != nil {
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.FailLabel).Inc()
-		logger.Warn(ctx, "failed to walk through objects", zap.Error(err))
+		logger.Warn(ctx, "failed to walk through objects", mlog.Err(err))
 		return err
 	}
 	metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataWalkLabel).
@@ -446,7 +445,7 @@ func ToMilvusIoError(fileName string, err error) error {
 func (mcm *RemoteChunkManager) Copy(ctx context.Context, srcFilePath string, dstFilePath string) error {
 	err := mcm.copyObject(ctx, mcm.bucketName, srcFilePath, dstFilePath)
 	if err != nil {
-		mlog.Warn(ctx, "failed to copy object", zap.String("bucket", mcm.bucketName), zap.String("src", srcFilePath), zap.String("dst", dstFilePath), zap.Error(err))
+		mlog.Warn(ctx, "failed to copy object", mlog.String("bucket", mcm.bucketName), mlog.String("src", srcFilePath), mlog.String("dst", dstFilePath), mlog.Err(err))
 		return err
 	}
 	return nil

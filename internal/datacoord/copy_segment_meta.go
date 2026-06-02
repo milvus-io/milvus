@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 
-	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -474,7 +473,7 @@ func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID
 	}
 	if prevJob == nil {
 		m.mu.Unlock()
-		mlog.Warn(ctx, "UpdateJobStateAndReleaseRef: job not found", zap.Int64("jobID", jobID))
+		mlog.Warn(ctx, "UpdateJobStateAndReleaseRef: job not found", mlog.FieldJobID(jobID))
 		return nil
 	}
 
@@ -502,23 +501,23 @@ func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID
 		// left here will self-heal; we still log loudly so operators can detect
 		// a broken unpin path early instead of waiting for TTL expiry.
 		mlog.Warn(ctx, "failed to unpin source snapshot on job terminal transition, orphan pin will expire via TTL",
-			zap.Int64("jobID", jobID),
-			zap.Int64("pinID", pinID),
-			zap.Int64("sourceCollectionID", sourceCollectionID),
-			zap.String("snapshot", snapshotName),
-			zap.Error(unpinErr))
+			mlog.FieldJobID(jobID),
+			mlog.Int64("pinID", pinID),
+			mlog.Int64("sourceCollectionID", sourceCollectionID),
+			mlog.String("snapshot", snapshotName),
+			mlog.Err(unpinErr))
 		return nil
 	}
 	if unpinName != "" {
 		setSnapshotActivePinsGauge(unpinCollID, unpinName, remaining)
 	}
 	mlog.Info(ctx, "unpinned source snapshot on job completion",
-		zap.Int64("jobID", jobID),
-		zap.Int64("pinID", pinID),
-		zap.Int64("sourceCollectionID", sourceCollectionID),
-		zap.String("snapshot", snapshotName),
-		zap.String("previousState", previousState.String()),
-		zap.String("newState", newState.String()))
+		mlog.FieldJobID(jobID),
+		mlog.Int64("pinID", pinID),
+		mlog.Int64("sourceCollectionID", sourceCollectionID),
+		mlog.String("snapshot", snapshotName),
+		mlog.String("previousState", previousState.String()),
+		mlog.String("newState", newState.String()))
 	return nil
 }
 
@@ -551,7 +550,7 @@ func (m *copySegmentMeta) RemoveJob(ctx context.Context, jobID int64) error {
 		// transitioned to a terminal state (Completed/Failed), not here at removal.
 		// This decouples reference lifetime from job metadata cleanup.
 		mlog.Info(ctx, "removed copy segment job",
-			zap.Int64("jobID", jobID))
+			mlog.FieldJobID(jobID))
 
 		// Remove from in-memory cache
 		delete(m.jobs, jobID)

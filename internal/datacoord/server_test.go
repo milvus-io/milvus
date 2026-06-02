@@ -34,7 +34,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -1010,8 +1009,8 @@ func TestServer_GetMetrics(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	mlog.Info(context.TODO(), "TestServer_GetMetrics",
-		zap.String("name", resp.ComponentName),
-		zap.String("response", resp.Response))
+		mlog.String("name", resp.ComponentName),
+		mlog.String("response", resp.Response))
 }
 
 func TestServer_getSystemInfoMetrics(t *testing.T) {

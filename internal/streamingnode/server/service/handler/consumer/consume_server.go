@@ -5,7 +5,6 @@ import (
 	"io"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -84,7 +83,7 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 		if err := scanner.Close(); err != nil {
 			resource.Resource().Logger().Warn(context.TODO(),
 
-				"close scanner failed at create consume server", zap.Error(err))
+				"close scanner failed at create consume server", mlog.Err(err))
 		}
 		return nil, err
 	}
@@ -95,8 +94,8 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 		consumeServer: consumeServer,
 		logger: resource.Resource().Logger().With(
 			mlog.FieldComponent("consumer-server"),
-			zap.String("channel", l.Channel().Name),
-			zap.Int64("term", l.Channel().Term)), // Add trace info for all log.
+			mlog.String("channel", l.Channel().Name),
+			mlog.Int64("term", l.Channel().Term)), // Add trace info for all log.
 		closeCh: make(chan struct{}),
 		metrics: metrics,
 	}, nil
@@ -133,10 +132,10 @@ func (c *ConsumeServer) Execute() error {
 func (c *ConsumeServer) sendLoop() (err error) {
 	defer func() {
 		if err := c.scanner.Close(); err != nil {
-			c.logger.Warn(context.TODO(), "close scanner failed", zap.Error(err))
+			c.logger.Warn(context.TODO(), "close scanner failed", mlog.Err(err))
 		}
 		if err != nil {
-			c.logger.Warn(context.TODO(), "send arm of stream closed by unexpected error", zap.Error(err))
+			c.logger.Warn(context.TODO(), "send arm of stream closed by unexpected error", mlog.Err(err))
 			return
 		}
 		c.logger.Info(context.TODO(), "send arm of stream closed")
@@ -174,7 +173,7 @@ func (c *ConsumeServer) sendLoop() (err error) {
 		case <-c.closeCh:
 			c.logger.Info(context.TODO(), "close channel notified")
 			if err := c.consumeServer.SendClosed(); err != nil {
-				c.logger.Warn(context.TODO(), "send close failed", zap.Error(err))
+				c.logger.Warn(context.TODO(), "send close failed", mlog.Err(err))
 				return status.NewInner("close send server failed: %s", err.Error())
 			}
 			return nil
@@ -205,7 +204,7 @@ func (c *ConsumeServer) recvLoop() (err error) {
 	defer func() {
 		close(c.closeCh)
 		if err != nil {
-			c.logger.Warn(context.TODO(), "recv arm of stream closed by unexpected error", zap.Error(err))
+			c.logger.Warn(context.TODO(), "recv arm of stream closed by unexpected error", mlog.Err(err))
 			return
 		}
 		c.logger.Info(context.TODO(), "recv arm of stream closed")
@@ -225,7 +224,7 @@ func (c *ConsumeServer) recvLoop() (err error) {
 			// we will receive io.EOF soon, just do nothing here.
 		default:
 			// skip unknown message here, to keep the forward compatibility.
-			c.logger.Warn(context.TODO(), "unknown request type", zap.Any("request", req))
+			c.logger.Warn(context.TODO(), "unknown request type", mlog.Any("request", req))
 		}
 	}
 }

@@ -23,7 +23,6 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -225,7 +224,7 @@ func NewMarshaledMsg(msg common.Message, group string) (ConsumeMsg, error) {
 
 	timestamp, err := strconv.ParseUint(tsStr, 10, 64)
 	if err != nil {
-		mlog.Warn(context.TODO(), "parse message properties minTs failed, unknown message", zap.Error(err))
+		mlog.Warn(context.TODO(), "parse message properties minTs failed, unknown message", mlog.Err(err))
 		return nil, errors.New("parse minTs from msg properties failed")
 	}
 
@@ -236,7 +235,7 @@ func NewMarshaledMsg(msg common.Message, group string) (ConsumeMsg, error) {
 
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		mlog.Warn(context.TODO(), "parse message properties minTs failed, unknown message", zap.Error(err))
+		mlog.Warn(context.TODO(), "parse message properties minTs failed, unknown message", mlog.Err(err))
 		return nil, errors.New("parse minTs from msg properties failed")
 	}
 
@@ -296,7 +295,7 @@ type MsgStream interface {
 func GetTimestamp(msg TsMsg) uint64 {
 	msgBase, ok := msg.(interface{ GetBase() *commonpb.MsgBase })
 	if !ok {
-		mlog.Warn(context.TODO(), "fail to get msg base, please check it", zap.Any("type", msg.Type()))
+		mlog.Warn(context.TODO(), "fail to get msg base, please check it", mlog.Any("type", msg.Type()))
 		return 0
 	}
 	return msgBase.GetBase().GetTimestamp()
@@ -359,7 +358,7 @@ func (p *SimpleMsgDispatcher) filterAndParase() {
 				// unmarshal message
 				msg, err := marshalMsg.Unmarshal(p.unmarshalDispatcher)
 				if err != nil {
-					mlog.Warn(context.TODO(), "unmarshal message failed, invalid message", zap.Error(err))
+					mlog.Warn(context.TODO(), "unmarshal message failed, invalid message", mlog.Err(err))
 					continue
 				}
 				msgPack.Msgs = append(msgPack.Msgs, msg)

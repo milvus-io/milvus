@@ -28,7 +28,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -198,14 +197,14 @@ func newSystemMetricsListener(opt *GcOption) *hardware.SystemMetricsListener {
 			isSlowDown := listener.Context.(bool)
 			if metrics.UsedRatio() > paramtable.Get().DataCoordCfg.GCSlowDownCPUUsageThreshold.GetAsFloat() {
 				if !isSlowDown {
-					mlog.Info(context.TODO(), "garbage collector slow down...", zap.Float64("cpuUsage", metrics.UsedRatio()))
+					mlog.Info(context.TODO(), "garbage collector slow down...", mlog.Float64("cpuUsage", metrics.UsedRatio()))
 					opt.removeObjectPool.Resize(1)
 					listener.Context = true
 				}
 				return
 			}
 			if isSlowDown {
-				mlog.Info(context.TODO(), "garbage collector slow down finished", zap.Float64("cpuUsage", metrics.UsedRatio()))
+				mlog.Info(context.TODO(), "garbage collector slow down finished", mlog.Float64("cpuUsage", metrics.UsedRatio()))
 				opt.removeObjectPool.Resize(paramtable.Get().DataCoordCfg.GCRemoveConcurrent.GetAsInt())
 				listener.Context = false
 			}
@@ -216,11 +215,11 @@ func newSystemMetricsListener(opt *GcOption) *hardware.SystemMetricsListener {
 // newGarbageCollector create garbage collector with meta and option
 func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageCollector {
 	mlog.Info(context.TODO(), "GC with option",
-		zap.Bool("enabled", opt.enabled),
-		zap.Duration("interval", opt.checkInterval),
-		zap.Duration("scanInterval", opt.scanInterval),
-		zap.Duration("missingTolerance", opt.missingTolerance),
-		zap.Duration("dropTolerance", opt.dropTolerance))
+		mlog.Bool("enabled", opt.enabled),
+		mlog.Duration("interval", opt.checkInterval),
+		mlog.Duration("scanInterval", opt.scanInterval),
+		mlog.Duration("missingTolerance", opt.missingTolerance),
+		mlog.Duration("dropTolerance", opt.dropTolerance))
 	opt.removeObjectPool = conc.NewPool[struct{}](Params.DataCoordCfg.GCRemoveConcurrent.GetAsInt(), conc.WithExpiryDuration(time.Minute))
 	ctx, cancel := context.WithCancel(context.Background())
 	metaSignal := make(chan gcCmd)
@@ -401,13 +400,13 @@ func (gc *garbageCollector) startControlLoop(_ context.Context) {
 
 func (gc *garbageCollector) pause(cmd gcCmd) error {
 	log := mlog.With(
-		zap.Int64("collectionID", cmd.collectionID),
-		zap.String("ticket", cmd.ticket),
+		mlog.FieldCollectionID(cmd.collectionID),
+		mlog.String("ticket", cmd.ticket),
 	)
 	reqPauseUntil := time.Now().Add(cmd.duration)
 	log = log.With(
-		zap.Time("pauseUntil", reqPauseUntil),
-		zap.Duration("duration", cmd.duration),
+		mlog.Time("pauseUntil", reqPauseUntil),
+		mlog.Duration("duration", cmd.duration),
 	)
 	var err error
 	if cmd.collectionID <= 0 { // legacy pause all
@@ -459,12 +458,12 @@ func (gc *garbageCollector) resume(cmd gcCmd) {
 		}
 	}
 	stillPaused := time.Now().Before(afterResume)
-	mlog.Info(gc.ctx, "garbage collection resumed", zap.Bool("stillPaused", stillPaused))
+	mlog.Info(gc.ctx, "garbage collection resumed", mlog.Bool("stillPaused", stillPaused))
 }
 
 // runRecycleTaskWithPauser is a helper function to create a task with pauser
 func (gc *garbageCollector) runRecycleTaskWithPauser(ctx context.Context, name string, interval time.Duration, task func(ctx context.Context, signal <-chan gcCmd)) {
-	logger := mlog.With(zap.String("gcType", name)).With(zap.Duration("interval", interval))
+	logger := mlog.With(mlog.String("gcType", name)).With(mlog.Duration("interval", interval))
 	timer := time.NewTicker(interval)
 	defer timer.Stop()
 	// get signal channel, ok if nil, means no control
@@ -479,13 +478,13 @@ func (gc *garbageCollector) runRecycleTaskWithPauser(ctx context.Context, name s
 		case <-timer.C:
 			globalPauseUntil := gc.pauseUntil.PauseUntil()
 			if time.Now().Before(globalPauseUntil) {
-				logger.Info(ctx, "garbage collector paused", zap.Time("until", globalPauseUntil))
+				logger.Info(ctx, "garbage collector paused", mlog.Time("until", globalPauseUntil))
 				continue
 			}
 			logger.Info(ctx, "garbage collector recycle task start...")
 			start := time.Now()
 			task(ctx, signal)
-			logger.Info(ctx, "garbage collector recycle task done", zap.Duration("timeCost", time.Since(start)))
+			logger.Info(ctx, "garbage collector recycle task done", mlog.Duration("timeCost", time.Since(start)))
 		}
 	}
 }
@@ -510,10 +509,10 @@ func (gc *garbageCollector) close() {
 // if missing found, performs gc cleanup
 func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 	start := time.Now()
-	log := mlog.With(zap.String("gcName", "recycleUnusedBinlogFiles"), zap.Time("startAt", start))
+	log := mlog.With(mlog.String("gcName", "recycleUnusedBinlogFiles"), mlog.Time("startAt", start))
 	log.Info(ctx, "start recycleUnusedBinlogFiles...")
 	defer func() {
-		log.Info(ctx, "recycleUnusedBinlogFiles done", zap.Duration("timeCost", time.Since(start)))
+		log.Info(ctx, "recycleUnusedBinlogFiles done", mlog.Duration("timeCost", time.Since(start)))
 	}()
 
 	type scanTask struct {
@@ -534,7 +533,7 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
 				logID, err := binlog.GetLogIDFromBingLogPath(objectInfo.FilePath)
 				if err != nil {
-					log.Warn(ctx, "garbageCollector find dirty stats log", zap.String("filePath", objectInfo.FilePath), zap.Error(err))
+					log.Warn(ctx, "garbageCollector find dirty stats log", mlog.String("filePath", objectInfo.FilePath), mlog.Err(err))
 					return false
 				}
 				return segment != nil && segment.IsStatsLogExists(logID)
@@ -546,7 +545,7 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
 				logID, err := binlog.GetLogIDFromBingLogPath(objectInfo.FilePath)
 				if err != nil {
-					log.Warn(ctx, "garbageCollector find dirty dleta log", zap.String("filePath", objectInfo.FilePath), zap.Error(err))
+					log.Warn(ctx, "garbageCollector find dirty dleta log", mlog.String("filePath", objectInfo.FilePath), mlog.Err(err))
 					return false
 				}
 				return segment != nil && segment.IsDeltaLogExists(logID)
@@ -564,8 +563,8 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 // recycleUnusedBinLogWithChecker scans the prefix and checks the path with checker.
 // GC the file if checker returns false.
 func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, prefix string, label string, checker func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool) {
-	logger := mlog.With(zap.String("prefix", prefix))
-	logger.Info(ctx, "garbageCollector recycleUnusedBinlogFiles start", zap.String("prefix", prefix))
+	logger := mlog.With(mlog.String("prefix", prefix))
+	logger.Info(ctx, "garbageCollector recycleUnusedBinlogFiles start", mlog.String("prefix", prefix))
 	lastFilePath := ""
 	total := 0
 	valid := 0
@@ -596,7 +595,7 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 
 		// Check file tolerance first to avoid unnecessary operation.
 		if time.Since(chunkInfo.ModifyTime) <= gc.option.missingTolerance {
-			logger.Info(ctx, "garbageCollector recycleUnusedBinlogFiles skip file since it is not expired", zap.String("filePath", chunkInfo.FilePath), zap.Time("modifyTime", chunkInfo.ModifyTime))
+			logger.Info(ctx, "garbageCollector recycleUnusedBinlogFiles skip file since it is not expired", mlog.String("filePath", chunkInfo.FilePath), mlog.Time("modifyTime", chunkInfo.ModifyTime))
 			return true
 		}
 
@@ -616,8 +615,8 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 			}
 			unexpectedFailure.Inc()
 			logger.Warn(ctx, "garbageCollector recycleUnusedBinlogFiles parse segment id error",
-				zap.String("filePath", chunkInfo.FilePath),
-				zap.Error(err))
+				mlog.String("filePath", chunkInfo.FilePath),
+				mlog.Err(err))
 			return true
 		}
 
@@ -631,7 +630,7 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 
 		if checker(chunkInfo, segment) {
 			valid++
-			logger.Info(ctx, "garbageCollector recycleUnusedBinlogFiles skip file since it is valid", zap.String("filePath", chunkInfo.FilePath), zap.Int64("segmentID", segmentID))
+			logger.Info(ctx, "garbageCollector recycleUnusedBinlogFiles skip file since it is valid", mlog.String("filePath", chunkInfo.FilePath), mlog.FieldSegmentID(segmentID))
 			return true
 		}
 
@@ -642,7 +641,7 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 		}
 		if isSnapshotProtected(segmentID, collectionID) {
 			logger.Info(ctx, "skip GC binlog files since segment is protected by snapshot",
-				zap.Int64("segmentID", segmentID))
+				mlog.FieldSegmentID(segmentID))
 			valid++
 			return true
 		}
@@ -651,11 +650,11 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 		file := chunkInfo.FilePath
 
 		future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
-			logger := logger.With(zap.String("file", file))
+			logger := logger.With(mlog.String("file", file))
 			logger.Info(ctx, "garbageCollector recycleUnusedBinlogFiles remove file...")
 
 			if err = gc.option.cli.Remove(ctx, file); err != nil {
-				mlog.Warn(ctx, "garbageCollector recycleUnusedBinlogFiles remove file failed", zap.Error(err))
+				mlog.Warn(ctx, "garbageCollector recycleUnusedBinlogFiles remove file failed", mlog.Err(err))
 				unexpectedFailure.Inc()
 				return struct{}{}, err
 			}
@@ -669,18 +668,18 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 	// Wait for all remove tasks done.
 	if err := conc.BlockOnAll(futures...); err != nil {
 		// error is logged, and can be ignored here.
-		logger.Warn(ctx, "some task failure in remove object pool", zap.Error(err))
+		logger.Warn(ctx, "some task failure in remove object pool", mlog.Err(err))
 	}
 
 	cost := time.Since(start)
 	logger.Info(ctx, "garbageCollector recycleUnusedBinlogFiles done",
-		zap.Int("total", total),
-		zap.Int("valid", valid),
-		zap.Int("unexpectedFailure", int(unexpectedFailure.Load())),
-		zap.Int("removed", int(removed.Load())),
-		zap.String("lastFilePath", lastFilePath),
-		zap.Duration("cost", cost),
-		zap.Error(err))
+		mlog.Int("total", total),
+		mlog.Int("valid", valid),
+		mlog.Int("unexpectedFailure", int(unexpectedFailure.Load())),
+		mlog.Int("removed", int(removed.Load())),
+		mlog.String("lastFilePath", lastFilePath),
+		mlog.Duration("cost", cost),
+		mlog.Err(err))
 
 	metrics.GarbageCollectorFileScanDuration.
 		WithLabelValues(paramtable.GetStringNodeID(), label).
@@ -692,7 +691,7 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 	indexSet typeutil.UniqueSet,
 	cpTimestamp Timestamp,
 ) bool {
-	log := mlog.With(zap.Int64("segmentID", segment.ID))
+	log := mlog.With(mlog.FieldSegmentID(segment.ID))
 
 	if !gc.isExpire(segment.GetDroppedAt()) {
 		return false
@@ -705,7 +704,7 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 		if childSegment != nil && !indexSet.Contain(childSegment.GetID()) {
 			log.
 				RatedInfo(gc.ctx, rate.Limit(60), "skipping GC when compact target segment is not indexed",
-					zap.Int64("child segment ID", childSegment.GetID()))
+					mlog.Int64("child segment ID", childSegment.GetID()))
 			return false
 		}
 	}
@@ -718,8 +717,8 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 		// segment gc shall only happen when channel cp is after segment dml cp.
 		log.
 			RatedInfo(gc.ctx, rate.Limit(60), "dropped segment dml position after channel cp, skip meta gc",
-				zap.Uint64("dmlPosTs", segmentEffectiveDmlTs(segment.SegmentInfo)),
-				zap.Uint64("channelCpTs", cpTimestamp),
+				mlog.Uint64("dmlPosTs", segmentEffectiveDmlTs(segment.SegmentInfo)),
+				mlog.Uint64("channelCpTs", cpTimestamp),
 			)
 		return false
 	}
@@ -729,10 +728,10 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 // recycleDroppedSegments scans all segments and remove those dropped segments from meta and oss.
 func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
-	log := mlog.With(zap.String("gcName", "recycleDroppedSegments"), zap.Time("startAt", start))
+	log := mlog.With(mlog.String("gcName", "recycleDroppedSegments"), mlog.Time("startAt", start))
 	log.Info(ctx, "start clear dropped segments...")
 	defer func() {
-		log.Info(ctx, "clear dropped segments done", zap.Duration("timeCost", time.Since(start)))
+		log.Info(ctx, "clear dropped segments done", mlog.Duration("timeCost", time.Since(start)))
 	}()
 
 	all := gc.meta.SelectSegments(ctx)
@@ -776,14 +775,14 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 	loadedSegments := typeutil.NewSet[int64]()
 	segments, err := gc.handler.ListLoadedSegments(ctx)
 	if err != nil {
-		log.Warn(ctx, "failed to get loaded segments", zap.Error(err))
+		log.Warn(ctx, "failed to get loaded segments", mlog.Err(err))
 		return
 	}
 	for _, segmentID := range segments {
 		loadedSegments.Insert(segmentID)
 	}
 
-	log.Info(ctx, "start to GC segments", zap.Int("drop_num", len(drops)))
+	log.Info(ctx, "start to GC segments", mlog.Int("drop_num", len(drops)))
 	for segmentID, segment := range drops {
 		if ctx.Err() != nil {
 			// process canceled, stop.
@@ -793,14 +792,14 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 		gc.ackSignal(signal)
 
 		if gc.collectionGCPaused(segment.GetCollectionID()) {
-			log.Info(ctx, "skip GC segment since collection is paused", zap.Int64("segmentID", segmentID), zap.Int64("collectionID", segment.GetCollectionID()))
+			log.Info(ctx, "skip GC segment since collection is paused", mlog.FieldSegmentID(segmentID), mlog.FieldCollectionID(segment.GetCollectionID()))
 			continue
 		}
 
-		log := mlog.With(zap.Int64("segmentID", segmentID))
+		log := mlog.With(mlog.FieldSegmentID(segmentID))
 		segInsertChannel := segment.GetInsertChannel()
 		if loadedSegments.Contain(segmentID) {
-			log.Info(ctx, "skip GC segment since it is loaded", zap.Int64("segmentID", segmentID))
+			log.Info(ctx, "skip GC segment since it is loaded", mlog.FieldSegmentID(segmentID))
 			continue
 		}
 
@@ -810,10 +809,10 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 		if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil {
 			if snapshotMeta.IsSegmentGCBlocked(segment.GetCollectionID(), segmentID) {
 				log.Info(ctx, "skip GC segment since it is protected by snapshot",
-					zap.Int64("collectionID", segment.GetCollectionID()),
-					zap.Int64("partitionID", segment.GetPartitionID()),
-					zap.String("channel", segInsertChannel),
-					zap.Int64("segmentID", segmentID))
+					mlog.FieldCollectionID(segment.GetCollectionID()),
+					mlog.FieldPartitionID(segment.GetPartitionID()),
+					mlog.String("channel", segInsertChannel),
+					mlog.FieldSegmentID(segmentID))
 				continue
 			}
 		}
@@ -853,7 +852,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 // keyLock — must preserve these invariants, otherwise dropped-segment GC
 // will silently break under load.
 func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID int64, segment *SegmentInfo) {
-	log := mlog.With(zap.Int64("segmentID", segmentID), zap.Int64("collectionID", segment.GetCollectionID()))
+	log := mlog.With(mlog.FieldSegmentID(segmentID), mlog.FieldCollectionID(segment.GetCollectionID()))
 
 	if ctx.Err() != nil {
 		return
@@ -862,13 +861,13 @@ func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID
 	segIndexes, indexFiles, indexSnapshotBlocked := gc.getDroppedSegmentIndexFiles(segmentID)
 	if indexSnapshotBlocked {
 		log.Info(ctx, "skip GC segment since segment index is protected by snapshot",
-			zap.Int("segmentIndexes", len(segIndexes)))
+			mlog.Int("segmentIndexes", len(segIndexes)))
 		return
 	}
 
 	cloned := segment.Clone()
 	if err := gc.removeDroppedSegmentFiles(ctx, cloned, indexFiles); err != nil {
-		log.Warn(ctx, "GC segment remove files failed", zap.Error(err))
+		log.Warn(ctx, "GC segment remove files failed", mlog.Err(err))
 		return
 	}
 
@@ -877,7 +876,7 @@ func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID
 	}
 
 	if err := gc.removeDroppedSegmentIndexMeta(ctx, segIndexes); err != nil {
-		log.Warn(ctx, "GC segment index meta failed, wait to retry", zap.Error(err))
+		log.Warn(ctx, "GC segment index meta failed, wait to retry", mlog.Err(err))
 		return
 	}
 
@@ -886,10 +885,10 @@ func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID
 	}
 
 	if err := gc.meta.DropSegment(ctx, cloned.GetID()); err != nil {
-		log.Warn(ctx, "GC segment meta failed to drop segment", zap.Error(err))
+		log.Warn(ctx, "GC segment meta failed to drop segment", mlog.Err(err))
 		return
 	}
-	log.Info(ctx, "GC segment meta drop segment done", zap.Int("segmentIndexes", len(segIndexes)))
+	log.Info(ctx, "GC segment meta drop segment done", mlog.Int("segmentIndexes", len(segIndexes)))
 }
 
 func (gc *garbageCollector) getDroppedSegmentIndexFiles(segmentID int64) ([]*model.SegmentIndex, map[string]struct{}, bool) {
@@ -926,7 +925,7 @@ func (gc *garbageCollector) getAllSegmentIndexesForDroppedSegment(segmentID int6
 }
 
 func (gc *garbageCollector) removeDroppedSegmentFiles(ctx context.Context, cloned *SegmentInfo, indexFiles map[string]struct{}) error {
-	log := mlog.With(zap.Int64("segmentID", cloned.GetID()))
+	log := mlog.With(mlog.FieldSegmentID(cloned.GetID()))
 
 	// V3 segment data lives under the manifest base path. Segment index files still
 	// live under index file prefixes and must be deleted from recorded file keys.
@@ -934,17 +933,17 @@ func (gc *garbageCollector) removeDroppedSegmentFiles(ctx context.Context, clone
 		basePath, _, err := packed.UnmarshalManifestPath(cloned.GetManifestPath())
 		if err != nil {
 			log.Warn(ctx, "GC V3 segment failed to parse manifest path",
-				zap.String("manifestPath", cloned.GetManifestPath()),
-				zap.Error(err))
+				mlog.String("manifestPath", cloned.GetManifestPath()),
+				mlog.Err(err))
 			return err
 		}
 		log.Info(ctx, "GC V3 segment start, removing basePath...",
-			zap.String("basePath", basePath),
-			zap.Int("indexFiles", len(indexFiles)))
+			mlog.String("basePath", basePath),
+			mlog.Int("indexFiles", len(indexFiles)))
 		if err := gc.option.cli.RemoveWithPrefix(ctx, basePath); err != nil {
 			log.Warn(ctx, "GC V3 segment remove basePath failed",
-				zap.String("basePath", basePath),
-				zap.Error(err))
+				mlog.String("basePath", basePath),
+				mlog.Err(err))
 			return err
 		}
 		if len(indexFiles) == 0 {
@@ -952,7 +951,7 @@ func (gc *garbageCollector) removeDroppedSegmentFiles(ctx context.Context, clone
 			return nil
 		}
 		if err := gc.removeObjectFiles(ctx, indexFiles); err != nil {
-			log.Warn(ctx, "GC V3 segment remove index files failed", zap.Error(err))
+			log.Warn(ctx, "GC V3 segment remove index files failed", mlog.Err(err))
 			return err
 		}
 		log.Info(ctx, "GC V3 segment files done")
@@ -971,15 +970,15 @@ func (gc *garbageCollector) removeDroppedSegmentFiles(ctx context.Context, clone
 		logs[key] = struct{}{}
 	}
 
-	log.Info(ctx, "GC segment start...", zap.Int("insert_logs", len(cloned.GetBinlogs())),
-		zap.Int("delta_logs", len(cloned.GetDeltalogs())),
-		zap.Int("stats_logs", len(cloned.GetStatslogs())),
-		zap.Int("bm25_logs", len(cloned.GetBm25Statslogs())),
-		zap.Int("text_logs", len(cloned.GetTextStatsLogs())),
-		zap.Int("json_key_logs", len(cloned.GetJsonKeyStats())),
-		zap.Int("index_files", len(indexFiles)))
+	log.Info(ctx, "GC segment start...", mlog.Int("insert_logs", len(cloned.GetBinlogs())),
+		mlog.Int("delta_logs", len(cloned.GetDeltalogs())),
+		mlog.Int("stats_logs", len(cloned.GetStatslogs())),
+		mlog.Int("bm25_logs", len(cloned.GetBm25Statslogs())),
+		mlog.Int("text_logs", len(cloned.GetTextStatsLogs())),
+		mlog.Int("json_key_logs", len(cloned.GetJsonKeyStats())),
+		mlog.Int("index_files", len(indexFiles)))
 	if err := gc.removeObjectFiles(ctx, logs); err != nil {
-		log.Warn(ctx, "GC segment remove logs failed", zap.Error(err))
+		log.Warn(ctx, "GC segment remove logs failed", mlog.Err(err))
 		return err
 	}
 	return nil
@@ -1000,14 +999,14 @@ func (gc *garbageCollector) removeDroppedSegmentIndexMeta(ctx context.Context, s
 func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-chan gcCmd) {
 	channelCPs, err := gc.meta.catalog.ListChannelCheckpoint(ctx)
 	if err != nil {
-		mlog.Warn(ctx, "list channel cp fail during GC", zap.Error(err))
+		mlog.Warn(ctx, "list channel cp fail during GC", mlog.Err(err))
 		return
 	}
 
 	collectionID2GcStatus := make(map[int64]bool)
 	skippedCnt := 0
 
-	mlog.Info(ctx, "start to GC channel cp", zap.Int("vchannelCPCnt", len(channelCPs)))
+	mlog.Info(ctx, "start to GC channel cp", mlog.Int("vchannelCPCnt", len(channelCPs)))
 	for vChannel := range channelCPs {
 		collectionID := funcutil.GetCollectionIDFromVChannel(vChannel)
 		if gc.collectionGCPaused(collectionID) {
@@ -1019,7 +1018,7 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-c
 		// !!! Skip to GC if vChannel format is illegal, it will lead meta leak in this case
 		if collectionID == -1 {
 			skippedCnt++
-			mlog.Warn(ctx, "parse collection id fail, skip to gc channel cp", zap.String("vchannel", vChannel))
+			mlog.Warn(ctx, "parse collection id fail, skip to gc channel cp", mlog.FieldVChannel(vChannel))
 			continue
 		}
 
@@ -1037,8 +1036,8 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-c
 			} else {
 				// skip checkpoints GC of this cycle if describe collection fails or the collection state is available.
 				mlog.Debug(ctx, "skip channel cp GC, the collection state is available",
-					zap.Int64("collectionID", collectionID),
-					zap.Bool("dropped", has), zap.Error(err))
+					mlog.FieldCollectionID(collectionID),
+					mlog.Bool("dropped", has), mlog.Err(err))
 				collectionID2GcStatus[collectionID] = false
 			}
 		}
@@ -1052,13 +1051,13 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-c
 		err := gc.meta.DropChannelCheckpoint(vChannel)
 		if err != nil {
 			// Try to GC in the next gc cycle if drop channel cp meta fail.
-			mlog.Warn(ctx, "failed to drop channelcp check point during gc", zap.String("vchannel", vChannel), zap.Error(err))
+			mlog.Warn(ctx, "failed to drop channelcp check point during gc", mlog.FieldVChannel(vChannel), mlog.Err(err))
 		} else {
-			mlog.Info(ctx, "GC channel cp", zap.String("vchannel", vChannel))
+			mlog.Info(ctx, "GC channel cp", mlog.FieldVChannel(vChannel))
 		}
 	}
 
-	mlog.Info(ctx, "GC channel cp done", zap.Int("skippedChannelCP", skippedCnt))
+	mlog.Info(ctx, "GC channel cp done", mlog.Int("skippedChannelCP", skippedCnt))
 }
 
 func (gc *garbageCollector) isExpire(dropts Timestamp) bool {
@@ -1147,8 +1146,8 @@ func (gc *garbageCollector) removeObjectFiles(ctx context.Context, filePaths map
 				mlog.With().
 					Info(ctx,
 						"remove log failed, key not found, may be removed at previous GC, ignore the error",
-						zap.String("path", filePath),
-						zap.Error(err))
+						mlog.String("path", filePath),
+						mlog.Err(err))
 			}
 			return struct{}{}, nil
 		})
@@ -1161,10 +1160,10 @@ func (gc *garbageCollector) removeObjectFiles(ctx context.Context, filePaths map
 func (gc *garbageCollector) recycleUnusedIndexes(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
 	log := mlog.With().
-		With(zap.String("gcName", "recycleUnusedIndexes"), zap.Time("startAt", start))
+		With(mlog.String("gcName", "recycleUnusedIndexes"), mlog.Time("startAt", start))
 	log.Info(ctx, "start recycleUnusedIndexes...")
 	defer func() {
-		log.Info(ctx, "recycleUnusedIndexes done", zap.Duration("timeCost", time.Since(start)))
+		log.Info(ctx, "recycleUnusedIndexes done", mlog.Duration("timeCost", time.Since(start)))
 	}()
 
 	deletedIndexes := gc.meta.indexMeta.GetDeletedIndexes()
@@ -1178,9 +1177,9 @@ func (gc *garbageCollector) recycleUnusedIndexes(ctx context.Context, signal <-c
 		}
 		gc.ackSignal(signal)
 
-		log := mlog.With(zap.Int64("collectionID", index.CollectionID), zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID))
+		log := mlog.With(mlog.FieldCollectionID(index.CollectionID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID))
 		if err := gc.meta.indexMeta.RemoveIndex(ctx, index.CollectionID, index.IndexID); err != nil {
-			log.Warn(ctx, "remove index on collection fail", zap.Error(err))
+			log.Warn(ctx, "remove index on collection fail", mlog.Err(err))
 			continue
 		}
 		log.Info(ctx, "remove index on collection done")
@@ -1191,10 +1190,10 @@ func (gc *garbageCollector) recycleUnusedIndexes(ctx context.Context, signal <-c
 func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
 	log := mlog.With().
-		With(zap.String("gcName", "recycleUnusedSegIndexes"), zap.Time("startAt", start))
+		With(mlog.String("gcName", "recycleUnusedSegIndexes"), mlog.Time("startAt", start))
 	log.Info(ctx, "start recycleUnusedSegIndexes...")
 	defer func() {
-		log.Info(ctx, "recycleUnusedSegIndexes done", zap.Duration("timeCost", time.Since(start)))
+		log.Info(ctx, "recycleUnusedSegIndexes done", mlog.Duration("timeCost", time.Since(start)))
 	}()
 
 	segIndexes := gc.meta.indexMeta.GetAllSegIndexes()
@@ -1212,21 +1211,21 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 		// 2. index is deleted.
 		if gc.meta.GetSegment(ctx, segIdx.SegmentID) == nil || !gc.meta.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
 			indexFiles := gc.getAllIndexFilesOfIndex(segIdx)
-			log := mlog.With(zap.Int64("collectionID", segIdx.CollectionID),
-				zap.Int64("partitionID", segIdx.PartitionID),
-				zap.Int64("segmentID", segIdx.SegmentID),
-				zap.Int64("indexID", segIdx.IndexID),
-				zap.Int64("buildID", segIdx.BuildID),
-				zap.Int64("nodeID", segIdx.NodeID),
-				zap.Int("indexFiles", len(indexFiles)))
+			log := mlog.With(mlog.FieldCollectionID(segIdx.CollectionID),
+				mlog.FieldPartitionID(segIdx.PartitionID),
+				mlog.FieldSegmentID(segIdx.SegmentID),
+				mlog.FieldIndexID(segIdx.IndexID),
+				mlog.FieldBuildID(segIdx.BuildID),
+				mlog.FieldNodeID(segIdx.NodeID),
+				mlog.Int("indexFiles", len(indexFiles)))
 
 			// Skip buildIDs protected by snapshot references. IsBuildIDGCBlocked is O(1)
 			// and embeds the "RefIndex not loaded → fail-closed" check.
 			if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil {
 				if snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
 					log.Info(ctx, "skip GC segment index since buildID is protected by snapshot",
-						zap.Int64("collectionID", segIdx.CollectionID),
-						zap.Int64("buildID", segIdx.BuildID))
+						mlog.FieldCollectionID(segIdx.CollectionID),
+						mlog.FieldBuildID(segIdx.BuildID))
 					continue
 				}
 			}
@@ -1235,13 +1234,13 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 
 			// Remove index files first.
 			if err := gc.removeObjectFiles(ctx, indexFiles); err != nil {
-				log.Warn(ctx, "fail to remove index files for index", zap.Error(err))
+				log.Warn(ctx, "fail to remove index files for index", mlog.Err(err))
 				continue
 			}
 
 			// Remove meta from index meta.
 			if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, segIdx.BuildID); err != nil {
-				log.Warn(ctx, "delete index meta from etcd failed, wait to retry", zap.Error(err))
+				log.Warn(ctx, "delete index meta from etcd failed, wait to retry", mlog.Err(err))
 				continue
 			}
 			log.Info(ctx, "index meta recycle success")
@@ -1255,7 +1254,7 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 func (gc *garbageCollector) recycleUnusedIndexFilesV0(ctx context.Context) {
 	start := time.Now()
 	log := mlog.With().
-		With(zap.String("gcName", "recycleUnusedIndexFilesV0"), zap.Time("startAt", start))
+		With(mlog.String("gcName", "recycleUnusedIndexFilesV0"), mlog.Time("startAt", start))
 	log.Info(ctx, "start recycleUnusedIndexFilesV0...")
 
 	prefix := path.Join(gc.option.cli.RootPath(), common.SegmentIndexV0Path) + "/"
@@ -1269,16 +1268,16 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV0(ctx context.Context) {
 	err := gc.option.cli.WalkWithPrefix(ctx, prefix, false, func(indexPathInfo *storage.ChunkObjectInfo) bool {
 		key := indexPathInfo.FilePath
 		keyCount++
-		logger := mlog.With(zap.String("prefix", prefix), zap.String("key", key))
+		logger := mlog.With(mlog.String("prefix", prefix), mlog.String("key", key))
 
 		// This recycler only walks index_files/ (v0). Its first path level is buildID;
 		// v1 collectionID directories live under index_v1/ and are handled below.
 		buildID, err := parseBuildIDFromFilePath(key)
 		if err != nil {
-			logger.Warn(ctx, "garbageCollector recycleUnusedIndexFilesV0 parseIndexFileKey", zap.Error(err))
+			logger.Warn(ctx, "garbageCollector recycleUnusedIndexFilesV0 parseIndexFileKey", mlog.Err(err))
 			return true
 		}
-		logger = logger.With(zap.Int64("buildID", buildID))
+		logger = logger.With(mlog.FieldBuildID(buildID))
 		logger.Info(ctx, "garbageCollector will recycle index files")
 		canRecycle, segIdx := gc.meta.indexMeta.CheckCleanSegmentIndex(buildID)
 		if !canRecycle {
@@ -1292,7 +1291,7 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV0(ctx context.Context) {
 			// so IsBuildIDGCBlocked(-1, buildID) fail-closes on ANY unloaded RefIndex globally.
 			if snapshotMeta != nil && snapshotMeta.IsBuildIDGCBlocked(-1, buildID) {
 				logger.Info(ctx, "skip GC index files since buildID is protected by snapshot",
-					zap.Int64("buildID", buildID))
+					mlog.FieldBuildID(buildID))
 				return true
 			}
 
@@ -1300,7 +1299,7 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV0(ctx context.Context) {
 			logger.Info(ctx, "garbageCollector recycleUnusedIndexFilesV0 find meta has not exist, remove index files")
 			err = gc.option.cli.RemoveWithPrefix(ctx, key)
 			if err != nil {
-				logger.Warn(ctx, "garbageCollector recycleUnusedIndexFilesV0 remove index files failed", zap.Error(err))
+				logger.Warn(ctx, "garbageCollector recycleUnusedIndexFilesV0 remove index files failed", mlog.Err(err))
 				return true
 			}
 			logger.Info(ctx, "garbageCollector recycleUnusedIndexFilesV0 remove index files success")
@@ -1312,15 +1311,15 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV0(ctx context.Context) {
 		if snapshotMeta != nil {
 			if snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
 				logger.Info(ctx, "skip GC index files since buildID is protected by snapshot",
-					zap.Int64("collectionID", segIdx.CollectionID),
-					zap.Int64("buildID", segIdx.BuildID))
+					mlog.FieldCollectionID(segIdx.CollectionID),
+					mlog.FieldBuildID(segIdx.BuildID))
 				return true
 			}
 		}
 
 		filesMap := gc.getAllIndexFilesOfIndex(segIdx)
 
-		logger.Info(ctx, "recycle index files", zap.Int("meta files num", len(filesMap)))
+		logger.Info(ctx, "recycle index files", mlog.Int("meta files num", len(filesMap)))
 		deletedFilesNum := atomic.NewInt32(0)
 		fileNum := 0
 
@@ -1330,11 +1329,11 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV0(ctx context.Context) {
 			file := indexFile.FilePath
 			if _, ok := filesMap[file]; !ok {
 				future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
-					logger := logger.With(zap.String("file", file))
+					logger := logger.With(mlog.String("file", file))
 					logger.Info(ctx, "garbageCollector recycleUnusedIndexFilesV0 remove file...")
 
 					if err := gc.option.cli.Remove(ctx, file); err != nil {
-						logger.Warn(ctx, "garbageCollector recycleUnusedIndexFilesV0 remove file failed", zap.Error(err))
+						logger.Warn(ctx, "garbageCollector recycleUnusedIndexFilesV0 remove file failed", mlog.Err(err))
 						return struct{}{}, err
 					}
 					deletedFilesNum.Inc()
@@ -1348,20 +1347,20 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV0(ctx context.Context) {
 		// Wait for all remove tasks done.
 		if err := conc.BlockOnAll(futures...); err != nil {
 			// error is logged, and can be ignored here.
-			logger.Warn(ctx, "some task failure in remove object pool", zap.Error(err))
+			logger.Warn(ctx, "some task failure in remove object pool", mlog.Err(err))
 		}
 
-		logger = logger.With(zap.Int("deleteIndexFilesNum", int(deletedFilesNum.Load())), zap.Int("walkFileNum", fileNum))
+		logger = logger.With(mlog.Int("deleteIndexFilesNum", int(deletedFilesNum.Load())), mlog.Int("walkFileNum", fileNum))
 		if err != nil {
-			logger.Warn(ctx, "index files recycle failed when walk with prefix", zap.Error(err))
+			logger.Warn(ctx, "index files recycle failed when walk with prefix", mlog.Err(err))
 			return true
 		}
 		logger.Info(ctx, "index files recycle done")
 		return true
 	})
-	log = log.With(zap.Duration("timeCost", time.Since(start)), zap.Int("keyCount", keyCount), zap.Error(err))
+	log = log.With(mlog.Duration("timeCost", time.Since(start)), mlog.Int("keyCount", keyCount), mlog.Err(err))
 	if err != nil {
-		log.Warn(ctx, "garbageCollector recycleUnusedIndexFilesV0 failed", zap.Error(err))
+		log.Warn(ctx, "garbageCollector recycleUnusedIndexFilesV0 failed", mlog.Err(err))
 		return
 	}
 	log.Info(ctx, "recycleUnusedIndexFilesV0 done")
@@ -1386,7 +1385,7 @@ func (gc *garbageCollector) getAllIndexFilesOfIndex(segmentIndex *model.SegmentI
 // so GC iterates deleted metadata entries instead of trying to parse buildID from a prefix walk.
 func (gc *garbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
 	log := mlog.With().
-		With(zap.String("gcName", "recycleUnusedIndexFilesV1"))
+		With(mlog.String("gcName", "recycleUnusedIndexFilesV1"))
 
 	snapshotMeta := gc.meta.GetSnapshotMeta()
 	deletedIndexes := gc.meta.indexMeta.GetDeletedIndexesWithV1Path()
@@ -1394,14 +1393,14 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
 		return
 	}
 
-	log.Info(ctx, "start recycleUnusedIndexFilesV1", zap.Int("deletedCount", len(deletedIndexes)))
+	log.Info(ctx, "start recycleUnusedIndexFilesV1", mlog.Int("deletedCount", len(deletedIndexes)))
 	futures := make([]*conc.Future[struct{}], 0, len(deletedIndexes))
 	for _, segIdx := range deletedIndexes {
 		segIdx := segIdx
 		if snapshotMeta != nil && snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
 			log.Info(ctx, "skip GC v1 index files since buildID is protected by snapshot",
-				zap.Int64("collectionID", segIdx.CollectionID),
-				zap.Int64("buildID", segIdx.BuildID))
+				mlog.FieldCollectionID(segIdx.CollectionID),
+				mlog.FieldBuildID(segIdx.BuildID))
 			continue
 		}
 
@@ -1414,42 +1413,42 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
 
 			if err := gc.option.cli.RemoveWithPrefix(ctx, prefix); err != nil {
 				log.Warn(ctx, "recycleUnusedIndexFilesV1 remove failed",
-					zap.Int64("collectionID", segIdx.CollectionID),
-					zap.Int64("partitionID", segIdx.PartitionID),
-					zap.Int64("segmentID", segIdx.SegmentID),
-					zap.Int64("buildID", segIdx.BuildID),
-					zap.Int64("indexID", segIdx.IndexID),
-					zap.Stringer("pathVersion", segIdx.IndexStorePathVersion),
-					zap.String("prefix", prefix),
-					zap.Error(err))
+					mlog.FieldCollectionID(segIdx.CollectionID),
+					mlog.FieldPartitionID(segIdx.PartitionID),
+					mlog.FieldSegmentID(segIdx.SegmentID),
+					mlog.FieldBuildID(segIdx.BuildID),
+					mlog.FieldIndexID(segIdx.IndexID),
+					mlog.Stringer("pathVersion", segIdx.IndexStorePathVersion),
+					mlog.String("prefix", prefix),
+					mlog.Err(err))
 				return struct{}{}, err
 			}
 			if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, segIdx.BuildID); err != nil {
 				log.Warn(ctx, "recycleUnusedIndexFilesV1 remove segment index meta failed",
-					zap.Int64("collectionID", segIdx.CollectionID),
-					zap.Int64("partitionID", segIdx.PartitionID),
-					zap.Int64("segmentID", segIdx.SegmentID),
-					zap.Int64("buildID", segIdx.BuildID),
-					zap.Int64("indexID", segIdx.IndexID),
-					zap.Stringer("pathVersion", segIdx.IndexStorePathVersion),
-					zap.String("prefix", prefix),
-					zap.Error(err))
+					mlog.FieldCollectionID(segIdx.CollectionID),
+					mlog.FieldPartitionID(segIdx.PartitionID),
+					mlog.FieldSegmentID(segIdx.SegmentID),
+					mlog.FieldBuildID(segIdx.BuildID),
+					mlog.FieldIndexID(segIdx.IndexID),
+					mlog.Stringer("pathVersion", segIdx.IndexStorePathVersion),
+					mlog.String("prefix", prefix),
+					mlog.Err(err))
 				return struct{}{}, err
 			}
 			log.Info(ctx, "recycleUnusedIndexFilesV1 removed index files and meta",
-				zap.Int64("collectionID", segIdx.CollectionID),
-				zap.Int64("partitionID", segIdx.PartitionID),
-				zap.Int64("segmentID", segIdx.SegmentID),
-				zap.Int64("buildID", segIdx.BuildID),
-				zap.Int64("indexID", segIdx.IndexID),
-				zap.Stringer("pathVersion", segIdx.IndexStorePathVersion),
-				zap.String("prefix", prefix))
+				mlog.FieldCollectionID(segIdx.CollectionID),
+				mlog.FieldPartitionID(segIdx.PartitionID),
+				mlog.FieldSegmentID(segIdx.SegmentID),
+				mlog.FieldBuildID(segIdx.BuildID),
+				mlog.FieldIndexID(segIdx.IndexID),
+				mlog.Stringer("pathVersion", segIdx.IndexStorePathVersion),
+				mlog.String("prefix", prefix))
 			return struct{}{}, nil
 		})
 		futures = append(futures, future)
 	}
 	if err := conc.BlockOnAll(futures...); err != nil {
-		log.Warn(ctx, "some task failure in remove object pool", zap.Error(err))
+		log.Warn(ctx, "some task failure in remove object pool", mlog.Err(err))
 	}
 }
 
@@ -1465,10 +1464,10 @@ func (gc *garbageCollector) recycleUnusedAnalyzeFiles(ctx context.Context, signa
 		return true
 	})
 	if err != nil {
-		mlog.Warn(ctx, "garbageCollector recycleUnusedAnalyzeFiles list keys from chunk manager failed", zap.Error(err))
+		mlog.Warn(ctx, "garbageCollector recycleUnusedAnalyzeFiles list keys from chunk manager failed", mlog.Err(err))
 		return
 	}
-	mlog.Info(ctx, "recycleUnusedAnalyzeFiles, finish list object", zap.Duration("time spent", time.Since(startTs)), zap.Int("task ids", len(keys)))
+	mlog.Info(ctx, "recycleUnusedAnalyzeFiles, finish list object", mlog.Duration("time spent", time.Since(startTs)), mlog.Int("task ids", len(keys)))
 	for _, key := range keys {
 		if ctx.Err() != nil {
 			// process canceled
@@ -1477,37 +1476,37 @@ func (gc *garbageCollector) recycleUnusedAnalyzeFiles(ctx context.Context, signa
 		// collection gc pause not affect analyze file for now
 		gc.ackSignal(signal)
 
-		mlog.Debug(ctx, "analyze keys", zap.String("key", key))
+		mlog.Debug(ctx, "analyze keys", mlog.String("key", key))
 		taskID, err := parseBuildIDFromFilePath(key)
 		if err != nil {
-			mlog.Warn(ctx, "garbageCollector recycleUnusedAnalyzeFiles parseAnalyzeResult failed", zap.String("key", key), zap.Error(err))
+			mlog.Warn(ctx, "garbageCollector recycleUnusedAnalyzeFiles parseAnalyzeResult failed", mlog.String("key", key), mlog.Err(err))
 			continue
 		}
-		mlog.Info(ctx, "garbageCollector will recycle analyze stats files", zap.Int64("taskID", taskID))
+		mlog.Info(ctx, "garbageCollector will recycle analyze stats files", mlog.FieldTaskID(taskID))
 		canRecycle, task := gc.meta.analyzeMeta.CheckCleanAnalyzeTask(taskID)
 		if !canRecycle {
 			// Even if the analysis task is marked as deleted, the analysis stats file will not be recycled, wait for the next gc,
 			// and delete all index files about the taskID at one time.
-			mlog.Info(ctx, "garbageCollector no need to recycle analyze stats files", zap.Int64("taskID", taskID))
+			mlog.Info(ctx, "garbageCollector no need to recycle analyze stats files", mlog.FieldTaskID(taskID))
 			continue
 		}
 		if task == nil {
 			// taskID no longer exists in meta, remove all analysis files
 			mlog.Info(ctx, "garbageCollector recycleUnusedAnalyzeFiles find meta has not exist, remove index files",
-				zap.Int64("taskID", taskID))
+				mlog.FieldTaskID(taskID))
 			err = gc.option.cli.RemoveWithPrefix(ctx, key)
 			if err != nil {
 				mlog.Warn(ctx, "garbageCollector recycleUnusedAnalyzeFiles remove analyze stats files failed",
-					zap.Int64("taskID", taskID), zap.String("prefix", key), zap.Error(err))
+					mlog.FieldTaskID(taskID), mlog.String("prefix", key), mlog.Err(err))
 				continue
 			}
 			mlog.Info(ctx, "garbageCollector recycleUnusedAnalyzeFiles remove analyze stats files success",
-				zap.Int64("taskID", taskID), zap.String("prefix", key))
+				mlog.FieldTaskID(taskID), mlog.String("prefix", key))
 			continue
 		}
 
 		mlog.Info(ctx, "remove analyze stats files which version is less than current task",
-			zap.Int64("taskID", taskID), zap.Int64("current version", task.Version))
+			mlog.FieldTaskID(taskID), mlog.Int64("current version", task.Version))
 		var i int64
 		for i = 0; i < task.Version; i++ {
 			if ctx.Err() != nil {
@@ -1517,11 +1516,11 @@ func (gc *garbageCollector) recycleUnusedAnalyzeFiles(ctx context.Context, signa
 			removePrefix := prefix + fmt.Sprintf("%d/", task.Version)
 			if err := gc.option.cli.RemoveWithPrefix(ctx, removePrefix); err != nil {
 				mlog.Warn(ctx, "garbageCollector recycleUnusedAnalyzeFiles remove files with prefix failed",
-					zap.Int64("taskID", taskID), zap.String("removePrefix", removePrefix))
+					mlog.FieldTaskID(taskID), mlog.String("removePrefix", removePrefix))
 				continue
 			}
 		}
-		mlog.Info(ctx, "analyze stats files recycle success", zap.Int64("taskID", taskID))
+		mlog.Info(ctx, "analyze stats files recycle success", mlog.FieldTaskID(taskID))
 	}
 }
 
@@ -1530,10 +1529,10 @@ func (gc *garbageCollector) recycleUnusedAnalyzeFiles(ctx context.Context, signa
 func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
 	log := mlog.With().
-		With(zap.String("gcName", "recycleUnusedTextIndexFiles"), zap.Time("startAt", start))
+		With(mlog.String("gcName", "recycleUnusedTextIndexFiles"), mlog.Time("startAt", start))
 	log.Info(ctx, "start recycleUnusedTextIndexFiles...")
 	defer func() {
-		log.Info(ctx, "recycleUnusedTextIndexFiles done", zap.Duration("timeCost", time.Since(start)))
+		log.Info(ctx, "recycleUnusedTextIndexFiles done", mlog.Duration("timeCost", time.Since(start)))
 	}()
 
 	hasTextIndexSegments := gc.meta.SelectSegments(ctx, SegmentFilterFunc(func(info *SegmentInfo) bool {
@@ -1550,7 +1549,7 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context, sig
 			return
 		}
 		if gc.collectionGCPaused(seg.GetCollectionID()) {
-			log.Info(ctx, "skip GC segment since collection is paused", zap.Int64("segmentID", seg.GetID()), zap.Int64("collectionID", seg.GetCollectionID()))
+			log.Info(ctx, "skip GC segment since collection is paused", mlog.FieldSegmentID(seg.GetID()), mlog.FieldCollectionID(seg.GetCollectionID()))
 			continue
 		}
 
@@ -1558,14 +1557,14 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context, sig
 		// is O(1) and embeds the "RefIndex not loaded → fail-closed" check.
 		if snapshotMeta != nil && snapshotMeta.IsSegmentGCBlocked(seg.GetCollectionID(), seg.GetID()) {
 			log.Info(ctx, "skip GC text index files since segment is protected by snapshot",
-				zap.Int64("segmentID", seg.GetID()),
-				zap.Int64("collectionID", seg.GetCollectionID()))
+				mlog.FieldSegmentID(seg.GetID()),
+				mlog.FieldCollectionID(seg.GetCollectionID()))
 			continue
 		}
 
 		gc.ackSignal(signal)
 		for _, fieldStats := range seg.GetTextStatsLogs() {
-			log := mlog.With(zap.Int64("segmentID", seg.GetID()), zap.Int64("fieldID", fieldStats.GetFieldID()))
+			log := mlog.With(mlog.FieldSegmentID(seg.GetID()), mlog.FieldFieldID(fieldStats.GetFieldID()))
 			// clear low version task
 			for i := int64(1); i < fieldStats.GetVersion(); i++ {
 				prefix := metautil.BuildTextIndexPrefix(gc.option.cli.RootPath(),
@@ -1576,11 +1575,11 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context, sig
 					file := files.FilePath
 
 					future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
-						log := mlog.With(zap.String("file", file))
+						log := mlog.With(mlog.String("file", file))
 						log.Info(ctx, "garbageCollector recycleUnusedTextIndexFiles remove file...")
 
 						if err := gc.option.cli.Remove(ctx, file); err != nil {
-							log.Warn(ctx, "garbageCollector recycleUnusedTextIndexFiles remove file failed", zap.Error(err))
+							log.Warn(ctx, "garbageCollector recycleUnusedTextIndexFiles remove file failed", mlog.Err(err))
 							return struct{}{}, err
 						}
 						deletedFilesNum.Inc()
@@ -1594,12 +1593,12 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context, sig
 				// Wait for all remove tasks done.
 				if err := conc.BlockOnAll(futures...); err != nil {
 					// error is logged, and can be ignored here.
-					log.Warn(ctx, "some task failure in remove object pool", zap.Error(err))
+					log.Warn(ctx, "some task failure in remove object pool", mlog.Err(err))
 				}
 
-				log = log.With(zap.Int("deleteIndexFilesNum", int(deletedFilesNum.Load())), zap.Int("walkFileNum", fileNum))
+				log = log.With(mlog.Int("deleteIndexFilesNum", int(deletedFilesNum.Load())), mlog.Int("walkFileNum", fileNum))
 				if err != nil {
-					log.Warn(ctx, "text index files recycle failed when walk with prefix", zap.Error(err))
+					log.Warn(ctx, "text index files recycle failed when walk with prefix", mlog.Err(err))
 					return
 				}
 			}
@@ -1615,10 +1614,10 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context, sig
 func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
 	log := mlog.With().
-		With(zap.String("gcName", "recycleUnusedJSONStatsFiles"), zap.Time("startAt", start))
+		With(mlog.String("gcName", "recycleUnusedJSONStatsFiles"), mlog.Time("startAt", start))
 	log.Info(ctx, "start recycleUnusedJSONStatsFiles...")
 	defer func() {
-		log.Info(ctx, "recycleUnusedJSONStatsFiles done", zap.Duration("timeCost", time.Since(start)))
+		log.Info(ctx, "recycleUnusedJSONStatsFiles done", mlog.Duration("timeCost", time.Since(start)))
 	}()
 
 	hasJSONStatsSegments := gc.meta.SelectSegments(ctx, SegmentFilterFunc(func(info *SegmentInfo) bool {
@@ -1635,21 +1634,21 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 			return
 		}
 		if gc.collectionGCPaused(seg.GetCollectionID()) {
-			log.Info(ctx, "skip GC segment since collection is paused", zap.Int64("segmentID", seg.GetID()), zap.Int64("collectionID", seg.GetCollectionID()))
+			log.Info(ctx, "skip GC segment since collection is paused", mlog.FieldSegmentID(seg.GetID()), mlog.FieldCollectionID(seg.GetCollectionID()))
 			continue
 		}
 
 		// Skip segments whose files are still referenced by snapshots.
 		if snapshotMeta != nil && snapshotMeta.IsSegmentGCBlocked(seg.GetCollectionID(), seg.GetID()) {
 			log.Info(ctx, "skip GC JSON stats files since segment is protected by snapshot",
-				zap.Int64("segmentID", seg.GetID()),
-				zap.Int64("collectionID", seg.GetCollectionID()))
+				mlog.FieldSegmentID(seg.GetID()),
+				mlog.FieldCollectionID(seg.GetCollectionID()))
 			continue
 		}
 
 		gc.ackSignal(signal)
 		for _, fieldStats := range seg.GetJsonKeyStats() {
-			log := mlog.With(zap.Int64("segmentID", seg.GetID()), zap.Int64("fieldID", fieldStats.GetFieldID()))
+			log := mlog.With(mlog.FieldSegmentID(seg.GetID()), mlog.FieldFieldID(fieldStats.GetFieldID()))
 			// clear low version task
 			for i := int64(1); i < fieldStats.GetVersion(); i++ {
 				prefix := metautil.BuildJSONKeyStatsPrefix(gc.option.cli.RootPath(), fieldStats.GetJsonKeyStatsDataFormat(),
@@ -1660,11 +1659,11 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 					file := files.FilePath
 
 					future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
-						log := mlog.With(zap.String("file", file))
+						log := mlog.With(mlog.String("file", file))
 						log.Info(ctx, "garbageCollector recycleUnusedJSONStatsFiles remove file...")
 
 						if err := gc.option.cli.Remove(ctx, file); err != nil {
-							log.Warn(ctx, "garbageCollector recycleUnusedJSONStatsFiles remove file failed", zap.Error(err))
+							log.Warn(ctx, "garbageCollector recycleUnusedJSONStatsFiles remove file failed", mlog.Err(err))
 							return struct{}{}, err
 						}
 						deletedFilesNum.Inc()
@@ -1678,11 +1677,11 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 				// Wait for all remove tasks done.
 				if err := conc.BlockOnAll(futures...); err != nil {
 					// error is logged, and can be ignored here.
-					log.Warn(ctx, "some task failure in remove object pool", zap.Error(err))
+					log.Warn(ctx, "some task failure in remove object pool", mlog.Err(err))
 				}
 
 				if err != nil {
-					log.Warn(ctx, "json stats files recycle failed when walk with prefix", zap.Error(err))
+					log.Warn(ctx, "json stats files recycle failed when walk with prefix", mlog.Err(err))
 					return
 				}
 			}
@@ -1697,11 +1696,11 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 					file := files.FilePath
 
 					future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
-						log := mlog.With(zap.String("file", file))
+						log := mlog.With(mlog.String("file", file))
 						log.Info(ctx, "garbageCollector recycleUnusedJSONStatsFiles remove file...")
 
 						if err := gc.option.cli.Remove(ctx, file); err != nil {
-							log.Warn(ctx, "garbageCollector recycleUnusedJSONStatsFiles remove file failed", zap.Error(err))
+							log.Warn(ctx, "garbageCollector recycleUnusedJSONStatsFiles remove file failed", mlog.Err(err))
 							return struct{}{}, err
 						}
 						deletedFilesNum.Inc()
@@ -1715,19 +1714,19 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 				// Wait for all remove tasks done.
 				if err := conc.BlockOnAll(futures...); err != nil {
 					// error is logged, and can be ignored here.
-					log.Warn(ctx, "some task failure in remove object pool", zap.Error(err))
+					log.Warn(ctx, "some task failure in remove object pool", mlog.Err(err))
 				}
 
 				if err != nil {
-					log.Warn(ctx, "json stats lower data format files recycle failed when walk with prefix", zap.Error(err))
+					log.Warn(ctx, "json stats lower data format files recycle failed when walk with prefix", mlog.Err(err))
 					return
 				}
 			}
 		}
 	}
 	log.Info(ctx, "json stats files recycle done",
-		zap.Int("deleteJSONStatsNum", int(deletedFilesNum.Load())),
-		zap.Int("walkFileNum", fileNum))
+		mlog.Int("deleteJSONStatsNum", int(deletedFilesNum.Load())),
+		mlog.Int("walkFileNum", fileNum))
 
 	metrics.GarbageCollectorRunCount.WithLabelValues(paramtable.GetStringNodeID()).Add(1)
 }
@@ -1736,10 +1735,10 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
 	log := mlog.With().
-		With(zap.String("gcName", "recycleUnusedJSONIndexFiles"), zap.Time("startAt", start))
+		With(mlog.String("gcName", "recycleUnusedJSONIndexFiles"), mlog.Time("startAt", start))
 	log.Info(ctx, "start recycleUnusedJSONIndexFiles...")
 	defer func() {
-		log.Info(ctx, "recycleUnusedJSONIndexFiles done", zap.Duration("timeCost", time.Since(start)))
+		log.Info(ctx, "recycleUnusedJSONIndexFiles done", mlog.Duration("timeCost", time.Since(start)))
 	}()
 
 	hasJSONIndexSegments := gc.meta.SelectSegments(ctx, SegmentFilterFunc(func(info *SegmentInfo) bool {
@@ -1754,7 +1753,7 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, sig
 			return
 		}
 		if gc.collectionGCPaused(seg.GetCollectionID()) {
-			log.Info(ctx, "skip GC segment since collection is paused", zap.Int64("segmentID", seg.GetID()), zap.Int64("collectionID", seg.GetCollectionID()))
+			log.Info(ctx, "skip GC segment since collection is paused", mlog.FieldSegmentID(seg.GetID()), mlog.FieldCollectionID(seg.GetCollectionID()))
 			continue
 		}
 
@@ -1762,15 +1761,15 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, sig
 		if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil {
 			if snapshotMeta.IsSegmentGCBlocked(seg.GetCollectionID(), seg.GetID()) {
 				log.Info(ctx, "skip GC JSON index files since segment is protected by snapshot",
-					zap.Int64("segmentID", seg.GetID()),
-					zap.Int64("collectionID", seg.GetCollectionID()))
+					mlog.FieldSegmentID(seg.GetID()),
+					mlog.FieldCollectionID(seg.GetCollectionID()))
 				continue
 			}
 		}
 
 		gc.ackSignal(signal)
 		for _, fieldStats := range seg.GetJsonKeyStats() {
-			log := mlog.With(zap.Int64("segmentID", seg.GetID()), zap.Int64("fieldID", fieldStats.GetFieldID()))
+			log := mlog.With(mlog.FieldSegmentID(seg.GetID()), mlog.FieldFieldID(fieldStats.GetFieldID()))
 			// clear low version task
 			for i := int64(1); i < fieldStats.GetVersion(); i++ {
 				prefix := fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d/%d", gc.option.cli.RootPath(), common.JSONIndexPath,
@@ -1781,11 +1780,11 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, sig
 					file := files.FilePath
 
 					future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
-						log := mlog.With(zap.String("file", file))
+						log := mlog.With(mlog.String("file", file))
 						log.Info(ctx, "garbageCollector recycleUnusedJSONIndexFiles remove file...")
 
 						if err := gc.option.cli.Remove(ctx, file); err != nil {
-							log.Warn(ctx, "garbageCollector recycleUnusedJSONIndexFiles remove file failed", zap.Error(err))
+							log.Warn(ctx, "garbageCollector recycleUnusedJSONIndexFiles remove file failed", mlog.Err(err))
 							return struct{}{}, err
 						}
 						deletedFilesNum.Inc()
@@ -1799,17 +1798,17 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, sig
 				// Wait for all remove tasks done.
 				if err := conc.BlockOnAll(futures...); err != nil {
 					// error is logged, and can be ignored here.
-					log.Warn(ctx, "some task failure in remove object pool", zap.Error(err))
+					log.Warn(ctx, "some task failure in remove object pool", mlog.Err(err))
 				}
 
 				if err != nil {
-					log.Warn(ctx, "json index files recycle failed when walk with prefix", zap.Error(err))
+					log.Warn(ctx, "json index files recycle failed when walk with prefix", mlog.Err(err))
 					return
 				}
 			}
 		}
 	}
-	log.Info(ctx, "json index files recycle done", zap.Int("deleteJSONKeyIndexNum", int(deletedFilesNum.Load())), zap.Int("walkFileNum", fileNum))
+	log.Info(ctx, "json index files recycle done", mlog.Int("deleteJSONKeyIndexNum", int(deletedFilesNum.Load())), mlog.Int("walkFileNum", fileNum))
 
 	metrics.GarbageCollectorRunCount.WithLabelValues(paramtable.GetStringNodeID()).Add(1)
 }
@@ -1835,10 +1834,10 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, sig
 func (gc *garbageCollector) recycleSnapshots(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
 	log := mlog.With().
-		With(zap.String("gcName", "recycleSnapshots"), zap.Time("startAt", start))
+		With(mlog.String("gcName", "recycleSnapshots"), mlog.Time("startAt", start))
 	log.Info(ctx, "start recycleSnapshots...")
 	defer func() {
-		log.Info(ctx, "recycleSnapshots done", zap.Duration("timeCost", time.Since(start)))
+		log.Info(ctx, "recycleSnapshots done", mlog.Duration("timeCost", time.Since(start)))
 	}()
 
 	snapshotMeta := gc.meta.GetSnapshotMeta()
@@ -1853,19 +1852,19 @@ func (gc *garbageCollector) recycleSnapshots(ctx context.Context, signal <-chan 
 	// Get all pending snapshots that have exceeded timeout
 	pendingSnapshots, err := snapshotMeta.GetPendingSnapshots(ctx, pendingTimeout)
 	if err != nil {
-		log.Warn(ctx, "failed to get pending snapshots", zap.Error(err))
+		log.Warn(ctx, "failed to get pending snapshots", mlog.Err(err))
 		return
 	}
 
 	if len(pendingSnapshots) > 0 {
-		log.Info(ctx, "found pending snapshots to cleanup", zap.Int("count", len(pendingSnapshots)))
+		log.Info(ctx, "found pending snapshots to cleanup", mlog.Int("count", len(pendingSnapshots)))
 		cleanedCount := 0
 
 		for _, snapshot := range pendingSnapshots {
 			snapshotLog := log.With(
-				zap.String("snapshotName", snapshot.GetName()),
-				zap.Int64("snapshotID", snapshot.GetId()),
-				zap.Int64("collectionID", snapshot.GetCollectionId()),
+				mlog.String("snapshotName", snapshot.GetName()),
+				mlog.Int64("snapshotID", snapshot.GetId()),
+				mlog.FieldCollectionID(snapshot.GetCollectionId()),
 			)
 
 			gc.ackSignal(signal)
@@ -1877,27 +1876,27 @@ func (gc *garbageCollector) recycleSnapshots(ctx context.Context, signal <-chan 
 			)
 
 			snapshotLog.Info(ctx, "cleaning up pending snapshot",
-				zap.String("manifestDir", manifestDir),
-				zap.String("metadataPath", metadataPath))
+				mlog.String("manifestDir", manifestDir),
+				mlog.String("metadataPath", metadataPath))
 
 			// Delete manifest directory using RemoveWithPrefix (no list needed)
 			// This removes all segment manifest files: manifests/{snapshot_id}/*.avro
 			if err := gc.option.cli.RemoveWithPrefix(ctx, manifestDir); err != nil {
-				snapshotLog.Warn(ctx, "failed to remove pending snapshot manifest directory", zap.Error(err))
+				snapshotLog.Warn(ctx, "failed to remove pending snapshot manifest directory", mlog.Err(err))
 				// Keep catalog record for retry in next GC cycle.
 				continue
 			}
 
 			// Delete metadata file
 			if err := gc.option.cli.Remove(ctx, metadataPath); err != nil {
-				snapshotLog.Warn(ctx, "failed to remove pending snapshot metadata file", zap.Error(err))
+				snapshotLog.Warn(ctx, "failed to remove pending snapshot metadata file", mlog.Err(err))
 				// Keep catalog record for retry in next GC cycle.
 				continue
 			}
 
 			// Delete etcd record
 			if err := snapshotMeta.CleanupPendingSnapshot(ctx, snapshot); err != nil {
-				snapshotLog.Warn(ctx, "failed to drop pending snapshot from catalog", zap.Error(err))
+				snapshotLog.Warn(ctx, "failed to drop pending snapshot from catalog", mlog.Err(err))
 				continue
 			}
 
@@ -1906,24 +1905,24 @@ func (gc *garbageCollector) recycleSnapshots(ctx context.Context, signal <-chan 
 		}
 
 		log.Info(ctx, "pending snapshots cleanup completed",
-			zap.Int("totalPending", len(pendingSnapshots)),
-			zap.Int("cleanedCount", cleanedCount))
+			mlog.Int("totalPending", len(pendingSnapshots)),
+			mlog.Int("cleanedCount", cleanedCount))
 	}
 
 	// Clean up DELETING snapshots (two-phase delete cleanup)
 	// These are snapshots that were marked for deletion but S3 cleanup failed
 	deletingSnapshots, err := snapshotMeta.GetDeletingSnapshots(ctx)
 	if err != nil {
-		log.Warn(ctx, "failed to get deleting snapshots", zap.Error(err))
+		log.Warn(ctx, "failed to get deleting snapshots", mlog.Err(err))
 	} else if len(deletingSnapshots) > 0 {
-		log.Info(ctx, "found deleting snapshots to cleanup", zap.Int("count", len(deletingSnapshots)))
+		log.Info(ctx, "found deleting snapshots to cleanup", mlog.Int("count", len(deletingSnapshots)))
 		deletingCleanedCount := 0
 
 		for _, snapshot := range deletingSnapshots {
 			snapshotLog := log.With(
-				zap.String("snapshotName", snapshot.GetName()),
-				zap.Int64("snapshotID", snapshot.GetId()),
-				zap.Int64("collectionID", snapshot.GetCollectionId()),
+				mlog.String("snapshotName", snapshot.GetName()),
+				mlog.Int64("snapshotID", snapshot.GetId()),
+				mlog.FieldCollectionID(snapshot.GetCollectionId()),
 			)
 
 			gc.ackSignal(signal)
@@ -1936,24 +1935,24 @@ func (gc *garbageCollector) recycleSnapshots(ctx context.Context, signal <-chan 
 			)
 
 			snapshotLog.Info(ctx, "cleaning up deleting snapshot",
-				zap.String("manifestDir", manifestDir),
-				zap.String("metadataPath", metadataPath))
+				mlog.String("manifestDir", manifestDir),
+				mlog.String("metadataPath", metadataPath))
 
 			// Delete manifest directory
 			if err := gc.option.cli.RemoveWithPrefix(ctx, manifestDir); err != nil {
-				snapshotLog.Warn(ctx, "failed to remove deleting snapshot manifest directory", zap.Error(err))
+				snapshotLog.Warn(ctx, "failed to remove deleting snapshot manifest directory", mlog.Err(err))
 				// Continue with metadata and etcd cleanup even if S3 cleanup fails
 			}
 
 			// Delete metadata file
 			if err := gc.option.cli.Remove(ctx, metadataPath); err != nil {
-				snapshotLog.Warn(ctx, "failed to remove deleting snapshot metadata file", zap.Error(err))
+				snapshotLog.Warn(ctx, "failed to remove deleting snapshot metadata file", mlog.Err(err))
 				// Continue with etcd cleanup even if S3 cleanup fails
 			}
 
 			// Delete etcd record
 			if err := snapshotMeta.CleanupDeletingSnapshot(ctx, snapshot); err != nil {
-				snapshotLog.Warn(ctx, "failed to drop deleting snapshot from catalog", zap.Error(err))
+				snapshotLog.Warn(ctx, "failed to drop deleting snapshot from catalog", mlog.Err(err))
 				continue
 			}
 
@@ -1962,8 +1961,8 @@ func (gc *garbageCollector) recycleSnapshots(ctx context.Context, signal <-chan 
 		}
 
 		log.Info(ctx, "deleting snapshots cleanup completed",
-			zap.Int("totalDeleting", len(deletingSnapshots)),
-			zap.Int("cleanedCount", deletingCleanedCount))
+			mlog.Int("totalDeleting", len(deletingSnapshots)),
+			mlog.Int("cleanedCount", deletingCleanedCount))
 	}
 
 	// GC fallback: Two responsibilities per collection:
@@ -1997,8 +1996,8 @@ func (gc *garbageCollector) recycleSnapshots(ctx context.Context, signal <-chan 
 			cancel()
 			if err != nil {
 				log.Warn(ctx, "failed to check collection existence for orphan snapshot cleanup",
-					zap.Int64("collectionID", collectionID),
-					zap.Error(err))
+					mlog.FieldCollectionID(collectionID),
+					mlog.Err(err))
 				continue
 			}
 			if has {
@@ -2007,7 +2006,7 @@ func (gc *garbageCollector) recycleSnapshots(ctx context.Context, signal <-chan 
 			}
 
 			log.Info(ctx, "found orphan snapshots for dropped collection, cleaning up",
-				zap.Int64("collectionID", collectionID))
+				mlog.FieldCollectionID(collectionID))
 
 			dropped, err := snapshotMeta.DropSnapshotsByCollection(ctx, collectionID)
 			for _, n := range dropped {
@@ -2015,20 +2014,20 @@ func (gc *garbageCollector) recycleSnapshots(ctx context.Context, signal <-chan 
 			}
 			if err != nil {
 				log.Warn(ctx, "failed to drop orphan snapshots for collection",
-					zap.Int64("collectionID", collectionID),
-					zap.Error(err))
+					mlog.FieldCollectionID(collectionID),
+					mlog.Err(err))
 				continue
 			}
 
 			log.Info(ctx, "successfully cleaned up orphan snapshots for dropped collection",
-				zap.Int64("collectionID", collectionID))
+				mlog.FieldCollectionID(collectionID))
 			orphanCleanedCount++
 		}
 
 		if orphanCleanedCount > 0 {
 			log.Info(ctx, "orphan snapshots cleanup completed",
-				zap.Int("totalOrphanCollections", len(activeCollectionIDs)),
-				zap.Int("cleanedCount", orphanCleanedCount))
+				mlog.Int("totalOrphanCollections", len(activeCollectionIDs)),
+				mlog.Int("cleanedCount", orphanCleanedCount))
 		}
 	}
 

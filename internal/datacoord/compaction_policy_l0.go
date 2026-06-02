@@ -7,7 +7,6 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -63,7 +62,7 @@ func (policy *l0CompactionPolicy) Trigger(ctx context.Context) (events map[Compa
 	activeL0Views, idleL0Views := []CompactionView{}, []CompactionView{}
 	newTriggerID, err := policy.allocator.AllocID(ctx)
 	if err != nil {
-		mlog.Warn(ctx, "fail to allocate triggerID to trigger l0 compaction", zap.Error(err))
+		mlog.Warn(ctx, "fail to allocate triggerID to trigger l0 compaction", mlog.Err(err))
 		return nil, err
 	}
 	events = make(map[CompactionTriggerType][]CompactionView)
@@ -73,7 +72,7 @@ func (policy *l0CompactionPolicy) Trigger(ctx context.Context) (events map[Compa
 			continue
 		}
 		if collection.IsExternal() {
-			mlog.Info(ctx, "skip l0 compaction for external collection", zap.Int64("collectionID", collID))
+			mlog.Info(ctx, "skip l0 compaction for external collection", mlog.FieldCollectionID(collID))
 			continue
 		}
 
@@ -103,7 +102,7 @@ func (policy *l0CompactionPolicy) Trigger(ctx context.Context) (events map[Compa
 }
 
 func (policy *l0CompactionPolicy) triggerOneCollection(ctx context.Context, collectionID int64) ([]CompactionView, int64, error) {
-	log := mlog.With(zap.Int64("collectionID", collectionID))
+	log := mlog.With(mlog.FieldCollectionID(collectionID))
 	log.Info(ctx, "start trigger collection l0 compaction")
 	collection := policy.meta.GetCollection(collectionID)
 	if collection == nil {
@@ -128,7 +127,7 @@ func (policy *l0CompactionPolicy) triggerOneCollection(ctx context.Context, coll
 
 	newTriggerID, err := policy.allocator.AllocID(ctx)
 	if err != nil {
-		log.Warn(ctx, "fail to allocate triggerID for l0 compaction", zap.Error(err))
+		log.Warn(ctx, "fail to allocate triggerID for l0 compaction", mlog.Err(err))
 		return nil, 0, err
 	}
 	views := policy.groupL0ViewsByPartChan(collectionID, GetViewsByInfo(allL0Segments...), newTriggerID)
@@ -212,7 +211,7 @@ func (ac *activeCollections) Read(collectionID int64) {
 		ac.collections[collectionID].readCount.Inc()
 		if ac.collections[collectionID].readCount.Load() >= 3 &&
 			time.Since(ac.collections[collectionID].lastRefresh) > 3*paramtable.Get().DataCoordCfg.L0CompactionTriggerInterval.GetAsDuration(time.Second) {
-			mlog.Info(context.TODO(), "Active(of deletions) collections become idle", zap.Int64("collectionID", collectionID))
+			mlog.Info(context.TODO(), "Active(of deletions) collections become idle", mlog.FieldCollectionID(collectionID))
 			delete(ac.collections, collectionID)
 		}
 	}

@@ -20,7 +20,6 @@ import (
 	"context"
 	"strconv"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
@@ -45,7 +44,7 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 		}
 		dbID, collectionIDToPartIDs, rt, n, err := GetRequestInfo(ctx, request)
 		if err != nil {
-			mlog.Warn(context.TODO(), "failed to get request info", zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to get request info", mlog.Err(err))
 			return handler(ctx, req)
 		}
 		if rt == internalpb.RateType_DMLBulkLoad {
@@ -64,7 +63,7 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 			if rsp != nil {
 				return rsp, nil
 			}
-			mlog.Warn(context.TODO(), "failed to get failed response, please check it!", zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to get failed response, please check it!", mlog.Err(err))
 			return nil, err
 		}
 		metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.SuccessLabel).Inc()

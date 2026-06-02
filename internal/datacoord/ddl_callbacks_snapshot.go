@@ -19,8 +19,6 @@ package datacoord
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -30,19 +28,19 @@ import (
 func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result message.BroadcastResultCreateSnapshotMessageV2) error {
 	header := result.Message.Header()
 	log := mlog.With(
-		zap.Int64("collectionID", header.CollectionId),
-		zap.String("snapshotName", header.Name),
+		mlog.FieldCollectionID(header.CollectionId),
+		mlog.String("snapshotName", header.Name),
 	)
 	log.Info(ctx, "createSnapshotV2AckCallback received")
 
 	// Create snapshot - ID is allocated inside CreateSnapshot
 	snapshotID, err := s.snapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description, header.CompactionProtectionSeconds)
 	if err != nil {
-		log.Error(ctx, "failed to create snapshot via DDL callback", zap.Error(err))
+		log.Error(ctx, "failed to create snapshot via DDL callback", mlog.Err(err))
 		return err
 	}
 
-	log.Info(ctx, "snapshot created successfully via DDL callback", zap.Int64("snapshotID", snapshotID))
+	log.Info(ctx, "snapshot created successfully via DDL callback", mlog.Int64("snapshotID", snapshotID))
 	return nil
 }
 
@@ -57,14 +55,14 @@ func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result m
 func (s *DDLCallbacks) dropSnapshotV2AckCallback(ctx context.Context, result message.BroadcastResultDropSnapshotMessageV2) error {
 	header := result.Message.Header()
 	log := mlog.With(
-		zap.String("snapshotName", header.Name),
-		zap.Int64("collectionID", header.CollectionId),
+		mlog.String("snapshotName", header.Name),
+		mlog.FieldCollectionID(header.CollectionId),
 	)
 	log.Info(ctx, "dropSnapshotV2AckCallback received")
 
 	// Delete snapshot using SnapshotManager interface (idempotent)
 	if err := s.snapshotManager.DropSnapshot(ctx, header.CollectionId, header.Name); err != nil {
-		log.Error(ctx, "failed to drop snapshot via DDL callback", zap.Error(err))
+		log.Error(ctx, "failed to drop snapshot via DDL callback", mlog.Err(err))
 		return err
 	}
 
@@ -78,11 +76,11 @@ func (s *DDLCallbacks) dropSnapshotsByCollectionV2AckCallback(ctx context.Contex
 	msg := result.Message
 	collectionID := msg.Header().GetCollectionId()
 
-	log := mlog.With(zap.Int64("collectionID", collectionID))
+	log := mlog.With(mlog.FieldCollectionID(collectionID))
 	log.Info(ctx, "dropSnapshotsByCollectionV2AckCallback received")
 
 	if err := s.snapshotManager.DropSnapshotsByCollection(ctx, collectionID); err != nil {
-		log.Error(ctx, "failed to drop snapshots by collection in callback", zap.Error(err))
+		log.Error(ctx, "failed to drop snapshots by collection in callback", mlog.Err(err))
 		return err
 	}
 
@@ -97,9 +95,9 @@ func (s *DDLCallbacks) dropSnapshotsByCollectionV2AckCallback(ctx context.Contex
 func (s *DDLCallbacks) restoreSnapshotV2AckCallback(ctx context.Context, result message.BroadcastResultRestoreSnapshotMessageV2) error {
 	header := result.Message.Header()
 	log := mlog.With(
-		zap.String("snapshotName", header.SnapshotName),
-		zap.Int64("collectionID", header.CollectionId),
-		zap.Int64("jobID", header.JobId),
+		mlog.String("snapshotName", header.SnapshotName),
+		mlog.FieldCollectionID(header.CollectionId),
+		mlog.FieldJobID(header.JobId),
 	)
 	log.Info(ctx, "restoreSnapshotV2AckCallback received")
 
@@ -107,10 +105,10 @@ func (s *DDLCallbacks) restoreSnapshotV2AckCallback(ctx context.Context, result 
 	// Use the pre-allocated jobID from the WAL message for idempotency
 	jobID, err := s.snapshotManager.RestoreData(ctx, header.SourceCollectionId, header.SnapshotName, header.CollectionId, header.JobId, header.PinId)
 	if err != nil {
-		log.Error(ctx, "failed to restore data", zap.Error(err))
+		log.Error(ctx, "failed to restore data", mlog.Err(err))
 		return err
 	}
 
-	log.Info(ctx, "restore snapshot callback completed, job created for async execution", zap.Int64("jobID", jobID))
+	log.Info(ctx, "restore snapshot callback completed, job created for async execution", mlog.FieldJobID(jobID))
 	return nil
 }

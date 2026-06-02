@@ -22,7 +22,6 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
@@ -37,7 +36,7 @@ var once sync.Once
 func InitRocksMQ(path string) error {
 	var finalErr error
 	once.Do(func() {
-		mlog.Debug(context.TODO(), "initializing global rmq", zap.String("path", path))
+		mlog.Debug(context.TODO(), "initializing global rmq", mlog.String("path", path))
 		var fi os.FileInfo
 		fi, finalErr = os.Stat(path)
 		if os.IsNotExist(finalErr) {

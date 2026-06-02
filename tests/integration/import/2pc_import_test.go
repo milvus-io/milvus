@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -83,10 +82,10 @@ func WaitForImportState(ctx context.Context, c *cluster.MiniClusterV3, jobID str
 		}
 
 		mlog.Info(ctx, "waiting for import state",
-			zap.String("jobID", jobID),
-			zap.String("current", currentState.String()),
-			zap.String("target", targetState.String()),
-			zap.Int64("progress", resp.GetProgress()))
+			mlog.String("jobID", jobID),
+			mlog.String("current", currentState.String()),
+			mlog.String("target", targetState.String()),
+			mlog.Int64("progress", resp.GetProgress()))
 		time.Sleep(1 * time.Second)
 	}
 }
@@ -139,7 +138,7 @@ func (s *TwoPCImportSuite) importWithAutoCommit(ctx context.Context, collectionN
 	})
 	s.NoError(err)
 	s.Equal(int32(0), importResp.GetStatus().GetCode())
-	mlog.Info(ctx, "Import started", zap.String("jobID", importResp.GetJobID()))
+	mlog.Info(ctx, "Import started", mlog.String("jobID", importResp.GetJobID()))
 
 	return importResp.GetJobID()
 }
@@ -241,18 +240,18 @@ func (s *TwoPCImportSuite) TestImportWithManualCommit() {
 	// Wait for Uncommitted state
 	err := WaitForImportState(ctx, s.Cluster, jobID, internalpb.ImportJobState_Uncommitted)
 	s.NoError(err)
-	mlog.Info(ctx, "import job reached Uncommitted state", zap.String("jobID", jobID))
+	mlog.Info(ctx, "import job reached Uncommitted state", mlog.String("jobID", jobID))
 
 	// Commit the import
 	status, err := s.commitImport(ctx, getJobID(jobID))
 	err = merr.CheckRPCCall(status, err)
 	s.NoError(err)
-	mlog.Info(ctx, "CommitImport succeeded", zap.String("jobID", jobID))
+	mlog.Info(ctx, "CommitImport succeeded", mlog.String("jobID", jobID))
 
 	// Wait for Completed state
 	err = WaitForImportState(ctx, s.Cluster, jobID, internalpb.ImportJobState_Completed)
 	s.NoError(err)
-	mlog.Info(ctx, "import job completed", zap.String("jobID", jobID))
+	mlog.Info(ctx, "import job completed", mlog.String("jobID", jobID))
 
 	// Verify data is visible
 	count := s.loadAndQuery(ctx, collectionName)
@@ -276,7 +275,7 @@ func (s *TwoPCImportSuite) TestImportWithAbort() {
 	status, err := s.abortImport(ctx, getJobID(jobID))
 	err = merr.CheckRPCCall(status, err)
 	s.NoError(err)
-	mlog.Info(ctx, "AbortImport succeeded", zap.String("jobID", jobID))
+	mlog.Info(ctx, "AbortImport succeeded", mlog.String("jobID", jobID))
 
 	// Wait for Failed state
 	err = WaitForImportState(ctx, s.Cluster, jobID, internalpb.ImportJobState_Failed)
@@ -360,7 +359,7 @@ func (s *TwoPCImportSuite) TestAbortAfterCommit() {
 	status, err = s.abortImport(ctx, getJobID(jobID))
 	err = merr.CheckRPCCall(status, err)
 	s.Error(err)
-	mlog.Info(ctx, "AbortImport after commit correctly returned error", zap.Error(err))
+	mlog.Info(ctx, "AbortImport after commit correctly returned error", mlog.Err(err))
 }
 
 // TestCommitAfterAbort tests that committing after abort returns an error.
@@ -387,7 +386,7 @@ func (s *TwoPCImportSuite) TestCommitAfterAbort() {
 	status, err = s.commitImport(ctx, getJobID(jobID))
 	err = merr.CheckRPCCall(status, err)
 	s.Error(err)
-	mlog.Info(ctx, "CommitImport after abort correctly returned error", zap.Error(err))
+	mlog.Info(ctx, "CommitImport after abort correctly returned error", mlog.Err(err))
 }
 
 // TestQueryBeforeCommit tests that data is invisible before commit and visible after.
@@ -405,7 +404,7 @@ func (s *TwoPCImportSuite) TestQueryBeforeCommit() {
 	// Load and query BEFORE commit - data should be invisible
 	countBefore := s.loadAndQuery(ctx, collectionName)
 	s.Equal(0, countBefore, "data should be invisible before commit")
-	mlog.Info(ctx, "verified data invisible before commit", zap.Int("count", countBefore))
+	mlog.Info(ctx, "verified data invisible before commit", mlog.Int("count", countBefore))
 
 	// Now commit
 	status, err := s.commitImport(ctx, getJobID(jobID))
@@ -419,7 +418,7 @@ func (s *TwoPCImportSuite) TestQueryBeforeCommit() {
 	// Query AFTER commit - data should be visible
 	countAfter := s.queryRowCount(ctx, collectionName)
 	s.Equal(twoPCRowCount, countAfter, "data should be visible after commit")
-	mlog.Info(ctx, "verified data visible after commit", zap.Int("count", countAfter))
+	mlog.Info(ctx, "verified data visible after commit", mlog.Int("count", countAfter))
 }
 
 func TestTwoPCImport(t *testing.T) {

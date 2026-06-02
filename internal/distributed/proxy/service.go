@@ -36,7 +36,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
@@ -131,7 +130,7 @@ func authenticate(c *gin.Context) {
 	username, password, ok := httpserver.ParseUsernamePassword(c)
 	if ok {
 		if proxy.PasswordVerify(c, username, password) {
-			mlog.Debug(context.TODO(), "auth successful", zap.String("username", username))
+			mlog.Debug(context.TODO(), "auth successful", mlog.String("username", username))
 			c.Set(httpserver.ContextUsername, username)
 			c.Set(httpserver.ContextToken, fmt.Sprintf("%s%s%s", username, util.CredentialSeparator, password))
 			return
@@ -145,7 +144,7 @@ func authenticate(c *gin.Context) {
 			c.Set(httpserver.ContextToken, rawToken)
 			return
 		}
-		mlog.Warn(context.TODO(), "fail to verify apikey", zap.Error(err))
+		mlog.Warn(context.TODO(), "fail to verify apikey", mlog.Err(err))
 	}
 
 	hookutil.GetExtension().ReportAction(context.Background(), nil, &milvuspb.BoolResponse{
@@ -239,13 +238,13 @@ func (s *Server) startHTTPServer(errChan chan error) {
 		go func() { serveErrChan <- s.serveHTTP(s.listenerManager.HTTPListener()) }()
 		for i := 0; i < 2; i++ {
 			if err := <-serveErrChan; err != nil {
-				mlog.Error(s.ctx, "start Proxy http server to listen failed", zap.Error(err))
+				mlog.Error(s.ctx, "start Proxy http server to listen failed", mlog.Err(err))
 				errChan <- err
 				return
 			}
 		}
 	} else if err := s.serveHTTP(s.listenerManager.HTTPListener()); err != nil {
-		mlog.Error(s.ctx, "start Proxy http server to listen failed", zap.Error(err))
+		mlog.Error(s.ctx, "start Proxy http server to listen failed", mlog.Err(err))
 		errChan <- err
 		return
 	}
@@ -277,7 +276,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 
 	limiter, err := s.proxy.GetRateLimiter()
 	if err != nil {
-		mlog.Error(s.ctx, "Get proxy rate limiter failed", zap.Error(err))
+		mlog.Error(s.ctx, "Get proxy rate limiter failed", mlog.Err(err))
 		errChan <- err
 		return
 	}
@@ -326,7 +325,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 	if Params.TLSMode.GetAsInt() == 1 {
 		creds, err := credentials.NewServerTLSFromFile(Params.ServerPemPath.GetValue(), Params.ServerKeyPath.GetValue())
 		if err != nil {
-			mlog.Warn(s.ctx, "proxy can't create creds", zap.Error(err))
+			mlog.Warn(s.ctx, "proxy can't create creds", mlog.Err(err))
 			errChan <- err
 			return
 		}
@@ -334,7 +333,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 	} else if Params.TLSMode.GetAsInt() == 2 {
 		cert, err := tls.LoadX509KeyPair(Params.ServerPemPath.GetValue(), Params.ServerKeyPath.GetValue())
 		if err != nil {
-			mlog.Warn(s.ctx, "proxy cant load x509 key pair", zap.Error(err))
+			mlog.Warn(s.ctx, "proxy cant load x509 key pair", mlog.Err(err))
 			errChan <- err
 			return
 		}
@@ -342,7 +341,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		certPool := x509.NewCertPool()
 		rootBuf, err := storage.ReadFile(Params.CaPemPath.GetValue())
 		if err != nil {
-			mlog.Warn(s.ctx, "failed read ca pem", zap.Error(err))
+			mlog.Warn(s.ctx, "failed read ca pem", mlog.Err(err))
 			errChan <- err
 			return
 		}
@@ -372,15 +371,15 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 	errChan <- nil
 
 	mlog.Debug(s.ctx, "create Proxy grpc server",
-		zap.Any("enforcement policy", kaep),
-		zap.Any("server parameters", kasp))
+		mlog.Any("enforcement policy", kaep),
+		mlog.Any("server parameters", kasp))
 
 	if s.listenerManager.portShareMode {
 		mlog.Info(s.ctx, "Proxy external grpc server is served by shared http2 server")
 		return
 	}
 	if err := s.grpcExternalServer.Serve(s.listenerManager.ExternalGrpcListener()); err != nil && err != cmux.ErrServerClosed {
-		mlog.Error(s.ctx, "failed to serve on Proxy's listener", zap.Error(err))
+		mlog.Error(s.ctx, "failed to serve on Proxy's listener", mlog.Err(err))
 		errChan <- err
 		return
 	}
@@ -437,11 +436,11 @@ func (s *Server) startInternalGrpc(errChan chan error) {
 	errChan <- nil
 
 	mlog.Info(s.ctx, "create Proxy internal grpc server",
-		zap.Any("enforcement policy", kaep),
-		zap.Any("server parameters", kasp))
+		mlog.Any("enforcement policy", kaep),
+		mlog.Any("server parameters", kasp))
 
 	if err := s.grpcInternalServer.Serve(s.listenerManager.InternalGrpcListener()); err != nil {
-		mlog.Error(s.ctx, "failed to internal serve on Proxy's listener", zap.Error(err))
+		mlog.Error(s.ctx, "failed to internal serve on Proxy's listener", mlog.Err(err))
 		errChan <- err
 		return
 	}
@@ -461,14 +460,14 @@ func (s *Server) Prepare() error {
 func (s *Server) Run() error {
 	mlog.Info(s.ctx, "init Proxy server")
 	if err := s.init(); err != nil {
-		mlog.Warn(s.ctx, "init Proxy server failed", zap.Error(err))
+		mlog.Warn(s.ctx, "init Proxy server failed", mlog.Err(err))
 		return err
 	}
 	mlog.Info(s.ctx, "init Proxy server done")
 
 	mlog.Info(s.ctx, "start Proxy server")
 	if err := s.start(); err != nil {
-		mlog.Warn(s.ctx, "start Proxy server failed", zap.Error(err))
+		mlog.Warn(s.ctx, "start Proxy server failed", mlog.Err(err))
 		return err
 	}
 	mlog.Info(s.ctx, "start Proxy server done")
@@ -485,7 +484,7 @@ func (s *Server) init() error {
 
 	accesslog.InitAccessLogger(paramtable.Get())
 	serviceName := fmt.Sprintf("Proxy ip: %s, port: %d", Params.IP, Params.Port.GetAsInt())
-	mlog.Info(s.ctx, "init Proxy's tracer done", zap.String("service name", serviceName))
+	mlog.Info(s.ctx, "init Proxy's tracer done", mlog.String("service name", serviceName))
 
 	etcdCli, err := etcd.CreateEtcdClient(
 		etcdConfig.UseEmbedEtcd.GetAsBool(),
@@ -500,7 +499,7 @@ func (s *Server) init() error {
 		etcdConfig.EtcdTLSMinVersion.GetValue(),
 		etcdConfig.ClientOptions()...)
 	if err != nil {
-		mlog.Debug(s.ctx, "Proxy connect to etcd failed", zap.Error(err))
+		mlog.Debug(s.ctx, "Proxy connect to etcd failed", mlog.Err(err))
 		return err
 	}
 	s.etcdCli = etcdCli
@@ -510,14 +509,14 @@ func (s *Server) init() error {
 	{
 		s.startInternalRPCServer(errChan)
 		if err := <-errChan; err != nil {
-			mlog.Error(s.ctx, "failed to create internal rpc server", zap.Error(err))
+			mlog.Error(s.ctx, "failed to create internal rpc server", mlog.Err(err))
 			return err
 		}
 	}
 	{
 		s.startExternalRPCServer(errChan)
 		if err := <-errChan; err != nil {
-			mlog.Error(s.ctx, "failed to create external rpc server", zap.Error(err))
+			mlog.Error(s.ctx, "failed to create external rpc server", mlog.Err(err))
 			return err
 		}
 	}
@@ -527,7 +526,7 @@ func (s *Server) init() error {
 		mlog.Debug(s.ctx, "create MixCoordClient client for Proxy")
 		s.mixCoordClient, err = mix.NewClient(s.ctx)
 		if err != nil {
-			mlog.Warn(s.ctx, "failed to create MixCoordClient client for Proxy", zap.Error(err))
+			mlog.Warn(s.ctx, "failed to create MixCoordClient client for Proxy", mlog.Err(err))
 			return err
 		}
 		mlog.Debug(s.ctx, "create MixCoordClient client for Proxy done")
@@ -535,7 +534,7 @@ func (s *Server) init() error {
 
 	mlog.Debug(s.ctx, "Proxy wait for MixCoordClient to be healthy")
 	if err := componentutil.WaitForComponentHealthy(s.ctx, s.mixCoordClient, "MixCoord", 1000000, time.Millisecond*200); err != nil {
-		mlog.Warn(s.ctx, "Proxy failed to wait for MixCoord to be healthy", zap.Error(err))
+		mlog.Warn(s.ctx, "Proxy failed to wait for MixCoord to be healthy", mlog.Err(err))
 		return err
 	}
 	mlog.Debug(s.ctx, "Proxy wait for MixCoord to be healthy done")
@@ -557,7 +556,7 @@ func (s *Server) init() error {
 
 	mlog.Debug(s.ctx, "init Proxy")
 	if err := s.proxy.Init(); err != nil {
-		mlog.Warn(s.ctx, "failed to init Proxy", zap.Error(err))
+		mlog.Warn(s.ctx, "failed to init Proxy", mlog.Err(err))
 		return err
 	}
 	mlog.Debug(s.ctx, "init Proxy done")
@@ -570,12 +569,12 @@ func (s *Server) init() error {
 
 func (s *Server) start() error {
 	if err := s.proxy.Start(); err != nil {
-		mlog.Warn(s.ctx, "failed to start Proxy server", zap.Error(err))
+		mlog.Warn(s.ctx, "failed to start Proxy server", mlog.Err(err))
 		return err
 	}
 
 	if err := s.proxy.Register(); err != nil {
-		mlog.Warn(s.ctx, "failed to register Proxy", zap.Error(err))
+		mlog.Warn(s.ctx, "failed to register Proxy", mlog.Err(err))
 		return err
 	}
 
@@ -585,7 +584,7 @@ func (s *Server) start() error {
 		s.wg.Add(1)
 		go s.startHTTPServer(errChan)
 		if err := <-errChan; err != nil {
-			mlog.Error(s.ctx, "failed to create http rpc server", zap.Error(err))
+			mlog.Error(s.ctx, "failed to create http rpc server", mlog.Err(err))
 			return err
 		}
 	}
@@ -598,12 +597,12 @@ func (s *Server) Stop() (err error) {
 	logger := mlog.With()
 	if s.listenerManager != nil {
 		logger = mlog.With(
-			zap.String("internal address", s.listenerManager.internalGrpcListener.Address()),
-			zap.String("external address", s.listenerManager.externalGrpcListener.Address()))
+			mlog.String("internal address", s.listenerManager.internalGrpcListener.Address()),
+			mlog.String("external address", s.listenerManager.externalGrpcListener.Address()))
 	}
 	logger.Info(s.ctx, "Proxy stopping")
 	defer func() {
-		logger.Info(s.ctx, "Proxy stopped", zap.Error(err))
+		logger.Info(s.ctx, "Proxy stopped", mlog.Err(err))
 	}()
 
 	if s.etcdCli != nil {
@@ -621,7 +620,7 @@ func (s *Server) Stop() (err error) {
 			mlog.Info(s.ctx, "Proxy shutdown http server...")
 			ctx, cancel := context.WithTimeout(context.Background(), paramtable.Get().ProxyGrpcServerCfg.GracefulStopTimeout.GetAsDuration(time.Second))
 			if err := s.httpServer.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) && !errors.Is(err, cmux.ErrServerClosed) {
-				mlog.Warn(s.ctx, "Proxy failed to shutdown http server", zap.Error(err))
+				mlog.Warn(s.ctx, "Proxy failed to shutdown http server", mlog.Err(err))
 			}
 			cancel()
 		}
@@ -657,7 +656,7 @@ func (s *Server) Stop() (err error) {
 	mlog.Info(s.ctx, "internal server[proxy] start to stop")
 	err = s.proxy.Stop()
 	if err != nil {
-		mlog.Error(s.ctx, "failed to close proxy", zap.Error(err))
+		mlog.Error(s.ctx, "failed to close proxy", mlog.Err(err))
 		return err
 	}
 

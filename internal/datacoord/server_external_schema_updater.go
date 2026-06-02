@@ -19,8 +19,6 @@ package datacoord
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -52,8 +50,8 @@ func (s *Server) updateExternalSchemaViaWAL(ctx context.Context, collectionID in
 	}
 
 	mlog.Info(ctx, "updated external schema via RootCoord after refresh",
-		zap.Int64("collectionID", collectionID),
-		zap.String("externalSource", externalSource),
-		zap.String("externalSpec", externalspec.RedactExternalSpec(externalSpec)))
+		mlog.FieldCollectionID(collectionID),
+		mlog.String("externalSource", externalSource),
+		mlog.String("externalSpec", externalspec.RedactExternalSpec(externalSpec)))
 	return nil
 }

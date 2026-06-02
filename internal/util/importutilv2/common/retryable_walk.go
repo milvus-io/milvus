@@ -19,8 +19,6 @@ package common
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -42,8 +40,8 @@ func WalkWithPrefixRetry(ctx context.Context, cm storage.ChunkManager,
 			return nil
 		}
 		mlog.Warn(ctx, "WalkWithPrefix failed, checking retryability",
-			zap.String("prefix", prefix),
-			zap.Error(err),
+			mlog.String("prefix", prefix),
+			mlog.Err(err),
 		)
 		// Map raw storage error to Milvus IO error for consistent classification
 		err = storage.ToMilvusIoError(prefix, err)

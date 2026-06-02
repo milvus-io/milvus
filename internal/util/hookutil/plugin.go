@@ -6,8 +6,6 @@ import (
 	"plugin"
 	"sync"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
@@ -22,7 +20,7 @@ func LoadPlugin[T any](path string, symbol string) (T, error) {
 		return zero, fmt.Errorf("empty plugin path for symbol %q", symbol)
 	}
 
-	mlog.Info(context.TODO(), "loading plugin", zap.String("path", path), zap.String("symbol", symbol))
+	mlog.Info(context.TODO(), "loading plugin", mlog.String("path", path), mlog.String("symbol", symbol))
 
 	pluginMutex.Lock()
 	defer pluginMutex.Unlock()

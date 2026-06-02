@@ -24,7 +24,6 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -135,8 +134,8 @@ func (node *MockQueryNode) Start() error {
 	node.session.ServerID = node.ID
 	node.session.Register()
 	mlog.Debug(context.TODO(), "mock QueryNode started",
-		zap.Int64("nodeID", node.ID),
-		zap.String("nodeAddr", node.addr))
+		mlog.FieldNodeID(node.ID),
+		mlog.String("nodeAddr", node.addr))
 
 	return err
 }

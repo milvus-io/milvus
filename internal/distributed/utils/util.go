@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
@@ -39,14 +38,14 @@ func GracefulStopGRPCServer(s *grpc.Server) {
 }
 
 func getTLSCreds(certFile string, keyFile string, nodeType string) credentials.TransportCredentials {
-	mlog.Info(context.TODO(), "TLS Server PEM Path", zap.String("path", certFile))
-	mlog.Info(context.TODO(), "TLS Server Key Path", zap.String("path", keyFile))
+	mlog.Info(context.TODO(), "TLS Server PEM Path", mlog.String("path", certFile))
+	mlog.Info(context.TODO(), "TLS Server Key Path", mlog.String("path", keyFile))
 	creds, err := credentials.NewServerTLSFromFile(certFile, keyFile)
 	if err != nil {
 		mlog.Warn(context.TODO(),
-			nodeType+" can't create creds", zap.Error(err))
+			nodeType+" can't create creds", mlog.Err(err))
 		mlog.Warn(context.TODO(),
-			nodeType+" can't create creds", zap.Error(err))
+			nodeType+" can't create creds", mlog.Err(err))
 	}
 	return creds
 }
@@ -57,7 +56,7 @@ func EnableInternalTLS(NodeType string) grpc.ServerOption {
 	keyFile := Params.InternalTLSCfg.InternalTLSServerKeyPath.GetValue()
 	internaltlsEnabled := Params.InternalTLSCfg.InternalTLSEnabled.GetAsBool()
 
-	mlog.Info(context.TODO(), "Internal TLS Enabled", zap.Bool("value", internaltlsEnabled))
+	mlog.Info(context.TODO(), "Internal TLS Enabled", mlog.Bool("value", internaltlsEnabled))
 
 	if internaltlsEnabled {
 		creds := getTLSCreds(certFile, keyFile, NodeType)
@@ -68,12 +67,12 @@ func EnableInternalTLS(NodeType string) grpc.ServerOption {
 
 func CreateCertPoolforClient(caFile string, nodeType string) (*x509.CertPool, error) {
 	mlog.Info(context.TODO(), "Creating cert pool for "+nodeType)
-	mlog.Info(context.TODO(), "Cert file path:", zap.String("caFile", caFile))
+	mlog.Info(context.TODO(), "Cert file path:", mlog.String("caFile", caFile))
 	certPool := x509.NewCertPool()
 
 	b, err := os.ReadFile(caFile)
 	if err != nil {
-		mlog.Error(context.TODO(), "Error reading cert file in client", zap.Error(err))
+		mlog.Error(context.TODO(), "Error reading cert file in client", mlog.Err(err))
 		return nil, err
 	}
 

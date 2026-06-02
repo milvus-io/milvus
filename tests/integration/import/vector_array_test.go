@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -253,7 +252,7 @@ func (s *BulkInsertSuite) runForStructArray() {
 	s.NotNil(importResp)
 	s.Equal(int32(0), importResp.GetStatus().GetCode())
 
-	mlog.Info(context.TODO(), "Import response", zap.Any("resp", importResp))
+	mlog.Info(context.TODO(), "Import response", mlog.Any("resp", importResp))
 	jobID := importResp.GetJobID()
 
 	// Wait for import to complete

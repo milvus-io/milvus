@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/grpc/resolver"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -55,12 +54,12 @@ func (r *watchBasedGRPCResolver) Update(state VersionedState) error {
 		// watch based resolver could ignore the error, just log and return nil
 		r.Logger().Warn(context.TODO(),
 
-			"fail to update resolver state", zap.Stringer("state", state), zap.Error(err))
+			"fail to update resolver state", mlog.Stringer("state", state), mlog.Err(err))
 		return nil
 	}
 	r.Logger().Info(context.TODO(),
 
-		"update resolver state success", zap.Stringer("state", state))
+		"update resolver state success", mlog.Stringer("state", state))
 	return nil
 }
 

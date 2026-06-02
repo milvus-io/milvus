@@ -25,7 +25,6 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
@@ -82,7 +81,7 @@ func (dms *dmlMsgStream) DecRefCnt() {
 	if dms.refcnt > 0 {
 		dms.refcnt--
 	} else {
-		mlog.Warn(context.TODO(), "Try to remove channel with no ref count", zap.Int64("idx", dms.idx))
+		mlog.Warn(context.TODO(), "Try to remove channel with no ref count", mlog.Int64("idx", dms.idx))
 	}
 }
 
@@ -151,8 +150,8 @@ type dmlChannels struct {
 
 func newDmlChannels(initCtx context.Context, factory msgstream.Factory, chanNamePrefixDefault string, chanNumDefault int64) *dmlChannels {
 	mlog.Info(initCtx, "new DmlChannels",
-		zap.String("chanNamePrefixDefault", chanNamePrefixDefault),
-		zap.Int64("chanNumDefault", chanNumDefault))
+		mlog.String("chanNamePrefixDefault", chanNamePrefixDefault),
+		mlog.Int64("chanNumDefault", chanNumDefault))
 	params := &paramtable.Get().CommonCfg
 	var (
 		chanNamePrefix string
@@ -189,7 +188,7 @@ func newDmlChannels(initCtx context.Context, factory msgstream.Factory, chanName
 			if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(initCtx, notifier); err != nil {
 				panic(err)
 			}
-			logger := mlog.With(zap.String("pchannel", name))
+			logger := mlog.With(mlog.FieldPChannel(name))
 			if !notifier.IsReady() {
 				logger.Info(initCtx, "streaming service is not enabled, create a msgstream to use")
 				ms = d.newMsgstream(initCtx, factory, name)
@@ -219,7 +218,7 @@ func newDmlChannels(initCtx context.Context, factory msgstream.Factory, chanName
 
 	heap.Init(&d.channelsHeap)
 
-	mlog.Info(initCtx, "init dml channels", zap.String("prefix", chanNamePrefix), zap.Int64("num", chanNum))
+	mlog.Info(initCtx, "init dml channels", mlog.String("prefix", chanNamePrefix), mlog.Int64("num", chanNum))
 
 	metrics.RootCoordNumOfDMLChannel.Add(float64(chanNum))
 	metrics.RootCoordNumOfMsgStream.Add(float64(chanNum))
@@ -232,8 +231,8 @@ func (d *dmlChannels) newMsgstream(initCtx context.Context, factory msgstream.Fa
 	ms, err := factory.NewMsgStream(initCtx)
 	if err != nil {
 		mlog.Error(initCtx, "Failed to add msgstream",
-			zap.String("name", name),
-			zap.Error(err))
+			mlog.String("name", name),
+			mlog.Err(err))
 		panic("Failed to add msgstream")
 	}
 
@@ -311,7 +310,7 @@ func (d *dmlChannels) getChannelNum() int {
 func (d *dmlChannels) getMsgStreamByName(chanName string) (*dmlMsgStream, error) {
 	dms, ok := d.pool.Get(chanName)
 	if !ok {
-		mlog.Error(d.ctx, "invalid channelName", zap.String("chanName", chanName))
+		mlog.Error(d.ctx, "invalid channelName", mlog.String("chanName", chanName))
 		return nil, errors.Newf("invalid channel name: %s", chanName)
 	}
 	return dms, nil
@@ -327,7 +326,7 @@ func (d *dmlChannels) broadcast(chanNames []string, pack *msgstream.MsgPack) err
 		dms.mutex.RLock()
 		if dms.refcnt > 0 {
 			if _, err := dms.ms.Broadcast(d.ctx, pack); err != nil {
-				mlog.Error(d.ctx, "Broadcast failed", zap.Error(err), zap.String("chanName", chanName))
+				mlog.Error(d.ctx, "Broadcast failed", mlog.Err(err), mlog.String("chanName", chanName))
 				dms.mutex.RUnlock()
 				return err
 			}
@@ -349,7 +348,7 @@ func (d *dmlChannels) broadcastMark(chanNames []string, pack *msgstream.MsgPack)
 		if dms.refcnt > 0 {
 			ids, err := dms.ms.Broadcast(d.ctx, pack)
 			if err != nil {
-				mlog.Error(d.ctx, "BroadcastMark failed", zap.Error(err), zap.String("chanName", chanName))
+				mlog.Error(d.ctx, "BroadcastMark failed", mlog.Err(err), mlog.String("chanName", chanName))
 				dms.mutex.RUnlock()
 				return result, err
 			}
@@ -416,12 +415,12 @@ func genChannelNames(prefix string, num int64) []string {
 func parseChannelNameIndex(channelName string) int {
 	index := strings.LastIndex(channelName, "_")
 	if index < 0 {
-		mlog.Error(context.TODO(), "invalid channelName", zap.String("chanName", channelName))
+		mlog.Error(context.TODO(), "invalid channelName", mlog.String("chanName", channelName))
 		panic("invalid channel name: " + channelName)
 	}
 	index, err := strconv.Atoi(channelName[index+1:])
 	if err != nil {
-		mlog.Error(context.TODO(), "invalid channelName", zap.String("chanName", channelName), zap.Error(err))
+		mlog.Error(context.TODO(), "invalid channelName", mlog.String("chanName", channelName), mlog.Err(err))
 		panic("invalid channel name: " + channelName)
 	}
 	return index
@@ -445,7 +444,7 @@ func getNeedChanNum(setNum int, chanMap map[typeutil.UniqueID][]string) int {
 				panic("topic were empty")
 			}
 			if chanNameSet.Contain(topic) {
-				mlog.Error(context.TODO(), "duplicate topics are pre-created", zap.String("topic", topic))
+				mlog.Error(context.TODO(), "duplicate topics are pre-created", mlog.String("topic", topic))
 				panic("duplicate topic: " + topic)
 			}
 			chanNameSet.Insert(topic)
@@ -454,7 +453,7 @@ func getNeedChanNum(setNum int, chanMap map[typeutil.UniqueID][]string) int {
 		for _, chanNames := range chanMap {
 			for _, chanName := range chanNames {
 				if !chanNameSet.Contain(chanName) {
-					mlog.Error(context.TODO(), "invalid channel that is not in the list when pre-created topic", zap.String("chanName", chanName))
+					mlog.Error(context.TODO(), "invalid channel that is not in the list when pre-created topic", mlog.String("chanName", chanName))
 					panic("invalid chanName: " + chanName)
 				}
 			}

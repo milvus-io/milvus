@@ -18,9 +18,9 @@ package importv2
 
 import (
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 )
@@ -191,12 +191,12 @@ type Task interface {
 	Clone() Task
 }
 
-func WrapLogFields(task Task, fields ...zap.Field) []zap.Field {
-	res := []zap.Field{
-		zap.Int64("taskID", task.GetTaskID()),
-		zap.Int64("jobID", task.GetJobID()),
-		zap.Int64("collectionID", task.GetCollectionID()),
-		zap.String("type", task.GetType().String()),
+func WrapLogFields(task Task, fields ...mlog.Field) []mlog.Field {
+	res := []mlog.Field{
+		mlog.FieldTaskID(task.GetTaskID()),
+		mlog.FieldJobID(task.GetJobID()),
+		mlog.FieldCollectionID(task.GetCollectionID()),
+		mlog.String("type", task.GetType().String()),
 	}
 	res = append(res, fields...)
 	return res

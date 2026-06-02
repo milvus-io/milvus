@@ -24,7 +24,6 @@ import (
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -178,7 +177,7 @@ func (ob *CollectionObserver) observeTimeout(ctx context.Context) {
 		collection := ob.meta.GetCollection(ctx, task.CollectionID)
 		// collection released
 		if collection == nil {
-			mlog.Info(ctx, "Load Collection Task canceled, collection removed from meta", zap.Int64("collectionID", task.CollectionID), zap.String("traceID", traceID))
+			mlog.Info(ctx, "Load Collection Task canceled, collection removed from meta", mlog.FieldCollectionID(task.CollectionID), mlog.String("traceID", traceID))
 			ob.loadTasks.Remove(traceID)
 			return true
 		}
@@ -188,8 +187,8 @@ func (ob *CollectionObserver) observeTimeout(ctx context.Context) {
 			if collection.GetStatus() == querypb.LoadStatus_Loading &&
 				time.Now().After(collection.UpdatedAt.Add(Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second))) {
 				mlog.Info(ctx, "load collection timeout, cancel it",
-					zap.Int64("collectionID", collection.GetCollectionID()),
-					zap.Duration("loadTime", time.Since(collection.CreatedAt)))
+					mlog.FieldCollectionID(collection.GetCollectionID()),
+					mlog.Duration("loadTime", time.Since(collection.CreatedAt)))
 				ob.meta.CollectionManager.RemoveCollection(ctx, collection.GetCollectionID())
 				ob.meta.ReplicaManager.RemoveCollection(ctx, collection.GetCollectionID())
 				ob.targetObserver.ReleaseCollection(collection.GetCollectionID())
@@ -205,9 +204,9 @@ func (ob *CollectionObserver) observeTimeout(ctx context.Context) {
 			// all partition released
 			if len(partitions) == 0 {
 				mlog.Info(ctx, "Load Partitions Task canceled, collection removed from meta",
-					zap.Int64("collectionID", task.CollectionID),
-					zap.Int64s("partitionIDs", task.PartitionIDs),
-					zap.String("traceID", traceID))
+					mlog.FieldCollectionID(task.CollectionID),
+					mlog.Int64s("partitionIDs", task.PartitionIDs),
+					mlog.String("traceID", traceID))
 				ob.loadTasks.Remove(traceID)
 				return true
 			}
@@ -222,8 +221,8 @@ func (ob *CollectionObserver) observeTimeout(ctx context.Context) {
 			// only all partitions timeout means task timeout
 			if !working {
 				mlog.Info(ctx, "load partitions timeout, cancel it",
-					zap.Int64("collectionID", task.CollectionID),
-					zap.Int64s("partitionIDs", task.PartitionIDs))
+					mlog.FieldCollectionID(task.CollectionID),
+					mlog.Int64s("partitionIDs", task.PartitionIDs))
 				for _, partition := range partitions {
 					ob.meta.RemovePartition(ctx, partition.CollectionID, partition.GetPartitionID())
 					ob.targetObserver.ReleasePartition(partition.GetCollectionID(), partition.GetPartitionID())
@@ -231,7 +230,7 @@ func (ob *CollectionObserver) observeTimeout(ctx context.Context) {
 
 				// all partition timeout, remove collection
 				if len(ob.meta.GetPartitionsByCollection(ctx, task.CollectionID)) == 0 {
-					mlog.Info(ctx, "collection timeout due to all partition removed", zap.Int64("collection", task.CollectionID))
+					mlog.Info(ctx, "collection timeout due to all partition removed", mlog.Int64("collection", task.CollectionID))
 
 					ob.meta.CollectionManager.RemoveCollection(ctx, task.CollectionID)
 					ob.meta.ReplicaManager.RemoveCollection(ctx, task.CollectionID)
@@ -305,19 +304,19 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context) {
 		// all partition loaded, finish task
 		if len(partitions) > 0 && loaded {
 			mlog.Info(ctx, "Load task finish",
-				zap.String("traceID", traceID),
-				zap.Int64("collectionID", task.CollectionID),
-				zap.Int64s("partitionIDs", task.PartitionIDs),
-				zap.Stringer("loadType", task.LoadType))
+				mlog.String("traceID", traceID),
+				mlog.FieldCollectionID(task.CollectionID),
+				mlog.Int64s("partitionIDs", task.PartitionIDs),
+				mlog.Stringer("loadType", task.LoadType))
 			ob.loadTasks.Remove(traceID)
 		}
 
-		mlog.Info(ctx, "observe collection done", zap.Int64("collectionID", task.CollectionID), zap.Duration("dur", time.Since(start)))
+		mlog.Info(ctx, "observe collection done", mlog.FieldCollectionID(task.CollectionID), mlog.Duration("dur", time.Since(start)))
 		return true
 	})
 
 	if observeTaskNum > 0 {
-		mlog.Info(ctx, "observe all collections done", zap.Int("num", observeTaskNum), zap.Duration("dur", time.Since(observeStart)))
+		mlog.Info(ctx, "observe all collections done", mlog.Int("num", observeTaskNum), mlog.Duration("dur", time.Since(observeStart)))
 	}
 
 	// trigger check logic when loading collections/partitions
@@ -354,12 +353,12 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 		return false
 	}
 	mlog.RatedInfo(ctx, rate.Limit(10), "partition targets",
-		zap.Int64("collectionID", partition.GetCollectionID()),
-		zap.Int64("partitionID", partition.GetPartitionID()),
-		zap.Int("segmentTargetNum", len(segmentTargets)),
-		zap.Int("channelTargetNum", channelTargetNum),
-		zap.Int("totalTargetNum", targetNum),
-		zap.Int32("replicaNum", replicaNum),
+		mlog.FieldCollectionID(partition.GetCollectionID()),
+		mlog.FieldPartitionID(partition.GetPartitionID()),
+		mlog.Int("segmentTargetNum", len(segmentTargets)),
+		mlog.Int("channelTargetNum", channelTargetNum),
+		mlog.Int("totalTargetNum", targetNum),
+		mlog.Int32("replicaNum", replicaNum),
 	)
 	loadedCount := subChannelCount
 	loadPercentage := int32(0)
@@ -386,8 +385,8 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 	if loadPercentage == 100 {
 		if !ob.targetObserver.Check(ctx, partition.GetCollectionID(), partition.PartitionID) {
 			mlog.Warn(ctx, "failed to manual check current target, skip update load status",
-				zap.Int64("collectionID", partition.GetCollectionID()),
-				zap.Int64("partitionID", partition.GetPartitionID()))
+				mlog.FieldCollectionID(partition.GetCollectionID()),
+				mlog.FieldPartitionID(partition.GetPartitionID()))
 			return false
 		}
 		delete(ob.partitionLoadedCount, partition.GetPartitionID())
@@ -395,15 +394,15 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 	err := ob.meta.UpdatePartitionLoadPercent(ctx, partition.PartitionID, loadPercentage)
 	if err != nil {
 		mlog.Warn(ctx, "failed to update partition load percentage",
-			zap.Int64("collectionID", partition.GetCollectionID()),
-			zap.Int64("partitionID", partition.GetPartitionID()))
+			mlog.FieldCollectionID(partition.GetCollectionID()),
+			mlog.FieldPartitionID(partition.GetPartitionID()))
 	}
 	mlog.Info(ctx, "partition load status updated",
-		zap.Int64("collectionID", partition.GetCollectionID()),
-		zap.Int64("partitionID", partition.GetPartitionID()),
-		zap.Int32("partitionLoadPercentage", loadPercentage),
-		zap.Int("subChannelCount", subChannelCount),
-		zap.Int("loadSegmentCount", loadedCount-subChannelCount),
+		mlog.FieldCollectionID(partition.GetCollectionID()),
+		mlog.FieldPartitionID(partition.GetPartitionID()),
+		mlog.Int32("partitionLoadPercentage", loadPercentage),
+		mlog.Int("subChannelCount", subChannelCount),
+		mlog.Int("loadSegmentCount", loadedCount-subChannelCount),
 	)
 	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("partition %d load percentage update: %d", partition.PartitionID, loadPercentage)))
 	return true
@@ -412,11 +411,11 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 func (ob *CollectionObserver) observeCollectionLoadStatus(ctx context.Context, collectionID int64) {
 	collectionPercentage, err := ob.meta.UpdateCollectionLoadPercent(ctx, collectionID)
 	if err != nil {
-		mlog.Warn(ctx, "failed to update collection load percentage", zap.Int64("collectionID", collectionID))
+		mlog.Warn(ctx, "failed to update collection load percentage", mlog.FieldCollectionID(collectionID))
 	}
 	mlog.Info(ctx, "collection load status updated",
-		zap.Int64("collectionID", collectionID),
-		zap.Int32("collectionLoadPercentage", collectionPercentage),
+		mlog.FieldCollectionID(collectionID),
+		mlog.Int32("collectionLoadPercentage", collectionPercentage),
 	)
 	if collectionPercentage == 100 {
 		ob.invalidateCache(ctx, collectionID)
@@ -431,7 +430,7 @@ func (ob *CollectionObserver) invalidateCache(ctx context.Context, collectionID 
 		CollectionID: collectionID,
 	}, proxyutil.SetMsgType(commonpb.MsgType_LoadCollection))
 	if err != nil {
-		mlog.Warn(ctx, "failed to invalidate proxy's shard leader cache", zap.Error(err))
+		mlog.Warn(ctx, "failed to invalidate proxy's shard leader cache", mlog.Err(err))
 		return
 	}
 }

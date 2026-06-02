@@ -7,7 +7,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -308,15 +307,15 @@ func (cm *ChannelManager) AddPChannels(ctx context.Context, newChannels []string
 		}
 		cm.Logger().Error(ctx,
 
-			"failed to save new pchannels", zap.Error(err))
+			"failed to save new pchannels", mlog.Err(err))
 		return err
 	}
 
 	cm.Logger().Info(ctx,
 
 		"dynamically added new pchannels",
-		zap.Int("count", len(newMetas)),
-		zap.Strings("channels", newChannels))
+		mlog.Int("count", len(newMetas)),
+		mlog.Strings("channels", newChannels))
 	return nil
 }
 
@@ -347,7 +346,7 @@ func (cm *ChannelManager) MarkStreamingHasEnabled(ctx context.Context) error {
 	if err := resource.Resource().StreamingCatalog().SaveVersion(ctx, cm.streamingVersion); err != nil {
 		cm.Logger().Error(ctx,
 
-			"failed to save streaming version", zap.Error(err))
+			"failed to save streaming version", mlog.Err(err))
 		return err
 	}
 
@@ -378,7 +377,7 @@ func (cm *ChannelManager) MarkStreamingVersion(ctx context.Context, version int6
 	if err := resource.Resource().StreamingCatalog().SaveVersion(ctx, cm.streamingVersion); err != nil {
 		cm.Logger().Error(ctx,
 
-			"failed to save streaming version", zap.Error(err))
+			"failed to save streaming version", mlog.Err(err))
 		return err
 	}
 	return nil
@@ -546,7 +545,7 @@ func (cm *ChannelManager) updatePChannelMeta(ctx context.Context, pChannelMetas 
 	if err := resource.Resource().StreamingCatalog().SavePChannels(ctx, pChannelMetas); err != nil {
 		cm.Logger().Error(ctx,
 
-			"failed to save pchannels", zap.Error(err))
+			"failed to save pchannels", mlog.Err(err))
 		return err
 	}
 
@@ -649,7 +648,7 @@ func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, resu
 	if err := resource.Resource().StreamingCatalog().SaveReplicateConfiguration(ctx, configMeta, newIncomingCDCTasks); err != nil {
 		cm.Logger().Error(ctx,
 
-			"failed to save replicate configuration", zap.Error(err))
+			"failed to save replicate configuration", mlog.Err(err))
 		return err
 	}
 

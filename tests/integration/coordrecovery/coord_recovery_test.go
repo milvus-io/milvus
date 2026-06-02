@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -242,7 +241,7 @@ func (s *CoordSwitchSuite) switchCoord() float64 {
 	start := time.Now()
 	mlog.Info(context.TODO(), "=========================Stopping Coordinators========================")
 	c.DefaultMixCoord().Stop()
-	mlog.Info(context.TODO(), "=========================Coordinators stopped=========================", zap.Duration("elapsed", time.Since(start)))
+	mlog.Info(context.TODO(), "=========================Coordinators stopped=========================", mlog.Duration("elapsed", time.Since(start)))
 	start = time.Now()
 
 	c.AddMixCoord()

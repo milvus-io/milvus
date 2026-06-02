@@ -5,7 +5,6 @@ import (
 	"math"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -82,7 +81,7 @@ type InsertBuffer struct {
 func NewInsertBuffer(sch *schemapb.CollectionSchema) (*InsertBuffer, error) {
 	estSize, err := typeutil.EstimateSizePerRecord(sch)
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to estimate size per record", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to estimate size per record", mlog.Err(err))
 		return nil, err
 	}
 

@@ -28,8 +28,6 @@ import (
 	"math"
 	"unsafe"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -96,9 +94,9 @@ func addDeltaLogsToManifest(
 	}
 
 	mlog.Debug(context.TODO(), "AddDeltaLogsToManifest",
-		zap.String("basePath", basePath),
-		zap.Int64("version", version),
-		zap.Int("numDeltaLogs", len(deltaLogs)))
+		mlog.String("basePath", basePath),
+		mlog.Int64("version", version),
+		mlog.Int("numDeltaLogs", len(deltaLogs)))
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
@@ -129,8 +127,8 @@ func addDeltaLogsToManifest(
 		}
 
 		mlog.Debug(context.TODO(), "Added delta log to transaction",
-			zap.String("path", deltaLog.Path),
-			zap.Int64("numEntries", deltaLog.NumEntries))
+			mlog.String("path", deltaLog.Path),
+			mlog.Int64("numEntries", deltaLog.NumEntries))
 	}
 
 	// Commit transaction
@@ -141,7 +139,7 @@ func addDeltaLogsToManifest(
 	}
 
 	newManifestPath := MarshalManifestPath(basePath, int64(commitVersion))
-	mlog.Debug(context.TODO(), "Delta logs committed to manifest", zap.Int64("newVersion", int64(commitVersion)))
+	mlog.Debug(context.TODO(), "Delta logs committed to manifest", mlog.Int64("newVersion", int64(commitVersion)))
 
 	return newManifestPath, nil
 }
@@ -196,9 +194,9 @@ func GetDeltaLogPathsFromManifest(
 	}
 
 	mlog.Debug(context.TODO(), "GetDeltaLogPathsFromManifest",
-		zap.String("manifestPath", manifestPath),
-		zap.Int("numDeltaLogs", numDeltaLogs),
-		zap.Strings("paths", paths))
+		mlog.String("manifestPath", manifestPath),
+		mlog.Int("numDeltaLogs", numDeltaLogs),
+		mlog.Strings("paths", paths))
 
 	return paths, nil
 }
@@ -226,9 +224,9 @@ func AddStatsToManifest(
 	}
 
 	mlog.Debug(context.TODO(), "AddStatsToManifest",
-		zap.String("basePath", basePath),
-		zap.Int64("version", version),
-		zap.Int("numStats", len(stats)))
+		mlog.String("basePath", basePath),
+		mlog.Int64("version", version),
+		mlog.Int("numStats", len(stats)))
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
@@ -252,8 +250,8 @@ func AddStatsToManifest(
 			return "", fmt.Errorf("failed to update stat %s: %w", stat.Key, err)
 		}
 		mlog.Debug(context.TODO(), "Added stat to transaction",
-			zap.String("key", stat.Key),
-			zap.Strings("files", stat.Files))
+			mlog.String("key", stat.Key),
+			mlog.Strings("files", stat.Files))
 	}
 
 	var commitVersion C.int64_t
@@ -263,7 +261,7 @@ func AddStatsToManifest(
 	}
 
 	newManifestPath := MarshalManifestPath(basePath, int64(commitVersion))
-	mlog.Debug(context.TODO(), "Stats committed to manifest", zap.Int64("newVersion", int64(commitVersion)))
+	mlog.Debug(context.TODO(), "Stats committed to manifest", mlog.Int64("newVersion", int64(commitVersion)))
 
 	return newManifestPath, nil
 }

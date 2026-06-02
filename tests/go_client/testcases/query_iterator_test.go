@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
@@ -323,7 +322,7 @@ func TestQueryIteratorExpr(t *testing.T) {
 		expectCount, err := rs.GetColumn("count(*)").GetAsInt64(0)
 		common.CheckErr(t, err, true)
 
-		mlog.Info(context.TODO(), "case expr is", zap.String("expr", exprLimit.expr), zap.Int64("expectedCount", expectCount))
+		mlog.Info(context.TODO(), "case expr is", mlog.String("expr", exprLimit.expr), mlog.Int64("expectedCount", expectCount))
 		itr, err := mc.QueryIterator(ctx, client.NewQueryIteratorOption(schema.CollectionName).WithBatchSize(batch).WithFilter(exprLimit.expr))
 		common.CheckErr(t, err, true)
 		common.CheckQueryIteratorResult(ctx, t, itr, int(expectCount), common.WithExpBatchSize(hp.GenBatchSizes(int(expectCount), batch)))
@@ -440,7 +439,7 @@ func TestQueryIteratorConsistencyLevel(t *testing.T) {
 				if err == io.EOF {
 					break
 				}
-				mlog.Error(context.TODO(), "QueryIterator next gets error", zap.Error(err))
+				mlog.Error(context.TODO(), "QueryIterator next gets error", mlog.Err(err))
 				break
 			}
 			actualLimit = actualLimit + rs.ResultCount

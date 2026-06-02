@@ -22,7 +22,6 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -311,21 +310,21 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 	if exist && specifyIndexType != "" {
 		// todo(SpadeA): mmap check for struct array index
 		if err := indexparamcheck.ValidateMmapIndexParams(specifyIndexType, indexParamsMap); err != nil {
-			mlog.Warn(ctx, "Invalid mmap type params", zap.String(common.IndexTypeKey, specifyIndexType), zap.Error(err))
+			mlog.Warn(ctx, "Invalid mmap type params", mlog.String(common.IndexTypeKey, specifyIndexType), mlog.Err(err))
 			return merr.WrapErrParameterInvalidMsg("invalid mmap type params: %s", err.Error())
 		}
 		// todo(SpadeA): check for struct array index
 		checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(specifyIndexType)
 		// not enable hybrid index for user, used in milvus internally
 		if err != nil || indexparamcheck.IsHYBRIDChecker(checker) {
-			mlog.Warn(ctx, "Failed to get index checker", zap.String(common.IndexTypeKey, specifyIndexType), zap.Error(err))
+			mlog.Warn(ctx, "Failed to get index checker", mlog.String(common.IndexTypeKey, specifyIndexType), mlog.Err(err))
 			return merr.WrapErrParameterInvalid("valid index", fmt.Sprintf("invalid index type: %s", specifyIndexType))
 		}
 	}
 
 	// Validate warmup policy if specified
 	if err := indexparamcheck.ValidateWarmupIndexParams(indexParamsMap); err != nil {
-		mlog.Warn(ctx, "Invalid warmup params", zap.Error(err))
+		mlog.Warn(ctx, "Invalid warmup params", mlog.Err(err))
 		return merr.WrapErrParameterInvalidMsg("invalid warmup params: %s", err.Error())
 	}
 
@@ -379,8 +378,8 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 		if Params.AutoIndexConfig.Enable.GetAsBool() {
 			// `enable` only for cloud instance.
 			mlog.Info(ctx, "create index trigger AutoIndex",
-				zap.String("original type", specifyIndexType),
-				zap.String("final type", Params.AutoIndexConfig.AutoIndexTypeName.GetValue()))
+				mlog.String("original type", specifyIndexType),
+				mlog.String("final type", Params.AutoIndexConfig.AutoIndexTypeName.GetValue()))
 
 			metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]
 
@@ -441,10 +440,10 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			}
 		} else { // behavior change after 2.2.9, adapt autoindex logic here.
 			useAutoIndex := func(autoIndexConfig map[string]string) {
-				fields := make([]zap.Field, 0, len(autoIndexConfig))
+				fields := make([]mlog.Field, 0, len(autoIndexConfig))
 				for k, v := range autoIndexConfig {
 					indexParamsMap[k] = v
-					fields = append(fields, zap.String(k, v))
+					fields = append(fields, mlog.String(k, v))
 				}
 				mlog.Info(ctx, "AutoIndex triggered", fields...)
 			}
@@ -621,20 +620,20 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 func (cit *createIndexTask) getIndexedFieldAndFunction(ctx context.Context) error {
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, cit.req.GetDbName(), cit.req.GetCollectionName())
 	if err != nil {
-		mlog.Error(ctx, "failed to get collection schema", zap.Error(err))
+		mlog.Error(ctx, "failed to get collection schema", mlog.Err(err))
 		return fmt.Errorf("failed to get collection schema: %s", err)
 	}
 
 	field, err := schema.schemaHelper.GetFieldFromNameDefaultJSON(cit.req.GetFieldName())
 	if err != nil {
-		mlog.Error(ctx, "create index on non-exist field", zap.Error(err))
+		mlog.Error(ctx, "create index on non-exist field", mlog.Err(err))
 		return fmt.Errorf("cannot create index on non-exist field: %s", cit.req.GetFieldName())
 	}
 
 	if field.IsFunctionOutput {
 		function, err := schema.schemaHelper.GetFunctionByOutputField(field)
 		if err != nil {
-			mlog.Error(ctx, "create index failed, cannot find function of function output field", zap.Error(err))
+			mlog.Error(ctx, "create index failed, cannot find function of function output field", mlog.Err(err))
 			return fmt.Errorf("create index failed, cannot find function of function output field: %s", cit.req.GetFieldName())
 		}
 		cit.functionSchema = function
@@ -680,7 +679,7 @@ func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams ma
 
 	checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType)
 	if err != nil {
-		mlog.Warn(ctx, "Failed to get index checker", zap.String(common.IndexTypeKey, indexType))
+		mlog.Warn(ctx, "Failed to get index checker", mlog.String(common.IndexTypeKey, indexType))
 		return fmt.Errorf("invalid index type: %s", indexType)
 	}
 
@@ -719,12 +718,12 @@ func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams ma
 	}
 
 	if err := checker.CheckValidDataType(indexType, effectiveField); err != nil {
-		mlog.Info(ctx, "create index with invalid data type", zap.Error(err), zap.String("data_type", field.GetDataType().String()))
+		mlog.Info(ctx, "create index with invalid data type", mlog.Err(err), mlog.String("data_type", field.GetDataType().String()))
 		return err
 	}
 
 	if err := checker.CheckTrain(effectiveDataType, effectiveElementType, indexParams); err != nil {
-		mlog.Info(ctx, "create index with invalid parameters", zap.Error(err))
+		mlog.Info(ctx, "create index with invalid parameters", mlog.Err(err))
 		return err
 	}
 
@@ -765,10 +764,10 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 }
 
 func (cit *createIndexTask) Execute(ctx context.Context) error {
-	mlog.Info(ctx, "proxy create index", zap.Int64("collectionID", cit.collectionID), zap.Int64("fieldID", cit.fieldSchema.GetFieldID()),
-		zap.String("indexName", cit.req.GetIndexName()), zap.Any("typeParams", cit.fieldSchema.GetTypeParams()),
-		zap.Any("indexParams", cit.req.GetExtraParams()),
-		zap.Any("newExtraParams", cit.newExtraParams),
+	mlog.Info(ctx, "proxy create index", mlog.FieldCollectionID(cit.collectionID), mlog.FieldFieldID(cit.fieldSchema.GetFieldID()),
+		mlog.String("indexName", cit.req.GetIndexName()), mlog.Any("typeParams", cit.fieldSchema.GetTypeParams()),
+		mlog.Any("indexParams", cit.req.GetExtraParams()),
+		mlog.Any("newExtraParams", cit.newExtraParams),
 	)
 
 	var err error
@@ -901,10 +900,10 @@ func (t *alterIndexTask) PreExecute(ctx context.Context) error {
 
 func (t *alterIndexTask) Execute(ctx context.Context) error {
 	log := mlog.With(
-		zap.String("collection", t.req.GetCollectionName()),
-		zap.String("indexName", t.req.GetIndexName()),
-		zap.Any("params", t.req.GetExtraParams()),
-		zap.Any("deletekeys", t.req.GetDeleteKeys()),
+		mlog.String("collection", t.req.GetCollectionName()),
+		mlog.String("indexName", t.req.GetIndexName()),
+		mlog.Any("params", t.req.GetExtraParams()),
+		mlog.Any("deletekeys", t.req.GetDeleteKeys()),
 	)
 
 	log.Info(ctx, "alter index")
@@ -993,7 +992,7 @@ func (dit *describeIndexTask) PreExecute(ctx context.Context) error {
 func (dit *describeIndexTask) Execute(ctx context.Context) error {
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, dit.GetDbName(), dit.GetCollectionName())
 	if err != nil {
-		mlog.Error(ctx, "failed to get collection schema", zap.Error(err))
+		mlog.Error(ctx, "failed to get collection schema", mlog.Err(err))
 		return fmt.Errorf("failed to get collection schema: %s", err)
 	}
 
@@ -1015,7 +1014,7 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 	for _, indexInfo := range resp.IndexInfos {
 		field, err := schema.schemaHelper.GetFieldFromID(indexInfo.FieldID)
 		if err != nil {
-			mlog.Error(ctx, "failed to get collection field", zap.Error(err))
+			mlog.Error(ctx, "failed to get collection field", mlog.Err(err))
 			return fmt.Errorf("failed to get collection field: %d", indexInfo.FieldID)
 		}
 		params := indexInfo.GetUserIndexParams()
@@ -1029,7 +1028,7 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 		if field.IsDynamic {
 			jsonPath, err := funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, indexInfo.GetIndexParams())
 			if err != nil {
-				mlog.Warn(ctx, "failed to get json path for dynamic field", zap.Error(err))
+				mlog.Warn(ctx, "failed to get json path for dynamic field", mlog.Err(err))
 			} else if jsonPath != "" {
 				// Skip leading "/" and find next "/" to get first path segment
 				trimmedPath := strings.TrimPrefix(jsonPath, "/")
@@ -1133,7 +1132,7 @@ func (dit *getIndexStatisticsTask) PreExecute(ctx context.Context) error {
 func (dit *getIndexStatisticsTask) Execute(ctx context.Context) error {
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, dit.GetDbName(), dit.GetCollectionName())
 	if err != nil {
-		mlog.Error(ctx, "failed to get collection schema", zap.String("collection_name", dit.GetCollectionName()), zap.Error(err))
+		mlog.Error(ctx, "failed to get collection schema", mlog.FieldCollectionName(dit.GetCollectionName()), mlog.Err(err))
 		return fmt.Errorf("failed to get collection schema: %s", dit.GetCollectionName())
 	}
 	schemaHelper := schema.schemaHelper
@@ -1149,7 +1148,7 @@ func (dit *getIndexStatisticsTask) Execute(ctx context.Context) error {
 	for _, indexInfo := range resp.IndexInfos {
 		field, err := schemaHelper.GetFieldFromID(indexInfo.FieldID)
 		if err != nil {
-			mlog.Error(ctx, "failed to get collection field", zap.Int64("field_id", indexInfo.FieldID), zap.Error(err))
+			mlog.Error(ctx, "failed to get collection field", mlog.FieldFieldID(indexInfo.FieldID), mlog.Err(err))
 			return fmt.Errorf("failed to get collection field: %d", indexInfo.FieldID)
 		}
 		params := indexInfo.GetUserIndexParams()
@@ -1240,10 +1239,10 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 }
 
 func (dit *dropIndexTask) Execute(ctx context.Context) error {
-	mlog.Info(ctx, "proxy drop index", zap.Int64("collID", dit.collectionID),
-		zap.String("field_name", dit.FieldName),
-		zap.String("index_name", dit.IndexName),
-		zap.String("db_name", dit.DbName),
+	mlog.Info(ctx, "proxy drop index", mlog.Int64("collID", dit.collectionID),
+		mlog.String("field_name", dit.FieldName),
+		mlog.String("index_name", dit.IndexName),
+		mlog.FieldDbName(dit.DbName),
 	)
 
 	var err error
@@ -1254,7 +1253,7 @@ func (dit *dropIndexTask) Execute(ctx context.Context) error {
 		DropAll:      false,
 	})
 	if err = merr.CheckRPCCall(dit.result, err); err != nil {
-		mlog.Warn(ctx, "drop index failed", zap.Error(err))
+		mlog.Warn(ctx, "drop index failed", mlog.Err(err))
 		return err
 	}
 	return nil

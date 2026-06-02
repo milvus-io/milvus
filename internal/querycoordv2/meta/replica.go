@@ -5,7 +5,6 @@ import (
 	"sort"
 	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -579,8 +578,8 @@ func (replica *mutableReplica) allocateInsufficientNodes(channelInfos map[string
 			replica.replicaPB.ChannelNodeInfos[channelName].RwNodes = updatedNodes
 		}
 		mlog.Info(context.TODO(), "channel exclusive node list",
-			zap.String("channelName", channelName),
-			zap.Int64s("nodes", replica.replicaPB.ChannelNodeInfos[channelName].RwNodes))
+			mlog.String("channelName", channelName),
+			mlog.Int64s("nodes", replica.replicaPB.ChannelNodeInfos[channelName].RwNodes))
 	}
 }
 

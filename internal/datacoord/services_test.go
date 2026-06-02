@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -91,7 +90,7 @@ func (s *ServerSuite) SetupTest() {
 
 func (s *ServerSuite) TearDownTest() {
 	if s.testServer != nil {
-		mlog.Info(context.TODO(), "ServerSuite tears down test", zap.String("name", s.T().Name()))
+		mlog.Info(context.TODO(), "ServerSuite tears down test", mlog.String("name", s.T().Name()))
 		closeTestServer(s.T(), s.testServer)
 	}
 }

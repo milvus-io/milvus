@@ -25,7 +25,6 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
@@ -85,10 +84,10 @@ func (s *Server) Prepare() error {
 		netutil.OptHighPriorityToUsePort(paramtable.Get().DataNodeGrpcServerCfg.Port.GetAsInt()),
 	)
 	if err != nil {
-		mlog.Warn(s.ctx, "DataNode fail to create net listener", zap.Error(err))
+		mlog.Warn(s.ctx, "DataNode fail to create net listener", mlog.Err(err))
 		return err
 	}
-	mlog.Info(s.ctx, "DataNode listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
+	mlog.Info(s.ctx, "DataNode listen on", mlog.String("address", listener.Addr().String()), mlog.Int("port", listener.Port()))
 	s.listener = listener
 	paramtable.Get().Save(
 		paramtable.Get().DataNodeGrpcServerCfg.Port.Key,
@@ -184,11 +183,11 @@ func (s *Server) Run() error {
 func (s *Server) Stop() (err error) {
 	logger := mlog.With()
 	if s.listener != nil {
-		logger = logger.With(zap.String("address", s.listener.Address()))
+		logger = logger.With(mlog.String("address", s.listener.Address()))
 	}
 	logger.Info(s.ctx, "datanode stopping")
 	defer func() {
-		logger.Info(s.ctx, "datanode stopped", zap.Error(err))
+		logger.Info(s.ctx, "datanode stopped", mlog.Err(err))
 	}()
 
 	if s.etcdCli != nil {
@@ -202,7 +201,7 @@ func (s *Server) Stop() (err error) {
 	logger.Info(s.ctx, "internal server[datanode] start to stop")
 	err = s.datanode.Stop()
 	if err != nil {
-		logger.Error(s.ctx, "failed to close datanode", zap.Error(err))
+		logger.Error(s.ctx, "failed to close datanode", mlog.Err(err))
 		return err
 	}
 	s.cancel()
@@ -230,13 +229,13 @@ func (s *Server) init() error {
 		etcdConfig.EtcdTLSMinVersion.GetValue(),
 		etcdConfig.ClientOptions()...)
 	if err != nil {
-		mlog.Error(s.ctx, "failed to connect to etcd", zap.Error(err))
+		mlog.Error(s.ctx, "failed to connect to etcd", mlog.Err(err))
 		return err
 	}
 	s.etcdCli = etcdCli
 	s.SetEtcdClient(s.etcdCli)
 	s.datanode.SetAddress(s.listener.Address())
-	mlog.Info(s.ctx, "DataNode address", zap.String("address", s.listener.Address()))
+	mlog.Info(s.ctx, "DataNode address", mlog.String("address", s.listener.Address()))
 
 	err = s.startGrpc()
 	if err != nil {
@@ -246,10 +245,10 @@ func (s *Server) init() error {
 	s.datanode.UpdateStateCode(commonpb.StateCode_Initializing)
 
 	if err := s.datanode.Init(); err != nil {
-		mlog.Error(s.ctx, "failed to init DataNode server", zap.Error(err))
+		mlog.Error(s.ctx, "failed to init DataNode server", mlog.Err(err))
 		return err
 	}
-	mlog.Info(s.ctx, "current DataNode state", zap.Any("state", s.datanode.GetStateCode()))
+	mlog.Info(s.ctx, "current DataNode state", mlog.Any("state", s.datanode.GetStateCode()))
 	return nil
 }
 
@@ -260,7 +259,7 @@ func (s *Server) start() error {
 	}
 	err := s.datanode.Register()
 	if err != nil {
-		mlog.Debug(s.ctx, "failed to register to Etcd", zap.Error(err))
+		mlog.Debug(s.ctx, "failed to register to Etcd", mlog.Err(err))
 		return err
 	}
 	return nil

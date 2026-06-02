@@ -23,8 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
@@ -52,7 +50,7 @@ func ProcessFuncParallel(total, maxParallel int, f ProcessFunc, fname string) er
 
 	t := time.Now()
 	defer func() {
-		mlog.Debug(context.TODO(), fname, zap.Int("total", total), zap.Any("time cost", time.Since(t)))
+		mlog.Debug(context.TODO(), fname, mlog.Int("total", total), mlog.Any("time cost", time.Since(t)))
 	}()
 
 	nPerBatch := (total + maxParallel - 1) / maxParallel
@@ -86,7 +84,7 @@ func ProcessFuncParallel(total, maxParallel int, f ProcessFunc, fname string) er
 			for idx := begin; idx < end; idx++ {
 				err = f(idx)
 				if err != nil {
-					mlog.Error(context.TODO(), fname, zap.Error(err), zap.Int("idx", idx))
+					mlog.Error(context.TODO(), fname, mlog.Err(err), mlog.Int("idx", idx))
 					break
 				}
 			}
@@ -143,13 +141,13 @@ func ProcessTaskParallel(maxParallel int, fname string, tasks ...TaskFunc) error
 
 	t := time.Now()
 	defer func() {
-		mlog.Debug(ctx, fname, zap.Any("time cost", time.Since(t)))
+		mlog.Debug(ctx, fname, mlog.Any("time cost", time.Since(t)))
 	}()
 
 	total := len(tasks)
 	nPerBatch := (total + maxParallel - 1) / maxParallel
-	mlog.Debug(ctx, fname, zap.Int("total", total))
-	mlog.Debug(ctx, fname, zap.Int("nPerBatch", nPerBatch))
+	mlog.Debug(ctx, fname, mlog.Int("total", total))
+	mlog.Debug(ctx, fname, mlog.Int("nPerBatch", nPerBatch))
 
 	quit := make(chan bool)
 	errc := make(chan error)
@@ -190,7 +188,7 @@ func ProcessTaskParallel(maxParallel int, fname string, tasks ...TaskFunc) error
 			for idx := begin; idx < end; idx++ {
 				err = tasks[idx]()
 				if err != nil {
-					mlog.Error(ctx, fname, zap.Error(err), zap.Int("idx", idx))
+					mlog.Error(ctx, fname, mlog.Err(err), mlog.Int("idx", idx))
 					break
 				}
 			}
@@ -214,7 +212,7 @@ func ProcessTaskParallel(maxParallel int, fname string, tasks ...TaskFunc) error
 		routineNum++
 	}
 
-	mlog.Debug(ctx, fname, zap.Int("NumOfGoRoutines", routineNum))
+	mlog.Debug(ctx, fname, mlog.Int("NumOfGoRoutines", routineNum))
 
 	if routineNum <= 0 {
 		return nil

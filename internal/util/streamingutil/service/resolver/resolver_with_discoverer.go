@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -173,7 +172,7 @@ func (r *resolverWithDiscoverer) doDiscover() {
 				if err := watcher.Update(*state); err != nil {
 					r.Logger().Info(context.TODO(),
 
-						"resolver is closed, ignore the new grpc resolver", zap.Error(err))
+						"resolver is closed, ignore the new grpc resolver", mlog.Err(err))
 					delete(grpcResolvers, watcher)
 				}
 			case stateWithError := <-ch:
@@ -184,7 +183,7 @@ func (r *resolverWithDiscoverer) doDiscover() {
 					}
 					r.Logger().Warn(context.TODO(),
 
-						"service discover break down", zap.Error(stateWithError.err), zap.Duration("retryInterval", r.retryInterval))
+						"service discover break down", mlog.Err(stateWithError.err), mlog.Duration("retryInterval", r.retryInterval))
 					time.Sleep(r.retryInterval)
 					break L
 				}
@@ -196,13 +195,13 @@ func (r *resolverWithDiscoverer) doDiscover() {
 					// Ignore the old version.
 					r.Logger().Info(context.TODO(),
 
-						"service discover update, ignore old version", zap.Stringer("state", state))
+						"service discover update, ignore old version", mlog.Stringer("state", state))
 					continue
 				}
 				// Update all grpc resolver.
 				r.Logger().Info(context.TODO(),
 
-					"service discover update, update resolver", zap.Stringer("state", state), zap.Int("resolver_count", len(grpcResolvers)))
+					"service discover update, update resolver", mlog.Stringer("state", state), mlog.Int("resolver_count", len(grpcResolvers)))
 				for watcher := range grpcResolvers {
 					// Update operation do not block.
 					// Only return error if the resolver is closed, so just print a info log and delete the resolver.
@@ -210,7 +209,7 @@ func (r *resolverWithDiscoverer) doDiscover() {
 						// updateError is always context.Canceled.
 						r.Logger().Info(context.TODO(),
 
-							"resolver is closed, unregister the resolver", zap.NamedError("updateError", err))
+							"resolver is closed, unregister the resolver", mlog.NamedError("updateError", err))
 						delete(grpcResolvers, watcher)
 					}
 				}

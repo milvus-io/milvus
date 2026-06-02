@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"go.etcd.io/etcd/server/v3/embed"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -33,8 +32,8 @@ import (
 // The UseEmbedEtcd in the param is used to determine whether the etcd service is external or embedded.
 func NewWatchKVFactory(rootPath string, etcdCfg *paramtable.EtcdConfig) (kv.WatchKV, error) {
 	mlog.Info(context.TODO(), "start etcd with rootPath",
-		zap.String("rootpath", rootPath),
-		zap.Bool("isEmbed", etcdCfg.UseEmbedEtcd.GetAsBool()))
+		mlog.String("rootpath", rootPath),
+		mlog.Bool("isEmbed", etcdCfg.UseEmbedEtcd.GetAsBool()))
 	if etcdCfg.UseEmbedEtcd.GetAsBool() {
 		path := etcdCfg.ConfigPath.GetValue()
 		var cfg *embed.Config

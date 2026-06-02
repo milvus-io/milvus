@@ -29,7 +29,6 @@ import (
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -54,7 +53,7 @@ func TestMain(m *testing.M) {
 
 func getPulsarAddress() string {
 	pulsarAddress := Params.PulsarCfg.Address.GetValue()
-	mlog.Info(context.TODO(), "pulsar address", zap.String("address", pulsarAddress))
+	mlog.Info(context.TODO(), "pulsar address", mlog.String("address", pulsarAddress))
 	if len(pulsarAddress) != 0 {
 		return pulsarAddress
 	}
@@ -89,7 +88,7 @@ func Produce(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, 
 		}
 		_, err = producer.Send(ctx, msg)
 		assert.NoError(t, err)
-		mlog.Info(ctx, "Pub", zap.Any("SND", v))
+		mlog.Info(ctx, "Pub", mlog.Any("SND", v))
 	}
 
 	mlog.Info(ctx, "Produce done")
@@ -97,13 +96,13 @@ func Produce(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, 
 
 func VerifyMessage(t *testing.T, msg mqcommon.Message) {
 	pload := BytesToInt(msg.Payload())
-	mlog.Info(context.TODO(), "RECV", zap.Any("v", pload))
+	mlog.Info(context.TODO(), "RECV", mlog.Any("v", pload))
 	pm := msg.(*pulsarMessage)
 	topic := pm.Topic()
 	assert.NotEmpty(t, topic)
-	mlog.Info(context.TODO(), "RECV", zap.Any("t", topic))
+	mlog.Info(context.TODO(), "RECV", mlog.Any("t", topic))
 	prop := pm.Properties()
-	mlog.Info(context.TODO(), "RECV", zap.Any("p", len(prop)))
+	mlog.Info(context.TODO(), "RECV", mlog.Any("p", len(prop)))
 }
 
 // Consume1 will consume random messages and record the last MessageID it received
@@ -134,12 +133,12 @@ func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 			consumer.Ack(msg)
 			VerifyMessage(t, msg)
 			(*total)++
-			// log.Debug("total", zap.Int("val", *total))
+			// log.Debug("total", mlog.Int("val", *total))
 		}
 	}
 	c <- msg.ID()
 
-	mlog.Info(ctx, "Consume1 randomly RECV", zap.Any("number", cnt))
+	mlog.Info(ctx, "Consume1 randomly RECV", mlog.Any("number", cnt))
 	mlog.Info(ctx, "Consume1 done")
 }
 
@@ -173,7 +172,7 @@ func Consume2(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 			consumer.Ack(msg)
 			VerifyMessage(t, msg)
 			(*total)++
-			// log.Debug("total", zap.Int("val", *total))
+			// log.Debug("total", mlog.Int("val", *total))
 		}
 	}
 }
@@ -200,7 +199,7 @@ func Consume3(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 			consumer.Ack(msg)
 			VerifyMessage(t, msg)
 			(*total)++
-			// log.Debug("total", zap.Int("val", *total))
+			// log.Debug("total", mlog.Int("val", *total))
 		}
 	}
 }
@@ -231,14 +230,14 @@ func Consume21(ctx context.Context, t *testing.T, pc *pulsarClient, topic string
 		case msg = <-consumer.Chan():
 			consumer.Ack(msg)
 			v := BytesToInt(msg.Payload())
-			mlog.Info(ctx, "RECV", zap.Any("v", v))
+			mlog.Info(ctx, "RECV", mlog.Any("v", v))
 			(*total)++
-			// log.Debug("total", zap.Int("val", *total))
+			// log.Debug("total", mlog.Int("val", *total))
 		}
 	}
 	c <- &pulsarID{messageID: msg.ID()}
 
-	mlog.Info(ctx, "Consume1 randomly RECV", zap.Any("number", cnt))
+	mlog.Info(ctx, "Consume1 randomly RECV", mlog.Any("number", cnt))
 	mlog.Info(ctx, "Consume1 done")
 }
 
@@ -271,9 +270,9 @@ func Consume22(ctx context.Context, t *testing.T, pc *pulsarClient, topic string
 		case msg := <-consumer.Chan():
 			consumer.Ack(msg)
 			v := BytesToInt(msg.Payload())
-			mlog.Info(ctx, "RECV", zap.Any("v", v))
+			mlog.Info(ctx, "RECV", mlog.Any("v", v))
 			(*total)++
-			// log.Debug("total", zap.Int("val", *total))
+			// log.Debug("total", mlog.Int("val", *total))
 		}
 	}
 }
@@ -299,9 +298,9 @@ func Consume23(ctx context.Context, t *testing.T, pc *pulsarClient, topic string
 		case msg := <-consumer.Chan():
 			consumer.Ack(msg)
 			v := BytesToInt(msg.Payload())
-			mlog.Info(ctx, "RECV", zap.Any("v", v))
+			mlog.Info(ctx, "RECV", mlog.Any("v", v))
 			(*total)++
-			// log.Debug("total", zap.Int("val", *total))
+			// log.Debug("total", mlog.Int("val", *total))
 		}
 	}
 }
@@ -355,7 +354,7 @@ func TestPulsarClient_SeekLatest(t *testing.T) {
 		case msg := <-msgChan:
 			consumer.Ack(msg)
 			v := BytesToInt(msg.Payload())
-			mlog.Info(context.TODO(), "RECV", zap.Any("v", v))
+			mlog.Info(context.TODO(), "RECV", mlog.Any("v", v))
 			assert.Equal(t, v, 4)
 			loop = false
 		case <-ticker.C:

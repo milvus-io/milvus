@@ -7,8 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/cmd/tools/migration/allocator"
 	"github.com/milvus-io/milvus/cmd/tools/migration/legacy/legacypb"
@@ -304,7 +302,7 @@ func combineToLoadInfo220(collectionLoadInfo CollectionLoadInfo220, partitionLoa
 	}
 
 	for _, collectionID := range toBeReleased {
-		mlog.Warn(context.TODO(), "release the collection without index", zap.Int64("collectionID", collectionID))
+		mlog.Warn(context.TODO(), "release the collection without index", mlog.FieldCollectionID(collectionID))
 		delete(collectionLoadInfo, collectionID)
 	}
 }

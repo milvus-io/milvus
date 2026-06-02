@@ -24,7 +24,6 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -76,14 +75,14 @@ func (s *ManualRollingUpgradeSuite) TestTransfer() {
 
 	err = merr.Error(createCollectionStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.Err(err))
 	}
 
-	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
-	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	// insert data, and flush generate segment
 	vecFieldData := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
@@ -98,7 +97,7 @@ func (s *ManualRollingUpgradeSuite) TestTransfer() {
 		})
 		s.NoError(err)
 		s.True(merr.Ok(insertResult.GetStatus()))
-		mlog.Info(context.TODO(), "Insert succeed", zap.Int("round", i+1))
+		mlog.Info(context.TODO(), "Insert succeed", mlog.Int("round", i+1))
 		resp, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 			DbName:          dbName,
 			CollectionNames: []string{collectionName},
@@ -125,7 +124,7 @@ func (s *ManualRollingUpgradeSuite) TestTransfer() {
 	s.NoError(err)
 	err = merr.Error(createIndexStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "createIndexStatus fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "createIndexStatus fail reason", mlog.Err(err))
 	}
 
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
@@ -139,7 +138,7 @@ func (s *ManualRollingUpgradeSuite) TestTransfer() {
 	s.NoError(err)
 	err = merr.Error(loadStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "LoadCollection fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "LoadCollection fail reason", mlog.Err(err))
 	}
 	s.WaitForLoad(ctx, collectionName)
 	mlog.Info(context.TODO(), "Load collection done")
@@ -280,14 +279,14 @@ func (s *ManualRollingUpgradeSuite) TestSuspendNode() {
 
 	err = merr.Error(createCollectionStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.Err(err))
 	}
 
-	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
-	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	// insert data, and flush generate segment
 	vecFieldData := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
@@ -302,7 +301,7 @@ func (s *ManualRollingUpgradeSuite) TestSuspendNode() {
 		})
 		s.NoError(err)
 		s.True(merr.Ok(insertResult.GetStatus()))
-		mlog.Info(context.TODO(), "Insert succeed", zap.Int("round", i+1))
+		mlog.Info(context.TODO(), "Insert succeed", mlog.Int("round", i+1))
 		resp, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 			DbName:          dbName,
 			CollectionNames: []string{collectionName},
@@ -329,7 +328,7 @@ func (s *ManualRollingUpgradeSuite) TestSuspendNode() {
 	s.NoError(err)
 	err = merr.Error(createIndexStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "createIndexStatus fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "createIndexStatus fail reason", mlog.Err(err))
 	}
 
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
@@ -359,7 +358,7 @@ func (s *ManualRollingUpgradeSuite) TestSuspendNode() {
 	s.NoError(err)
 	err = merr.Error(loadStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "LoadCollection fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "LoadCollection fail reason", mlog.Err(err))
 	}
 	s.WaitForLoad(ctx, collectionName)
 	mlog.Info(context.TODO(), "Load collection done")

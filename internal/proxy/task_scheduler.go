@@ -27,7 +27,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -153,7 +152,7 @@ func (queue *baseTaskQueue) AddActiveTask(t task) {
 	tID := t.ID()
 	_, ok := queue.activeTasks[tID]
 	if ok {
-		mlog.Warn(t.TraceCtx(), "Proxy task with tID already in active task list!", zap.Int64("ID", tID))
+		mlog.Warn(t.TraceCtx(), "Proxy task with tID already in active task list!", mlog.Int64("ID", tID))
 	}
 
 	queue.activeTasks[tID] = t
@@ -168,7 +167,7 @@ func (queue *baseTaskQueue) PopActiveTask(taskID UniqueID) task {
 		delete(queue.activeTasks, taskID)
 		return t
 	}
-	mlog.Warn(context.TODO(), "Proxy task not in active task list! ts", zap.Int64("taskID", taskID))
+	mlog.Warn(context.TODO(), "Proxy task not in active task list! ts", mlog.FieldTaskID(taskID))
 	return t
 }
 
@@ -309,7 +308,7 @@ func (queue *dmTaskQueue) Enqueue(t task) error {
 	dmt := t.(dmlTask)
 	err := dmt.setChannels()
 	if err != nil {
-		mlog.Warn(t.TraceCtx(), "setChannels failed when Enqueue", zap.Int64("taskID", t.ID()), zap.Error(err))
+		mlog.Warn(t.TraceCtx(), "setChannels failed when Enqueue", mlog.FieldTaskID(t.ID()), mlog.Err(err))
 		return err
 	}
 
@@ -338,10 +337,10 @@ func (queue *dmTaskQueue) PopActiveTask(taskID UniqueID) task {
 		defer queue.statsLock.Unlock()
 
 		delete(queue.activeTasks, taskID)
-		mlog.Debug(t.TraceCtx(), "Proxy dmTaskQueue popPChanStats", zap.Int64("taskID", t.ID()))
+		mlog.Debug(t.TraceCtx(), "Proxy dmTaskQueue popPChanStats", mlog.FieldTaskID(t.ID()))
 		queue.popPChanStats(t)
 	} else {
-		mlog.Warn(context.TODO(), "Proxy task not in active task list!", zap.Int64("taskID", taskID))
+		mlog.Warn(context.TODO(), "Proxy task not in active task list!", mlog.FieldTaskID(taskID))
 	}
 	return t
 }
@@ -589,7 +588,7 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 	err = t.Execute(ctx)
 	if err != nil {
 		span.RecordError(err)
-		mlog.Warn(ctx, "Failed to execute task: ", zap.Error(err))
+		mlog.Warn(ctx, "Failed to execute task: ", mlog.Err(err))
 		return
 	}
 
@@ -597,7 +596,7 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 	err = t.PostExecute(ctx)
 	if err != nil {
 		span.RecordError(err)
-		mlog.Warn(ctx, "Failed to post-execute task: ", zap.Error(err))
+		mlog.Warn(ctx, "Failed to post-execute task: ", mlog.Err(err))
 		return
 	}
 }

@@ -6,8 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
@@ -69,7 +67,7 @@ func getSystemMetricsWatcher() *SystemMericsWatcher {
 				return stats.UsedRatio() > 0.9
 			},
 			Callback: func(sm SystemMetrics, listener *SystemMetricsListener) {
-				logger.Warn(context.TODO(), "memory used ratio is extremely high", zap.String("memory", sm.String()), zap.Float64("usedRatio", sm.UsedRatio()))
+				logger.Warn(context.TODO(), "memory used ratio is extremely high", mlog.String("memory", sm.String()), mlog.Float64("usedRatio", sm.UsedRatio()))
 			},
 		}
 		systemMetricsWatcher.RegisterListener(warningLoggerListener)

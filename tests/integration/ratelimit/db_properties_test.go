@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -97,7 +96,7 @@ func (s *DBPropertiesSuite) prepareCollection(ctx context.Context, dbName string
 	s.NoError(err)
 	err = merr.Error(createIndexStatus)
 	if err != nil {
-		mlog.Warn(ctx, "createIndexStatus fail reason", zap.Error(err))
+		mlog.Warn(ctx, "createIndexStatus fail reason", mlog.Err(err))
 	}
 
 	s.WaitForIndexBuiltWithDB(timeoutCtx, dbName, collectionName, integration.FloatVecField)
@@ -111,7 +110,7 @@ func (s *DBPropertiesSuite) prepareCollection(ctx context.Context, dbName string
 	s.NoError(err)
 	err = merr.Error(loadStatus)
 	if err != nil {
-		mlog.Warn(ctx, "LoadCollection fail reason", zap.Error(err))
+		mlog.Warn(ctx, "LoadCollection fail reason", mlog.Err(err))
 	}
 	s.WaitForLoadWithDB(ctx, dbName, collectionName)
 	mlog.Info(ctx, "Load collection done")

@@ -36,7 +36,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -695,7 +694,7 @@ func TestBinlogSerializeWriter(t *testing.T) {
 		chunkSize := uint64(64)                     // 64B
 		rw, err := newCompositeBinlogRecordWriter(0, 0, 0, schema,
 			func(b []*Blob) error {
-				mlog.Debug(context.TODO(), "write blobs", zap.Int("files", len(b)))
+				mlog.Debug(context.TODO(), "write blobs", mlog.Int("files", len(b)))
 				return nil
 			},
 			alloc, chunkSize, "root", 10000)
@@ -1241,7 +1240,7 @@ func BenchmarkSerializeWriter(b *testing.B) {
 	sort.Slice(values, func(i, j int) bool {
 		return values[i].PK.LT(values[j].PK)
 	})
-	mlog.Info(context.TODO(), "prepare data done", zap.Int("len", len(values)), zap.Duration("dur", time.Since(start)))
+	mlog.Info(context.TODO(), "prepare data done", mlog.Int("len", len(values)), mlog.Duration("dur", time.Since(start)))
 
 	b.ResetTimer()
 

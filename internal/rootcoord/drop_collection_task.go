@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -63,7 +62,7 @@ func (t *dropCollectionTask) validate(ctx context.Context) error {
 	// Check if all aliases have been dropped.
 	if len(aliases) > 0 {
 		err = fmt.Errorf("unable to drop the collection [%s] because it has associated aliases %v, please remove all aliases before dropping the collection", t.Req.GetCollectionName(), aliases)
-		mlog.Warn(ctx, "drop collection failed", zap.String("database", t.Req.GetDbName()), zap.Error(err))
+		mlog.Warn(ctx, "drop collection failed", mlog.String("database", t.Req.GetDbName()), mlog.Err(err))
 		return err
 	}
 

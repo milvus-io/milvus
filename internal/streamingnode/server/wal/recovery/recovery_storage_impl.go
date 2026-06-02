@@ -42,7 +42,7 @@ func RecoverRecoveryStorage(
 	if err := rs.recoverRecoveryInfoFromMeta(ctx, recoveryStreamBuilder.Channel(), lastTimeTickMessage); err != nil {
 		rs.Logger().Warn(ctx,
 
-			"recovery storage failed", zap.Error(err))
+			"recovery storage failed", mlog.Err(err))
 		return nil, nil, err
 	}
 	// recover the state from wal and start the background task to persist the state.
@@ -50,16 +50,16 @@ func RecoverRecoveryStorage(
 	if err != nil {
 		rs.Logger().Warn(ctx,
 
-			"recovery storage failed", zap.Error(err))
+			"recovery storage failed", mlog.Err(err))
 		return nil, nil, err
 	}
 	// recovery storage start work.
 	rs.metrics.ObserveStateChange(recoveryStorageStateWorking)
 	rs.SetLogger(resource.Resource().Logger().With(
-		zap.Int64("nodeID", paramtable.GetNodeID()),
+		mlog.FieldNodeID(paramtable.GetNodeID()),
 		mlog.FieldComponent(componentRecoveryStorage),
-		zap.String("channel", recoveryStreamBuilder.Channel().String()),
-		zap.String("state", recoveryStorageStateWorking)))
+		mlog.String("channel", recoveryStreamBuilder.Channel().String()),
+		mlog.String("state", recoveryStorageStateWorking)))
 	rs.truncator = recoveryStreamBuilder.RWWALImpls()
 	go rs.backgroundTask()
 	return rs, snapshot, nil
@@ -127,17 +127,17 @@ func (r *recoveryStorageImpl) UpdateFlusherCheckpoint(vchannel string, checkpoin
 		if err := vchannelInfo.UpdateFlushCheckpoint(checkpoint); err != nil {
 			r.Logger().Warn(context.TODO(),
 
-				"failed to update flush checkpoint", zap.Error(err))
+				"failed to update flush checkpoint", mlog.Err(err))
 			return
 		}
 		r.Logger().Info(context.TODO(),
 
-			"update flush checkpoint", zap.String("vchannel", vchannel), zap.String("messageID", checkpoint.MessageID.String()), zap.Uint64("timeTick", checkpoint.TimeTick))
+			"update flush checkpoint", mlog.FieldVChannel(vchannel), mlog.String("messageID", checkpoint.MessageID.String()), mlog.Uint64("timeTick", checkpoint.TimeTick))
 		return
 	}
 	r.Logger().Warn(context.TODO(),
 
-		"vchannel not found", zap.String("vchannel", vchannel))
+		"vchannel not found", mlog.FieldVChannel(vchannel))
 }
 
 // GetSchema gets the schema of the collection at the given timetick.
@@ -150,7 +150,7 @@ func (r *recoveryStorageImpl) GetSchema(ctx context.Context, vchannel string, ti
 		if schema == nil {
 			r.Logger().DPanic(ctx,
 
-				"schema not found, fallback to latest schema", zap.String("vchannel", vchannel), zap.Uint64("timetick", timetick))
+				"schema not found, fallback to latest schema", mlog.FieldVChannel(vchannel), mlog.Uint64("timetick", timetick))
 			if _, schema = vchannelInfo.GetSchema(0); schema != nil {
 				return schema, nil
 			}
@@ -167,7 +167,7 @@ func (r *recoveryStorageImpl) ObserveMessage(ctx context.Context, msg message.Im
 		if err := streaming.WAL().Broadcast().Ack(ctx, msg); err != nil {
 			r.Logger().Warn(ctx,
 
-				"failed to ack broadcast message", zap.Error(err))
+				"failed to ack broadcast message", mlog.Err(err))
 			return err
 		}
 	}
@@ -244,8 +244,8 @@ func (r *recoveryStorageImpl) observeMessage(msg message.ImmutableMessage) {
 
 				"skip the message before the checkpoint",
 				mlog.FieldMessage(msg),
-				zap.Uint64("checkpoint", r.checkpoint.TimeTick),
-				zap.Uint64("incoming", msg.TimeTick()),
+				mlog.Uint64("checkpoint", r.checkpoint.TimeTick),
+				mlog.Uint64("incoming", msg.TimeTick()),
 			)
 		}
 		return
@@ -277,7 +277,7 @@ func (r *recoveryStorageImpl) updateCheckpoint(msg message.ImmutableMessage) {
 			r.Logger().Info(context.TODO(),
 
 				"AlterReplicateConfig message has ignore flag set, skipping checkpoint update",
-				zap.Bool("forcePromote", header.ForcePromote))
+				mlog.Bool("forcePromote", header.ForcePromote))
 		} else {
 			r.checkpoint.ReplicateConfig = header.ReplicateConfiguration
 			clusterRole := replicateutil.MustNewConfigHelper(r.currentClusterID, header.ReplicateConfiguration).GetCurrentCluster()
@@ -327,8 +327,8 @@ func (r *recoveryStorageImpl) updateCheckpoint(msg message.ImmutableMessage) {
 	if replicateHeader.ClusterID != r.checkpoint.ReplicateCheckpoint.ClusterID {
 		r.detectInconsistency(msg,
 			"replicate header cluster id mismatch",
-			zap.String("expected", r.checkpoint.ReplicateCheckpoint.ClusterID),
-			zap.String("actual", replicateHeader.ClusterID))
+			mlog.String("expected", r.checkpoint.ReplicateCheckpoint.ClusterID),
+			mlog.String("actual", replicateHeader.ClusterID))
 		return
 	}
 	r.checkpoint.ReplicateCheckpoint.MessageID = replicateHeader.LastConfirmedMessageID
@@ -426,16 +426,16 @@ func (r *recoveryStorageImpl) handleAlterWAL(msg message.ImmutableAlterWALMessag
 
 			"flush all growing segments for WAL switch",
 			mlog.FieldMessage(msg),
-			zap.Stringer("targetWALName", header.TargetWalName),
-			zap.Int64s("segmentIDs", segmentIDs),
-			zap.Uint64s("rows", rows),
-			zap.Uint64s("binarySize", binarySize))
+			mlog.Stringer("targetWALName", header.TargetWalName),
+			mlog.Int64s("segmentIDs", segmentIDs),
+			mlog.Uint64s("rows", rows),
+			mlog.Uint64s("binarySize", binarySize))
 	} else {
 		r.Logger().Info(context.TODO(),
 
 			"no growing segments to flush for WAL switch",
 			mlog.FieldMessage(msg),
-			zap.Stringer("targetWALName", header.TargetWalName))
+			mlog.Stringer("targetWALName", header.TargetWalName))
 	}
 
 	// Record alter WAL information for snapshot persistence
@@ -472,8 +472,8 @@ func (r *recoveryStorageImpl) handleCreateSegment(msg message.ImmutableCreateSeg
 
 			"skip create segment for non-active vchannel",
 			mlog.FieldMessage(msg),
-			zap.String("vchannel", msg.VChannel()),
-			zap.Int64("segmentID", msg.Header().SegmentId),
+			mlog.FieldVChannel(msg.VChannel()),
+			mlog.FieldSegmentID(msg.Header().SegmentId),
 		)
 		return
 	}
@@ -491,7 +491,7 @@ func (r *recoveryStorageImpl) handleFlush(msg message.ImmutableFlushMessageV2) {
 		segment.ObserveFlush(msg.TimeTick())
 		r.Logger().Info(context.TODO(),
 
-			"flush segment", mlog.FieldMessage(msg), zap.Uint64("rows", segment.Rows()), zap.Uint64("binarySize", segment.BinarySize()))
+			"flush segment", mlog.FieldMessage(msg), mlog.Uint64("rows", segment.Rows()), mlog.Uint64("binarySize", segment.BinarySize()))
 	}
 }
 
@@ -526,14 +526,14 @@ func (r *recoveryStorageImpl) flushSegments(msg message.ImmutableMessage, sealSe
 		}
 	}
 	if len(segmentIDs) != len(sealSegmentIDs) {
-		r.detectInconsistency(msg, "flush segments not exist", zap.Int64s("wanted", lo.Keys(sealSegmentIDs)), zap.Int64s("actually", segmentIDs))
+		r.detectInconsistency(msg, "flush segments not exist", mlog.Int64s("wanted", lo.Keys(sealSegmentIDs)), mlog.Int64s("actually", segmentIDs))
 	}
 	r.Logger().Info(context.TODO(),
 
 		"flush segments of collection by flush", mlog.FieldMessage(msg),
-		zap.Uint64s("rows", rows),
-		zap.Uint64s("binarySize", binarySize),
-		zap.Int("flushedSegmentCount", len(segmentIDs)),
+		mlog.Uint64s("rows", rows),
+		mlog.Uint64s("binarySize", binarySize),
+		mlog.Int("flushedSegmentCount", len(segmentIDs)),
 	)
 }
 
@@ -575,7 +575,7 @@ func (r *recoveryStorageImpl) flushAllSegmentOfCollection(msg message.ImmutableM
 	}
 	r.Logger().Info(context.TODO(),
 
-		"flush all segments of collection", mlog.FieldMessage(msg), zap.Int64s("segmentIDs", segmentIDs), zap.Uint64s("rows", rows))
+		"flush all segments of collection", mlog.FieldMessage(msg), mlog.Int64s("segmentIDs", segmentIDs), mlog.Uint64s("rows", rows))
 }
 
 // handleCreatePartition handles the create partition message.
@@ -615,7 +615,7 @@ func (r *recoveryStorageImpl) flushAllSegmentOfPartition(msg message.ImmutableMe
 	}
 	r.Logger().Info(context.TODO(),
 
-		"flush all segments of partition", mlog.FieldMessage(msg), zap.Int64s("segmentIDs", segmentIDs), zap.Uint64s("rows", rows))
+		"flush all segments of partition", mlog.FieldMessage(msg), mlog.Int64s("segmentIDs", segmentIDs), mlog.Uint64s("rows", rows))
 }
 
 // handleTxn handles the txn message.
@@ -671,9 +671,9 @@ func (r *recoveryStorageImpl) handleTruncateCollection(msg message.ImmutableTrun
 }
 
 // detectInconsistency detects the inconsistency in the recovery storage.
-func (r *recoveryStorageImpl) detectInconsistency(msg message.ImmutableMessage, reason string, extra ...zap.Field) {
-	fields := make([]zap.Field, 0, len(extra)+2)
-	fields = append(fields, mlog.FieldMessage(msg), zap.String("reason", reason))
+func (r *recoveryStorageImpl) detectInconsistency(msg message.ImmutableMessage, reason string, extra ...mlog.Field) {
+	fields := make([]mlog.Field, 0, len(extra)+2)
+	fields = append(fields, mlog.FieldMessage(msg), mlog.String("reason", reason))
 	fields = append(fields, extra...)
 	// The log is not fatal in some cases.
 	// because our meta is not atomic-updated, so these error may be logged if crashes when meta updated partially.
@@ -692,7 +692,7 @@ func (r *recoveryStorageImpl) GetFlusherCheckpointByTimeTick(ctx context.Context
 	if len(r.vchannels) == 0 {
 		r.Logger().Info(ctx,
 
-			"get flush checkpoint fast return pChan cp, due to no vChan", zap.String("pChannel", r.channel.String()))
+			"get flush checkpoint fast return pChan cp, due to no vChan", mlog.String("pChannel", r.channel.String()))
 		return r.checkpoint
 	}
 

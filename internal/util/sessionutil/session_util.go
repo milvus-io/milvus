@@ -34,7 +34,6 @@ import (
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -271,7 +270,7 @@ func NewSession(ctx context.Context, opts ...SessionOption) *Session {
 func NewSessionWithEtcd(ctx context.Context, metaRoot string, client *clientv3.Client, opts ...SessionOption) *Session {
 	hostName, hostNameErr := os.Hostname()
 	if hostNameErr != nil {
-		mlog.Error(ctx, "get host name fail", zap.Error(hostNameErr))
+		mlog.Error(ctx, "get host name fail", mlog.Err(hostNameErr))
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -322,9 +321,9 @@ func (s *Session) Init(serverName, address string, exclusive bool) {
 
 	s.SetLogger(mlog.With(
 		mlog.FieldComponent("service-registration"),
-		zap.String("role", serverName),
-		zap.Int64("serverID", s.ServerID),
-		zap.String("address", address),
+		mlog.String("role", serverName),
+		mlog.Int64("serverID", s.ServerID),
+		mlog.String("address", address),
 	))
 }
 
@@ -339,7 +338,7 @@ func (s *Session) Register() {
 	if err != nil {
 		s.Logger().Error(s.ctx,
 
-			"register failed", zap.Error(err))
+			"register failed", mlog.Err(err))
 		panic(err)
 	}
 	s.UpdateRegistered(true)
@@ -389,7 +388,7 @@ func (s *Session) getServerID() (int64, error) {
 	serverIDMu.Lock()
 	defer serverIDMu.Unlock()
 
-	mlog.Debug(s.ctx, "getServerID", zap.Bool("reuse", s.reuseNodeID))
+	mlog.Debug(s.ctx, "getServerID", mlog.Bool("reuse", s.reuseNodeID))
 	if s.reuseNodeID {
 		// Notice, For standalone, all process share the same nodeID.
 		if nodeID := paramtable.GetNodeID(); nodeID != 0 {
@@ -417,23 +416,23 @@ func (s *Session) checkIDExist() {
 
 func (s *Session) getServerIDWithKey(key string) (int64, error) {
 	if os.Getenv(MilvusNodeIDForTesting) != "" {
-		mlog.Info(s.ctx, "use node id for testing", zap.String("nodeID", os.Getenv(MilvusNodeIDForTesting)))
+		mlog.Info(s.ctx, "use node id for testing", mlog.String("nodeID", os.Getenv(MilvusNodeIDForTesting)))
 		return strconv.ParseInt(os.Getenv(MilvusNodeIDForTesting), 10, 64)
 	}
 	for {
 		getResp, err := s.etcdCli.Get(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, key))
 		if err != nil {
-			mlog.Warn(s.ctx, "Session get etcd key error", zap.String("key", key), zap.Error(err))
+			mlog.Warn(s.ctx, "Session get etcd key error", mlog.String("key", key), mlog.Err(err))
 			return -1, err
 		}
 		if getResp.Count <= 0 {
-			mlog.Warn(s.ctx, "Session there is no value", zap.String("key", key))
+			mlog.Warn(s.ctx, "Session there is no value", mlog.String("key", key))
 			continue
 		}
 		value := string(getResp.Kvs[0].Value)
 		valueInt, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
-			mlog.Warn(s.ctx, "Session ParseInt error", zap.String("value", value), zap.Error(err))
+			mlog.Warn(s.ctx, "Session ParseInt error", mlog.String("value", value), mlog.Err(err))
 			continue
 		}
 		txnResp, err := s.etcdCli.Txn(s.ctx).If(
@@ -443,15 +442,15 @@ func (s *Session) getServerIDWithKey(key string) (int64, error) {
 				value)).
 			Then(clientv3.OpPut(path.Join(s.metaRoot, DefaultServiceRoot, key), strconv.FormatInt(valueInt+1, 10))).Commit()
 		if err != nil {
-			mlog.Warn(s.ctx, "Session Txn failed", zap.String("key", key), zap.Error(err))
+			mlog.Warn(s.ctx, "Session Txn failed", mlog.String("key", key), mlog.Err(err))
 			return -1, err
 		}
 
 		if !txnResp.Succeeded {
-			mlog.Warn(s.ctx, "Session Txn unsuccessful", zap.String("key", key))
+			mlog.Warn(s.ctx, "Session Txn unsuccessful", mlog.String("key", key))
 			continue
 		}
-		mlog.Debug(s.ctx, "Session get serverID success", zap.String("key", key), zap.Int64("ServerId", valueInt))
+		mlog.Debug(s.ctx, "Session get serverID success", mlog.String("key", key), mlog.Int64("ServerId", valueInt))
 		return valueInt, nil
 	}
 }
@@ -493,7 +492,7 @@ func (s *Session) registerService() error {
 		if err != nil {
 			s.Logger().Error(s.ctx,
 
-				"register service: failed to grant lease from etcd", zap.Error(err))
+				"register service: failed to grant lease from etcd", mlog.Err(err))
 			return err
 		}
 		s.LeaseID = &resp.ID
@@ -502,7 +501,7 @@ func (s *Session) registerService() error {
 		if err != nil {
 			s.Logger().Error(s.ctx,
 
-				"register service: failed to marshal session", zap.Error(err))
+				"register service: failed to marshal session", mlog.Err(err))
 			return err
 		}
 
@@ -525,7 +524,7 @@ func (s *Session) registerService() error {
 		if err != nil {
 			s.Logger().Warn(s.ctx,
 
-				"register on etcd error, check the availability of etcd", zap.Error(err))
+				"register on etcd error, check the availability of etcd", mlog.Err(err))
 			return err
 		}
 		if txnResp != nil && !txnResp.Succeeded {
@@ -536,7 +535,7 @@ func (s *Session) registerService() error {
 		}
 		s.Logger().Info(s.ctx,
 
-			"put session key into etcd, service registered successfully", zap.String("key", completeKey), zap.String("value", string(sessionJSON)))
+			"put session key into etcd, service registered successfully", mlog.String("key", completeKey), mlog.String("value", string(sessionJSON)))
 		return nil
 	}
 	return retry.Do(s.ctx, registerFn, retry.Attempts(uint(s.sessionRetryTimes)), retry.RetryErr(isNotSessionVersionCheckFailure))
@@ -591,11 +590,11 @@ func (s *Session) processKeepAliveResponse() {
 		if _, err := s.etcdCli.Revoke(ctx, *s.LeaseID); err != nil {
 			s.Logger().Error(s.ctx,
 
-				"failed to revoke lease", zap.Error(err), zap.Int64("leaseID", int64(*s.LeaseID)))
+				"failed to revoke lease", mlog.Err(err), mlog.Int64("leaseID", int64(*s.LeaseID)))
 		}
 		s.Logger().Info(s.ctx,
 
-			"lease revoked successfully", zap.Int64("leaseID", int64(*s.LeaseID)))
+			"lease revoked successfully", mlog.Int64("leaseID", int64(*s.LeaseID)))
 		s.wg.Done()
 	}()
 
@@ -617,7 +616,7 @@ func (s *Session) processKeepAliveResponse() {
 			nextBackoffInterval := backoff.NextBackOff()
 			s.Logger().Warn(s.ctx,
 
-				"failed to start keep alive, wait for retry...", zap.Error(lastErr), zap.Duration("nextBackoffInterval", nextBackoffInterval))
+				"failed to start keep alive, wait for retry...", mlog.Err(lastErr), mlog.Duration("nextBackoffInterval", nextBackoffInterval))
 			select {
 			case <-time.After(nextBackoffInterval):
 			case <-s.ctx.Done():
@@ -634,13 +633,13 @@ func (s *Session) processKeepAliveResponse() {
 			if err != nil {
 				s.Logger().Error(s.ctx,
 
-					"failed to keep alive with etcd", zap.Error(err))
+					"failed to keep alive with etcd", mlog.Err(err))
 				lastErr = errors.Wrap(err, "failed to keep alive")
 				continue
 			}
 			s.Logger().Info(s.ctx,
 
-				"keep alive...", zap.Int64("leaseID", int64(*s.LeaseID)))
+				"keep alive...", mlog.Int64("leaseID", int64(*s.LeaseID)))
 			ch = newCH
 		}
 
@@ -668,14 +667,14 @@ func (s *Session) checkKeepaliveTTL(nextKeepaliveInstant time.Time) error {
 		if errors.Is(err, v3rpc.ErrLeaseNotFound) {
 			s.Logger().Error(s.ctx,
 
-				"confirm the lease is not found, the session is expired without activing closing", zap.Error(err))
+				"confirm the lease is not found, the session is expired without activing closing", mlog.Err(err))
 			mlog.Cleanup()
 			os.Exit(ExitCodeEtcd)
 		}
 		if ctx.Err() != nil && errors.Is(context.Cause(ctx), errSessionExpiredAtClientSide) {
 			s.Logger().Error(s.ctx,
 
-				"session expired at client side, the session is expired without activing closing", zap.Error(err))
+				"session expired at client side, the session is expired without activing closing", mlog.Err(err))
 			mlog.Cleanup()
 			os.Exit(ExitCodeEtcd)
 		}
@@ -684,13 +683,13 @@ func (s *Session) checkKeepaliveTTL(nextKeepaliveInstant time.Time) error {
 	if ttlResp.TTL <= 0 {
 		s.Logger().Error(s.ctx,
 
-			"confirm the lease is expired, the session is expired without activing closing", zap.Error(err))
+			"confirm the lease is expired, the session is expired without activing closing", mlog.Err(err))
 		mlog.Cleanup()
 		os.Exit(ExitCodeEtcd)
 	}
 	s.Logger().Info(s.ctx,
 
-		"check TTL success, try to keep alive...", zap.Int64("ttl", ttlResp.TTL))
+		"check TTL success, try to keep alive...", mlog.Int64("ttl", ttlResp.TTL))
 	return nil
 }
 
@@ -717,9 +716,9 @@ func (s *Session) GetSessions(ctx context.Context, prefix string) (map[string]*S
 		}
 		_, mapKey := path.Split(string(kv.Key))
 		mlog.Debug(s.ctx, "SessionUtil GetSessions",
-			zap.String("prefix", prefix),
-			zap.String("key", mapKey),
-			zap.String("address", session.Address))
+			mlog.String("prefix", prefix),
+			mlog.String("key", mapKey),
+			mlog.String("address", session.Address))
 		res[mapKey] = session
 	}
 	return res, resp.Header.Revision, nil
@@ -742,13 +741,13 @@ func (s *Session) GetSessionsWithVersionRange(prefix string, r semver.Range) (ma
 			return nil, 0, err
 		}
 		if !r(session.Version) {
-			mlog.Debug(s.ctx, "Session version out of range", zap.String("version", session.Version.String()), zap.Int64("serverID", session.ServerID))
+			mlog.Debug(s.ctx, "Session version out of range", mlog.String("version", session.Version.String()), mlog.Int64("serverID", session.ServerID))
 			continue
 		}
 		_, mapKey := path.Split(string(kv.Key))
-		mlog.Debug(s.ctx, "SessionUtil GetSessions ", zap.String("prefix", prefix),
-			zap.String("key", mapKey),
-			zap.String("address", session.Address))
+		mlog.Debug(s.ctx, "SessionUtil GetSessions ", mlog.String("prefix", prefix),
+			mlog.String("key", mapKey),
+			mlog.String("address", session.Address))
 		res[mapKey] = session
 	}
 	return res, resp.Header.Revision, nil
@@ -768,7 +767,7 @@ func (s *Session) GoingStop() error {
 	if err != nil {
 		s.Logger().Error(s.ctx,
 
-			"fail to get the session", zap.String("key", completeKey), zap.Error(err))
+			"fail to get the session", mlog.String("key", completeKey), mlog.Err(err))
 		return err
 	}
 	if resp.Count == 0 {
@@ -779,14 +778,14 @@ func (s *Session) GoingStop() error {
 	if err != nil {
 		s.Logger().Error(s.ctx,
 
-			"fail to marshal the session", zap.String("key", completeKey))
+			"fail to marshal the session", mlog.String("key", completeKey))
 		return err
 	}
 	_, err = s.etcdCli.Put(s.ctx, completeKey, string(sessionJSON), clientv3.WithLease(*s.LeaseID))
 	if err != nil {
 		s.Logger().Error(s.ctx,
 
-			"fail to update the session to stopping state", zap.String("key", completeKey))
+			"fail to update the session to stopping state", mlog.String("key", completeKey))
 		return err
 	}
 	return nil
@@ -906,7 +905,7 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 	if wresp.Err() != nil {
 		err := w.handleWatchErr(wresp.Err())
 		if err != nil {
-			mlog.Error(context.TODO(), "failed to handle watch session response", zap.Error(err))
+			mlog.Error(context.TODO(), "failed to handle watch session response", mlog.Err(err))
 			panic(err)
 		}
 		return
@@ -917,10 +916,10 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 		switch ev.Type {
 		case mvccpb.PUT:
 			mlog.Debug(context.TODO(), "watch services",
-				zap.Any("add kv", ev.Kv))
+				mlog.Any("add kv", ev.Kv))
 			err := json.Unmarshal(ev.Kv.Value, session)
 			if err != nil {
-				mlog.Error(context.TODO(), "watch services", zap.Error(err))
+				mlog.Error(context.TODO(), "watch services", mlog.Err(err))
 				continue
 			}
 			if !w.validate(session) {
@@ -933,10 +932,10 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 			}
 		case mvccpb.DELETE:
 			mlog.Debug(context.TODO(), "watch services",
-				zap.Any("delete kv", ev.PrevKv))
+				mlog.Any("delete kv", ev.PrevKv))
 			err := json.Unmarshal(ev.PrevKv.Value, session)
 			if err != nil {
-				mlog.Error(context.TODO(), "watch services", zap.Error(err))
+				mlog.Error(context.TODO(), "watch services", mlog.Err(err))
 				continue
 			}
 			if !w.validate(session) {
@@ -944,7 +943,7 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 			}
 			eventType = SessionDelEvent
 		}
-		mlog.Debug(context.TODO(), "WatchService", zap.Any("event type", eventType))
+		mlog.Debug(context.TODO(), "WatchService", mlog.Any("event type", eventType))
 		w.eventCh <- &SessionEvent{
 			EventType: eventType,
 			Session:   session,
@@ -956,14 +955,14 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 	// if not ErrCompacted, just close the channel
 	if err != v3rpc.ErrCompacted {
 		// close event channel
-		mlog.Warn(context.TODO(), "Watch service found error", zap.Error(err))
+		mlog.Warn(context.TODO(), "Watch service found error", mlog.Err(err))
 		w.closeEventCh()
 		return err
 	}
 
 	sessions, revision, err := w.s.GetSessions(w.s.ctx, w.prefix)
 	if err != nil {
-		mlog.Warn(context.TODO(), "GetSession before rewatch failed", zap.String("prefix", w.prefix), zap.Error(err))
+		mlog.Warn(context.TODO(), "GetSession before rewatch failed", mlog.String("prefix", w.prefix), mlog.Err(err))
 		w.closeEventCh()
 		return err
 	}
@@ -974,7 +973,7 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 		err = w.rewatch(sessions)
 	}
 	if err != nil {
-		mlog.Warn(context.TODO(), "WatchServices rewatch failed", zap.String("prefix", w.prefix), zap.Error(err))
+		mlog.Warn(context.TODO(), "WatchServices rewatch failed", mlog.String("prefix", w.prefix), mlog.Err(err))
 		w.closeEventCh()
 		return err
 	}
@@ -996,10 +995,10 @@ func (s *Session) SetMixCoordMode(enable bool) {
 
 func (s *Session) Stop() {
 	if s.isMixCoordMode.Load() {
-		mlog.Info(s.ctx, "session stop skipped, session is in MixCoord mode", zap.String("serverName", s.ServerName))
+		mlog.Info(s.ctx, "session stop skipped, session is in MixCoord mode", mlog.String("serverName", s.ServerName))
 		return
 	}
-	mlog.Info(s.ctx, "session stopping", zap.String("serverName", s.ServerName))
+	mlog.Info(s.ctx, "session stopping", mlog.String("serverName", s.ServerName))
 	if s.cancel != nil {
 		s.cancel()
 	}
@@ -1068,11 +1067,11 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 		for _, role := range oldRoles {
 			sessions, _, err := s.GetSessions(s.ctx, role)
 			if err != nil {
-				mlog.Debug(s.ctx, "failed to get old sessions", zap.String("role", role), zap.Error(err))
+				mlog.Debug(s.ctx, "failed to get old sessions", mlog.String("role", role), mlog.Err(err))
 				continue
 			}
 			if len(sessions) > 0 {
-				mlog.Info(s.ctx, "old session exists", zap.String("role", role))
+				mlog.Info(s.ctx, "old session exists", mlog.String("role", role))
 				return false, -1, merr.ErrOldSessionExists
 			}
 		}
@@ -1081,7 +1080,7 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 			fmt.Sprintf("try to register as ACTIVE %v service...", s.ServerName))
 		sessionJSON, err := json.Marshal(s)
 		if err != nil {
-			mlog.Error(s.ctx, "json marshal error", zap.Error(err))
+			mlog.Error(s.ctx, "json marshal error", mlog.Err(err))
 			return false, -1, err
 		}
 
@@ -1100,7 +1099,7 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 
 		txnResp, err := s.etcdCli.Txn(s.ctx).If(compareOps...).Then(ops...).Commit()
 		if err != nil {
-			mlog.Error(s.ctx, "register active key to etcd failed", zap.Error(err))
+			mlog.Error(s.ctx, "register active key to etcd failed", mlog.Err(err))
 			return false, -1, err
 		}
 		doRegistered := txnResp.Succeeded
@@ -1108,7 +1107,7 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 		if doRegistered {
 			s.registeredRevision.Store(revision)
 			mlog.Info(s.ctx,
-				fmt.Sprintf("register ACTIVE %s", s.ServerName), zap.Int64("revision", revision))
+				fmt.Sprintf("register ACTIVE %s", s.ServerName), mlog.Int64("revision", revision))
 		} else {
 			mlog.Info(s.ctx,
 				fmt.Sprintf("ACTIVE %s has already been registered", s.ServerName))
@@ -1158,9 +1157,9 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 			for _, event := range wresp.Events {
 				switch event.Type {
 				case mvccpb.PUT:
-					mlog.Debug(s.ctx, "watch the ACTIVE key", zap.Any("ADD", event.Kv))
+					mlog.Debug(s.ctx, "watch the ACTIVE key", mlog.Any("ADD", event.Kv))
 				case mvccpb.DELETE:
-					mlog.Debug(s.ctx, "watch the ACTIVE key", zap.Any("DELETE", event.Kv))
+					mlog.Debug(s.ctx, "watch the ACTIVE key", mlog.Any("DELETE", event.Kv))
 					cancel()
 				}
 			}
@@ -1192,13 +1191,13 @@ func filterEmptyStrings(s []string) []string {
 func GetSessions(pid int) []string {
 	fileFullName := GetServerInfoFilePath(pid)
 	if _, err := os.Stat(fileFullName); errors.Is(err, os.ErrNotExist) {
-		mlog.Warn(context.TODO(), "not found server info file path", zap.String("filePath", fileFullName), zap.Error(err))
+		mlog.Warn(context.TODO(), "not found server info file path", mlog.String("filePath", fileFullName), mlog.Err(err))
 		return []string{}
 	}
 
 	v, err := storage.ReadFile(fileFullName)
 	if err != nil {
-		mlog.Warn(context.TODO(), "read server info file path failed", zap.String("filePath", fileFullName), zap.Error(err))
+		mlog.Warn(context.TODO(), "read server info file path failed", mlog.String("filePath", fileFullName), mlog.Err(err))
 		return []string{}
 	}
 
@@ -1225,7 +1224,7 @@ func saveServerInfoInternal(role string, serverID int64, pid int) {
 	fileFullPath := GetServerInfoFilePath(pid)
 	fd, err := os.OpenFile(fileFullPath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o664)
 	if err != nil {
-		mlog.Warn(context.TODO(), "open server info file fail", zap.String("filePath", fileFullPath), zap.Error(err))
+		mlog.Warn(context.TODO(), "open server info file fail", mlog.String("filePath", fileFullPath), mlog.Err(err))
 		return
 	}
 	defer fd.Close()
@@ -1233,10 +1232,10 @@ func saveServerInfoInternal(role string, serverID int64, pid int) {
 	data := fmt.Sprintf("%s-%d\n", role, serverID)
 	_, err = fd.WriteString(data)
 	if err != nil {
-		mlog.Warn(context.TODO(), "write server info file fail", zap.String("filePath", fileFullPath), zap.Error(err))
+		mlog.Warn(context.TODO(), "write server info file fail", mlog.String("filePath", fileFullPath), mlog.Err(err))
 	}
 
-	mlog.Info(context.TODO(), "save server info into file", zap.String("content", data), zap.String("filePath", fileFullPath))
+	mlog.Info(context.TODO(), "save server info into file", mlog.String("content", data), mlog.String("filePath", fileFullPath))
 }
 
 func SaveServerInfo(role string, serverID int64) {

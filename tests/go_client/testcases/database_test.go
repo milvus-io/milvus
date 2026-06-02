@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
@@ -241,7 +240,7 @@ func TestClientWithDb(t *testing.T) {
 	_, defCol1 := hp.CollPrepare.CreateCollection(ctx, t, mcDefault, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	defCollections, _ := mcDefault.ListCollections(ctx, listCollOpt)
 	require.Contains(t, defCollections, defCol1.CollectionName)
-	mlog.Debug(context.TODO(), "default db collections:", zap.Any("default collections", defCollections))
+	mlog.Debug(context.TODO(), "default db collections:", mlog.Any("default collections", defCollections))
 
 	// create a db and create collection in db
 	dbName := common.GenRandomString("db", 5)
@@ -257,7 +256,7 @@ func TestClientWithDb(t *testing.T) {
 	_, dbCol1 := hp.CollPrepare.CreateCollection(ctx, t, mcDb, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
 	dbCollections, _ := mcDb.ListCollections(ctx, listCollOpt)
-	mlog.Debug(context.TODO(), "db collections:", zap.Any("db collections", dbCollections))
+	mlog.Debug(context.TODO(), "db collections:", mlog.Any("db collections", dbCollections))
 	require.Containsf(t, dbCollections, dbCol1.CollectionName, fmt.Sprintf("The collection %s not in: %v", dbCol1.CollectionName, dbCollections))
 
 	// using default db and collection not in

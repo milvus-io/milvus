@@ -3,8 +3,6 @@ package streaming
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -97,9 +95,9 @@ func (m *delegatorMsgstreamAdaptor) Seek(ctx context.Context, msgPositions []*ms
 	position := msgPositions[0]
 	startFrom := adaptor.MustGetMessageIDFromMQWrapperIDBytesWithWALName(message.WALName(position.WALName), position.MsgID)
 	mlog.Info(ctx, "delegator msgstream adaptor seeks from position with scanner",
-		zap.String("channel", position.GetChannelName()),
-		zap.Any("startFromMessageID", startFrom),
-		zap.Uint64("timestamp", position.GetTimestamp()),
+		mlog.String("channel", position.GetChannelName()),
+		mlog.Any("startFromMessageID", startFrom),
+		mlog.Uint64("timestamp", position.GetTimestamp()),
 	)
 	handler := adaptor.NewMsgPackAdaptorHandler()
 	if funcutil.IsControlChannel(position.GetChannelName()) {

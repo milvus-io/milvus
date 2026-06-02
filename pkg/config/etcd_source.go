@@ -26,7 +26,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -50,7 +49,7 @@ type EtcdSource struct {
 }
 
 func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
-	mlog.Debug(context.TODO(), "init etcd source", zap.Any("etcdInfo", etcdInfo))
+	mlog.Debug(context.TODO(), "init etcd source", mlog.Any("etcdInfo", etcdInfo))
 	etcdCli, err := etcd.CreateEtcdClient(
 		etcdInfo.UseEmbed,
 		etcdInfo.EnableAuth,
@@ -170,7 +169,7 @@ func (es *EtcdSource) refreshConfigurationsWithOpts(extraOpts ...clientv3.OpOpti
 
 	ctx, cancel := context.WithTimeout(es.ctx, ReadConfigTimeout)
 	defer cancel()
-	mlog.RatedDebug(es.ctx, rate.Limit(10), "etcd refreshConfigurations", zap.String("prefix", prefix), zap.Any("endpoints", es.etcdCli.Endpoints()))
+	mlog.RatedDebug(es.ctx, rate.Limit(10), "etcd refreshConfigurations", mlog.String("prefix", prefix), mlog.Any("endpoints", es.etcdCli.Endpoints()))
 	opts := append([]clientv3.OpOption{clientv3.WithPrefix()}, extraOpts...)
 	response, err := es.etcdCli.Get(ctx, prefix, opts...)
 	if err != nil {
@@ -182,7 +181,7 @@ func (es *EtcdSource) refreshConfigurationsWithOpts(extraOpts ...clientv3.OpOpti
 		key = strings.TrimPrefix(key, prefix+"/")
 		newConfig[key] = string(kv.Value)
 		newConfig[formatKey(key)] = string(kv.Value)
-		mlog.Debug(es.ctx, "got config from etcd", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
+		mlog.Debug(es.ctx, "got config from etcd", mlog.String("key", string(kv.Key)), mlog.String("value", string(kv.Value)))
 	}
 	return es.update(newConfig)
 }
@@ -196,7 +195,7 @@ func (es *EtcdSource) update(configs map[string]string) error {
 	events, err := PopulateEvents(es.GetSourceName(), es.currentConfigs, configs)
 	if err != nil {
 		es.Unlock()
-		mlog.Warn(es.ctx, "generating event error", zap.Error(err))
+		mlog.Warn(es.ctx, "generating event error", mlog.Err(err))
 		return err
 	}
 	es.currentConfigs = configs

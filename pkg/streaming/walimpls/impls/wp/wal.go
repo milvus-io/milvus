@@ -6,9 +6,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/zilliztech/woodpecker/common/werr"
 	wp "github.com/zilliztech/woodpecker/woodpecker/log"
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -41,10 +41,10 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 	)
 	if r.Err != nil {
 		if werr.ErrLogWriterLockLost.Is(r.Err) {
-			w.Log().RatedWarn(ctx, rate.Limit(1), "wp writer fenced", zap.Error(r.Err))
+			w.Log().RatedWarn(ctx, rate.Limit(1), "wp writer fenced", mlog.Err(r.Err))
 			return nil, errors.Mark(r.Err, walimpls.ErrFenced)
 		}
-		w.Log().RatedWarn(ctx, rate.Limit(1), "write message to woodpecker failed", zap.Error(r.Err))
+		w.Log().RatedWarn(ctx, rate.Limit(1), "write message to woodpecker failed", mlog.Err(r.Err))
 		return nil, r.Err
 	}
 	return wpID{r.LogMessageId}, nil
@@ -92,6 +92,6 @@ func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {
 func (w *walImpl) Close() {
 	closeWriterErr := w.p.Close(context.Background())
 	if closeWriterErr != nil {
-		w.Log().Warn(context.TODO(), "close woodpecker writer err", zap.Error(closeWriterErr))
+		w.Log().Warn(context.TODO(), "close woodpecker writer err", mlog.Err(closeWriterErr))
 	}
 }

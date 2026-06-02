@@ -4,8 +4,6 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -100,7 +98,7 @@ func (m *sealWorker) notifyToSealSegmentWithTimePolicy() {
 	if len(sealSegmentIDs) != 0 {
 		m.Logger().Info(context.TODO(),
 
-			"notify to seal segments with time policy", zap.Int("segmentNum", len(sealSegmentIDs)))
+			"notify to seal segments with time policy", mlog.Int("segmentNum", len(sealSegmentIDs)))
 		for segmentID, sealPolicy := range sealSegmentIDs {
 			m.asyncMustSealSegment(segmentID, sealPolicy)
 		}
@@ -113,7 +111,7 @@ func (m *sealWorker) notifyToSealSegmentWithBlockingL0Policy() {
 	if len(sealSegmentIDs) != 0 {
 		m.Logger().Info(context.TODO(),
 
-			"notify to seal segments with blocking l0 policy", zap.Int("segmentNum", len(sealSegmentIDs)))
+			"notify to seal segments with blocking l0 policy", mlog.Int("segmentNum", len(sealSegmentIDs)))
 		for segmentID, sealPolicy := range sealSegmentIDs {
 			m.asyncMustSealSegment(segmentID, sealPolicy)
 		}
@@ -126,7 +124,7 @@ func (m *sealWorker) notifyToSealSegmentUntilLessThanLWM(sealPolicy policy.SealP
 	if len(segmentIDs) != 0 {
 		m.Logger().Info(context.TODO(),
 
-			"notify to seal segments until less than LWM", zap.Int("segmentNum", len(segmentIDs)), zap.String("policy", string(sealPolicy.Policy)))
+			"notify to seal segments until less than LWM", mlog.Int("segmentNum", len(segmentIDs)), mlog.String("policy", string(sealPolicy.Policy)))
 		for _, segmentID := range segmentIDs {
 			m.asyncMustSealSegment(segmentID, sealPolicy)
 		}

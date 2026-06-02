@@ -7,8 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -68,8 +66,8 @@ func (s *connectionManager) purgeIfNumOfClientsExceed() {
 	begin := time.Now()
 
 	log := mlog.With(
-		zap.Int64("num", int64(s.clientInfos.Len())),
-		zap.Int64("limit", paramtable.Get().ProxyCfg.MaxConnectionNum.GetAsInt64()))
+		mlog.Int64("num", int64(s.clientInfos.Len())),
+		mlog.Int64("limit", paramtable.Get().ProxyCfg.MaxConnectionNum.GetAsInt64()))
 
 	log.Info(context.TODO(), "number of client infos exceed limit, ready to purge the oldest")
 	q := newPriorityQueueWithCap(int(diffNum + 1))
@@ -91,8 +89,8 @@ func (s *connectionManager) purgeIfNumOfClientsExceed() {
 	}
 
 	log.Info(context.TODO(), "purge client infos done",
-		zap.Duration("cost", time.Since(begin)),
-		zap.Int64("num after purge", int64(s.clientInfos.Len())))
+		mlog.Duration("cost", time.Since(begin)),
+		mlog.Int64("num after purge", int64(s.clientInfos.Len())))
 }
 
 func (s *connectionManager) Register(ctx context.Context, identifier int64, info *commonpb.ClientInfo) {

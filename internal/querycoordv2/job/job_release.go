@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
@@ -71,7 +70,7 @@ func NewReleaseCollectionJob(ctx context.Context,
 
 func (job *ReleaseCollectionJob) Execute() error {
 	collectionID := job.result.Message.Header().GetCollectionId()
-	log := mlog.With(zap.Int64("collectionID", collectionID))
+	log := mlog.With(mlog.FieldCollectionID(collectionID))
 	replicas := job.meta.GetByCollection(job.ctx, collectionID)
 
 	if !job.meta.Exist(job.ctx, collectionID) && len(replicas) == 0 {
@@ -84,7 +83,7 @@ func (job *ReleaseCollectionJob) Execute() error {
 		if err != nil {
 			msg := "failed to remove collection"
 			log.Warn(context.TODO(),
-				msg, zap.Error(err))
+				msg, mlog.Err(err))
 			return errors.Wrap(err, msg)
 		}
 
@@ -97,28 +96,28 @@ func (job *ReleaseCollectionJob) Execute() error {
 				CollectionID: collectionID,
 			},
 			proxyutil.SetMsgType(commonpb.MsgType_ReleaseCollection)); err != nil {
-			log.Warn(context.TODO(), "failed to invalidate collection meta cache", zap.Error(err))
+			log.Warn(context.TODO(), "failed to invalidate collection meta cache", mlog.Err(err))
 		}
 
 		// try best clean shard leader cache
 		if err := job.proxyManager.InvalidateShardLeaderCache(job.ctx, &proxypb.InvalidateShardLeaderCacheRequest{
 			CollectionIDs: []int64{collectionID},
 		}); err != nil {
-			log.Warn(context.TODO(), "failed to invalidate shard leader cache", zap.Error(err))
+			log.Warn(context.TODO(), "failed to invalidate shard leader cache", mlog.Err(err))
 		}
 	}
 
 	if err := WaitCollectionReleased(job.ctx, job.dist, job.checkerController, collectionID); err != nil {
-		log.Warn(context.TODO(), "failed to wait collection released", zap.Error(err))
+		log.Warn(context.TODO(), "failed to wait collection released", mlog.Err(err))
 		return errors.Wrap(err, "failed to wait collection released")
 	}
 
 	if err := job.meta.ReplicaManager.RemoveCollection(job.ctx, collectionID); err != nil {
 		msg := "failed to remove replicas"
 		log.Warn(context.TODO(),
-			msg, zap.Error(err))
+			msg, mlog.Err(err))
 		return errors.Wrap(err, msg)
 	}
-	log.Info(context.TODO(), "release collection job done", zap.Int64("collectionID", collectionID))
+	log.Info(context.TODO(), "release collection job done", mlog.FieldCollectionID(collectionID))
 	return nil
 }

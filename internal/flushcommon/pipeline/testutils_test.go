@@ -23,7 +23,6 @@ import (
 	"math"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -466,7 +465,7 @@ func GenRowData() (rawData []byte) {
 		panic(err)
 	}
 	rawData = append(rawData, bfloat64.Bytes()...)
-	mlog.Debug(context.TODO(), "Rawdata length:", zap.Int("Length of rawData", len(rawData)))
+	mlog.Debug(context.TODO(), "Rawdata length:", mlog.Int("Length of rawData", len(rawData)))
 	return rawData
 }
 

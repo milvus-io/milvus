@@ -26,7 +26,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -334,7 +333,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 		s.NotNil(segment.GetDeltalogs())
 	}
 
-	mlog.Info(context.TODO(), "test segment results", zap.Any("result", segments))
+	mlog.Info(context.TODO(), "test segment results", mlog.Any("result", segments))
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
@@ -425,7 +424,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 		s.NotNil(segment.GetDeltalogs())
 	}
 
-	mlog.Info(context.TODO(), "test segment results", zap.Any("result", segments))
+	mlog.Info(context.TODO(), "test segment results", mlog.Any("result", segments))
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestSplitAndWrite() {
@@ -529,9 +528,9 @@ func (s *LevelZeroCompactionTaskSuite) TestSplitAndWrite() {
 		s.ElementsMatch(expectedTSs, allTSs, "segment %d should have expected timestamps", segmentID)
 
 		mlog.Info(context.TODO(), "verified deltalog content",
-			zap.Int64("segmentID", segmentID),
-			zap.Int64s("pks", allPKs),
-			zap.Uint64s("tss", allTSs))
+			mlog.FieldSegmentID(segmentID),
+			mlog.Int64s("pks", allPKs),
+			mlog.Uint64s("tss", allTSs))
 	}
 
 	// Segment 100 should have PKs 1 and 3 with their timestamps

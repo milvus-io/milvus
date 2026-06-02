@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -43,7 +42,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	if hookutil.IsClusterEncryptionEnabled() {
 		schema, err := globalMetaCache.GetCollectionSchema(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
 		if err != nil {
-			mlog.Warn(ctx, "get collection schema from global meta cache failed", zap.String("collectionName", dt.req.GetCollectionName()), zap.Error(err))
+			mlog.Warn(ctx, "get collection schema from global meta cache failed", mlog.FieldCollectionName(dt.req.GetCollectionName()), mlog.Err(err))
 			return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 		}
 
@@ -70,15 +69,15 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		}
 	}
 	mlog.Debug(ctx, "send delete request to virtual channels",
-		zap.String("collectionName", dt.req.GetCollectionName()),
-		zap.Int64("collectionID", dt.collectionID),
-		zap.Strings("virtual_channels", dt.vChannels),
-		zap.Int64("taskID", dt.ID()),
-		zap.Duration("prepare duration", dt.tr.RecordSpan()))
+		mlog.FieldCollectionName(dt.req.GetCollectionName()),
+		mlog.FieldCollectionID(dt.collectionID),
+		mlog.Strings("virtual_channels", dt.vChannels),
+		mlog.FieldTaskID(dt.ID()),
+		mlog.Duration("prepare duration", dt.tr.RecordSpan()))
 
 	resp := streaming.WAL().AppendMessages(ctx, msgs...)
 	if err := resp.UnwrapFirstError(); err != nil {
-		mlog.Warn(ctx, "append messages to wal failed", zap.Error(err))
+		mlog.Warn(ctx, "append messages to wal failed", mlog.Err(err))
 		return err
 	}
 	dt.sessionTS = resp.MaxTimeTick()

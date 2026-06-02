@@ -22,7 +22,6 @@ import (
 	"runtime/debug"
 	"sync"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -238,8 +237,8 @@ func (m *ExternalCollectionManager) SubmitTask(
 		// scheduler TOCTOU race between Enqueue dedup check and Push).
 		// Treat as idempotent success since the task is already running.
 		mlog.Info(m.ctx, "task already exists, treating as idempotent success",
-			zap.Int64("taskID", taskID),
-			zap.Int64("collectionID", req.GetCollectionID()))
+			mlog.FieldTaskID(taskID),
+			mlog.FieldCollectionID(req.GetCollectionID()))
 		return nil
 	}
 
@@ -253,26 +252,26 @@ func (m *ExternalCollectionManager) SubmitTask(
 			if r := recover(); r != nil {
 				stack := debug.Stack()
 				mlog.Error(m.ctx, "external collection task panicked",
-					zap.Int64("taskID", taskID),
-					zap.Int64("collectionID", req.GetCollectionID()),
-					zap.Any("panic", r),
-					zap.ByteString("stack", stack))
+					mlog.FieldTaskID(taskID),
+					mlog.FieldCollectionID(req.GetCollectionID()),
+					mlog.Any("panic", r),
+					mlog.ByteString("stack", stack))
 				reason := fmt.Sprintf("task panicked: %v", r)
 				m.UpdateResult(clusterID, taskID, indexpb.JobState_JobStateFailed, reason, info.KeptSegments, nil)
 				retErr = fmt.Errorf("%s", reason)
 			}
 		}()
 		mlog.Info(m.ctx, "executing external collection task in pool",
-			zap.Int64("taskID", taskID),
-			zap.Int64("collectionID", req.GetCollectionID()))
+			mlog.FieldTaskID(taskID),
+			mlog.FieldCollectionID(req.GetCollectionID()))
 
 		// Execute the task
 		resp, err := taskFunc(taskCtx)
 		if err != nil {
 			m.UpdateResult(clusterID, taskID, indexpb.JobState_JobStateFailed, err.Error(), info.KeptSegments, nil)
 			mlog.Warn(m.ctx, "external collection task failed",
-				zap.Int64("taskID", taskID),
-				zap.Error(err))
+				mlog.FieldTaskID(taskID),
+				mlog.Err(err))
 			return nil, err
 		}
 
@@ -284,7 +283,7 @@ func (m *ExternalCollectionManager) SubmitTask(
 		kept := resp.GetKeptSegments()
 		m.UpdateResult(clusterID, taskID, state, failReason, kept, resp.GetUpdatedSegments())
 		mlog.Info(m.ctx, "external collection task completed",
-			zap.Int64("taskID", taskID))
+			mlog.FieldTaskID(taskID))
 		return nil, nil
 	})
 

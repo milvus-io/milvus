@@ -28,7 +28,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
@@ -1192,7 +1191,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 
 func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 	paramtable.Init()
-	mlog.Info(context.TODO(), "InsertTaskcheckFieldsDataBySchema", zap.Bool("enable", Params.ProxyCfg.SkipAutoIDCheck.GetAsBool()))
+	mlog.Info(context.TODO(), "InsertTaskcheckFieldsDataBySchema", mlog.Bool("enable", Params.ProxyCfg.SkipAutoIDCheck.GetAsBool()))
 	var err error
 
 	t.Run("schema is empty, though won't happen in system", func(t *testing.T) {

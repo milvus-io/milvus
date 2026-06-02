@@ -5,8 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
@@ -77,7 +75,7 @@ func (b *broadcasterScheduler) execute() {
 	}
 	b.Logger().Info(context.TODO(),
 
-		"broadcaster start to execute", zap.Int("workerNum", workers))
+		"broadcaster start to execute", mlog.Int("workerNum", workers))
 
 	defer func() {
 		b.backgroundTaskNotifier.Finish(struct{}{})
@@ -117,7 +115,7 @@ func (b *broadcasterScheduler) dispatch() {
 			nextBackOff, nextInterval = b.backoffs.Peek().NextTimer()
 			b.Logger().Info(context.TODO(),
 
-				"backoff task", zap.Duration("nextInterval", nextInterval))
+				"backoff task", mlog.Duration("nextInterval", nextInterval))
 		}
 
 		select {
@@ -146,7 +144,7 @@ func (b *broadcasterScheduler) dispatch() {
 }
 
 func (b *broadcasterScheduler) worker(no int) {
-	logger := b.Logger().With(zap.Int("workerNo", no))
+	logger := b.Logger().With(mlog.Int("workerNo", no))
 	defer func() {
 		logger.Info(context.TODO(), "broadcaster worker exit")
 	}()

@@ -25,7 +25,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"gopkg.in/yaml.v2"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -171,7 +170,7 @@ func (fs *FileSource) update(configs map[string]string) error {
 	events, err := PopulateEvents(fs.GetSourceName(), fs.configs, configs)
 	if err != nil {
 		fs.Unlock()
-		mlog.Warn(context.TODO(), "generating event error", zap.Error(err))
+		mlog.Warn(context.TODO(), "generating event error", mlog.Err(err))
 		return err
 	}
 	fs.configs = configs

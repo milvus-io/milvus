@@ -23,7 +23,6 @@ import (
 	"strconv"
 	"strings"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/compaction"
@@ -244,9 +243,9 @@ func collectSegmentFiles(
 		// Empty file list is OK for V3 — segment may have only deltas and no insert binlogs
 		files.InsertBinlogs = allFiles
 		mlog.Info(ctx, "collected InsertBinlogs from manifest",
-			zap.String("basePath", basePath),
-			zap.Int("fileCount", len(allFiles)),
-			zap.Int64("storageVersion", source.GetStorageVersion()))
+			mlog.String("basePath", basePath),
+			mlog.Int("fileCount", len(allFiles)),
+			mlog.Int64("storageVersion", source.GetStorageVersion()))
 
 		// Collect LOB files owned by THIS segment from the manifest.
 		// LOB files live at partition level ({root}/insert_log/{coll}/{part}/lobs/),
@@ -257,22 +256,22 @@ func collectSegmentFiles(
 		lobFileInfos, lobErr := packed.GetManifestLobFiles(manifestPath, storageConfig)
 		if lobErr != nil {
 			mlog.Debug(ctx, "no LOB files found in manifest (may not have TEXT fields)",
-				zap.String("manifestPath", manifestPath),
-				zap.Error(lobErr))
+				mlog.String("manifestPath", manifestPath),
+				mlog.Err(lobErr))
 		} else if len(lobFileInfos) > 0 {
 			// GetManifestLobFiles returns absolute paths (the manifest
 			// deserializer calls ToAbsolute internally), so use them directly.
 			files.LobFiles = lobFileInfosToPaths(lobFileInfos)
 			mlog.Info(ctx, "collected LOB files from segment manifest",
-				zap.String("manifestPath", manifestPath),
-				zap.Int("lobFileCount", len(files.LobFiles)))
+				mlog.String("manifestPath", manifestPath),
+				mlog.Int("lobFileCount", len(files.LobFiles)))
 		}
 	} else {
 		// StorageV1/V2: use pb paths (traditional non-packed format)
 		files.InsertBinlogs = extractFromPb(source.GetInsertBinlogs())
 		mlog.Info(ctx, "using InsertBinlogs from pb",
-			zap.Int("fileCount", len(files.InsertBinlogs)),
-			zap.Int64("storageVersion", source.GetStorageVersion()))
+			mlog.Int("fileCount", len(files.InsertBinlogs)),
+			mlog.Int64("storageVersion", source.GetStorageVersion()))
 	}
 
 	// Other types from pb
@@ -365,16 +364,16 @@ func CopySegmentAndIndexFiles(
 	cm storage.ChunkManager,
 	source *datapb.CopySegmentSource,
 	target *datapb.CopySegmentTarget,
-	logFields []zap.Field,
+	logFields []mlog.Field,
 ) (*datapb.CopySegmentResult, []string, error) {
 	segmentID := source.GetSegmentId()
 	useManifest := source.GetStorageVersion() >= storage.StorageV3
 
 	mlog.Info(ctx, "start copying segment and index files",
-		zap.Int64("sourceSegmentID", segmentID),
-		zap.Int64("storageVersion", source.GetStorageVersion()),
-		zap.Bool("useManifest", useManifest),
-		zap.Bool("isExternalCollection", source.GetIsExternalCollection()))
+		mlog.Int64("sourceSegmentID", segmentID),
+		mlog.Int64("storageVersion", source.GetStorageVersion()),
+		mlog.Bool("useManifest", useManifest),
+		mlog.Bool("isExternalCollection", source.GetIsExternalCollection()))
 
 	// Step 1: Collect all files to copy
 	files, err := collectSegmentFiles(ctx, cm, source)
@@ -392,13 +391,13 @@ func CopySegmentAndIndexFiles(
 	copiedFiles := make([]string, 0, len(mappings))
 	for src, dst := range mappings {
 		mlog.Debug(ctx, "copying file",
-			zap.String("src", src),
-			zap.String("dst", dst))
+			mlog.String("src", src),
+			mlog.String("dst", dst))
 
 		if err := copyFile(ctx, cm, src, dst); err != nil {
-			fields := make([]zap.Field, 0, len(logFields)+3)
+			fields := make([]mlog.Field, 0, len(logFields)+3)
 			fields = append(fields, logFields...)
-			fields = append(fields, zap.String("src", src), zap.String("dst", dst), zap.Error(err))
+			fields = append(fields, mlog.String("src", src), mlog.String("dst", dst), mlog.Err(err))
 			mlog.Warn(ctx, "failed to copy file", fields...)
 			return nil, copiedFiles, fmt.Errorf("failed to copy file from %s to %s: %w", src, dst, err)
 		}
@@ -406,7 +405,7 @@ func CopySegmentAndIndexFiles(
 	}
 
 	mlog.Info(ctx, "all files copied successfully",
-		zap.Int("fileCount", len(mappings)))
+		mlog.Int("fileCount", len(mappings)))
 
 	// Step 3.5: When manifest is used (StorageV3+), InsertBinlogs were collected from manifest
 	// (actual file paths under base_path including _data/ and _metadata/), but
@@ -424,7 +423,7 @@ func CopySegmentAndIndexFiles(
 			}
 		}
 		mlog.Info(ctx, "added logical insert binlog mappings for manifest segment",
-			zap.Int("pbPathCount", len(pbInsertPaths)))
+			mlog.Int("pbPathCount", len(pbInsertPaths)))
 	}
 
 	// Step 4: Build index metadata from source
@@ -453,9 +452,9 @@ func CopySegmentAndIndexFiles(
 	jsonKeyIndexInfos = shortenJSONStatsPath(jsonKeyIndexInfos)
 
 	mlog.Info(ctx, "path compression completed",
-		zap.Int("binlogFields", len(segmentInfo.GetBinlogs())),
-		zap.Int("indexCount", len(indexInfos)),
-		zap.Int("jsonStatsCount", len(jsonKeyIndexInfos)))
+		mlog.Int("binlogFields", len(segmentInfo.GetBinlogs())),
+		mlog.Int("indexCount", len(indexInfos)),
+		mlog.Int("jsonStatsCount", len(jsonKeyIndexInfos)))
 
 	// Step 7: Build result
 	result := &datapb.CopySegmentResult{
@@ -480,7 +479,7 @@ func CopySegmentAndIndexFiles(
 	}
 
 	mlog.Info(ctx, "copy segment and index files completed successfully",
-		zap.Int64("importedRows", result.ImportedRows))
+		mlog.Int64("importedRows", result.ImportedRows))
 
 	return result, copiedFiles, nil
 }

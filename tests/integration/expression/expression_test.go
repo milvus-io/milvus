@@ -23,7 +23,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -134,7 +133,7 @@ func (s *ExpressionSuite) insertFlushIndexLoad(ctx context.Context, fieldData []
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
-		mlog.Info(ctx, "ShowSegments result", zap.String("segment", segment.String()))
+		mlog.Info(ctx, "ShowSegments result", mlog.String("segment", segment.String()))
 	}
 
 	// create index
@@ -283,8 +282,8 @@ func (s *ExpressionSuite) TestDivisionByZeroError() {
 						c.expectedInReason, c.expr))
 			}
 			mlog.Info(context.TODO(), "Got expected error",
-				zap.String("expr", c.expr),
-				zap.String("reason", status.GetReason()))
+				mlog.String("expr", c.expr),
+				mlog.String("reason", status.GetReason()))
 		} else {
 			// For valid cases, check successful execution
 			err = merr.Error(searchResult.GetStatus())

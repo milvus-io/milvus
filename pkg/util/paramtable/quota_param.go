@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"math"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
@@ -1611,7 +1609,7 @@ When memory usage < memoryLowWaterLevel, no action.`,
 			level := getAsFloat(v)
 			// (0, 1]
 			if level <= 0 || level > 1 {
-				// mlog.Warn(context.TODO(), "MemoryLowWaterLevel must in the range of `(0, 1]`, use default value", zap.Float64("low", p.DataNodeMemoryHighWaterLevel), zap.Float64("default", defaultHighWaterLevel))
+				// mlog.Warn(context.TODO(), "MemoryLowWaterLevel must in the range of `(0, 1]`, use default value", mlog.Float64("low", p.DataNodeMemoryHighWaterLevel), mlog.Float64("default", defaultHighWaterLevel))
 				return highWaterLevel
 			}
 			if !p.checkMinMaxLegal(p.DataNodeMemoryLowWaterLevel.GetAsFloat(), getAsFloat(v)) {
@@ -1635,7 +1633,7 @@ When memory usage < memoryLowWaterLevel, no action.`,
 			level := getAsFloat(v)
 			// (0, 1]
 			if level <= 0 || level > 1 {
-				// mlog.Warn(context.TODO(), "MemoryLowWaterLevel must in the range of `(0, 1]`, use default value", zap.Float64("low", p.QueryNodeMemoryLowWaterLevel), zap.Float64("default", defaultLowWaterLevel))
+				// mlog.Warn(context.TODO(), "MemoryLowWaterLevel must in the range of `(0, 1]`, use default value", mlog.Float64("low", p.QueryNodeMemoryLowWaterLevel), mlog.Float64("default", defaultLowWaterLevel))
 				return lowWaterLevel
 			}
 			return v
@@ -1656,7 +1654,7 @@ When memory usage < memoryLowWaterLevel, no action.`,
 			level := getAsFloat(v)
 			// (0, 1]
 			if level <= 0 || level > 1 {
-				// mlog.Warn(context.TODO(), "MemoryLowWaterLevel must in the range of `(0, 1]`, use default value", zap.Float64("low", p.QueryNodeMemoryHighWaterLevel), zap.Float64("default", defaultHighWaterLevel))
+				// mlog.Warn(context.TODO(), "MemoryLowWaterLevel must in the range of `(0, 1]`, use default value", mlog.Float64("low", p.QueryNodeMemoryHighWaterLevel), mlog.Float64("default", defaultHighWaterLevel))
 				return highWaterLevel
 			}
 			if !p.checkMinMaxLegal(p.QueryNodeMemoryLowWaterLevel.GetAsFloat(), getAsFloat(v)) {
@@ -1973,7 +1971,7 @@ func megaBytes2Bytes(f float64) float64 {
 func (p *quotaConfig) checkMinMaxLegal(min, max float64) bool {
 	if min > max {
 		mlog.Warn(context.TODO(), "init QuotaConfig failed, max/high must be greater than or equal to min/low, use default values",
-			zap.String("msg", fmt.Sprintf("min: %v, max: %v, defaultMin: %v, defaultMax: %v", min, max, defaultMin, defaultMax)))
+			mlog.String("msg", fmt.Sprintf("min: %v, max: %v, defaultMin: %v, defaultMax: %v", min, max, defaultMin, defaultMax)))
 		return false
 	}
 	return true

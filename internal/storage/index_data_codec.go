@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -174,7 +173,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 		binlogReader, err := NewBinlogReader(blob.Value)
 		if err != nil {
 			mlog.Warn(context.TODO(), "failed to read binlog",
-				zap.Error(err))
+				mlog.Err(err))
 			return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err
 		}
 		dataType := binlogReader.PayloadDataType
@@ -182,7 +181,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 		//desc, err := binlogReader.readDescriptorEvent()
 		//if err != nil {
 		//	log.Warn("failed to read descriptor event",
-		//		zap.Error(err))
+		//		mlog.Err(err))
 		//	return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err
 		//}
 		desc := binlogReader.descriptorEvent
@@ -212,7 +211,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 			eventReader, err := binlogReader.NextEventReader()
 			if err != nil {
 				mlog.Warn(context.TODO(), "failed to get next event reader",
-					zap.Error(err))
+					mlog.Err(err))
 				binlogReader.Close()
 				return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err
 			}
@@ -226,7 +225,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 				content, _, err := eventReader.GetByteFromPayload()
 				if err != nil {
 					mlog.Warn(context.TODO(), "failed to get byte from payload",
-						zap.Error(err))
+						mlog.Err(err))
 					eventReader.Close()
 					binlogReader.Close()
 					return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err
@@ -243,7 +242,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 			case schemapb.DataType_String:
 				content, _, err := eventReader.GetStringFromPayload()
 				if err != nil {
-					mlog.Warn(context.TODO(), "failed to get string from payload", zap.Error(err))
+					mlog.Warn(context.TODO(), "failed to get string from payload", mlog.Err(err))
 					eventReader.Close()
 					binlogReader.Close()
 					return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err

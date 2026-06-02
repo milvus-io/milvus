@@ -33,8 +33,6 @@ import (
 	"strings"
 	"unsafe"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
@@ -274,8 +272,8 @@ func ExploreFilesReturnManifestPath(
 	fileInfos, skipped := NormalizeFileInfos(fileInfos, format)
 	if skipped > 0 {
 		mlog.Info(context.TODO(), "Skipped files with non-matching format during explore",
-			zap.Int("skippedCount", skipped),
-			zap.String("format", format))
+			mlog.Int("skippedCount", skipped),
+			mlog.String("format", format))
 	}
 
 	return fileInfos, manifestPath, nil

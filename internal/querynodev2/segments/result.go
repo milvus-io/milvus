@@ -22,7 +22,6 @@ import (
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -53,7 +52,7 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	})
 
 	if len(results) == 1 {
-		mlog.Debug(ctx, "Shortcut return ReduceSearchResults", zap.Any("result info", info))
+		mlog.Debug(ctx, "Shortcut return ReduceSearchResults", mlog.Any("result info", info))
 		return results[0], nil
 	}
 
@@ -81,29 +80,29 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 
 	searchResultData, err := DecodeSearchResults(ctx, results)
 	if err != nil {
-		mlog.Warn(ctx, "shard leader decode search results errors", zap.Error(err))
+		mlog.Warn(ctx, "shard leader decode search results errors", mlog.Err(err))
 		return nil, err
 	}
-	mlog.Debug(ctx, "shard leader get valid search results", zap.Int("numbers", len(searchResultData)))
+	mlog.Debug(ctx, "shard leader get valid search results", mlog.Int("numbers", len(searchResultData)))
 
 	for i, sData := range searchResultData {
 		mlog.Debug(ctx, "reduceSearchResultData",
-			zap.Int("result No.", i),
-			zap.Int64("nq", sData.NumQueries),
-			zap.Int64("topk", sData.TopK),
-			zap.Int("ids.len", typeutil.GetSizeOfIDs(sData.Ids)),
-			zap.Int("fieldsData.len", len(sData.FieldsData)))
+			mlog.Int("result No.", i),
+			mlog.Int64("nq", sData.NumQueries),
+			mlog.Int64("topk", sData.TopK),
+			mlog.Int("ids.len", typeutil.GetSizeOfIDs(sData.Ids)),
+			mlog.Int("fieldsData.len", len(sData.FieldsData)))
 	}
 
 	searchReduce := InitSearchReducer(info)
 	reducedResultData, err := searchReduce.ReduceSearchResultData(ctx, searchResultData, info)
 	if err != nil {
-		mlog.Warn(ctx, "shard leader reduce errors", zap.Error(err))
+		mlog.Warn(ctx, "shard leader reduce errors", mlog.Err(err))
 		return nil, err
 	}
 	searchResults, err := EncodeSearchResultData(ctx, reducedResultData, info.GetNq(), info.GetTopK(), info.GetMetricType())
 	if err != nil {
-		mlog.Warn(ctx, "shard leader encode search result errors", zap.Error(err))
+		mlog.Warn(ctx, "shard leader encode search result errors", mlog.Err(err))
 		return nil, err
 	}
 
@@ -210,7 +209,7 @@ func SelectSearchResultData(dataArray []*schemapb.SearchResultData, resultOffset
 			if sel == -1 {
 				// A bad case happens where knowhere returns distance == +/-maxFloat32
 				// by mistake.
-				mlog.Warn(context.TODO(), "a bad distance is found, something is wrong here!", zap.Float32("score", distance))
+				mlog.Warn(context.TODO(), "a bad distance is found, something is wrong here!", mlog.Float32("score", distance))
 			} else if typeutil.ComparePK(
 				typeutil.GetPK(dataArray[i].GetIds(), idx),
 				typeutil.GetPK(dataArray[sel].GetIds(), resultDataIdx)) {

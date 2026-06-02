@@ -7,7 +7,6 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -38,7 +37,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "mergeSortMultipleSegments")
 	defer span.End()
 
-	log := mlog.With(zap.Int64("planID", plan.GetPlanID()))
+	log := mlog.With(mlog.Int64("planID", plan.GetPlanID()))
 
 	writerSchema := plan.GetSchema()
 
@@ -132,13 +131,13 @@ func mergeSortMultipleSegments(ctx context.Context,
 
 	if _, err = storage.MergeSort(compactionParams.BinLogMaxSize, writerSchema, segmentReaders, writer, predicate, sortByFields); err != nil {
 		if closeErr := writer.Close(); closeErr != nil {
-			log.Warn(ctx, "failed to close writer after merge sort error", zap.Error(closeErr))
+			log.Warn(ctx, "failed to close writer after merge sort error", mlog.Err(closeErr))
 		}
 		return nil, err
 	}
 
 	if err := writer.Close(); err != nil {
-		log.Warn(ctx, "compact wrong, failed to finish writer", zap.Error(err))
+		log.Warn(ctx, "compact wrong, failed to finish writer", mlog.Err(err))
 		return nil, err
 	}
 
@@ -165,10 +164,10 @@ func mergeSortMultipleSegments(ctx context.Context,
 
 	totalElapse := tr.RecordSpan()
 	log.Info(ctx, "compact mergeSortMultipleSegments end",
-		zap.Int("deleted row count", deletedRowCount),
-		zap.Int("expired entities", expiredRowCount),
-		zap.Int("missing deletes", missingDeleteCount),
-		zap.Duration("total elapse", totalElapse))
+		mlog.Int("deleted row count", deletedRowCount),
+		mlog.Int("expired entities", expiredRowCount),
+		mlog.Int("missing deletes", missingDeleteCount),
+		mlog.Duration("total elapse", totalElapse))
 
 	metrics.DataNodeCompactionDeleteCount.WithLabelValues(fmt.Sprint(collectionID)).Add(float64(deltalogDeleteEntriesCount))
 	metrics.DataNodeCompactionMissingDeleteCount.WithLabelValues(fmt.Sprint(collectionID)).Add(float64(missingDeleteCount))

@@ -24,7 +24,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -1256,8 +1255,8 @@ func TestInsertCodec(t *testing.T) {
 		},
 		resultData.Data[JSONField].(*JSONFieldData).Data)
 
-	mlog.Debug(context.TODO(), "Data", zap.Any("Data", resultData.Data))
-	mlog.Debug(context.TODO(), "Infos", zap.Any("Infos", resultData.Infos))
+	mlog.Debug(context.TODO(), "Data", mlog.Any("Data", resultData.Data))
+	mlog.Debug(context.TODO(), "Infos", mlog.Any("Infos", resultData.Infos))
 
 	blobs := []*Blob{}
 	_, _, _, err = insertCodec.Deserialize(blobs)

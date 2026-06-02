@@ -3,8 +3,6 @@ package proxy
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -372,12 +370,12 @@ func (t *describeDatabaseTask) Execute(ctx context.Context) error {
 	ctx = AppendUserInfoForRPC(ctx)
 	ret, err := t.mixCoord.DescribeDatabase(ctx, req)
 	if err != nil {
-		mlog.Warn(ctx, "DescribeDatabase failed", zap.Error(err))
+		mlog.Warn(ctx, "DescribeDatabase failed", mlog.Err(err))
 		return err
 	}
 
 	if err := merr.CheckRPCCall(ret, err); err != nil {
-		mlog.Warn(ctx, "DescribeDatabase failed", zap.Error(err))
+		mlog.Warn(ctx, "DescribeDatabase failed", mlog.Err(err))
 		return err
 	}
 

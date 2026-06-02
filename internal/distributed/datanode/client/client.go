@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -62,7 +61,7 @@ func NewClient(ctx context.Context, addr string, serverID int64, encryption bool
 	sess := sessionutil.NewSession(context.Background())
 	if sess == nil {
 		err := errors.New("new session error, maybe can not connect to etcd")
-		mlog.Debug(ctx, "DataNodeClient New Etcd Session failed", zap.Error(err))
+		mlog.Debug(ctx, "DataNodeClient New Etcd Session failed", mlog.Err(err))
 		return nil, err
 	}
 

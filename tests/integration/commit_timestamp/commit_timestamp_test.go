@@ -27,7 +27,6 @@ import (
 
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -86,8 +85,8 @@ func (s *CommitTimestampSuite) setCommitTimestamp(
 		}
 
 		mlog.Info(context.TODO(), "setCommitTimestamp: modifying segment",
-			zap.Int64("segmentID", seg.GetID()),
-			zap.Uint64("commitTs", commitTs))
+			mlog.FieldSegmentID(seg.GetID()),
+			mlog.Uint64("commitTs", commitTs))
 
 		seg.CommitTimestamp = commitTs
 
@@ -529,7 +528,7 @@ func (s *CommitTimestampSuite) TestCompaction_NormalizesCommitTs() {
 			continue
 		}
 		if stateResp.GetState() == commonpb.CompactionState_Completed {
-			mlog.Info(context.TODO(), "compaction completed", zap.Int64("compactionID", compactionID))
+			mlog.Info(context.TODO(), "compaction completed", mlog.Int64("compactionID", compactionID))
 			compactionCompleted = true
 			break
 		}

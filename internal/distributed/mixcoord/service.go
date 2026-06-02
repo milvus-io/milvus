@@ -25,7 +25,6 @@ import (
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
@@ -100,10 +99,10 @@ func (s *Server) Prepare() error {
 		netutil.OptPort(paramtable.Get().RootCoordGrpcServerCfg.Port.GetAsInt()),
 	)
 	if err != nil {
-		mlog.Warn(s.ctx, "MixCoord fail to create net listener", zap.Error(err))
+		mlog.Warn(s.ctx, "MixCoord fail to create net listener", mlog.Err(err))
 		return err
 	}
-	mlog.Info(s.ctx, "MixCoord listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
+	mlog.Info(s.ctx, "MixCoord listen on", mlog.String("address", listener.Addr().String()), mlog.Int("port", listener.Port()))
 	s.listener = listener
 	return nil
 }
@@ -143,7 +142,7 @@ func (s *Server) init() error {
 		etcdConfig.EtcdTLSMinVersion.GetValue(),
 		etcdConfig.ClientOptions()...)
 	if err != nil {
-		mlog.Warn(s.ctx, "MixCoord connect to etcd failed", zap.Error(err))
+		mlog.Warn(s.ctx, "MixCoord connect to etcd failed", mlog.Err(err))
 		return err
 	}
 	s.etcdCli = etcdCli
@@ -156,7 +155,7 @@ func (s *Server) init() error {
 		mlog.Info(s.ctx, "Connecting to tikv metadata storage.")
 		s.tikvCli, err = getTiKVClient(&paramtable.Get().TiKVCfg)
 		if err != nil {
-			mlog.Warn(s.ctx, "MixCoord failed to connect to tikv", zap.Error(err))
+			mlog.Warn(s.ctx, "MixCoord failed to connect to tikv", mlog.Err(err))
 			return err
 		}
 		s.mixCoord.SetTiKVClient(s.tikvCli)
@@ -197,7 +196,7 @@ func (s *Server) startGrpcLoop() {
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
 
-	mlog.Info(s.ctx, "start grpc ", zap.Int("port", s.listener.Port()))
+	mlog.Info(s.ctx, "start grpc ", mlog.Int("port", s.listener.Port()))
 
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
@@ -247,12 +246,12 @@ func (s *Server) startGrpcLoop() {
 func (s *Server) start() error {
 	mlog.Info(s.ctx, "MixCoord Core start ...")
 	if err := s.mixCoord.Register(); err != nil {
-		mlog.Error(s.ctx, "MixCoord registers service failed", zap.Error(err))
+		mlog.Error(s.ctx, "MixCoord registers service failed", mlog.Err(err))
 		return err
 	}
 
 	if err := s.mixCoord.Start(); err != nil {
-		mlog.Error(s.ctx, "MixCoord start service failed", zap.Error(err))
+		mlog.Error(s.ctx, "MixCoord start service failed", mlog.Err(err))
 		return err
 	}
 
@@ -262,11 +261,11 @@ func (s *Server) start() error {
 func (s *Server) Stop() (err error) {
 	logger := mlog.With()
 	if s.listener != nil {
-		logger = logger.With(zap.String("address", s.listener.Address()))
+		logger = logger.With(mlog.String("address", s.listener.Address()))
 	}
 	logger.Info(s.ctx, "MixCoord stopping")
 	defer func() {
-		logger.Info(s.ctx, "MixCoord stopped", zap.Error(err))
+		logger.Info(s.ctx, "MixCoord stopped", mlog.Err(err))
 	}()
 
 	if s.etcdCli != nil {
@@ -290,7 +289,7 @@ func (s *Server) Stop() (err error) {
 	if s.mixCoord != nil {
 		logger.Info(s.ctx, "internal server[rootCoord] start to stop")
 		if err := s.mixCoord.Stop(); err != nil {
-			mlog.Error(s.ctx, "Failed to close rootCoord", zap.Error(err))
+			mlog.Error(s.ctx, "Failed to close rootCoord", mlog.Err(err))
 		}
 	}
 

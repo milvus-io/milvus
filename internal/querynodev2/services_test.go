@@ -32,7 +32,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -2121,7 +2120,7 @@ func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 	mockDelegator := delegator.NewMockShardDelegator(suite.T())
 	mockDelegator.EXPECT().LoadSegments(mock.Anything, mock.Anything).
 		RunAndReturn(func(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
-			mlog.Info(context.TODO(), "version", zap.Int64("versionInload", req.GetVersion()))
+			mlog.Info(context.TODO(), "version", mlog.Int64("versionInload", req.GetVersion()))
 			versionMatch = req.GetVersion() == segmentVersion
 			return nil
 		})

@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -144,7 +143,7 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 	})
 	s.NoError(err)
 	s.Equal(int32(0), importResp.GetStatus().GetCode())
-	mlog.Info(context.TODO(), "Import result", zap.Any("importResp", importResp))
+	mlog.Info(context.TODO(), "Import result", mlog.Any("importResp", importResp))
 
 	jobID := importResp.GetJobID()
 	err = WaitForImportDone(ctx, c, jobID)
@@ -161,7 +160,7 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
-	mlog.Info(context.TODO(), "Show segments", zap.Any("segments", segments))
+	mlog.Info(context.TODO(), "Show segments", mlog.Any("segments", segments))
 
 	// load refresh
 	loadStatus, err = c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{

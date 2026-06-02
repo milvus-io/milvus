@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -74,7 +73,7 @@ func (mRWLock *MetricsRWMutex) maybeLogUnlockDuration(source string, lockType st
 			delete(mRWLock.acquireTimeMap, source)
 		} else {
 			mlog.Error(context.TODO(), "there's no lock history for the source, there may be some defects in codes",
-				zap.String("source", source))
+				mlog.String("source", source))
 			return errors.New("unknown source")
 		}
 	}
@@ -83,13 +82,13 @@ func (mRWLock *MetricsRWMutex) maybeLogUnlockDuration(source string, lockType st
 
 func logLock(duration time.Duration, lockName string, source string, lockType string, opType string) {
 	if duration >= paramtable.Get().CommonCfg.LockSlowLogWarnThreshold.GetAsDuration(time.Millisecond) {
-		mlog.Warn(context.TODO(), "lock takes too long", zap.String("lockName", lockName), zap.String("lockType", lockType),
-			zap.String("source", source), zap.String("opType", opType),
-			zap.Duration("time_cost", duration))
+		mlog.Warn(context.TODO(), "lock takes too long", mlog.String("lockName", lockName), mlog.String("lockType", lockType),
+			mlog.String("source", source), mlog.String("opType", opType),
+			mlog.Duration("time_cost", duration))
 	} else if duration >= paramtable.Get().CommonCfg.LockSlowLogInfoThreshold.GetAsDuration(time.Millisecond) {
-		mlog.Info(context.TODO(), "lock takes too long", zap.String("lockName", lockName), zap.String("lockType", lockType),
-			zap.String("source", source), zap.String("opType", opType),
-			zap.Duration("time_cost", duration))
+		mlog.Info(context.TODO(), "lock takes too long", mlog.String("lockName", lockName), mlog.String("lockType", lockType),
+			mlog.String("source", source), mlog.String("opType", opType),
+			mlog.Duration("time_cost", duration))
 	}
 	metrics.LockCosts.WithLabelValues(lockName, source, lockType, opType).Set(float64(duration.Milliseconds()))
 }

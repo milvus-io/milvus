@@ -22,7 +22,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -84,8 +83,8 @@ func (s *DataSalvageSuite) TestGetReplicateInfoOnPrimaryCluster() {
 	// On a primary cluster, checkpoint should exist but salvage checkpoint should be nil
 	// (no force promote has occurred)
 	mlog.Info(context.TODO(), "GetReplicateInfo response",
-		zap.Any("checkpoint", resp.GetCheckpoint()),
-		zap.Any("salvageCheckpoint", resp.GetSalvageCheckpoint()))
+		mlog.Any("checkpoint", resp.GetCheckpoint()),
+		mlog.Any("salvageCheckpoint", resp.GetSalvageCheckpoint()))
 
 	// Salvage checkpoint should be nil on primary cluster
 	s.Nil(resp.GetSalvageCheckpoint(), "salvage checkpoint should be nil on primary cluster")
@@ -144,8 +143,8 @@ func (s *DataSalvageSuite) TestDumpMessagesBasic() {
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
 
 	mlog.Info(context.TODO(), "Testing DumpMessages",
-		zap.String("pchannel", pchannel),
-		zap.String("vchannel", vchannel))
+		mlog.FieldPChannel(pchannel),
+		mlog.FieldVChannel(vchannel))
 
 	// Set up replication config first
 	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
@@ -197,15 +196,15 @@ func (s *DataSalvageSuite) TestDumpMessagesBasic() {
 				break
 			}
 			if err != nil {
-				mlog.Warn(context.TODO(), "error receiving message", zap.Error(err))
+				mlog.Warn(context.TODO(), "error receiving message", mlog.Err(err))
 				break
 			}
 			// Check if response contains a message (not a status)
 			if msg := resp.GetMessage(); msg != nil {
 				messages = append(messages, resp)
-				mlog.Info(context.TODO(), "received message", zap.String("messageId", msg.GetId().GetId()))
+				mlog.Info(context.TODO(), "received message", mlog.String("messageId", msg.GetId().GetId()))
 			} else if status := resp.GetStatus(); status != nil {
-				mlog.Warn(context.TODO(), "received status response", zap.Any("status", status))
+				mlog.Warn(context.TODO(), "received status response", mlog.Any("status", status))
 				break
 			}
 		}
@@ -214,7 +213,7 @@ func (s *DataSalvageSuite) TestDumpMessagesBasic() {
 
 	<-readCtx.Done()
 
-	mlog.Info(context.TODO(), "DumpMessages test completed", zap.Int("messageCount", len(messages)))
+	mlog.Info(context.TODO(), "DumpMessages test completed", mlog.Int("messageCount", len(messages)))
 
 	// We should have received at least some messages
 	// Note: The exact count depends on timing and what messages are in the WAL

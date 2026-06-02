@@ -86,13 +86,13 @@ func initHook() error {
 	}
 	storeHook((hookVal))
 	paramtable.GetHookParams().WatchHookWithPrefix("watch_hook", "", func(event *config.Event) {
-		mlog.Info(context.TODO(), "receive the hook refresh event", zap.Any("event", event))
+		mlog.Info(context.TODO(), "receive the hook refresh event", mlog.Any("event", event))
 		go func() {
 			hookVal := GetHook()
 			soConfig := paramtable.GetHookParams().SoConfig.GetValue()
-			mlog.Info(context.TODO(), "refresh hook configs", zap.Any("config", soConfig))
+			mlog.Info(context.TODO(), "refresh hook configs", mlog.Any("config", soConfig))
 			if err = hookVal.Init(soConfig); err != nil {
-				mlog.Panic(context.TODO(), "fail to init configs for the hook when refreshing", zap.Error(err))
+				mlog.Panic(context.TODO(), "fail to init configs for the hook when refreshing", mlog.Err(err))
 			}
 			storeHook(hookVal)
 		}()
@@ -125,7 +125,7 @@ func InitOnceHook() {
 				mlog.Panic(context.TODO(),
 					fmt.Sprintf("fail to init hook, so_path=%s, error=%v", soPath, err))
 			}
-			mlog.Warn(context.TODO(), "fail to init hook", zap.String("so_path", soPath), zap.Error(err))
+			mlog.Warn(context.TODO(), "fail to init hook", mlog.String("so_path", soPath), mlog.Err(err))
 		}
 	})
 }

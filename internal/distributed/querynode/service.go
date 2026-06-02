@@ -26,7 +26,6 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
@@ -126,11 +125,11 @@ func (s *Server) Prepare() error {
 		netutil.OptHighPriorityToUsePort(paramtable.Get().QueryNodeGrpcServerCfg.Port.GetAsInt()),
 	)
 	if err != nil {
-		mlog.Warn(s.ctx, "QueryNode fail to create net listener", zap.Error(err))
+		mlog.Warn(s.ctx, "QueryNode fail to create net listener", mlog.Err(err))
 		return err
 	}
 	s.listener = listener
-	mlog.Info(s.ctx, "QueryNode listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
+	mlog.Info(s.ctx, "QueryNode listen on", mlog.String("address", listener.Addr().String()), mlog.Int("port", listener.Port()))
 	paramtable.Get().Save(
 		paramtable.Get().QueryNodeGrpcServerCfg.Port.Key,
 		strconv.FormatInt(int64(listener.Port()), 10))
@@ -141,7 +140,7 @@ func (s *Server) Prepare() error {
 func (s *Server) init() error {
 	etcdConfig := &paramtable.Get().EtcdCfg
 
-	mlog.Debug(s.ctx, "QueryNode", zap.Int("port", s.listener.Port()))
+	mlog.Debug(s.ctx, "QueryNode", mlog.Int("port", s.listener.Port()))
 
 	etcdCli, err := etcd.CreateEtcdClient(
 		etcdConfig.UseEmbedEtcd.GetAsBool(),
@@ -156,7 +155,7 @@ func (s *Server) init() error {
 		etcdConfig.EtcdTLSMinVersion.GetValue(),
 		etcdConfig.ClientOptions()...)
 	if err != nil {
-		mlog.Debug(s.ctx, "QueryNode connect to etcd failed", zap.Error(err))
+		mlog.Debug(s.ctx, "QueryNode connect to etcd failed", mlog.Err(err))
 		return err
 	}
 	s.etcdCli = etcdCli
@@ -172,9 +171,9 @@ func (s *Server) init() error {
 	}
 
 	s.querynode.UpdateStateCode(commonpb.StateCode_Initializing)
-	mlog.Debug(s.ctx, "QueryNode", zap.Any("State", commonpb.StateCode_Initializing))
+	mlog.Debug(s.ctx, "QueryNode", mlog.Any("State", commonpb.StateCode_Initializing))
 	if err := s.querynode.Init(); err != nil {
-		mlog.Error(s.ctx, "QueryNode init error: ", zap.Error(err))
+		mlog.Error(s.ctx, "QueryNode init error: ", mlog.Err(err))
 		return err
 	}
 	s.serverID.Store(s.querynode.GetNodeID())
@@ -212,11 +211,11 @@ func (s *Server) initMixCoord() {
 // start starts QueryNode's grpc service.
 func (s *Server) start() error {
 	if err := s.querynode.Start(); err != nil {
-		mlog.Error(s.ctx, "QueryNode start failed", zap.Error(err))
+		mlog.Error(s.ctx, "QueryNode start failed", mlog.Err(err))
 		return err
 	}
 	if err := s.querynode.Register(); err != nil {
-		mlog.Error(s.ctx, "QueryNode register service failed", zap.Error(err))
+		mlog.Error(s.ctx, "QueryNode register service failed", mlog.Err(err))
 		return err
 	}
 	return nil
@@ -298,17 +297,17 @@ func (s *Server) Run() error {
 func (s *Server) Stop() (err error) {
 	logger := mlog.With()
 	if s.listener != nil {
-		logger = logger.With(zap.String("address", s.listener.Address()))
+		logger = logger.With(mlog.String("address", s.listener.Address()))
 	}
 	logger.Info(s.ctx, "QueryNode stopping")
 	defer func() {
-		logger.Info(s.ctx, "QueryNode stopped", zap.Error(err))
+		logger.Info(s.ctx, "QueryNode stopped", mlog.Err(err))
 	}()
 
 	logger.Info(s.ctx, "internal server[querynode] start to stop")
 	err = s.querynode.Stop()
 	if err != nil {
-		logger.Error(s.ctx, "failed to close querynode", zap.Error(err))
+		logger.Error(s.ctx, "failed to close querynode", mlog.Err(err))
 		return err
 	}
 	if s.etcdCli != nil {

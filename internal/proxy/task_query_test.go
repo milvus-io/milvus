@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -1648,7 +1647,7 @@ func getFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 			FieldId: fieldID,
 		}
 	default:
-		mlog.Warn(context.TODO(), "not supported field type", zap.String("fieldType", fieldType.String()))
+		mlog.Warn(context.TODO(), "not supported field type", mlog.String("fieldType", fieldType.String()))
 	}
 
 	return fieldData

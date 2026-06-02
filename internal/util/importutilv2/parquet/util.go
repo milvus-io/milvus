@@ -23,7 +23,6 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	common2 "github.com/milvus-io/milvus/internal/util/importutilv2/common"
@@ -227,7 +226,7 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 		}
 	}
 
-	mlog.Info(ctx, "create parquet column readers", zap.Any("readFields", readFields))
+	mlog.Info(ctx, "create parquet column readers", mlog.Any("readFields", readFields))
 	return crs, nil
 }
 

@@ -30,7 +30,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/sbinet/npyio"
 	"github.com/sbinet/npyio/npy"
-	"go.uber.org/zap"
 	"golang.org/x/text/encoding/unicode"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -124,7 +123,7 @@ func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemap
 		}
 	}
 
-	mlog.Info(ctx, "create numpy readers", zap.Any("readFields", readFields))
+	mlog.Info(ctx, "create numpy readers", mlog.Any("readFields", readFields))
 	return readers, nil
 }
 

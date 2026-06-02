@@ -39,7 +39,6 @@ import (
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
@@ -419,8 +418,8 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	tieredEvictableDiskCacheRatio := params.QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat()
 
 	mlog.Info(context.TODO(), "tiered storage eviction cache ratio configured",
-		zap.Float64("tieredEvictableMemoryCacheRatio", tieredEvictableMemoryCacheRatio),
-		zap.Float64("tieredEvictableDiskCacheRatio", tieredEvictableDiskCacheRatio),
+		mlog.Float64("tieredEvictableMemoryCacheRatio", tieredEvictableMemoryCacheRatio),
+		mlog.Float64("tieredEvictableDiskCacheRatio", tieredEvictableDiskCacheRatio),
 	)
 
 	return nil
@@ -544,7 +543,7 @@ func SetupCoreConfigChangelCallback() {
 				factor = 32
 			}
 			knowhereThreadPoolSize := uint32(float64(hardware.GetCPUNum()) * factor)
-			mlog.Info(context.TODO(), "UpdateKnowhereThreadPoolSize", zap.Uint32("knowhereThreadPoolSize", knowhereThreadPoolSize))
+			mlog.Info(context.TODO(), "UpdateKnowhereThreadPoolSize", mlog.Uint32("knowhereThreadPoolSize", knowhereThreadPoolSize))
 			C.SegcoreSetKnowhereSearchThreadPoolNum(C.uint32_t(knowhereThreadPoolSize))
 			return nil
 		})
@@ -560,7 +559,7 @@ func SetupCoreConfigChangelCallback() {
 				factor = 32
 			}
 			knowhereFetchThreadPoolSize := uint32(float64(hardware.GetCPUNum()) * factor)
-			mlog.Info(context.TODO(), "UpdateKnowhereFetchThreadPoolSize", zap.Uint32("knowhereFetchThreadPoolSize", knowhereFetchThreadPoolSize))
+			mlog.Info(context.TODO(), "UpdateKnowhereFetchThreadPoolSize", mlog.Uint32("knowhereFetchThreadPoolSize", knowhereFetchThreadPoolSize))
 			C.SegcoreSetKnowhereFetchThreadPoolNum(C.uint32_t(knowhereFetchThreadPoolSize))
 			return nil
 		})
@@ -797,7 +796,7 @@ func serializeHeaders(headerstr string) string {
 func InitPluginLoader() error {
 	if hookutil.IsClusterEncryptionEnabled() {
 		cSoPath := C.CString(paramtable.GetCipherParams().SoPathCpp.GetValue())
-		mlog.Info(context.TODO(), "Init PluginLoader", zap.String("soPath", paramtable.GetCipherParams().SoPathCpp.GetValue()))
+		mlog.Info(context.TODO(), "Init PluginLoader", mlog.String("soPath", paramtable.GetCipherParams().SoPathCpp.GetValue()))
 		defer C.free(unsafe.Pointer(cSoPath))
 		status := C.InitPluginLoader(cSoPath)
 		return HandleCStatus(&status, "InitPluginLoader failed")

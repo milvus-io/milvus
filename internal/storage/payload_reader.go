@@ -14,7 +14,6 @@ import (
 	"github.com/apache/arrow/go/v17/parquet/file"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -1317,12 +1316,12 @@ func ReadData[T any, E interface {
 	fileReader, err := pqarrow.NewFileReader(reader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
 	// defer fileReader.ParquetReader().Close()
 	if err != nil {
-		mlog.Warn(context.TODO(), "create arrow parquet file reader failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "create arrow parquet file reader failed", mlog.Err(err))
 		return -1, err
 	}
 	schema, err := fileReader.Schema()
 	if err != nil {
-		mlog.Warn(context.TODO(), "can't schema from file", zap.Error(err))
+		mlog.Warn(context.TODO(), "can't schema from file", mlog.Err(err))
 		return -1, err
 	}
 	for i, field := range schema.Fields() {
@@ -1331,7 +1330,7 @@ func ReadData[T any, E interface {
 		defer cancel()
 		columnReader, err := fileReader.GetColumn(newCtx, i)
 		if err != nil {
-			mlog.Warn(context.TODO(), "get column reader failed", zap.String("fieldName", field.Name), zap.Error(err))
+			mlog.Warn(context.TODO(), "get column reader failed", mlog.String("fieldName", field.Name), mlog.Err(err))
 			return -1, err
 		}
 		chunked, err := columnReader.NextBatch(numRows)
@@ -1342,7 +1341,7 @@ func ReadData[T any, E interface {
 			dataNums := chunk.Data().Len()
 			reader, ok := chunk.(E)
 			if !ok {
-				mlog.Warn(context.TODO(), "the column data in parquet is not equal to field", zap.String("fieldName", field.Name), zap.String("actual type", chunk.DataType().Name()))
+				mlog.Warn(context.TODO(), "the column data in parquet is not equal to field", mlog.String("fieldName", field.Name), mlog.String("actual type", chunk.DataType().Name()))
 				return -1, merr.WrapErrImportFailed(fmt.Sprintf("the column data in parquet is not equal to field: %s, but: %s", field.Name, chunk.DataType().Name()))
 			}
 			nullBitset := bytesToBoolArray(dataNums, reader.NullBitmapBytes())

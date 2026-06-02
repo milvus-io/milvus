@@ -34,7 +34,6 @@ import (
 	iamRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/iam/v3/region"
 	"github.com/minio/minio-go/v7"
 	minioCred "github.com/minio/minio-go/v7/pkg/credentials"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
@@ -108,7 +107,7 @@ func (p *HuaweiCredentialProvider) initClients() error {
 	basicChain := provider.BasicCredentialProviderChain()
 	basicCred, err := basicChain.GetCredentials()
 	if err != nil {
-		mlog.Warn(context.TODO(), "HuaweiCloud credential provider: failed to get basic credentials", zap.Error(err))
+		mlog.Warn(context.TODO(), "HuaweiCloud credential provider: failed to get basic credentials", mlog.Err(err))
 		return errors.Wrap(err, "failed to get basic credentials")
 	}
 	p.basicCred = basicCred
@@ -123,7 +122,7 @@ func (p *HuaweiCredentialProvider) initClients() error {
 		endpoint := fmt.Sprintf("https://iam.%s.myhuaweicloud.com", regionName)
 		regionObj = region.NewRegion(regionName, endpoint)
 		mlog.Warn(context.TODO(), "HuaweiCloud credential provider: region not in SDK, using constructed endpoint",
-			zap.String("region", regionName), zap.String("endpoint", endpoint))
+			mlog.String("region", regionName), mlog.String("endpoint", endpoint))
 	}
 	p.regionObj = regionObj
 
@@ -133,13 +132,13 @@ func (p *HuaweiCredentialProvider) initClients() error {
 		WithHttpConfig(config.DefaultHttpConfig().WithTimeout(30 * time.Second)).
 		SafeBuild()
 	if err != nil {
-		mlog.Warn(context.TODO(), "HuaweiCloud credential provider: failed to build IAM client", zap.Error(err))
+		mlog.Warn(context.TODO(), "HuaweiCloud credential provider: failed to build IAM client", mlog.Err(err))
 		return errors.Wrap(err, "failed to build IAM client")
 	}
 	p.iamClient = iam.NewIamClient(hcClient)
 	p.inited = true
 	mlog.Info(context.TODO(), "HuaweiCloud credential provider: IAM client initialized successfully",
-		zap.String("region", regionName))
+		mlog.String("region", regionName))
 	return nil
 }
 
@@ -183,7 +182,7 @@ func (p *HuaweiCredentialProvider) Retrieve() (minioCred.Value, error) {
 	if p.isInCooldown() {
 		if p.hasValidCachedCredentials() {
 			mlog.Warn(context.TODO(), "HuaweiCloud credential provider: in cooldown after failure, returning cached credentials",
-				zap.Time("cached_expiration", p.expiration))
+				mlog.Time("cached_expiration", p.expiration))
 			return p.credentials, nil
 		}
 		mlog.Warn(context.TODO(), "HuaweiCloud credential provider: in cooldown after failure, no valid cached credentials available")
@@ -211,16 +210,16 @@ func (p *HuaweiCredentialProvider) Retrieve() (minioCred.Value, error) {
 		p.lastFailedReloadTime = time.Now()
 		if p.hasValidCachedCredentials() {
 			mlog.Warn(context.TODO(), "HuaweiCloud credential provider: STS refresh failed, falling back to cached credentials",
-				zap.Time("cached_expiration", p.expiration),
-				zap.Int64("sts_success", p.stsSuccessCount.Load()),
-				zap.Int64("sts_failure", p.stsFailureCount.Load()),
-				zap.Error(err))
+				mlog.Time("cached_expiration", p.expiration),
+				mlog.Int64("sts_success", p.stsSuccessCount.Load()),
+				mlog.Int64("sts_failure", p.stsFailureCount.Load()),
+				mlog.Err(err))
 			return p.credentials, nil
 		}
 		mlog.Warn(context.TODO(), "HuaweiCloud credential provider: failed to create temporary access key",
-			zap.Int64("sts_success", p.stsSuccessCount.Load()),
-			zap.Int64("sts_failure", p.stsFailureCount.Load()),
-			zap.Error(err))
+			mlog.Int64("sts_success", p.stsSuccessCount.Load()),
+			mlog.Int64("sts_failure", p.stsFailureCount.Load()),
+			mlog.Err(err))
 		return minioCred.Value{}, errors.Wrap(err, "failed to create temporary access key")
 	}
 
@@ -231,14 +230,14 @@ func (p *HuaweiCredentialProvider) Retrieve() (minioCred.Value, error) {
 		p.lastFailedReloadTime = time.Now()
 		if p.hasValidCachedCredentials() {
 			mlog.Warn(context.TODO(), "HuaweiCloud credential provider: STS returned incomplete credentials, falling back to cached credentials",
-				zap.Time("cached_expiration", p.expiration),
-				zap.Int64("sts_success", p.stsSuccessCount.Load()),
-				zap.Int64("sts_failure", p.stsFailureCount.Load()))
+				mlog.Time("cached_expiration", p.expiration),
+				mlog.Int64("sts_success", p.stsSuccessCount.Load()),
+				mlog.Int64("sts_failure", p.stsFailureCount.Load()))
 			return p.credentials, nil
 		}
 		mlog.Warn(context.TODO(), "HuaweiCloud credential provider: STS returned nil or incomplete credentials",
-			zap.Int64("sts_success", p.stsSuccessCount.Load()),
-			zap.Int64("sts_failure", p.stsFailureCount.Load()))
+			mlog.Int64("sts_success", p.stsSuccessCount.Load()),
+			mlog.Int64("sts_failure", p.stsFailureCount.Load()))
 		return minioCred.Value{}, errors.New("incomplete credential returned from Huawei Cloud (missing ak/sk/token)")
 	}
 
@@ -246,10 +245,10 @@ func (p *HuaweiCredentialProvider) Retrieve() (minioCred.Value, error) {
 	if err != nil {
 		p.stsFailureCount.Add(1)
 		mlog.Warn(context.TODO(), "HuaweiCloud credential provider: failed to parse expiration time",
-			zap.String("expires_at", response.Credential.ExpiresAt),
-			zap.Int64("sts_success", p.stsSuccessCount.Load()),
-			zap.Int64("sts_failure", p.stsFailureCount.Load()),
-			zap.Error(err))
+			mlog.String("expires_at", response.Credential.ExpiresAt),
+			mlog.Int64("sts_success", p.stsSuccessCount.Load()),
+			mlog.Int64("sts_failure", p.stsFailureCount.Load()),
+			mlog.Err(err))
 		p.lastReloadFailed = true
 		p.lastFailedReloadTime = time.Now()
 		if p.hasValidCachedCredentials() {
@@ -276,9 +275,9 @@ func (p *HuaweiCredentialProvider) Retrieve() (minioCred.Value, error) {
 		akPrefix = akPrefix[:4] + "***"
 	}
 	mlog.Info(context.TODO(), "HuaweiCloud credential provider: credentials retrieved successfully",
-		zap.String("ak_prefix", akPrefix), zap.Time("expiration", expiration),
-		zap.Int64("sts_success", p.stsSuccessCount.Load()),
-		zap.Int64("sts_failure", p.stsFailureCount.Load()))
+		mlog.String("ak_prefix", akPrefix), mlog.Time("expiration", expiration),
+		mlog.Int64("sts_success", p.stsSuccessCount.Load()),
+		mlog.Int64("sts_failure", p.stsFailureCount.Load()))
 
 	return credentials, nil
 }

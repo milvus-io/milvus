@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -103,7 +102,7 @@ func (t *createCollectionTask) validate(ctx context.Context) error {
 
 	maxCollectionNum := Params.QuotaConfig.MaxCollectionNum.GetAsInt()
 	if totalCollections >= maxCollectionNum {
-		mlog.Warn(ctx, "unable to create collection because the number of collection has reached the limit", zap.Int("max_collection_num", maxCollectionNum))
+		mlog.Warn(ctx, "unable to create collection because the number of collection has reached the limit", mlog.Int("max_collection_num", maxCollectionNum))
 		return merr.WrapErrCollectionNumLimitExceeded(t.Req.GetDbName(), maxCollectionNum)
 	}
 
@@ -121,19 +120,19 @@ func (t *createCollectionTask) checkMaxCollectionsPerDB(ctx context.Context, db2
 
 	collIDs, ok := db2CollIDs[t.header.DbId]
 	if !ok {
-		mlog.Warn(ctx, "can not found DB ID", zap.String("collection", t.Req.GetCollectionName()), zap.String("dbName", t.Req.GetDbName()))
+		mlog.Warn(ctx, "can not found DB ID", mlog.String("collection", t.Req.GetCollectionName()), mlog.FieldDbName(t.Req.GetDbName()))
 		return merr.WrapErrDatabaseNotFound(t.Req.GetDbName(), "failed to create collection")
 	}
 
 	db, err := t.meta.GetDatabaseByName(ctx, t.Req.GetDbName(), typeutil.MaxTimestamp)
 	if err != nil {
-		mlog.Warn(ctx, "can not found DB ID", zap.String("collection", t.Req.GetCollectionName()), zap.String("dbName", t.Req.GetDbName()))
+		mlog.Warn(ctx, "can not found DB ID", mlog.String("collection", t.Req.GetCollectionName()), mlog.FieldDbName(t.Req.GetDbName()))
 		return merr.WrapErrDatabaseNotFound(t.Req.GetDbName(), "failed to create collection")
 	}
 
 	check := func(maxColNumPerDB int) error {
 		if len(collIDs) >= maxColNumPerDB {
-			mlog.Warn(ctx, "unable to create collection because the number of collection has reached the limit in DB", zap.Int("maxCollectionNumPerDB", maxColNumPerDB))
+			mlog.Warn(ctx, "unable to create collection because the number of collection has reached the limit in DB", mlog.Int("maxCollectionNumPerDB", maxColNumPerDB))
 			return merr.WrapErrCollectionNumLimitExceeded(t.Req.GetDbName(), maxColNumPerDB)
 		}
 		return nil
@@ -143,8 +142,8 @@ func (t *createCollectionTask) checkMaxCollectionsPerDB(ctx context.Context, db2
 	if maxColNumPerDBStr != "" {
 		maxColNumPerDB, err := strconv.Atoi(maxColNumPerDBStr)
 		if err != nil {
-			mlog.Warn(ctx, "parse value of property fail", zap.String("key", common.DatabaseMaxCollectionsKey),
-				zap.String("value", maxColNumPerDBStr), zap.Error(err))
+			mlog.Warn(ctx, "parse value of property fail", mlog.String("key", common.DatabaseMaxCollectionsKey),
+				mlog.String("value", maxColNumPerDBStr), mlog.Err(err))
 			return fmt.Errorf("parse value of property fail, key:%s, value:%s", common.DatabaseMaxCollectionsKey, maxColNumPerDBStr)
 		}
 		return check(maxColNumPerDB)
@@ -156,7 +155,7 @@ func (t *createCollectionTask) checkMaxCollectionsPerDB(ctx context.Context, db2
 
 func checkGeometryDefaultValue(value string) error {
 	if _, err := common.ConvertWKTToWKB(value); err != nil {
-		mlog.Warn(context.TODO(), "invalid default value for geometry field", zap.Error(err))
+		mlog.Warn(context.TODO(), "invalid default value for geometry field", mlog.Err(err))
 		return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
 	}
 
@@ -173,9 +172,9 @@ func hasSystemFields(schema *schemapb.CollectionSchema, systemFields []string) b
 }
 
 func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schemapb.CollectionSchema) error {
-	mlog.With(zap.String("CollectionName", t.Req.CollectionName))
+	mlog.With(mlog.String("CollectionName", t.Req.CollectionName))
 	if t.Req.GetCollectionName() != schema.GetName() {
-		mlog.Error(ctx, "collection name not matches schema name", zap.String("SchemaName", schema.Name))
+		mlog.Error(ctx, "collection name not matches schema name", mlog.String("SchemaName", schema.Name))
 		msg := fmt.Sprintf("collection name = %s, schema.Name=%s", t.Req.GetCollectionName(), schema.Name)
 		return merr.WrapErrParameterInvalid("collection name matches schema name", "don't match", msg)
 	}
@@ -218,10 +217,10 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 
 	if hasSystemFields(schema, []string{RowIDFieldName, TimeStampFieldName, MetaFieldName, NamespaceFieldName}) {
 		mlog.Error(ctx, "schema contains system field",
-			zap.String("RowIDFieldName", RowIDFieldName),
-			zap.String("TimeStampFieldName", TimeStampFieldName),
-			zap.String("MetaFieldName", MetaFieldName),
-			zap.String("NamespaceFieldName", NamespaceFieldName))
+			mlog.String("RowIDFieldName", RowIDFieldName),
+			mlog.String("TimeStampFieldName", TimeStampFieldName),
+			mlog.String("MetaFieldName", MetaFieldName),
+			mlog.String("NamespaceFieldName", NamespaceFieldName))
 		msg := fmt.Sprintf("schema contains system field: %s, %s, %s, %s", RowIDFieldName, TimeStampFieldName, MetaFieldName, NamespaceFieldName)
 		return merr.WrapErrParameterInvalid("schema don't contains system field", "contains", msg)
 	}
@@ -340,7 +339,7 @@ func (t *createCollectionTask) appendDynamicField(ctx context.Context, schema *s
 				},
 			},
 		})
-		mlog.Info(ctx, "append dynamic field", zap.String("collection", schema.Name))
+		mlog.Info(ctx, "append dynamic field", mlog.String("collection", schema.Name))
 	}
 }
 
@@ -402,8 +401,8 @@ func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema 
 		Value: "true",
 	})
 	mlog.Info(ctx, "added namespace field",
-		zap.String("collectionName", t.Req.CollectionName),
-		zap.String("fieldName", common.NamespaceFieldName))
+		mlog.FieldCollectionName(t.Req.CollectionName),
+		mlog.String("fieldName", common.NamespaceFieldName))
 	return nil
 }
 
@@ -438,12 +437,12 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	preservedDynamicFieldID := int64(-1)
 	preservedNamespaceFieldID := int64(-1)
 	if t.preserveFieldID {
-		mlog.Info(ctx, "preserve field IDs from schema during create collection", zap.String("collection", t.Req.CollectionName))
+		mlog.Info(ctx, "preserve field IDs from schema during create collection", mlog.String("collection", t.Req.CollectionName))
 		fields := make([]*schemapb.FieldSchema, 0)
 		// filter out system fields
 		for _, field := range t.body.CollectionSchema.Fields {
 			if field.Name != RowIDFieldName && field.GetFieldID() == 0 {
-				mlog.Info(ctx, "field id 0 is not allowed when preserve field ids", zap.String("field", field.Name))
+				mlog.Info(ctx, "field id 0 is not allowed when preserve field ids", mlog.String("field", field.Name))
 				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field id 0 is not allowed when preserve field ids, field: %s", field.Name))
 			}
 
@@ -556,9 +555,9 @@ func (t *createCollectionTask) assignPartitionIDs(ctx context.Context) error {
 	t.body.PartitionNames = partitionNames
 
 	mlog.Info(ctx, "assign partitions when create collection",
-		zap.String("collectionName", t.Req.GetCollectionName()),
-		zap.Int64s("partitionIds", t.header.PartitionIds),
-		zap.Strings("partitionNames", t.body.PartitionNames))
+		mlog.FieldCollectionName(t.Req.GetCollectionName()),
+		mlog.Int64s("partitionIds", t.header.PartitionIds),
+		mlog.Strings("partitionNames", t.body.PartitionNames))
 	return nil
 }
 
@@ -630,7 +629,7 @@ func (t *createCollectionTask) validateIfCollectionExists(ctx context.Context) e
 	// Check if the collection name duplicates an alias.
 	if _, err := t.meta.DescribeAlias(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp); err == nil {
 		err2 := fmt.Errorf("collection name [%s] conflicts with an existing alias, please choose a unique name", t.Req.GetCollectionName())
-		mlog.Warn(ctx, "create collection failed", zap.String("database", t.Req.GetDbName()), zap.Error(err2))
+		mlog.Warn(ctx, "create collection failed", mlog.String("database", t.Req.GetDbName()), mlog.Err(err2))
 		return err2
 	}
 

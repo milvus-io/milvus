@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -59,14 +58,14 @@ func (s *HelloMilvusSuite) TestRangeSearchIP() {
 
 	err = merr.Error(createCollectionStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.Err(err))
 	}
 
-	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
-	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	hashKeys := integration.GenerateHashKeys(rowNum)
@@ -98,7 +97,7 @@ func (s *HelloMilvusSuite) TestRangeSearchIP() {
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
-		mlog.Info(context.TODO(), "ShowSegments result", zap.String("segment", segment.String()))
+		mlog.Info(context.TODO(), "ShowSegments result", mlog.String("segment", segment.String()))
 	}
 
 	// create index
@@ -111,7 +110,7 @@ func (s *HelloMilvusSuite) TestRangeSearchIP() {
 	s.NoError(err)
 	err = merr.Error(createIndexStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "createIndexStatus fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "createIndexStatus fail reason", mlog.Err(err))
 	}
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
@@ -123,7 +122,7 @@ func (s *HelloMilvusSuite) TestRangeSearchIP() {
 	s.NoError(err)
 	err = merr.Error(loadStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "LoadCollection fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "LoadCollection fail reason", mlog.Err(err))
 	}
 	s.WaitForLoad(ctx, collectionName)
 	// search
@@ -145,7 +144,7 @@ func (s *HelloMilvusSuite) TestRangeSearchIP() {
 
 	err = merr.Error(searchResult.GetStatus())
 	if err != nil {
-		mlog.Warn(context.TODO(), "searchResult fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "searchResult fail reason", mlog.Err(err))
 	}
 	s.NoError(err)
 
@@ -158,7 +157,7 @@ func (s *HelloMilvusSuite) TestRangeSearchIP() {
 
 	err = merr.Error(searchResult.GetStatus())
 	if err != nil {
-		mlog.Warn(context.TODO(), "searchResult fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "searchResult fail reason", mlog.Err(err))
 	}
 	s.NoError(err)
 
@@ -172,7 +171,7 @@ func (s *HelloMilvusSuite) TestRangeSearchIP() {
 
 	err = merr.Error(searchResult.GetStatus())
 	if err != nil {
-		mlog.Warn(context.TODO(), "searchResult fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "searchResult fail reason", mlog.Err(err))
 	}
 	s.Error(err)
 
@@ -208,14 +207,14 @@ func (s *HelloMilvusSuite) TestRangeSearchL2() {
 
 	err = merr.Error(createCollectionStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.Err(err))
 	}
 
-	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
-	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	hashKeys := integration.GenerateHashKeys(rowNum)
@@ -247,7 +246,7 @@ func (s *HelloMilvusSuite) TestRangeSearchL2() {
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
-		mlog.Info(context.TODO(), "ShowSegments result", zap.String("segment", segment.String()))
+		mlog.Info(context.TODO(), "ShowSegments result", mlog.String("segment", segment.String()))
 	}
 
 	// create index
@@ -260,7 +259,7 @@ func (s *HelloMilvusSuite) TestRangeSearchL2() {
 	s.NoError(err)
 	err = merr.Error(createIndexStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "createIndexStatus fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "createIndexStatus fail reason", mlog.Err(err))
 	}
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
@@ -272,7 +271,7 @@ func (s *HelloMilvusSuite) TestRangeSearchL2() {
 	s.NoError(err)
 	err = merr.Error(loadStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "LoadCollection fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "LoadCollection fail reason", mlog.Err(err))
 	}
 	s.WaitForLoad(ctx, collectionName)
 	// search
@@ -293,7 +292,7 @@ func (s *HelloMilvusSuite) TestRangeSearchL2() {
 
 	err = merr.Error(searchResult.GetStatus())
 	if err != nil {
-		mlog.Warn(context.TODO(), "searchResult fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "searchResult fail reason", mlog.Err(err))
 	}
 	s.NoError(err)
 
@@ -306,7 +305,7 @@ func (s *HelloMilvusSuite) TestRangeSearchL2() {
 
 	err = merr.Error(searchResult.GetStatus())
 	if err != nil {
-		mlog.Warn(context.TODO(), "searchResult fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "searchResult fail reason", mlog.Err(err))
 	}
 	s.NoError(err)
 
@@ -320,7 +319,7 @@ func (s *HelloMilvusSuite) TestRangeSearchL2() {
 
 	err = merr.Error(searchResult.GetStatus())
 	if err != nil {
-		mlog.Warn(context.TODO(), "searchResult fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "searchResult fail reason", mlog.Err(err))
 	}
 	s.Error(err)
 
@@ -433,7 +432,7 @@ func (s *HelloMilvusSuite) TestRangeSearchElementLevelL2() {
 	searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 	s.NoError(err)
 	if err := merr.Error(searchResult.GetStatus()); err != nil {
-		mlog.Warn(context.TODO(), "element-level range search with radius only failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "element-level range search with radius only failed", mlog.Err(err))
 	}
 	s.NoError(merr.Error(searchResult.GetStatus()))
 
@@ -445,7 +444,7 @@ func (s *HelloMilvusSuite) TestRangeSearchElementLevelL2() {
 	searchResult, err = c.MilvusClient.Search(ctx, searchReq)
 	s.NoError(err)
 	if err := merr.Error(searchResult.GetStatus()); err != nil {
-		mlog.Warn(context.TODO(), "element-level range search with radius+range_filter failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "element-level range search with radius+range_filter failed", mlog.Err(err))
 	}
 	s.NoError(merr.Error(searchResult.GetStatus()))
 

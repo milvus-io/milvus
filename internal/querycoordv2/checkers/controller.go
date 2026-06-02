@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -143,7 +142,7 @@ func (controller *CheckerController) startChecker(ctx context.Context, checker u
 		select {
 		case <-ctx.Done():
 			mlog.Info(ctx, "Checker stopped",
-				zap.String("type", checker.String()))
+				mlog.String("type", checker.String()))
 			return
 
 		case <-ticker.C:

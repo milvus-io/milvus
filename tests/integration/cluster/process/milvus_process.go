@@ -35,7 +35,6 @@ import (
 	"github.com/cockroachdb/errors"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials"
@@ -196,9 +195,9 @@ func (mp *MilvusProcess) initCmd() {
 	mp.cmd.Stdout = os.Stdout
 	mp.cmd.Stderr = os.Stderr
 	mp.SetLogger(mp.Logger().With(
-		zap.String("role", mp.role),
-		zap.String("rootPath", mp.rootPath),
-		zap.Int64("nodeID", mp.nodeID),
+		mlog.String("role", mp.role),
+		mlog.String("rootPath", mp.rootPath),
+		mlog.FieldNodeID(mp.nodeID),
 		mlog.FieldComponent(MilvusClusterComponent),
 	))
 }
@@ -215,7 +214,7 @@ func (mp *MilvusProcess) background() (err error) {
 		if err != nil {
 			mp.Logger().Warn(context.TODO(),
 
-				"subprocess fail to exit", zap.Error(err))
+				"subprocess fail to exit", mlog.Err(err))
 		}
 	}()
 
@@ -226,11 +225,11 @@ func (mp *MilvusProcess) background() (err error) {
 	if err := mp.cmd.Start(); err != nil {
 		mp.Logger().Warn(context.TODO(),
 
-			"failed to start milvus process", zap.Error(err))
+			"failed to start milvus process", mlog.Err(err))
 		return errors.Wrap(err, "when start process")
 	}
 
-	mp.SetLogger(mp.Logger().With(zap.Int("pid", mp.cmd.Process.Pid)))
+	mp.SetLogger(mp.Logger().With(mlog.Int("pid", mp.cmd.Process.Pid)))
 	mp.Logger().Info(context.TODO(),
 
 		"Milvus process started")
@@ -250,14 +249,14 @@ func (mp *MilvusProcess) background() (err error) {
 			// graceful stop
 			mp.Logger().Info(context.TODO(),
 
-				"Graceful stop Milvus process", zap.Int("pid", mp.cmd.Process.Pid))
+				"Graceful stop Milvus process", mlog.Int("pid", mp.cmd.Process.Pid))
 			gracefulStop = nil
 			mp.cmd.Process.Signal(syscall.SIGTERM)
 		case <-forceStop:
 			// force stop
 			mp.Logger().Info(context.TODO(),
 
-				"Force stop Milvus process", zap.Int("pid", mp.cmd.Process.Pid))
+				"Force stop Milvus process", mlog.Int("pid", mp.cmd.Process.Pid))
 			mp.cmd.Process.Signal(syscall.SIGKILL)
 			forceStop = nil
 		case <-waitFuture.Done():
@@ -320,7 +319,7 @@ func (mp *MilvusProcess) Stop(gracefulTimeout ...time.Duration) error {
 	defer func() {
 		mp.Logger().Info(context.TODO(),
 
-			"stop milvus process done", zap.Duration("cost", time.Since(now)))
+			"stop milvus process done", mlog.Duration("cost", time.Since(now)))
 	}()
 
 	select {
@@ -341,7 +340,7 @@ func (mp *MilvusProcess) ForceStop() error {
 	defer func() {
 		mp.Logger().Info(context.TODO(),
 
-			"force stop milvus process done", zap.Duration("cost", time.Since(now)))
+			"force stop milvus process done", mlog.Duration("cost", time.Since(now)))
 	}()
 
 	mp.graceful.Close()
@@ -366,16 +365,16 @@ func (mp *MilvusProcess) GetClient(ctx context.Context) (io.Closer, error) {
 // asyncGetClient gets the client for the Milvus process in the background.
 func (mp *MilvusProcess) asyncGetClient(ctx context.Context) {
 	defer mp.wg.Done()
-	logger := mp.Logger().With(zap.String("operation", "Init"))
+	logger := mp.Logger().With(mlog.String("operation", "Init"))
 	now := time.Now()
 
 	c, err := mp.getClient(ctx)
 	if err != nil {
-		logger.Warn(ctx, "failed to get client", zap.Error(err))
+		logger.Warn(ctx, "failed to get client", mlog.Err(err))
 		return
 	}
 
-	logger.Info(ctx, "client get", zap.Duration("cost", time.Since(now)))
+	logger.Info(ctx, "client get", mlog.Duration("cost", time.Since(now)))
 	now = time.Now()
 
 	ticker := time.NewTicker(20 * time.Millisecond)
@@ -394,26 +393,26 @@ func (mp *MilvusProcess) asyncGetClient(ctx context.Context) {
 	}
 
 	mp.client.Set(c)
-	logger.Info(ctx, "client set", zap.Duration("cost", time.Since(now)))
+	logger.Info(ctx, "client set", mlog.Duration("cost", time.Since(now)))
 }
 
 // asyncGetClient gets the client for the Milvus process in the background.
 func (mp *MilvusProcess) getClient(ctx context.Context) (nodeClient, error) {
-	logger := mp.Logger().With(zap.String("operation", "Init"))
+	logger := mp.Logger().With(mlog.String("operation", "Init"))
 	now := time.Now()
 
 	addr, err := mp.GetAddress(ctx)
 	if err != nil {
 		return nil, err
 	}
-	logger.Info(ctx, "get address from etcd", zap.Duration("cost", time.Since(now)))
+	logger.Info(ctx, "get address from etcd", mlog.Duration("cost", time.Since(now)))
 	now = time.Now()
 
 	conn, err := mp.getGrpcClient(ctx, addr)
 	if err != nil {
 		return nil, err
 	}
-	logger.Info(ctx, "create grpc client", zap.Duration("cost", time.Since(now)))
+	logger.Info(ctx, "create grpc client", mlog.Duration("cost", time.Since(now)))
 	switch mp.role {
 	case "mixcoord":
 		return newMixCoordClient(conn), nil

@@ -20,7 +20,6 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -73,9 +72,9 @@ func UpdateCopyJobState(state datapb.CopySegmentJobState) UpdateCopySegmentJobAc
 			cleanupTs := tsoutil.ComposeTSByTime(cleanupTime, 0)
 			job.(*copySegmentJob).CleanupTs = cleanupTs
 			mlog.Info(context.TODO(), "set copy segment job cleanup ts",
-				zap.Int64("jobID", job.GetJobId()),
-				zap.Time("cleanupTime", cleanupTime),
-				zap.Uint64("cleanupTs", cleanupTs))
+				mlog.FieldJobID(job.GetJobId()),
+				mlog.Time("cleanupTime", cleanupTime),
+				mlog.Uint64("cleanupTs", cleanupTs))
 		}
 	}
 }

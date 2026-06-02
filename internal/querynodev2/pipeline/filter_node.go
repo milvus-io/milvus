@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"reflect"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
@@ -50,15 +48,15 @@ type filterNode struct {
 func (fNode *filterNode) Operate(in Msg) Msg {
 	if in == nil {
 		mlog.Debug(context.TODO(), "type assertion failed for Msg in filterNode because it's nil",
-			zap.String("name", fNode.Name()))
+			mlog.String("name", fNode.Name()))
 		return nil
 	}
 
 	streamMsgPack, ok := in.(*msgstream.MsgPack)
 	if !ok {
 		mlog.Warn(context.TODO(), "type assertion failed for MsgPack",
-			zap.String("msgType", reflect.TypeOf(in).Name()),
-			zap.String("name", fNode.Name()))
+			mlog.String("msgType", reflect.TypeOf(in).Name()),
+			mlog.String("name", fNode.Name()))
 		return nil
 	}
 
@@ -73,7 +71,7 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 	// Get collection from collection manager
 	collection := fNode.manager.Collection.Get(fNode.collectionID)
 	if collection == nil {
-		mlog.Fatal(context.TODO(), "collection not found in meta", zap.Int64("collectionID", fNode.collectionID))
+		mlog.Fatal(context.TODO(), "collection not found in meta", mlog.FieldCollectionID(fNode.collectionID))
 	}
 
 	out := &insertNodeMsg{
@@ -90,10 +88,10 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 		err := fNode.filtrate(collection, msg)
 		if err != nil {
 			mlog.Debug(context.TODO(), "filter invalid message",
-				zap.String("message type", msg.Type().String()),
-				zap.String("channel", fNode.channel),
-				zap.Int64("collectionID", fNode.collectionID),
-				zap.Error(err),
+				mlog.String("message type", msg.Type().String()),
+				mlog.String("channel", fNode.channel),
+				mlog.FieldCollectionID(fNode.collectionID),
+				mlog.Err(err),
 			)
 		} else {
 			out.append(msg)

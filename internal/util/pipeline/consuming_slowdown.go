@@ -23,7 +23,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -66,7 +65,7 @@ func newEmptyTimeTickSlowdowner(lastestMVCCTimeTickGetter LastestMVCCTimeTickGet
 func updateThresholdWithConfiguration() {
 	params := paramtable.Get()
 	interval := params.StreamingCfg.DelegatorEmptyTimeTickMaxFilterInterval.GetAsDurationByParse()
-	mlog.Info(context.TODO(), "delegator empty time tick max filter interval initialized", zap.Duration("interval", interval))
+	mlog.Info(context.TODO(), "delegator empty time tick max filter interval initialized", mlog.Duration("interval", interval))
 	thresholdUpdateIntervalMs.Store(interval.Milliseconds())
 	params.Watch(params.StreamingCfg.DelegatorEmptyTimeTickMaxFilterInterval.Key, config.NewHandler(
 		params.StreamingCfg.DelegatorEmptyTimeTickMaxFilterInterval.Key,
@@ -74,8 +73,8 @@ func updateThresholdWithConfiguration() {
 			previousInterval := thresholdUpdateIntervalMs.Load()
 			newInterval := params.StreamingCfg.DelegatorEmptyTimeTickMaxFilterInterval.GetAsDurationByParse()
 			mlog.Info(context.TODO(), "delegator empty time tick max filter interval updated",
-				zap.Duration("previousInterval", time.Duration(previousInterval)),
-				zap.Duration("interval", newInterval))
+				mlog.Duration("previousInterval", time.Duration(previousInterval)),
+				mlog.Duration("interval", newInterval))
 			thresholdUpdateIntervalMs.Store(newInterval.Milliseconds())
 		},
 	))

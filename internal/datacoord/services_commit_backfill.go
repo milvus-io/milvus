@@ -21,8 +21,6 @@ import (
 	"sort"
 	"strconv"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -44,14 +42,14 @@ import (
 // broadcaster ensures serialization against compaction and other DDL-like
 // operations on the same collection.
 func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBackfillResultRequest) (*datapb.CommitBackfillResultResponse, error) {
-	log := mlog.With(zap.String("resultPath", req.GetResultPath()))
+	log := mlog.With(mlog.String("resultPath", req.GetResultPath()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.CommitBackfillResultResponse{Status: merr.Status(err)}, nil
 	}
 
 	result, err := s.loadBackfillResult(ctx, req.GetResultPath())
 	if err != nil {
-		log.Warn(ctx, "CommitBackfillResult failed to load result JSON", zap.Error(err))
+		log.Warn(ctx, "CommitBackfillResult failed to load result JSON", mlog.Err(err))
 		return &datapb.CommitBackfillResultResponse{Status: merr.Status(err)}, nil
 	}
 
@@ -72,7 +70,7 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 
 	coll, err := s.broker.DescribeCollectionInternal(ctx, result.CollectionID)
 	if err != nil {
-		log.Warn(ctx, "CommitBackfillResult failed to describe collection", zap.Error(err), zap.Int64("collectionID", result.CollectionID))
+		log.Warn(ctx, "CommitBackfillResult failed to describe collection", mlog.Err(err), mlog.FieldCollectionID(result.CollectionID))
 		return &datapb.CommitBackfillResultResponse{Status: merr.Status(err)}, nil
 	}
 
@@ -93,7 +91,7 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 		batch := items[start:end]
 		if err := broadcastBackfillBatch(ctx, coll, result.CollectionID, channels, batch); err != nil {
 			log.Error(ctx, "CommitBackfillResult broadcast batch failed",
-				zap.Error(err), zap.Int("batchStart", start), zap.Int("batchEnd", end))
+				mlog.Err(err), mlog.Int("batchStart", start), mlog.Int("batchEnd", end))
 			lastErr = err
 			appendItemStatuses(&statuses, batch, false, err.Error())
 			continue
@@ -103,9 +101,9 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 
 	committed, failed := countStatuses(statuses)
 	log.Info(ctx, "CommitBackfillResult broadcast completed",
-		zap.Int32("total", total),
-		zap.Int32("committed", committed),
-		zap.Int32("failed", failed))
+		mlog.Int32("total", total),
+		mlog.Int32("committed", committed),
+		mlog.Int32("failed", failed))
 
 	// Top-level Success unless every broadcast failed -- partial failures are
 	// surfaced through per-segment statuses.

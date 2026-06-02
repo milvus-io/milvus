@@ -20,7 +20,6 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -87,7 +86,7 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 		}
 		collection := c.meta.GetCollection(ctx, collectionID)
 		if collection == nil {
-			mlog.Warn(ctx, "collection released during check leader", zap.Int64("collection", collectionID))
+			mlog.Warn(ctx, "collection released during check leader", mlog.Int64("collection", collectionID))
 			continue
 		}
 
@@ -128,9 +127,9 @@ func (c *LeaderChecker) findNeedSyncPartitionStats(ctx context.Context, replica 
 			partStatsToUpdate[partID] = psVersionInTarget
 		} else {
 			mlog.RatedDebug(ctx, rate.Limit(60), "no need to update part stats for partition",
-				zap.Int64("partitionID", partID),
-				zap.Int64("psVersionInLView", psVersionInLView),
-				zap.Int64("psVersionInTarget", psVersionInTarget))
+				mlog.FieldPartitionID(partID),
+				mlog.Int64("psVersionInLView", psVersionInLView),
+				mlog.Int64("psVersionInTarget", psVersionInTarget))
 		}
 	}
 	if len(partStatsToUpdate) > 0 {
@@ -150,8 +149,8 @@ func (c *LeaderChecker) findNeedSyncPartitionStats(ctx context.Context, replica 
 		t.SetReason("sync partition stats versions")
 		ret = append(ret, t)
 		mlog.Debug(ctx, "Created leader actions for partitionStats",
-			zap.Int64("collectionID", leaderView.CollectionID),
-			zap.Any("action", action.String()))
+			mlog.FieldCollectionID(leaderView.CollectionID),
+			mlog.Any("action", action.String()))
 	}
 
 	return ret
@@ -159,10 +158,10 @@ func (c *LeaderChecker) findNeedSyncPartitionStats(ctx context.Context, replica 
 
 func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica *meta.Replica, leaderView *meta.LeaderView, dist []*meta.Segment) []task.Task {
 	log := mlog.With(
-		zap.Int64("collectionID", leaderView.CollectionID),
-		zap.Int64("replica", replica.GetID()),
-		zap.String("channel", leaderView.Channel),
-		zap.Int64("leaderViewID", leaderView.ID),
+		mlog.FieldCollectionID(leaderView.CollectionID),
+		mlog.Int64("replica", replica.GetID()),
+		mlog.String("channel", leaderView.Channel),
+		mlog.Int64("leaderViewID", leaderView.ID),
 	)
 	ret := make([]task.Task, 0)
 
@@ -180,8 +179,8 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica *met
 		version, ok := leaderView.Segments[s.GetID()]
 		if !ok || version.GetNodeID() != s.Node {
 			log.RatedDebug(ctx, rate.Limit(10), "leader checker append a segment to set",
-				zap.Int64("segmentID", s.GetID()),
-				zap.Int64("nodeID", s.Node))
+				mlog.FieldSegmentID(s.GetID()),
+				mlog.FieldNodeID(s.Node))
 
 			action := task.NewLeaderAction(leaderView.ID, s.Node, task.ActionTypeGrow, s.GetInsertChannel(), s.GetID(), time.Now().UnixNano())
 			t := task.NewLeaderSegmentTask(
@@ -204,10 +203,10 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica *met
 
 func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica *meta.Replica, leaderView *meta.LeaderView, dists []*meta.Segment) []task.Task {
 	log := mlog.With(
-		zap.Int64("collectionID", leaderView.CollectionID),
-		zap.Int64("replica", replica.GetID()),
-		zap.String("channel", leaderView.Channel),
-		zap.Int64("leaderViewID", leaderView.ID),
+		mlog.FieldCollectionID(leaderView.CollectionID),
+		mlog.Int64("replica", replica.GetID()),
+		mlog.String("channel", leaderView.Channel),
+		mlog.Int64("leaderViewID", leaderView.ID),
 	)
 
 	ret := make([]task.Task, 0)
@@ -224,8 +223,8 @@ func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica *me
 			continue
 		}
 		log.Debug(ctx, "leader checker append a segment to remove",
-			zap.Int64("segmentID", sid),
-			zap.Int64("nodeID", s.NodeID))
+			mlog.FieldSegmentID(sid),
+			mlog.FieldNodeID(s.NodeID))
 		// reduce leader action won't be execute on worker, in  order to remove segment from delegator success even when worker done
 		// set workerID to leader view's node
 		action := task.NewLeaderAction(leaderView.ID, leaderView.ID, task.ActionTypeReduce, leaderView.Channel, sid, 0)

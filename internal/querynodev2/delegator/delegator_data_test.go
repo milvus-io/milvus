@@ -33,7 +33,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -1518,7 +1517,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		}
 		_, err = s.delegator.buildBM25IDF(context.Background(), req)
 		s.Error(err)
-		mlog.Info(context.TODO(), "test", zap.Error(err))
+		mlog.Info(context.TODO(), "test", mlog.Err(err))
 	})
 
 	s.Run("set avgdl failed", func() {

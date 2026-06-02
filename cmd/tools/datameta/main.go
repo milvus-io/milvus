@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -33,14 +32,14 @@ func main() {
 
 	etcdCli, err := etcd.GetRemoteEtcdClient([]string{*etcdAddr})
 	if err != nil {
-		mlog.Fatal(context.TODO(), "failed to connect to etcd", zap.Error(err))
+		mlog.Fatal(context.TODO(), "failed to connect to etcd", mlog.Err(err))
 	}
 
 	etcdkv := etcdkv.NewEtcdKV(etcdCli, *rootPath)
 
 	keys, values, err := etcdkv.LoadWithPrefix(context.TODO(), "/")
 	if err != nil {
-		mlog.Fatal(context.TODO(), "failed to list ", zap.Error(err))
+		mlog.Fatal(context.TODO(), "failed to list ", mlog.Err(err))
 	}
 	for i := range keys {
 		info := &datapb.SegmentInfo{}

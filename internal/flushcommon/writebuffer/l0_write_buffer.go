@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -14,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -125,7 +124,7 @@ func (wb *l0WriteBuffer) getL0SegmentID(partitionID int64, startPos *msgpb.MsgPo
 			return err
 		})
 		if err != nil {
-			log.Error(context.TODO(), "failed to allocate l0 segment ID", zap.Error(err))
+			log.Error(context.TODO(), "failed to allocate l0 segment ID", mlog.Err(err))
 			panic(err)
 		}
 		wb.l0Segments[partitionID] = segmentID
@@ -140,9 +139,9 @@ func (wb *l0WriteBuffer) getL0SegmentID(partitionID int64, startPos *msgpb.MsgPo
 			Level:         datapb.SegmentLevel_L0,
 		}, func(_ *datapb.SegmentInfo) pkoracle.PkStat { return pkoracle.NewBloomFilterSet() }, metacache.NoneBm25StatsFactory, metacache.SetStartPosRecorded(false))
 		log.Info(context.TODO(), "Add a new level zero segment",
-			zap.Int64("segmentID", segmentID),
-			zap.String("level", datapb.SegmentLevel_L0.String()),
-			zap.Any("start position", startPos),
+			mlog.FieldSegmentID(segmentID),
+			mlog.String("level", datapb.SegmentLevel_L0.String()),
+			mlog.Any("start position", startPos),
 		)
 	}
 	return segmentID

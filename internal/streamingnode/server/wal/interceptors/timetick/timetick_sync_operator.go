@@ -5,7 +5,6 @@ import (
 	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
@@ -31,7 +30,7 @@ func newTimeTickSyncOperator(param *interceptors.InterceptorBuildParam) *timeTic
 	return &timeTickSyncOperator{
 		logger: resource.Resource().Logger().With(
 			mlog.FieldComponent("timetick-sync"),
-			zap.Any("pchannel", param.ChannelInfo),
+			mlog.Any("pchannel", param.ChannelInfo),
 		),
 		interceptorBuildParam: param,
 		ackManager:            ack.NewAckManager(param.LastTimeTickMessage.TimeTick(), param.LastConfirmedMessageID, metrics),
@@ -78,7 +77,7 @@ func (impl *timeTickSyncOperator) Sync(ctx context.Context, persisted bool) {
 	// Sync operation cannot trigger until isReady.
 	wal, err := impl.interceptorBuildParam.WAL.GetWithContext(ctx)
 	if err != nil {
-		impl.logger.Warn(ctx, "unreachable: get wal failed", zap.Error(err))
+		impl.logger.Warn(ctx, "unreachable: get wal failed", mlog.Err(err))
 		return
 	}
 
@@ -90,7 +89,7 @@ func (impl *timeTickSyncOperator) Sync(ctx context.Context, persisted bool) {
 		return appendResult.MessageID, nil
 	}, persisted)
 	if err != nil {
-		impl.logger.Warn(ctx, "send time tick sync message failed", zap.Error(err))
+		impl.logger.Warn(ctx, "send time tick sync message failed", mlog.Err(err))
 		if s := status.AsStreamingError(err); s.IsFenced() || s.IsOnShutdown() {
 			impl.walShutdownOrFenced.Store(true)
 		}
@@ -177,7 +176,7 @@ func (impl *timeTickSyncOperator) syncAcknowledgedDetails(ctx context.Context) {
 	// Sync up and get last confirmed timestamp.
 	ackDetails, err := impl.ackManager.SyncAndGetAcknowledged(ctx)
 	if err != nil {
-		impl.logger.Warn(ctx, "sync timestamp ack manager failed", zap.Error(err))
+		impl.logger.Warn(ctx, "sync timestamp ack manager failed", mlog.Err(err))
 	}
 
 	// Add ack details to ackDetails.

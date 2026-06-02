@@ -19,8 +19,6 @@ package metacache
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
@@ -190,7 +188,7 @@ func NewSegmentInfo(info *datapb.SegmentInfo, bfs pkoracle.PkStat, bm25Stats *Se
 				Format:  group.GetFormat(),
 			})
 		}
-		mlog.Info(context.TODO(), "recover split info", zap.Int64("segmentID", info.GetID()), zap.Stringers("columnGroup", currentSplit))
+		mlog.Info(context.TODO(), "recover split info", mlog.FieldSegmentID(info.GetID()), mlog.Stringers("columnGroup", currentSplit))
 	}
 	return &SegmentInfo{
 		segmentID:        info.GetID(),

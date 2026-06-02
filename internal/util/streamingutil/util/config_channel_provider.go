@@ -4,8 +4,6 @@ import (
 	"context"
 	"sort"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -96,7 +94,7 @@ func (p *ConfigChannelProvider) onConfigChange() {
 	if len(newChannels) > 0 {
 		sort.Strings(newChannels)
 		mlog.Info(context.TODO(), "ConfigChannelProvider detected new channels",
-			zap.Strings("newChannels", newChannels))
+			mlog.Strings("newChannels", newChannels))
 		select {
 		case p.ch <- newChannels:
 		case <-p.notifier.Context().Done():

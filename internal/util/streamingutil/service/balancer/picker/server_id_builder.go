@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/balancer/base"
 
@@ -38,7 +37,7 @@ func (b *serverIDPickerBuilder) Build(info bbalancer.PickerBuildInfo) balancer.P
 	for sc, scInfo := range info.ReadySCs {
 		serverID := attributes.GetServerID(scInfo.Address.BalancerAttributes)
 		if serverID == nil {
-			mlog.Warn(context.TODO(), "no server id found in subConn", zap.String("address", scInfo.Address.Addr))
+			mlog.Warn(context.TODO(), "no server id found in subConn", mlog.String("address", scInfo.Address.Addr))
 			continue
 		}
 
@@ -54,7 +53,7 @@ func (b *serverIDPickerBuilder) Build(info bbalancer.PickerBuildInfo) balancer.P
 	for sc, scInfo := range info.UnReadySCs {
 		serverID := attributes.GetServerID(scInfo.Address.BalancerAttributes)
 		if serverID == nil {
-			mlog.Warn(context.TODO(), "no server id found in subConn", zap.String("address", scInfo.Address.Addr))
+			mlog.Warn(context.TODO(), "no server id found in subConn", mlog.String("address", scInfo.Address.Addr))
 			continue
 		}
 		info := subConnInfo{

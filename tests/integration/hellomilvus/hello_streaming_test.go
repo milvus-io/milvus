@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -68,13 +67,13 @@ func (s *HelloMilvusSuite) TestHelloStreaming() {
 	})
 	err = merr.CheckRPCCall(createCollectionStatus, err)
 	s.NoError(err)
-	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 
 	// show collection
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	err = merr.CheckRPCCall(showCollectionsResp, err)
 	s.NoError(err)
-	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	// insert
 	pkColumn := integration.NewInt64FieldData(integration.Int64Field, rowNum)

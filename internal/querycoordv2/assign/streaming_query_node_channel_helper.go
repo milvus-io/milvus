@@ -19,8 +19,6 @@ package assign
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
@@ -73,7 +71,7 @@ func filterSQNIfStreamingServiceEnabled(nodes []int64) []int64 {
 			}
 		}
 		if len(unexpectedNodes) > 0 {
-			mlog.Warn(context.TODO(), "unexpected streaming querynode found when enable streaming service", zap.Int64s("unexpectedNodes", unexpectedNodes))
+			mlog.Warn(context.TODO(), "unexpected streaming querynode found when enable streaming service", mlog.Int64s("unexpectedNodes", unexpectedNodes))
 		}
 		return expectedSQNs
 	}

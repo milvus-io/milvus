@@ -9,7 +9,6 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -128,7 +127,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 		var int64PkValue int64
 		err := binary.Read(reader, common.Endian, &int64PkValue)
 		if err != nil {
-			mlog.Warn(context.TODO(), "binary read blob value failed", zap.Error(err))
+			mlog.Warn(context.TODO(), "binary read blob value failed", mlog.Err(err))
 			return nil, err
 		}
 		pks[i] = storage.NewInt64PrimaryKey(int64PkValue)

@@ -32,7 +32,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
@@ -341,8 +340,8 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 	return func(gCtx *gin.Context) {
 		req := newReq()
 		if err := gCtx.ShouldBindBodyWith(req, binding.JSON); err != nil {
-			mlog.Warn(context.TODO(), "high level restful api, read parameters from request body fail", zap.Error(err),
-				zap.Any("url", gCtx.Request.URL.Path))
+			mlog.Warn(context.TODO(), "high level restful api, read parameters from request body fail", mlog.Err(err),
+				mlog.Any("url", gCtx.Request.URL.Path))
 			if _, ok := err.(validator.ValidationErrors); ok {
 				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
@@ -383,7 +382,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 		mlog.With().
 			Debug(ctx,
 				"high level restful api, read parameters from request body, then start to handle.",
-				zap.Any("url", gCtx.Request.URL.Path))
+				mlog.Any("url", gCtx.Request.URL.Path))
 
 		resp, err := v2(ctx, gCtx, req, dbName)
 		methodTag, ok := routeToMethod[gCtx.FullPath()]
@@ -451,7 +450,7 @@ func wrapperTraceLog(v2 handlerFuncV2) handlerFuncV2 {
 			if err != nil {
 				mlog.With().
 					Info(ctx,
-						"trace info: all, error", zap.Error(err))
+						"trace info: all, error", mlog.Err(err))
 			} else {
 				mlog.With().
 					Info(ctx,
@@ -513,7 +512,7 @@ func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, ch
 	if checkLimit {
 		_, err := CheckLimiter(ctx, req, pxy)
 		if err != nil {
-			mlog.Warn(ctx, "high level restful api, fail to check limiter", zap.Error(err), zap.String("method", fullMethod))
+			mlog.Warn(ctx, "high level restful api, fail to check limiter", mlog.Err(err), mlog.String("method", fullMethod))
 			hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(merr.ErrHTTPRateLimit), nil, ginCtx.FullPath(), hookutil.ActionAuthorize)
 			HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrHTTPRateLimit),
@@ -553,7 +552,7 @@ func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, ch
 	if err != nil {
 		mlog.With().
 			Warn(ctx,
-				"high level restful api, grpc call failed", zap.Error(err))
+				"high level restful api, grpc call failed", mlog.Err(err))
 		if !ignoreErr {
 			HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		}
@@ -619,7 +618,7 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 	if !ok {
 		mlog.With().
 			Warn(ctx,
-				"high level restful api, get primary field from collection schema fail", zap.Any("collection schema", coll.Schema), zap.Any("request", anyReq))
+				"high level restful api, get primary field from collection schema fail", mlog.Any("collection schema", coll.Schema), mlog.Any("request", anyReq))
 	} else {
 		autoID = primaryField.AutoID
 	}
@@ -1175,7 +1174,7 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	if err != nil {
 		mlog.With().
 			Warn(ctx,
-				"high level restful api, query with consistency_level invalid", zap.Error(err))
+				"high level restful api, query with consistency_level invalid", mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded, err:" + err.Error(),
@@ -1200,7 +1199,7 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		if err != nil {
 			mlog.With().
 				Warn(ctx,
-					"high level restful api, fail to deal with query result", zap.Any("response", resp), zap.Error(err))
+					"high level restful api, fail to deal with query result", mlog.Any("response", resp), mlog.Err(err))
 			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 				HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
@@ -1254,7 +1253,7 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 	if err != nil {
 		mlog.With().
 			Warn(ctx,
-				"high level restful api, query with consistency_level invalid", zap.Error(err))
+				"high level restful api, query with consistency_level invalid", mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded, err:" + err.Error(),
@@ -1272,7 +1271,7 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 		if err != nil {
 			mlog.With().
 				Warn(ctx,
-					"high level restful api, fail to deal with get result", zap.Any("response", resp), zap.Error(err))
+					"high level restful api, fail to deal with get result", mlog.Any("response", resp), mlog.Err(err))
 			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 				HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
@@ -1359,7 +1358,7 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	if err != nil {
 		mlog.With().
 			Warn(ctx,
-				"high level restful api, fail to deal with insert data", zap.Error(err), zap.String("body", string(body.([]byte))))
+				"high level restful api, fail to deal with insert data", mlog.Err(err), mlog.String("body", string(body.([]byte))))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
@@ -1372,7 +1371,7 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	if err != nil {
 		mlog.With().
 			Warn(ctx,
-				"high level restful api, fail to deal with insert data", zap.Any("data", httpReq.Data), zap.Error(err))
+				"high level restful api, fail to deal with insert data", mlog.Any("data", httpReq.Data), mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
@@ -1447,7 +1446,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	if err != nil {
 		mlog.With().
 			Warn(ctx,
-				"high level restful api, fail to deal with upsert data", zap.Any("body", body), zap.Error(err))
+				"high level restful api, fail to deal with upsert data", mlog.Any("body", body), mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
@@ -1460,7 +1459,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	if err != nil {
 		mlog.With().
 			Warn(ctx,
-				"high level restful api, fail to deal with upsert data", zap.Any("data", httpReq.Data), zap.Error(err))
+				"high level restful api, fail to deal with upsert data", mlog.Any("data", httpReq.Data), mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
@@ -1630,7 +1629,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	if err != nil {
 		mlog.With().
 			Warn(ctx,
-				"high level restful api, search with consistency_level invalid", zap.Error(err))
+				"high level restful api, search with consistency_level invalid", mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded, err:" + err.Error(),
@@ -1705,7 +1704,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	if err != nil {
 		mlog.With().
 			Warn(ctx,
-				"high level restful api, generate SearchParams failed", zap.Error(err))
+				"high level restful api, generate SearchParams failed", mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: err.Error(),
@@ -1744,7 +1743,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		if err != nil {
 			mlog.With().
 				Warn(ctx,
-					"high level restful api, convert ids to schemapb.IDs failed", zap.Error(err))
+					"high level restful api, convert ids to schemapb.IDs failed", mlog.Err(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 				HTTPReturnMessage: merr.ErrParameterInvalid.Error() + ", error: " + err.Error(),
@@ -1768,7 +1767,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		if err != nil {
 			mlog.With().
 				Warn(ctx,
-					"high level restful api, search with vector invalid", zap.Error(err))
+					"high level restful api, search with vector invalid", mlog.Err(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 				HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
@@ -1823,7 +1822,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			if err != nil {
 				mlog.With().
 					Warn(ctx,
-						"high level restful api, fail to deal with search result", zap.Any("result", searchResp.Results), zap.Error(err))
+						"high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
 				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
@@ -1889,7 +1888,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	if err != nil {
 		mlog.With().
 			Warn(ctx,
-				"high level restful api, search with consistency_level invalid", zap.Error(err))
+				"high level restful api, search with consistency_level invalid", mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded, err:" + err.Error(),
@@ -1923,7 +1922,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		if err != nil {
 			mlog.With().
 				Warn(ctx,
-					"high level restful api, generate SearchParams failed", zap.Error(err))
+					"high level restful api, generate SearchParams failed", mlog.Err(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
@@ -1937,7 +1936,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		if err != nil {
 			mlog.With().
 				Warn(ctx,
-					"high level restful api, search with vector invalid", zap.Error(err))
+					"high level restful api, search with vector invalid", mlog.Err(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 				HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
@@ -1997,7 +1996,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			if err != nil {
 				mlog.With().
 					Warn(ctx,
-						"high level restful api, fail to deal with search result", zap.Any("result", searchResp.Results), zap.Error(err))
+						"high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
 				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
@@ -2028,7 +2027,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			"externalSource and externalSpec must be set under schema when creating an external collection")
 		mlog.With().
 			Warn(ctx,
-				"high level restful api, create external collection with top-level external config fail", zap.Error(err), zap.Any("request", anyReq))
+				"high level restful api, create external collection with top-level external config fail", mlog.Err(err), mlog.Any("request", anyReq))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: err.Error(),
@@ -2046,7 +2045,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				"external collection is not supported by quick create; provide schema.fields with externalField")
 			mlog.With().
 				Warn(ctx,
-					"high level restful api, quickly create external collection fail", zap.Error(err), zap.Any("request", anyReq))
+					"high level restful api, quickly create external collection fail", mlog.Err(err), mlog.Any("request", anyReq))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
@@ -2058,7 +2057,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				"functions are not supported for quickly create collection")
 			mlog.With().
 				Warn(ctx,
-					"high level restful api, quickly create collection fail", zap.Error(err), zap.Any("request", anyReq))
+					"high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
@@ -2071,7 +2070,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				"dimension is required for quickly create collection(default metric type: "+DefaultMetricType+")")
 			mlog.With().
 				Warn(ctx,
-					"high level restful api, quickly create collection fail", zap.Error(err), zap.Any("request", anyReq))
+					"high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
@@ -2095,7 +2094,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				"idType can only be [Int64, VarChar], default: Int64")
 			mlog.With().
 				Warn(ctx,
-					"high level restful api, quickly create collection fail", zap.Error(err), zap.Any("request", anyReq))
+					"high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
@@ -2114,7 +2113,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			if err != nil {
 				mlog.With().
 					Warn(ctx,
-						"high level restful api, parse enableDynamicField fail", zap.Error(err), zap.Any("request", anyReq))
+						"high level restful api, parse enableDynamicField fail", mlog.Err(err), mlog.Any("request", anyReq))
 				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(err),
 					HTTPReturnMessage: "parse enableDynamicField fail, err:" + err.Error(),
@@ -2186,7 +2185,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			if !ok {
 				mlog.With().
 					Warn(ctx,
-						"field's data type is invalid(case sensitive).", zap.Any("fieldDataType", field.DataType), zap.Any("field", field))
+						"field's data type is invalid(case sensitive).", mlog.Any("fieldDataType", field.DataType), mlog.Any("field", field))
 				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 					HTTPReturnMessage: merr.ErrParameterInvalid.Error() + ", data type " + field.DataType + " is invalid(case sensitive).",
@@ -2209,7 +2208,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			if err != nil {
 				mlog.With().
 					Warn(ctx,
-						"convert defaultValue fail", zap.Any("defaultValue", field.DefaultValue))
+						"convert defaultValue fail", mlog.Any("defaultValue", field.DefaultValue))
 				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(err),
 					HTTPReturnMessage: "convert defaultValue fail, err:" + err.Error(),
@@ -2220,7 +2219,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				if _, ok := schemapb.DataType_value[field.ElementDataType]; !ok {
 					mlog.With().
 						Warn(ctx,
-							"element's data type is invalid(case sensitive).", zap.Any("elementDataType", field.ElementDataType), zap.Any("field", field))
+							"element's data type is invalid(case sensitive).", mlog.Any("elementDataType", field.ElementDataType), mlog.Any("field", field))
 					HTTPAbortReturn(c, http.StatusOK, gin.H{
 						HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 						HTTPReturnMessage: merr.ErrParameterInvalid.Error() + ", element data type " + field.ElementDataType + " is invalid(case sensitive).",
@@ -2258,7 +2257,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				err := merr.WrapErrParameterInvalidMsg("duplicated field name: %s", structField.FieldName)
 				mlog.With().
 					Warn(ctx,
-						"high level restful api, create collection fail", zap.Error(err), zap.Any("request", anyReq))
+						"high level restful api, create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
 				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(err),
 					HTTPReturnMessage: err.Error(),
@@ -2270,7 +2269,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				mlog.With().
 					Warn(ctx,
 						"high level restful api, convert struct array field fail",
-						zap.String("structField", structField.FieldName), zap.Error(err))
+						mlog.String("structField", structField.FieldName), mlog.Err(err))
 				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(err),
 					HTTPReturnMessage: err.Error(),
@@ -2289,7 +2288,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	if err != nil {
 		mlog.With().
 			Warn(ctx,
-				"high level restful api, marshal collection schema fail", zap.Error(err), zap.Any("request", anyReq))
+				"high level restful api, marshal collection schema fail", mlog.Err(err), mlog.Any("request", anyReq))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrMarshalCollectionSchema),
 			HTTPReturnMessage: merr.ErrMarshalCollectionSchema.Error() + ", error: " + err.Error(),
@@ -2315,7 +2314,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				"consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded")
 			mlog.With().
 				Warn(ctx,
-					"high level restful api, create collection fail", zap.Error(err), zap.Any("request", anyReq))
+					"high level restful api, create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
@@ -2415,7 +2414,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 
 					// will not happen
 					Warn(ctx,
-						"high level restful api, convertToExtraParams fail", zap.Error(err), zap.Any("request", anyReq))
+						"high level restful api, convertToExtraParams fail", mlog.Err(err), mlog.Any("request", anyReq))
 				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(err),
 					HTTPReturnMessage: err.Error(),
@@ -3106,7 +3105,7 @@ func (h *HandlersV2) createIndex(ctx context.Context, c *gin.Context, anyReq any
 
 				// will not happen
 				Warn(ctx,
-					"high level restful api, convertToExtraParams fail", zap.Error(err), zap.Any("request", anyReq))
+					"high level restful api, convertToExtraParams fail", mlog.Err(err), mlog.Any("request", anyReq))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),

@@ -5,8 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -52,7 +50,7 @@ func NewTxnManager(pchannel types.PChannelInfo, uncommittedTxnBuilders map[messa
 	txnManager.SetLogger(resource.Resource().Logger().With(mlog.FieldComponent("txn-manager")))
 	txnManager.Logger().Info(context.TODO(),
 
-		"txn manager recovered with txn", zap.Int64s("txnIDs", sessionIDs))
+		"txn manager recovered with txn", mlog.Int64s("txnIDs", sessionIDs))
 	return txnManager
 }
 
@@ -146,7 +144,7 @@ func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
 	if len(ids) > 0 {
 		m.Logger().Info(context.TODO(),
 
-			"transaction interrupted", zap.String("vchannel", vchannel), zap.Int64s("txnIDs", ids))
+			"transaction interrupted", mlog.FieldVChannel(vchannel), mlog.Int64s("txnIDs", ids))
 	}
 	m.notifyRecoverDone()
 }
@@ -207,7 +205,7 @@ func (m *TxnManager) RollbackAllInFlightTransactions() {
 
 	m.Logger().Info(context.TODO(),
 
-		"Rolling back all in-flight transactions", zap.Int("sessionCount", len(m.sessions)))
+		"Rolling back all in-flight transactions", mlog.Int("sessionCount", len(m.sessions)))
 
 	ids := make([]int64, 0, len(m.sessions))
 	for txnID, session := range m.sessions {
@@ -220,7 +218,7 @@ func (m *TxnManager) RollbackAllInFlightTransactions() {
 	m.Logger().Info(context.TODO(),
 
 		"Rolled back in-flight transactions",
-		zap.Int64s("txnIDs", ids))
+		mlog.Int64s("txnIDs", ids))
 
 	// Signal GracefulClose if it's already waiting and all sessions are now cleared.
 	if len(m.sessions) == 0 && m.closed != nil {
@@ -243,7 +241,7 @@ func (m *TxnManager) GracefulClose(ctx context.Context) error {
 	}
 	m.Logger().Info(ctx,
 
-		"graceful close txn manager", zap.Int("activeTxnCount", len(m.sessions)))
+		"graceful close txn manager", mlog.Int("activeTxnCount", len(m.sessions)))
 	m.mu.Unlock()
 
 	select {

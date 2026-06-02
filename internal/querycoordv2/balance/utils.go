@@ -22,8 +22,6 @@ import (
 	"sort"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -64,26 +62,26 @@ func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeou
 		)
 		if err != nil {
 			mlog.Warn(ctx, "create segment task from plan failed",
-				zap.Int64("collection", p.Segment.GetCollectionID()),
-				zap.Int64("segmentID", p.Segment.GetID()),
-				zap.Int64("replica", p.Replica.GetID()),
-				zap.String("channel", p.Segment.GetInsertChannel()),
-				zap.Int64("from", p.From),
-				zap.Int64("to", p.To),
-				zap.Error(err),
+				mlog.Int64("collection", p.Segment.GetCollectionID()),
+				mlog.FieldSegmentID(p.Segment.GetID()),
+				mlog.Int64("replica", p.Replica.GetID()),
+				mlog.String("channel", p.Segment.GetInsertChannel()),
+				mlog.Int64("from", p.From),
+				mlog.Int64("to", p.To),
+				mlog.Err(err),
 			)
 			continue
 		}
 
 		mlog.Info(ctx, "create segment task",
-			zap.Int64("collection", p.Segment.GetCollectionID()),
-			zap.Int64("segmentID", p.Segment.GetID()),
-			zap.Int64("replica", p.Replica.GetID()),
-			zap.String("channel", p.Segment.GetInsertChannel()),
-			zap.String("level", p.Segment.GetLevel().String()),
-			zap.Int32("loadPriority", int32(p.LoadPriority)),
-			zap.Int64("from", p.From),
-			zap.Int64("to", p.To))
+			mlog.Int64("collection", p.Segment.GetCollectionID()),
+			mlog.FieldSegmentID(p.Segment.GetID()),
+			mlog.Int64("replica", p.Replica.GetID()),
+			mlog.String("channel", p.Segment.GetInsertChannel()),
+			mlog.String("level", p.Segment.GetLevel().String()),
+			mlog.Int32("loadPriority", int32(p.LoadPriority)),
+			mlog.Int64("from", p.From),
+			mlog.Int64("to", p.To))
 		if task.GetTaskType(t) == task.TaskTypeMove {
 			// from balance checker
 			t.SetPriority(task.TaskPriorityLow)
@@ -114,22 +112,22 @@ func CreateChannelTasksFromPlans(ctx context.Context, source task.Source, timeou
 		t, err := task.NewChannelTask(ctx, timeout, source, p.Channel.GetCollectionID(), p.Replica, actions...)
 		if err != nil {
 			mlog.Warn(ctx, "create channel task failed",
-				zap.Int64("collection", p.Channel.GetCollectionID()),
-				zap.Int64("replica", p.Replica.GetID()),
-				zap.String("channel", p.Channel.GetChannelName()),
-				zap.Int64("from", p.From),
-				zap.Int64("to", p.To),
-				zap.Error(err),
+				mlog.Int64("collection", p.Channel.GetCollectionID()),
+				mlog.Int64("replica", p.Replica.GetID()),
+				mlog.String("channel", p.Channel.GetChannelName()),
+				mlog.Int64("from", p.From),
+				mlog.Int64("to", p.To),
+				mlog.Err(err),
 			)
 			continue
 		}
 
 		mlog.Info(ctx, "create channel task",
-			zap.Int64("collection", p.Channel.GetCollectionID()),
-			zap.Int64("replica", p.Replica.GetID()),
-			zap.String("channel", p.Channel.GetChannelName()),
-			zap.Int64("from", p.From),
-			zap.Int64("to", p.To))
+			mlog.Int64("collection", p.Channel.GetCollectionID()),
+			mlog.Int64("replica", p.Replica.GetID()),
+			mlog.String("channel", p.Channel.GetChannelName()),
+			mlog.Int64("from", p.From),
+			mlog.Int64("to", p.To))
 		t.SetPriority(task.TaskPriorityHigh)
 		ret = append(ret, t)
 	}

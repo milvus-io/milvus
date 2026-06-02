@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -130,12 +129,12 @@ func (s *VectorClusteringCompactionSuite) TestVectorClusteringCompaction() {
 			segCountBefore++
 		}
 		mlog.Info(context.TODO(), "segment before compaction",
-			zap.Int64("id", seg.ID),
-			zap.String("state", seg.GetState().String()),
-			zap.String("level", seg.GetLevel().String()),
-			zap.Int64("numOfRows", seg.GetNumOfRows()))
+			mlog.Int64("id", seg.ID),
+			mlog.String("state", seg.GetState().String()),
+			mlog.String("level", seg.GetLevel().String()),
+			mlog.Int64("numOfRows", seg.GetNumOfRows()))
 	}
-	mlog.Info(context.TODO(), "segments before compaction", zap.Int("count", segCountBefore))
+	mlog.Info(context.TODO(), "segments before compaction", mlog.Int("count", segCountBefore))
 
 	// reduce SegmentMaxSize to force clustering compaction
 	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
@@ -176,7 +175,7 @@ func (s *VectorClusteringCompactionSuite) TestVectorClusteringCompaction() {
 	compactResp, err := c.MilvusClient.ManualCompaction(ctx, compactReq)
 	s.NoError(err)
 	s.Greater(compactResp.GetCompactionID(), int64(0), "compaction should be triggered, got zero compactionID")
-	mlog.Info(context.TODO(), "compaction triggered", zap.Int64("compactionID", compactResp.GetCompactionID()))
+	mlog.Info(context.TODO(), "compaction triggered", mlog.Int64("compactionID", compactResp.GetCompactionID()))
 
 	// wait for compaction to complete with timeout
 	compacted := func() bool {
@@ -189,7 +188,7 @@ func (s *VectorClusteringCompactionSuite) TestVectorClusteringCompaction() {
 		if resp.GetState() == commonpb.CompactionState_Completed {
 			return true
 		}
-		mlog.Info(context.TODO(), "waiting for compaction", zap.String("state", resp.GetState().String()))
+		mlog.Info(context.TODO(), "waiting for compaction", mlog.String("state", resp.GetState().String()))
 		return false
 	}
 	for !compacted() {
@@ -235,14 +234,14 @@ func (s *VectorClusteringCompactionSuite) TestVectorClusteringCompaction() {
 			hasPartitionStats = true
 		}
 		mlog.Info(context.TODO(), "segment after compaction",
-			zap.Int64("id", segInfo.GetID()),
-			zap.String("state", segInfo.GetState().String()),
-			zap.String("level", segInfo.GetLevel().String()),
-			zap.Int64("numOfRows", segInfo.GetNumOfRows()),
-			zap.Int64("partitionStatsVersion", segInfo.GetPartitionStatsVersion()))
+			mlog.Int64("id", segInfo.GetID()),
+			mlog.String("state", segInfo.GetState().String()),
+			mlog.String("level", segInfo.GetLevel().String()),
+			mlog.Int64("numOfRows", segInfo.GetNumOfRows()),
+			mlog.Int64("partitionStatsVersion", segInfo.GetPartitionStatsVersion()))
 	}
 	s.Equal(int64(rowNum), totalRows, "total row count should be unchanged after compaction")
-	mlog.Info(context.TODO(), "segments after compaction", zap.Int("count", segCountAfter))
+	mlog.Info(context.TODO(), "segments after compaction", mlog.Int("count", segCountAfter))
 
 	// verify 2: segment count changed (compaction merged segments)
 	s.NotEqual(segCountBefore, segCountAfter, "segment count should change after clustering compaction")

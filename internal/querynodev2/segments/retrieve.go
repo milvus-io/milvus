@@ -20,8 +20,6 @@ import (
 	"context"
 	"sync"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -65,18 +63,18 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 			countRet := result.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0]
 			if allRetrieveCount != countRet {
 				mlog.Debug(ctx, "count segment done with delete",
-					zap.Uint64("mvcc", req.GetReq().GetMvccTimestamp()),
-					zap.String("channel", s.LoadInfo().GetInsertChannel()),
-					zap.Int64("segmentID", s.ID()),
-					zap.Int64("allRetrieveCount", allRetrieveCount),
-					zap.Int64("countRet", countRet))
+					mlog.Uint64("mvcc", req.GetReq().GetMvccTimestamp()),
+					mlog.String("channel", s.LoadInfo().GetInsertChannel()),
+					mlog.FieldSegmentID(s.ID()),
+					mlog.Int64("allRetrieveCount", allRetrieveCount),
+					mlog.Int64("countRet", countRet))
 			} else {
 				mlog.Debug(ctx, "count segment done",
-					zap.Uint64("mvcc", req.GetReq().GetMvccTimestamp()),
-					zap.String("channel", s.LoadInfo().GetInsertChannel()),
-					zap.Int64("segmentID", s.ID()),
-					zap.Int64("allRetrieveCount", allRetrieveCount),
-					zap.Int64("countRet", countRet))
+					mlog.Uint64("mvcc", req.GetReq().GetMvccTimestamp()),
+					mlog.String("channel", s.LoadInfo().GetInsertChannel()),
+					mlog.FieldSegmentID(s.ID()),
+					mlog.Int64("allRetrieveCount", allRetrieveCount),
+					mlog.Int64("countRet", countRet))
 			}
 		}
 		resultCh <- RetrieveSegmentResult{
@@ -178,7 +176,7 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 	segIDs := req.GetSegmentIDs()
 	collID := req.Req.GetCollectionID()
 
-	mlog.Debug(ctx, "retrieve on segments", zap.Int64s("segmentIDs", segIDs), zap.Int64("collectionID", collID))
+	mlog.Debug(ctx, "retrieve on segments", mlog.Int64s("segmentIDs", segIDs), mlog.FieldCollectionID(collID))
 
 	if req.GetScope() == querypb.DataScope_Historical {
 		SegType = SegmentTypeSealed
@@ -204,7 +202,7 @@ func RetrieveStream(ctx context.Context, manager *Manager, plan *RetrievePlan, r
 
 	segIDs := req.GetSegmentIDs()
 	collID := req.Req.GetCollectionID()
-	mlog.Debug(ctx, "retrieve stream on segments", zap.Int64s("segmentIDs", segIDs), zap.Int64("collectionID", collID))
+	mlog.Debug(ctx, "retrieve stream on segments", mlog.Int64s("segmentIDs", segIDs), mlog.FieldCollectionID(collID))
 
 	if req.GetScope() == querypb.DataScope_Historical {
 		SegType = SegmentTypeSealed

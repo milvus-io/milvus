@@ -19,8 +19,6 @@ package pipeline
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -85,7 +83,7 @@ func (fm *fgManagerImpl) ClearFlowgraphs() {
 		value.GracefullyClose()
 		fm.flowgraphs.GetAndRemove(key)
 
-		mlog.Info(fm.ctx, "successfully dropped flowgraph", zap.String("vChannelName", key))
+		mlog.Info(fm.ctx, "successfully dropped flowgraph", mlog.String("vChannelName", key))
 		return true
 	})
 }
@@ -139,7 +137,7 @@ func (fm *fgManagerImpl) GetChannelsJSON(collectionID int64) string {
 
 	ret, err := json.Marshal(channels)
 	if err != nil {
-		mlog.Warn(fm.ctx, "failed to marshal channels", zap.Error(err))
+		mlog.Warn(fm.ctx, "failed to marshal channels", mlog.Err(err))
 		return ""
 	}
 	return string(ret)
@@ -173,7 +171,7 @@ func (fm *fgManagerImpl) GetSegmentsJSON(collectionID int64) string {
 
 	ret, err := json.Marshal(segments)
 	if err != nil {
-		mlog.Warn(fm.ctx, "failed to marshal segments", zap.Error(err))
+		mlog.Warn(fm.ctx, "failed to marshal segments", mlog.Err(err))
 		return ""
 	}
 	return string(ret)

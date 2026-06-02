@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -1013,7 +1012,7 @@ func Test_batchMultiSaveAndRemove(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		snapshot := mocks.NewTxnKV(t)
 		snapshot.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, kvs map[string]string) error {
-			mlog.Info(context.TODO(), "multi save", zap.Any("len", len(kvs)), zap.Any("saves", kvs))
+			mlog.Info(context.TODO(), "multi save", mlog.Any("len", len(kvs)), mlog.Any("saves", kvs))
 			return nil
 		})
 		snapshot.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(nil)

@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -85,7 +84,7 @@ func (nodeCtxManager *nodeCtxManager) Start() {
 	// tt checker start
 	if enableTtChecker {
 		manager := timerecord.GetCheckerManger("data-fgNode", nodeCtxTtInterval, func(list []string) {
-			mlog.Warn(context.TODO(), "some node(s) haven't received input", zap.Strings("list", list), zap.Duration("duration ", nodeCtxTtInterval))
+			mlog.Warn(context.TODO(), "some node(s) haven't received input", mlog.Strings("list", list), mlog.Duration("duration ", nodeCtxTtInterval))
 		})
 		for curNode != nil {
 			name := fmt.Sprintf("nodeCtxTtChecker-%s", curNode.node.Name())
@@ -176,8 +175,8 @@ func (nodeCtx *nodeCtx) Block() {
 		nodeCtx.blockMutex.Lock()
 		if time.Since(startTs) >= blockAllWait {
 			mlog.Warn(context.TODO(), "flow graph wait for long time",
-				zap.String("name", nodeCtx.node.Name()),
-				zap.Duration("wait time", time.Since(startTs)))
+				mlog.String("name", nodeCtx.node.Name()),
+				mlog.Duration("wait time", time.Since(startTs)))
 		}
 	}
 }
@@ -203,7 +202,7 @@ func (nodeCtx *nodeCtx) Close() {
 			if nodeCtx.checker != nil {
 				nodeCtx.checker.Close()
 			}
-			mlog.Debug(context.TODO(), "flow graph node closed", zap.String("nodeName", nodeCtx.node.Name()))
+			mlog.Debug(context.TODO(), "flow graph node closed", mlog.String("nodeName", nodeCtx.node.Name()))
 			nodeCtx = nodeCtx.downstream
 		}
 	}
@@ -263,7 +262,7 @@ func (node *BaseNode) IsValidInMsg(in []Msg) bool {
 	}
 
 	if len(in) != 1 {
-		mlog.Warn(context.TODO(), "Invalid operate message input", zap.Int("input length", len(in)))
+		mlog.Warn(context.TODO(), "Invalid operate message input", mlog.Int("input length", len(in)))
 		return false
 	}
 	return true

@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -60,7 +59,7 @@ func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val
 	if val.Kind() != reflect.Struct {
 		return
 	}
-	mlog.Debug(context.TODO(), "enter", zap.Any("variable", val.String()))
+	mlog.Debug(context.TODO(), "enter", mlog.Any("variable", val.String()))
 	for j := 0; j < val.NumField(); j++ {
 		subVal := val.Field(j)
 		tag := val.Type().Field(j).Tag
@@ -73,11 +72,11 @@ func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val
 			if strings.HasPrefix(item.DefaultValue, "\"") && strings.HasSuffix(item.DefaultValue, "\"") {
 				defaultValue = fmt.Sprintf("\"%s\"", defaultValue)
 			}
-			mlog.Debug(context.TODO(), "got key", zap.String("key", item.Key), zap.Any("value", defaultValue), zap.String("variable", val.Type().Field(j).Name))
+			mlog.Debug(context.TODO(), "got key", mlog.String("key", item.Key), mlog.Any("value", defaultValue), mlog.String("variable", val.Type().Field(j).Name))
 			*data = append(*data, DocContent{item.Key, defaultValue, item.Version, refreshable, item.Export, item.Doc})
 		case "paramtable.ParamGroup":
 			item := subVal.Interface().(paramtable.ParamGroup)
-			mlog.Debug(context.TODO(), "got key", zap.String("key", item.KeyPrefix), zap.String("variable", val.Type().Field(j).Name))
+			mlog.Debug(context.TODO(), "got key", mlog.String("key", item.KeyPrefix), mlog.String("variable", val.Type().Field(j).Name))
 			refreshable := tag.Get("refreshable")
 
 			// Sort group items to stablize the output order
@@ -89,7 +88,7 @@ func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val
 			sort.Strings(keys)
 			for _, key := range keys {
 				value := m[key]
-				mlog.Debug(context.TODO(), "got group entry", zap.String("key", key), zap.String("value", value))
+				mlog.Debug(context.TODO(), "got group entry", mlog.String("key", key), mlog.String("value", value))
 				*data = append(*data, DocContent{fmt.Sprintf("%s%s", item.KeyPrefix, key), quoteIfNeeded(value), item.Version, refreshable, item.Export, item.GetDoc(key)})
 			}
 		default:

@@ -3,8 +3,6 @@ package planparserv2
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -199,5 +197,5 @@ func ShowExpr(expr *planpb.Expr) {
 	v := NewShowExprVisitor()
 	js := v.VisitExpr(expr)
 	b, _ := json.Marshal(js)
-	mlog.Info(context.TODO(), "[ShowExpr]", zap.String("expr", string(b)))
+	mlog.Info(context.TODO(), "[ShowExpr]", mlog.String("expr", string(b)))
 }

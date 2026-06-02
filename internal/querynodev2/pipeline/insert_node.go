@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"sort"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
@@ -52,7 +50,7 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 	if err != nil {
 		err = fmt.Errorf("failed to get primary keys, err = %v", err)
 		mlog.Error(context.TODO(),
-			err.Error(), zap.Int64("collectionID", iNode.collectionID), zap.String("channel", iNode.channel))
+			err.Error(), mlog.FieldCollectionID(iNode.collectionID), mlog.String("channel", iNode.channel))
 		panic(err)
 	}
 	iData, ok := insertDatas[msg.SegmentID]
@@ -69,7 +67,7 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 	} else {
 		err := typeutil.MergeFieldData(iData.InsertRecord.FieldsData, insertRecord.FieldsData)
 		if err != nil {
-			mlog.Error(context.TODO(), "failed to merge field data", zap.String("channel", iNode.channel), zap.Error(err))
+			mlog.Error(context.TODO(), "failed to merge field data", mlog.String("channel", iNode.channel), mlog.Err(err))
 			panic(err)
 		}
 		iData.InsertRecord.NumRows += insertRecord.NumRows
@@ -82,7 +80,7 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 
 	pks, err := segments.GetPrimaryKeys(msg, collection.Schema())
 	if err != nil {
-		mlog.Error(context.TODO(), "failed to get primary keys from insert message", zap.Error(err))
+		mlog.Error(context.TODO(), "failed to get primary keys from insert message", mlog.Err(err))
 		panic(err)
 	}
 
@@ -90,11 +88,11 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 	iData.RowIDs = append(iData.RowIDs, msg.RowIDs...)
 	iData.Timestamps = append(iData.Timestamps, msg.Timestamps...)
 	mlog.Debug(context.TODO(), "pipeline fetch insert msg",
-		zap.Int64("collectionID", iNode.collectionID),
-		zap.Int64("segmentID", msg.SegmentID),
-		zap.Int("insertRowNum", len(pks)),
-		zap.Uint64("timestampMin", msg.BeginTimestamp),
-		zap.Uint64("timestampMax", msg.EndTimestamp))
+		mlog.FieldCollectionID(iNode.collectionID),
+		mlog.FieldSegmentID(msg.SegmentID),
+		mlog.Int("insertRowNum", len(pks)),
+		mlog.Uint64("timestampMin", msg.BeginTimestamp),
+		mlog.Uint64("timestampMax", msg.EndTimestamp))
 }
 
 // fillEmbeddingData is only used to handle old insert messages that were not embedded before WAL append.

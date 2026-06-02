@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -100,7 +99,7 @@ func (kv *ReliableWriteMetaKv) retryWithBackoff(ctx context.Context, fn func(ctx
 		case <-time.After(nextInterval):
 			kv.Logger().Warn(ctx,
 
-				"failed to persist operation, wait for retry...", zap.Duration("nextRetryInterval", nextInterval), zap.Error(err))
+				"failed to persist operation, wait for retry...", mlog.Duration("nextRetryInterval", nextInterval), mlog.Err(err))
 		}
 	}
 }

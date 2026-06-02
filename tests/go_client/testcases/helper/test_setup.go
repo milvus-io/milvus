@@ -72,7 +72,7 @@ func GetTEIModelDim() int {
 }
 
 func parseLogConfig() {
-	mlog.Info(context.TODO(), "Parser Log Level", zap.String("logLevel", *logLevel))
+	mlog.Info(context.TODO(), "Parser Log Level", mlog.String("logLevel", *logLevel))
 	switch *logLevel {
 	case "debug", "DEBUG", "Debug":
 		mlog.SetLevel(zap.DebugLevel)
@@ -91,7 +91,7 @@ func setup() {
 	mlog.Info(context.TODO(), "Start to setup all......")
 	flag.Parse()
 	parseLogConfig()
-	mlog.Info(context.TODO(), "Parser Milvus address", zap.String("address", *addr))
+	mlog.Info(context.TODO(), "Parser Milvus address", mlog.String("address", *addr))
 
 	// set default milvus client config
 	setDefaultClientConfig(&client.ClientConfig{Address: *addr})
@@ -104,7 +104,7 @@ func teardown() {
 	defer cancel()
 	mc, err := base.NewMilvusClient(ctx, &client.ClientConfig{Address: GetAddr(), Username: GetUser(), Password: GetPassword()})
 	if err != nil {
-		mlog.Error(context.TODO(), "teardown failed to connect milvus with error", zap.Error(err))
+		mlog.Error(context.TODO(), "teardown failed to connect milvus with error", mlog.Err(err))
 		return
 	}
 	defer mc.Close(ctx)
@@ -162,7 +162,7 @@ func AlterServerConfig(key, value string) (string, error) {
 		respBody, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("alter config failed (HTTP %d): %s", resp.StatusCode, string(respBody))
 	}
-	mlog.Info(context.TODO(), "AlterServerConfig", zap.String("key", key), zap.String("value", value), zap.String("prev", prev))
+	mlog.Info(context.TODO(), "AlterServerConfig", mlog.String("key", key), mlog.String("value", value), mlog.String("prev", prev))
 	return prev, nil
 }
 
@@ -201,7 +201,7 @@ func RunTests(m *testing.M) int {
 	setup()
 	code := m.Run()
 	if code != 0 {
-		mlog.Error(context.TODO(), "Tests failed and exited", zap.Int("code", code))
+		mlog.Error(context.TODO(), "Tests failed and exited", mlog.Int("code", code))
 	}
 	teardown()
 	return code

@@ -102,10 +102,10 @@ func (p *policy) Balance(currentLayout balancer.CurrentLayout) (layout balancer.
 			p.Logger().Debug(context.TODO(),
 
 				"vchannel fair policy rebalance result found",
-				zap.Stringers("reassignChannelIDs", reassignChannelIDs),
-				zap.Float64("current", snapshot.GlobalUnbalancedScore),
-				zap.Float64("greatest", greatestSnapshot.GlobalUnbalancedScore),
-				zap.Float64("tolerance", p.cfg.RebalanceTolerance),
+				mlog.Stringers("reassignChannelIDs", reassignChannelIDs),
+				mlog.Float64("current", snapshot.GlobalUnbalancedScore),
+				mlog.Float64("greatest", greatestSnapshot.GlobalUnbalancedScore),
+				mlog.Float64("tolerance", p.cfg.RebalanceTolerance),
 			)
 		}
 		return balancer.ExpectedLayout{
@@ -116,10 +116,10 @@ func (p *policy) Balance(currentLayout balancer.CurrentLayout) (layout balancer.
 		p.Logger().Debug(context.TODO(),
 
 			"vchannel fair policy rebalance result ignored with rebalance tolerance",
-			zap.Stringers("reassignChannelIDs", reassignChannelIDs),
-			zap.Float64("current", snapshot.GlobalUnbalancedScore),
-			zap.Float64("greatest", greatestSnapshot.GlobalUnbalancedScore),
-			zap.Float64("tolerance", p.cfg.RebalanceTolerance),
+			mlog.Stringers("reassignChannelIDs", reassignChannelIDs),
+			mlog.Float64("current", snapshot.GlobalUnbalancedScore),
+			mlog.Float64("greatest", greatestSnapshot.GlobalUnbalancedScore),
+			mlog.Float64("tolerance", p.cfg.RebalanceTolerance),
 		)
 	}
 	return balancer.ExpectedLayout{
@@ -134,11 +134,11 @@ func (p *policy) updatePolicyConfiguration() {
 	if err := newCfg.Validate(); err != nil {
 		p.Logger().Warn(context.TODO(),
 
-			"invalid new incoming vchannel fair policy config", zap.Any("new", newCfg))
+			"invalid new incoming vchannel fair policy config", mlog.Any("new", newCfg))
 	} else if p.cfg != newCfg {
 		p.Logger().Info(context.TODO(),
 
-			"vchannel fair policy config updated", zap.Any("old", p.cfg), zap.Any("new", newCfg))
+			"vchannel fair policy config updated", mlog.Any("old", p.cfg), mlog.Any("new", newCfg))
 		p.cfg = newCfg
 	}
 }

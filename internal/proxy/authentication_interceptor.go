@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -77,14 +76,14 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 		token := authStrArr[0]
 		rawToken, err := crypto.Base64Decode(token)
 		if err != nil {
-			mlog.Warn(ctx, "fail to decode the token", zap.Error(err))
+			mlog.Warn(ctx, "fail to decode the token", mlog.Err(err))
 			return nil, status.Error(codes.Unauthenticated, "invalid token format")
 		}
 
 		if !strings.Contains(rawToken, util.CredentialSeparator) {
 			user, err := VerifyAPIKey(rawToken)
 			if err != nil {
-				mlog.Warn(ctx, "fail to verify apikey", zap.Error(err))
+				mlog.Warn(ctx, "fail to verify apikey", mlog.Err(err))
 				return nil, status.Error(codes.Unauthenticated, "auth check failure, please check api key is correct")
 			}
 			metrics.UserRPCCounter.WithLabelValues(user).Inc()
@@ -96,7 +95,7 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 			// username+password authentication
 			username, password := parseMD(rawToken)
 			if !passwordVerify(ctx, username, password, privilege.GetPrivilegeCache()) {
-				mlog.Warn(ctx, "fail to verify password", zap.String("username", username))
+				mlog.Warn(ctx, "fail to verify password", mlog.String("username", username))
 				// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
 				return nil, status.Error(codes.Unauthenticated, "auth check failure, please check username and password are correct")
 			}

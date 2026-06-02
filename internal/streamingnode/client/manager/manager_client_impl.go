@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
@@ -223,7 +222,7 @@ func (c *managerClientImpl) getAllStreamingNodeStatus(ctx context.Context, state
 			defer mu.Unlock()
 
 			if err != nil {
-				mlog.Warn(ctx, "collect status failed, skip", zap.Int64("serverID", serverID), zap.Error(err))
+				mlog.Warn(ctx, "collect status failed, skip", mlog.Int64("serverID", serverID), mlog.Err(err))
 				return err
 			}
 			result[serverID] = &types.StreamingNodeStatus{
@@ -234,7 +233,7 @@ func (c *managerClientImpl) getAllStreamingNodeStatus(ctx context.Context, state
 				Metrics: types.NewStreamingNodeBalanceAttrsFromProto(resp.Metrics),
 				Err:     err,
 			}
-			mlog.Debug(ctx, "collect status success", zap.Int64("serverID", serverID), zap.Any("status", resp))
+			mlog.Debug(ctx, "collect status success", mlog.Int64("serverID", serverID), mlog.Any("status", resp))
 			return nil
 		})
 	}

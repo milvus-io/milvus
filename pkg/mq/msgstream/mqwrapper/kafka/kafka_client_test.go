@@ -12,7 +12,6 @@ import (
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
@@ -36,7 +35,7 @@ func TestMain(m *testing.M) {
 
 	broker := mockCluster.BootstrapServers()
 	Params.Save("kafka.brokerList", broker)
-	mlog.Info(context.TODO(), "start testing kafka broker", zap.String("address", broker))
+	mlog.Info(context.TODO(), "start testing kafka broker", mlog.String("address", broker))
 
 	exitCode := m.Run()
 	os.Exit(exitCode)
@@ -44,7 +43,7 @@ func TestMain(m *testing.M) {
 
 func getKafkaBrokerList() string {
 	brokerList := Params.KafkaCfg.Address.GetValue()
-	mlog.Info(context.TODO(), "get kafka broker list.", zap.String("address", brokerList))
+	mlog.Info(context.TODO(), "get kafka broker list.", mlog.String("address", brokerList))
 	return brokerList
 }
 
@@ -90,14 +89,14 @@ func Consume1(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, 
 				return
 			}
 
-			mlog.Info(ctx, "Consume1 RECV", zap.Any("v", BytesToInt(msg.Payload())))
+			mlog.Info(ctx, "Consume1 RECV", mlog.Any("v", BytesToInt(msg.Payload())))
 			consumer.Ack(msg)
 			(*total)++
 		}
 	}
 
 	c <- msg.ID()
-	mlog.Info(ctx, "Consume1 randomly RECV", zap.Any("number", cnt))
+	mlog.Info(ctx, "Consume1 randomly RECV", mlog.Any("number", cnt))
 	mlog.Info(ctx, "Consume1 done")
 }
 
@@ -118,7 +117,7 @@ func Consume2(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, 
 
 	mm := <-consumer.Chan()
 	consumer.Ack(mm)
-	mlog.Info(ctx, "skip the last received message", zap.Any("skip msg", mm.ID()))
+	mlog.Info(ctx, "skip the last received message", mlog.Any("skip msg", mm.ID()))
 
 	mlog.Info(ctx, "Consume2 start")
 	for {
@@ -131,7 +130,7 @@ func Consume2(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, 
 				return
 			}
 
-			mlog.Info(ctx, "Consume2 RECV", zap.Any("v", BytesToInt(msg.Payload())))
+			mlog.Info(ctx, "Consume2 RECV", mlog.Any("v", BytesToInt(msg.Payload())))
 			consumer.Ack(msg)
 			(*total)++
 		}
@@ -162,7 +161,7 @@ func Consume3(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, 
 
 			consumer.Ack(msg)
 			(*total)++
-			mlog.Info(ctx, "Consume3 RECV", zap.Any("v", BytesToInt(msg.Payload())), zap.Int("total", *total))
+			mlog.Info(ctx, "Consume3 RECV", mlog.Any("v", BytesToInt(msg.Payload())), mlog.Int("total", *total))
 		}
 	}
 }
@@ -196,7 +195,7 @@ func TestKafkaClient_ConsumeWithAck(t *testing.T) {
 	Consume1(ctx1, t, kc, topic, subName, c, &total1)
 
 	lastMsgID := <-c
-	mlog.Info(context.TODO(), "lastMsgID", zap.Any("lastMsgID", lastMsgID.(*KafkaID).MessageID))
+	mlog.Info(context.TODO(), "lastMsgID", mlog.Any("lastMsgID", lastMsgID.(*KafkaID).MessageID))
 
 	ctx2, cancel2 := context.WithTimeout(ctx, 3*time.Second)
 	Consume2(ctx2, t, kc, topic, subName, lastMsgID, &total2)

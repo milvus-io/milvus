@@ -25,7 +25,6 @@ import (
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/json"
@@ -100,16 +99,16 @@ func (csm *compactionTaskMeta) reloadFromKV() error {
 			task.PreAllocatedSegmentIDs == nil &&
 			task.GetType() != datapb.CompactionType_Level0DeleteCompaction {
 			mlog.Warn(csm.ctx, "PreAllocatedSegmentIDs is nil, mark the task as failed",
-				zap.Int64("taskID", task.GetPlanID()),
-				zap.String("type", task.GetType().String()),
-				zap.String("originalState", task.State.String()),
+				mlog.FieldTaskID(task.GetPlanID()),
+				mlog.String("type", task.GetType().String()),
+				mlog.String("originalState", task.State.String()),
 			)
 			task.State = datapb.CompactionTaskState_failed
 			task.FailReason = fmt.Sprintf("PreAllocatedSegmentIDs is nil, taskID: %v", task.GetPlanID())
 		}
 		csm.saveCompactionTaskMemory(task)
 	}
-	mlog.Info(csm.ctx, "DataCoord compactionTaskMeta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
+	mlog.Info(csm.ctx, "DataCoord compactionTaskMeta reloadFromKV done", mlog.Duration("duration", record.ElapseSpan()))
 	return nil
 }
 
@@ -165,7 +164,7 @@ func (csm *compactionTaskMeta) SaveCompactionTask(ctx context.Context, task *dat
 	csm.Lock()
 	defer csm.Unlock()
 	if err := csm.catalog.SaveCompactionTask(ctx, task); err != nil {
-		mlog.Error(ctx, "meta update: update compaction task fail", zap.Error(err))
+		mlog.Error(ctx, "meta update: update compaction task fail", mlog.Err(err))
 		return err
 	}
 	csm.saveCompactionTaskMemory(task)
@@ -185,7 +184,7 @@ func (csm *compactionTaskMeta) DropCompactionTask(ctx context.Context, task *dat
 	csm.Lock()
 	defer csm.Unlock()
 	if err := csm.catalog.DropCompactionTask(ctx, task); err != nil {
-		mlog.Error(ctx, "meta update: drop compaction task fail", zap.Int64("triggerID", task.TriggerID), zap.Int64("planID", task.PlanID), zap.Int64("collectionID", task.CollectionID), zap.Error(err))
+		mlog.Error(ctx, "meta update: drop compaction task fail", mlog.Int64("triggerID", task.TriggerID), mlog.Int64("planID", task.PlanID), mlog.FieldCollectionID(task.CollectionID), mlog.Err(err))
 		return err
 	}
 	_, triggerIDExist := csm.compactionTasks[task.TriggerID]

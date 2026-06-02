@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -171,9 +170,9 @@ func (writer *baseBinlogWriter) Finish() error {
 			return err
 		}
 		mlog.Debug(context.TODO(), "Binlog writer encrypted plain text",
-			zap.String("writer type", writer.binlogType.String()),
-			zap.Int("plain size", eventBuffer.Len()),
-			zap.Int("cipher size", len(encrypted)))
+			mlog.String("writer type", writer.binlogType.String()),
+			mlog.Int("plain size", eventBuffer.Len()),
+			mlog.Int("cipher size", len(encrypted)))
 		if err := binary.Write(writer.buffer, common.Endian, encrypted); err != nil {
 			return err
 		}

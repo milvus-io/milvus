@@ -22,10 +22,10 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -55,7 +55,7 @@ func (sd *shardDelegator) executeFilterStage(
 	filterResults, err := sd.executeSearchSubTasks(ctx, req, sealed, []SegmentEntry{}, sealedRowCount)
 	if err != nil {
 		log := sd.getLogger(ctx)
-		log.Warn(ctx, "Two-stage search: filter stage failed", zap.Error(err))
+		log.Warn(ctx, "Two-stage search: filter stage failed", mlog.Err(err))
 		return nil, err
 	}
 
@@ -115,8 +115,8 @@ func (sd *shardDelegator) twoStageSearch(
 	expectedSegments := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
 	if len(validCounts) != expectedSegments {
 		log.Debug(ctx, "Two-stage search: FilterValidCounts incomplete, falling back to normal search",
-			zap.Int("expected", expectedSegments),
-			zap.Int("got", len(validCounts)),
+			mlog.Int("expected", expectedSegments),
+			mlog.Int("got", len(validCounts)),
 		)
 		metrics.QueryNodeTwoStageSearchFallbackCount.WithLabelValues(nodeID, collectionID, "incomplete_filter_counts").Inc()
 		return nil, true, nil
@@ -125,8 +125,8 @@ func (sd *shardDelegator) twoStageSearch(
 	effectiveSegmentNum := optimizers.CalculateEffectiveSegmentNum(sd.queryHook, validCounts, req.GetReq().GetTopk())
 
 	log.Debug(ctx, "Two-stage search: filter stage completed",
-		zap.Int64s("validCounts", validCounts),
-		zap.Int("effectiveSegmentNum", effectiveSegmentNum),
+		mlog.Int64s("validCounts", validCounts),
+		mlog.Int("effectiveSegmentNum", effectiveSegmentNum),
 	)
 
 	// ==================== Optimize with actual stats ====================
@@ -134,7 +134,7 @@ func (sd *shardDelegator) twoStageSearch(
 	const isSecondStageSearch = true
 	optimizedReq, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch, sd.getVectorFieldDim)
 	if err != nil {
-		log.Warn(ctx, "Two-stage search: failed to optimize search params", zap.Error(err))
+		log.Warn(ctx, "Two-stage search: failed to optimize search params", mlog.Err(err))
 		return nil, false, err
 	}
 
@@ -148,10 +148,10 @@ func (sd *shardDelegator) twoStageSearch(
 	stage2Dur := float64(time.Since(stage2Start).Milliseconds())
 	metrics.QueryNodeTwoStageSearchLatency.WithLabelValues(nodeID, collectionID).Observe(stage2Dur)
 	if err != nil {
-		log.Warn(ctx, "Two-stage search: vector search stage failed", zap.Error(err))
+		log.Warn(ctx, "Two-stage search: vector search stage failed", mlog.Err(err))
 		return nil, false, err
 	}
 
-	log.Debug(ctx, "Two-stage search completed", zap.Int("results", len(results)))
+	log.Debug(ctx, "Two-stage search completed", mlog.Int("results", len(results)))
 	return results, false, nil
 }

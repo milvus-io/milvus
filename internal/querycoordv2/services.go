@@ -23,7 +23,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 
@@ -57,11 +56,11 @@ var (
 )
 
 func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-	mlog.Debug(ctx, "show collections request received", zap.Int64s("collections", req.GetCollectionIDs()))
+	mlog.Debug(ctx, "show collections request received", mlog.Int64s("collections", req.GetCollectionIDs()))
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to show collections"
 		mlog.Warn(ctx,
-			msg, zap.Error(err))
+			msg, mlog.Err(err))
 		return &querypb.ShowCollectionsResponse{
 			Status: merr.Status(errors.Wrap(err, msg)),
 		}, nil
@@ -85,7 +84,7 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 		QueryServiceAvailable: make([]bool, 0, len(collectionSet)),
 	}
 	for _, collectionID := range collections {
-		log := mlog.With(zap.Int64("collectionID", collectionID))
+		log := mlog.With(mlog.FieldCollectionID(collectionID))
 
 		collection := s.meta.GetCollection(ctx, collectionID)
 		percentage := s.meta.CalculateLoadPercentage(ctx, collectionID)
@@ -100,14 +99,14 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 			err := meta.GlobalFailedLoadCache.Get(collectionID)
 			if err != nil {
 				err = merr.WrapErrCollectionNotLoaded(collectionID, err.Error())
-				log.Warn(ctx, "show collection failed", zap.Error(err))
+				log.Warn(ctx, "show collection failed", mlog.Err(err))
 				return &querypb.ShowCollectionsResponse{
 					Status: merr.Status(err),
 				}, nil
 			}
 
 			err = merr.WrapErrCollectionNotLoaded(collectionID)
-			log.Warn(ctx, "show collection failed", zap.Error(err))
+			log.Warn(ctx, "show collection failed", mlog.Err(err))
 			return &querypb.ShowCollectionsResponse{
 				Status: merr.Status(err),
 			}, nil
@@ -131,15 +130,15 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 
 func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 	log := mlog.With(
-		zap.Int64("collectionID", req.GetCollectionID()),
+		mlog.FieldCollectionID(req.GetCollectionID()),
 	)
 
-	log.Info(ctx, "show partitions request received", zap.Int64s("partitions", req.GetPartitionIDs()))
+	log.Info(ctx, "show partitions request received", mlog.Int64s("partitions", req.GetPartitionIDs()))
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to show partitions"
 		log.Warn(ctx,
-			msg, zap.Error(err))
+			msg, mlog.Err(err))
 		return &querypb.ShowPartitionsResponse{
 			Status: merr.Status(errors.Wrap(err, msg)),
 		}, nil
@@ -163,14 +162,14 @@ func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartit
 			if err != nil {
 				partitionErr := merr.WrapErrPartitionNotLoaded(partitionID, err.Error())
 				status := merr.Status(partitionErr)
-				log.Warn(ctx, "show partition failed", zap.Error(partitionErr))
+				log.Warn(ctx, "show partition failed", mlog.Err(partitionErr))
 				return &querypb.ShowPartitionsResponse{
 					Status: status,
 				}, nil
 			}
 
 			err = merr.WrapErrPartitionNotLoaded(partitionID)
-			log.Warn(ctx, "show partition failed", zap.Error(err))
+			log.Warn(ctx, "show partition failed", mlog.Err(err))
 			return &querypb.ShowPartitionsResponse{
 				Status: merr.Status(err),
 			}, nil
@@ -198,21 +197,21 @@ func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartit
 
 func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
 	logger := mlog.With(
-		zap.Int64("dbID", req.GetDbID()),
-		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Int32("replicaNumber", req.GetReplicaNumber()),
-		zap.Strings("resourceGroups", req.GetResourceGroups()),
-		zap.Bool("refreshMode", req.GetRefresh()),
+		mlog.FieldDbID(req.GetDbID()),
+		mlog.FieldCollectionID(req.GetCollectionID()),
+		mlog.Int32("replicaNumber", req.GetReplicaNumber()),
+		mlog.Strings("resourceGroups", req.GetResourceGroups()),
+		mlog.Bool("refreshMode", req.GetRefresh()),
 	)
 
 	logger.Info(ctx, "load collection request received",
-		zap.Any("schema", req.Schema),
-		zap.Int64s("fieldIndexes", lo.Values(req.GetFieldIndexID())),
+		mlog.Any("schema", req.Schema),
+		mlog.Int64s("fieldIndexes", lo.Values(req.GetFieldIndexID())),
 	)
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel).Inc()
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		logger.Warn(ctx, "failed to load collection", zap.Error(err))
+		logger.Warn(ctx, "failed to load collection", mlog.Err(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
@@ -220,7 +219,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 	if req.GetRefresh() {
 		err := s.refreshCollection(ctx, req.GetCollectionID())
 		if err != nil {
-			logger.Warn(ctx, "failed to refresh collection", zap.Error(err))
+			logger.Warn(ctx, "failed to refresh collection", mlog.Err(err))
 			metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 			return merr.Status(err), nil
 		}
@@ -235,7 +234,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 			metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
 			return merr.Success(), nil
 		}
-		logger.Warn(ctx, "failed to load collection", zap.Error(err))
+		logger.Warn(ctx, "failed to load collection", mlog.Err(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
@@ -246,14 +245,14 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 }
 
 func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	logger := mlog.With(zap.Int64("collectionID", req.GetCollectionID()))
+	logger := mlog.With(mlog.FieldCollectionID(req.GetCollectionID()))
 
 	logger.Info(ctx, "release collection request received")
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("release-collection")
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		logger.Warn(ctx, "failed to release collection", zap.Error(err))
+		logger.Warn(ctx, "failed to release collection", mlog.Err(err))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
@@ -264,7 +263,7 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 			metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
 			return merr.Success(), nil
 		}
-		logger.Warn(ctx, "failed to release collection", zap.Error(err))
+		logger.Warn(ctx, "failed to release collection", mlog.Err(err))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
@@ -276,20 +275,20 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 
 func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
 	logger := mlog.With(
-		zap.Int64("dbID", req.GetDbID()),
-		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Int32("replicaNumber", req.GetReplicaNumber()),
-		zap.Int64s("partitions", req.GetPartitionIDs()),
-		zap.Strings("resourceGroups", req.GetResourceGroups()),
-		zap.Bool("refreshMode", req.GetRefresh()),
+		mlog.FieldDbID(req.GetDbID()),
+		mlog.FieldCollectionID(req.GetCollectionID()),
+		mlog.Int32("replicaNumber", req.GetReplicaNumber()),
+		mlog.Int64s("partitions", req.GetPartitionIDs()),
+		mlog.Strings("resourceGroups", req.GetResourceGroups()),
+		mlog.Bool("refreshMode", req.GetRefresh()),
 	)
 
 	logger.Info(ctx, "received load partitions request",
-		zap.Any("schema", req.Schema))
+		mlog.Any("schema", req.Schema))
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel).Inc()
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		logger.Warn(ctx, "failed to load partitions", zap.Error(err))
+		logger.Warn(ctx, "failed to load partitions", mlog.Err(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
@@ -298,7 +297,7 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 	if req.GetRefresh() {
 		err := s.refreshCollection(ctx, req.GetCollectionID())
 		if err != nil {
-			logger.Warn(ctx, "failed to refresh partitions", zap.Error(err))
+			logger.Warn(ctx, "failed to refresh partitions", mlog.Err(err))
 			metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 			return merr.Status(err), nil
 		}
@@ -313,7 +312,7 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 			metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
 			return merr.Success(), nil
 		}
-		logger.Warn(ctx, "failed to load partitions", zap.Error(err))
+		logger.Warn(ctx, "failed to load partitions", mlog.Err(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
@@ -324,22 +323,22 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 
 func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	logger := mlog.With(
-		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Int64s("partitionIDs", req.GetPartitionIDs()),
+		mlog.FieldCollectionID(req.GetCollectionID()),
+		mlog.Int64s("partitionIDs", req.GetPartitionIDs()),
 	)
 
 	logger.Info(ctx, "release partitions")
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		logger.Warn(ctx, "failed to release partitions", zap.Error(err))
+		logger.Warn(ctx, "failed to release partitions", mlog.Err(err))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
 	if len(req.GetPartitionIDs()) == 0 {
 		err := merr.WrapErrParameterInvalid("any partition", "empty partition list")
-		logger.Warn(ctx, "no partition to release", zap.Error(err))
+		logger.Warn(ctx, "no partition to release", mlog.Err(err))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
@@ -351,11 +350,11 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 			metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
 			return merr.Success(), nil
 		}
-		logger.Warn(ctx, "failed to release partitions", zap.Error(err))
+		logger.Warn(ctx, "failed to release partitions", mlog.Err(err))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
-	logger.Info(ctx, "release partitions done", zap.Bool("collectionReleased", collectionReleased))
+	logger.Info(ctx, "release partitions done", mlog.Bool("collectionReleased", collectionReleased))
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionID())
 	return merr.Success(), nil
@@ -363,15 +362,15 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 
 func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {
 	log := mlog.With(
-		zap.Int64("collectionID", req.GetCollectionID()),
+		mlog.FieldCollectionID(req.GetCollectionID()),
 	)
 
-	log.Info(ctx, "get partition states", zap.Int64s("partitions", req.GetPartitionIDs()))
+	log.Info(ctx, "get partition states", mlog.Int64s("partitions", req.GetPartitionIDs()))
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to get partition states"
 		log.Warn(ctx,
-			msg, zap.Error(err))
+			msg, mlog.Err(err))
 		return &querypb.GetPartitionStatesResponse{
 			Status: merr.Status(errors.Wrap(err, msg)),
 		}, nil
@@ -408,7 +407,7 @@ func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.GetPartiti
 			partition := s.meta.GetPartition(ctx, partitionID)
 			if partition == nil {
 				log.Warn(ctx,
-					msg, zap.Int64("partition", partitionID))
+					msg, mlog.Int64("partition", partitionID))
 				return notLoadResp, nil
 			}
 			state := querypb.PartitionState_PartialInMemory
@@ -435,15 +434,15 @@ func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.GetPartiti
 
 func (s *Server) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	log := mlog.With(
-		zap.Int64("collectionID", req.GetCollectionID()),
+		mlog.FieldCollectionID(req.GetCollectionID()),
 	)
 
-	log.Info(ctx, "get segment info", zap.Int64s("segments", req.GetSegmentIDs()))
+	log.Info(ctx, "get segment info", mlog.Int64s("segments", req.GetSegmentIDs()))
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to get segment info"
 		log.Warn(ctx,
-			msg, zap.Error(err))
+			msg, mlog.Err(err))
 		return &querypb.GetSegmentInfoResponse{
 			Status: merr.Status(errors.Wrap(err, msg)),
 		}, nil
@@ -459,7 +458,7 @@ func (s *Server) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegment
 				err := merr.WrapErrSegmentNotLoaded(segmentID)
 				msg := fmt.Sprintf("segment %v not found in any node", segmentID)
 				log.Warn(ctx,
-					msg, zap.Int64("segment", segmentID))
+					msg, mlog.Int64("segment", segmentID))
 				return &querypb.GetSegmentInfoResponse{
 					Status: merr.Status(errors.Wrap(err, msg)),
 				}, nil
@@ -478,8 +477,8 @@ func (s *Server) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegment
 
 func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncNewCreatedPartitionRequest) (*commonpb.Status, error) {
 	log := mlog.With(
-		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Int64("partitionID", req.GetPartitionID()),
+		mlog.FieldCollectionID(req.GetCollectionID()),
+		mlog.FieldPartitionID(req.GetPartitionID()),
 	)
 
 	log.Info(ctx, "received sync new created partition request")
@@ -487,7 +486,7 @@ func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 	failedMsg := "failed to sync new created partition"
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn(ctx,
-			failedMsg, zap.Error(err))
+			failedMsg, mlog.Err(err))
 		return merr.Status(err), nil
 	}
 
@@ -501,14 +500,14 @@ func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 		err := syncJob.PreExecute()
 		if err != nil {
 			log.Warn(ctx,
-				failedMsg, zap.Error(err))
+				failedMsg, mlog.Err(err))
 			syncJob.SetError(err)
 			return
 		}
 		err = syncJob.Execute()
 		if err != nil {
 			log.Warn(ctx,
-				failedMsg, zap.Error(err))
+				failedMsg, mlog.Err(err))
 			syncJob.SetError(err)
 			return
 		}
@@ -516,7 +515,7 @@ func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 	err := syncJob.Wait()
 	if err != nil {
 		log.Warn(ctx,
-			failedMsg, zap.Error(err))
+			failedMsg, mlog.Err(err))
 		return merr.Status(err), nil
 	}
 
@@ -580,12 +579,12 @@ func (s *Server) refreshCollection(ctx context.Context, collectionID int64) erro
 // 	defer cancel()
 
 // 	log := mlog.With(
-// 		zap.Int64("collectionID", collID),
-// 		zap.Int64s("partitionIDs", partIDs),
+// 		mlog.Int64("collectionID", collID),
+// 		mlog.Int64s("partitionIDs", partIDs),
 // 	)
 // 	if s.status.Load() != commonpb.StateCode_Healthy {
 // 		msg := "failed to refresh partitions"
-// 		log.Warn(msg, zap.Error(ErrNotHealthy))
+// 		log.Warn(msg, mlog.Err(ErrNotHealthy))
 // 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
 // 		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
 // 	}
@@ -603,7 +602,7 @@ func (s *Server) refreshCollection(ctx context.Context, collectionID int64) erro
 // 	// Pull the latest target.
 // 	readyCh, err := s.targetObserver.UpdateNextTarget(collID)
 // 	if err != nil {
-// 		log.Warn("failed to update next target", zap.Error(err))
+// 		log.Warn("failed to update next target", mlog.Err(err))
 // 		return &commonpb.Status{
 // 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 // 			Reason:    err.Error(),
@@ -628,7 +627,7 @@ func (s *Server) refreshCollection(ctx context.Context, collectionID int64) erro
 func (s *Server) isStoppingNode(ctx context.Context, nodeID int64) error {
 	isStopping, err := s.nodeMgr.IsStoppingNode(nodeID)
 	if err != nil {
-		mlog.Warn(ctx, "fail to check whether the node is stopping", zap.Int64("node_id", nodeID), zap.Error(err))
+		mlog.Warn(ctx, "fail to check whether the node is stopping", mlog.FieldNodeID(nodeID), mlog.Err(err))
 		return err
 	}
 	if isStopping {
@@ -642,18 +641,18 @@ func (s *Server) isStoppingNode(ctx context.Context, nodeID int64) error {
 
 func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
 	log := mlog.With(
-		zap.Int64("collectionID", req.GetCollectionID()),
+		mlog.FieldCollectionID(req.GetCollectionID()),
 	)
 
 	log.Info(ctx, "load balance request received",
-		zap.Int64s("source", req.GetSourceNodeIDs()),
-		zap.Int64s("dest", req.GetDstNodeIDs()),
-		zap.Int64s("segments", req.GetSealedSegmentIDs()))
+		mlog.Int64s("source", req.GetSourceNodeIDs()),
+		mlog.Int64s("dest", req.GetDstNodeIDs()),
+		mlog.Int64s("segments", req.GetSealedSegmentIDs()))
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to load balance"
 		log.Warn(ctx,
-			msg, zap.Error(err))
+			msg, mlog.Err(err))
 		return merr.Status(errors.Wrap(err, msg)), nil
 	}
 
@@ -662,7 +661,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 		err := merr.WrapErrParameterInvalid("only 1 source node", fmt.Sprintf("%d source nodes", len(req.GetSourceNodeIDs())))
 		msg := "source nodes can only contain 1 node"
 		log.Warn(ctx,
-			msg, zap.Int("source-nodes-num", len(req.GetSourceNodeIDs())))
+			msg, mlog.Int("source-nodes-num", len(req.GetSourceNodeIDs())))
 		return merr.Status(err), nil
 	}
 	if s.meta.CalculateLoadPercentage(ctx, req.GetCollectionID()) < 100 {
@@ -694,7 +693,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 		for _, dstNode := range req.GetDstNodeIDs() {
 			if !replica.Contains(dstNode) {
 				err := merr.WrapErrNodeNotFound(dstNode, "destination node not found in the same replica")
-				log.Warn(ctx, "failed to balance to the destination node", zap.Error(err))
+				log.Warn(ctx, "failed to balance to the destination node", mlog.Err(err))
 				return merr.Status(err), nil
 			}
 			dstNodeSet.Insert(dstNode)
@@ -730,7 +729,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 			// Only balance segments in targets
 			existInTarget := s.targetMgr.GetSealedSegment(ctx, segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
 			if !existInTarget {
-				log.Info(ctx, "segment doesn't exist in current target, skip it", zap.Int64("segmentID", segmentID))
+				log.Info(ctx, "segment doesn't exist in current target, skip it", mlog.FieldSegmentID(segmentID))
 				continue
 			}
 			toBalance.Insert(segment)
@@ -741,7 +740,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 	if err != nil {
 		msg := "failed to balance segments"
 		log.Warn(ctx,
-			msg, zap.Error(err))
+			msg, mlog.Err(err))
 		return merr.Status(errors.Wrap(err, msg)), nil
 	}
 
@@ -749,12 +748,12 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 }
 
 func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	mlog.Info(ctx, "show configurations request received", zap.String("pattern", req.GetPattern()))
+	mlog.Info(ctx, "show configurations request received", mlog.String("pattern", req.GetPattern()))
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to show configurations"
 		mlog.Warn(ctx,
-			msg, zap.Error(err))
+			msg, mlog.Err(err))
 		return &internalpb.ShowConfigurationsResponse{
 			Status: merr.Status(errors.Wrap(err, msg)),
 		}, nil
@@ -776,12 +775,12 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	mlog.RatedDebug(ctx, rate.Limit(60), "get metrics request received",
-		zap.String("metricType", req.GetRequest()))
+		mlog.String("metricType", req.GetRequest()))
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to get metrics"
 		mlog.Warn(ctx,
-			msg, zap.Error(err))
+			msg, mlog.Err(err))
 		return &milvuspb.GetMetricsResponse{
 			Status: merr.Status(errors.Wrap(err, msg)),
 		}, nil
@@ -805,15 +804,15 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 
 func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
 	log := mlog.With(
-		zap.Int64("collectionID", req.GetCollectionID()),
+		mlog.FieldCollectionID(req.GetCollectionID()),
 	)
 
-	log.Info(ctx, "get replicas request received", zap.Bool("with-shard-nodes", req.GetWithShardNodes()))
+	log.Info(ctx, "get replicas request received", mlog.Bool("with-shard-nodes", req.GetWithShardNodes()))
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to get replicas"
 		log.Warn(ctx,
-			msg, zap.Error(err))
+			msg, mlog.Err(err))
 		return &milvuspb.GetReplicasResponse{
 			Status: merr.Status(errors.Wrap(err, msg)),
 		}, nil
@@ -837,14 +836,14 @@ func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReque
 
 func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
 	log := mlog.With(
-		zap.Int64("collectionID", req.GetCollectionID()),
+		mlog.FieldCollectionID(req.GetCollectionID()),
 	)
 
 	log.RatedInfo(ctx, rate.Limit(10), "get shard leaders request received")
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to get shard leaders"
 		log.Warn(ctx,
-			msg, zap.Error(err))
+			msg, mlog.Err(err))
 		return &querypb.GetShardLeadersResponse{
 			Status: merr.Status(errors.Wrap(err, msg)),
 		}, nil
@@ -877,7 +876,7 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 	}
 
 	if err := utils.CheckCollectionsQueryable(ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr); err != nil {
-		mlog.Warn(ctx, "some collection is not queryable during health check", zap.Error(err))
+		mlog.Warn(ctx, "some collection is not queryable during health check", mlog.Err(err))
 	}
 
 	return componentutil.CheckHealthRespWithErr(nil), nil
@@ -913,12 +912,12 @@ func (s *Server) checkNodeHealth(ctx context.Context) ([]string, error) {
 
 func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
 	log := mlog.With(
-		zap.String("rgName", req.GetResourceGroup()),
+		mlog.String("rgName", req.GetResourceGroup()),
 	)
 
 	log.Info(ctx, "create resource group request received")
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(ctx, "failed to create resource group", zap.Error(err))
+		log.Warn(ctx, "failed to create resource group", mlog.Err(err))
 		return merr.Status(err), nil
 	}
 
@@ -927,7 +926,7 @@ func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateRe
 			log.Info(ctx, "create resource group request ignored")
 			return merr.Success(), nil
 		}
-		log.Warn(ctx, "failed to create resource group", zap.Error(err))
+		log.Warn(ctx, "failed to create resource group", mlog.Err(err))
 		return merr.Status(err), nil
 	}
 	log.Info(ctx, "create resource group done")
@@ -936,17 +935,17 @@ func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateRe
 
 func (s *Server) UpdateResourceGroups(ctx context.Context, req *querypb.UpdateResourceGroupsRequest) (*commonpb.Status, error) {
 	log := mlog.With(
-		zap.Any("rgName", req.GetResourceGroups()),
+		mlog.Any("rgName", req.GetResourceGroups()),
 	)
 
 	log.Info(ctx, "update resource group request received")
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(ctx, "failed to update resource group", zap.Error(err))
+		log.Warn(ctx, "failed to update resource group", mlog.Err(err))
 		return merr.Status(err), nil
 	}
 
 	if err := s.broadcastUpdateResourceGroups(ctx, req); err != nil {
-		log.Warn(ctx, "failed to update resource group", zap.Error(err))
+		log.Warn(ctx, "failed to update resource group", mlog.Err(err))
 		return merr.Status(err), nil
 	}
 	log.Info(ctx, "update resource group done")
@@ -955,12 +954,12 @@ func (s *Server) UpdateResourceGroups(ctx context.Context, req *querypb.UpdateRe
 
 func (s *Server) DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
 	log := mlog.With(
-		zap.String("rgName", req.GetResourceGroup()),
+		mlog.String("rgName", req.GetResourceGroup()),
 	)
 
 	log.Info(ctx, "drop resource group request received")
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(ctx, "failed to drop resource group", zap.Error(err))
+		log.Warn(ctx, "failed to drop resource group", mlog.Err(err))
 		return merr.Status(err), nil
 	}
 
@@ -969,7 +968,7 @@ func (s *Server) DropResourceGroup(ctx context.Context, req *milvuspb.DropResour
 			log.Info(ctx, "drop resource group request ignored")
 			return merr.Success(), nil
 		}
-		log.Warn(ctx, "failed to drop resource group", zap.Error(err))
+		log.Warn(ctx, "failed to drop resource group", mlog.Err(err))
 		return merr.Status(err), nil
 	}
 	log.Info(ctx, "drop resource group done")
@@ -980,19 +979,19 @@ func (s *Server) DropResourceGroup(ctx context.Context, req *milvuspb.DropResour
 // Use UpdateResourceGroups instead.
 func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
 	log := mlog.With(
-		zap.String("source", req.GetSourceResourceGroup()),
-		zap.String("target", req.GetTargetResourceGroup()),
-		zap.Int32("numNode", req.GetNumNode()),
+		mlog.String("source", req.GetSourceResourceGroup()),
+		mlog.String("target", req.GetTargetResourceGroup()),
+		mlog.Int32("numNode", req.GetNumNode()),
 	)
 
 	log.Info(ctx, "transfer node between resource group request received")
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(ctx, "failed to transfer node between resource group", zap.Error(err))
+		log.Warn(ctx, "failed to transfer node between resource group", mlog.Err(err))
 		return merr.Status(err), nil
 	}
 
 	if err := s.broadcastTransferNode(ctx, req); err != nil {
-		log.Warn(ctx, "failed to transfer node", zap.Error(err))
+		log.Warn(ctx, "failed to transfer node", mlog.Err(err))
 		return merr.Status(err), nil
 	}
 	log.Info(ctx, "transfer node done")
@@ -1001,20 +1000,20 @@ func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeReq
 
 func (s *Server) TransferReplica(ctx context.Context, req *querypb.TransferReplicaRequest) (*commonpb.Status, error) {
 	log := mlog.With(
-		zap.String("source", req.GetSourceResourceGroup()),
-		zap.String("target", req.GetTargetResourceGroup()),
-		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Int64("numReplica", req.GetNumReplica()),
+		mlog.String("source", req.GetSourceResourceGroup()),
+		mlog.String("target", req.GetTargetResourceGroup()),
+		mlog.FieldCollectionID(req.GetCollectionID()),
+		mlog.Int64("numReplica", req.GetNumReplica()),
 	)
 
 	log.Info(ctx, "transfer replica request received")
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(ctx, "failed to transfer replica between resource group", zap.Error(err))
+		log.Warn(ctx, "failed to transfer replica between resource group", mlog.Err(err))
 		return merr.Status(err), nil
 	}
 
 	if err := s.broadcastAlterLoadConfigCollectionV2ForTransferReplica(ctx, req); err != nil {
-		log.Warn(ctx, "failed to transfer replica between resource group", zap.Error(err))
+		log.Warn(ctx, "failed to transfer replica between resource group", mlog.Err(err))
 		return merr.Status(err), nil
 	}
 	log.Info(ctx, "transfer replica done")
@@ -1027,7 +1026,7 @@ func (s *Server) ListResourceGroups(ctx context.Context, req *milvuspb.ListResou
 		Status: merr.Success(),
 	}
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		mlog.Warn(ctx, "failed to list resource group", zap.Error(err))
+		mlog.Warn(ctx, "failed to list resource group", mlog.Err(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
@@ -1038,7 +1037,7 @@ func (s *Server) ListResourceGroups(ctx context.Context, req *milvuspb.ListResou
 
 func (s *Server) DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
 	log := mlog.With(
-		zap.String("rgName", req.GetResourceGroup()),
+		mlog.String("rgName", req.GetResourceGroup()),
 	)
 
 	log.Info(ctx, "describe resource group request received")
@@ -1046,7 +1045,7 @@ func (s *Server) DescribeResourceGroup(ctx context.Context, req *querypb.Describ
 		Status: merr.Success(),
 	}
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(ctx, "failed to describe resource group", zap.Error(err))
+		log.Warn(ctx, "failed to describe resource group", mlog.Err(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
@@ -1113,16 +1112,16 @@ func (s *Server) DescribeResourceGroup(ctx context.Context, req *querypb.Describ
 
 func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadConfigRequest) (*commonpb.Status, error) {
 	log := mlog.With(
-		zap.Int64s("collectionIDs", req.GetCollectionIDs()),
-		zap.Int32("replicaNumber", req.GetReplicaNumber()),
-		zap.Strings("resourceGroups", req.GetResourceGroups()),
+		mlog.Int64s("collectionIDs", req.GetCollectionIDs()),
+		mlog.Int32("replicaNumber", req.GetReplicaNumber()),
+		mlog.Strings("resourceGroups", req.GetResourceGroups()),
 	)
 
 	log.Info(ctx, "update load config request received")
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to update load config"
 		log.Warn(ctx,
-			msg, zap.Error(err))
+			msg, mlog.Err(err))
 		return merr.Status(errors.Wrap(err, msg)), nil
 	}
 
@@ -1130,7 +1129,7 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 	if err != nil {
 		msg := "failed to update load config"
 		log.Warn(ctx,
-			msg, zap.Error(err))
+			msg, mlog.Err(err))
 		return merr.Status(errors.Wrap(err, msg)), nil
 	}
 
@@ -1145,7 +1144,7 @@ func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, ne
 		collection := s.meta.GetCollection(ctx, collectionID)
 		if collection == nil {
 			err := merr.WrapErrCollectionNotLoaded(collectionID)
-			mlog.Warn(ctx, "failed to update load config", zap.Error(err))
+			mlog.Warn(ctx, "failed to update load config", mlog.Err(err))
 			continue
 		}
 
@@ -1170,7 +1169,7 @@ func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, ne
 		}
 
 		if !replicaChanged && !rgChanged {
-			mlog.Info(ctx, "no need to update load config", zap.Int64("collectionID", collectionID))
+			mlog.Info(ctx, "no need to update load config", mlog.FieldCollectionID(collectionID))
 			continue
 		}
 
@@ -1306,13 +1305,13 @@ func (s *Server) ComputePhraseMatchSlop(ctx context.Context, req *querypb.Comput
 // ManualUpdateCurrentTarget is used to manually update the current target for TruncateCollection
 func (s *Server) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
 	log := mlog.With(
-		zap.Int64("collectionID", collectionID),
+		mlog.FieldCollectionID(collectionID),
 	)
 
 	log.Info(ctx, "manual update current target request received")
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(ctx, "failed to manual update current target", zap.Error(err))
+		log.Warn(ctx, "failed to manual update current target", mlog.Err(err))
 		return err
 	}
 
@@ -1325,7 +1324,7 @@ func (s *Server) ManualUpdateCurrentTarget(ctx context.Context, collectionID int
 
 	err := job.WaitCurrentTargetUpdated(ctx, s.targetObserver, collectionID)
 	if err != nil {
-		log.Warn(ctx, "failed to wait current target updated", zap.Error(err))
+		log.Warn(ctx, "failed to wait current target updated", mlog.Err(err))
 		return err
 	}
 

@@ -14,7 +14,6 @@ import (
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -140,8 +139,8 @@ func (c *CCollection) Release() {
 
 func PutOrRefPluginContext(ez *hookutil.EZ, key string) error {
 	mlog.Info(context.TODO(), "PutOrRefPluginContext",
-		zap.Int64("ez_id", ez.EzID),
-		zap.Int64("collection_id", ez.CollectionID))
+		mlog.Int64("ez_id", ez.EzID),
+		mlog.FieldCollectionID(ez.CollectionID))
 	ckey := C.CString(key)
 	defer C.free(unsafe.Pointer(ckey))
 	pluginContext := C.CPluginContext{
@@ -158,8 +157,8 @@ func PutOrRefPluginContext(ez *hookutil.EZ, key string) error {
 
 func UnRefPluginContext(ez *hookutil.EZ) error {
 	mlog.Info(context.TODO(), "UnRefPluginContext",
-		zap.Int64("ez_id", ez.EzID),
-		zap.Int64("collection_id", ez.CollectionID))
+		mlog.Int64("ez_id", ez.EzID),
+		mlog.FieldCollectionID(ez.CollectionID))
 	pluginContext := C.CPluginContext{
 		ez_id:         C.int64_t(ez.EzID),
 		collection_id: C.int64_t(ez.CollectionID),

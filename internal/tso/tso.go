@@ -36,7 +36,6 @@ import (
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv"
@@ -120,7 +119,7 @@ func (t *timestampOracle) InitTimestamp() error {
 		return err
 	}
 
-	mlog.Info(context.TODO(), "sync and save timestamp", zap.Time("last", last), zap.Time("save", save), zap.Time("next", next))
+	mlog.Info(context.TODO(), "sync and save timestamp", mlog.Time("last", last), mlog.Time("save", save), mlog.Time("next", next))
 	current := &atomicObject{
 		physical: next,
 	}
@@ -176,8 +175,8 @@ func (t *timestampOracle) UpdateTimestamp() error {
 
 	jetLag := typeutil.SubTimeByWallClock(now, prev.physical)
 	if jetLag > 3*UpdateTimestampStep {
-		mlog.RatedWarn(context.TODO(), rate.Limit(60.0), "clock offset is huge, check network latency and clock skew", zap.Duration("jet-lag", jetLag),
-			zap.Time("prev-physical", prev.physical), zap.Time("now", now))
+		mlog.RatedWarn(context.TODO(), rate.Limit(60.0), "clock offset is huge, check network latency and clock skew", mlog.Duration("jet-lag", jetLag),
+			mlog.Time("prev-physical", prev.physical), mlog.Time("now", now))
 	}
 
 	var next time.Time
@@ -188,7 +187,7 @@ func (t *timestampOracle) UpdateTimestamp() error {
 	} else if prevLogical > maxLogical/2 {
 		// The reason choosing maxLogical/2 here is that it's big enough for common cases.
 		// Because there is enough timestamp can be allocated before next update.
-		mlog.Warn(context.TODO(), "the logical time may be not enough", zap.Int64("prev-logical", prevLogical))
+		mlog.Warn(context.TODO(), "the logical time may be not enough", mlog.Int64("prev-logical", prevLogical))
 		next = prev.physical.Add(time.Millisecond)
 	} else {
 		// It will still use the previous physical time to alloc the timestamp.

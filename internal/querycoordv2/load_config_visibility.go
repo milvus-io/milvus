@@ -19,8 +19,6 @@ package querycoordv2
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -51,8 +49,8 @@ func (s *Server) tryPromoteReadyLoadConfigReplicas(ctx context.Context) {
 	}
 
 	mlog.Info(ctx, "load config replicas are query visible",
-		zap.Int64s("collections", collections),
-		zap.Int64s("replicas", replicaIDs))
+		mlog.Int64s("collections", collections),
+		mlog.Int64s("replicas", replicaIDs))
 	if s.proxyClientManager == nil {
 		return
 	}
@@ -60,7 +58,7 @@ func (s *Server) tryPromoteReadyLoadConfigReplicas(ctx context.Context) {
 		CollectionIDs: collections,
 	}); err != nil {
 		mlog.Warn(ctx, "failed to invalidate proxy shard leader cache after promoting load config replicas",
-			zap.Int64s("collections", collections),
-			zap.Error(err))
+			mlog.Int64s("collections", collections),
+			mlog.Err(err))
 	}
 }

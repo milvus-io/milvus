@@ -25,7 +25,6 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -92,7 +91,7 @@ func NewLoadCollectionJob(
 
 func (job *LoadCollectionJob) Execute() error {
 	req := job.result.Message.Header()
-	log := mlog.With(zap.Int64("collectionID", req.GetCollectionId()))
+	log := mlog.With(mlog.FieldCollectionID(req.GetCollectionId()))
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionId())
 
 	collInfo, err := job.broker.DescribeCollection(job.ctx, req.GetCollectionId())
@@ -112,7 +111,7 @@ func (job *LoadCollectionJob) Execute() error {
 		}
 		replicas = localReplicas
 		log.Info(context.TODO(), "using local cluster-level replica config for replicated load",
-			zap.Int("localReplicaCount", len(localReplicas)))
+			mlog.Int("localReplicaCount", len(localReplicas)))
 	}
 
 	// 2. create replica if not exist (may also remove redundant replicas)
@@ -189,16 +188,16 @@ func (job *LoadCollectionJob) Execute() error {
 	if err = job.meta.PutCollection(job.ctx, collection, partitions...); err != nil {
 		msg := "failed to store collection and partitions"
 		log.Warn(context.TODO(),
-			msg, zap.Error(err))
+			msg, mlog.Err(err))
 		return errors.Wrap(err, msg)
 	}
 	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Start load collection %d", collection.CollectionID)))
 	metrics.QueryCoordNumPartitions.WithLabelValues().Add(float64(len(partitions)))
 
 	log.Info(context.TODO(), "put collection and partitions done",
-		zap.Int64("collectionID", req.GetCollectionId()),
-		zap.Int64s("partitions", req.GetPartitionIds()),
-		zap.Int64s("toReleasePartitions", toReleasePartitions),
+		mlog.FieldCollectionID(req.GetCollectionId()),
+		mlog.Int64s("partitions", req.GetPartitionIds()),
+		mlog.Int64s("toReleasePartitions", toReleasePartitions),
 	)
 
 	// 5. update next target, no need to rollback if pull target failed, target observer will pull target in periodically
@@ -212,16 +211,16 @@ func (job *LoadCollectionJob) Execute() error {
 	// 7. wait for partition released if any partition is released
 	if len(toReleasePartitions) > 0 {
 		if err = WaitCurrentTargetUpdated(ctx, job.targetObserver, req.GetCollectionId()); err != nil {
-			log.Warn(context.TODO(), "failed to wait current target updated", zap.Error(err))
+			log.Warn(context.TODO(), "failed to wait current target updated", mlog.Err(err))
 			// return nil to avoid infinite retry on DDL callback
 			return nil
 		}
 		if err = WaitCollectionReleased(ctx, job.dist, job.checkerController, req.GetCollectionId(), toReleasePartitions...); err != nil {
-			log.Warn(context.TODO(), "failed to wait partition released", zap.Error(err))
+			log.Warn(context.TODO(), "failed to wait partition released", mlog.Err(err))
 			// return nil to avoid infinite retry on DDL callback
 			return nil
 		}
-		log.Info(context.TODO(), "wait for partition released done", zap.Int64s("toReleasePartitions", toReleasePartitions))
+		log.Info(context.TODO(), "wait for partition released done", mlog.Int64s("toReleasePartitions", toReleasePartitions))
 	}
 	return nil
 }

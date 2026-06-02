@@ -24,7 +24,6 @@ import (
 	"math"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
@@ -71,9 +70,9 @@ func (b *RoundRobinBalancer) GetAssignPolicy() assign.AssignPolicy {
 // if no channel plans were generated.
 func (b *RoundRobinBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) (segmentPlans []assign.SegmentAssignPlan, channelPlans []assign.ChannelAssignPlan) {
 	log := mlog.With(
-		zap.Int64("collectionID", replica.GetCollectionID()),
-		zap.Int64("replicaID", replica.GetID()),
-		zap.String("resourceGroup", replica.GetResourceGroup()),
+		mlog.FieldCollectionID(replica.GetCollectionID()),
+		mlog.Int64("replicaID", replica.GetID()),
+		mlog.String("resourceGroup", replica.GetResourceGroup()),
 	)
 
 	if replica.NodesCount() < 2 {
@@ -90,8 +89,8 @@ func (b *RoundRobinBalancer) BalanceReplica(ctx context.Context, replica *meta.R
 
 	if len(segmentPlans) > 0 || len(channelPlans) > 0 {
 		log.Info(ctx, "balance plan generated",
-			zap.Int("segmentPlans", len(segmentPlans)),
-			zap.Int("channelPlans", len(channelPlans)))
+			mlog.Int("segmentPlans", len(segmentPlans)),
+			mlog.Int("channelPlans", len(channelPlans)))
 	}
 	return segmentPlans, channelPlans
 }

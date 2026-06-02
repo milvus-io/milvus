@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -134,7 +133,7 @@ func (ccu *ChannelCheckpointUpdater) updateCheckpoints(tasks []*channelCPUpdateT
 				})
 				err := ccu.broker.UpdateChannelCheckpoint(ctx, channelCPs)
 				if err != nil {
-					mlog.Warn(context.TODO(), "update channel checkpoint failed", zap.Error(err))
+					mlog.Warn(context.TODO(), "update channel checkpoint failed", mlog.Err(err))
 					return
 				}
 				for _, task := range tasks {
@@ -172,7 +171,7 @@ func (ccu *ChannelCheckpointUpdater) execute() {
 func (ccu *ChannelCheckpointUpdater) AddTask(channelPos *msgpb.MsgPosition, flush bool, callback func()) {
 	// Note: Only earliest msgId of woodpecker can be empty bytes
 	if channelPos == nil || (channelPos.GetMsgID() == nil && channelPos.GetWALName() != commonpb.WALName_WoodPecker) || channelPos.GetChannelName() == "" {
-		mlog.Warn(context.TODO(), "illegal checkpoint", zap.Any("pos", channelPos))
+		mlog.Warn(context.TODO(), "illegal checkpoint", mlog.Any("pos", channelPos))
 		return
 	}
 	if flush {

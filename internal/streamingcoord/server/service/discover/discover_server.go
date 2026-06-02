@@ -5,7 +5,6 @@ import (
 	"io"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
@@ -61,7 +60,7 @@ func (s *AssignmentDiscoverServer) recvLoop() (err error) {
 	defer func() {
 		if err != nil {
 			s.cancel(err)
-			s.logger.Warn(s.ctx, "recv arm of stream closed by unexpected error", zap.Error(err))
+			s.logger.Warn(s.ctx, "recv arm of stream closed by unexpected error", mlog.Err(err))
 			return
 		}
 		s.cancel(errClosedByUser)
@@ -83,7 +82,7 @@ func (s *AssignmentDiscoverServer) recvLoop() (err error) {
 			s.balancer.MarkAsUnavailable(s.ctx, []types.PChannelInfo{channel})
 		case *streamingpb.AssignmentDiscoverRequest_Close:
 		default:
-			s.logger.Warn(s.ctx, "unknown command type", zap.Any("command", req))
+			s.logger.Warn(s.ctx, "unknown command type", mlog.Any("command", req))
 		}
 	}
 }

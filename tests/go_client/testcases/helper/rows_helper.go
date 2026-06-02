@@ -5,8 +5,6 @@ import (
 	"context"
 	"strconv"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/common"
@@ -222,7 +220,7 @@ func GenInt64VecRows(nb int, enableDynamicField bool, autoID bool, option GenDat
 func GenInt64VarcharSparseRows(nb int, enableDynamicField bool, autoID bool, option GenDataOption) []interface{} {
 	start := option.start
 	if option.validData != nil && len(option.validData) != nb {
-		mlog.Warn(context.TODO(), "GenInt64VarcharSparseRows", zap.Int("unexpected validData length", len(option.validData)))
+		mlog.Warn(context.TODO(), "GenInt64VarcharSparseRows", mlog.Int("unexpected validData length", len(option.validData)))
 	}
 
 	rows := make([]interface{}, 0, nb)

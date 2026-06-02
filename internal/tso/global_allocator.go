@@ -35,7 +35,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -129,7 +128,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
 		logical = atomic.AddInt64(&current.logical, int64(count))
 		if logical >= maxLogical && gta.LimitMaxLogic {
 			mlog.Info(context.TODO(), "logical part outside of max logical interval, please check ntp time",
-				zap.Int("retry-count", i))
+				mlog.Int("retry-count", i))
 			time.Sleep(UpdateTimestampStep)
 			continue
 		}

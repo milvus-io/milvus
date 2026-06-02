@@ -23,7 +23,6 @@ import (
 
 	"github.com/shirou/gopsutil/v3/process"
 	"github.com/sirupsen/logrus"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
@@ -45,7 +44,7 @@ func init() {
 func GetUsedMemoryCount() uint64 {
 	memInfo, err := proc.MemoryInfoEx()
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to get memory info", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to get memory info", mlog.Err(err))
 		return 0
 	}
 

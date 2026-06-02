@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -315,7 +314,7 @@ func newSnapshotMeta(ctx context.Context, catalog metastore.DataCoordCatalog, ch
 	// Reload all snapshots from catalog to populate in-memory cache
 	if err := sm.reload(ctx); err != nil {
 		loaderCancel()
-		mlog.Error(ctx, "failed to reload snapshot meta from kv", zap.Error(err))
+		mlog.Error(ctx, "failed to reload snapshot meta from kv", mlog.Err(err))
 		return nil, err
 	}
 
@@ -366,7 +365,7 @@ func newSnapshotMeta(ctx context.Context, catalog metastore.DataCoordCatalog, ch
 func (sm *snapshotMeta) reload(ctx context.Context) error {
 	snapshots, err := sm.catalog.ListSnapshots(ctx)
 	if err != nil {
-		mlog.Info(ctx, "failed to list snapshots from kv", zap.Error(err))
+		mlog.Info(ctx, "failed to list snapshots from kv", mlog.Err(err))
 		return err
 	}
 
@@ -374,9 +373,9 @@ func (sm *snapshotMeta) reload(ctx context.Context) error {
 		if snapshot.GetState() == datapb.SnapshotState_SnapshotStatePending ||
 			snapshot.GetState() == datapb.SnapshotState_SnapshotStateDeleting {
 			mlog.Warn(ctx, "skipping snapshot during reload, will be cleaned by GC",
-				zap.String("name", snapshot.GetName()),
-				zap.Int64("id", snapshot.GetId()),
-				zap.String("state", snapshot.GetState().String()))
+				mlog.String("name", snapshot.GetName()),
+				mlog.Int64("id", snapshot.GetId()),
+				mlog.String("state", snapshot.GetState().String()))
 			continue
 		}
 
@@ -396,8 +395,8 @@ func (sm *snapshotMeta) reload(ctx context.Context) error {
 		}
 
 		mlog.Info(ctx, "loaded snapshot metadata from catalog",
-			zap.String("name", snapshot.GetName()),
-			zap.Int64("id", snapshot.GetId()))
+			mlog.String("name", snapshot.GetName()),
+			mlog.Int64("id", snapshot.GetId()))
 	}
 
 	return nil
@@ -421,7 +420,7 @@ func (sm *snapshotMeta) refIndexLoaderLoop(ctx context.Context) {
 		interval := paramtable.Get().DataCoordCfg.SnapshotRefIndexLoadInterval.GetAsDurationByParse()
 		if interval <= 0 {
 			mlog.Warn(ctx, "invalid snapshot RefIndex load interval, fallback to 60s",
-				zap.Duration("interval", interval))
+				mlog.Duration("interval", interval))
 			return 60 * time.Second
 		}
 		return interval
@@ -486,16 +485,16 @@ func (sm *snapshotMeta) loadUnloadedRefIndexesWithContext(ctx context.Context) b
 		cancel()
 		if err != nil {
 			mlog.Warn(ctx, "failed to load RefIndex from S3",
-				zap.String("name", info.GetName()),
-				zap.Int64("id", id),
-				zap.Duration("timeout", timeout),
-				zap.Error(err))
+				mlog.String("name", info.GetName()),
+				mlog.Int64("id", id),
+				mlog.Duration("timeout", timeout),
+				mlog.Err(err))
 			refIndex.SetFailed()
 		} else {
 			refIndex.SetLoaded(snapshotData.SegmentIDs, snapshotData.BuildIDs)
 			mlog.Info(ctx, "loaded RefIndex from S3",
-				zap.String("name", info.GetName()),
-				zap.Int64("id", id))
+				mlog.String("name", info.GetName()),
+				mlog.Int64("id", id))
 		}
 		changed = true
 
@@ -538,9 +537,9 @@ func (sm *snapshotMeta) Close() {
 //   - error: Error if any phase fails
 func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData) error {
 	log := mlog.With(
-		zap.String("snapshotName", snapshot.SnapshotInfo.GetName()),
-		zap.Int64("snapshotID", snapshot.SnapshotInfo.GetId()),
-		zap.Int64("collectionID", snapshot.SnapshotInfo.GetCollectionId()),
+		mlog.String("snapshotName", snapshot.SnapshotInfo.GetName()),
+		mlog.Int64("snapshotID", snapshot.SnapshotInfo.GetId()),
+		mlog.FieldCollectionID(snapshot.SnapshotInfo.GetCollectionId()),
 	)
 
 	// Step 1: Extract segment IDs and build IDs for reference tracking
@@ -575,7 +574,7 @@ func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData
 	snapshot.SnapshotInfo.PendingStartTime = time.Now().UnixMilli()
 
 	if err := sm.catalog.SaveSnapshot(ctx, snapshot.SnapshotInfo); err != nil {
-		log.Error(ctx, "failed to save pending snapshot to catalog", zap.Error(err))
+		log.Error(ctx, "failed to save pending snapshot to catalog", mlog.Err(err))
 		return fmt.Errorf("failed to save pending snapshot to catalog: %w", err)
 	}
 	log.Info(ctx, "saved pending snapshot to catalog")
@@ -585,11 +584,11 @@ func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData
 	if err != nil {
 		// S3 write failed, leave PENDING record for GC to clean up
 		log.Error(ctx, "failed to save snapshot to S3, pending record left for GC cleanup",
-			zap.Error(err))
+			mlog.Err(err))
 		return fmt.Errorf("failed to save snapshot to S3: %w", err)
 	}
 	snapshot.SnapshotInfo.S3Location = metadataFilePath
-	log.Info(ctx, "saved snapshot data to S3", zap.String("s3Location", metadataFilePath))
+	log.Info(ctx, "saved snapshot data to S3", mlog.String("s3Location", metadataFilePath))
 
 	// Step 4: Phase 2 (Commit) - Update catalog to COMMITTED state
 	snapshot.SnapshotInfo.State = datapb.SnapshotState_SnapshotStateCommitted
@@ -601,7 +600,7 @@ func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData
 		// Phase 2 failed, but S3 data and PENDING record are already written.
 		// GC will eventually cleanup via the PENDING marker.
 		log.Error(ctx, "failed to update snapshot to committed state, pending record left for GC cleanup",
-			zap.Error(err))
+			mlog.Err(err))
 		return fmt.Errorf("failed to update snapshot to committed state: %w", err)
 	}
 
@@ -618,9 +617,9 @@ func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData
 	sm.registerSnapshotProtection(snapshot.SnapshotInfo, segmentIDs, buildIDs)
 
 	log.Info(ctx, "snapshot saved successfully with 2PC",
-		zap.String("s3Location", metadataFilePath),
-		zap.Int("numSegments", len(snapshot.Segments)),
-		zap.Int("numIndexes", len(snapshot.Indexes)))
+		mlog.String("s3Location", metadataFilePath),
+		mlog.Int("numSegments", len(snapshot.Segments)),
+		mlog.Int("numIndexes", len(snapshot.Indexes)))
 
 	return nil
 }
@@ -645,12 +644,12 @@ func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData
 // Returns:
 //   - error: Error if snapshot not found or catalog update fails
 func (sm *snapshotMeta) DropSnapshot(ctx context.Context, collectionID int64, snapshotName string) error {
-	log := mlog.With(zap.String("snapshotName", snapshotName), zap.Int64("collectionID", collectionID))
+	log := mlog.With(mlog.String("snapshotName", snapshotName), mlog.FieldCollectionID(collectionID))
 
 	// Step 1: Lookup snapshot by name within collection
 	snapshot, err := sm.getSnapshotByName(ctx, collectionID, snapshotName)
 	if err != nil {
-		log.Error(ctx, "failed to get snapshot by name", zap.Error(err))
+		log.Error(ctx, "failed to get snapshot by name", mlog.Err(err))
 		return err
 	}
 
@@ -688,7 +687,7 @@ func (sm *snapshotMeta) DropSnapshot(ctx context.Context, collectionID int64, sn
 	updated.State = datapb.SnapshotState_SnapshotStateDeleting
 
 	if err := sm.catalog.SaveSnapshot(ctx, updated); err != nil {
-		log.Error(ctx, "failed to mark snapshot as deleting", zap.Error(err))
+		log.Error(ctx, "failed to mark snapshot as deleting", mlog.Err(err))
 		return err
 	}
 
@@ -725,8 +724,8 @@ func (sm *snapshotMeta) DropSnapshot(ctx context.Context, collectionID int64, sn
 	// Step 5: Delete S3 data (may fail, GC will retry)
 	if err := sm.writer.Drop(ctx, snapshot.GetS3Location()); err != nil {
 		log.Warn(ctx, "S3 delete failed, will be cleaned by GC",
-			zap.Int64("snapshotID", snapshot.GetId()),
-			zap.Error(err))
+			mlog.Int64("snapshotID", snapshot.GetId()),
+			mlog.Err(err))
 		// Return success - snapshot is already invisible to users
 		// GC will clean up S3 data by finding Deleting state snapshots
 		return nil
@@ -735,14 +734,14 @@ func (sm *snapshotMeta) DropSnapshot(ctx context.Context, collectionID int64, sn
 	// Step 6: Delete catalog record (final cleanup)
 	if err := sm.catalog.DropSnapshot(ctx, snapshot.GetCollectionId(), snapshot.GetId()); err != nil {
 		log.Warn(ctx, "failed to drop snapshot from catalog after S3 cleanup",
-			zap.Int64("snapshotID", snapshot.GetId()),
-			zap.Error(err))
+			mlog.Int64("snapshotID", snapshot.GetId()),
+			mlog.Err(err))
 		// Return success - S3 data is already deleted
 		// GC will clean up catalog record
 		return nil
 	}
 
-	log.Info(ctx, "snapshot deleted successfully", zap.Int64("snapshotID", snapshot.GetId()))
+	log.Info(ctx, "snapshot deleted successfully", mlog.Int64("snapshotID", snapshot.GetId()))
 	return nil
 }
 
@@ -758,7 +757,7 @@ func (sm *snapshotMeta) DropSnapshot(ctx context.Context, collectionID int64, sn
 // could create a snapshot that is missed by this cascade. The GC orphan detection serves
 // as a fallback to clean up such snapshots.
 func (sm *snapshotMeta) DropSnapshotsByCollection(ctx context.Context, collectionID int64) ([]string, error) {
-	log := mlog.With(zap.Int64("collectionID", collectionID))
+	log := mlog.With(mlog.FieldCollectionID(collectionID))
 
 	// Step 1: Get all snapshot IDs for this collection.
 	// Copy IDs under lock since UniqueSet (raw map) is not thread-safe for concurrent read/write.
@@ -791,25 +790,25 @@ func (sm *snapshotMeta) DropSnapshotsByCollection(ctx context.Context, collectio
 		if err := sm.DropSnapshot(ctx, collectionID, name); err != nil {
 			if errors.Is(err, merr.ErrSnapshotPinned) {
 				log.Info(ctx, "skip pinned snapshot during collection cleanup, GC will retry after TTL/unpin",
-					zap.String("snapshotName", name),
-					zap.Error(err))
+					mlog.String("snapshotName", name),
+					mlog.Err(err))
 				continue
 			}
 			if errors.Is(err, merr.ErrSnapshotNotFound) {
 				log.Info(ctx, "skip not-found snapshot during collection cleanup",
-					zap.String("snapshotName", name),
-					zap.Error(err))
+					mlog.String("snapshotName", name),
+					mlog.Err(err))
 				continue
 			}
 			errs = append(errs, err)
 			log.Warn(ctx, "failed to drop snapshot during collection cleanup, continuing",
-				zap.String("snapshotName", name),
-				zap.Error(err))
+				mlog.String("snapshotName", name),
+				mlog.Err(err))
 			continue
 		}
 		dropped = append(dropped, name)
 		log.Info(ctx, "dropped snapshot during collection cleanup",
-			zap.String("snapshotName", name))
+			mlog.String("snapshotName", name))
 	}
 
 	if len(errs) > 0 {
@@ -933,24 +932,24 @@ func (sm *snapshotMeta) GetSnapshot(ctx context.Context, collectionID int64, sna
 //     SegmentIDs always populated for new format snapshots)
 //   - error: Error if snapshot not found or S3 read fails
 func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, collectionID int64, snapshotName string, includeSegments bool) (*SnapshotData, error) {
-	log := mlog.With(zap.String("snapshotName", snapshotName), zap.Int64("collectionID", collectionID))
+	log := mlog.With(mlog.String("snapshotName", snapshotName), mlog.FieldCollectionID(collectionID))
 
 	// Step 1: Get snapshot metadata from memory to find S3 location
 	snapshotInfo, err := sm.getSnapshotByName(ctx, collectionID, snapshotName)
 	if err != nil {
-		log.Error(ctx, "failed to get snapshot by name", zap.Error(err))
+		log.Error(ctx, "failed to get snapshot by name", mlog.Err(err))
 		return nil, err
 	}
 
 	log.Info(ctx, "got snapshot from memory before ReadSnapshot",
-		zap.String("name", snapshotInfo.GetName()),
-		zap.Int64("id", snapshotInfo.GetId()),
-		zap.String("s3_location_from_memory", snapshotInfo.GetS3Location()))
+		mlog.String("name", snapshotInfo.GetName()),
+		mlog.Int64("id", snapshotInfo.GetId()),
+		mlog.String("s3_location_from_memory", snapshotInfo.GetS3Location()))
 
 	// Step 2: Read snapshot data from S3 using the known metadata path directly
 	snapshotData, err := sm.reader.ReadSnapshot(ctx, snapshotInfo.GetS3Location(), includeSegments)
 	if err != nil {
-		log.Error(ctx, "failed to read snapshot data from S3", zap.Error(err))
+		log.Error(ctx, "failed to read snapshot data from S3", mlog.Err(err))
 		return nil, err
 	}
 
@@ -1195,7 +1194,7 @@ func (sm *snapshotMeta) SetSnapshotPending(collectionID int64) {
 	defer sm.segmentProtectionMu.Unlock()
 	sm.snapshotPendingCollections.Insert(collectionID)
 	mlog.Info(context.TODO(), "collection marked as snapshot pending, compaction blocked",
-		zap.Int64("collectionID", collectionID))
+		mlog.FieldCollectionID(collectionID))
 }
 
 // ClearSnapshotPending removes the pending snapshot mark for a collection.
@@ -1205,7 +1204,7 @@ func (sm *snapshotMeta) ClearSnapshotPending(collectionID int64) {
 	defer sm.segmentProtectionMu.Unlock()
 	sm.snapshotPendingCollections.Remove(collectionID)
 	mlog.Info(context.TODO(), "collection snapshot pending mark cleared, compaction unblocked",
-		zap.Int64("collectionID", collectionID))
+		mlog.FieldCollectionID(collectionID))
 }
 
 // isProtectionActive returns true if the given expiry timestamp represents
@@ -1330,11 +1329,11 @@ func (sm *snapshotMeta) registerSnapshotProtection(
 	}
 
 	mlog.Info(context.TODO(), "registered snapshot protection",
-		zap.Int64("snapshotID", info.GetId()),
-		zap.Int64("collectionID", info.GetCollectionId()),
-		zap.Uint64("protectionUntil", protectionUntil),
-		zap.Int("numSegments", len(segmentIDs)),
-		zap.Int("numBuildIDs", len(buildIDs)))
+		mlog.Int64("snapshotID", info.GetId()),
+		mlog.FieldCollectionID(info.GetCollectionId()),
+		mlog.Uint64("protectionUntil", protectionUntil),
+		mlog.Int("numSegments", len(segmentIDs)),
+		mlog.Int("numBuildIDs", len(buildIDs)))
 }
 
 // rebuildAllSegmentProtection atomically rebuilds BOTH compaction protection and GC
@@ -1410,9 +1409,9 @@ func (sm *snapshotMeta) rebuildAllSegmentProtection() {
 			// Fail-closed: active TTL but RefIndex not loaded.
 			compactionBlocked.Insert(info.GetCollectionId())
 			mlog.Info(context.TODO(), "blocking compaction for collection due to unloaded protected snapshot RefIndex",
-				zap.Int64("snapshotID", id),
-				zap.Int64("collectionID", info.GetCollectionId()),
-				zap.Uint64("protectionUntil", protectionUntil))
+				mlog.Int64("snapshotID", id),
+				mlog.FieldCollectionID(info.GetCollectionId()),
+				mlog.Uint64("protectionUntil", protectionUntil))
 			return true
 		}
 
@@ -1427,11 +1426,11 @@ func (sm *snapshotMeta) rebuildAllSegmentProtection() {
 	sm.segmentReferencedByGC = segRefGC
 	sm.buildIDReferencedByGC = buildRefGC
 	mlog.Info(context.TODO(), "rebuilt all snapshot protection state",
-		zap.Int("compactionProtectedSegments", len(sm.segmentProtectionUntil)),
-		zap.Int("compactionBlockedCollections", sm.compactionBlockedCollections.Len()),
-		zap.Int("gcReferencedSegments", sm.segmentReferencedByGC.Len()),
-		zap.Int("gcReferencedBuildIDs", sm.buildIDReferencedByGC.Len()),
-		zap.Int("gcBlockedCollections", sm.gcBlockedCollections.Len()))
+		mlog.Int("compactionProtectedSegments", len(sm.segmentProtectionUntil)),
+		mlog.Int("compactionBlockedCollections", sm.compactionBlockedCollections.Len()),
+		mlog.Int("gcReferencedSegments", sm.segmentReferencedByGC.Len()),
+		mlog.Int("gcReferencedBuildIDs", sm.buildIDReferencedByGC.Len()),
+		mlog.Int("gcBlockedCollections", sm.gcBlockedCollections.Len()))
 }
 
 // PinCleanupResult summarizes the per-snapshot outcome of a pin-modifying
@@ -1564,12 +1563,12 @@ func (sm *snapshotMeta) PinSnapshot(ctx context.Context, collectionID int64, nam
 
 	active := countActivePins(updated)
 	mlog.Info(ctx, "pinned snapshot",
-		zap.String("name", name),
-		zap.Int64("collectionID", collectionID),
-		zap.Int64("pinID", pinID),
-		zap.Int64("ttlSeconds", ttlSeconds),
-		zap.Int("pinCount", len(updated.GetPinIds())),
-		zap.Int("activePins", active))
+		mlog.String("name", name),
+		mlog.FieldCollectionID(collectionID),
+		mlog.Int64("pinID", pinID),
+		mlog.Int64("ttlSeconds", ttlSeconds),
+		mlog.Int("pinCount", len(updated.GetPinIds())),
+		mlog.Int("activePins", active))
 	return pinID, active, nil
 }
 
@@ -1666,11 +1665,11 @@ func (sm *snapshotMeta) UnpinSnapshot(ctx context.Context, pinID int64) (int64, 
 
 	active := countActivePins(updated)
 	mlog.Info(ctx, "unpinned snapshot",
-		zap.String("name", updated.GetName()),
-		zap.Int64("collectionID", updated.GetCollectionId()),
-		zap.Int64("pinID", pinID),
-		zap.Int("pinCount", len(updated.GetPinIds())),
-		zap.Int("activePins", active))
+		mlog.String("name", updated.GetName()),
+		mlog.FieldCollectionID(updated.GetCollectionId()),
+		mlog.Int64("pinID", pinID),
+		mlog.Int("pinCount", len(updated.GetPinIds())),
+		mlog.Int("activePins", active))
 	return updated.GetCollectionId(), updated.GetName(), active, nil
 }
 
@@ -1752,7 +1751,7 @@ func (sm *snapshotMeta) cleanExpiredPinsForSnapshot(ctx context.Context, snapsho
 
 	if err := sm.catalog.SaveSnapshot(ctx, updated); err != nil {
 		mlog.Warn(ctx, "failed to persist expired pin cleanup, will retry",
-			zap.String("name", current.GetName()), zap.Error(err))
+			mlog.String("name", current.GetName()), mlog.Err(err))
 		return current, false
 	}
 
@@ -1761,10 +1760,10 @@ func (sm *snapshotMeta) cleanExpiredPinsForSnapshot(ctx context.Context, snapsho
 	sm.pinMu.Unlock()
 
 	mlog.Info(ctx, "cleaned expired pins from snapshot",
-		zap.String("name", updated.GetName()),
-		zap.Int64("collectionID", updated.GetCollectionId()),
-		zap.Int("expiredCount", len(expired)),
-		zap.Int("remainingPins", len(updated.GetPinIds())))
+		mlog.String("name", updated.GetName()),
+		mlog.FieldCollectionID(updated.GetCollectionId()),
+		mlog.Int("expiredCount", len(expired)),
+		mlog.Int("remainingPins", len(updated.GetPinIds())))
 	return updated, true
 }
 

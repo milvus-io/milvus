@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
@@ -38,7 +37,7 @@ func RecoverBalancer(
 ) (Balancer, error) {
 	policyBuilder := mustGetPolicy(paramtable.Get().StreamingCfg.WALBalancerPolicyName.GetValue())
 	policy := policyBuilder.Build()
-	logger := resource.Resource().Logger().With(mlog.FieldComponent("balancer"), zap.String("policy", policyBuilder.Name()))
+	logger := resource.Resource().Logger().With(mlog.FieldComponent("balancer"), mlog.String("policy", policyBuilder.Name()))
 	policy.SetLogger(logger)
 
 	// Recover the channel view from catalog.
@@ -325,7 +324,7 @@ func (b *balancerImpl) execute(ready260Future *syncutil.Future[error]) {
 	if err := b.blockUntilExpectedInitialStreamingNodeNumReached(b.backgroundTaskNotifier.Context()); err != nil {
 		b.Logger().Warn(b.ctx,
 
-			"fail to block until expected initial streaming node number reached", zap.Error(err))
+			"fail to block until expected initial streaming node number reached", mlog.Err(err))
 		return
 	}
 
@@ -334,14 +333,14 @@ func (b *balancerImpl) execute(ready260Future *syncutil.Future[error]) {
 	if err != nil {
 		b.Logger().Warn(b.ctx,
 
-			"fail to watch node changed", zap.Error(err))
+			"fail to watch node changed", mlog.Err(err))
 		return
 	}
 	statsManager, err := channel.StaticPChannelStatsManager.GetWithContext(b.backgroundTaskNotifier.Context())
 	if err != nil {
 		b.Logger().Warn(b.ctx,
 
-			"fail to get pchannel stats manager", zap.Error(err))
+			"fail to get pchannel stats manager", mlog.Err(err))
 		return
 	}
 	channelChanged := statsManager.WatchAtChannelCountChanged()
@@ -357,7 +356,7 @@ func (b *balancerImpl) execute(ready260Future *syncutil.Future[error]) {
 
 		b.Logger().Info(b.ctx,
 
-			"balance wait", zap.Duration("nextBalanceInterval", nextBalanceInterval))
+			"balance wait", mlog.Duration("nextBalanceInterval", nextBalanceInterval))
 		select {
 		case <-b.backgroundTaskNotifier.Context().Done():
 			return
@@ -368,7 +367,7 @@ func (b *balancerImpl) execute(ready260Future *syncutil.Future[error]) {
 			if err := ready260Future.Get(); err != nil {
 				b.Logger().Warn(b.ctx,
 
-					"fail to block until all node is greater than 2.6.0", zap.Error(err))
+					"fail to block until all node is greater than 2.6.0", mlog.Err(err))
 				return
 			}
 			b.Logger().Info(b.ctx,
@@ -395,7 +394,7 @@ func (b *balancerImpl) execute(ready260Future *syncutil.Future[error]) {
 			if err := b.channelMetaManager.AddPChannels(b.backgroundTaskNotifier.Context(), newChannels); err != nil {
 				b.Logger().Warn(b.ctx,
 
-					"failed to add dynamic channels", zap.Error(err), zap.Strings("channels", newChannels))
+					"failed to add dynamic channels", mlog.Err(err), mlog.Strings("channels", newChannels))
 			}
 			// new pchannels added dynamically, trigger rebalance
 		}
@@ -406,7 +405,7 @@ func (b *balancerImpl) execute(ready260Future *syncutil.Future[error]) {
 			}
 			b.Logger().Warn(b.ctx,
 
-				"fail to apply balance, start a backoff...", zap.Error(err))
+				"fail to apply balance, start a backoff...", mlog.Err(err))
 			balanceTimer.EnableBackoff()
 			continue
 		}
@@ -454,7 +453,7 @@ func (b *balancerImpl) checkIfAllNodeGreaterThan260(ctx context.Context) (bool, 
 
 // checkIfRoleGreaterThan260 check if the role is greater than 2.6.0.
 func (b *balancerImpl) checkIfRoleGreaterThan260(ctx context.Context, role string) (bool, error) {
-	logger := b.Logger().With(zap.String("role", role))
+	logger := b.Logger().With(mlog.String("role", role))
 	rb := resolver.NewSessionBuilder(resource.Resource().ETCD(),
 		discoverer.OptSDPrefix(sessionutil.GetSessionPrefixByRole(role)),
 		discoverer.OptSDVersionRange(versionChecker260))
@@ -463,11 +462,11 @@ func (b *balancerImpl) checkIfRoleGreaterThan260(ctx context.Context, role strin
 	r := rb.Resolver()
 	state, err := r.GetLatestState(ctx)
 	if err != nil {
-		logger.Warn(ctx, "fail to get latest state", zap.Error(err))
+		logger.Warn(ctx, "fail to get latest state", mlog.Err(err))
 		return false, err
 	}
 	if len(state.Sessions()) > 0 {
-		logger.Info(ctx, "node is not greater than 2.6.0 when checking", zap.Int("sessionCount", len(state.Sessions())))
+		logger.Info(ctx, "node is not greater than 2.6.0 when checking", mlog.Int("sessionCount", len(state.Sessions())))
 		return false, nil
 	}
 	return true, nil
@@ -503,7 +502,7 @@ func (b *balancerImpl) blockUntilExpectedInitialStreamingNodeNumReached(ctx cont
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	logger := b.Logger().With(zap.Int("expectedInitialStreamingNodeNum", expectedInitialStreamingNodeNum))
+	logger := b.Logger().With(mlog.Int("expectedInitialStreamingNodeNum", expectedInitialStreamingNodeNum))
 	for {
 		select {
 		case <-ctx.Done():
@@ -511,14 +510,14 @@ func (b *balancerImpl) blockUntilExpectedInitialStreamingNodeNumReached(ctx cont
 		case <-ticker.C:
 			nodes, err := resource.Resource().StreamingNodeManagerClient().GetAllStreamingNodes(ctx)
 			if err != nil {
-				logger.Warn(ctx, "fail to get all streaming nodes, ignore the error and continue to wait...", zap.Error(err))
+				logger.Warn(ctx, "fail to get all streaming nodes, ignore the error and continue to wait...", mlog.Err(err))
 				continue
 			}
 			if len(nodes) >= expectedInitialStreamingNodeNum {
-				logger.Info(ctx, "expected initial streaming node number reached, stop waiting...", zap.Int("streamingNodeNum", len(nodes)))
+				logger.Info(ctx, "expected initial streaming node number reached, stop waiting...", mlog.Int("streamingNodeNum", len(nodes)))
 				return nil
 			}
-			logger.Info(ctx, "streaming node number is not enough, continue to wait...", zap.Int("streamingNodeNum", len(nodes)))
+			logger.Info(ctx, "streaming node number is not enough, continue to wait...", mlog.Int("streamingNodeNum", len(nodes)))
 		}
 	}
 }
@@ -526,8 +525,8 @@ func (b *balancerImpl) blockUntilExpectedInitialStreamingNodeNumReached(ctx cont
 // blockUntilRoleGreaterThanVersion blocks until every session of the role is outside versionChecker.
 func (b *balancerImpl) blockUntilRoleGreaterThanVersion(ctx context.Context, role string, versionChecker string) error {
 	doneErr := errors.New("done")
-	logger := b.Logger().With(zap.String("role", role))
-	logger.Info(ctx, "start to wait that the nodes is greater than version", zap.String("version", versionChecker))
+	logger := b.Logger().With(mlog.String("role", role))
+	logger.Info(ctx, "start to wait that the nodes is greater than version", mlog.String("version", versionChecker))
 	// Check if there's any proxy or data node with version < 2.6.0.
 	rb := resolver.NewSessionBuilder(resource.Resource().ETCD(),
 		discoverer.OptSDPrefix(sessionutil.GetSessionPrefixByRole(role)),
@@ -539,14 +538,14 @@ func (b *balancerImpl) blockUntilRoleGreaterThanVersion(ctx context.Context, rol
 		if len(vs.Sessions()) == 0 {
 			return doneErr
 		}
-		logger.Info(ctx, "session changes", zap.Int("sessionCount", len(vs.Sessions())))
+		logger.Info(ctx, "session changes", mlog.Int("sessionCount", len(vs.Sessions())))
 		return nil
 	})
 	if err != nil && !errors.Is(err, doneErr) {
-		logger.Info(ctx, "fail to wait that the nodes is greater than version", zap.String("version", versionChecker), zap.Error(err))
+		logger.Info(ctx, "fail to wait that the nodes is greater than version", mlog.String("version", versionChecker), mlog.Err(err))
 		return err
 	}
-	logger.Info(ctx, "all nodes is greater than version when watching", zap.String("version", versionChecker))
+	logger.Info(ctx, "all nodes is greater than version when watching", mlog.String("version", versionChecker))
 	return nil
 }
 
@@ -587,7 +586,7 @@ func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
 	rgName := paramtable.Get().StreamingCfg.PrimaryResourceGroup.GetValue()
 	b.Logger().Info(ctx,
 
-		"collect all status...", zap.String("resourceGroupHint", rgName))
+		"collect all status...", mlog.String("resourceGroupHint", rgName))
 	nodeStatus, err := b.fetchStreamingNodeStatus(ctx, rgName)
 	if err != nil {
 		return false, err
@@ -606,7 +605,7 @@ func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
 
 	b.Logger().Info(ctx,
 
-		"balance policy generate result success, try to assign...", zap.Stringer("expectedLayout", expectedLayout))
+		"balance policy generate result success, try to assign...", mlog.Stringer("expectedLayout", expectedLayout))
 	// bookkeeping the meta assignment started.
 	modifiedChannels, err := b.channelMetaManager.AssignPChannels(ctx, expectedLayout.ChannelAssignment)
 	if err != nil {
@@ -650,7 +649,7 @@ func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context, rgName stri
 		if _, ok := nodeStatus[serverID]; !ok {
 			b.Logger().Info(ctx,
 
-				"freeze node has been removed from session", zap.Int64("serverID", serverID))
+				"freeze node has been removed from session", mlog.Int64("serverID", serverID))
 			b.freezeNodes.Remove(serverID)
 		}
 		return true
@@ -662,7 +661,7 @@ func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context, rgName stri
 func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, modifiedChannels map[types.ChannelID]*channel.PChannelMeta) error {
 	b.Logger().Info(ctx,
 
-		"balance result need to be applied...", zap.Int("modifiedChannelCount", len(modifiedChannels)))
+		"balance result need to be applied...", mlog.Int("modifiedChannelCount", len(modifiedChannels)))
 
 	// different channel can be execute concurrently.
 	g, _ := errgroup.WithContext(ctx)
@@ -678,12 +677,12 @@ func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, mo
 				if err := resource.Resource().StreamingNodeManagerClient().Remove(opCtx, assignment); err != nil {
 					b.Logger().Warn(ctx,
 
-						"fail to remove channel", zap.String("assignment", assignment.String()), zap.Error(err))
+						"fail to remove channel", mlog.String("assignment", assignment.String()), mlog.Err(err))
 					return err
 				}
 				b.Logger().Info(ctx,
 
-					"remove channel success", zap.String("assignment", assignment.String()))
+					"remove channel success", mlog.String("assignment", assignment.String()))
 			}
 
 			// assign the channel to the target node.
@@ -692,18 +691,18 @@ func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, mo
 			if err := resource.Resource().StreamingNodeManagerClient().Assign(opCtx, channel.CurrentAssignment()); err != nil {
 				b.Logger().Warn(ctx,
 
-					"fail to assign channel", zap.String("assignment", channel.CurrentAssignment().String()), zap.Error(err))
+					"fail to assign channel", mlog.String("assignment", channel.CurrentAssignment().String()), mlog.Err(err))
 				return err
 			}
 			b.Logger().Info(ctx,
 
-				"assign channel success", zap.String("assignment", channel.CurrentAssignment().String()))
+				"assign channel success", mlog.String("assignment", channel.CurrentAssignment().String()))
 
 			// bookkeeping the meta assignment done.
 			if err := b.channelMetaManager.AssignPChannelsDone(ctx, []types.ChannelID{channel.ChannelID()}); err != nil {
 				b.Logger().Warn(ctx,
 
-					"fail to bookkeep pchannel assignment done", zap.String("assignment", channel.CurrentAssignment().String()))
+					"fail to bookkeep pchannel assignment done", mlog.String("assignment", channel.CurrentAssignment().String()))
 				return err
 			}
 			return nil
@@ -727,10 +726,10 @@ func generateCurrentLayout(view *channel.PChannelView, allNodesStatus map[int64]
 		if !meta.IsAssigned() {
 			// dead or expired relationship.
 			mlog.Warn(context.TODO(), "channel is not assigned to any server",
-				zap.Stringer("channel", id),
-				zap.Int64("term", meta.CurrentTerm()),
-				zap.Int64("serverID", meta.CurrentServerID()),
-				zap.String("state", meta.State().String()),
+				mlog.Stringer("channel", id),
+				mlog.Int64("term", meta.CurrentTerm()),
+				mlog.Int64("serverID", meta.CurrentServerID()),
+				mlog.String("state", meta.State().String()),
 			)
 			continue
 		}
@@ -739,10 +738,10 @@ func generateCurrentLayout(view *channel.PChannelView, allNodesStatus map[int64]
 		} else {
 			// dead or expired relationship.
 			mlog.Warn(context.TODO(), "channel of current server id is not healthy or not alive",
-				zap.Stringer("channel", id),
-				zap.Int64("term", meta.CurrentTerm()),
-				zap.Int64("serverID", meta.CurrentServerID()),
-				zap.Error(nodeStatus.ErrorOfNode()),
+				mlog.Stringer("channel", id),
+				mlog.Int64("term", meta.CurrentTerm()),
+				mlog.Int64("serverID", meta.CurrentServerID()),
+				mlog.Err(nodeStatus.ErrorOfNode()),
 			)
 		}
 	}

@@ -20,7 +20,6 @@ import (
 	"context"
 	"slices"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -59,14 +58,14 @@ func (s *HelloMilvusSuite) TestInsertWithDuplicateField() {
 
 	err = merr.Error(createCollectionStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.Err(err))
 	}
 
-	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
-	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	// create index
 	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
@@ -78,7 +77,7 @@ func (s *HelloMilvusSuite) TestInsertWithDuplicateField() {
 	s.NoError(err)
 	err = merr.Error(createIndexStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "createIndexStatus fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "createIndexStatus fail reason", mlog.Err(err))
 	}
 
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
@@ -92,7 +91,7 @@ func (s *HelloMilvusSuite) TestInsertWithDuplicateField() {
 	s.NoError(err)
 	err = merr.Error(loadStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "LoadCollection fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "LoadCollection fail reason", mlog.Err(err))
 	}
 	s.WaitForLoad(ctx, collectionName)
 	mlog.Info(context.TODO(), "Load collection done")
@@ -141,14 +140,14 @@ func (s *HelloMilvusSuite) TestInsertStorageV2() {
 
 	err = merr.Error(createCollectionStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.Err(err))
 	}
 
-	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
-	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	pkFieldData := integration.NewInt64FieldData(integration.Int64Field, rowNum)
 	vecFieldData := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)

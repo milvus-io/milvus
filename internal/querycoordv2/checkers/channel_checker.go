@@ -22,7 +22,6 @@ import (
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
@@ -258,7 +257,7 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 	for _, delegator := range delegatorList {
 		leader := c.dist.ChannelDistManager.GetShardLeader(delegator.GetChannelName(), replica)
 		if leader == nil {
-			mlog.Warn(ctx, "channel leader does not exist, skip it", zap.String("channel", delegator.GetChannelName()))
+			mlog.Warn(ctx, "channel leader does not exist, skip it", mlog.String("channel", delegator.GetChannelName()))
 			continue
 		}
 		// if channel's version is smaller than shard leader's version, it means that the channel is not up to date
@@ -299,11 +298,11 @@ func (c *ChannelChecker) createChannelReduceTasks(ctx context.Context, channels 
 		task, err := task.NewChannelTask(ctx, Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), c.ID(), ch.GetCollectionID(), replica, action)
 		if err != nil {
 			mlog.Warn(ctx, "create channel reduce task failed",
-				zap.Int64("collection", ch.GetCollectionID()),
-				zap.Int64("replica", replica.GetID()),
-				zap.String("channel", ch.GetChannelName()),
-				zap.Int64("from", ch.Node),
-				zap.Error(err),
+				mlog.Int64("collection", ch.GetCollectionID()),
+				mlog.Int64("replica", replica.GetID()),
+				mlog.String("channel", ch.GetChannelName()),
+				mlog.Int64("from", ch.Node),
+				mlog.Err(err),
 			)
 			continue
 		}

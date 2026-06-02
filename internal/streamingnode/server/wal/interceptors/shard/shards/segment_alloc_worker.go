@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -76,18 +75,18 @@ func (w *segmentAllocWorker) do() {
 		if e := status.AsStreamingError(err); e.IsUnrecoverable() {
 			w.Logger().Warn(w.ctx,
 
-				"allocate new growing segement with unrecoverable error, stop retrying", zap.Error(err))
+				"allocate new growing segement with unrecoverable error, stop retrying", mlog.Err(err))
 			return
 		}
 		nextInterval := backoff.NextBackOff()
 		w.Logger().Info(w.ctx,
 
-			"failed to allocate new growing segment, retrying", zap.Duration("nextInterval", nextInterval), zap.Error(err))
+			"failed to allocate new growing segment, retrying", mlog.Duration("nextInterval", nextInterval), mlog.Err(err))
 		select {
 		case <-w.ctx.Done():
 			w.Logger().Info(w.ctx,
 
-				"segment allocation canceled", zap.Error(w.ctx.Err()))
+				"segment allocation canceled", mlog.Err(w.ctx.Err()))
 			return
 		case <-w.wal.Available():
 			// wal is unavailable, stop the worker.
@@ -134,12 +133,12 @@ func (w *segmentAllocWorker) doOnce() error {
 	if err != nil {
 		w.Logger().Warn(w.ctx,
 
-			"failed to append create segment message", mlog.FieldMessage(msg), zap.Error(err))
+			"failed to append create segment message", mlog.FieldMessage(msg), mlog.Err(err))
 		return err
 	}
 	w.Logger().Info(w.ctx,
 
-		"append create segment message", mlog.FieldMessage(msg), zap.String("messageID", result.MessageID.String()), zap.Uint64("timetick", result.TimeTick))
+		"append create segment message", mlog.FieldMessage(msg), mlog.String("messageID", result.MessageID.String()), mlog.Uint64("timetick", result.TimeTick))
 	return nil
 }
 
@@ -156,7 +155,7 @@ func (w *segmentAllocWorker) initSegmentConfig() error {
 	if err != nil {
 		w.Logger().Warn(w.ctx,
 
-			"failed to allocate segment id", zap.Error(err))
+			"failed to allocate segment id", mlog.Err(err))
 		return err
 	}
 	w.segmentID = segmentID

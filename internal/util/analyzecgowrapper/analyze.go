@@ -29,7 +29,6 @@ import (
 	"runtime"
 	"unsafe"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
@@ -46,8 +45,8 @@ func Analyze(ctx context.Context, analyzeInfo *clusteringpb.AnalyzeInfo) (CodecA
 	analyzeInfoBlob, err := proto.Marshal(analyzeInfo)
 	if err != nil {
 		mlog.Warn(ctx, "marshal analyzeInfo failed",
-			zap.Int64("buildID", analyzeInfo.GetBuildID()),
-			zap.Error(err))
+			mlog.FieldBuildID(analyzeInfo.GetBuildID()),
+			mlog.Err(err))
 		return nil, err
 	}
 	var analyzePtr C.CAnalyze

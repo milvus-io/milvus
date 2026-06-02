@@ -23,7 +23,6 @@ import (
 	"io"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -64,7 +63,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	csvReader.Comma = sep
 
 	header, err := csvReader.Read()
-	mlog.Info(ctx, "csv header parsed", zap.Strings("header", header))
+	mlog.Info(ctx, "csv header parsed", mlog.Strings("header", header))
 	if err != nil {
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read csv header, error: %v", err))
 	}

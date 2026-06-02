@@ -20,8 +20,6 @@ import (
 	"context"
 	"sync"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -108,7 +106,7 @@ func (f *BalancerFactory) GetBalancer() Balance {
 		return balancer
 	}
 
-	mlog.Info(context.TODO(), "Creating new balancer", zap.String("type", balanceKey))
+	mlog.Info(context.TODO(), "Creating new balancer", mlog.String("type", balanceKey))
 
 	switch balanceKey {
 	case meta.RoundRobinBalancerName:
@@ -123,8 +121,8 @@ func (f *BalancerFactory) GetBalancer() Balance {
 		balancer = NewChannelLevelScoreBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr)
 	default:
 		mlog.Info(context.TODO(), "Unknown balancer type, using default",
-			zap.String("requested", balanceKey),
-			zap.String("default", meta.ScoreBasedBalancerName))
+			mlog.String("requested", balanceKey),
+			mlog.String("default", meta.ScoreBasedBalancerName))
 		balancer = NewScoreBasedBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr)
 	}
 
@@ -145,7 +143,7 @@ func (f *BalancerFactory) GetStoppingBalancer() *StoppingBalancer {
 		return balancer
 	}
 
-	mlog.Info(context.TODO(), "Creating new stopping balancer", zap.String("policyType", policyType))
+	mlog.Info(context.TODO(), "Creating new stopping balancer", mlog.String("policyType", policyType))
 
 	// Use AssignPolicyFactory to get cached policy instance
 	assignPolicy := assign.GetGlobalAssignPolicyFactory().GetPolicy(policyType)

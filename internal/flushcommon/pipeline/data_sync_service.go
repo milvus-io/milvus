@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"sync"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
@@ -84,12 +82,12 @@ type nodeConfig struct {
 // Start the flow graph in dataSyncService
 func (dsService *DataSyncService) Start() {
 	if dsService.fg != nil {
-		mlog.Info(dsService.ctx, "dataSyncService starting flow graph", zap.Int64("collectionID", dsService.collectionID),
-			zap.String("vChanName", dsService.vchannelName))
+		mlog.Info(dsService.ctx, "dataSyncService starting flow graph", mlog.FieldCollectionID(dsService.collectionID),
+			mlog.String("vChanName", dsService.vchannelName))
 		dsService.fg.Start()
 	} else {
-		mlog.Warn(dsService.ctx, "dataSyncService starting flow graph is nil", zap.Int64("collectionID", dsService.collectionID),
-			zap.String("vChanName", dsService.vchannelName))
+		mlog.Warn(dsService.ctx, "dataSyncService starting flow graph is nil", mlog.FieldCollectionID(dsService.collectionID),
+			mlog.String("vChanName", dsService.vchannelName))
 	}
 }
 
@@ -108,8 +106,8 @@ func (dsService *DataSyncService) GetOpID() int64 {
 func (dsService *DataSyncService) close() {
 	dsService.stopOnce.Do(func() {
 		log := mlog.With(
-			zap.Int64("collectionID", dsService.collectionID),
-			zap.String("vChanName", dsService.vchannelName),
+			mlog.FieldCollectionID(dsService.collectionID),
+			mlog.String("vChanName", dsService.vchannelName),
 		)
 		if dsService.fg != nil {
 			log.Info(dsService.ctx, "dataSyncService closing flowgraph")
@@ -153,10 +151,10 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 	loadSegmentStats := func(segType string, segments []*datapb.SegmentInfo) {
 		for _, item := range segments {
 			mlog.Info(initCtx, "recover segments from checkpoints",
-				zap.String("vChannelName", item.GetInsertChannel()),
-				zap.Int64("segmentID", item.GetID()),
-				zap.Int64("numRows", item.GetNumOfRows()),
-				zap.String("segmentType", segType),
+				mlog.String("vChannelName", item.GetInsertChannel()),
+				mlog.FieldSegmentID(item.GetID()),
+				mlog.Int64("numRows", item.GetNumOfRows()),
+				mlog.String("segmentType", segType),
 			)
 			segment := item
 			future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
@@ -321,7 +319,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 		writebuffer.WithIDAllocator(params.Allocator),
 		writebuffer.WithTaskObserverCallback(wbTaskObserverCallback))
 	if err != nil {
-		mlog.Warn(initCtx, "failed to register channel buffer", zap.String("channel", channelName), zap.Error(err))
+		mlog.Warn(initCtx, "failed to register channel buffer", mlog.String("channel", channelName), mlog.Err(err))
 		return nil, err
 	}
 
