@@ -133,18 +133,12 @@ func DPanic(ctx context.Context, msg string, fields ...Field) {
 
 // Panic logs a message at panic level, then panics.
 func Panic(ctx context.Context, msg string, fields ...Field) {
-	if !currentLevel().Enabled(PanicLevel) {
-		return
-	}
 	logger, fields := prepareLog(ctx, fields)
 	logger.Panic(msg, fields...)
 }
 
 // Fatal logs a message at fatal level, then calls os.Exit(1).
 func Fatal(ctx context.Context, msg string, fields ...Field) {
-	if !currentLevel().Enabled(FatalLevel) {
-		return
-	}
 	logger, fields := prepareLog(ctx, fields)
 	logger.Fatal(msg, fields...)
 }
@@ -155,14 +149,6 @@ func Fatal(ctx context.Context, msg string, fields ...Field) {
 type Logger struct {
 	logger *zap.Logger // pre-encoded with component fields
 	fields []Field     // copy of component fields for passing to other loggers
-}
-
-// NewLogger wraps a zap logger as a mlog Logger.
-func NewLogger(logger *zap.Logger) *Logger {
-	if logger == nil {
-		logger = getLogger()
-	}
-	return &Logger{logger: logger}
 }
 
 // With creates a new Logger with the given fields (immediately encoded).
@@ -357,18 +343,12 @@ func (l *Logger) DPanic(ctx context.Context, msg string, fields ...Field) {
 
 // Panic logs a message at panic level, then panics.
 func (l *Logger) Panic(ctx context.Context, msg string, fields ...Field) {
-	if !currentLevel().Enabled(PanicLevel) {
-		return
-	}
 	logger, fields := l.prepareLog(ctx, fields)
 	logger.Panic(msg, fields...)
 }
 
 // Fatal logs a message at fatal level, then calls os.Exit(1).
 func (l *Logger) Fatal(ctx context.Context, msg string, fields ...Field) {
-	if !currentLevel().Enabled(FatalLevel) {
-		return
-	}
 	logger, fields := l.prepareLog(ctx, fields)
 	logger.Fatal(msg, fields...)
 }

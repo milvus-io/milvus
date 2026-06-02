@@ -287,10 +287,12 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 				grpc.UseCompressor(compress),
 			),
 			grpc.WithUnaryInterceptor(grpc_middleware.ChainUnaryClient(
+				mlog.UnaryClientInterceptor(),
 				interceptor.ClusterInjectionUnaryClientInterceptor(),
 				interceptor.ServerIDInjectionUnaryClientInterceptor(c.GetNodeID()),
 			)),
 			grpc.WithStreamInterceptor(grpc_middleware.ChainStreamClient(
+				mlog.StreamClientInterceptor(),
 				interceptor.ClusterInjectionStreamClientInterceptor(),
 				interceptor.ServerIDInjectionStreamClientInterceptor(c.GetNodeID()),
 			)),
@@ -325,10 +327,12 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 				grpc.UseCompressor(compress),
 			),
 			grpc.WithUnaryInterceptor(grpc_middleware.ChainUnaryClient(
+				mlog.UnaryClientInterceptor(),
 				interceptor.ClusterInjectionUnaryClientInterceptor(),
 				interceptor.ServerIDInjectionUnaryClientInterceptor(c.GetNodeID()),
 			)),
 			grpc.WithStreamInterceptor(grpc_middleware.ChainStreamClient(
+				mlog.StreamClientInterceptor(),
 				interceptor.ClusterInjectionStreamClientInterceptor(),
 				interceptor.ServerIDInjectionStreamClientInterceptor(c.GetNodeID()),
 			)),

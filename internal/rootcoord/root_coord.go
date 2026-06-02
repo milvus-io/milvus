@@ -29,6 +29,7 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -465,8 +466,12 @@ func (c *Core) initTSOAllocator(initCtx context.Context) error {
 }
 
 func (c *Core) initInternal() error {
-	initCtx, initSpan := mlog.NewIntentContext(typeutil.RootCoordRole, "initInternal")
+	initCtx, initSpan := otel.Tracer(typeutil.RootCoordRole).Start(context.Background(), "initInternal")
 	defer initSpan.End()
+	initCtx = mlog.WithFields(initCtx,
+		mlog.String("role", typeutil.RootCoordRole),
+		mlog.String("intent", "initInternal"),
+	)
 
 	c.UpdateStateCode(commonpb.StateCode_Initializing)
 

@@ -8,7 +8,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -111,29 +110,14 @@ func TestWithFieldsDoesNotMutateParent(t *testing.T) {
 
 func TestContextFieldHelpers(t *testing.T) {
 	ctx := context.Background()
-	ctx = WithTraceID(ctx, "trace-1")
 	ctx = WithReqID(ctx, 100)
 	ctx = WithModule(ctx, "proxy")
 
 	fields := FieldsFromContext(ctx)
-	require.Len(t, fields, 3)
+	require.Len(t, fields, 2)
 	fm := fieldsToMap(fields)
-	assert.Equal(t, zap.String(keyTraceID, "trace-1"), fm[keyTraceID])
 	assert.Equal(t, zap.Int64("req_id", 100), fm["req_id"])
 	assert.Equal(t, zap.String(keyModule, "proxy"), fm[keyModule])
-}
-
-func TestNewIntentContext(t *testing.T) {
-	ctx, span := NewIntentContext("rootcoord", "init")
-	defer span.End()
-
-	spanCtx := span.SpanContext()
-	assert.Equal(t, spanCtx.TraceID(), trace.SpanContextFromContext(ctx).TraceID())
-
-	fields := fieldsToMap(FieldsFromContext(ctx))
-	assert.Equal(t, zap.String("role", "rootcoord"), fields["role"])
-	assert.Equal(t, zap.String("intent", "init"), fields["intent"])
-	assert.Equal(t, zap.String(keyTraceID, spanCtx.TraceID().String()), fields[keyTraceID])
 }
 
 // Tests for propagatedStringField/propagatedInt64Field
