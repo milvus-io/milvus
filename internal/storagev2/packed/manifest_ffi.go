@@ -111,7 +111,7 @@ func columnsToAppend(existing []manifestColumnGroup, requested []string, fragmen
 		if existingSets, ok := existingFragments[column]; ok {
 			for _, existingSet := range existingSets {
 				if !sameFragmentSet(existingSet, fragments) {
-					return nil, fmt.Errorf("column %s already exists with different fragments", column)
+					return nil, merr.WrapErrServiceInternalMsg("column %s already exists with different fragments", column)
 				}
 			}
 			continue
@@ -420,14 +420,14 @@ func readColumnGroupsFromManifest(
 ) ([]manifestColumnGroup, error) {
 	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse manifest path: %w", err)
+		return nil, merr.Wrap(err, "failed to parse manifest path")
 	}
 
 	manifestFilePath := fmt.Sprintf("%s/_metadata/manifest-%d.avro", basePath, version)
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create properties: %w", err)
+		return nil, merr.Wrap(err, "failed to create properties")
 	}
 	defer C.loon_properties_free(cProperties)
 
@@ -437,16 +437,16 @@ func readColumnGroupsFromManifest(
 	var manifest *C.LoonManifest
 	result := C.loon_exttable_read_manifest(cManifestFilePath, cProperties, &manifest)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, fmt.Errorf("loon_exttable_read_manifest failed: %w", err)
+		return nil, merr.Wrap(err, "loon_exttable_read_manifest failed")
 	}
 	if manifest == nil {
-		return nil, fmt.Errorf("loon_exttable_read_manifest returned nil manifest")
+		return nil, merr.WrapErrServiceInternalMsg("loon_exttable_read_manifest returned nil manifest")
 	}
 	defer C.loon_manifest_destroy(manifest)
 
 	cgroups := &manifest.column_groups
 	if cgroups.column_group_array == nil && cgroups.num_of_column_groups > 0 {
-		return nil, fmt.Errorf("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
+		return nil, merr.WrapErrServiceInternalMsg("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
 	}
 	if cgroups.column_group_array == nil {
 		return nil, nil
@@ -459,7 +459,7 @@ func readColumnGroupsFromManifest(
 		group := manifestColumnGroup{}
 
 		if cg.columns == nil && cg.num_of_columns > 0 {
-			return nil, fmt.Errorf("columns array is nil but num_of_columns is %d in column group %d", cg.num_of_columns, i)
+			return nil, merr.WrapErrServiceInternalMsg("columns array is nil but num_of_columns is %d in column group %d", cg.num_of_columns, i)
 		}
 		if cg.columns != nil {
 			columnArray := unsafe.Slice(cg.columns, int(cg.num_of_columns))
@@ -476,7 +476,7 @@ func readColumnGroupsFromManifest(
 		}
 
 		if cg.files == nil && cg.num_of_files > 0 {
-			return nil, fmt.Errorf("files array is nil but num_of_files is %d in column group %d", cg.num_of_files, i)
+			return nil, merr.WrapErrServiceInternalMsg("files array is nil but num_of_files is %d in column group %d", cg.num_of_files, i)
 		}
 		if cg.num_of_files > 0 {
 			if cg.format == nil {
@@ -535,12 +535,12 @@ func AppendSegmentManifestColumns(
 		return oldManifestPath, nil
 	}
 	if len(fragments) == 0 {
-		return "", fmt.Errorf("fragments cannot be empty")
+		return "", merr.WrapErrServiceInternalMsg("fragments cannot be empty")
 	}
 
 	existingGroups, err := readColumnGroupsFromManifest(oldManifestPath, storageConfig)
 	if err != nil {
-		return "", fmt.Errorf("failed to read manifest column groups: %w", err)
+		return "", merr.Wrap(err, "failed to read manifest column groups")
 	}
 
 	columns, err = columnsToAppend(existingGroups, columns, fragments)
@@ -553,15 +553,15 @@ func AppendSegmentManifestColumns(
 
 	basePath, version, err := UnmarshalManifestPath(oldManifestPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse manifest path: %w", err)
+		return "", merr.Wrap(err, "failed to parse manifest path")
 	}
 
 	columnGroups, err := createColumnGroups(columns, format, fragments)
 	if err != nil {
-		return "", fmt.Errorf("failed to create column groups: %w", err)
+		return "", merr.Wrap(err, "failed to create column groups")
 	}
 	if columnGroups == nil {
-		return "", fmt.Errorf("loon_column_groups_create returned nil column groups")
+		return "", merr.WrapErrServiceInternalMsg("loon_column_groups_create returned nil column groups")
 	}
 
 	newFiles := &ColumnGroups{
@@ -571,7 +571,7 @@ func AppendSegmentManifestColumns(
 	defer newFiles.Destroy()
 
 	if columnGroups.column_group_array == nil && columnGroups.num_of_column_groups > 0 {
-		return "", fmt.Errorf("column_group_array is nil but num_of_column_groups is %d", columnGroups.num_of_column_groups)
+		return "", merr.WrapErrServiceInternalMsg("column_group_array is nil but num_of_column_groups is %d", columnGroups.num_of_column_groups)
 	}
 
 	return CommitManifestUpdates(basePath, version, storageConfig, &ManifestUpdates{

@@ -212,7 +212,7 @@ func parseOrderByFields(searchParamsPair []*commonpb.KeyValuePair, schema *schem
 			case orderByNullsLast:
 				nullsFirst = false
 			default:
-				return nil, fmt.Errorf("invalid null ordering '%s', expected '%s' or '%s'", nullOrdering, orderByNullsFirst, orderByNullsLast)
+				return nil, merr.WrapErrParameterInvalidMsg("invalid null ordering '%s', expected '%s' or '%s'", nullOrdering, orderByNullsFirst, orderByNullsLast)
 			}
 		}
 
@@ -250,7 +250,7 @@ func splitOrderByFieldOptions(pair string) (fieldSpec, direction, nullOrdering s
 			if bracketDepth == 0 {
 				colonIdxs = append(colonIdxs, i)
 				if len(colonIdxs) > 2 {
-					return "", "", "", fmt.Errorf("too many order_by field options in '%s'", pair)
+					return "", "", "", merr.WrapErrParameterInvalidMsg("too many order_by field options in '%s'", pair)
 				}
 			}
 		}

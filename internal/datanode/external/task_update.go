@@ -557,7 +557,7 @@ func (t *RefreshExternalCollectionTask) patchSegmentForMissingColumns(
 		t.req.GetStorageConfig(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to append manifest columns for segment %d: %w", seg.GetID(), err)
+		return nil, merr.Wrapf(err, "failed to append manifest columns for segment %d", seg.GetID())
 	}
 
 	sampleRows := paramtable.Get().QueryNodeCfg.ExternalCollectionSampleRows.GetAsInt()
@@ -574,7 +574,7 @@ func (t *RefreshExternalCollectionTask) patchSegmentForMissingColumns(
 		t.req.GetStorageConfig(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to sample external field sizes for segment %d: %w", seg.GetID(), err)
+		return nil, merr.Wrapf(err, "failed to sample external field sizes for segment %d", seg.GetID())
 	}
 	externalAvgBytes := sumFieldSizes(fieldSizes, schema)
 	if externalAvgBytes <= 0 {
