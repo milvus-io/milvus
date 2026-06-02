@@ -13,6 +13,24 @@ import (
 // Field is an alias for zap.Field - no wrapper overhead
 type Field = zap.Field
 
+// ObjectEncoder is an alias for zapcore.ObjectEncoder.
+type ObjectEncoder = zapcore.ObjectEncoder
+
+// ObjectMarshaler is an alias for zapcore.ObjectMarshaler.
+type ObjectMarshaler = zapcore.ObjectMarshaler
+
+// ObjectMarshalerFunc is an alias for zapcore.ObjectMarshalerFunc.
+type ObjectMarshalerFunc = zapcore.ObjectMarshalerFunc
+
+// ArrayEncoder is an alias for zapcore.ArrayEncoder.
+type ArrayEncoder = zapcore.ArrayEncoder
+
+// ArrayMarshaler is an alias for zapcore.ArrayMarshaler.
+type ArrayMarshaler = zapcore.ArrayMarshaler
+
+// ArrayMarshalerFunc is an alias for zapcore.ArrayMarshalerFunc.
+type ArrayMarshalerFunc = zapcore.ArrayMarshalerFunc
+
 // Basic type field constructors - thin wrappers around zap functions
 
 // String types
@@ -103,10 +121,10 @@ func Binary(key string, val []byte) Field { return zap.Binary(key, val) }
 func Reflect(key string, val any) Field   { return zap.Reflect(key, val) }
 
 // Structured types
-func Object(key string, val zapcore.ObjectMarshaler) Field { return zap.Object(key, val) }
-func Array(key string, val zapcore.ArrayMarshaler) Field   { return zap.Array(key, val) }
-func Inline(val zapcore.ObjectMarshaler) Field             { return zap.Inline(val) }
-func Namespace(key string) Field                           { return zap.Namespace(key) }
+func Object(key string, val ObjectMarshaler) Field { return zap.Object(key, val) }
+func Array(key string, val ArrayMarshaler) Field   { return zap.Array(key, val) }
+func Inline(val ObjectMarshaler) Field             { return zap.Inline(val) }
+func Namespace(key string) Field                   { return zap.Namespace(key) }
 
 // Stack and skip
 func Stack(key string) Field               { return zap.Stack(key) }

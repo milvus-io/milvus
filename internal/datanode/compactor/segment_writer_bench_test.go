@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -37,7 +36,7 @@ import (
 
 func testSegmentWriterBatchSize(b *testing.B, batchSize int) {
 	orgLevel := mlog.GetLevel()
-	mlog.SetLevel(zapcore.InfoLevel)
+	mlog.SetLevel(mlog.InfoLevel)
 	defer mlog.SetLevel(orgLevel)
 	paramtable.Init()
 

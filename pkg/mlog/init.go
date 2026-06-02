@@ -17,7 +17,7 @@ import (
 var globalP, globalS, globalCleanup atomic.Value
 
 // InitLogger initializes a zap logger.
-func InitLogger(cfg *Config, opts ...zap.Option) (*zap.Logger, *ZapProperties, error) {
+func InitLogger(cfg *Config, opts ...Option) (*zap.Logger, *ZapProperties, error) {
 	var outputs []zapcore.WriteSyncer
 	if len(cfg.File.Filename) > 0 {
 		lg, err := initFileLog(&cfg.File)
@@ -53,9 +53,9 @@ func InitLogger(cfg *Config, opts ...zap.Option) (*zap.Logger, *ZapProperties, e
 }
 
 // InitTestLogger initializes a logger for unit tests.
-func InitTestLogger(t zaptest.TestingT, cfg *Config, opts ...zap.Option) (*zap.Logger, *ZapProperties, error) {
+func InitTestLogger(t zaptest.TestingT, cfg *Config, opts ...Option) (*zap.Logger, *ZapProperties, error) {
 	writer := newTestingWriter(t)
-	zapOptions := []zap.Option{
+	zapOptions := []Option{
 		// Send zap errors to the same writer and mark the test as failed if
 		// that happens.
 		zap.ErrorOutput(writer.WithMarkFailed(true)),
@@ -65,7 +65,7 @@ func InitTestLogger(t zaptest.TestingT, cfg *Config, opts ...zap.Option) (*zap.L
 }
 
 // InitLoggerWithWriteSyncer initializes a zap logger with the specified write syncer.
-func InitLoggerWithWriteSyncer(cfg *Config, output zapcore.WriteSyncer, opts ...zap.Option) (*zap.Logger, *ZapProperties, error) {
+func InitLoggerWithWriteSyncer(cfg *Config, output zapcore.WriteSyncer, opts ...Option) (*zap.Logger, *ZapProperties, error) {
 	cfg.initialize()
 	level := zap.NewAtomicLevel()
 	parsedLevel := cfg.Level

@@ -56,6 +56,15 @@ func LevelEnabled(level Level) bool {
 	return currentLevel().Enabled(level)
 }
 
+// ParseLevel parses a text log level.
+func ParseLevel(text string) (Level, error) {
+	var level Level
+	if err := level.UnmarshalText([]byte(text)); err != nil {
+		return 0, err
+	}
+	return level, nil
+}
+
 // GetAtomicLevel returns the AtomicLevel for integration with custom configs.
 // Callers can use this when building their own zap.Config:
 //

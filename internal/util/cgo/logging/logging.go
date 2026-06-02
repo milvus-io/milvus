@@ -94,20 +94,20 @@ func goZapLogExt(sev C.int,
 	}
 }
 
-func mapGlogSeverity(s int) zapcore.Level {
+func mapGlogSeverity(s int) mlog.Level {
 	switch s {
 	case glogInfo: // GLOG_INFO
-		return zapcore.InfoLevel
+		return mlog.InfoLevel
 	case glogWarning: // GLOG_WARNING
-		return zapcore.WarnLevel
+		return mlog.WarnLevel
 	case glogError: // GLOG_ERROR
-		return zapcore.ErrorLevel
+		return mlog.ErrorLevel
 	case glogFatal: // GLOG_FATAL
 		// glog fatal will call std::abort,
 		// zap will call os.Exit(1),
 		// we don't want to double exit, so we use error level instead
-		return zapcore.ErrorLevel
+		return mlog.ErrorLevel
 	default:
-		return zapcore.InfoLevel
+		return mlog.InfoLevel
 	}
 }

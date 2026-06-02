@@ -137,7 +137,7 @@ func NewProxy(ctx context.Context, _ dependency.Factory) (*Proxy, error) {
 	expr.Register("proxy", node)
 	hookutil.SetHook(connection.GetManager())
 	hookutil.InitOnceHook()
-	logutil.Logger(ctx).Debug("create a new Proxy instance", mlog.Any("state", node.stateCode.Load()))
+	mlog.Debug(ctx, "create a new Proxy instance", mlog.Any("state", node.stateCode.Load()))
 	return node, nil
 }
 
