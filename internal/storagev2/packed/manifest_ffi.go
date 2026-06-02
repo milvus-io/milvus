@@ -32,9 +32,7 @@ import (
 	"strings"
 	"unsafe"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	log "github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -466,9 +464,9 @@ func readColumnGroupsFromManifest(
 			group.Columns = make([]string, 0, len(columnArray))
 			for j, cColumn := range columnArray {
 				if cColumn == nil {
-					log.Warn("column name is nil in readColumnGroupsFromManifest",
-						zap.Int("columnGroupIndex", i),
-						zap.Int("columnIndex", j))
+					log.Warn(context.TODO(), "column name is nil in readColumnGroupsFromManifest",
+						log.Int("columnGroupIndex", i),
+						log.Int("columnIndex", j))
 					continue
 				}
 				group.Columns = append(group.Columns, C.GoString(cColumn))
@@ -494,9 +492,9 @@ func readColumnGroupsFromManifest(
 				file := &fileArray[j]
 
 				if file.path == nil {
-					log.Warn("file path is nil in readColumnGroupsFromManifest",
-						zap.Int("columnGroupIndex", i),
-						zap.Int("fileIndex", j))
+					log.Warn(context.TODO(), "file path is nil in readColumnGroupsFromManifest",
+						log.Int("columnGroupIndex", i),
+						log.Int("fileIndex", j))
 					continue
 				}
 
