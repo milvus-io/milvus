@@ -44,6 +44,8 @@
 #include "common/Span.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "exec/expression/EvalCtx.h"
+#include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
@@ -230,6 +232,43 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         ASSERT_TRUE(status.ok());
     }
 
+    int64_t
+    RowCount() const {
+        return chunk_num * test_data_count;
+    }
+
+    void
+    LoadInt64ScalarIndex(const std::string& index_type) {
+        auto fid = fields.at("int64");
+        auto file_manager_ctx = storage::FileManagerContext();
+        file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+            milvus::proto::schema::Int64);
+        file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(fid.get());
+        file_manager_ctx.fieldDataMeta.field_id = fid.get();
+        milvus::storage::IndexMeta index_meta;
+        index_meta.field_id = fid.get();
+        index_meta.build_id = 1000 + fid.get();
+        index_meta.index_version = 2000 + fid.get();
+        file_manager_ctx.indexMeta = index_meta;
+
+        index::CreateIndexInfo create_index_info;
+        create_index_info.field_type = milvus::DataType::INT64;
+        create_index_info.index_type = index_type;
+        auto index = index::IndexFactory::GetInstance().CreateScalarIndex(
+            create_index_info, file_manager_ctx);
+
+        std::vector<int64_t> data(RowCount());
+        std::iota(data.begin(), data.end(), 0);
+        index->BuildWithRawDataForUT(data.size(), data.data());
+
+        segcore::LoadIndexInfo load_index_info;
+        load_index_info.index_params = GenIndexParams(index.get());
+        load_index_info.cache_index =
+            CreateTestCacheIndex("int64_scalar_index", std::move(index));
+        load_index_info.field_id = fid.get();
+        segment->LoadIndex(load_index_info);
+    }
+
     segcore::SegmentSealedUPtr segment;
     SchemaPtr schema_;
     LoadFieldDataInfo load_info_;
@@ -369,6 +408,98 @@ TEST_P(TestChunkSegmentStorageV2, TestCompareExpr) {
     final = query::ExecuteQueryExpr(
         plan, segment.get(), chunk_num * test_data_count, MAX_TIMESTAMP);
     ASSERT_EQ(chunk_num * test_data_count, final.count());
+}
+
+TEST_P(TestChunkSegmentStorageV2, TestColumnExprWithScalarIndexRawData) {
+    LoadInt64ScalarIndex(index::ASCENDING_SORT);
+    ASSERT_TRUE(segment->HasRawData(fields.at("int64").get()));
+
+    auto query_config = std::make_shared<exec::QueryConfig>(
+        std::unordered_map<std::string, std::string>{
+            {exec::QueryConfig::kExprEvalBatchSize, "4096"}});
+    exec::QueryContext query_context("column_expr_scalar_index_raw_data",
+                                     segment.get(),
+                                     RowCount(),
+                                     MAX_TIMESTAMP,
+                                     0,
+                                     0,
+                                     query::PlanOptions(),
+                                     query_config);
+    exec::ExecContext exec_context(&query_context);
+
+    std::vector<expr::TypedExprPtr> exprs{
+        std::make_shared<expr::ColumnExpr>(expr::ColumnInfo(
+            fields.at("int64"), milvus::DataType::INT64))};
+    exec::ExprSet expr_set(exprs, &exec_context);
+    exec::EvalCtx eval_context(&exec_context);
+
+    int64_t offset = 0;
+    while (offset < RowCount()) {
+        std::vector<VectorPtr> results;
+        expr_set.Eval(eval_context, results);
+        ASSERT_EQ(1, results.size());
+
+        auto column = std::dynamic_pointer_cast<ColumnVector>(results[0]);
+        ASSERT_NE(column, nullptr);
+        auto expected_batch_size =
+            std::min<int64_t>(4096, RowCount() - offset);
+        ASSERT_EQ(expected_batch_size, column->size());
+
+        auto values = column->RawAsValues<int64_t>();
+        for (int64_t i = 0; i < expected_batch_size; ++i) {
+            ASSERT_TRUE(column->ValidAt(i));
+            ASSERT_EQ(offset + i, values[i]);
+        }
+        offset += expected_batch_size;
+    }
+}
+
+TEST_P(TestChunkSegmentStorageV2,
+       TestCompareExprSkippedCursorWithScalarIndexWithoutRawData) {
+    LoadInt64ScalarIndex(index::INVERTED_INDEX_TYPE);
+    ASSERT_FALSE(segment->HasRawData(fields.at("int64").get()));
+
+    proto::plan::GenericValue threshold;
+    threshold.set_int64_val(12000);
+    auto range_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(fields.at("int64"), milvus::DataType::INT64),
+        proto::plan::OpType::GreaterEqual,
+        threshold);
+    auto right_field = GetParam() ? fields.at("int64") : fields.at("pk");
+    auto compare_expr = std::make_shared<expr::CompareExpr>(
+        fields.at("int64"),
+        right_field,
+        milvus::DataType::INT64,
+        milvus::DataType::INT64,
+        proto::plan::OpType::Equal);
+    auto conjunct_expr = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::And, range_expr, compare_expr);
+    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                       conjunct_expr);
+
+    auto query_config = std::make_shared<exec::QueryConfig>(
+        std::unordered_map<std::string, std::string>{
+            {exec::QueryConfig::kExprEvalBatchSize, "6000"}});
+    auto query_context = std::make_shared<exec::QueryContext>(
+        DEAFULT_QUERY_ID,
+        segment.get(),
+        RowCount(),
+        MAX_TIMESTAMP,
+        0,
+        0,
+        query::PlanOptions(),
+        query_config);
+    auto plan_fragment = plan::PlanFragment(plan);
+    auto row =
+        query::ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
+    ASSERT_NE(row, nullptr);
+    ASSERT_EQ(row->childrens().size(), 1);
+    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(row->childrens()[0]);
+    ASSERT_NE(col_vec, nullptr);
+    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+    BitsetType final(view);
+    final.flip();
+    ASSERT_EQ(RowCount() - threshold.int64_val(), final.count());
 }
 
 // Test DropFieldData behavior based on parquet file structure.
