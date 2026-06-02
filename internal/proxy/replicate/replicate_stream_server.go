@@ -1,7 +1,6 @@
 package replicate
 
 import (
-	"context"
 	"io"
 	"sync"
 
@@ -55,12 +54,13 @@ func (p *ReplicateStreamServer) Execute() error {
 
 // sendLoop sends the message to client.
 func (p *ReplicateStreamServer) sendLoop() (err error) {
+	ctx := p.streamServer.Context()
 	defer func() {
 		if err != nil {
-			mlog.Warn(context.TODO(), "send arm of stream closed by unexpected error", zap.Error(err))
+			mlog.Warn(ctx, "send arm of stream closed by unexpected error", zap.Error(err))
 			return
 		}
-		mlog.Info(context.TODO(), "send arm of stream closed")
+		mlog.Info(ctx, "send arm of stream closed")
 	}()
 
 	for {
@@ -72,22 +72,23 @@ func (p *ReplicateStreamServer) sendLoop() (err error) {
 			if err := p.streamServer.Send(resp); err != nil {
 				return err
 			}
-		case <-p.streamServer.Context().Done():
-			return errors.Wrap(p.streamServer.Context().Err(), "cancel send loop by stream server")
+		case <-ctx.Done():
+			return errors.Wrap(ctx.Err(), "cancel send loop by stream server")
 		}
 	}
 }
 
 // recvLoop receives the message from client.
 func (p *ReplicateStreamServer) recvLoop() (err error) {
+	ctx := p.streamServer.Context()
 	defer func() {
 		p.wg.Wait()
 		close(p.replicateRespCh)
 		if err != nil {
-			mlog.Warn(context.TODO(), "recv arm of stream closed by unexpected error", zap.Error(err))
+			mlog.Warn(ctx, "recv arm of stream closed by unexpected error", zap.Error(err))
 			return
 		}
-		mlog.Info(context.TODO(), "recv arm of stream closed")
+		mlog.Info(ctx, "recv arm of stream closed")
 	}()
 
 	for {
@@ -105,7 +106,7 @@ func (p *ReplicateStreamServer) recvLoop() (err error) {
 				return err
 			}
 		default:
-			mlog.Warn(context.TODO(), "unknown request type", zap.Any("request", req))
+			mlog.Warn(ctx, "unknown request type", zap.Any("request", req))
 		}
 	}
 }
@@ -120,30 +121,32 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 		return err
 	}
 	sourceTs := msg.ReplicateHeader().TimeTick
-	mlog.Debug(context.TODO(), "recv replicate message from client",
+	ctx := p.streamServer.Context()
+	mlog.Debug(ctx, "recv replicate message from client",
 		zap.String("messageID", reqMsg.GetId().GetId()),
 		zap.Uint64("sourceTimeTick", sourceTs),
 		mlog.FieldMessage(msg),
 	)
 
 	// Append message to wal.
-	_, err = streaming.WAL().Replicate().Append(p.streamServer.Context(), msg)
+	_, err = streaming.WAL().Replicate().Append(ctx, msg)
 	if err == nil {
 		p.sendReplicateResult(sourceTs, msg)
 		return nil
 	}
 	if status.AsStreamingError(err).IsIgnoredOperation() {
-		mlog.Info(context.TODO(), "append replicate message to wal ignored", mlog.FieldMessage(msg), zap.Error(err))
+		mlog.Info(ctx, "append replicate message to wal ignored", mlog.FieldMessage(msg), zap.Error(err))
 		p.sendReplicateResult(sourceTs, msg)
 		return nil
 	}
 	// unexpected error, will close the stream and wait for client to reconnect.
-	mlog.Warn(context.TODO(), "append replicate message to wal failed", mlog.FieldMessage(msg), zap.Error(err))
+	mlog.Warn(ctx, "append replicate message to wal failed", mlog.FieldMessage(msg), zap.Error(err))
 	return err
 }
 
 // sendReplicateResult sends the replicate result to client.
 func (p *ReplicateStreamServer) sendReplicateResult(sourceTimeTick uint64, msg message.ReplicateMutableMessage) {
+	ctx := p.streamServer.Context()
 	if msg.TxnContext() != nil && msg.MessageType() != message.MessageTypeCommitTxn {
 		// Only confirm the commit message of a transaction.
 		return
@@ -159,9 +162,9 @@ func (p *ReplicateStreamServer) sendReplicateResult(sourceTimeTick uint64, msg m
 	// all pending response message should be dropped, client side will handle it.
 	select {
 	case p.replicateRespCh <- resp:
-		mlog.Debug(context.TODO(), "send replicate message response to client", zap.Uint64("confirmedTimeTick", sourceTimeTick))
-	case <-p.streamServer.Context().Done():
-		mlog.Warn(context.TODO(), "stream closed before replicate message response sent", zap.Uint64("confirmedTimeTick", sourceTimeTick))
+		mlog.Debug(ctx, "send replicate message response to client", zap.Uint64("confirmedTimeTick", sourceTimeTick))
+	case <-ctx.Done():
+		mlog.Warn(ctx, "stream closed before replicate message response sent", zap.Uint64("confirmedTimeTick", sourceTimeTick))
 		return
 	}
 }
