@@ -391,6 +391,7 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	stepStart = time.Now()
 	textStatsLogs, err := t.createTextIndex(ctx,
 		t.collectionID, t.partitionID, targetSegemntID, t.GetPlanID(),
+		res.GetSegments()[0].GetManifest(),
 		res.GetSegments()[0].GetInsertLogs())
 	if err != nil {
 		log.Warn("failed to create text indexes", zap.Int64("targetSegmentID", targetSegemntID),
@@ -450,6 +451,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 	partitionID int64,
 	segmentID int64,
 	taskID int64,
+	manifest string,
 	insertBinlogs []*datapb.FieldBinlog,
 ) (map[int64]*datapb.TextIndexStats, error) {
 	return buildTextIndexesForSegment(ctx, buildTextIndexArgs{
@@ -460,7 +462,11 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 		segmentID:        segmentID,
 		taskID:           taskID,
 		storageVersion:   t.storageVersion,
-		manifest:         t.manifest,
-		insertBinlogs:    insertBinlogs,
+		// Use the OUTPUT segment's own manifest, not the input segment's
+		// (t.manifest). Under StorageV2 the text-index build reads field data
+		// via the manifest, so the index must reflect the sorted OUTPUT
+		// segment's rows/order, not the unsorted input's.
+		manifest:      manifest,
+		insertBinlogs: insertBinlogs,
 	})
 }
