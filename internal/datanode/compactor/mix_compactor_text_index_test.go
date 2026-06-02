@@ -415,3 +415,34 @@ func TestBuildTextIndexesForSegment_NoEnableMatchFields(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Empty(t, got)
 }
+
+// TestSortCompaction_createTextIndex_ForwardsPassedManifest guards the fix that
+// sort builds the text index over the OUTPUT segment's manifest: the wrapper must
+// forward the manifest argument it's given, NOT t.manifest (the INPUT segment's).
+// Under StorageV2 the manifest is the data source, so using the input manifest
+// would index unsorted input rows against the sorted output segment.
+func TestSortCompaction_createTextIndex_ForwardsPassedManifest(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+
+	task := &sortCompactionTask{
+		plan:             &datapb.CompactionPlan{PlanID: 1, Schema: textMatchSchema(101)},
+		compactionParams: compaction.GenParams(),
+		collectionID:     1,
+		partitionID:      2,
+		storageVersion:   storage.StorageV2,
+		manifest:         "input-manifest", // INPUT segment manifest — must NOT be used
+	}
+
+	var gotManifest string
+	mockBuild := mockey.Mock(buildTextIndexesForSegment).
+		To(func(_ context.Context, args buildTextIndexArgs) (map[int64]*datapb.TextIndexStats, error) {
+			gotManifest = args.manifest
+			return map[int64]*datapb.TextIndexStats{101: {FieldID: 101}}, nil
+		}).Build()
+	defer mockBuild.UnPatch()
+
+	_, err := task.createTextIndex(context.Background(), 1, 2, 3, 1, "output-manifest", nil)
+	assert.NoError(t, err)
+	assert.Equal(t, "output-manifest", gotManifest,
+		"sort must forward the OUTPUT segment manifest passed in, not t.manifest (the input segment's)")
+}
