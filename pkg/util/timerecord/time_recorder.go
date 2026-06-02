@@ -103,8 +103,8 @@ func (tr *TimeRecorder) printTimeRecord(ctx context.Context, msg string, span ti
 	}
 	mlog.With().WithOptions(zap.AddCallerSkip(2)).
 		Debug(ctx, tr.logLabel,
-			zap.String("msg", msg),
-			zap.Duration("duration", span),
+			mlog.String("msg", msg),
+			mlog.Duration("duration", span),
 		)
 }
 

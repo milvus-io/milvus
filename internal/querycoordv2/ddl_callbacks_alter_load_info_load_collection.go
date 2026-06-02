@@ -20,8 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
@@ -94,7 +92,7 @@ func (s *Server) getDefaultResourceGroupsAndReplicaNumber(ctx context.Context, r
 		// when replica number or resource groups is not set, use pre-defined load config
 		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, collectionID)
 		if err != nil {
-			mlog.Warn(ctx, "failed to get pre-defined load info", zap.Error(err))
+			mlog.Warn(ctx, "failed to get pre-defined load info", mlog.Err(err))
 		} else {
 			replicaNumber = int32(replicas)
 			resourceGroups = rgs

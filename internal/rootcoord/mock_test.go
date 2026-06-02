@@ -23,7 +23,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -770,9 +769,9 @@ func cleanTestEnv() {
 		return
 	}
 	if err := os.RemoveAll(path); err != nil { //nolint:gosec // path is from test environment variable
-		mlog.Warn(context.TODO(), "failed to clean test directories", zap.Error(err), zap.String("path", path))
+		mlog.Warn(context.TODO(), "failed to clean test directories", mlog.Err(err), mlog.String("path", path))
 	}
-	mlog.Debug(context.TODO(), "clean test environment", zap.String("path", path))
+	mlog.Debug(context.TODO(), "clean test environment", mlog.String("path", path))
 }
 
 func withTtSynchronizer(ticker *timetickSync) Opt {

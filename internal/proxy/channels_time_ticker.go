@@ -21,8 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -93,13 +91,13 @@ func (ticker *channelsTimeTickerImpl) initCurrents(current Timestamp) {
 func (ticker *channelsTimeTickerImpl) tick() error {
 	now, err := ticker.tso.AllocOne(ticker.ctx)
 	if err != nil {
-		mlog.Warn(ticker.ctx, "Proxy channelsTimeTickerImpl failed to get ts from tso", zap.Error(err))
+		mlog.Warn(ticker.ctx, "Proxy channelsTimeTickerImpl failed to get ts from tso", mlog.Err(err))
 		return err
 	}
 
 	stats, err2 := ticker.getStatisticsFunc()
 	if err2 != nil {
-		mlog.Warn(ticker.ctx, "failed to get tt statistics", zap.Error(err))
+		mlog.Warn(ticker.ctx, "failed to get tt statistics", mlog.Err(err))
 		return nil
 	}
 
@@ -135,7 +133,7 @@ func (ticker *channelsTimeTickerImpl) tick() error {
 	for pchan, value := range stats {
 		if value.minTs == typeutil.ZeroTimestamp {
 			mlog.Warn(ticker.ctx, "channelsTimeTickerImpl.tick, stats contains physical channel which min ts is zero ",
-				zap.String("pchan", pchan))
+				mlog.String("pchan", pchan))
 			continue
 		}
 		_, ok := ticker.currents[pchan]
@@ -165,7 +163,7 @@ func (ticker *channelsTimeTickerImpl) tickLoop() {
 		case <-timer.C:
 			err := ticker.tick()
 			if err != nil {
-				mlog.Warn(ticker.ctx, "channelsTimeTickerImpl.tickLoop", zap.Error(err))
+				mlog.Warn(ticker.ctx, "channelsTimeTickerImpl.tickLoop", mlog.Err(err))
 			}
 		}
 	}

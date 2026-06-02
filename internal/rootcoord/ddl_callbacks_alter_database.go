@@ -21,7 +21,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -154,7 +153,7 @@ func (c *DDLCallback) alterDatabaseV1AckCallback(ctx context.Context, result mes
 		}
 		if err := merr.CheckRPCCall(resp, err); err != nil {
 			if errors.Is(err, merr.ErrResourceGroupNotFound) {
-				mlog.Warn(ctx, "failed to update load config due to missing resource group, stop retrying", zap.Error(err))
+				mlog.Warn(ctx, "failed to update load config due to missing resource group, stop retrying", mlog.Err(err))
 				return nil
 			}
 			return merr.Wrap(err, "failed to update load config")

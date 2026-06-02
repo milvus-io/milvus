@@ -7,7 +7,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
@@ -52,11 +51,11 @@ func InitEtcdServer(
 			cfg.LogLevel = logLevel
 			e, err := embed.StartEtcd(cfg)
 			if err != nil {
-				mlog.Error(context.TODO(), "failed to init embedded Etcd server", zap.Error(err))
+				mlog.Error(context.TODO(), "failed to init embedded Etcd server", mlog.Err(err))
 				initError = err
 			}
 			etcdServer = e
-			mlog.Info(context.TODO(), "finish init Etcd config", zap.String("path", path), zap.String("data", dataDir))
+			mlog.Info(context.TODO(), "finish init Etcd config", mlog.String("path", path), mlog.String("data", dataDir))
 		})
 		return initError
 	}

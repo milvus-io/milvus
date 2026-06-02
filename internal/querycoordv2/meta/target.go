@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -126,7 +125,7 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 	}
 
 	if lackSegmentInfo {
-		mlog.Info(context.TODO(), "target has lack of segment info", zap.Int64("collectionID", target.GetCollectionID()))
+		mlog.Info(context.TODO(), "target has lack of segment info", mlog.FieldCollectionID(target.GetCollectionID()))
 	}
 
 	return &CollectionTarget{

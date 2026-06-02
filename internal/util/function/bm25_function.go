@@ -23,7 +23,6 @@ import (
 	"sync"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"

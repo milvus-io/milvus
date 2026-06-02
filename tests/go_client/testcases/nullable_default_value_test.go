@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
@@ -871,7 +870,7 @@ func TestNullableQuery(t *testing.T) {
 		{expr: fmt.Sprintf("%s is not null and %d <= %s < %d", common.DefaultVarcharFieldName, common.DefaultNb*3, common.DefaultInt64FieldName, common.DefaultNb*4), count: common.DefaultNb},
 	}
 	for _, exprCount := range exprCounts {
-		mlog.Info(context.TODO(), "exprCount", zap.String("expr", exprCount.expr), zap.Int64("count", exprCount.count))
+		mlog.Info(context.TODO(), "exprCount", mlog.String("expr", exprCount.expr), mlog.Int64("count", exprCount.count))
 		countRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprCount.expr).WithOutputFields(common.QueryCountFieldName))
 		common.CheckErr(t, err, true)
 		count, _ := countRes.Fields[0].GetAsInt64(0)
@@ -929,7 +928,7 @@ func TestDefaultValueQuery(t *testing.T) {
 			{expr: fmt.Sprintf("%s == 'test'", common.DefaultVarcharFieldName), count: common.DefaultNb * 3 / 2},
 		}
 		for _, exprCount := range exprCounts {
-			mlog.Info(context.TODO(), "exprCount", zap.String("expr", exprCount.expr), zap.Int64("count", exprCount.count))
+			mlog.Info(context.TODO(), "exprCount", mlog.String("expr", exprCount.expr), mlog.Int64("count", exprCount.count))
 			countRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprCount.expr).WithOutputFields(common.QueryCountFieldName))
 			common.CheckErr(t, err, true)
 			count, _ := countRes.Fields[0].GetAsInt64(0)

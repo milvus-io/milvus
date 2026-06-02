@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
@@ -36,7 +35,7 @@ type Server struct {
 func (s *Server) Start(ctx context.Context, checker balancer.FileResourceChecker) (err error) {
 	s.logger.Info(ctx, "init streamingcoord...")
 	if err := s.initBasicComponent(ctx); err != nil {
-		s.logger.Warn(ctx, "init basic component of streamingcoord failed", zap.Error(err))
+		s.logger.Warn(ctx, "init basic component of streamingcoord failed", mlog.Err(err))
 		return err
 	}
 	balance.SetFileResourceChecker(checker)
@@ -56,7 +55,7 @@ func (s *Server) initBasicComponent(ctx context.Context) (err error) {
 		balancer, err := balancer.RecoverBalancer(ctx, provider)
 		if err != nil {
 			provider.Close()
-			s.logger.Warn(ctx, "recover balancer failed", zap.Error(err))
+			s.logger.Warn(ctx, "recover balancer failed", mlog.Err(err))
 			return struct{}{}, err
 		}
 		balance.Register(balancer)
@@ -69,7 +68,7 @@ func (s *Server) initBasicComponent(ctx context.Context) (err error) {
 		s.logger.Info(ctx, "start recovery broadcaster...")
 		broadcaster, err := broadcaster.RecoverBroadcaster(ctx)
 		if err != nil {
-			s.logger.Warn(ctx, "recover broadcaster failed", zap.Error(err))
+			s.logger.Warn(ctx, "recover broadcaster failed", mlog.Err(err))
 			return struct{}{}, err
 		}
 		broadcast.Register(broadcaster)

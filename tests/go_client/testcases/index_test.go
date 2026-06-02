@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
@@ -44,7 +43,7 @@ func TestIndexVectorDefault(t *testing.T) {
 
 	// index
 	for _, idx := range hp.GenAllFloatIndex(entity.L2) {
-		mlog.Debug(context.TODO(), "index", zap.String("name", idx.Name()), zap.Any("indexType", idx.IndexType()), zap.Any("params", idx.Params()))
+		mlog.Debug(context.TODO(), "index", mlog.String("name", idx.Name()), mlog.Any("indexType", idx.IndexType()), mlog.Any("params", idx.Params()))
 		for _, fieldName := range []string{common.DefaultFloat16VecFieldName, common.DefaultBFloat16VecFieldName, common.DefaultFloatVecFieldName} {
 			indexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, fieldName, idx))
 			common.CheckErr(t, err, true)
@@ -78,7 +77,7 @@ func TestIndexVectorIP(t *testing.T) {
 
 	// index
 	for _, idx := range hp.GenAllFloatIndex(entity.IP) {
-		mlog.Debug(context.TODO(), "index", zap.String("name", idx.Name()), zap.Any("indexType", idx.IndexType()), zap.Any("params", idx.Params()))
+		mlog.Debug(context.TODO(), "index", mlog.String("name", idx.Name()), mlog.Any("indexType", idx.IndexType()), mlog.Any("params", idx.Params()))
 		for _, fieldName := range []string{common.DefaultFloat16VecFieldName, common.DefaultBFloat16VecFieldName, common.DefaultFloatVecFieldName} {
 			indexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, fieldName, idx))
 			common.CheckErr(t, err, true)
@@ -113,7 +112,7 @@ func TestIndexVectorCosine(t *testing.T) {
 
 	// index
 	for _, idx := range hp.GenAllFloatIndex(entity.COSINE) {
-		mlog.Debug(context.TODO(), "index", zap.String("name", idx.Name()), zap.Any("indexType", idx.IndexType()), zap.Any("params", idx.Params()))
+		mlog.Debug(context.TODO(), "index", mlog.String("name", idx.Name()), mlog.Any("indexType", idx.IndexType()), mlog.Any("params", idx.Params()))
 		for _, fieldName := range []string{common.DefaultFloat16VecFieldName, common.DefaultBFloat16VecFieldName, common.DefaultFloatVecFieldName} {
 			indexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, fieldName, idx))
 			common.CheckErr(t, err, true)
@@ -736,7 +735,7 @@ func TestCreateInvertedIndexArrayField(t *testing.T) {
 	// create scalar and vector index on array field
 	for _, field := range schema.Fields {
 		if field.DataType == entity.FieldTypeArray {
-			mlog.Debug(context.TODO(), "array field", zap.String("name", field.Name), zap.Any("element type", field.ElementType))
+			mlog.Debug(context.TODO(), "array field", mlog.String("name", field.Name), mlog.Any("element type", field.ElementType))
 
 			// create scalar index
 			_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, index.NewInvertedIndex()))
@@ -1174,7 +1173,7 @@ func TestCreateIndexAsync(t *testing.T) {
 
 	idx, err := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName))
 	common.CheckErr(t, err, true)
-	mlog.Debug(context.TODO(), "describe index", zap.Any("descIdx", idx))
+	mlog.Debug(context.TODO(), "describe index", mlog.Any("descIdx", idx))
 }
 
 // create same index name on different vector field

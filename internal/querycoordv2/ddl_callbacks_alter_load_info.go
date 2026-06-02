@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -43,8 +42,8 @@ func (s *Server) alterLoadConfigV2AckCallback(ctx context.Context, result messag
 		// ErrCollectionNotFound early-return inside LoadCollectionJob.Execute().
 		if errors.Is(err, merr.ErrChannelDroppedSentinel) {
 			mlog.Warn(ctx, "ack alter load config: collection channel is dropped sentinel",
-				zap.Int64("collectionID", result.Message.Header().GetCollectionId()),
-				zap.Error(err))
+				mlog.FieldCollectionID(result.Message.Header().GetCollectionId()),
+				mlog.Err(err))
 			return nil
 		}
 		return err

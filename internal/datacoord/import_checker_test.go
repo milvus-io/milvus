@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -707,7 +706,7 @@ func TestImportCheckerCompaction(t *testing.T) {
 		job := importMeta.GetJob(context.TODO(), jobID)
 		preimportTasks := importMeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()), WithType(PreImportTaskType))
 		taskLen := len(preimportTasks)
-		mlog.Info(context.TODO(), "job pre-importing", zap.Any("taskLen", taskLen), zap.Any("jobState", job.GetState()))
+		mlog.Info(context.TODO(), "job pre-importing", mlog.Any("taskLen", taskLen), mlog.Any("jobState", job.GetState()))
 		return taskLen == 2 && job.GetState() == internalpb.ImportJobState_PreImporting
 	}, 2*time.Second, 500*time.Millisecond)
 	mlog.Info(context.TODO(), "job pre-importing")

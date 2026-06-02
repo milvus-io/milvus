@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
@@ -82,7 +81,7 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 		return nil, err
 	}
 	if exist {
-		mlog.Debug(context.TODO(), "ConsumerGroup already existed", zap.Any("topic", options.Topic), zap.String("SubscriptionName", options.SubscriptionName))
+		mlog.Debug(context.TODO(), "ConsumerGroup already existed", mlog.Any("topic", options.Topic), mlog.String("SubscriptionName", options.SubscriptionName))
 		consumer, err := getExistedConsumer(c, options, con.MsgMutex)
 		if err != nil {
 			return nil, err
@@ -133,7 +132,7 @@ func (c *client) consume(consumer *consumer) {
 	}()
 
 	if err := c.blockUntilInitDone(consumer); err != nil {
-		mlog.Warn(context.TODO(), "consumer init failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "consumer init failed", mlog.Err(err))
 		return
 	}
 
@@ -173,7 +172,7 @@ func (c *client) consume(consumer *consumer) {
 		case _, ok := <-newIncomingMsgCh:
 			if !ok {
 				// consumer MsgMutex closed, goroutine exit
-				mlog.Info(context.TODO(), "Consumer MsgMutex closed", zap.String("topic", consumer.topic), zap.String("groupName", consumer.consumerName))
+				mlog.Info(context.TODO(), "Consumer MsgMutex closed", mlog.String("topic", consumer.topic), mlog.String("groupName", consumer.consumerName))
 				return
 			}
 		case <-timerNotify:
@@ -213,7 +212,7 @@ func (c *client) tryToConsume(consumer *consumer) []*RmqMessage {
 			continue
 		}
 		if !errors.Is(err, errNotStreamingServiceMessage) {
-			mlog.Warn(context.TODO(), "Consumer's goroutine cannot unmarshal streaming message: ", zap.Error(err))
+			mlog.Warn(context.TODO(), "Consumer's goroutine cannot unmarshal streaming message: ", mlog.Err(err))
 			continue
 		}
 		// then fallback to the legacy message format.

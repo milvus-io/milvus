@@ -20,8 +20,6 @@ import (
 	"context"
 	"sync"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/ratelimit"
@@ -55,23 +53,23 @@ func (f *adaptiveRateLimitControllerConfigFetcher) FetchRecoveryConfig() ratelim
 
 	if newConfig.HWM < newConfig.LWM || newConfig.Incremental <= 0 || newConfig.NormalDelayInterval < 0 || newConfig.IncreaseInterval < 0 {
 		mlog.Warn(context.TODO(), "illegal recovery config, fallback to previous one",
-			zap.String("sourceName", f.sourceName),
-			zap.Int64("hwm", newConfig.HWM),
-			zap.Int64("lwm", newConfig.LWM),
-			zap.Int64("incremental", newConfig.Incremental),
-			zap.Duration("normalInterval", newConfig.NormalDelayInterval),
-			zap.Duration("increaseDelayInterval", newConfig.IncreaseInterval))
+			mlog.String("sourceName", f.sourceName),
+			mlog.Int64("hwm", newConfig.HWM),
+			mlog.Int64("lwm", newConfig.LWM),
+			mlog.Int64("incremental", newConfig.Incremental),
+			mlog.Duration("normalInterval", newConfig.NormalDelayInterval),
+			mlog.Duration("increaseDelayInterval", newConfig.IncreaseInterval))
 		return f.lastRecovery
 	}
 	if f.lastRecovery != newConfig {
 		f.lastRecovery = newConfig
 		mlog.Info(context.TODO(), "recovery config changed",
-			zap.String("sourceName", f.sourceName),
-			zap.Int64("hwm", newConfig.HWM),
-			zap.Int64("lwm", newConfig.LWM),
-			zap.Duration("normalInterval", newConfig.NormalDelayInterval),
-			zap.Int64("incremental", newConfig.Incremental),
-			zap.Duration("increaseDelayInterval", newConfig.IncreaseInterval))
+			mlog.String("sourceName", f.sourceName),
+			mlog.Int64("hwm", newConfig.HWM),
+			mlog.Int64("lwm", newConfig.LWM),
+			mlog.Duration("normalInterval", newConfig.NormalDelayInterval),
+			mlog.Int64("incremental", newConfig.Incremental),
+			mlog.Duration("increaseDelayInterval", newConfig.IncreaseInterval))
 	}
 	f.reportRecoveryConfigMetrics(newConfig)
 	return newConfig
@@ -102,25 +100,25 @@ func (f *adaptiveRateLimitControllerConfigFetcher) FetchSlowdownConfig() ratelim
 
 	if newConfig.FirstSlowdownDelay < 0 || newConfig.HWM < newConfig.LWM || newConfig.DecreaseInterval < 0 || newConfig.DecreaseRatio <= 0 || newConfig.DecreaseRatio >= 1 || newConfig.RejectDelayInterval < 0 {
 		mlog.Warn(context.TODO(), "illegal slowdown config, fallback to previous one",
-			zap.String("sourceName", f.sourceName),
-			zap.Duration("firstSlowdownDelay", newConfig.FirstSlowdownDelay),
-			zap.Int64("hwm", newConfig.HWM),
-			zap.Int64("lwm", newConfig.LWM),
-			zap.Duration("decreaseInterval", newConfig.DecreaseInterval),
-			zap.Float64("decreaseRatio", newConfig.DecreaseRatio),
-			zap.Duration("rejectDelayInterval", newConfig.RejectDelayInterval))
+			mlog.String("sourceName", f.sourceName),
+			mlog.Duration("firstSlowdownDelay", newConfig.FirstSlowdownDelay),
+			mlog.Int64("hwm", newConfig.HWM),
+			mlog.Int64("lwm", newConfig.LWM),
+			mlog.Duration("decreaseInterval", newConfig.DecreaseInterval),
+			mlog.Float64("decreaseRatio", newConfig.DecreaseRatio),
+			mlog.Duration("rejectDelayInterval", newConfig.RejectDelayInterval))
 		return f.lastSlowdown
 	}
 	if f.lastSlowdown != newConfig {
 		f.lastSlowdown = newConfig
 		mlog.Info(context.TODO(), "slowdown config changed",
-			zap.String("sourceName", f.sourceName),
-			zap.Duration("firstSlowdownDelay", newConfig.FirstSlowdownDelay),
-			zap.Int64("hwm", newConfig.HWM),
-			zap.Int64("lwm", newConfig.LWM),
-			zap.Duration("decreaseInterval", newConfig.DecreaseInterval),
-			zap.Float64("decreaseRatio", newConfig.DecreaseRatio),
-			zap.Duration("rejectDelayInterval", newConfig.RejectDelayInterval))
+			mlog.String("sourceName", f.sourceName),
+			mlog.Duration("firstSlowdownDelay", newConfig.FirstSlowdownDelay),
+			mlog.Int64("hwm", newConfig.HWM),
+			mlog.Int64("lwm", newConfig.LWM),
+			mlog.Duration("decreaseInterval", newConfig.DecreaseInterval),
+			mlog.Float64("decreaseRatio", newConfig.DecreaseRatio),
+			mlog.Duration("rejectDelayInterval", newConfig.RejectDelayInterval))
 	}
 	f.reportSlowdownConfigMetrics(newConfig)
 	return newConfig

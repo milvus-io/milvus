@@ -19,8 +19,6 @@ package delegator
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -227,7 +225,7 @@ func pkFromGenericValue(dataType schemapb.DataType, value *planpb.GenericValue) 
 	case schemapb.DataType_VarChar:
 		return storage.NewVarCharPrimaryKey(value.GetStringVal()), true
 	default:
-		mlog.Warn(context.TODO(), "unknown pk type", zap.Int("type", int(dataType)))
+		mlog.Warn(context.TODO(), "unknown pk type", mlog.Int("type", int(dataType)))
 		return nil, false
 	}
 }

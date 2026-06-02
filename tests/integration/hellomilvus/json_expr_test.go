@@ -23,7 +23,6 @@ import (
 	"strconv"
 	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -96,15 +95,15 @@ func (s *HelloMilvusSuite) TestJsonEnableDynamicSchema() {
 	})
 	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.String("reason", createCollectionStatus.GetReason()))
 	}
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	describeCollectionResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 	s.NoError(err)
@@ -179,15 +178,15 @@ func (s *HelloMilvusSuite) TestJSON_InsertWithoutDynamicData() {
 	})
 	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.String("reason", createCollectionStatus.GetReason()))
 	}
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	describeCollectionResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 	s.NoError(err)
@@ -275,15 +274,15 @@ func (s *HelloMilvusSuite) TestJSON_DynamicSchemaWithJSON() {
 	})
 	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.String("reason", createCollectionStatus.GetReason()))
 	}
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	describeCollectionResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 	s.NoError(err)
@@ -745,7 +744,7 @@ func (s *HelloMilvusSuite) insertFlushIndexLoad(ctx context.Context, dbName, col
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
-		mlog.Info(ctx, "ShowSegments result", zap.String("segment", segment.String()))
+		mlog.Info(ctx, "ShowSegments result", mlog.String("segment", segment.String()))
 	}
 
 	// create index
@@ -775,7 +774,7 @@ func (s *HelloMilvusSuite) insertFlushIndexLoad(ctx context.Context, dbName, col
 	s.NoError(err)
 
 	if err = merr.Error(createIndexStatus); err != nil {
-		mlog.Warn(ctx, "createIndexStatus failed", zap.Error(err))
+		mlog.Warn(ctx, "createIndexStatus failed", mlog.Err(err))
 	}
 	s.NoError(err)
 
@@ -788,7 +787,7 @@ func (s *HelloMilvusSuite) insertFlushIndexLoad(ctx context.Context, dbName, col
 	s.Require().NoError(err)
 
 	if err = merr.Error(loadStatus); err != nil {
-		mlog.Warn(ctx, "loadStatus failed", zap.Error(err))
+		mlog.Warn(ctx, "loadStatus failed", mlog.Err(err))
 	}
 	s.Require().NoError(err)
 
@@ -818,15 +817,15 @@ func (s *HelloMilvusSuite) doSearch(collectionName string, outputField []string,
 	searchResult, err := s.Cluster.MilvusClient.Search(context.Background(), searchReq)
 
 	if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		mlog.Warn(context.TODO(), "searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
+		mlog.Warn(context.TODO(), "searchResult fail reason", mlog.String("reason", searchResult.GetStatus().GetReason()))
 	}
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
 
-	mlog.Info(context.TODO(), "TestHelloMilvus succeed", zap.Any("result", searchResult.Results),
-		zap.Any("result num", len(searchResult.Results.FieldsData)))
+	mlog.Info(context.TODO(), "TestHelloMilvus succeed", mlog.Any("result", searchResult.Results),
+		mlog.Any("result num", len(searchResult.Results.FieldsData)))
 	for _, data := range searchResult.Results.FieldsData {
-		mlog.Info(context.TODO(), "output field", zap.Any("outputfield", data.String()))
+		mlog.Info(context.TODO(), "output field", mlog.Any("outputfield", data.String()))
 	}
 	checkFunc(searchResult)
 }
@@ -895,7 +894,7 @@ func (s *HelloMilvusSuite) doSearchWithInvalidExpr(collectionName string, output
 	searchResult, err := s.Cluster.MilvusClient.Search(context.Background(), searchReq)
 
 	if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		mlog.Warn(context.TODO(), "searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
+		mlog.Warn(context.TODO(), "searchResult fail reason", mlog.String("reason", searchResult.GetStatus().GetReason()))
 	}
 	s.NoError(err)
 	s.NotEqual(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
@@ -961,15 +960,15 @@ func (s *HelloMilvusSuite) TestJsonWithEscapeString() {
 	})
 	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.String("reason", createCollectionStatus.GetReason()))
 	}
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	describeCollectionResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 	s.NoError(err)
@@ -1080,15 +1079,15 @@ func (s *HelloMilvusSuite) TestJsonContains() {
 	})
 	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.String("reason", createCollectionStatus.GetReason()))
 	}
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	describeCollectionResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 	s.NoError(err)

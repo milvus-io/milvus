@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -34,8 +33,8 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 	)
 
 	if isMock, mockResp, err = hoo.Mock(ctx, req, fullMethod); isMock {
-		mlog.Info(ctx, "hook mock", zap.String("user", userName),
-			zap.String("full method", fullMethod), zap.Error(err))
+		mlog.Info(ctx, "hook mock", mlog.String("user", userName),
+			mlog.String("full method", fullMethod), mlog.Err(err))
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookMock, fullMethod).Inc()
 		updateProxyFunctionCallMetric(fullMethod, err)
 		if err != nil {
@@ -46,8 +45,8 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 	}
 
 	if newCtx, err = hoo.Before(ctx, req, fullMethod); err != nil {
-		mlog.Warn(ctx, "hook before error", zap.String("user", userName), zap.String("full method", fullMethod),
-			zap.Any("request", req), zap.Error(err))
+		mlog.Warn(ctx, "hook before error", mlog.String("user", userName), mlog.String("full method", fullMethod),
+			mlog.Any("request", req), mlog.Err(err))
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookBefore, fullMethod).Inc()
 		updateProxyFunctionCallMetric(fullMethod, err)
 		// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
@@ -55,8 +54,8 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 	}
 	realResp, realErr = handler(newCtx, req)
 	if err = hoo.After(newCtx, realResp, realErr, fullMethod); err != nil {
-		mlog.Warn(ctx, "hook after error", zap.String("user", userName), zap.String("full method", fullMethod),
-			zap.Any("request", req), zap.Error(err))
+		mlog.Warn(ctx, "hook after error", mlog.String("user", userName), mlog.String("full method", fullMethod),
+			mlog.Any("request", req), mlog.Err(err))
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookAfter, fullMethod).Inc()
 		updateProxyFunctionCallMetric(fullMethod, err)
 		// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk

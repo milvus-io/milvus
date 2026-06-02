@@ -440,7 +440,7 @@ func GenTestIndexMeta(collectionID int64, schema *schemapb.CollectionSchema) *se
 	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
 	maxIndexRecordPerSegment := int64(0)
 	if err != nil || sizePerRecord == 0 {
-		mlog.Warn(context.TODO(), "failed to transfer segment size to collection, because failed to estimate size per record", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to transfer segment size to collection, because failed to estimate size per record", mlog.Err(err))
 	} else {
 		threshold := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024
 		proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
@@ -503,14 +503,14 @@ func SaveBinLogWithData(ctx context.Context,
 		return nil, nil, err
 	}
 
-	mlog.Debug(ctx, ".. [query node unittest] Saving bin logs to MinIO ..", zap.Int("number", len(binLogs)))
+	mlog.Debug(ctx, ".. [query node unittest] Saving bin logs to MinIO ..", mlog.Int("number", len(binLogs)))
 	kvs := make(map[string][]byte, len(binLogs))
 
 	// write insert binlog
 	fieldBinlog := make([]*datapb.FieldBinlog, 0)
 	for _, blob := range binLogs {
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
-		mlog.Debug(ctx, "[query node unittest] save binlog", zap.Int64("fieldID", fieldID))
+		mlog.Debug(ctx, "[query node unittest] save binlog", mlog.FieldFieldID(fieldID))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -532,7 +532,7 @@ func SaveBinLogWithData(ctx context.Context,
 	statsBinlog := make([]*datapb.FieldBinlog, 0)
 	for _, blob := range statsLogs {
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
-		mlog.Debug(ctx, "[query node unittest] save statLog", zap.Int64("fieldID", fieldID))
+		mlog.Debug(ctx, "[query node unittest] save statLog", mlog.FieldFieldID(fieldID))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -811,7 +811,7 @@ func SaveDeltaLog(collectionID int64,
 	// write delta log
 	pkFieldID := int64(106)
 	fieldBinlog := make([]*datapb.FieldBinlog, 0)
-	mlog.Debug(context.TODO(), "[query node unittest] save delta log", zap.Int64("fieldID", pkFieldID))
+	mlog.Debug(context.TODO(), "[query node unittest] save delta log", mlog.FieldFieldID(pkFieldID))
 	key := metautil.JoinIDPath(collectionID, partitionID, segmentID, pkFieldID)
 	// keyPath := path.Join(defaultLocalStorage, "delta-log", key)
 	keyPath := path.Join(cm.RootPath(), "delta-log", key)

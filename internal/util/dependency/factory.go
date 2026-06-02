@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -95,7 +94,7 @@ func (f *DefaultFactory) Init(params *paramtable.ComponentParam) {
 func (f *DefaultFactory) initMQ(standalone bool, params *paramtable.ComponentParam) error {
 	mqType := mustSelectMQType(standalone, params.MQCfg.Type.GetValue(), mqEnable{params.RocksmqEnable(), params.PulsarEnable(), params.KafkaEnable(), params.WoodpeckerEnable()})
 	metrics.RegisterMQType(mqType)
-	mlog.Info(context.TODO(), "try to init mq", zap.Bool("standalone", standalone), zap.String("mqType", mqType))
+	mlog.Info(context.TODO(), "try to init mq", mlog.Bool("standalone", standalone), mlog.String("mqType", mqType))
 
 	switch mqType {
 	case mqTypeRocksmq:

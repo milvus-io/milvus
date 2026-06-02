@@ -26,7 +26,6 @@ import (
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
@@ -66,9 +65,9 @@ func createTextIndex(ctx context.Context,
 	segment *datapb.CompactionSegment,
 ) (map[int64]*datapb.TextIndexStats, error) {
 	log := mlog.With(
-		zap.Int64("collectionID", collectionID),
-		zap.Int64("partitionID", partitionID),
-		zap.Int64("segmentID", segmentID),
+		mlog.FieldCollectionID(collectionID),
+		mlog.FieldPartitionID(partitionID),
+		mlog.FieldSegmentID(segmentID),
 	)
 
 	fieldBinlogs := lo.GroupBy(segment.GetInsertLogs(), func(binlog *datapb.FieldBinlog) int64 {
@@ -124,7 +123,7 @@ func createTextIndex(ctx context.Context,
 		if !h.EnableMatch() {
 			continue
 		}
-		log.Info(ctx, "field enable match, ready to create text index", zap.Int64("field id", field.GetFieldID()))
+		log.Info(ctx, "field enable match, ready to create text index", mlog.Int64("field id", field.GetFieldID()))
 
 		eg.Go(func() error {
 			files, err := getInsertFiles(field.GetFieldID())
@@ -206,9 +205,9 @@ func createTextIndex(ctx context.Context,
 			mu.Unlock()
 
 			log.Info(ctx, "field enable match, create text index done",
-				zap.Int64("segmentID", segmentID),
-				zap.Int64("field id", field.GetFieldID()),
-				zap.Strings("files", statsFiles),
+				mlog.FieldSegmentID(segmentID),
+				mlog.Int64("field id", field.GetFieldID()),
+				mlog.Strings("files", statsFiles),
 			)
 			return nil
 		})

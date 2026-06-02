@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -75,7 +74,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 	})
 	err = merr.CheckRPCCall(createCollectionStatus, err)
 	s.NoError(err)
-	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 
 	// show collection
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
@@ -83,7 +82,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 	})
 	err = merr.CheckRPCCall(showCollectionsResp, err)
 	s.NoError(err)
-	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	// insert
 	pkColumn := integration.NewInt64FieldData(integration.Int64Field, rowNum)
@@ -178,7 +177,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 		segments, err = c.ShowSegments(collectionName)
 		s.NoError(err)
 		s.NotEmpty(segments)
-		mlog.Info(context.TODO(), "ShowSegments result", zap.Any("segments", segments))
+		mlog.Info(context.TODO(), "ShowSegments result", mlog.Any("segments", segments))
 		flushed := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
 			return segment.GetState() == commonpb.SegmentState_Flushed
 		})
@@ -393,10 +392,10 @@ func (s *CompactionSuite) TestL0CompactionDeltaLogOnV3Segment() {
 
 	for _, seg := range flushed {
 		mlog.Info(context.TODO(), "checking L1 segment after L0 compaction",
-			zap.Int64("segmentID", seg.GetID()),
-			zap.Int64("numOfRows", seg.GetNumOfRows()),
-			zap.Int64("storageVersion", seg.GetStorageVersion()),
-			zap.Int("deltalogFieldCount", len(seg.GetDeltalogs())),
+			mlog.FieldSegmentID(seg.GetID()),
+			mlog.Int64("numOfRows", seg.GetNumOfRows()),
+			mlog.Int64("storageVersion", seg.GetStorageVersion()),
+			mlog.Int("deltalogFieldCount", len(seg.GetDeltalogs())),
 		)
 		s.NotEmpty(seg.GetDeltalogs(), "L1 segment should have Deltalogs after L0 compaction")
 

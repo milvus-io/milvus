@@ -131,7 +131,7 @@ func (w *zapWrapper) V(l int) bool {
 // Commonly used with a `defer`.
 func LogPanic() {
 	if e := recover(); e != nil {
-		mlog.Fatal(context.TODO(), "panic", zap.Reflect("recover", e))
+		mlog.Fatal(context.TODO(), "panic", mlog.Reflect("recover", e))
 	}
 }
 
@@ -145,7 +145,7 @@ func SetupLogger(cfg *mlog.Config) {
 		if err == nil {
 			mlog.ReplaceGlobals(logger, p)
 		} else {
-			mlog.Fatal(context.TODO(), "initialize logger error", zap.Error(err))
+			mlog.Fatal(context.TODO(), "initialize logger error", mlog.Err(err))
 		}
 
 		// Initialize grpc log wrapper
@@ -162,8 +162,8 @@ func SetupLogger(cfg *mlog.Config) {
 		wrapper := &zapWrapper{logger, logLevel}
 		grpclog.SetLoggerV2(wrapper)
 
-		mlog.Info(context.TODO(), "Log directory", zap.String("configDir", cfg.File.RootPath))
-		mlog.Info(context.TODO(), "Set log file to ", zap.String("path", cfg.File.Filename))
+		mlog.Info(context.TODO(), "Log directory", mlog.String("configDir", cfg.File.RootPath))
+		mlog.Info(context.TODO(), "Set log file to ", mlog.String("path", cfg.File.Filename))
 	})
 }
 

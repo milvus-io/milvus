@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
@@ -226,13 +225,13 @@ func (chainTask *CollectionPrepare) CreateCollection(ctx context.Context, t *tes
 	case FieldOptions:
 		fields = FieldsFact.GenFieldsForCollection(cp.CollectionFieldsType, v)
 	case *GenFieldsOption:
-		mlog.Warn(ctx, "CreateCollection", zap.String("", "*GenFieldsOption has been deprecated, it is recommended to use FieldOptions"))
+		mlog.Warn(ctx, "CreateCollection", mlog.String("", "*GenFieldsOption has been deprecated, it is recommended to use FieldOptions"))
 		// Convert *GenFieldsOption to FieldOptions for compatibility with GenFieldsForCollection
 		// First generate fields to get field names, then create FieldOptions
 		tempFields := FieldsFact.GenFieldsForCollection(cp.CollectionFieldsType, TNewFieldOptions())
 		fieldOpts := TNewFieldOptions()
 		for _, field := range tempFields {
-			mlog.Info(ctx, "CreateCollection", zap.String("name", field.Name))
+			mlog.Info(ctx, "CreateCollection", mlog.String("name", field.Name))
 			fieldOpts = fieldOpts.WithFieldOption(field.Name, v)
 		}
 		fields = FieldsFact.GenFieldsForCollection(cp.CollectionFieldsType, fieldOpts)
@@ -279,7 +278,7 @@ func (chainTask *CollectionPrepare) InsertData(ctx context.Context, t *testing.T
 	case ColumnOptions:
 		columns, dynamicColumns = GenColumnsBasedSchema(ip.Schema, v)
 	case *GenDataOption:
-		mlog.Warn(ctx, "InsertData", zap.String("", "*GenDataOption has been deprecated, it is recommended to use ColumnOptions"))
+		mlog.Warn(ctx, "InsertData", mlog.String("", "*GenDataOption has been deprecated, it is recommended to use ColumnOptions"))
 		// Convert *GenDataOption to ColumnOptions for compatibility
 		columnOpts := TNewColumnOptions()
 		for _, fieldName := range GetAllFieldsName(*ip.Schema) {
@@ -324,14 +323,14 @@ func (chainTask *CollectionPrepare) CreateIndex(ctx context.Context, t *testing.
 	for _, field := range ip.Schema.Fields {
 		if field.DataType >= 100 {
 			if idx, ok := mFieldIndex[field.Name]; ok {
-				mlog.Info(ctx, "CreateIndex", zap.String("indexName", idx.Name()), zap.Any("indexType", idx.IndexType()), zap.Any("indexParams", idx.Params()))
+				mlog.Info(ctx, "CreateIndex", mlog.String("indexName", idx.Name()), mlog.Any("indexType", idx.IndexType()), mlog.Any("indexParams", idx.Params()))
 				createIndexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, field.Name, idx))
 				common.CheckErr(t, err, true)
 				err = createIndexTask.Await(ctx)
 				common.CheckErr(t, err, true)
 			} else {
 				idx := GetDefaultVectorIndex(field.DataType)
-				mlog.Info(ctx, "CreateIndex", zap.String("indexName", idx.Name()), zap.Any("indexType", idx.IndexType()), zap.Any("indexParams", idx.Params()))
+				mlog.Info(ctx, "CreateIndex", mlog.String("indexName", idx.Name()), mlog.Any("indexType", idx.IndexType()), mlog.Any("indexParams", idx.Params()))
 				createIndexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, field.Name, idx))
 				common.CheckErr(t, err, true)
 				err = createIndexTask.Await(ctx)

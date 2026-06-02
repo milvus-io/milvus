@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
@@ -86,10 +85,10 @@ func (s *broadcastServceImpl) forwardImportToDataCoord(ctx context.Context, msg 
 	body := importMsg.MustBody()
 
 	mlog.Info(ctx, "forwarding import message from old proxy to DataCoord.ImportV2",
-		zap.Int64("collectionID", body.GetCollectionID()),
-		zap.String("collectionName", body.GetCollectionName()),
-		zap.Int64s("partitionIDs", body.GetPartitionIDs()),
-		zap.Int("fileCount", len(body.GetFiles())))
+		mlog.FieldCollectionID(body.GetCollectionID()),
+		mlog.FieldCollectionName(body.GetCollectionName()),
+		mlog.Int64s("partitionIDs", body.GetPartitionIDs()),
+		mlog.Int("fileCount", len(body.GetFiles())))
 
 	// Convert msgpb.ImportFile to internalpb.ImportFile
 	files := lo.Map(body.GetFiles(), func(f *msgpb.ImportFile, _ int) *internalpb.ImportFile {
@@ -126,7 +125,7 @@ func (s *broadcastServceImpl) forwardImportToDataCoord(ctx context.Context, msg 
 	}
 
 	mlog.Info(ctx, "import request forwarded to DataCoord successfully",
-		zap.String("jobID", resp.GetJobID()))
+		mlog.String("jobID", resp.GetJobID()))
 
 	// Return a response compatible with old proxy expectations
 	// The old proxy doesn't really use the response content for import,

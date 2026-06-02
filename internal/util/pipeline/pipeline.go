@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
@@ -51,7 +49,7 @@ func (p *pipeline) addNode(node Node) {
 	if p.enableTtChecker {
 		nodeTtInterval := p.nodeTtInterval
 		manager := timerecord.GetCheckerManger("fgNode", nodeTtInterval, func(list []string) {
-			mlog.Warn(context.TODO(), "some node(s) haven't received input", zap.Strings("list", list), zap.Duration("duration ", nodeTtInterval))
+			mlog.Warn(context.TODO(), "some node(s) haven't received input", mlog.Strings("list", list), mlog.Duration("duration ", nodeTtInterval))
 		})
 		name := fmt.Sprintf("nodeCtxTtChecker-%s", node.Name())
 		nodeCtx.Checker = timerecord.NewChecker(name, manager)

@@ -29,7 +29,6 @@ import (
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -170,7 +169,7 @@ func (s *Server) SetSession(session sessionutil.SessionInterface) error {
 func (s *Server) ServerExist(serverID int64) bool {
 	sessions, _, err := s.session.GetSessions(s.ctx, typeutil.QueryNodeRole)
 	if err != nil {
-		mlog.Warn(s.ctx, "failed to get sessions", zap.Error(err))
+		mlog.Warn(s.ctx, "failed to get sessions", mlog.Err(err))
 		return false
 	}
 	sessionMap := lo.MapKeys(sessions, func(s *sessionutil.Session, _ string) int64 {
@@ -241,8 +240,8 @@ func (s *Server) SetFileResourceObserver(observer FileResourceObserver) {
 
 func (s *Server) Init() error {
 	mlog.Info(s.ctx, "QueryCoord start init",
-		zap.String("meta-root-path", Params.EtcdCfg.MetaRootPath.GetValue()),
-		zap.String("address", s.address))
+		mlog.String("meta-root-path", Params.EtcdCfg.MetaRootPath.GetValue()),
+		mlog.String("address", s.address))
 
 	s.registerMetricsRequest()
 	if err := s.initSession(); err != nil {
@@ -265,7 +264,7 @@ func (s *Server) initSession() error {
 
 func (s *Server) initQueryCoord() error {
 	s.UpdateStateCode(commonpb.StateCode_Initializing)
-	mlog.Info(s.ctx, "start init querycoord", zap.Any("State", commonpb.StateCode_Initializing))
+	mlog.Info(s.ctx, "start init querycoord", mlog.Any("State", commonpb.StateCode_Initializing))
 	// Init KV and ID allocator
 	metaType := Params.MetaStoreCfg.MetaStoreType.GetValue()
 	var idAllocatorKV kv.TxnKV
@@ -289,7 +288,7 @@ func (s *Server) initQueryCoord() error {
 	idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", idAllocatorKV)
 	err := idAllocator.Initialize()
 	if err != nil {
-		mlog.Error(s.ctx, "query coordinator id allocator initialize failed", zap.Error(err))
+		mlog.Error(s.ctx, "query coordinator id allocator initialize failed", mlog.Err(err))
 		return err
 	}
 	s.idAllocator = func() (int64, error) {
@@ -371,7 +370,7 @@ func (s *Server) initQueryCoord() error {
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 
 	RegisterDDLCallbacks(s)
-	mlog.Info(s.ctx, "init querycoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", s.address))
+	mlog.Info(s.ctx, "init querycoord done", mlog.FieldNodeID(paramtable.GetNodeID()), mlog.String("Address", s.address))
 	return err
 }
 
@@ -389,11 +388,11 @@ func (s *Server) initMeta() error {
 	mlog.Info(s.ctx, "recover meta...")
 	err := s.meta.CollectionManager.Recover(s.ctx, s.broker)
 	if err != nil {
-		mlog.Warn(s.ctx, "failed to recover collections", zap.Error(err))
+		mlog.Warn(s.ctx, "failed to recover collections", mlog.Err(err))
 		return err
 	}
 	collections := s.meta.GetAll(s.ctx)
-	mlog.Info(s.ctx, "recovering collections...", zap.Int64s("collections", collections))
+	mlog.Info(s.ctx, "recovering collections...", mlog.Int64s("collections", collections))
 
 	// We really update the metric after observers think the collection loaded.
 	metrics.QueryCoordNumCollections.WithLabelValues().Set(0)
@@ -402,13 +401,13 @@ func (s *Server) initMeta() error {
 
 	err = s.meta.ReplicaManager.Recover(s.ctx, collections)
 	if err != nil {
-		mlog.Warn(s.ctx, "failed to recover replicas", zap.Error(err))
+		mlog.Warn(s.ctx, "failed to recover replicas", mlog.Err(err))
 		return err
 	}
 
 	err = s.meta.ResourceManager.Recover(s.ctx)
 	if err != nil {
-		mlog.Warn(s.ctx, "failed to recover resource groups", zap.Error(err))
+		mlog.Warn(s.ctx, "failed to recover resource groups", mlog.Err(err))
 		return err
 	}
 
@@ -416,10 +415,10 @@ func (s *Server) initMeta() error {
 	s.targetMgr = meta.NewTargetManager(s.broker, s.meta)
 	err = s.targetMgr.Recover(s.ctx, s.store)
 	if err != nil {
-		mlog.Warn(s.ctx, "failed to recover collection targets", zap.Error(err))
+		mlog.Warn(s.ctx, "failed to recover collection targets", mlog.Err(err))
 	}
 
-	mlog.Info(s.ctx, "QueryCoord server initMeta done", zap.Duration("duration", record.ElapseSpan()))
+	mlog.Info(s.ctx, "QueryCoord server initMeta done", mlog.Duration("duration", record.ElapseSpan()))
 	return nil
 }
 
@@ -477,7 +476,7 @@ func (s *Server) startQueryCoord() error {
 		return err
 	}
 
-	mlog.Info(s.ctx, "rewatch nodes", zap.Any("sessions", sessions))
+	mlog.Info(s.ctx, "rewatch nodes", mlog.Any("sessions", sessions))
 	err = s.rewatchNodes(sessions)
 	if err != nil {
 		return err
@@ -490,7 +489,7 @@ func (s *Server) startQueryCoord() error {
 	s.updateBalanceConfigLoop(s.ctx)
 
 	if err := s.proxyWatcher.WatchProxy(s.ctx); err != nil {
-		mlog.Warn(s.ctx, "querycoord failed to watch proxy", zap.Error(err))
+		mlog.Warn(s.ctx, "querycoord failed to watch proxy", mlog.Err(err))
 	}
 
 	s.startServerLoop()
@@ -609,7 +608,7 @@ func (s *Server) Stop() error {
 // UpdateStateCode updates the status of the coord, including healthy, unhealthy
 func (s *Server) UpdateStateCode(code commonpb.StateCode) {
 	s.status.Store(int32(code))
-	mlog.Info(s.ctx, "update querycoord state", zap.String("state", code.String()))
+	mlog.Info(s.ctx, "update querycoord state", mlog.String("state", code.String()))
 }
 
 func (s *Server) State() commonpb.StateCode {
@@ -652,7 +651,7 @@ func (s *Server) watchNodes(revision int64) {
 		case event, ok := <-s.sessionWatcher.EventChannel():
 			if !ok {
 				// ErrCompacted is handled inside SessionWatcher
-				mlog.Warn(s.ctx, "Session Watcher channel closed", zap.Int64("serverID", paramtable.GetNodeID()))
+				mlog.Warn(s.ctx, "Session Watcher channel closed", mlog.Int64("serverID", paramtable.GetNodeID()))
 				if s.ctx.Err() == nil {
 					// ctx is still active, meaning this is not a normal shutdown but a genuine watch failure.
 					// Force exit so the process can be restarted by the orchestrator (e.g. K8s).
@@ -666,8 +665,8 @@ func (s *Server) watchNodes(revision int64) {
 			nodeID := event.Session.ServerID
 			addr := event.Session.Address
 			log := mlog.With(
-				zap.Int64("nodeID", nodeID),
-				zap.String("nodeAddr", addr),
+				mlog.FieldNodeID(nodeID),
+				mlog.String("nodeAddr", addr),
 			)
 
 			switch event.EventType {
@@ -715,7 +714,7 @@ func (s *Server) rewatchNodes(sessions map[string]*sessionutil.Session) error {
 		} else {
 			if nodeSession.Stopping && !node.IsStoppingState() {
 				// node in node manager but session is stopping, means it's stopping
-				mlog.Warn(s.ctx, "rewatch found old querynode in stopping state", zap.Int64("nodeID", nodeSession.ServerID))
+				mlog.Warn(s.ctx, "rewatch found old querynode in stopping state", mlog.FieldNodeID(nodeSession.ServerID))
 				s.nodeMgr.Stopping(node.ID())
 				s.handleNodeStopping(node.ID())
 			}
@@ -740,7 +739,7 @@ func (s *Server) rewatchNodes(sessions map[string]*sessionutil.Session) error {
 			s.handleNodeUp(nodeSession.GetServerID())
 
 			if nodeSession.Stopping {
-				mlog.Warn(s.ctx, "rewatch found new querynode in stopping state", zap.Int64("nodeID", nodeSession.ServerID))
+				mlog.Warn(s.ctx, "rewatch found new querynode in stopping state", mlog.FieldNodeID(nodeSession.ServerID))
 				s.nodeMgr.Stopping(nodeSession.ServerID)
 				s.handleNodeStopping(nodeSession.ServerID)
 			}
@@ -758,7 +757,7 @@ func (s *Server) rewatchNodes(sessions map[string]*sessionutil.Session) error {
 func (s *Server) handleNodeUp(node int64) {
 	nodeInfo := s.nodeMgr.Get(node)
 	if nodeInfo == nil {
-		mlog.Warn(s.ctx, "node already down", zap.Int64("nodeID", node))
+		mlog.Warn(s.ctx, "node already down", mlog.FieldNodeID(node))
 		return
 	}
 
@@ -846,7 +845,7 @@ func (s *Server) updateBalanceConfig() bool {
 	r := semver.MustParseRange("<2.3.0")
 	sessions, _, err := s.session.GetSessionsWithVersionRange(typeutil.QueryNodeRole, r)
 	if err != nil {
-		mlog.Warn(s.ctx, "check query node version occur error on etcd", zap.Error(err))
+		mlog.Warn(s.ctx, "check query node version occur error on etcd", mlog.Err(err))
 		return false
 	}
 
@@ -858,7 +857,7 @@ func (s *Server) updateBalanceConfig() bool {
 	}
 
 	Params.Save(Params.QueryCoordCfg.AutoBalance.Key, "false")
-	mlog.RatedDebug(s.ctx, rate.Limit(10), "old query node exist", zap.Strings("sessions", lo.Keys(sessions)))
+	mlog.RatedDebug(s.ctx, rate.Limit(10), "old query node exist", mlog.Strings("sessions", lo.Keys(sessions)))
 	return false
 }
 

@@ -1,8 +1,6 @@
 package helper
 
 import (
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
@@ -11,7 +9,7 @@ import (
 // NewWALHelper creates a new WALHelper.
 func NewWALHelper(opt *walimpls.OpenOption) *WALHelper {
 	return &WALHelper{
-		logger:  mlog.With(zap.String("channel", opt.Channel.String())),
+		logger:  mlog.With(mlog.String("channel", opt.Channel.String())),
 		channel: opt.Channel,
 	}
 }

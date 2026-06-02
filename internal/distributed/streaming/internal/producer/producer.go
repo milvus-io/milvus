@@ -7,7 +7,6 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/errs"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
@@ -44,7 +43,7 @@ func NewResumableProducer(f factory, opts *ProducerOptions) *ResumableProducer {
 		metrics:        newResumingProducerMetrics(opts.PChannel),
 		rateLimiter:    newProduceRateLimiter(opts.PChannel),
 	}
-	p.SetLogger(mlog.With(zap.String("pchannel", opts.PChannel)))
+	p.SetLogger(mlog.With(mlog.FieldPChannel(opts.PChannel)))
 	go p.resumeLoop()
 	return p
 }
@@ -225,7 +224,7 @@ func (p *ResumableProducer) createNewProducer() (producer.Producer, error) {
 			nextBackoff := backoff.NextBackOff()
 			p.Logger().Warn(p.ctx,
 
-				"create producer failed, retry...", zap.Error(err), zap.Duration("nextRetryInterval", nextBackoff))
+				"create producer failed, retry...", mlog.Err(err), mlog.Duration("nextRetryInterval", nextBackoff))
 			time.Sleep(nextBackoff)
 			continue
 		}

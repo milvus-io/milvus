@@ -7,7 +7,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -58,7 +57,7 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 	partitionToSegmentManagers, segmentBelongs := newSegmentAllocManagersFromRecovery(param.ChannelInfo, param.InitialRecoverSnapshot, collections)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	logger := resource.Resource().Logger().With(mlog.FieldComponent("shard-manager")).With(zap.Stringer("pchannel", param.ChannelInfo))
+	logger := resource.Resource().Logger().With(mlog.FieldComponent("shard-manager")).With(mlog.Stringer("pchannel", param.ChannelInfo))
 	// create managers list.
 	managers := make(map[PartitionUniqueKey]*partitionManager)
 	segmentTotal := 0

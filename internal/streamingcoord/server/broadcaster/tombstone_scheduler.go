@@ -5,8 +5,6 @@ import (
 	"sort"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -120,9 +118,9 @@ func (s *tombstoneScheduler) triggerGCTombstone() {
 	s.Logger().Info(context.TODO(),
 
 		"triggerGCTombstone",
-		zap.Int("tombstone count", len(s.tombstones)),
-		zap.Int("expired offset", expiredOffset),
-		zap.Time("expired time", expiredTime))
+		mlog.Int("tombstone count", len(s.tombstones)),
+		mlog.Int("expired offset", expiredOffset),
+		mlog.Time("expired time", expiredTime))
 	for idx, tombstone := range s.tombstones {
 		// drop tombstone until the expired time or until the expired offset.
 		if idx >= expiredOffset && tombstone.createTime.After(expiredTime) {
@@ -132,7 +130,7 @@ func (s *tombstoneScheduler) triggerGCTombstone() {
 		if err := s.bm.DropTombstone(s.notifier.Context(), tombstone.broadcastID); err != nil {
 			s.Logger().Error(context.TODO(),
 
-				"failed to drop tombstone", zap.Error(err))
+				"failed to drop tombstone", mlog.Err(err))
 			s.tombstones = s.tombstones[idx:]
 			return
 		}

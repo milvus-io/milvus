@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
@@ -126,10 +125,10 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 func (impl *timeTickAppendInterceptor) GracefulClose() {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	logger := mlog.With(zap.Any("pchannel", impl.operator.interceptorBuildParam.ChannelInfo))
+	logger := mlog.With(mlog.Any("pchannel", impl.operator.interceptorBuildParam.ChannelInfo))
 	logger.Info(context.TODO(), "timeTickAppendInterceptor is closing, try to perform a txn manager graceful shutdown")
 	if err := impl.txnManager.GracefulClose(ctx); err != nil {
-		logger.Warn(context.TODO(), "timeTickAppendInterceptor is closed", zap.Error(err))
+		logger.Warn(context.TODO(), "timeTickAppendInterceptor is closed", mlog.Err(err))
 		return
 	}
 	logger.Info(context.TODO(), "txnManager of timeTickAppendInterceptor is graceful closed")

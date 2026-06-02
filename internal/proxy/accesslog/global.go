@@ -128,7 +128,7 @@ func (l *AccessLogger) Write(info info.AccessInfo) bool {
 	}
 	_, err := l.writer.Write([]byte(formatter.Format(info)))
 	if err != nil {
-		mlog.Warn(context.TODO(), "write access log failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "write access log failed", mlog.Err(err))
 		return false
 	}
 	return true
@@ -147,7 +147,7 @@ func InitAccessLogger(params *paramtable.ComponentParam) {
 
 		err := logger.Init(params)
 		if err != nil {
-			mlog.Warn(context.TODO(), "Init access logger failed", zap.Error(err))
+			mlog.Warn(context.TODO(), "Init access logger failed", mlog.Err(err))
 		}
 		_globalL = logger
 		info.ClusterPrefix.Store(params.CommonCfg.ClusterPrefix.GetValue())

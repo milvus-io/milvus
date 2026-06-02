@@ -56,9 +56,9 @@ func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
 	name := "recovery"
 	logger := resource.Resource().Logger().With(
 		mlog.FieldComponent("scanner"),
-		zap.String("name", name),
-		zap.String("channel", l.Channel().String()),
-		zap.String("startMessageID", startMessageID.String()),
+		mlog.String("name", name),
+		mlog.String("channel", l.Channel().String()),
+		mlog.String("startMessageID", startMessageID.String()),
 	)
 	readOption := wal.ReadOption{
 		DeliverPolicy:          options.DeliverPolicyStartFrom(startMessageID),
@@ -99,8 +99,8 @@ func newScannerAdaptor(
 	options.GetFilterFunc(readOption.MessageFilter)
 	logger := resource.Resource().Logger().With(
 		mlog.FieldComponent("scanner"),
-		zap.String("name", name),
-		zap.String("channel", l.Channel().Name),
+		mlog.String("name", name),
+		mlog.String("channel", l.Channel().Name),
 	)
 	s := &scannerAdaptorImpl{
 		logger:          logger,
@@ -187,7 +187,7 @@ func (s *scannerAdaptorImpl) execute() {
 			s.logger.Info(context.TODO(), "the produce event loop of scanner is closed")
 			return
 		}
-		s.logger.Warn(context.TODO(), "the produce event loop of scanner is closed with unexpected error", zap.Error(err))
+		s.logger.Warn(context.TODO(), "the produce event loop of scanner is closed with unexpected error", mlog.Err(err))
 	}()
 
 	err := s.consumeEventLoop(msgChan)
@@ -195,7 +195,7 @@ func (s *scannerAdaptorImpl) execute() {
 		s.logger.Info(context.TODO(), "the consuming event loop of scanner is closed")
 		return
 	}
-	s.logger.Warn(context.TODO(), "the consuming event loop of scanner is closed with unexpected error", zap.Error(err))
+	s.logger.Warn(context.TODO(), "the consuming event loop of scanner is closed with unexpected error", mlog.Err(err))
 }
 
 // produceEventLoop produces the message from the wal and write ahead buffer.
@@ -215,7 +215,7 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 	}
 
 	scanner := newSwithableScanner(s.Name(), s.logger, s.innerWAL, wb, s.readOption.DeliverPolicy, msgChan)
-	s.logger.Info(context.TODO(), "start produce loop of scanner at model", zap.String("model", getScannerModel(scanner)))
+	s.logger.Info(context.TODO(), "start produce loop of scanner at model", mlog.String("model", getScannerModel(scanner)))
 	for {
 		if s.readOption.RateLimitControl != nil {
 			// if the scanner is working with rate limit control,
@@ -237,7 +237,7 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 		}
 		m := getScannerModel(scanner)
 		s.metrics.SwitchModel(m)
-		s.logger.Info(context.TODO(), "switch scanner model", zap.String("model", m))
+		s.logger.Info(context.TODO(), "switch scanner model", mlog.String("model", m))
 	}
 }
 
@@ -365,7 +365,7 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 			if s.logger.LevelEnabled(zap.DebugLevel) {
 				for _, m := range msgs {
 					s.logger.Debug(context.TODO(), "push message into pending queue",
-						zap.Uint64("committedTimeTick", msg.TimeTick()),
+						mlog.Uint64("committedTimeTick", msg.TimeTick()),
 						mlog.FieldMessage(m),
 					)
 				}
@@ -398,8 +398,8 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 		}
 		s.logger.Warn(context.TODO(), "failed to push message into reorder buffer",
 			mlog.FieldMessage(msg),
-			zap.Bool("tailing", isTailing),
-			zap.Error(err))
+			mlog.Bool("tailing", isTailing),
+			mlog.Err(err))
 	}
 	// Observe the filtered message.
 	s.metrics.UpdateTimeTickBufSize(s.reorderBuffer.Bytes())

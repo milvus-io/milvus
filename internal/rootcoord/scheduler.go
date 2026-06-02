@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/tso"
@@ -142,7 +141,7 @@ func (s *scheduler) syncTsLoop() {
 func (s *scheduler) updateLatestTsoAsMinDdlTs() {
 	t := newBaseTask(context.Background(), nil)
 	if err := s.AddTask(&t); err != nil {
-		mlog.Warn(s.ctx, "failed to update latest ddl ts", zap.Error(err))
+		mlog.Warn(s.ctx, "failed to update latest ddl ts", mlog.Err(err))
 	}
 }
 

@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -103,9 +102,9 @@ func (st *statsTask) SetState(state indexpb.JobState, failReason string) {
 
 func (st *statsTask) UpdateStateWithMeta(state indexpb.JobState, failReason string) error {
 	if err := st.meta.statsTaskMeta.UpdateTaskState(st.GetTaskID(), state, failReason); err != nil {
-		mlog.Warn(context.TODO(), "update stats task state failed", zap.Int64("taskID", st.GetTaskID()),
-			zap.String("state", state.String()), zap.String("failReason", failReason),
-			zap.Error(err))
+		mlog.Warn(context.TODO(), "update stats task state failed", mlog.FieldTaskID(st.GetTaskID()),
+			mlog.String("state", state.String()), mlog.String("failReason", failReason),
+			mlog.Err(err))
 		return err
 	}
 	st.SetState(state, failReason)
@@ -138,10 +137,10 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	defer cancel()
 
 	log := mlog.With(
-		zap.Int64("taskID", st.GetTaskID()),
-		zap.Int64("segmentID", st.GetSegmentID()),
-		zap.Int64("targetSegmentID", st.GetTargetSegmentID()),
-		zap.String("subJobType", st.GetSubJobType().String()),
+		mlog.FieldTaskID(st.GetTaskID()),
+		mlog.FieldSegmentID(st.GetSegmentID()),
+		mlog.Int64("targetSegmentID", st.GetTargetSegmentID()),
+		mlog.String("subJobType", st.GetSubJobType().String()),
 	)
 
 	var err error
@@ -156,7 +155,7 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	if segment == nil {
 		log.Warn(context.TODO(), "segment is not healthy, skipping stats task")
 		if err := st.meta.statsTaskMeta.DropStatsTask(ctx, st.GetTaskID()); err != nil {
-			log.Warn(context.TODO(), "remove stats task failed, will retry later", zap.Error(err))
+			log.Warn(context.TODO(), "remove stats task failed, will retry later", mlog.Err(err))
 			return
 		}
 		st.SetState(indexpb.JobState_JobStateNone, "segment is not healthy")
@@ -165,21 +164,21 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 
 	if segment.GetNumOfRows() == 0 {
 		if err := st.handleEmptySegment(ctx); err != nil {
-			log.Warn(context.TODO(), "failed to handle empty segment", zap.Error(err))
+			log.Warn(context.TODO(), "failed to handle empty segment", mlog.Err(err))
 		}
 		return
 	}
 
 	// Update task version
 	if err := st.UpdateTaskVersion(nodeID); err != nil {
-		log.Warn(context.TODO(), "failed to update stats task version", zap.Error(err))
+		log.Warn(context.TODO(), "failed to update stats task version", mlog.Err(err))
 		return
 	}
 
 	// Prepare request
 	req, err := st.prepareJobRequest(ctx, segment)
 	if err != nil {
-		log.Warn(context.TODO(), "failed to prepare stats request", zap.Error(err))
+		log.Warn(context.TODO(), "failed to prepare stats request", mlog.Err(err))
 		return
 	}
 
@@ -191,25 +190,25 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	}()
 	// Execute task creation
 	if err = cluster.CreateStats(nodeID, req); err != nil {
-		log.Warn(context.TODO(), "failed to create stats task on worker", zap.Error(err))
+		log.Warn(context.TODO(), "failed to create stats task on worker", mlog.Err(err))
 		return
 	}
-	log.Info(context.TODO(), "assign stats task to worker successfully", zap.Int64("taskID", st.GetTaskID()))
+	log.Info(context.TODO(), "assign stats task to worker successfully", mlog.FieldTaskID(st.GetTaskID()))
 
 	if err = st.UpdateStateWithMeta(indexpb.JobState_JobStateInProgress, ""); err != nil {
-		log.Warn(context.TODO(), "failed to update stats task state to InProgress", zap.Error(err))
+		log.Warn(context.TODO(), "failed to update stats task state to InProgress", mlog.Err(err))
 		return
 	}
 
-	log.Info(context.TODO(), "stats task update state to InProgress successfully", zap.Int64("task version", st.GetVersion()))
+	log.Info(context.TODO(), "stats task update state to InProgress successfully", mlog.Int64("task version", st.GetVersion()))
 }
 
 func (st *statsTask) QueryTaskOnWorker(cluster session.Cluster) {
 	ctx := context.TODO()
 	log := mlog.With(
-		zap.Int64("taskID", st.GetTaskID()),
-		zap.Int64("segmentID", st.GetSegmentID()),
-		zap.Int64("nodeID", st.NodeID),
+		mlog.FieldTaskID(st.GetTaskID()),
+		mlog.FieldSegmentID(st.GetSegmentID()),
+		mlog.FieldNodeID(st.NodeID),
 	)
 
 	// Query task status
@@ -218,7 +217,7 @@ func (st *statsTask) QueryTaskOnWorker(cluster session.Cluster) {
 		TaskIDs:   []int64{st.GetTaskID()},
 	})
 	if err != nil {
-		log.Warn(context.TODO(), "query stats task result failed", zap.Error(err))
+		log.Warn(context.TODO(), "query stats task result failed", mlog.Err(err))
 		st.dropAndResetTaskOnWorker(ctx, cluster, err.Error())
 		return
 	}
@@ -252,14 +251,14 @@ func (st *statsTask) QueryTaskOnWorker(cluster session.Cluster) {
 
 func (st *statsTask) tryDropTaskOnWorker(cluster session.Cluster) error {
 	log := mlog.With(
-		zap.Int64("taskID", st.GetTaskID()),
-		zap.Int64("segmentID", st.GetSegmentID()),
-		zap.Int64("nodeID", st.NodeID),
+		mlog.FieldTaskID(st.GetTaskID()),
+		mlog.FieldSegmentID(st.GetSegmentID()),
+		mlog.FieldNodeID(st.NodeID),
 	)
 
 	err := cluster.DropStats(st.NodeID, st.GetTaskID())
 	if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
-		log.Warn(context.TODO(), "failed to drop stats task on worker", zap.Error(err))
+		log.Warn(context.TODO(), "failed to drop stats task on worker", mlog.Err(err))
 		return err
 	}
 
@@ -361,15 +360,15 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 	case indexpb.StatsSubJob_TextIndexJob:
 		err = st.meta.UpdateSegment(st.GetSegmentID(), SetTextIndexLogs(result.GetTextStatsLogs()))
 		if err != nil {
-			mlog.Warn(ctx, "save text index stats result failed", zap.Int64("taskID", st.GetTaskID()),
-				zap.Int64("segmentID", st.GetSegmentID()), zap.Error(err))
+			mlog.Warn(ctx, "save text index stats result failed", mlog.FieldTaskID(st.GetTaskID()),
+				mlog.FieldSegmentID(st.GetSegmentID()), mlog.Err(err))
 			break
 		}
 	case indexpb.StatsSubJob_JsonKeyIndexJob:
 		err = st.meta.UpdateSegment(st.GetSegmentID(), SetJSONKeyIndexLogs(result.GetJsonKeyStatsLogs()))
 		if err != nil {
-			mlog.Warn(ctx, "save json key index stats result failed", zap.Int64("taskId", st.GetTaskID()),
-				zap.Int64("segmentID", st.GetSegmentID()), zap.Error(err))
+			mlog.Warn(ctx, "save json key index stats result failed", mlog.Int64("taskId", st.GetTaskID()),
+				mlog.FieldSegmentID(st.GetSegmentID()), mlog.Err(err))
 			break
 		}
 	case indexpb.StatsSubJob_Sort:
@@ -387,8 +386,8 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 			if len(operators) > 0 {
 				err = st.meta.UpdateSegment(st.GetTargetSegmentID(), operators...)
 				if err != nil {
-					mlog.Warn(ctx, "save sort stats result failed", zap.Int64("taskID", st.GetTaskID()),
-						zap.Int64("segmentID", st.GetTargetSegmentID()), zap.Error(err))
+					mlog.Warn(ctx, "save sort stats result failed", mlog.FieldTaskID(st.GetTaskID()),
+						mlog.FieldSegmentID(st.GetTargetSegmentID()), mlog.Err(err))
 					break
 				}
 			}
@@ -396,7 +395,7 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 	case indexpb.StatsSubJob_BM25Job:
 	// bm25 logs are generated during with segment flush.
 	default:
-		mlog.Warn(ctx, "unexpected sub job type", zap.String("type", st.GetSubJobType().String()))
+		mlog.Warn(ctx, "unexpected sub job type", mlog.String("type", st.GetSubJobType().String()))
 	}
 
 	// if segment is not found, it means the segment is already dropped,
@@ -413,17 +412,17 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 		}
 		if updateErr := st.meta.UpdateSegmentsInfo(ctx, UpdateManifest(segID, manifest)); updateErr != nil {
 			mlog.Warn(ctx, "failed to update manifest after stats task",
-				zap.Int64("taskID", st.GetTaskID()),
-				zap.Int64("segmentID", segID),
-				zap.Error(updateErr))
+				mlog.FieldTaskID(st.GetTaskID()),
+				mlog.FieldSegmentID(segID),
+				mlog.Err(updateErr))
 			if !errors.Is(updateErr, merr.ErrSegmentNotFound) {
 				return updateErr
 			}
 		}
 	}
 
-	mlog.Info(ctx, "SetJobInfo for stats task success", zap.Int64("taskID", st.GetTaskID()),
-		zap.Int64("oldSegmentID", st.GetSegmentID()), zap.Int64("targetSegmentID", st.GetTargetSegmentID()),
-		zap.String("subJobType", st.GetSubJobType().String()), zap.String("state", st.GetState().String()))
+	mlog.Info(ctx, "SetJobInfo for stats task success", mlog.FieldTaskID(st.GetTaskID()),
+		mlog.Int64("oldSegmentID", st.GetSegmentID()), mlog.Int64("targetSegmentID", st.GetTargetSegmentID()),
+		mlog.String("subJobType", st.GetSubJobType().String()), mlog.String("state", st.GetState().String()))
 	return nil
 }

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
@@ -44,7 +43,7 @@ func TestSearchIteratorDefault(t *testing.T) {
 			if err == io.EOF {
 				break
 			} else {
-				mlog.Error(context.TODO(), "SearchIterator next gets error", zap.Error(err))
+				mlog.Error(context.TODO(), "SearchIterator next gets error", mlog.Err(err))
 				break
 			}
 		}
@@ -130,7 +129,7 @@ func TestSearchIteratorBatchSize(t *testing.T) {
 				if err == io.EOF {
 					break
 				}
-				mlog.Error(context.TODO(), "SearchIterator next gets error", zap.Error(err))
+				mlog.Error(context.TODO(), "SearchIterator next gets error", mlog.Err(err))
 				break
 			}
 			actualLimit = actualLimit + rs.ResultCount
@@ -316,7 +315,7 @@ func TestSearchIteratorTemplateKey(t *testing.T) {
 			if err == io.EOF {
 				break
 			}
-			mlog.Error(context.TODO(), "SearchIterator next gets error", zap.Error(err))
+			mlog.Error(context.TODO(), "SearchIterator next gets error", mlog.Err(err))
 			break
 		}
 		actualLimit = actualLimit + rs.ResultCount
@@ -378,7 +377,7 @@ func TestSearchIteratorIgnoreGrowing(t *testing.T) {
 			if err == io.EOF {
 				break
 			}
-			mlog.Error(context.TODO(), "SearchIterator next gets error", zap.Error(err))
+			mlog.Error(context.TODO(), "SearchIterator next gets error", mlog.Err(err))
 			break
 		}
 		actualLimit = actualLimit + rs.ResultCount
@@ -439,7 +438,7 @@ func TestSearchIteratorNull(t *testing.T) {
 			if err == io.EOF {
 				break
 			}
-			mlog.Error(context.TODO(), "SearchIterator next gets error", zap.Error(err))
+			mlog.Error(context.TODO(), "SearchIterator next gets error", mlog.Err(err))
 			break
 		}
 		actualLimit = actualLimit + rs.ResultCount
@@ -507,7 +506,7 @@ func TestSearchIteratorDefaultValue(t *testing.T) {
 			if err == io.EOF {
 				break
 			}
-			mlog.Error(context.TODO(), "SearchIterator next gets error", zap.Error(err))
+			mlog.Error(context.TODO(), "SearchIterator next gets error", mlog.Err(err))
 			break
 		}
 		actualLimit = actualLimit + rs.ResultCount

@@ -11,7 +11,6 @@ import (
 	wpStorageClient "github.com/zilliztech/woodpecker/common/objectstorage"
 	"github.com/zilliztech/woodpecker/woodpecker"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -67,7 +66,7 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 	if err != nil {
 		return nil, err
 	}
-	mlog.Info(context.TODO(), "build wp opener finish", zap.String("wpClientInstance", fmt.Sprintf("%p", wpClient)))
+	mlog.Info(context.TODO(), "build wp opener finish", mlog.String("wpClientInstance", fmt.Sprintf("%p", wpClient)))
 	return &openerImpl{
 		c: wpClient,
 	}, nil
@@ -173,8 +172,8 @@ func setQuorumConfig(wpConfig *config.Configuration, cfg *paramtable.WoodpeckerC
 		var bufferPools []config.QuorumBufferPool
 		if err := json.Unmarshal([]byte(bufferPoolsJSON), &bufferPools); err != nil {
 			mlog.Warn(context.TODO(), "failed to parse quorum buffer pools JSON, using empty configuration",
-				zap.String("json", bufferPoolsJSON),
-				zap.Error(err))
+				mlog.String("json", bufferPoolsJSON),
+				mlog.Err(err))
 		} else {
 			wpConfig.Woodpecker.Client.Quorum.BufferPools = bufferPools
 		}
@@ -191,8 +190,8 @@ func setQuorumConfig(wpConfig *config.Configuration, cfg *paramtable.WoodpeckerC
 		var customPlacements []config.CustomPlacement
 		if err := json.Unmarshal([]byte(customPlacementJSON), &customPlacements); err != nil {
 			mlog.Warn(context.TODO(), "failed to parse custom placement JSON, using empty configuration",
-				zap.String("json", customPlacementJSON),
-				zap.Error(err))
+				mlog.String("json", customPlacementJSON),
+				mlog.Err(err))
 		} else {
 			wpConfig.Woodpecker.Client.Quorum.SelectStrategy.CustomPlacement = customPlacements
 		}
@@ -216,7 +215,7 @@ func getEtcdClient(ctx context.Context) (*clientv3.Client, error) {
 		etcdConfig.EtcdTLSMinVersion.GetValue(),
 		etcdConfig.ClientOptions()...)
 	if err != nil {
-		mlog.Warn(ctx, "Woodpecker create connection to etcd failed", zap.Error(err))
+		mlog.Warn(ctx, "Woodpecker create connection to etcd failed", mlog.Err(err))
 		return nil, err
 	}
 	return etcdCli, nil

@@ -21,7 +21,6 @@ import (
 	"strconv"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -63,7 +62,7 @@ func (km *KeyManager) GetRevokedDatabases() ([]int64, error) {
 		if currentState != hookutil.KeyStateEnabled {
 			db, err := km.getDatabaseByEzID(ezID)
 			if err != nil {
-				mlog.Warn(km.ctx, "KeyManager: failed to get database for ezID", zap.Int64("ezID", ezID), zap.Error(err))
+				mlog.Warn(km.ctx, "KeyManager: failed to get database for ezID", mlog.Int64("ezID", ezID), mlog.Err(err))
 				continue
 			}
 

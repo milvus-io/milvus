@@ -5,9 +5,9 @@ import (
 	"math"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
@@ -36,7 +36,7 @@ func (impl *WALFlusherImpl) getRecoveryInfos(ctx context.Context, vchannel []str
 			continue
 		}
 		if errors.Is(err, errChannelLifetimeUnrecoverable) {
-			impl.logger.Warn(ctx, "channel has been dropped, skip to recover flusher for vchannel", zap.String("vchannel", vchannel[i]))
+			impl.logger.Warn(ctx, "channel has been dropped, skip to recover flusher for vchannel", mlog.FieldVChannel(vchannel[i]))
 			continue
 		}
 		return nil, nil, errors.Wrapf(err, "when get recovery info of vchannel %s", vchannel[i])
@@ -57,10 +57,10 @@ func (impl *WALFlusherImpl) getRecoveryInfos(ctx context.Context, vchannel []str
 func (impl *WALFlusherImpl) getRecoveryInfo(ctx context.Context, vchannel string) (*datapb.GetChannelRecoveryInfoResponse, error) {
 	var resp *datapb.GetChannelRecoveryInfoResponse
 	retryCnt := -1
-	logger := impl.logger.With(zap.String("vchannel", vchannel))
+	logger := impl.logger.With(mlog.FieldVChannel(vchannel))
 	err := retry.Do(ctx, func() error {
 		retryCnt++
-		logger := logger.With(zap.Int("retryCnt", retryCnt))
+		logger := logger.With(mlog.Int("retryCnt", retryCnt))
 		dc, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
 		if err != nil {
 			return err
@@ -68,20 +68,20 @@ func (impl *WALFlusherImpl) getRecoveryInfo(ctx context.Context, vchannel string
 		resp, err = dc.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{Vchannel: vchannel})
 		err = merr.CheckRPCCall(resp, err)
 		if errors.Is(err, merr.ErrChannelNotAvailable) {
-			logger.Warn(ctx, "channel not available because of collection dropped", zap.Error(err))
+			logger.Warn(ctx, "channel not available because of collection dropped", mlog.Err(err))
 			return retry.Unrecoverable(errChannelLifetimeUnrecoverable)
 		}
 		if errors.Is(err, merr.ErrCollectionNotFound) {
 			if retryCnt >= defaultCollectionNotFoundTolerance {
 				// TODO: It's not strong guarantee to make no resource lost or leak. Should be removed after wal-driven-ddl framework is ready.
-				logger.Warn(ctx, "too many collection not found, the create collection may undone by coord", zap.Error(err))
+				logger.Warn(ctx, "too many collection not found, the create collection may undone by coord", mlog.Err(err))
 				return retry.Unrecoverable(errChannelLifetimeUnrecoverable)
 			}
-			logger.Warn(ctx, "collection not found, maybe the create collection is not done or create collection undone by coord", zap.Error(err))
+			logger.Warn(ctx, "collection not found, maybe the create collection is not done or create collection undone by coord", mlog.Err(err))
 			return err
 		}
 		if err != nil {
-			logger.Warn(ctx, "get channel recovery info failed", zap.Error(err))
+			logger.Warn(ctx, "get channel recovery info failed", mlog.Err(err))
 			return err
 		}
 		// The channel has been dropped, skip to recover it.

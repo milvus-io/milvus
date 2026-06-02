@@ -25,7 +25,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -155,12 +154,12 @@ func (w *MultiSegmentWriter) closeWriter() error {
 		w.res = append(w.res, result)
 
 		mlog.Info(w.ctx, "created new segment",
-			zap.Int64("segmentID", w.currentSegmentID),
-			zap.String("channel", w.channel),
-			zap.Int64("totalRows", rowNum),
-			zap.Uint64("totalSize", writtenUncompressed),
-			zap.Int64("expected segment size", w.segmentSize),
-			zap.Int64("storageVersion", w.storageVersion))
+			mlog.FieldSegmentID(w.currentSegmentID),
+			mlog.String("channel", w.channel),
+			mlog.Int64("totalRows", rowNum),
+			mlog.Uint64("totalSize", writtenUncompressed),
+			mlog.Int64("expected segment size", w.segmentSize),
+			mlog.Int64("storageVersion", w.storageVersion))
 	}
 	return nil
 }

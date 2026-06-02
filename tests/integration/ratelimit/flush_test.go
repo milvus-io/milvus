@@ -19,7 +19,6 @@ package ratelimit
 import (
 	"context"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -59,11 +58,11 @@ func (s *DBPropertiesSuite) TestFlush() {
 	err = merr.CheckRPCCall(createCollectionStatus, err)
 	s.NoError(err)
 
-	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	err = merr.CheckRPCCall(showCollectionsResp.GetStatus(), err)
 	s.NoError(err)
-	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	var fVecColumn *schemapb.FieldData
 	if vecType == schemapb.DataType_SparseFloatVector {

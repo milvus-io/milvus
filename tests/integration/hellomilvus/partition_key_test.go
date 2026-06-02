@@ -22,7 +22,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -69,7 +68,7 @@ func (s *HelloMilvusSuite) TestPartitionKey() {
 	})
 	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.String("reason", createCollectionStatus.GetReason()))
 	}
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
@@ -138,7 +137,7 @@ func (s *HelloMilvusSuite) TestPartitionKey() {
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
-		mlog.Info(context.TODO(), "ShowSegments result", zap.String("segment", segment.String()))
+		mlog.Info(context.TODO(), "ShowSegments result", mlog.String("segment", segment.String()))
 	}
 
 	// create index
@@ -149,7 +148,7 @@ func (s *HelloMilvusSuite) TestPartitionKey() {
 		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, metric.L2),
 	})
 	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		mlog.Warn(context.TODO(), "createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createIndexStatus fail reason", mlog.String("reason", createIndexStatus.GetReason()))
 	}
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
@@ -163,7 +162,7 @@ func (s *HelloMilvusSuite) TestPartitionKey() {
 	})
 	s.NoError(err)
 	if loadStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		mlog.Warn(context.TODO(), "loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
+		mlog.Warn(context.TODO(), "loadStatus fail reason", mlog.String("reason", loadStatus.GetReason()))
 	}
 	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	s.WaitForLoad(ctx, collectionName)
@@ -182,7 +181,7 @@ func (s *HelloMilvusSuite) TestPartitionKey() {
 		searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 
 		if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			mlog.Warn(context.TODO(), "searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
+			mlog.Warn(context.TODO(), "searchResult fail reason", mlog.String("reason", searchResult.GetStatus().GetReason()))
 		}
 		s.NoError(err)
 		s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
@@ -202,7 +201,7 @@ func (s *HelloMilvusSuite) TestPartitionKey() {
 		searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 
 		if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			mlog.Warn(context.TODO(), "searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
+			mlog.Warn(context.TODO(), "searchResult fail reason", mlog.String("reason", searchResult.GetStatus().GetReason()))
 		}
 		s.NoError(err)
 		s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
@@ -216,7 +215,7 @@ func (s *HelloMilvusSuite) TestPartitionKey() {
 			OutputFields:   []string{"count(*)"},
 		})
 		if queryResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			mlog.Warn(context.TODO(), "searchResult fail reason", zap.String("reason", queryResult.GetStatus().GetReason()))
+			mlog.Warn(context.TODO(), "searchResult fail reason", mlog.String("reason", queryResult.GetStatus().GetReason()))
 		}
 		s.NoError(err)
 		s.Equal(commonpb.ErrorCode_Success, queryResult.GetStatus().GetErrorCode())
@@ -230,7 +229,7 @@ func (s *HelloMilvusSuite) TestPartitionKey() {
 			OutputFields:   []string{"count(*)"},
 		})
 		if queryResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			mlog.Warn(context.TODO(), "searchResult fail reason", zap.String("reason", queryResult.GetStatus().GetReason()))
+			mlog.Warn(context.TODO(), "searchResult fail reason", mlog.String("reason", queryResult.GetStatus().GetReason()))
 		}
 		s.NoError(err)
 		s.Equal(commonpb.ErrorCode_Success, queryResult.GetStatus().GetErrorCode())
@@ -243,7 +242,7 @@ func (s *HelloMilvusSuite) TestPartitionKey() {
 			Expr:           integration.Int64Field + " < 1000",
 		})
 		if deleteResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			mlog.Warn(context.TODO(), "deleteResult fail reason", zap.String("reason", deleteResult.GetStatus().GetReason()))
+			mlog.Warn(context.TODO(), "deleteResult fail reason", mlog.String("reason", deleteResult.GetStatus().GetReason()))
 		}
 		s.NoError(err)
 		s.Equal(commonpb.ErrorCode_Success, deleteResult.GetStatus().GetErrorCode())
@@ -256,7 +255,7 @@ func (s *HelloMilvusSuite) TestPartitionKey() {
 			Expr:           integration.Int64Field + " < 2000 && pid == 10",
 		})
 		if deleteResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			mlog.Warn(context.TODO(), "deleteResult fail reason", zap.String("reason", deleteResult.GetStatus().GetReason()))
+			mlog.Warn(context.TODO(), "deleteResult fail reason", mlog.String("reason", deleteResult.GetStatus().GetReason()))
 		}
 		s.NoError(err)
 		s.Equal(commonpb.ErrorCode_Success, deleteResult.GetStatus().GetErrorCode())
@@ -384,8 +383,8 @@ func (s *HelloMilvusSuite) TestPartitionKeyIsolation() {
 		s.NotEqual(commonpb.ErrorCode_Success, queryResult.GetStatus().GetErrorCode(),
 			"expr %q should fail under partition key isolation", expr)
 		mlog.Info(context.TODO(), "partition key isolation: correctly rejected",
-			zap.String("expr", expr),
-			zap.String("reason", queryResult.GetStatus().GetReason()))
+			mlog.String("expr", expr),
+			mlog.String("reason", queryResult.GetStatus().GetReason()))
 	}
 
 	// Helper: search that should fail with an error
@@ -402,8 +401,8 @@ func (s *HelloMilvusSuite) TestPartitionKeyIsolation() {
 		s.NotEqual(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode(),
 			"search with expr %q should fail under partition key isolation", expr)
 		mlog.Info(context.TODO(), "partition key isolation: search correctly rejected",
-			zap.String("expr", expr),
-			zap.String("reason", searchResult.GetStatus().GetReason()))
+			mlog.String("expr", expr),
+			mlog.String("reason", searchResult.GetStatus().GetReason()))
 	}
 
 	// ── Valid expressions (only == on partition key) ──
@@ -411,12 +410,12 @@ func (s *HelloMilvusSuite) TestPartitionKeyIsolation() {
 	// Test 1: pid == 1 (single equality — the only supported form)
 	count := queryCount("pid == 1")
 	s.Equal(int64(rowNum), count, "pid == 1 should return %d rows", rowNum)
-	mlog.Info(context.TODO(), "partition key isolation: pid == 1", zap.Int64("count", count))
+	mlog.Info(context.TODO(), "partition key isolation: pid == 1", mlog.Int64("count", count))
 
 	// Test 2: pid == 1 && additional filter (AND with equality)
 	count = queryCount(fmt.Sprintf("pid == 1 && %s >= 0", integration.Int64Field))
 	s.Equal(int64(rowNum), count, "pid == 1 with AND filter should return %d rows", rowNum)
-	mlog.Info(context.TODO(), "partition key isolation: pid == 1 && pk >= 0", zap.Int64("count", count))
+	mlog.Info(context.TODO(), "partition key isolation: pid == 1 && pk >= 0", mlog.Int64("count", count))
 
 	// Test 3: search with pid == 1 (valid)
 	{
@@ -432,7 +431,7 @@ func (s *HelloMilvusSuite) TestPartitionKeyIsolation() {
 		s.NoError(err)
 		s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
 		mlog.Info(context.TODO(), "partition key isolation: search with pid == 1",
-			zap.Int("numResults", len(searchResult.GetResults().GetScores())))
+			mlog.Int("numResults", len(searchResult.GetResults().GetScores())))
 	}
 
 	// ── Invalid expressions (IN and OR are rejected under isolation) ──
@@ -464,7 +463,7 @@ func (s *HelloMilvusSuite) TestPartitionKeyIsolation() {
 	// Test 11: pid == 1 && pid == 1 — redundant equality, should still be valid
 	count = queryCount("pid == 1 && pid == 1")
 	s.Equal(int64(rowNum), count, "pid == 1 && pid == 1 should return %d rows", rowNum)
-	mlog.Info(context.TODO(), "partition key isolation: pid == 1 && pid == 1", zap.Int64("count", count))
+	mlog.Info(context.TODO(), "partition key isolation: pid == 1 && pid == 1", mlog.Int64("count", count))
 
 	// Test 12: no partition key filter at all — rejected under isolation
 	queryExpectError(fmt.Sprintf("%s >= 0", integration.Int64Field))
@@ -477,22 +476,22 @@ func (s *HelloMilvusSuite) TestPartitionKeyIsolation() {
 	// Test 14: pid == 1 && pk IN list — IN on non-partition-key field is fine
 	count = queryCount("pid == 1 && int64Field in [0, 1, 2, 3, 4]")
 	s.Equal(int64(5), count, "pid == 1 && int64Field in [0..4] should return 5 rows")
-	mlog.Info(context.TODO(), "partition key isolation: pid == 1 && pk IN list", zap.Int64("count", count))
+	mlog.Info(context.TODO(), "partition key isolation: pid == 1 && pk IN list", mlog.Int64("count", count))
 
 	// Test 15: pid == 1 && pk OR conditions — OR on non-partition-key field is fine
 	count = queryCount("pid == 1 && (int64Field == 0 || int64Field == 1)")
 	s.Equal(int64(2), count, "pid == 1 && (pk==0 || pk==1) should return 2 rows")
-	mlog.Info(context.TODO(), "partition key isolation: pid == 1 && pk OR", zap.Int64("count", count))
+	mlog.Info(context.TODO(), "partition key isolation: pid == 1 && pk OR", mlog.Int64("count", count))
 
 	// Test 16: pid == 1 && complex non-pk expression (range + IN)
 	count = queryCount("pid == 1 && int64Field >= 0 && int64Field < 500")
 	s.Equal(int64(500), count, "pid == 1 && pk range [0,500) should return 500 rows")
-	mlog.Info(context.TODO(), "partition key isolation: pid == 1 && pk range", zap.Int64("count", count))
+	mlog.Info(context.TODO(), "partition key isolation: pid == 1 && pk range", mlog.Int64("count", count))
 
 	// Test 17: pid == 1 && non-pk NOT IN
 	count = queryCount("pid == 1 && int64Field not in [0, 1, 2]")
 	s.Equal(int64(rowNum-3), count, "pid == 1 && pk not in [0,1,2] should return %d rows", rowNum-3)
-	mlog.Info(context.TODO(), "partition key isolation: pid == 1 && pk NOT IN", zap.Int64("count", count))
+	mlog.Info(context.TODO(), "partition key isolation: pid == 1 && pk NOT IN", mlog.Int64("count", count))
 
 	// Test 18: search with pid == 1 && non-pk complex filter — should succeed
 	{
@@ -508,6 +507,6 @@ func (s *HelloMilvusSuite) TestPartitionKeyIsolation() {
 		s.NoError(err)
 		s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
 		mlog.Info(context.TODO(), "partition key isolation: search with pid == 1 && non-pk filter",
-			zap.Int("numResults", len(searchResult.GetResults().GetScores())))
+			mlog.Int("numResults", len(searchResult.GetResults().GetScores())))
 	}
 }

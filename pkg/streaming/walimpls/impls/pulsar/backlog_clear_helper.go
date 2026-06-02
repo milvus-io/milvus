@@ -7,7 +7,6 @@ import (
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -45,7 +44,7 @@ func newBacklogClearHelper(c pulsar.Client, channelName types.PChannelInfo, thre
 		reusedConsumer: nil,
 		tenant:         tenant,
 	}
-	h.SetLogger(mlog.With(zap.String("channel", channelName.String()), mlog.FieldComponent("backlog-clear")))
+	h.SetLogger(mlog.With(mlog.String("channel", channelName.String()), mlog.FieldComponent("backlog-clear")))
 	go h.background()
 	return h
 }
@@ -82,7 +81,7 @@ func (h *backlogClearHelper) background() {
 				return h.notifier.Context().Err()
 			}
 			if err := h.performBacklogClear(); err != nil {
-				h.Logger().Warn(context.TODO(), "failed to perform backlog clear", zap.Error(err))
+				h.Logger().Warn(context.TODO(), "failed to perform backlog clear", mlog.Err(err))
 				return err
 			}
 			h.Logger().Debug(context.TODO(), "perform backlog clear done")

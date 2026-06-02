@@ -20,8 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -149,8 +147,8 @@ func DecideLOBStrategyFromManifest(lobFiles []packed.LobFileInfo, fieldID int64,
 			seenFiles[file.Path] = file.TotalRows
 		} else {
 			mlog.Warn(context.TODO(), "LOB file referenced by multiple segments, invariant violation",
-				zap.String("path", file.Path),
-				zap.Int64("fieldID", fieldID))
+				mlog.String("path", file.Path),
+				mlog.FieldFieldID(fieldID))
 		}
 	}
 

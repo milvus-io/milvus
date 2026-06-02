@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -355,7 +354,7 @@ func autoWarmupForNonPKIsolationCollection(collectionProperties []*commonpb.KeyV
 	}
 	isPKI, isError := common.IsPartitionKeyIsolationKvEnabled(collectionProperties...)
 	if isError != nil {
-		mlog.Warn(context.TODO(), "failed to parse partition key isolation, autowarmup is disabled", zap.Error(isError))
+		mlog.Warn(context.TODO(), "failed to parse partition key isolation, autowarmup is disabled", mlog.Err(isError))
 		return false
 	}
 	if !isPKI {

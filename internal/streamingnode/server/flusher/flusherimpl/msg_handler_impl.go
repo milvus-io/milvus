@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -72,7 +71,7 @@ func (impl *msgHandlerImpl) createNewGrowingSegment(ctx context.Context, vchanne
 	if err != nil {
 		return err
 	}
-	logger := mlog.With(zap.Int64("collectionID", h.CollectionId), zap.Int64("partitionID", h.PartitionId), zap.Int64("segmentID", h.SegmentId))
+	logger := mlog.With(mlog.FieldCollectionID(h.CollectionId), mlog.FieldPartitionID(h.PartitionId), mlog.FieldSegmentID(h.SegmentId))
 	return retry.Do(ctx, func() (err error) {
 		// TODO: propagate SchemaVersion from CreateSegmentMessageHeader into AllocSegmentRequest
 		// so that DataCoord records the correct schema version for streaming-created segments.
@@ -91,7 +90,7 @@ func (impl *msgHandlerImpl) createNewGrowingSegment(ctx context.Context, vchanne
 			logger.Warn(ctx, "failed to alloc growing segment at datacoord")
 			return errors.Wrap(err, "failed to alloc growing segment at datacoord")
 		}
-		logger.Info(ctx, "alloc growing segment at datacoord", zap.Int32("schemaVersion", h.SchemaVersion))
+		logger.Info(ctx, "alloc growing segment at datacoord", mlog.Int32("schemaVersion", h.SchemaVersion))
 		return nil
 	}, retry.AttemptAlways(), retry.RetryErr(func(error) bool { return true }))
 }
@@ -150,21 +149,21 @@ func (impl *msgHandlerImpl) HandleTruncateCollection(flushMsg message.ImmutableT
 func (impl *msgHandlerImpl) HandleAlterWAL(ctx context.Context, alterWALMsg message.ImmutableAlterWALMessageV2, currentVChannel string) error {
 	vchannel := currentVChannel
 	logger := mlog.With(
-		zap.String("vchannel", vchannel),
-		zap.Uint64("alterWALTimeTick", alterWALMsg.TimeTick()),
-		zap.String("currentWALName", alterWALMsg.WALName().String()),
-		zap.Stringer("targetWALName", alterWALMsg.Header().TargetWalName))
+		mlog.FieldVChannel(vchannel),
+		mlog.Uint64("alterWALTimeTick", alterWALMsg.TimeTick()),
+		mlog.String("currentWALName", alterWALMsg.WALName().String()),
+		mlog.Stringer("targetWALName", alterWALMsg.Header().TargetWalName))
 
 	// Seal all segments in the current vchannel before WAL switch
 	if err := impl.wbMgr.SealAllSegments(ctx, vchannel); err != nil {
-		logger.Warn(ctx, "failed to seal all segments for WAL switch", zap.Error(err))
+		logger.Warn(ctx, "failed to seal all segments for WAL switch", mlog.Err(err))
 		return errors.Wrap(err, "failed to seal all segments")
 	}
 	logger.Info(ctx, "sealed all segments for WAL switch")
 
 	// Flush channel to persist buffered data before switching WAL
 	if err := impl.wbMgr.FlushChannel(ctx, vchannel, alterWALMsg.TimeTick()); err != nil {
-		logger.Warn(ctx, "failed to flush channel for WAL switch", zap.Error(err))
+		logger.Warn(ctx, "failed to flush channel for WAL switch", mlog.Err(err))
 		return errors.Wrap(err, "failed to flush channel")
 	}
 	logger.Info(ctx, "flushed channel for WAL switch")

@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -122,7 +121,7 @@ func (s *MaterializedViewTestSuite) run() {
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
-		mlog.Info(context.TODO(), "ShowSegments result", zap.String("segment", segment.String()))
+		mlog.Info(context.TODO(), "ShowSegments result", mlog.String("segment", segment.String()))
 	}
 
 	// create index

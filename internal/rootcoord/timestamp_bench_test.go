@@ -22,7 +22,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -54,7 +53,7 @@ func cleanTestEtcdEnv(cli *clientv3.Client, rootPath string) {
 	if _, err := cli.Delete(ctx, rootPath, clientv3.WithPrefix()); err != nil {
 		panic(err)
 	}
-	mlog.Debug(context.TODO(), "remove root path on etcd", zap.String("rootPath", rootPath))
+	mlog.Debug(context.TODO(), "remove root path on etcd", mlog.String("rootPath", rootPath))
 }
 
 func newBenchTSOAllocator(etcdCli *clientv3.Client, rootPath, subPath, key string) *tso.GlobalTSOAllocator {
@@ -70,7 +69,7 @@ func Benchmark_RootCoord_AllocTimestamp(b *testing.B) {
 	rootPath := funcutil.GenRandomStr()
 	subPath := funcutil.GenRandomStr()
 	key := funcutil.GenRandomStr()
-	mlog.Info(context.TODO(), "benchmark for allocating ts", zap.String("rootPath", rootPath), zap.String("subPath", subPath), zap.String("key", key))
+	mlog.Info(context.TODO(), "benchmark for allocating ts", mlog.String("rootPath", rootPath), mlog.String("subPath", subPath), mlog.String("key", key))
 
 	ctx := context.Background()
 	cli := getTestEtcdCli()

@@ -31,7 +31,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
 
@@ -87,7 +86,7 @@ func GetIP(ip string) string {
 	netIP := net.ParseIP(ip)
 	// not a valid ip addr
 	if netIP == nil {
-		mlog.Warn(context.TODO(), "cannot parse input ip, treat it as hostname/service name", zap.String("ip", ip))
+		mlog.Warn(context.TODO(), "cannot parse input ip, treat it as hostname/service name", mlog.String("ip", ip))
 		return ip
 	}
 	// only localhost or unicast is acceptable
@@ -104,7 +103,7 @@ func GetIP(ip string) string {
 func GetLocalIP() string {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		mlog.Warn(context.TODO(), "Failed to get interface addresses", zap.Error(err))
+		mlog.Warn(context.TODO(), "Failed to get interface addresses", mlog.Err(err))
 		return "127.0.0.1"
 	}
 
@@ -183,8 +182,8 @@ func getValidLocalIP(addrs []net.Addr, preferIPv6 bool) string {
 		if ip, exists := candidates[category]; exists {
 			result := formatLocalIP(ip)
 			mlog.Debug(context.TODO(), "Selected IP by priority",
-				zap.String("ip", result),
-				zap.String("categoryName", getCategoryName(category)))
+				mlog.String("ip", result),
+				mlog.String("categoryName", getCategoryName(category)))
 			return result
 		}
 	}
@@ -904,7 +903,7 @@ func categorizeLocalIP(ip net.IP) (ipCategory, bool) {
 		return ipCategoryIPv6Public, true
 	}
 
-	mlog.Debug(context.TODO(), "IP categorization: uncategorized IPv6", zap.String("ip", ip.String()))
+	mlog.Debug(context.TODO(), "IP categorization: uncategorized IPv6", mlog.String("ip", ip.String()))
 	return 0, false
 }
 

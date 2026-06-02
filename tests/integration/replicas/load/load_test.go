@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -234,7 +233,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineCollectionLevelConfig() {
 		})
 		s.NoError(err)
 		s.True(merr.Ok(resp2.Status))
-		mlog.Info(context.TODO(), "get replicas", zap.Any("replicas", resp2.GetReplicas()))
+		mlog.Info(context.TODO(), "get replicas", mlog.Any("replicas", resp2.GetReplicas()))
 		return len(resp2.GetReplicas()) == 2
 	}, 30*time.Second, time.Second)
 
@@ -645,7 +644,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithRGLackOfNode() {
 		s.Equal(5, len(resp3.GetReplicas()))
 		for _, replica := range resp3.GetReplicas() {
 			if len(replica.GetNodeIds()) != 2 { // one sn and one qn at least
-				mlog.Info(context.TODO(), "get replica info", zap.Any("replica", replica))
+				mlog.Info(context.TODO(), "get replica info", mlog.Any("replica", replica))
 				return false
 			}
 		}
@@ -719,7 +718,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_OnLoadingCollection() {
 			segmentNum += len(resp.Segments)
 			channelNum += len(resp.Channels)
 		}
-		mlog.Info(context.TODO(), "get data distribution", zap.Int("segmentNum", segmentNum), zap.Int("channelNum", channelNum))
+		mlog.Info(context.TODO(), "get data distribution", mlog.Int("segmentNum", segmentNum), mlog.Int("channelNum", channelNum))
 		return segmentNum == 5 && channelNum == 5
 	}, 30*time.Second, 1*time.Second)
 

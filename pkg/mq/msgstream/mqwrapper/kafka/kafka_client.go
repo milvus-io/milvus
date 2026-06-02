@@ -9,7 +9,6 @@ import (
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -67,9 +66,9 @@ func NewKafkaClientInstance(address string) *kafkaClient {
 }
 
 func NewKafkaClientInstanceWithConfigMap(config kafka.ConfigMap, extraConsumerConfig kafka.ConfigMap, extraProducerConfig kafka.ConfigMap) *kafkaClient {
-	mlog.Info(context.TODO(), "init kafka Config ", zap.String("commonConfig", ConfigtoString(config)),
-		zap.String("extraConsumerConfig", ConfigtoString(extraConsumerConfig)),
-		zap.String("extraProducerConfig", ConfigtoString(extraProducerConfig)),
+	mlog.Info(context.TODO(), "init kafka Config ", mlog.String("commonConfig", ConfigtoString(config)),
+		mlog.String("extraConsumerConfig", ConfigtoString(extraConsumerConfig)),
+		mlog.String("extraProducerConfig", ConfigtoString(extraProducerConfig)),
 	)
 	return &kafkaClient{basicConfig: config, consumerConfig: extraConsumerConfig, producerConfig: extraProducerConfig}
 }
@@ -153,7 +152,7 @@ func (kc *kafkaClient) getKafkaProducer() (*kafka.Producer, error) {
 		config := kc.newProducerConfig()
 		p, err := kafka.NewProducer(config)
 		if err != nil {
-			mlog.Error(context.TODO(), "create sync kafka producer failed", zap.Error(err))
+			mlog.Error(context.TODO(), "create sync kafka producer failed", mlog.Err(err))
 			return nil, err
 		}
 		go func() {
@@ -164,12 +163,12 @@ func (kc *kafkaClient) getKafkaProducer() (*kafka.Producer, error) {
 					// authentication issues, etc.
 					// After a fatal error has been raised, any subsequent Produce*() calls will fail with
 					// the original error code.
-					mlog.Error(context.TODO(), "kafka error", zap.String("error msg", ev.Error()))
+					mlog.Error(context.TODO(), "kafka error", mlog.String("error msg", ev.Error()))
 					if ev.IsFatal() {
 						panic(ev)
 					}
 				default:
-					mlog.Debug(context.TODO(), "kafka producer event", zap.Any("event", ev))
+					mlog.Debug(context.TODO(), "kafka producer event", mlog.Any("event", ev))
 				}
 			}
 		}()

@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
@@ -150,14 +149,14 @@ func (ob *ReplicaObserver) checkStreamingQueryNodesInReplica(sqNodeIDsByRG map[s
 				continue
 			}
 			logger := mlog.With(
-				zap.Int64("collectionID", replica.GetCollectionID()),
-				zap.Int64("replicaID", replica.GetID()),
-				zap.Int64s("removedNodes", removeNodes),
-				zap.Int64s("roNodes", roSQNodes),
-				zap.Int64s("rwNodes", rwSQNodes),
+				mlog.FieldCollectionID(replica.GetCollectionID()),
+				mlog.Int64("replicaID", replica.GetID()),
+				mlog.Int64s("removedNodes", removeNodes),
+				mlog.Int64s("roNodes", roSQNodes),
+				mlog.Int64s("rwNodes", rwSQNodes),
 			)
 			if err := ob.meta.RemoveSQNode(ctx, collectionID, replica.GetID(), removeNodes...); err != nil {
-				logger.Warn(context.TODO(), "fail to remove streaming query node from replica", zap.Error(err))
+				logger.Warn(context.TODO(), "fail to remove streaming query node from replica", mlog.Err(err))
 				continue
 			}
 			logger.Info(context.TODO(), "all segment/channel has been removed from ro streaming query node, remove it from replica")
@@ -196,10 +195,10 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 				continue
 			}
 			logger := mlog.With(
-				zap.Int64("collectionID", replica.GetCollectionID()),
-				zap.Int64("replicaID", replica.GetID()),
-				zap.Int64s("roNodes", roNodes),
-				zap.Int64s("rwNodes", rwNodes),
+				mlog.FieldCollectionID(replica.GetCollectionID()),
+				mlog.Int64("replicaID", replica.GetID()),
+				mlog.Int64s("roNodes", roNodes),
+				mlog.Int64s("rwNodes", rwNodes),
 			)
 
 			mlog.RatedInfo(ctx, rate.Limit(10), "found ro nodes in replica")
@@ -216,13 +215,13 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 			}
 			if err := ob.meta.RemoveNode(ctx, collectionID, replica.GetID(), removeNodes...); err != nil {
 				logger.Warn(context.TODO(), "fail to remove node from replica",
-					zap.Int64s("removedNodes", removeNodes),
-					zap.Error(err))
+					mlog.Int64s("removedNodes", removeNodes),
+					mlog.Err(err))
 				continue
 			}
 			hasNodeRemoved = true
 			logger.Info(context.TODO(), "all segment/channel has been removed from ro node, remove it from replica",
-				zap.Int64s("removedNodes", removeNodes),
+				mlog.Int64s("removedNodes", removeNodes),
 			)
 		}
 		if hasNodeRemoved {

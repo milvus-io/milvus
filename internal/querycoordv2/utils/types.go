@@ -20,8 +20,6 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -66,12 +64,12 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.M
 	tsLag := time.Since(posTime)
 	if tsLag >= 10*time.Minute {
 		mlog.Warn(context.TODO(), "delta position is quite stale",
-			zap.Int64("collectionID", segment.GetCollectionID()),
-			zap.Int64("segmentID", segment.GetID()),
-			zap.String("channel", segment.InsertChannel),
-			zap.Uint64("posTs", channelCheckpoint.GetTimestamp()),
-			zap.Time("posTime", posTime),
-			zap.Duration("tsLag", tsLag))
+			mlog.FieldCollectionID(segment.GetCollectionID()),
+			mlog.FieldSegmentID(segment.GetID()),
+			mlog.String("channel", segment.InsertChannel),
+			mlog.Uint64("posTs", channelCheckpoint.GetTimestamp()),
+			mlog.Time("posTime", posTime),
+			mlog.Duration("tsLag", tsLag))
 	}
 	loadInfo := &querypb.SegmentLoadInfo{
 		SegmentID:       segment.ID,

@@ -20,8 +20,6 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
@@ -57,7 +55,7 @@ func (q *QueryNode) Prepare() error {
 // Run starts service
 func (q *QueryNode) Run() error {
 	if err := q.svr.Run(); err != nil {
-		mlog.Error(q.ctx, "QueryNode starts error", zap.Error(err))
+		mlog.Error(q.ctx, "QueryNode starts error", mlog.Err(err))
 		return err
 	}
 	mlog.Info(q.ctx, "QueryNode successfully started")

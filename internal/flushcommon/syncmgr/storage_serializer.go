@@ -21,7 +21,6 @@ import (
 	"strconv"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
@@ -76,7 +75,7 @@ func (s *storageV1Serializer) serializeBinlog(ctx context.Context, pack *SyncPac
 	for _, blob := range blobs {
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
 		if err != nil {
-			mlog.Error(ctx, "serialize buffer failed ... cannot parse string to fieldID ..", zap.Error(err))
+			mlog.Error(ctx, "serialize buffer failed ... cannot parse string to fieldID ..", mlog.Err(err))
 			return nil, err
 		}
 

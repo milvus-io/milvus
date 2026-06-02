@@ -23,7 +23,6 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -80,19 +79,19 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 	err error,
 ) {
 	if inserts, manifest, err = bw.writeInserts(ctx, pack); err != nil {
-		mlog.Error(ctx, "failed to write insert data", zap.Error(err))
+		mlog.Error(ctx, "failed to write insert data", mlog.Err(err))
 		return inserts, deltas, stats, bm25Stats, manifest, size, err
 	}
 	if stats, err = bw.writeStats(ctx, pack); err != nil {
-		mlog.Error(ctx, "failed to process stats blob", zap.Error(err))
+		mlog.Error(ctx, "failed to process stats blob", mlog.Err(err))
 		return inserts, deltas, stats, bm25Stats, manifest, size, err
 	}
 	if deltas, err = bw.writeDelta(ctx, pack); err != nil {
-		mlog.Error(ctx, "failed to process delta blob", zap.Error(err))
+		mlog.Error(ctx, "failed to process delta blob", mlog.Err(err))
 		return inserts, deltas, stats, bm25Stats, manifest, size, err
 	}
 	if bm25Stats, err = bw.writeBM25Stasts(ctx, pack); err != nil {
-		mlog.Error(ctx, "failed to process bm25 stats blob", zap.Error(err))
+		mlog.Error(ctx, "failed to process bm25 stats blob", mlog.Err(err))
 		return inserts, deltas, stats, bm25Stats, manifest, size, err
 	}
 
@@ -177,9 +176,9 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 		logs, manifestPath, err = bw.writeInsertsIntoStorage(ctx, pluginContextPtr, pack, rec, tsFrom, tsTo)
 		if err != nil {
 			mlog.Warn(ctx, "failed to write inserts into storage",
-				zap.Int64("collectionID", pack.collectionID),
-				zap.Int64("segmentID", pack.segmentID),
-				zap.Error(err))
+				mlog.FieldCollectionID(pack.collectionID),
+				mlog.FieldSegmentID(pack.segmentID),
+				mlog.Err(err))
 			return err
 		}
 		return nil
@@ -204,7 +203,7 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 	doWrite := func(w storage.RecordWriter) error {
 		if err = w.Write(rec); err != nil {
 			if closeErr := w.Close(); closeErr != nil {
-				mlog.Error(context.TODO(), "failed to close writer after write failed", zap.Error(closeErr))
+				mlog.Error(context.TODO(), "failed to close writer after write failed", mlog.Err(closeErr))
 			}
 			return err
 		}

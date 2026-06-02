@@ -19,8 +19,6 @@ package proxy
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -102,9 +100,9 @@ func (bt *batchUpdateManifestTask) PreExecute(ctx context.Context) error {
 
 func (bt *batchUpdateManifestTask) Execute(ctx context.Context) error {
 	mlog.Info(ctx, "proxy batch update manifest",
-		zap.String("collectionName", bt.req.GetCollectionName()),
-		zap.Int64("collectionID", bt.collectionID),
-		zap.Int("itemCount", len(bt.req.GetItems())),
+		mlog.FieldCollectionName(bt.req.GetCollectionName()),
+		mlog.FieldCollectionID(bt.collectionID),
+		mlog.Int("itemCount", len(bt.req.GetItems())),
 	)
 
 	items := make([]*datapb.BatchUpdateManifestItem, 0, len(bt.req.GetItems()))

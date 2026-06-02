@@ -26,7 +26,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -502,11 +501,11 @@ func LogStats(manager TaskManager) {
 		byState := lo.GroupBy(tasks, func(t Task) datapb.ImportTaskStateV2 {
 			return t.GetState()
 		})
-		mlog.Info(context.TODO(), "import task stats", zap.String("type", taskType.String()),
-			zap.Int("pending", len(byState[datapb.ImportTaskStateV2_Pending])),
-			zap.Int("inProgress", len(byState[datapb.ImportTaskStateV2_InProgress])),
-			zap.Int("completed", len(byState[datapb.ImportTaskStateV2_Completed])),
-			zap.Int("failed", len(byState[datapb.ImportTaskStateV2_Failed])))
+		mlog.Info(context.TODO(), "import task stats", mlog.String("type", taskType.String()),
+			mlog.Int("pending", len(byState[datapb.ImportTaskStateV2_Pending])),
+			mlog.Int("inProgress", len(byState[datapb.ImportTaskStateV2_InProgress])),
+			mlog.Int("completed", len(byState[datapb.ImportTaskStateV2_Completed])),
+			mlog.Int("failed", len(byState[datapb.ImportTaskStateV2_Failed])))
 	}
 	tasks := manager.GetBy(WithType(PreImportTaskType))
 	logFunc(tasks, PreImportTaskType)

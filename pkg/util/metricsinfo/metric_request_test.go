@@ -19,7 +19,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tidwall/gjson"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -78,7 +77,7 @@ func Test_ConstructRequestByMetricType(t *testing.T) {
 		assert.Equal(t, test.errIsNil, err == nil)
 		if test.errIsNil {
 			mlog.Info(context.TODO(), "TestConstructRequestByMetricType",
-				zap.String("request", got.Request))
+				mlog.String("request", got.Request))
 		}
 	}
 }

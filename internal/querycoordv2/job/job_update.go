@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -78,7 +77,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 		msg := "modify replica for unloaded collection is not supported"
 		err := merr.WrapErrCollectionNotLoaded(msg)
 		mlog.Warn(context.TODO(),
-			msg, zap.Error(err))
+			msg, mlog.Err(err))
 		return err
 	}
 
@@ -87,7 +86,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 		msg := "set replica number to 0 for loaded collection is not supported"
 		err := merr.WrapErrParameterInvalidMsg(msg)
 		mlog.Warn(context.TODO(),
-			msg, zap.Error(err))
+			msg, mlog.Err(err))
 		return err
 	}
 
@@ -99,17 +98,17 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	// 2. reassign
 	toSpawn, toTransfer, toRelease, err := utils.ReassignReplicaToRG(job.ctx, job.meta, job.collectionID, job.newReplicaNumber, job.newResourceGroups)
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to reassign replica", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to reassign replica", mlog.Err(err))
 		return err
 	}
 
 	mlog.Info(context.TODO(), "reassign replica",
-		zap.Int64("collectionID", job.collectionID),
-		zap.Int32("replicaNumber", job.newReplicaNumber),
-		zap.Strings("resourceGroups", job.newResourceGroups),
-		zap.Any("toSpawn", toSpawn),
-		zap.Any("toTransfer", toTransfer),
-		zap.Any("toRelease", toRelease))
+		mlog.FieldCollectionID(job.collectionID),
+		mlog.Int32("replicaNumber", job.newReplicaNumber),
+		mlog.Strings("resourceGroups", job.newResourceGroups),
+		mlog.Any("toSpawn", toSpawn),
+		mlog.Any("toTransfer", toTransfer),
+		mlog.Any("toRelease", toRelease))
 
 	// 3. try to spawn new replica
 	channels := job.targetMgr.GetDmChannelsByCollection(job.ctx, job.collectionID, meta.CurrentTargetFirst)
@@ -120,7 +119,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	}
 	newReplicas, spawnErr := job.meta.Spawn(job.ctx, job.collectionID, toSpawn, lo.Keys(channels), commonpb.LoadPriority_LOW, spawnOpts...)
 	if spawnErr != nil {
-		mlog.Warn(context.TODO(), "failed to spawn replica", zap.Error(spawnErr))
+		mlog.Warn(context.TODO(), "failed to spawn replica", mlog.Err(spawnErr))
 		err := spawnErr
 		return err
 	}
@@ -130,7 +129,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 			replicaIDs := lo.Map(newReplicas, func(r *meta.Replica, _ int) int64 { return r.GetID() })
 			err := job.meta.RemoveReplicas(job.ctx, job.collectionID, replicaIDs...)
 			if err != nil {
-				mlog.Warn(context.TODO(), "failed to remove replicas", zap.Int64s("replicaIDs", replicaIDs), zap.Error(err))
+				mlog.Warn(context.TODO(), "failed to remove replicas", mlog.Int64s("replicaIDs", replicaIDs), mlog.Err(err))
 			}
 		}
 	}()
@@ -145,7 +144,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 			}
 
 			if transferErr := job.meta.MoveReplica(job.ctx, collectionID, rg, replicas); transferErr != nil {
-				mlog.Warn(context.TODO(), "failed to transfer replica for collection", zap.Int64("collectionID", collectionID), zap.Error(transferErr))
+				mlog.Warn(context.TODO(), "failed to transfer replica for collection", mlog.FieldCollectionID(collectionID), mlog.Err(transferErr))
 				err = transferErr
 				return err
 			}
@@ -158,7 +157,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 					oldRG := replicaOldRG[replica.GetID()]
 					if replica.GetResourceGroup() != oldRG {
 						if err := job.meta.TransferReplica(job.ctx, replica.GetID(), replica.GetResourceGroup(), oldRG, 1); err != nil {
-							mlog.Warn(context.TODO(), "failed to roll back replicas", zap.Int64("replica", replica.GetID()), zap.Error(err))
+							mlog.Warn(context.TODO(), "failed to roll back replicas", mlog.Int64("replica", replica.GetID()), mlog.Err(err))
 						}
 					}
 				}
@@ -169,7 +168,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	// 5. remove replica from meta
 	err = job.meta.RemoveReplicas(job.ctx, job.collectionID, toRelease...)
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to remove replicas", zap.Int64s("replicaIDs", toRelease), zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to remove replicas", mlog.Int64s("replicaIDs", toRelease), mlog.Err(err))
 		return err
 	}
 
@@ -190,7 +189,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	if err != nil {
 		msg := "failed to update replica number"
 		mlog.Warn(context.TODO(),
-			msg, zap.Error(err))
+			msg, mlog.Err(err))
 		return err
 	}
 
@@ -199,7 +198,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	if err != nil {
 		msg := "failed to update next target"
 		mlog.Warn(context.TODO(),
-			msg, zap.Error(err))
+			msg, mlog.Err(err))
 	}
 
 	return nil

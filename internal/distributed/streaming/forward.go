@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -212,7 +211,7 @@ func (fs *forwardServiceImpl) initLegacyProxy() {
 	fs.rb = rb
 	fs.Logger().Info(context.TODO(),
 
-		"streaming service is not ready, legacy proxy is initiated to forward request", zap.Int("proxyPort", port))
+		"streaming service is not ready, legacy proxy is initiated to forward request", mlog.Int("proxyPort", port))
 }
 
 // getDialOptions returns the dial options for the legacy proxy.

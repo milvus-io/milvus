@@ -20,8 +20,6 @@ import (
 	"context"
 	"sync"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
@@ -114,7 +112,7 @@ func (f *AssignPolicyFactory) GetPolicy(policyType string) AssignPolicy {
 		return policy
 	}
 
-	mlog.Info(context.TODO(), "Creating new assign policy", zap.String("type", policyType))
+	mlog.Info(context.TODO(), "Creating new assign policy", mlog.String("type", policyType))
 
 	switch policyType {
 	case PolicyTypeRoundRobin:
@@ -125,8 +123,8 @@ func (f *AssignPolicyFactory) GetPolicy(policyType string) AssignPolicy {
 		policy = newScoreBasedAssignPolicy(f.nodeManager, f.scheduler, f.dist, f.meta)
 	default:
 		mlog.Info(context.TODO(), "Unknown assign policy type, using default",
-			zap.String("requested", policyType),
-			zap.String("default", PolicyTypeScoreBased))
+			mlog.String("requested", policyType),
+			mlog.String("default", PolicyTypeScoreBased))
 		policy = newScoreBasedAssignPolicy(f.nodeManager, f.scheduler, f.dist, f.meta)
 	}
 

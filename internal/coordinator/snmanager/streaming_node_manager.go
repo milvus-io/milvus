@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
@@ -214,7 +213,7 @@ func (s *StreamingNodeManager) execute() (err error) {
 				s.latestAssignments[relation.Channel.Name] = relation
 			}
 			s.nodeChangedNotifier.NotifyAll()
-			mlog.Info(context.TODO(), "streaming node manager updated", zap.Any("assignments", s.latestAssignments))
+			mlog.Info(context.TODO(), "streaming node manager updated", mlog.Any("assignments", s.latestAssignments))
 			s.cond.L.Unlock()
 			return nil
 		}); err != nil {

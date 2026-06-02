@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -86,7 +85,7 @@ func (s *scheduler) scheduleTasks() {
 	taskIDs := lo.Map(tasks, func(t Task, _ int) int64 {
 		return t.GetTaskID()
 	})
-	mlog.Info(context.TODO(), "processing tasks...", zap.Int64s("taskIDs", taskIDs))
+	mlog.Info(context.TODO(), "processing tasks...", mlog.Int64s("taskIDs", taskIDs))
 
 	futures := make(map[int64][]*conc.Future[any])
 	for _, task := range tasks {
@@ -100,10 +99,10 @@ func (s *scheduler) scheduleTasks() {
 			continue
 		}
 		s.manager.Update(taskID, UpdateState(datapb.ImportTaskStateV2_Completed))
-		mlog.Info(context.TODO(), "preimport/import done", zap.Int64("taskID", taskID))
+		mlog.Info(context.TODO(), "preimport/import done", mlog.FieldTaskID(taskID))
 	}
 
-	mlog.Info(context.TODO(), "all tasks completed", zap.Int64s("taskIDs", taskIDs))
+	mlog.Info(context.TODO(), "all tasks completed", mlog.Int64s("taskIDs", taskIDs))
 }
 
 // Slots returns the used slots for import

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -60,9 +59,9 @@ func StartLegacyTombstoneGC(ctx context.Context, metaKV kv.MetaKv) {
 
 func runLegacyTombstoneGC(ctx context.Context, metaKV kv.MetaKv) {
 	mlog.Info(ctx, "legacy tombstone GC started",
-		zap.Strings("prefixes", tombstoneGCPrefixes),
-		zap.Int("batchSize", legacyGCBatchSize),
-		zap.Duration("interval", legacyGCInterval))
+		mlog.Strings("prefixes", tombstoneGCPrefixes),
+		mlog.Int("batchSize", legacyGCBatchSize),
+		mlog.Duration("interval", legacyGCInterval))
 
 	ticker := time.NewTicker(legacyGCInterval)
 	defer ticker.Stop()
@@ -74,28 +73,28 @@ func runLegacyTombstoneGC(ctx context.Context, metaKV kv.MetaKv) {
 		select {
 		case <-ctx.Done():
 			mlog.Info(ctx, "legacy tombstone GC stopped (context canceled)",
-				zap.Int("totalDeleted", totalDeleted),
-				zap.Duration("totalElapsed", time.Since(startTime)))
+				mlog.Int("totalDeleted", totalDeleted),
+				mlog.Duration("totalElapsed", time.Since(startTime)))
 			return
 		case <-ticker.C:
 			deleted, err := gcLegacyTombstonePass(ctx, metaKV)
 			if err != nil {
 				mlog.Warn(ctx, "legacy tombstone GC pass error",
-					zap.Error(err),
-					zap.Int("totalDeleted", totalDeleted))
+					mlog.Err(err),
+					mlog.Int("totalDeleted", totalDeleted))
 				continue
 			}
 			if deleted == 0 {
 				mlog.Info(ctx, "legacy tombstone GC complete",
-					zap.Int("totalDeleted", totalDeleted),
-					zap.Duration("totalElapsed", time.Since(startTime)))
+					mlog.Int("totalDeleted", totalDeleted),
+					mlog.Duration("totalElapsed", time.Since(startTime)))
 				return
 			}
 			totalDeleted += deleted
 			mlog.Info(ctx, "legacy tombstone GC pass done",
-				zap.Int("deleted", deleted),
-				zap.Int("totalDeleted", totalDeleted),
-				zap.Duration("elapsed", time.Since(startTime)))
+				mlog.Int("deleted", deleted),
+				mlog.Int("totalDeleted", totalDeleted),
+				mlog.Duration("elapsed", time.Since(startTime)))
 		}
 	}
 }
@@ -146,8 +145,8 @@ func gcLegacyTombstoneBatch(ctx context.Context, metaKV kv.MetaKv, prefix string
 		rel, ok := stripRootPath(metaKV, key, prefix)
 		if !ok {
 			mlog.Warn(ctx, "legacy tombstone GC: key not under expected prefix, skipping",
-				zap.String("key", key),
-				zap.String("prefix", prefix))
+				mlog.String("key", key),
+				mlog.String("prefix", prefix))
 			continue
 		}
 		relativeKeys = append(relativeKeys, rel)

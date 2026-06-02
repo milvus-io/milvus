@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -127,8 +126,8 @@ func TestChannelsTimeTickerImpl_getLastTick(t *testing.T) {
 					ts, err := channelTicker.getLastTick(pchan)
 					assert.Equal(t, nil, err)
 					mlog.Debug(context.TODO(), "TestChannelsTimeTickerImpl_getLastTick",
-						zap.Any("pchan", pchan),
-						zap.Any("minTs", ts))
+						mlog.Any("pchan", pchan),
+						mlog.Any("minTs", ts))
 				}
 			}
 		}
@@ -175,8 +174,8 @@ func TestChannelsTimeTickerImpl_getMinTsStatistics(t *testing.T) {
 				assert.Equal(t, nil, err)
 				for pchan, ts := range stats {
 					mlog.Debug(context.TODO(), "TestChannelsTimeTickerImpl_getLastTick",
-						zap.Any("pchan", pchan),
-						zap.Any("minTs", ts))
+						mlog.Any("pchan", pchan),
+						mlog.Any("minTs", ts))
 				}
 			}
 		}

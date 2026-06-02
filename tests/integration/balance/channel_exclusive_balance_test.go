@@ -26,7 +26,6 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -85,11 +84,11 @@ func (s *ChannelExclusiveBalanceSuit) initCollection(collectionName string, repl
 	s.NoError(err)
 	s.True(merr.Ok(createCollectionStatus))
 
-	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := s.Cluster.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.Status))
-	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	for i := 0; i < segmentNum; i++ {
 		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, segmentRowNum, dim)
@@ -111,7 +110,7 @@ func (s *ChannelExclusiveBalanceSuit) initCollection(collectionName string, repl
 
 			pks := insertResult.GetIDs().GetIntId().GetData()
 			mlog.Info(context.TODO(), "========================delete expr==================",
-				zap.Int("length of pk", len(pks)),
+				mlog.Int("length of pk", len(pks)),
 			)
 
 			expr := fmt.Sprintf("%s in [%s]", integration.Int64Field, strings.Join(lo.Map(pks, func(pk int64, _ int) string { return strconv.FormatInt(pk, 10) }), ","))
@@ -187,13 +186,13 @@ func (s *ChannelExclusiveBalanceSuit) TestBalanceOnSingleReplica() {
 			s.NoError(err)
 			s.True(merr.Ok(resp1.GetStatus()))
 
-			mlog.Info(context.TODO(), "resp", zap.Any("segments", resp1.Segments))
+			mlog.Info(context.TODO(), "resp", mlog.Any("segments", resp1.Segments))
 			if channel, ok := s.isSameChannel(resp1.GetSegments()); ok {
 				channelNodeCounter[channel] += 1
 			}
 		}
 
-		mlog.Info(context.TODO(), "dist", zap.Any("nodes", channelNodeCounter))
+		mlog.Info(context.TODO(), "dist", mlog.Any("nodes", channelNodeCounter))
 		nodeCountMatch := true
 		for _, cnt := range channelNodeCounter {
 			if cnt != channelNodeCount {
@@ -217,14 +216,14 @@ func (s *ChannelExclusiveBalanceSuit) TestBalanceOnSingleReplica() {
 		for _, node := range s.Cluster.GetAllQueryNodes() {
 			resp1, err := node.MustGetClient(ctx).GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 			if err != nil && merr.Ok(resp1.GetStatus()) {
-				mlog.Info(context.TODO(), "resp", zap.Any("segments", resp1.Segments))
+				mlog.Info(context.TODO(), "resp", mlog.Any("segments", resp1.Segments))
 				if channel, ok := s.isSameChannel(resp1.GetSegments()); ok {
 					channelNodeCounter[channel] += 1
 				}
 			}
 		}
 
-		mlog.Info(context.TODO(), "dist", zap.Any("nodes", channelNodeCounter))
+		mlog.Info(context.TODO(), "dist", mlog.Any("nodes", channelNodeCounter))
 		nodeCountMatch := true
 		for _, cnt := range channelNodeCounter {
 			if cnt != channelNodeCount {

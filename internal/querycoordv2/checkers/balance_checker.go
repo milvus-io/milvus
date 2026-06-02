@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
@@ -517,7 +516,7 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 	defer func() {
 		duration := time.Since(start)
 		if duration > 100*time.Millisecond {
-			mlog.Info(ctx, "Balance check too slow", zap.Duration("duration", duration))
+			mlog.Info(ctx, "Balance check too slow", mlog.Duration("duration", duration))
 		}
 	}()
 

@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -73,13 +72,13 @@ func (s *TargetTestSuit) initCollection(collectionName string, replica int, chan
 
 	mlog.Info(context.TODO(),
 
-		"CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+		"CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := s.Cluster.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.Status))
 	mlog.Info(context.TODO(),
 
-		"ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+		"ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	for i := 0; i < segmentNum; i++ {
 		s.insertToCollection(ctx, dbName, collectionName, segmentRowNum, dim)
@@ -210,7 +209,7 @@ func (s *TargetTestSuit) TestQueryCoordRestart() {
 			})
 			mlog.Info(context.TODO(),
 
-				"resp", zap.Any("status", resp.GetStatus()), zap.Any("shards", resp.Shards))
+				"resp", mlog.Any("status", resp.GetStatus()), mlog.Any("shards", resp.Shards))
 			s.NoError(err)
 			s.True(merr.Ok(resp.GetStatus()))
 

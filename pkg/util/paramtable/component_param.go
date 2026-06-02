@@ -28,7 +28,6 @@ import (
 
 	"github.com/shirou/gopsutil/v3/disk"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/log"
@@ -4591,12 +4590,12 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 				localStoragePath := getLocalStoragePath(base)
 				if _, err := os.Stat(localStoragePath); os.IsNotExist(err) {
 					if err := os.MkdirAll(localStoragePath, os.ModePerm); err != nil {
-						mlog.Fatal(context.TODO(), "failed to mkdir", zap.String("localStoragePath", localStoragePath), zap.Error(err))
+						mlog.Fatal(context.TODO(), "failed to mkdir", mlog.String("localStoragePath", localStoragePath), mlog.Err(err))
 					}
 				}
 				diskUsage, err := disk.Usage(localStoragePath)
 				if err != nil {
-					mlog.Fatal(context.TODO(), "failed to get disk usage", zap.String("localStoragePath", localStoragePath), zap.Error(err))
+					mlog.Fatal(context.TODO(), "failed to get disk usage", mlog.String("localStoragePath", localStoragePath), mlog.Err(err))
 				}
 				return strconv.FormatUint(diskUsage.Total, 10)
 			}
@@ -4831,7 +4830,7 @@ user-task-polling:
 		Formatter: func(v string) string {
 			if getAsInt64(v) <= 0 {
 				mlog.Warn(context.TODO(), "queryNode.segcore.storageV2.cellTargetSizeBytes must be positive, using default 4 MiB",
-					zap.String("configured", v))
+					mlog.String("configured", v))
 				return "4194304"
 			}
 			return v
@@ -6968,7 +6967,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Formatter: func(v string) string {
 			concurrency := getAsInt(v)
 			if concurrency < 1 {
-				mlog.Warn(context.TODO(), "positive parallel task number, reset to default 16", zap.String("value", v))
+				mlog.Warn(context.TODO(), "positive parallel task number, reset to default 16", mlog.String("value", v))
 				return "16" // MaxParallelSyncMgrTasksPerCPUCore must >= 1
 			}
 			return strconv.FormatInt(int64(concurrency), 10)
@@ -7026,7 +7025,7 @@ Setting this parameter too small causes the system to store a small amount of da
 			Export:       true,
 		}
 	} else {
-		mlog.Info(context.TODO(), "DeployModeEnv is not set, use default", zap.Float64("default", 0.5))
+		mlog.Info(context.TODO(), "DeployModeEnv is not set, use default", mlog.Float64("default", 0.5))
 		p.MemoryForceSyncWatermark = ParamItem{
 			Key:          "dataNode.memory.forceSyncWatermark",
 			Version:      "2.4.0",
@@ -8291,7 +8290,7 @@ func getLocalStoragePath(base *BaseTable) string {
 	localStoragePath := base.Get("localStorage.path")
 	if len(localStoragePath) == 0 {
 		localStoragePath = defaultLocalStoragePath
-		mlog.Warn(context.TODO(), "localStorage.path is not set, using default value", zap.String("localStorage.path", localStoragePath))
+		mlog.Warn(context.TODO(), "localStorage.path is not set, using default value", mlog.String("localStorage.path", localStoragePath))
 	}
 	return localStoragePath
 }

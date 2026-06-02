@@ -4,7 +4,6 @@ import (
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 	"google.golang.org/grpc/resolver"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
@@ -26,7 +25,7 @@ var idAllocator = typeutil.NewIDAllocator()
 func NewChannelAssignmentBuilder(w types.AssignmentDiscoverWatcher) Builder {
 	b := newBuilder(ChannelAssignmentResolverScheme,
 		discoverer.NewChannelAssignmentDiscoverer(w),
-		mlog.With(mlog.FieldComponent("grpc-resolver"), zap.String("scheme", ChannelAssignmentResolverScheme)))
+		mlog.With(mlog.FieldComponent("grpc-resolver"), mlog.String("scheme", ChannelAssignmentResolverScheme)))
 	return b
 }
 
@@ -34,7 +33,7 @@ func NewChannelAssignmentBuilder(w types.AssignmentDiscoverWatcher) Builder {
 // Multiple sessions are allowed, use the role as prefix.
 func NewSessionBuilder(c *clientv3.Client, sessionDiscovererOptions ...discoverer.SessionDiscovererOption) Builder {
 	sd := discoverer.NewSessionDiscoverer(c, sessionDiscovererOptions...)
-	b := newBuilder(SessionResolverScheme, sd, sd.Logger().With(mlog.FieldComponent("grpc-resolver"), zap.String("scheme", SessionResolverScheme)))
+	b := newBuilder(SessionResolverScheme, sd, sd.Logger().With(mlog.FieldComponent("grpc-resolver"), mlog.String("scheme", SessionResolverScheme)))
 	return b
 }
 
@@ -73,7 +72,7 @@ func (b *builderImpl) Build(_ resolver.Target, cc resolver.ClientConn, _ resolve
 	defer b.lifetime.Done()
 
 	r := newWatchBasedGRPCResolver(cc)
-	r.SetLogger(b.resolver.Logger().With(zap.Int64("id", idAllocator.Allocate())))
+	r.SetLogger(b.resolver.Logger().With(mlog.Int64("id", idAllocator.Allocate())))
 	b.resolver.RegisterNewWatcher(r)
 	return r, nil
 }

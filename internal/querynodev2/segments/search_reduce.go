@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
@@ -168,7 +167,7 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 		}
 
 		// if realTopK != -1 && realTopK != j {
-		// 	log.Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
+		// 	log.Warn("Proxy Reduce Search Result", mlog.Err(errors.New("the length (topk) between all result of query is different")))
 		// 	// return nil, errors.New("the length (topk) between all result of query is different")
 		// }
 		ret.Topks = append(ret.Topks, j)
@@ -178,7 +177,7 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 			return nil, merr.WrapErrParameterInvalidMsg("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
-	mlog.Debug(ctx, "skip duplicated search result", zap.Int64("count", skipDupCnt))
+	mlog.Debug(ctx, "skip duplicated search result", mlog.Int64("count", skipDupCnt))
 	return ret, nil
 }
 
@@ -189,7 +188,7 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 	defer sp.End()
 
 	if len(searchResultData) == 0 {
-		mlog.Debug(ctx, "Shortcut return SearchGroupByReduce, directly return empty result", zap.Any("result info", info))
+		mlog.Debug(ctx, "Shortcut return SearchGroupByReduce, directly return empty result", mlog.Any("result info", info))
 		return &schemapb.SearchResultData{
 			NumQueries: info.GetNq(),
 			TopK:       info.GetTopK(),
@@ -315,10 +314,10 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 	if float64(filteredCount) >= 0.3*float64(groupBound) {
 		mlog.Warn(ctx, "GroupBy reduce filtered too many results, "+
 			"this may influence the final result seriously",
-			zap.Int64("filteredCount", filteredCount),
-			zap.Int64("groupBound", groupBound))
+			mlog.Int64("filteredCount", filteredCount),
+			mlog.Int64("groupBound", groupBound))
 	}
-	mlog.Debug(ctx, "skip duplicated search result", zap.Int64("count", filteredCount))
+	mlog.Debug(ctx, "skip duplicated search result", mlog.Int64("count", filteredCount))
 	return ret, nil
 }
 

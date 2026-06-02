@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -39,7 +38,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 	}
 
 	collectionId := req.GetReq().GetCollectionID()
-	log := mlog.With(zap.Int64("collection", collectionId))
+	log := mlog.With(mlog.Int64("collection", collectionId))
 
 	serializedPlan := req.GetReq().GetSerializedExprPlan()
 	// plan not found
@@ -57,7 +56,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 	plan := planpb.PlanNode{}
 	err := proto.Unmarshal(serializedPlan, &plan)
 	if err != nil {
-		log.Warn(ctx, "failed to unmarshal plan", zap.Error(err))
+		log.Warn(ctx, "failed to unmarshal plan", mlog.Err(err))
 		return nil, merr.WrapErrParameterInvalid("valid serialized search plan", "no unmarshalable one", err.Error())
 	}
 
@@ -95,7 +94,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 		}
 		err := queryHook.Run(params)
 		if err != nil {
-			log.Warn(ctx, "failed to execute queryHook", zap.Error(err))
+			log.Warn(ctx, "failed to execute queryHook", mlog.Err(err))
 			return nil, merr.WrapErrServiceUnavailable(err.Error(), "queryHook execution failed")
 		}
 		finalTopk := params[common.TopKKey].(int64)
@@ -113,7 +112,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 		}
 		serializedExprPlan, err := proto.Marshal(&plan)
 		if err != nil {
-			log.Warn(ctx, "failed to marshal optimized plan", zap.Error(err))
+			log.Warn(ctx, "failed to marshal optimized plan", mlog.Err(err))
 			return nil, merr.WrapErrParameterInvalid("marshalable search plan", "plan with marshal error", err.Error())
 		}
 		req.Req.SerializedExprPlan = serializedExprPlan
@@ -124,9 +123,9 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			req.Req.IsRecallEvaluation = false
 		}
 
-		log.Debug(ctx, "optimized search params done", zap.Any("queryInfo", queryInfo))
+		log.Debug(ctx, "optimized search params done", mlog.Any("queryInfo", queryInfo))
 	default:
-		log.Warn(ctx, "not supported node type", zap.String("nodeType", fmt.Sprintf("%T", plan.GetNode())))
+		log.Warn(ctx, "not supported node type", mlog.String("nodeType", fmt.Sprintf("%T", plan.GetNode())))
 	}
 	return req, nil
 }

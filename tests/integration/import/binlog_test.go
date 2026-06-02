@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -87,13 +86,13 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 		CollectionNames: []string{collectionName},
 	})
 	s.NoError(merr.CheckRPCCall(showCollectionsResp, err))
-	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	showPartitionsResp, err := c.MilvusClient.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
 		CollectionName: collectionName,
 	})
 	s.NoError(merr.CheckRPCCall(showPartitionsResp, err))
-	mlog.Info(context.TODO(), "ShowPartitions result", zap.Any("showPartitionsResp", showPartitionsResp))
+	mlog.Info(context.TODO(), "ShowPartitions result", mlog.Any("showPartitionsResp", showPartitionsResp))
 
 	// create index
 	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
@@ -189,7 +188,7 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 		s.NoError(err)
 		s.NotEmpty(segments)
 		for _, segment := range segments {
-			mlog.Info(context.TODO(), "ShowSegments result", zap.String("segment", segment.String()))
+			mlog.Info(context.TODO(), "ShowSegments result", mlog.String("segment", segment.String()))
 		}
 	}
 
@@ -320,10 +319,10 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 	insertedIDs := sourceCollectionInfo.insertedIDs
 
 	mlog.Info(context.TODO(), "prepare source collection done",
-		zap.Int64("collectionID", collectionID),
-		zap.Int64("partitionID", partitionID),
-		zap.Int64s("segments", segmentIDs),
-		zap.Int64s("l0 segments", l0SegmentIDs))
+		mlog.FieldCollectionID(collectionID),
+		mlog.FieldPartitionID(partitionID),
+		mlog.Int64s("segments", segmentIDs),
+		mlog.Int64s("l0 segments", l0SegmentIDs))
 
 	c := s.Cluster
 	ctx := c.GetContext()
@@ -382,7 +381,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 		},
 	})
 	s.NoError(merr.CheckRPCCall(importResp, err))
-	mlog.Info(context.TODO(), "Import result", zap.Any("importResp", importResp))
+	mlog.Info(context.TODO(), "Import result", mlog.Any("importResp", importResp))
 
 	jobID := importResp.GetJobID()
 	err = WaitForImportDone(ctx, c, jobID)
@@ -394,7 +393,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 	segments = lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
 		return segment.GetCollectionID() == newCollectionID
 	})
-	mlog.Info(context.TODO(), "Show segments", zap.Any("segments", segments))
+	mlog.Info(context.TODO(), "Show segments", mlog.Any("segments", segments))
 	s.Equal(2, len(segments))
 	segment, ok := lo.Find(segments, func(segment *datapb.SegmentInfo) bool {
 		return segment.GetState() == commonpb.SegmentState_Flushed
@@ -431,7 +430,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 			},
 		})
 		s.NoError(merr.CheckRPCCall(importResp, err))
-		mlog.Info(context.TODO(), "Import result", zap.Any("importResp", importResp))
+		mlog.Info(context.TODO(), "Import result", mlog.Any("importResp", importResp))
 
 		jobID = importResp.GetJobID()
 		err = WaitForImportDone(ctx, c, jobID)
@@ -440,7 +439,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 		segments, err = c.ShowSegments(collectionName)
 		s.NoError(err)
 		s.NotEmpty(segments)
-		mlog.Info(context.TODO(), "Show segments", zap.Any("segments", segments))
+		mlog.Info(context.TODO(), "Show segments", mlog.Any("segments", segments))
 		l0Segments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
 			return segment.GetLevel() == datapb.SegmentLevel_L0
 		})
@@ -568,7 +567,7 @@ func (s *BulkInsertSuite) TestInvalidInput() {
 	err = merr.CheckRPCCall(importResp, err)
 	s.True(strings.Contains(err.Error(), "too many input paths for binlog import"))
 	s.Error(err)
-	mlog.Info(context.TODO(), "Import result", zap.Any("importResp", importResp))
+	mlog.Info(context.TODO(), "Import result", mlog.Any("importResp", importResp))
 }
 
 func (s *BulkInsertSuite) TestBinlogImport() {

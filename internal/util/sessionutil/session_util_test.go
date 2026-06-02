@@ -20,7 +20,6 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -322,7 +321,7 @@ func TestSession_Registered(t *testing.T) {
 
 func TestSession_String(t *testing.T) {
 	s := &Session{}
-	mlog.Debug(context.TODO(), "log session", zap.Any("session", s))
+	mlog.Debug(context.TODO(), "log session", mlog.Any("session", s))
 }
 
 func TestSesssionMarshal(t *testing.T) {

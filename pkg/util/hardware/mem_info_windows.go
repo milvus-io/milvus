@@ -21,7 +21,6 @@ import (
 	"context"
 
 	"github.com/shirou/gopsutil/v3/mem"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
@@ -32,7 +31,7 @@ func GetUsedMemoryCount() uint64 {
 	stats, err := mem.VirtualMemory()
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to get memory usage count",
-			zap.Error(err))
+			mlog.Err(err))
 		return 0
 	}
 

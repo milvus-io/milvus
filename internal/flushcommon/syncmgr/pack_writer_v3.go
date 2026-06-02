@@ -23,7 +23,6 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -153,19 +152,19 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	}()
 
 	if inserts, insertFiles, err = bw.writeInserts(ctx, pack, basePath); err != nil {
-		mlog.Warn(ctx, "failed to write insert data", zap.Error(err))
+		mlog.Warn(ctx, "failed to write insert data", mlog.Err(err))
 		return
 	}
 	if stats, statEntries, err = bw.writeStats(ctx, pack, basePath); err != nil {
-		mlog.Warn(ctx, "failed to process stats blob", zap.Error(err))
+		mlog.Warn(ctx, "failed to process stats blob", mlog.Err(err))
 		return
 	}
 	if deltas, deltaEntries, err = bw.writeDelta(ctx, pack, basePath); err != nil {
-		mlog.Warn(ctx, "failed to process delta blob", zap.Error(err))
+		mlog.Warn(ctx, "failed to process delta blob", mlog.Err(err))
 		return
 	}
 	if bm25Stats, bm25Entries, err = bw.writeBM25Stasts(ctx, pack, basePath); err != nil {
-		mlog.Warn(ctx, "failed to process bm25 stats blob", zap.Error(err))
+		mlog.Warn(ctx, "failed to process bm25 stats blob", mlog.Err(err))
 		return
 	}
 
@@ -243,8 +242,8 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 	var w packedBatchWriter
 	if len(textColumnConfigs) > 0 {
 		mlog.Info(ctx, "using TEXT-aware writer for import",
-			zap.Int("textFieldCount", len(textColumnConfigs)),
-			zap.String("basePath", basePath))
+			mlog.Int("textFieldCount", len(textColumnConfigs)),
+			mlog.String("basePath", basePath))
 		w, err = storage.NewPackedTextBatchWriter("", basePath, bw.schema,
 			bw.bufferSize, bw.multiPartUploadSize, bw.columnGroups, bw.storageConfig, textColumnConfigs, writerFormat, schemaBasedFormats)
 	} else {
@@ -271,9 +270,9 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 
 	if err = w.Write(rec); err != nil {
 		mlog.Warn(ctx, "failed to write inserts",
-			zap.Int64("collectionID", pack.collectionID),
-			zap.Int64("segmentID", pack.segmentID),
-			zap.Error(err))
+			mlog.FieldCollectionID(pack.collectionID),
+			mlog.FieldSegmentID(pack.segmentID),
+			mlog.Err(err))
 		return nil, nil, err
 	}
 

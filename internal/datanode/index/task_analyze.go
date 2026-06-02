@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -81,9 +79,9 @@ func (at *analyzeTask) IsVectorIndex() bool {
 
 func (at *analyzeTask) PreExecute(ctx context.Context) error {
 	at.queueDur = at.tr.RecordSpan()
-	log := mlog.With(zap.String("clusterID", at.req.GetClusterID()),
-		zap.Int64("TaskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
-		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
+	log := mlog.With(mlog.String("clusterID", at.req.GetClusterID()),
+		mlog.Int64("TaskID", at.req.GetTaskID()), mlog.Int64("Collection", at.req.GetCollectionID()),
+		mlog.FieldPartitionID(at.req.GetPartitionID()), mlog.FieldFieldID(at.req.GetFieldID()))
 	log.Info(ctx, "Begin to prepare analyze task")
 
 	log.Info(ctx, "Successfully prepare analyze task, nothing to do...")
@@ -93,9 +91,9 @@ func (at *analyzeTask) PreExecute(ctx context.Context) error {
 func (at *analyzeTask) Execute(ctx context.Context) error {
 	var err error
 
-	log := mlog.With(zap.String("clusterID", at.req.GetClusterID()),
-		zap.Int64("TaskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
-		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
+	log := mlog.With(mlog.String("clusterID", at.req.GetClusterID()),
+		mlog.Int64("TaskID", at.req.GetTaskID()), mlog.Int64("Collection", at.req.GetCollectionID()),
+		mlog.FieldPartitionID(at.req.GetPartitionID()), mlog.FieldFieldID(at.req.GetFieldID()))
 
 	log.Info(ctx, "Begin to build analyze task")
 
@@ -125,7 +123,7 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 	for segID, stats := range at.req.GetSegmentStats() {
 		numRows := stats.GetNumRows()
 		numRowsMap[segID] = numRows
-		log.Info(ctx, "append segment rows", zap.Int64("segment id", segID), zap.Int64("rows", numRows))
+		log.Info(ctx, "append segment rows", mlog.Int64("segment id", segID), mlog.Int64("rows", numRows))
 		insertFiles := make([]string, 0, len(stats.GetLogIDs()))
 		for _, id := range stats.GetLogIDs() {
 			path := metautil.BuildInsertLogPath(at.req.GetStorageConfig().RootPath,
@@ -164,32 +162,32 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 
 	at.analyze, err = analyzecgowrapper.Analyze(ctx, analyzeInfo)
 	if err != nil {
-		log.Error(ctx, "failed to analyze data", zap.Error(err))
+		log.Error(ctx, "failed to analyze data", mlog.Err(err))
 		return err
 	}
 
 	analyzeLatency := at.tr.RecordSpan()
-	log.Info(ctx, "analyze done", zap.Int64("analyze cost", analyzeLatency.Milliseconds()))
+	log.Info(ctx, "analyze done", mlog.Int64("analyze cost", analyzeLatency.Milliseconds()))
 	return nil
 }
 
 func (at *analyzeTask) PostExecute(ctx context.Context) error {
-	log := mlog.With(zap.String("clusterID", at.req.GetClusterID()),
-		zap.Int64("TaskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
-		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
+	log := mlog.With(mlog.String("clusterID", at.req.GetClusterID()),
+		mlog.Int64("TaskID", at.req.GetTaskID()), mlog.Int64("Collection", at.req.GetCollectionID()),
+		mlog.FieldPartitionID(at.req.GetPartitionID()), mlog.FieldFieldID(at.req.GetFieldID()))
 	gc := func() {
 		if err := at.analyze.Delete(); err != nil {
-			log.Error(ctx, "indexBuildTask Execute CIndexDelete failed", zap.Error(err))
+			log.Error(ctx, "indexBuildTask Execute CIndexDelete failed", mlog.Err(err))
 		}
 	}
 	defer gc()
 
 	centroidsFile, _, _, _, err := at.analyze.GetResult(len(at.req.GetSegmentStats()))
 	if err != nil {
-		log.Error(ctx, "failed to upload index", zap.Error(err))
+		log.Error(ctx, "failed to upload index", mlog.Err(err))
 		return err
 	}
-	log.Info(ctx, "analyze result", zap.String("centroidsFile", centroidsFile))
+	log.Info(ctx, "analyze result", mlog.String("centroidsFile", centroidsFile))
 
 	at.manager.StoreAnalyzeFilesAndStatistic(at.req.GetClusterID(),
 		at.req.GetTaskID(),
@@ -203,8 +201,8 @@ func (at *analyzeTask) OnEnqueue(ctx context.Context) error {
 	at.queueDur = 0
 	at.tr.RecordSpan()
 
-	mlog.Info(ctx, "analyzeTask enqueued", zap.String("clusterID", at.req.GetClusterID()),
-		zap.Int64("TaskID", at.req.GetTaskID()))
+	mlog.Info(ctx, "analyzeTask enqueued", mlog.String("clusterID", at.req.GetClusterID()),
+		mlog.Int64("TaskID", at.req.GetTaskID()))
 	return nil
 }
 

@@ -24,7 +24,6 @@ import (
 	"sync"
 
 	"github.com/hamba/avro/v2"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -559,8 +558,8 @@ func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (stri
 	}
 
 	mlog.Info(ctx, "Successfully wrote segment manifest files",
-		zap.Int("numSegments", len(snapshot.Segments)),
-		zap.String("manifestDir", manifestDir))
+		mlog.Int("numSegments", len(snapshot.Segments)),
+		mlog.String("manifestDir", manifestDir))
 
 	// Step 2: Collect StorageV2 manifest paths from segments
 	// StorageV2 segments have an additional manifest file for Lance/Arrow format
@@ -581,7 +580,7 @@ func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (stri
 	}
 
 	mlog.Info(ctx, "Successfully wrote metadata file",
-		zap.String("metadataPath", metadataPath))
+		mlog.String("metadataPath", metadataPath))
 
 	return metadataPath, nil
 }
@@ -701,8 +700,8 @@ func (w *SnapshotWriter) Drop(ctx context.Context, metadataFilePath string) erro
 			return merr.Wrap(err, "failed to remove manifest files")
 		}
 		mlog.Info(ctx, "Successfully removed manifest files",
-			zap.Int("count", len(manifestList)),
-			zap.Int64("snapshotID", snapshotID))
+			mlog.Int("count", len(manifestList)),
+			mlog.Int64("snapshotID", snapshotID))
 	}
 
 	// Step 3: Remove the metadata file (entry point)
@@ -710,10 +709,10 @@ func (w *SnapshotWriter) Drop(ctx context.Context, metadataFilePath string) erro
 		return merr.Wrap(err, "failed to remove metadata file")
 	}
 	mlog.Info(ctx, "Successfully removed metadata file",
-		zap.String("metadataFilePath", metadataFilePath))
+		mlog.String("metadataFilePath", metadataFilePath))
 
 	mlog.Info(ctx, "Successfully dropped snapshot",
-		zap.Int64("snapshotID", snapshotID))
+		mlog.Int64("snapshotID", snapshotID))
 	return nil
 }
 
@@ -1020,8 +1019,8 @@ func (r *SnapshotReader) ListSnapshots(ctx context.Context, collectionID int64) 
 		if err != nil {
 			// Log warning but continue - don't fail entire list for one bad file
 			mlog.Warn(ctx, "Failed to parse metadata file, skipping",
-				zap.String("file", file),
-				zap.Error(err))
+				mlog.String("file", file),
+				mlog.Err(err))
 			continue
 		}
 

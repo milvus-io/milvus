@@ -23,7 +23,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -72,7 +71,7 @@ func TestBinlogReaderWriterCipher(t *testing.T) {
 	binlogReader, err := NewBinlogReader(buffer, WithReaderDecryptionContext(1, 1))
 	assert.NoError(t, err)
 
-	mlog.Info(context.TODO(), "binlogReader", zap.Any("descriptorEvent", binlogReader.descriptorEvent))
+	mlog.Info(context.TODO(), "binlogReader", mlog.Any("descriptorEvent", binlogReader.descriptorEvent))
 
 	gotsafeKey, ok := binlogReader.GetEdek()
 	assert.True(t, ok)

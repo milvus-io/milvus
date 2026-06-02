@@ -22,7 +22,6 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -128,7 +127,7 @@ func (s *L0CompactionPolicySuite) TestTriggerIdle() {
 		s.Equal(datapb.SegmentLevel_L0, view.Level)
 	}
 
-	mlog.Info(context.TODO(), "cView", zap.String("string", cView.String()))
+	mlog.Info(context.TODO(), "cView", mlog.String("string", cView.String()))
 }
 
 func (s *L0CompactionPolicySuite) TestTriggerViewChange() {

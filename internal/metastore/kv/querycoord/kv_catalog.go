@@ -9,7 +9,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/klauspost/compress/zstd"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -346,7 +345,7 @@ func (s Catalog) GetCollectionTargets(ctx context.Context) (map[int64]*querypb.C
 		target := &querypb.CollectionTarget{}
 		if err := proto.Unmarshal(decompressed.Bytes(), target); err != nil {
 			// recover target from meta is a optimize policy, skip when failure happens
-			mlog.Warn(ctx, "failed to unmarshal collection target", zap.String("key", string(key)), zap.Error(err))
+			mlog.Warn(ctx, "failed to unmarshal collection target", mlog.String("key", string(key)), mlog.Err(err))
 			return nil
 		}
 		ret[target.GetCollectionID()] = target

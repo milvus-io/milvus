@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -71,7 +70,7 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 	})
 	err = merr.CheckRPCCall(createCollectionStatus, err)
 	s.NoError(err)
-	mlog.Info(ctx, "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(ctx, "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 
 	// create index
 	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
@@ -90,7 +89,7 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 	})
 	err = merr.CheckRPCCall(showCollectionsResp, err)
 	s.NoError(err)
-	mlog.Info(ctx, "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(ctx, "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	for i := 0; i < rowNum/batch; i++ {
 		// insert
@@ -128,7 +127,7 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 		s.True(has)
 		s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
-		mlog.Info(ctx, "insert done", zap.Int("i", i))
+		mlog.Info(ctx, "insert done", mlog.Int("i", i))
 	}
 
 	showSegments := func() {
@@ -140,7 +139,7 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 		s.True(len(segments) > 0)
 
 		for _, segment := range segments {
-			mlog.Info(ctx, "show segment result", zap.Any("segment", segment))
+			mlog.Info(ctx, "show segment result", mlog.Any("segment", segment))
 		}
 	}
 
@@ -159,8 +158,8 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 			return segment.GetState() == commonpb.SegmentState_Flushed
 		})
 
-		mlog.Info(ctx, "ShowSegments result", zap.Int("len(compactFromSegments)", len(compactFromSegments)),
-			zap.Int("len(compactToSegments)", len(compactToSegments)))
+		mlog.Info(ctx, "ShowSegments result", mlog.Int("len(compactFromSegments)", len(compactFromSegments)),
+			mlog.Int("len(compactToSegments)", len(compactToSegments)))
 
 		// The small segments can be merged based on dataCoord.compaction.min.segment
 		return len(compactToSegments) <= paramtable.Get().DataCoordCfg.MinSegmentToMerge.GetAsInt()

@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -291,15 +290,15 @@ func (m *externalCollectionRefreshManager) cleanupExploreTempForJob(jobID int64)
 
 	if err := m.chunkManager.RemoveWithPrefix(ctx, exploreBaseDir); err != nil {
 		mlog.Warn(m.ctx, "failed to remove explore temp prefix",
-			zap.Int64("jobID", jobID),
-			zap.String("dir", exploreBaseDir),
-			zap.Error(err))
+			mlog.FieldJobID(jobID),
+			mlog.String("dir", exploreBaseDir),
+			mlog.Err(err))
 	}
 	if err := m.chunkManager.Remove(ctx, exploreBaseDir); err != nil {
 		mlog.Warn(m.ctx, "failed to remove explore temp root",
-			zap.Int64("jobID", jobID),
-			zap.String("dir", exploreBaseDir),
-			zap.Error(err))
+			mlog.FieldJobID(jobID),
+			mlog.String("dir", exploreBaseDir),
+			mlog.Err(err))
 	}
 }
 
@@ -354,7 +353,7 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 		job.GetCollectionId(),
 		keptSegments,
 		updatedSegments,
-		zap.Int64("jobID", job.GetJobId()),
+		mlog.FieldJobID(job.GetJobId()),
 	)
 }
 
@@ -420,7 +419,7 @@ func (m *externalCollectionRefreshManager) handleJobFinished(ctx context.Context
 	m.notifiedMu.Unlock()
 	if mapSize > 1000 {
 		mlog.Warn(ctx, "notifiedJobs dedup map is large, GC may be lagging",
-			zap.Int("size", mapSize))
+			mlog.Int("size", mapSize))
 	}
 
 	// Reclaim the per-job explore temp dir now that all datanode tasks have
@@ -432,9 +431,9 @@ func (m *externalCollectionRefreshManager) handleJobFinished(ctx context.Context
 	collection, err := m.collectionGetter(ctx, job.GetCollectionId())
 	if err != nil || collection == nil {
 		mlog.Warn(ctx, "failed to get collection for schema update after refresh",
-			zap.Int64("jobID", job.GetJobId()),
-			zap.Int64("collectionID", job.GetCollectionId()),
-			zap.Error(err))
+			mlog.FieldJobID(job.GetJobId()),
+			mlog.FieldCollectionID(job.GetCollectionId()),
+			mlog.Err(err))
 		return
 	}
 
@@ -449,18 +448,18 @@ func (m *externalCollectionRefreshManager) handleJobFinished(ctx context.Context
 	}
 
 	mlog.Info(ctx, "updating collection schema after refresh",
-		zap.Int64("jobID", job.GetJobId()),
-		zap.Int64("collectionID", job.GetCollectionId()),
-		zap.String("oldSource", currentSource),
-		zap.String("newSource", newSource),
-		zap.String("oldSpec", externalspec.RedactExternalSpec(currentSpec)),
-		zap.String("newSpec", externalspec.RedactExternalSpec(newSpec)))
+		mlog.FieldJobID(job.GetJobId()),
+		mlog.FieldCollectionID(job.GetCollectionId()),
+		mlog.String("oldSource", currentSource),
+		mlog.String("newSource", newSource),
+		mlog.String("oldSpec", externalspec.RedactExternalSpec(currentSpec)),
+		mlog.String("newSpec", externalspec.RedactExternalSpec(newSpec)))
 
 	if err := m.schemaUpdater(ctx, job.GetCollectionId(), newSource, newSpec); err != nil {
 		mlog.Warn(ctx, "failed to update external schema after refresh, schema may be stale until next refresh",
-			zap.Int64("jobID", job.GetJobId()),
-			zap.Int64("collectionID", job.GetCollectionId()),
-			zap.Error(err))
+			mlog.FieldJobID(job.GetJobId()),
+			mlog.FieldCollectionID(job.GetCollectionId()),
+			mlog.Err(err))
 	}
 }
 
@@ -503,9 +502,9 @@ func (m *externalCollectionRefreshManager) SubmitRefreshJobWithID(
 	externalSource, externalSpec string,
 ) (int64, error) {
 	log := mlog.With(
-		zap.Int64("jobID", jobID),
-		zap.Int64("collectionID", collectionID),
-		zap.String("collectionName", collectionName))
+		mlog.FieldJobID(jobID),
+		mlog.FieldCollectionID(collectionID),
+		mlog.FieldCollectionName(collectionName))
 
 	// Idempotency: if job already exists, return. TOCTOU between this check and AddJob
 	// is mitigated by WAL idempotency (same JobID on retry) and per-collection lock in AddJob.
@@ -525,7 +524,7 @@ func (m *externalCollectionRefreshManager) SubmitRefreshJobWithID(
 	// DataCoord syncs the newly created collection.
 	collection, err := m.collectionGetter(ctx, collectionID)
 	if err != nil || collection == nil {
-		log.Warn(ctx, "collection not found", zap.Error(err))
+		log.Warn(ctx, "collection not found", mlog.Err(err))
 		return 0, merr.WrapErrCollectionNotFound(collectionID)
 	}
 
@@ -548,8 +547,8 @@ func (m *externalCollectionRefreshManager) SubmitRefreshJobWithID(
 	activeJob := m.refreshMeta.GetActiveJobByCollectionID(collectionID)
 	if activeJob != nil {
 		log.Warn(ctx, "refresh job already in progress",
-			zap.Int64("existingJobID", activeJob.GetJobId()),
-			zap.String("existingJobState", activeJob.GetState().String()))
+			mlog.Int64("existingJobID", activeJob.GetJobId()),
+			mlog.String("existingJobState", activeJob.GetState().String()))
 		return 0, merr.WrapErrTaskDuplicate("refresh_external_collection", fmt.Sprintf("refresh job %d is already in progress for collection %s, please wait for it to complete or cancel it first",
 			activeJob.GetJobId(), collectionName))
 	}
@@ -570,12 +569,12 @@ func (m *externalCollectionRefreshManager) SubmitRefreshJobWithID(
 	}
 
 	if err := m.refreshMeta.AddJob(job); err != nil {
-		log.Warn(ctx, "failed to add job to meta", zap.Error(err))
+		log.Warn(ctx, "failed to add job to meta", mlog.Err(err))
 		return 0, err
 	}
 
 	log.Info(ctx, "external collection refresh job accepted (Init), task creation deferred to async phase",
-		zap.String("externalSource", externalSource))
+		mlog.String("externalSource", externalSource))
 
 	// Phase B: kick off async task creation so this call returns immediately.
 	// The checker tick drives the same path as a retry safety net, and
@@ -631,7 +630,7 @@ func (m *externalCollectionRefreshManager) ensureTasksForInitJob(jobID int64) {
 		ctx, cancel := context.WithTimeout(m.ctx, timeout)
 		defer cancel()
 
-		log := mlog.With(zap.Int64("jobID", jobID))
+		log := mlog.With(mlog.FieldJobID(jobID))
 
 		// Re-read under goroutine to catch race where state changed between
 		// the cheap pre-check above and actual work start.
@@ -642,12 +641,12 @@ func (m *externalCollectionRefreshManager) ensureTasksForInitJob(jobID int64) {
 		}
 		if freshJob.GetState() != indexpb.JobState_JobStateInit {
 			log.Info(m.ctx, "init job no longer in Init state, skip async task creation",
-				zap.String("state", freshJob.GetState().String()))
+				mlog.String("state", freshJob.GetState().String()))
 			return
 		}
 		if len(freshJob.GetTaskIds()) > 0 {
 			log.Info(m.ctx, "init job already has tasks, skip async task creation",
-				zap.Int("taskCount", len(freshJob.GetTaskIds())))
+				mlog.Int("taskCount", len(freshJob.GetTaskIds())))
 			return
 		}
 
@@ -660,10 +659,10 @@ func (m *externalCollectionRefreshManager) ensureTasksForInitJob(jobID int64) {
 			var perm *nonRetriableJobError
 			if errors.As(err, &perm) {
 				log.Warn(m.ctx, "non-retriable error in task creation, marking job failed",
-					zap.Error(err))
+					mlog.Err(err))
 				if _, uerr := m.refreshMeta.UpdateJobState(jobID,
 					indexpb.JobState_JobStateFailed, perm.Error()); uerr != nil {
-					log.Warn(m.ctx, "failed to mark job failed", zap.Error(uerr))
+					log.Warn(m.ctx, "failed to mark job failed", mlog.Err(uerr))
 				}
 				return
 			}
@@ -671,7 +670,7 @@ func (m *externalCollectionRefreshManager) ensureTasksForInitJob(jobID int64) {
 			// checker tick / WAL redelivery path retries. tryTimeoutJob
 			// bounds how long a stuck job can linger.
 			log.Warn(m.ctx, "async task creation failed, will retry on next checker tick",
-				zap.Error(err))
+				mlog.Err(err))
 			return
 		}
 
@@ -680,7 +679,7 @@ func (m *externalCollectionRefreshManager) ensureTasksForInitJob(jobID int64) {
 			m.scheduler.Enqueue(t)
 		}
 		log.Info(m.ctx, "async task creation completed",
-			zap.Int("taskCount", len(tasks)))
+			mlog.Int("taskCount", len(tasks)))
 	}()
 }
 
@@ -697,7 +696,7 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 	ctx context.Context,
 	job *datapb.ExternalCollectionRefreshJob,
 ) ([]*refreshExternalCollectionTask, error) {
-	log := mlog.With(zap.Int64("jobID", job.GetJobId()), zap.Int64("collectionID", job.GetCollectionId()))
+	log := mlog.With(mlog.FieldJobID(job.GetJobId()), mlog.FieldCollectionID(job.GetCollectionId()))
 
 	// ExploreFiles once on DataCoord to get the full file list and manifest path.
 	// Manifest is written to S3 so DataNodes can read file info by range.
@@ -725,8 +724,8 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 	// The real guard lives at datanode's balanceFragmentsToSegments, where
 	// fragment RowCount is populated from manifest (endRow - startRow).
 	log.Info(ctx, "explored external files for task splitting",
-		zap.Int("totalFiles", len(allFiles)),
-		zap.String("manifestPath", manifestPath))
+		mlog.Int("totalFiles", len(allFiles)),
+		mlog.String("manifestPath", manifestPath))
 
 	// Determine task count: ceil(totalFiles/filesPerTask).
 	// - filesPerTask: configurable via dataCoord.externalCollectionFilesPerTask
@@ -755,14 +754,14 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 	}
 
 	log.Info(ctx, "splitting refresh job into tasks",
-		zap.Int("totalFiles", len(allFiles)),
-		zap.Int("numTasks", len(chunks)))
+		mlog.Int("totalFiles", len(allFiles)),
+		mlog.Int("numTasks", len(chunks)))
 
 	var tasks []*refreshExternalCollectionTask
 	for _, chunk := range chunks {
 		taskID, err := m.allocator.AllocID(ctx)
 		if err != nil {
-			log.Warn(ctx, "failed to allocate task ID", zap.Error(err))
+			log.Warn(ctx, "failed to allocate task ID", mlog.Err(err))
 			return nil, err
 		}
 
@@ -782,12 +781,12 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 		}
 
 		if err = m.refreshMeta.AddTask(task); err != nil {
-			log.Warn(ctx, "failed to add task to meta", zap.Error(err))
+			log.Warn(ctx, "failed to add task to meta", mlog.Err(err))
 			return nil, err
 		}
 
 		if err = m.refreshMeta.AddTaskIDToJob(job.GetJobId(), taskID); err != nil {
-			log.Warn(ctx, "failed to add taskID to job", zap.Error(err))
+			log.Warn(ctx, "failed to add taskID to job", mlog.Err(err))
 			return nil, err
 		}
 
@@ -796,8 +795,8 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 	}
 
 	log.Info(ctx, "tasks created for job",
-		zap.Int("numTasks", len(tasks)),
-		zap.Int64("jobID", job.GetJobId()))
+		mlog.Int("numTasks", len(tasks)),
+		mlog.FieldJobID(job.GetJobId()))
 
 	return tasks, nil
 }

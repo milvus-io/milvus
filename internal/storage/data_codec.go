@@ -24,7 +24,6 @@ import (
 	"sort"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -287,7 +286,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			if !allMissing {
 				return merr.WrapErrStorageMsg("segment must not be heterogeneous, all blocks must contain all fields or none, abnormal field %d(%s)", field.GetFieldID(), field.GetName())
 			}
-			mlog.Info(context.TODO(), "Skip field nullable missing field, could be schema change", zap.Int64("fieldId", field.GetFieldID()), zap.String("fieldName", field.GetName()))
+			mlog.Info(context.TODO(), "Skip field nullable missing field, could be schema change", mlog.Int64("fieldId", field.GetFieldID()), mlog.String("fieldName", field.GetName()))
 			return nil
 		}
 

@@ -37,7 +37,7 @@ import (
 )
 
 // HandleCStatus deals with the error returned from CGO
-func HandleCStatus(ctx context.Context, status *C.CStatus, extraInfo string, fields ...zap.Field) error {
+func HandleCStatus(ctx context.Context, status *C.CStatus, extraInfo string, fields ...mlog.Field) error {
 	if status.error_code == 0 {
 		return nil
 	}
@@ -49,6 +49,6 @@ func HandleCStatus(ctx context.Context, status *C.CStatus, extraInfo string, fie
 		WithOptions(zap.AddCallerSkip(1)) // Add caller stack to show HandleCStatus caller
 
 	err := merr.SegcoreError(int32(errorCode), errorMsg)
-	log.Warn(ctx, "CStatus returns err", zap.Error(err), zap.String("extra", extraInfo))
+	log.Warn(ctx, "CStatus returns err", mlog.Err(err), mlog.String("extra", extraInfo))
 	return err
 }

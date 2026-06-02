@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -127,14 +126,14 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 	if newReplicaNum <= 0 || len(newRGs) == 0 {
 		w.Logger().Info(context.TODO(),
 
-			"illegal cluster level load config, skip it", zap.Int32("replica_num", newReplicaNum), zap.Strings("resource_groups", newRGs))
+			"illegal cluster level load config, skip it", mlog.Int32("replica_num", newReplicaNum), mlog.Strings("resource_groups", newRGs))
 		return nil
 	}
 
 	if len(newRGs) != 1 && len(newRGs) != int(newReplicaNum) {
 		w.Logger().Info(context.TODO(),
 
-			"illegal cluster level load config, skip it", zap.Int32("replica_num", newReplicaNum), zap.Strings("resource_groups", newRGs))
+			"illegal cluster level load config, skip it", mlog.Int32("replica_num", newReplicaNum), mlog.Strings("resource_groups", newRGs))
 		return nil
 	}
 
@@ -143,7 +142,7 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 	if w.previousReplicaNum == newReplicaNum && !rgChanged {
 		w.Logger().Info(context.TODO(),
 
-			"no need to update load config, skip it", zap.Int32("replica_num", newReplicaNum), zap.Strings("resource_groups", newRGs))
+			"no need to update load config, skip it", mlog.Int32("replica_num", newReplicaNum), mlog.Strings("resource_groups", newRGs))
 		return nil
 	}
 
@@ -154,7 +153,7 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 		if collection.UserSpecifiedReplicaMode {
 			w.Logger().Info(context.TODO(),
 
-				"collection is user specified replica mode, skip update load config", zap.Int64("collectionID", collectionID))
+				"collection is user specified replica mode, skip update load config", mlog.FieldCollectionID(collectionID))
 			return false
 		}
 		return true
@@ -169,18 +168,18 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 	if err := w.s.updateLoadConfig(w.notifier.Context(), collectionIDs, newReplicaNum, newRGs, true); err != nil {
 		w.Logger().Warn(context.TODO(),
 
-			"failed to update load config", zap.Error(err))
+			"failed to update load config", mlog.Err(err))
 		return err
 	}
 	w.s.tryPromoteReadyLoadConfigReplicas(w.notifier.Context())
 	w.Logger().Info(context.TODO(),
 
 		"apply load config changes",
-		zap.Int64s("collectionIDs", collectionIDs),
-		zap.Int32("previousReplicaNum", w.previousReplicaNum),
-		zap.Strings("previousResourceGroups", w.previousRGs),
-		zap.Int32("replicaNum", newReplicaNum),
-		zap.Strings("resourceGroups", newRGs))
+		mlog.Int64s("collectionIDs", collectionIDs),
+		mlog.Int32("previousReplicaNum", w.previousReplicaNum),
+		mlog.Strings("previousResourceGroups", w.previousRGs),
+		mlog.Int32("replicaNum", newReplicaNum),
+		mlog.Strings("resourceGroups", newRGs))
 	w.previousReplicaNum = newReplicaNum
 	w.previousRGs = newRGs
 	return nil

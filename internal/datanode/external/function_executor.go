@@ -11,7 +11,6 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -56,10 +55,10 @@ func ExecuteFunctionsForSegment(
 ) (string, error) {
 	log := mlog.With()
 	log.Info(ctx, "executing functions for external table segment",
-		zap.Int64("segmentID", segmentID),
-		zap.String("basePath", basePath),
-		zap.Int("numFragments", len(fragments)),
-		zap.Int("numFunctions", len(schema.GetFunctions())))
+		mlog.FieldSegmentID(segmentID),
+		mlog.String("basePath", basePath),
+		mlog.Int("numFragments", len(fragments)),
+		mlog.Int("numFunctions", len(schema.GetFunctions())))
 
 	sourceColumns := packed.GetColumnNamesFromSchema(schema)
 
@@ -125,9 +124,9 @@ func ExecuteFunctionsForSegment(
 	}
 
 	log.Info(ctx, "function execution completed",
-		zap.Int64("segmentID", segmentID),
-		zap.Int64("rows", totalRows),
-		zap.String("manifestPath", manifestPath))
+		mlog.FieldSegmentID(segmentID),
+		mlog.Int64("rows", totalRows),
+		mlog.String("manifestPath", manifestPath))
 	return manifestPath, nil
 }
 
@@ -453,9 +452,9 @@ func appendBM25Stats(
 			},
 		})
 		log.Info(ctx, "registered bm25 stats",
-			zap.Int64("fieldID", outID),
-			zap.Int("bytes", len(blob)),
-			zap.Int64("numRow", stats.NumRow()))
+			mlog.FieldFieldID(outID),
+			mlog.Int("bytes", len(blob)),
+			mlog.Int64("numRow", stats.NumRow()))
 	}
 	updates.Stats = append(updates.Stats, entries...)
 	return nil

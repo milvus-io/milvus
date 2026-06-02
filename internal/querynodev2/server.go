@@ -41,7 +41,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -182,7 +181,7 @@ func (node *QueryNode) initSession() error {
 	sessionutil.SaveServerInfo(typeutil.QueryNodeRole, node.session.ServerID)
 	paramtable.SetNodeID(node.session.ServerID)
 	node.serverID = node.session.ServerID
-	mlog.Info(node.ctx, "QueryNode init session", zap.Int64("nodeID", node.GetNodeID()), zap.String("node address", node.session.Address))
+	mlog.Info(node.ctx, "QueryNode init session", mlog.FieldNodeID(node.GetNodeID()), mlog.String("node address", node.session.Address))
 	return nil
 }
 
@@ -232,19 +231,19 @@ func ResizeAllPools(evt *config.Event) {
 func (node *QueryNode) ReconfigDiskFileWriterParams(evt *config.Event) {
 	if evt.HasUpdated {
 		if err := initcore.InitDiskFileWriterConfig(paramtable.Get()); err != nil {
-			mlog.Warn(node.ctx, "QueryNode failed to reconfigure file writer params", zap.Error(err))
+			mlog.Warn(node.ctx, "QueryNode failed to reconfigure file writer params", mlog.Err(err))
 			return
 		}
 		mlog.Info(node.ctx, "QueryNode reconfig file writer params successfully",
-			zap.String("mode", paramtable.Get().CommonCfg.DiskWriteMode.GetValue()),
-			zap.Uint64("bufferSize", paramtable.Get().CommonCfg.DiskWriteBufferSizeKb.GetAsUint64()),
-			zap.Int("nrThreads", paramtable.Get().CommonCfg.DiskWriteNumThreads.GetAsInt()),
-			zap.Uint64("refillPeriodUs", paramtable.Get().CommonCfg.DiskWriteRateLimiterRefillPeriodUs.GetAsUint64()),
-			zap.Uint64("maxBurstKBps", paramtable.Get().CommonCfg.DiskWriteRateLimiterMaxBurstKBps.GetAsUint64()),
-			zap.Uint64("avgKBps", paramtable.Get().CommonCfg.DiskWriteRateLimiterAvgKBps.GetAsUint64()),
-			zap.Int("highPriorityRatio", paramtable.Get().CommonCfg.DiskWriteRateLimiterHighPriorityRatio.GetAsInt()),
-			zap.Int("middlePriorityRatio", paramtable.Get().CommonCfg.DiskWriteRateLimiterMiddlePriorityRatio.GetAsInt()),
-			zap.Int("lowPriorityRatio", paramtable.Get().CommonCfg.DiskWriteRateLimiterLowPriorityRatio.GetAsInt()))
+			mlog.String("mode", paramtable.Get().CommonCfg.DiskWriteMode.GetValue()),
+			mlog.Uint64("bufferSize", paramtable.Get().CommonCfg.DiskWriteBufferSizeKb.GetAsUint64()),
+			mlog.Int("nrThreads", paramtable.Get().CommonCfg.DiskWriteNumThreads.GetAsInt()),
+			mlog.Uint64("refillPeriodUs", paramtable.Get().CommonCfg.DiskWriteRateLimiterRefillPeriodUs.GetAsUint64()),
+			mlog.Uint64("maxBurstKBps", paramtable.Get().CommonCfg.DiskWriteRateLimiterMaxBurstKBps.GetAsUint64()),
+			mlog.Uint64("avgKBps", paramtable.Get().CommonCfg.DiskWriteRateLimiterAvgKBps.GetAsUint64()),
+			mlog.Int("highPriorityRatio", paramtable.Get().CommonCfg.DiskWriteRateLimiterHighPriorityRatio.GetAsInt()),
+			mlog.Int("middlePriorityRatio", paramtable.Get().CommonCfg.DiskWriteRateLimiterMiddlePriorityRatio.GetAsInt()),
+			mlog.Int("lowPriorityRatio", paramtable.Get().CommonCfg.DiskWriteRateLimiterLowPriorityRatio.GetAsInt()))
 	}
 }
 
@@ -285,7 +284,7 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 			newBytes := paramtable.Get().QueryNodeCfg.StorageV2CellTargetSizeBytes.GetAsInt64()
 			initcore.UpdateStorageV2CellTargetSizeBytes(newBytes)
 			mlog.Info(node.ctx, "queryNode.segcore.storageV2.cellTargetSizeBytes updated",
-				zap.Int64("bytes", newBytes))
+				mlog.Int64("bytes", newBytes))
 		}))
 	initcore.RegisterArrowReaderConfigWatchers(pt, "querynode")
 }
@@ -331,10 +330,10 @@ func (node *QueryNode) Init() error {
 	node.initOnce.Do(func() {
 		node.registerMetricsRequest()
 		// ctx := context.Background()
-		mlog.Info(node.ctx, "QueryNode session info", zap.String("metaPath", paramtable.Get().EtcdCfg.MetaRootPath.GetValue()))
+		mlog.Info(node.ctx, "QueryNode session info", mlog.String("metaPath", paramtable.Get().EtcdCfg.MetaRootPath.GetValue()))
 		err := node.initSession()
 		if err != nil {
-			mlog.Error(node.ctx, "QueryNode init session failed", zap.Error(err))
+			mlog.Error(node.ctx, "QueryNode init session failed", mlog.Err(err))
 			initError = err
 			return
 		}
@@ -343,7 +342,7 @@ func (node *QueryNode) Init() error {
 		if err != nil {
 			// auto index cannot work if hook init failed
 			if paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
-				mlog.Error(node.ctx, "QueryNode init hook failed", zap.Error(err))
+				mlog.Error(node.ctx, "QueryNode init hook failed", mlog.Err(err))
 				initError = err
 				return
 			}
@@ -356,7 +355,7 @@ func (node *QueryNode) Init() error {
 		localRootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
 		localUsedSize, err := segcore.GetLocalUsedSize(localRootPath)
 		if err != nil {
-			mlog.Warn(node.ctx, "get local used size failed", zap.Error(err))
+			mlog.Warn(node.ctx, "get local used size failed", mlog.Err(err))
 			initError = err
 			return
 		}
@@ -364,7 +363,7 @@ func (node *QueryNode) Init() error {
 
 		node.chunkManager, err = node.factory.NewPersistentStorageChunkManager(node.ctx)
 		if err != nil {
-			mlog.Error(node.ctx, "QueryNode init vector storage failed", zap.Error(err))
+			mlog.Error(node.ctx, "QueryNode init vector storage failed", mlog.Err(err))
 			initError = err
 			return
 		}
@@ -374,7 +373,7 @@ func (node *QueryNode) Init() error {
 			schedulePolicy,
 		)
 
-		mlog.Info(node.ctx, "queryNode init scheduler", zap.String("policy", schedulePolicy))
+		mlog.Info(node.ctx, "queryNode init scheduler", mlog.String("policy", schedulePolicy))
 		node.clusterManager = cluster.NewWorkerManager(func(ctx context.Context, nodeID int64) (cluster.Worker, error) {
 			if nodeID == node.GetNodeID() {
 				return NewLocalWorker(node), nil
@@ -411,7 +410,7 @@ func (node *QueryNode) Init() error {
 
 		err = initcore.InitQueryNode(node.ctx)
 		if err != nil {
-			mlog.Error(node.ctx, "QueryNode init segcore failed", zap.Error(err))
+			mlog.Error(node.ctx, "QueryNode init segcore failed", mlog.Err(err))
 			initError = err
 			return
 		}
@@ -420,8 +419,8 @@ func (node *QueryNode) Init() error {
 		cleanupOrphanedSpilloverFiles(node.GetNodeID())
 
 		mlog.Info(node.ctx, "query node init successfully",
-			zap.Int64("queryNodeID", node.GetNodeID()),
-			zap.String("Address", node.address),
+			mlog.Int64("queryNodeID", node.GetNodeID()),
+			mlog.String("Address", node.address),
 		)
 	})
 
@@ -451,14 +450,14 @@ func (node *QueryNode) Start() error {
 
 		registry.GetInMemoryResolver().RegisterQueryNode(node.GetNodeID(), node)
 		mlog.Info(node.ctx, "query node start successfully",
-			zap.Int64("queryNodeID", node.GetNodeID()),
-			zap.String("Address", node.address),
-			zap.Bool("mmapEnabled", mmapEnabled),
-			zap.Bool("growingmmapEnable", growingmmapEnable),
-			zap.Bool("mmapVectorIndex", mmapVectorIndex),
-			zap.Bool("mmapVectorField", mmapVectorField),
-			zap.Bool("mmapScalarIndex", mmapScalarIndex),
-			zap.Bool("mmapScalarField", mmapScalarField),
+			mlog.Int64("queryNodeID", node.GetNodeID()),
+			mlog.String("Address", node.address),
+			mlog.Bool("mmapEnabled", mmapEnabled),
+			mlog.Bool("growingmmapEnable", growingmmapEnable),
+			mlog.Bool("mmapVectorIndex", mmapVectorIndex),
+			mlog.Bool("mmapVectorField", mmapVectorField),
+			mlog.Bool("mmapScalarIndex", mmapScalarIndex),
+			mlog.Bool("mmapScalarField", mmapScalarField),
 		)
 	})
 
@@ -471,7 +470,7 @@ func (node *QueryNode) Stop() error {
 		mlog.Info(node.ctx, "Query node stop...")
 		err := node.session.GoingStop()
 		if err != nil {
-			mlog.Warn(node.ctx, "session fail to go stopping state", zap.Error(err))
+			mlog.Warn(node.ctx, "session fail to go stopping state", mlog.Err(err))
 		} else if util.MustSelectWALName() != message.WALNameRocksmq { // rocksmq cannot support querynode graceful stop because of using local storage.
 			metrics.StoppingBalanceNodeNum.WithLabelValues().Set(1)
 			// TODO: Redundant timeout control, graceful stop timeout is controlled by outside by `component`.
@@ -499,27 +498,27 @@ func (node *QueryNode) Stop() error {
 
 				select {
 				case <-timeoutCh:
-					mlog.Warn(node.ctx, "migrate data timed out", zap.Int64("ServerID", node.GetNodeID()),
-						zap.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
+					mlog.Warn(node.ctx, "migrate data timed out", mlog.Int64("ServerID", node.GetNodeID()),
+						mlog.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
 							return s.ID()
 						})),
-						zap.Int64s("growingSegments", lo.Map(growingSegments, func(t segments.Segment, i int) int64 {
+						mlog.Int64s("growingSegments", lo.Map(growingSegments, func(t segments.Segment, i int) int64 {
 							return t.ID()
 						})),
-						zap.Int("channelNum", channelNum),
+						mlog.Int("channelNum", channelNum),
 					)
 					break outer
 				case <-time.After(time.Second):
 					metrics.StoppingBalanceSegmentNum.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(float64(len(sealedSegments)))
 					metrics.StoppingBalanceChannelNum.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(float64(channelNum))
-					mlog.Info(node.ctx, "migrate data...", zap.Int64("ServerID", node.GetNodeID()),
-						zap.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
+					mlog.Info(node.ctx, "migrate data...", mlog.Int64("ServerID", node.GetNodeID()),
+						mlog.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
 							return s.ID()
 						})),
-						zap.Int64s("growingSegments", lo.Map(growingSegments, func(t segments.Segment, i int) int64 {
+						mlog.Int64s("growingSegments", lo.Map(growingSegments, func(t segments.Segment, i int) int64 {
 							return t.ID()
 						})),
-						zap.Int("channelNum", channelNum),
+						mlog.Int("channelNum", channelNum),
 					)
 				}
 			}
@@ -608,7 +607,7 @@ func (node *QueryNode) handleQueryHookEvent() {
 	onEvent := func(event *config.Event) {
 		if node.queryHook != nil {
 			if err := node.queryHook.Init(event.Value); err != nil {
-				mlog.Error(node.ctx, "failed to refresh hook config", zap.Error(err))
+				mlog.Error(node.ctx, "failed to refresh hook config", mlog.Err(err))
 			}
 		}
 	}
@@ -618,11 +617,11 @@ func (node *QueryNode) handleQueryHookEvent() {
 			switch event.EventType {
 			case config.CreateType, config.UpdateType:
 				if err := node.queryHook.InitTuningConfig(map[string]string{realKey: event.Value}); err != nil {
-					mlog.Warn(node.ctx, "failed to refresh hook tuning config", zap.Error(err))
+					mlog.Warn(node.ctx, "failed to refresh hook tuning config", mlog.Err(err))
 				}
 			case config.DeleteType:
 				if err := node.queryHook.DeleteTuningConfig(realKey); err != nil {
-					mlog.Warn(node.ctx, "failed to delete hook tuning config", zap.Error(err))
+					mlog.Warn(node.ctx, "failed to delete hook tuning config", mlog.Err(err))
 				}
 			}
 		}
@@ -643,15 +642,15 @@ func cleanupOrphanedSpilloverFiles(nodeID int64) {
 	}
 
 	mlog.Info(context.TODO(), "cleaning up orphaned TEXT LOB spillover files",
-		zap.String("path", spilloverDir))
+		mlog.String("path", spilloverDir))
 
 	if err := os.RemoveAll(spilloverDir); err != nil {
 		mlog.Warn(context.TODO(), "failed to clean up orphaned TEXT LOB spillover files",
-			zap.String("path", spilloverDir),
-			zap.Error(err))
+			mlog.String("path", spilloverDir),
+			mlog.Err(err))
 		return
 	}
 
 	mlog.Info(context.TODO(), "orphaned TEXT LOB spillover files cleaned up",
-		zap.String("path", spilloverDir))
+		mlog.String("path", spilloverDir))
 }

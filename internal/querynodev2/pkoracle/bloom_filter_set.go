@@ -29,8 +29,6 @@ import (
 	"context"
 	"sync"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -140,7 +138,7 @@ func (s *BloomFilterSet) UpdatePkCandidate(pks []storage.PrimaryKey) {
 			stringValue := pk.(*storage.VarCharPrimaryKey).Value
 			s.currentStat.PkFilter.AddString(stringValue)
 		default:
-			mlog.Error(context.TODO(), "failed to update bloomfilter", zap.Any("PK type", pk.Type()))
+			mlog.Error(context.TODO(), "failed to update bloomfilter", mlog.Any("PK type", pk.Type()))
 			panic("failed to update bloomfilter")
 		}
 	}
@@ -239,8 +237,8 @@ func (s *BloomFilterSet) Charge() {
 		s.trackedSize = size
 		s.resourceCharged = true
 		mlog.Debug(context.TODO(), "charged bloom filter resource",
-			zap.Int64("segmentID", s.segmentID),
-			zap.Int64("size", size))
+			mlog.FieldSegmentID(s.segmentID),
+			mlog.Int64("size", size))
 	}
 }
 
@@ -258,8 +256,8 @@ func (s *BloomFilterSet) Refund() {
 		disk_bytes:   0,
 	})
 	mlog.Debug(context.TODO(), "refunded bloom filter resource",
-		zap.Int64("segmentID", s.segmentID),
-		zap.Int64("size", s.trackedSize))
+		mlog.FieldSegmentID(s.segmentID),
+		mlog.Int64("size", s.trackedSize))
 	s.trackedSize = 0
 	s.resourceCharged = false
 }

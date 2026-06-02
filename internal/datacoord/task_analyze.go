@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -129,7 +128,7 @@ func (at *analyzeTask) dropAndResetTaskOnWorker(cluster session.Cluster, reason 
 
 func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	ctx := context.TODO()
-	log := mlog.With(zap.Int64("taskID", at.GetTaskID()))
+	log := mlog.With(mlog.FieldTaskID(at.GetTaskID()))
 
 	// Check if task still exists in meta
 	task := at.meta.analyzeMeta.GetTask(at.GetTaskID())
@@ -141,7 +140,7 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 
 	// Update task version
 	if err := at.UpdateVersion(nodeID); err != nil {
-		log.Warn(context.TODO(), "failed to update task version", zap.Error(err))
+		log.Warn(context.TODO(), "failed to update task version", mlog.Err(err))
 		return
 	}
 	req := &workerpb.AnalyzeRequest{
@@ -171,7 +170,7 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		info := segmentsMap[segID]
 		if info == nil {
 			log.Warn(context.TODO(), "analyze task is processing, but segment is nil, fail the task",
-				zap.Int64("segmentID", segID))
+				mlog.FieldSegmentID(segID))
 			at.SetState(indexpb.JobState_JobStateFailed, fmt.Sprintf("segmentInfo with ID: %d is nil", segID))
 			return
 		}
@@ -200,9 +199,9 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 				numClusters := int64(math.Ceil(totalSegmentsRawDataSize / (Params.DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024 * Params.DataCoordCfg.ClusteringCompactionMaxSegmentSizeRatio.GetAsFloat())))
 				if numClusters < Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64() {
 					log.Info(context.TODO(), "data size is too small, skip analyze task",
-						zap.Float64("raw data size", totalSegmentsRawDataSize),
-						zap.Int64("num clusters", numClusters),
-						zap.Int64("minimum num clusters required", Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64()))
+						mlog.Float64("raw data size", totalSegmentsRawDataSize),
+						mlog.Int64("num clusters", numClusters),
+						mlog.Int64("minimum num clusters required", Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64()))
 					at.SetState(indexpb.JobState_JobStateFinished, "")
 					return
 				}
@@ -226,28 +225,28 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 	var err error
 	defer func() {
 		if err != nil {
-			log.Warn(context.TODO(), "assign analyze task to worker failed, try drop task on worker", zap.Error(err))
+			log.Warn(context.TODO(), "assign analyze task to worker failed, try drop task on worker", mlog.Err(err))
 			at.tryDropTaskOnWorker(cluster)
 		}
 	}()
 
 	err = cluster.CreateAnalyze(nodeID, req)
 	if err != nil {
-		log.Warn(context.TODO(), "assign analyze task to worker failed", zap.Error(err))
+		log.Warn(context.TODO(), "assign analyze task to worker failed", mlog.Err(err))
 		return
 	}
 
 	log.Info(context.TODO(), "analyze task assigned successfully")
 	if err = at.UpdateStateWithMeta(indexpb.JobState_JobStateInProgress, ""); err != nil {
-		log.Warn(context.TODO(), "failed to update task state to inProgress", zap.Error(err))
+		log.Warn(context.TODO(), "failed to update task state to inProgress", mlog.Err(err))
 	}
 	log.Info(context.TODO(), "update task state to inProgress successfully")
 }
 
 func (at *analyzeTask) QueryTaskOnWorker(cluster session.Cluster) {
 	log := mlog.With(
-		zap.Int64("taskID", at.GetTaskID()),
-		zap.Int64("nodeID", at.NodeID),
+		mlog.FieldTaskID(at.GetTaskID()),
+		mlog.FieldNodeID(at.NodeID),
 	)
 
 	resp, err := cluster.QueryAnalyze(at.NodeID, &workerpb.QueryJobsRequest{
@@ -255,7 +254,7 @@ func (at *analyzeTask) QueryTaskOnWorker(cluster session.Cluster) {
 		TaskIDs:   []int64{at.GetTaskID()},
 	})
 	if err != nil {
-		log.Warn(context.TODO(), "query analyze task result from worker failed", zap.Error(err))
+		log.Warn(context.TODO(), "query analyze task result from worker failed", mlog.Err(err))
 		at.dropAndResetTaskOnWorker(cluster, err.Error())
 		return
 	}
@@ -271,13 +270,13 @@ func (at *analyzeTask) QueryTaskOnWorker(cluster session.Cluster) {
 		switch state {
 		case indexpb.JobState_JobStateFinished, indexpb.JobState_JobStateFailed:
 			log.Info(context.TODO(), "query analyze task result success",
-				zap.String("state", state.String()),
-				zap.String("failReason", result.GetFailReason()))
+				mlog.String("state", state.String()),
+				mlog.String("failReason", result.GetFailReason()))
 			at.setJobInfo(result)
 		case indexpb.JobState_JobStateRetry, indexpb.JobState_JobStateNone:
 			log.Info(context.TODO(), "query analyze task result success",
-				zap.String("state", state.String()),
-				zap.String("failReason", result.GetFailReason()))
+				mlog.String("state", state.String()),
+				mlog.String("failReason", result.GetFailReason()))
 			at.dropAndResetTaskOnWorker(cluster, result.GetFailReason())
 		}
 		// Otherwise (inProgress or unissued/init), keep current state
@@ -290,12 +289,12 @@ func (at *analyzeTask) QueryTaskOnWorker(cluster session.Cluster) {
 
 func (at *analyzeTask) tryDropTaskOnWorker(cluster session.Cluster) error {
 	log := mlog.With(
-		zap.Int64("taskID", at.GetTaskID()),
-		zap.Int64("nodeID", at.NodeID),
+		mlog.FieldTaskID(at.GetTaskID()),
+		mlog.FieldNodeID(at.NodeID),
 	)
 
 	if err := cluster.DropAnalyze(at.NodeID, at.GetTaskID()); err != nil {
-		log.Warn(context.TODO(), "failed to drop analyze task on worker", zap.Error(err))
+		log.Warn(context.TODO(), "failed to drop analyze task on worker", mlog.Err(err))
 		return err
 	}
 

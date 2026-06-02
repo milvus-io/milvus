@@ -22,7 +22,6 @@ import (
 	"sync"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -95,9 +94,9 @@ func getTaskSlotUsage(task Compactor) int64 {
 			taskSlotUsage = paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionSlotUsage.GetAsInt64()
 		}
 		mlog.Warn(context.TODO(), "illegal task slot usage, change it to a default value",
-			zap.Int64("illegalSlotUsage", task.GetSlotUsage()),
-			zap.Int64("defaultSlotUsage", taskSlotUsage),
-			zap.String("type", task.GetCompactionType().String()))
+			mlog.Int64("illegalSlotUsage", task.GetSlotUsage()),
+			mlog.Int64("defaultSlotUsage", taskSlotUsage),
+			mlog.String("type", task.GetCompactionType().String()))
 	}
 
 	return taskSlotUsage
@@ -112,8 +111,8 @@ func (e *executor) Enqueue(task Compactor) (bool, error) {
 	// Check for duplicate task
 	if _, exists := e.tasks[planID]; exists {
 		mlog.Warn(context.TODO(), "duplicated compaction task",
-			zap.Int64("planID", planID),
-			zap.String("channel", task.GetChannelName()))
+			mlog.Int64("planID", planID),
+			mlog.String("channel", task.GetChannelName()))
 		return false, merr.WrapErrDuplicatedCompactionTask()
 	}
 
@@ -155,7 +154,7 @@ func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResul
 		// Publish filesystem metrics after compaction task completion
 		storageConfig := task.compactor.GetStorageConfig()
 		if _, err := storagev2.PublishFilesystemMetricsWithConfig(storageConfig); err != nil {
-			mlog.Warn(context.TODO(), "failed to publish filesystem metrics", zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to publish filesystem metrics", mlog.Err(err))
 		}
 
 		// Adjust slot usage
@@ -174,9 +173,9 @@ func (e *executor) RemoveTask(planID int64) {
 		// Only remove completed/failed tasks, not executing ones
 		if task.state != datapb.CompactionTaskState_executing {
 			mlog.Info(context.TODO(), "Compaction task removed",
-				zap.Int64("planID", planID),
-				zap.String("channel", task.compactor.GetChannelName()),
-				zap.String("state", task.state.String()))
+				mlog.Int64("planID", planID),
+				mlog.String("channel", task.compactor.GetChannelName()),
+				mlog.String("state", task.state.String()))
 			delete(e.tasks, planID)
 		}
 	}
@@ -198,17 +197,17 @@ func (e *executor) Start(ctx context.Context) {
 
 func (e *executor) executeTask(task Compactor) {
 	log := mlog.With(
-		zap.Int64("planID", task.GetPlanID()),
-		zap.Int64("collection", task.GetCollection()),
-		zap.String("channel", task.GetChannelName()),
-		zap.String("type", task.GetCompactionType().String()),
+		mlog.Int64("planID", task.GetPlanID()),
+		mlog.Int64("collection", task.GetCollection()),
+		mlog.String("channel", task.GetChannelName()),
+		mlog.String("type", task.GetCompactionType().String()),
 	)
 
 	log.Info(context.TODO(), "start to execute compaction")
 
 	result, err := task.Compact()
 	if err != nil {
-		log.Warn(context.TODO(), "compaction task failed", zap.Error(err))
+		log.Warn(context.TODO(), "compaction task failed", mlog.Err(err))
 		e.completeTask(task.GetPlanID(), nil)
 		return
 	}
@@ -312,9 +311,9 @@ func (e *executor) getAllCompactionResults() []*datapb.CompactionPlanResult {
 
 	if len(results) > 0 {
 		mlog.Info(context.TODO(), "DataNode Compaction results",
-			zap.Int64s("executing", executing),
-			zap.Int64s("completed", completed),
-			zap.Int64s("completed levelzero", completedLevelZero),
+			mlog.Int64s("executing", executing),
+			mlog.Int64s("completed", completed),
+			mlog.Int64s("completed levelzero", completedLevelZero),
 		)
 	}
 

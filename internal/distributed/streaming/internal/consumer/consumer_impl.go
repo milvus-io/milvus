@@ -6,7 +6,6 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
@@ -26,7 +25,7 @@ func NewResumableConsumer(factory factory, opts *ConsumerOptions) ResumableConsu
 		cancel:         cancel,
 		stopResumingCh: make(chan struct{}),
 		resumingExitCh: make(chan struct{}),
-		logger:         mlog.With(zap.String("pchannel", opts.PChannel), zap.Any("initialDeliverPolicy", opts.DeliverPolicy)),
+		logger:         mlog.With(mlog.FieldPChannel(opts.PChannel), mlog.Any("initialDeliverPolicy", opts.DeliverPolicy)),
 		opts:           opts,
 		mh: &timeTickOrderMessageHandler{
 			inner:                  opts.MessageHandler,
@@ -139,7 +138,7 @@ func (rc *resumableConsumerImpl) resumeLoop() {
 }
 
 func (rc *resumableConsumerImpl) createNewConsumer(opts *handler.ConsumerOptions) (consumer.Consumer, error) {
-	logger := rc.logger.With(zap.Any("deliverPolicy", opts.DeliverPolicy))
+	logger := rc.logger.With(mlog.Any("deliverPolicy", opts.DeliverPolicy))
 
 	backoff := backoff.NewExponentialBackOff()
 	backoff.InitialInterval = 100 * time.Millisecond
@@ -157,7 +156,7 @@ func (rc *resumableConsumerImpl) createNewConsumer(opts *handler.ConsumerOptions
 		}
 		if err != nil {
 			nextBackoff := backoff.NextBackOff()
-			logger.Warn(rc.ctx, "create consumer failed, retry...", zap.Error(err), zap.Duration("nextRetryInterval", nextBackoff))
+			logger.Warn(rc.ctx, "create consumer failed, retry...", mlog.Err(err), mlog.Duration("nextRetryInterval", nextBackoff))
 			time.Sleep(nextBackoff)
 			continue
 		}
@@ -172,7 +171,7 @@ func (rc *resumableConsumerImpl) waitUntilUnavailable(consumer handler.Consumer)
 	defer func() {
 		consumer.Close()
 		if consumer.Error() != nil {
-			rc.logger.Warn(rc.ctx, "consumer is closed with error", zap.Error(consumer.Error()))
+			rc.logger.Warn(rc.ctx, "consumer is closed with error", mlog.Err(consumer.Error()))
 		}
 	}()
 
@@ -183,9 +182,9 @@ func (rc *resumableConsumerImpl) waitUntilUnavailable(consumer handler.Consumer)
 		return rc.ctx.Err()
 	case <-consumer.Done():
 		rc.logger.Warn(rc.ctx, "consumer is done or encounter error, try to resume...",
-			zap.Error(consumer.Error()),
-			zap.Any("lastConfirmedMessageID", rc.mh.lastConfirmedMessageID),
-			zap.Uint64("lastTimeTick", rc.mh.lastTimeTick),
+			mlog.Err(consumer.Error()),
+			mlog.Any("lastConfirmedMessageID", rc.mh.lastConfirmedMessageID),
+			mlog.Uint64("lastTimeTick", rc.mh.lastTimeTick),
 		)
 		return nil
 	}

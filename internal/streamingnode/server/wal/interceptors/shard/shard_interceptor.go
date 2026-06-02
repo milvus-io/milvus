@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
@@ -71,7 +70,7 @@ func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg me
 	createCollectionMsg := message.MustAsMutableCreateCollectionMessageV1(msg)
 	header := createCollectionMsg.Header()
 	if err := impl.shardManager.CheckIfCollectionCanBeCreated(header.GetCollectionId()); err != nil {
-		impl.shardManager.Logger().Warn(ctx, "collection already exists when creating collection", zap.Int64("collectionID", header.GetCollectionId()))
+		impl.shardManager.Logger().Warn(ctx, "collection already exists when creating collection", mlog.FieldCollectionID(header.GetCollectionId()))
 		// The collection can not be created at current shard, ignored
 		// TODO: idompotent for wal is required in future, but current milvus state is not recovered from wal.
 		// return nil, status.NewUnrecoverableError(err.Error())
@@ -92,7 +91,7 @@ func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg me
 func (impl *shardInterceptor) handleDropCollection(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	dropCollectionMessage := message.MustAsMutableDropCollectionMessageV1(msg)
 	if err := impl.shardManager.CheckIfCollectionExists(dropCollectionMessage.Header().GetCollectionId()); err != nil {
-		impl.shardManager.Logger().Warn(ctx, "collection not found when dropping collection", zap.Int64("collectionID", dropCollectionMessage.Header().GetCollectionId()))
+		impl.shardManager.Logger().Warn(ctx, "collection not found when dropping collection", mlog.FieldCollectionID(dropCollectionMessage.Header().GetCollectionId()))
 		// The collection can not be dropped at current shard, ignored
 		// TODO: idompotent for wal is required in future, but current milvus state is not recovered from wal.
 		// return nil, status.NewUnrecoverableError(err.Error())
@@ -112,7 +111,7 @@ func (impl *shardInterceptor) handleCreatePartition(ctx context.Context, msg mes
 	createPartitionMessage := message.MustAsMutableCreatePartitionMessageV1(msg)
 	h := createPartitionMessage.Header()
 	if err := impl.shardManager.CheckIfPartitionCanBeCreated(shards.PartitionUniqueKey{CollectionID: h.GetCollectionId(), PartitionID: h.GetPartitionId()}); err != nil {
-		impl.shardManager.Logger().Warn(ctx, "partition already exists when creating partition", zap.Int64("collectionID", h.GetCollectionId()), zap.Int64("partitionID", h.GetPartitionId()))
+		impl.shardManager.Logger().Warn(ctx, "partition already exists when creating partition", mlog.FieldCollectionID(h.GetCollectionId()), mlog.FieldPartitionID(h.GetPartitionId()))
 		// TODO: idompotent for wal is required in future, but current milvus state is not recovered from wal.
 		// return nil, status.NewUnrecoverableError(err.Error())
 	}
@@ -130,7 +129,7 @@ func (impl *shardInterceptor) handleDropPartition(ctx context.Context, msg messa
 	dropPartitionMessage := message.MustAsMutableDropPartitionMessageV1(msg)
 	h := dropPartitionMessage.Header()
 	if err := impl.shardManager.CheckIfPartitionExists(shards.PartitionUniqueKey{CollectionID: h.GetCollectionId(), PartitionID: h.GetPartitionId()}); err != nil {
-		impl.shardManager.Logger().Warn(ctx, "partition not found when dropping partition", zap.Int64("collectionID", h.GetCollectionId()), zap.Int64("partitionID", h.GetPartitionId()))
+		impl.shardManager.Logger().Warn(ctx, "partition not found when dropping partition", mlog.FieldCollectionID(h.GetCollectionId()), mlog.FieldPartitionID(h.GetPartitionId()))
 		// The partition can not be dropped at current shard, ignored
 		// TODO: idompotent for wal is required in future, but current milvus state is not recovered from wal.
 		// return nil, status.NewUnrecoverableError(err.Error())
@@ -161,19 +160,19 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 		}
 		if errors.Is(err, shards.ErrCollectionSchemaVersionNotMatch) {
 			impl.shardManager.Logger().Warn(ctx, "insertMessage schema version mismatch",
-				zap.Int64("collectionID", collectionID),
-				zap.Bool("schemaVersionProvided", header.SchemaVersion != nil),
-				zap.Int32("schemaVersion", schemaVersion),
-				zap.Int32("collectionSchemaVersion", correctSchemaVersion),
-				zap.Error(err))
+				mlog.FieldCollectionID(collectionID),
+				mlog.Bool("schemaVersionProvided", header.SchemaVersion != nil),
+				mlog.Int32("schemaVersion", schemaVersion),
+				mlog.Int32("collectionSchemaVersion", correctSchemaVersion),
+				mlog.Err(err))
 			return nil, status.NewSchemaVersionMismatch("schema version mismatch, input schema version: %d, collection schema version: %d",
 				schemaVersion, correctSchemaVersion)
 		}
 		impl.shardManager.Logger().Error(ctx, "unexpected error from CheckIfCollectionSchemaVersionMatch",
-			zap.Int64("collectionID", collectionID),
-			zap.Bool("schemaVersionProvided", header.SchemaVersion != nil),
-			zap.Int32("schemaVersion", schemaVersion),
-			zap.Error(err))
+			mlog.FieldCollectionID(collectionID),
+			mlog.Bool("schemaVersionProvided", header.SchemaVersion != nil),
+			mlog.Int32("schemaVersion", schemaVersion),
+			mlog.Err(err))
 		return nil, errors.Wrap(err, "CheckIfCollectionSchemaVersionMatch")
 	}
 	if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion); err != nil {
@@ -213,7 +212,7 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 		}
 		if errors.IsAny(err, shards.ErrTooLargeInsert, shards.ErrPartitionNotFound, shards.ErrCollectionNotFound) {
 			// Message is too large, so retry operation is unrecoverable, can't be retry at client side.
-			impl.shardManager.Logger().Warn(ctx, "unrecoverable insert operation", zap.Object("message", msg), zap.Error(err))
+			impl.shardManager.Logger().Warn(ctx, "unrecoverable insert operation", mlog.Object("message", msg), mlog.Err(err))
 			return nil, status.NewUnrecoverableError("fail to assign segment, %s", err.Error())
 		}
 		if err != nil {

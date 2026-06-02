@@ -23,7 +23,6 @@ import (
 	"sync"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -101,7 +100,7 @@ func NewTargetManager(broker Broker, meta *Meta) *TargetManager {
 // WARN: DO NOT call this method for an existing collection as target observer running, or it will lead to a double-update,
 // which may make the current target not available
 func (mgr *TargetManager) UpdateCollectionCurrentTarget(ctx context.Context, collectionID int64) bool {
-	log := mlog.With(zap.Int64("collectionID", collectionID))
+	log := mlog.With(mlog.FieldCollectionID(collectionID))
 
 	newTarget := mgr.next.getCollectionTarget(collectionID)
 	if newTarget == nil || newTarget.IsEmpty() {
@@ -126,10 +125,10 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(ctx context.Context, col
 		partStatsVersionInfo += "],"
 	}
 	log.Debug(ctx, "finish to update current target for collection",
-		zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
-		zap.Strings("channels", newTarget.GetAllDmChannelNames()),
-		zap.Int64("version", newTarget.GetTargetVersion()),
-		zap.String("partStatsVersion", partStatsVersionInfo),
+		mlog.Int64s("segments", newTarget.GetAllSegmentIDs()),
+		mlog.Strings("channels", newTarget.GetAllDmChannelNames()),
+		mlog.Int64("version", newTarget.GetTargetVersion()),
+		mlog.String("partStatsVersion", partStatsVersionInfo),
 	)
 	return true
 }
@@ -149,7 +148,7 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 		return false, nil
 	}, retry.Attempts(10))
 	if err != nil {
-		mlog.Warn(ctx, "failed to get next targets for collection", zap.Int64("collectionID", collectionID), zap.Error(err))
+		mlog.Warn(ctx, "failed to get next targets for collection", mlog.FieldCollectionID(collectionID), mlog.Err(err))
 		return err
 	}
 
@@ -158,9 +157,9 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 	for _, channelInfo := range vChannelInfos {
 		if funcutil.IsDroppedChannelCheckpoint(channelInfo.GetSeekPosition()) {
 			mlog.Warn(ctx, "refuse to build next target: channel checkpoint is a dropped sentinel; sticky until collection meta is fully dropped",
-				zap.Int64("collectionID", collectionID),
-				zap.String("channel", channelInfo.GetChannelName()),
-				zap.Uint64("seekTs", channelInfo.GetSeekPosition().GetTimestamp()),
+				mlog.FieldCollectionID(collectionID),
+				mlog.String("channel", channelInfo.GetChannelName()),
+				mlog.Uint64("seekTs", channelInfo.GetSeekPosition().GetTimestamp()),
 			)
 			return merr.WrapErrChannelDroppedSentinel(
 				channelInfo.GetChannelName(),
@@ -187,7 +186,7 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 	}
 
 	if len(segments) == 0 && len(dmChannels) == 0 {
-		mlog.Debug(ctx, "skip empty next targets for collection", zap.Int64("collectionID", collectionID), zap.Int64s("PartitionIDs", partitionIDs))
+		mlog.Debug(ctx, "skip empty next targets for collection", mlog.FieldCollectionID(collectionID), mlog.Int64s("PartitionIDs", partitionIDs))
 		return nil
 	}
 
@@ -196,8 +195,8 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 	mgr.next.updateCollectionTarget(collectionID, allocatedTarget)
 
 	mlog.Debug(ctx, "finish to update next targets for collection",
-		zap.Int64("collectionID", collectionID),
-		zap.Int64s("PartitionIDs", partitionIDs))
+		mlog.FieldCollectionID(collectionID),
+		mlog.Int64s("PartitionIDs", partitionIDs))
 
 	return nil
 }
@@ -225,7 +224,7 @@ func mergeDmChannelInfo(infos []*datapb.VchannelInfo) *DmChannel {
 // RemoveCollection removes all channels and segments in the given collection
 func (mgr *TargetManager) RemoveCollection(ctx context.Context, collectionID int64) {
 	mlog.Info(ctx, "remove collection from targets",
-		zap.Int64("collectionID", collectionID))
+		mlog.FieldCollectionID(collectionID))
 
 	current := mgr.current.getCollectionTarget(collectionID)
 	if current != nil {
@@ -249,8 +248,8 @@ func (mgr *TargetManager) RemoveCollection(ctx context.Context, collectionID int
 // NOTE: this doesn't remove any channel even the given one is the only partition
 // Deprecated: use RemovePartitionFromNextTarget instead @weiliu1031
 func (mgr *TargetManager) RemovePartition(ctx context.Context, collectionID int64, partitionIDs ...int64) {
-	log := mlog.With(zap.Int64("collectionID", collectionID),
-		zap.Int64s("PartitionIDs", partitionIDs))
+	log := mlog.With(mlog.FieldCollectionID(collectionID),
+		mlog.Int64s("PartitionIDs", partitionIDs))
 
 	log.Info(ctx, "remove partition from targets")
 
@@ -262,8 +261,8 @@ func (mgr *TargetManager) RemovePartition(ctx context.Context, collectionID int6
 		if newTarget != nil {
 			mgr.current.updateCollectionTarget(collectionID, newTarget)
 			log.Info(ctx, "finish to remove partition from current target for collection",
-				zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
-				zap.Strings("channels", newTarget.GetAllDmChannelNames()))
+				mlog.Int64s("segments", newTarget.GetAllSegmentIDs()),
+				mlog.Strings("channels", newTarget.GetAllDmChannelNames()))
 		} else {
 			log.Info(ctx, "all partitions have been released, release the collection next target now")
 			mgr.current.removeCollectionTarget(collectionID)
@@ -276,8 +275,8 @@ func (mgr *TargetManager) RemovePartition(ctx context.Context, collectionID int6
 		if newTarget != nil {
 			mgr.next.updateCollectionTarget(collectionID, newTarget)
 			log.Info(ctx, "finish to remove partition from next target for collection",
-				zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
-				zap.Strings("channels", newTarget.GetAllDmChannelNames()))
+				mlog.Int64s("segments", newTarget.GetAllSegmentIDs()),
+				mlog.Strings("channels", newTarget.GetAllDmChannelNames()))
 		} else {
 			log.Info(ctx, "all partitions have been released, release the collection current target now")
 			mgr.next.removeCollectionTarget(collectionID)
@@ -289,8 +288,8 @@ func (mgr *TargetManager) RemovePartition(ctx context.Context, collectionID int6
 // NOTE: don't edit current target directly, it will be updated by target observer, which push the new next target as current target
 // need the full progress to update next target to current target, so the query view on delegator could be updated when current target is updated
 func (mgr *TargetManager) RemovePartitionFromNextTarget(ctx context.Context, collectionID int64, partitionIDs ...int64) {
-	log := mlog.With(zap.Int64("collectionID", collectionID),
-		zap.Int64s("PartitionIDs", partitionIDs))
+	log := mlog.With(mlog.FieldCollectionID(collectionID),
+		mlog.Int64s("PartitionIDs", partitionIDs))
 
 	partitionSet := typeutil.NewUniqueSet(partitionIDs...)
 
@@ -301,8 +300,8 @@ func (mgr *TargetManager) RemovePartitionFromNextTarget(ctx context.Context, col
 		if newTarget != nil {
 			mgr.next.updateCollectionTarget(collectionID, newTarget)
 			log.Info(ctx, "finish to remove partition from next target for collection",
-				zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
-				zap.Strings("channels", newTarget.GetAllDmChannelNames()))
+				mlog.Int64s("segments", newTarget.GetAllSegmentIDs()),
+				mlog.Strings("channels", newTarget.GetAllDmChannelNames()))
 		} else {
 			log.Info(ctx, "all partitions have been released, release the collection current target now")
 			mgr.current.removeCollectionTarget(collectionID)
@@ -551,9 +550,9 @@ func (mgr *TargetManager) SaveCurrentTarget(ctx context.Context, catalog metasto
 				if err := catalog.SaveCollectionTargets(ctx, lo.Map(tasks, func(p typeutil.Pair[int64, *querypb.CollectionTarget], _ int) *querypb.CollectionTarget {
 					return p.B
 				})...); err != nil {
-					mlog.Warn(ctx, "failed to save current target for collection", zap.Int64s("collectionIDs", ids), zap.Error(err))
+					mlog.Warn(ctx, "failed to save current target for collection", mlog.Int64s("collectionIDs", ids), mlog.Err(err))
 				} else {
-					mlog.Info(ctx, "succeed to save current target for collection", zap.Int64s("collectionIDs", ids))
+					mlog.Info(ctx, "succeed to save current target for collection", mlog.Int64s("collectionIDs", ids))
 				}
 				return nil, nil
 			})
@@ -577,7 +576,7 @@ func (mgr *TargetManager) SaveCurrentTarget(ctx context.Context, catalog metasto
 func (mgr *TargetManager) Recover(ctx context.Context, catalog metastore.QueryCoordCatalog) error {
 	targets, err := catalog.GetCollectionTargets(ctx)
 	if err != nil {
-		mlog.Warn(ctx, "failed to recover collection target from etcd", zap.Error(err))
+		mlog.Warn(ctx, "failed to recover collection target from etcd", mlog.Err(err))
 		return err
 	}
 
@@ -585,10 +584,10 @@ func (mgr *TargetManager) Recover(ctx context.Context, catalog metastore.QueryCo
 		newTarget := FromPbCollectionTarget(t)
 		mgr.current.updateCollectionTarget(t.GetCollectionID(), newTarget)
 		mlog.Info(ctx, "recover current target for collection",
-			zap.Int64("collectionID", t.GetCollectionID()),
-			zap.Strings("channels", newTarget.GetAllDmChannelNames()),
-			zap.Int("segmentNum", len(newTarget.GetAllSegmentIDs())),
-			zap.Int64("version", newTarget.GetTargetVersion()),
+			mlog.FieldCollectionID(t.GetCollectionID()),
+			mlog.Strings("channels", newTarget.GetAllDmChannelNames()),
+			mlog.Int("segmentNum", len(newTarget.GetAllSegmentIDs())),
+			mlog.Int64("version", newTarget.GetTargetVersion()),
 		)
 	}
 
@@ -596,7 +595,7 @@ func (mgr *TargetManager) Recover(ctx context.Context, catalog metastore.QueryCo
 	// Uses RemoveWithPrefix which is a single etcd call.
 	if len(targets) > 0 {
 		if err := catalog.RemoveCollectionTargets(ctx); err != nil {
-			mlog.Warn(ctx, "failed to remove collection targets from etcd", zap.Error(err))
+			mlog.Warn(ctx, "failed to remove collection targets from etcd", mlog.Err(err))
 		}
 	}
 
@@ -626,7 +625,7 @@ func (mgr *TargetManager) GetTargetJSON(ctx context.Context, scope TargetScope, 
 
 	v, err := json.Marshal(ret.toQueryCoordCollectionTargets(collectionID))
 	if err != nil {
-		mlog.Warn(ctx, "failed to marshal target", zap.Error(err))
+		mlog.Warn(ctx, "failed to marshal target", mlog.Err(err))
 		return ""
 	}
 	return string(v)

@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -135,12 +134,12 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	job := t.importMeta.GetJob(context.TODO(), t.GetJobID())
 	req, err := AssembleImportRequest(t, job, t.meta, t.alloc)
 	if err != nil {
-		mlog.Warn(context.TODO(), "assemble import request failed", WrapTaskLog(t, zap.Error(err))...)
+		mlog.Warn(context.TODO(), "assemble import request failed", WrapTaskLog(t, mlog.Err(err))...)
 		return
 	}
 	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())
 	if err != nil {
-		mlog.Warn(context.TODO(), "import failed", WrapTaskLog(t, zap.Error(err))...)
+		mlog.Warn(context.TODO(), "import failed", WrapTaskLog(t, mlog.Err(err))...)
 		t.retryTimes++
 		return
 	}
@@ -148,12 +147,12 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		UpdateState(datapb.ImportTaskStateV2_InProgress),
 		UpdateNodeID(nodeID))
 	if err != nil {
-		mlog.Warn(context.TODO(), "update import task failed", WrapTaskLog(t, zap.Error(err))...)
+		mlog.Warn(context.TODO(), "update import task failed", WrapTaskLog(t, mlog.Err(err))...)
 		return
 	}
 	pendingDuration := t.GetTR().RecordSpan()
 	metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStagePending).Observe(float64(pendingDuration.Milliseconds()))
-	mlog.Info(context.TODO(), "import task start to execute", WrapTaskLog(t, zap.Int64("scheduledNodeID", nodeID), zap.Duration("taskTimeCost/pending", pendingDuration))...)
+	mlog.Info(context.TODO(), "import task start to execute", WrapTaskLog(t, mlog.Int64("scheduledNodeID", nodeID), mlog.Duration("taskTimeCost/pending", pendingDuration))...)
 }
 
 func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
@@ -171,23 +170,23 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 		if segmentIDs := t.GetSegmentIDs(); len(segmentIDs) > 0 {
 			if resetErr := t.meta.UpdateSegmentsInfo(context.TODO(), ResetImportingSegmentRows(segmentIDs...)); resetErr != nil {
 				mlog.Warn(context.TODO(), "failed to reset import segment row counts on retry",
-					WrapTaskLog(t, zap.Error(resetErr))...)
+					WrapTaskLog(t, mlog.Err(resetErr))...)
 				return
 			}
 		}
 		updateErr := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
 		if updateErr != nil {
-			mlog.Warn(context.TODO(), "failed to update import task state to pending", WrapTaskLog(t, zap.Error(updateErr))...)
+			mlog.Warn(context.TODO(), "failed to update import task state to pending", WrapTaskLog(t, mlog.Err(updateErr))...)
 		}
-		mlog.Info(context.TODO(), "reset import task state to pending due to error occurs", WrapTaskLog(t, zap.Error(err), zap.String("reason", resp.GetReason()))...)
+		mlog.Info(context.TODO(), "reset import task state to pending due to error occurs", WrapTaskLog(t, mlog.Err(err), mlog.String("reason", resp.GetReason()))...)
 		return
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Failed {
 		err = t.importMeta.UpdateJob(context.TODO(), t.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(resp.GetReason()))
 		if err != nil {
-			mlog.Warn(context.TODO(), "failed to update job state to Failed", zap.Int64("jobID", t.GetJobID()), zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to update job state to Failed", mlog.FieldJobID(t.GetJobID()), mlog.Err(err))
 		}
-		mlog.Warn(context.TODO(), "import failed", WrapTaskLog(t, zap.String("reason", resp.GetReason()))...)
+		mlog.Warn(context.TODO(), "import failed", WrapTaskLog(t, mlog.String("reason", resp.GetReason()))...)
 		return
 	}
 
@@ -207,10 +206,10 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 			op := UpdateImportedRows(info.GetSegmentID(), info.GetImportedRows())
 			err = t.meta.UpdateSegmentsInfo(context.TODO(), op)
 			if err != nil {
-				mlog.Warn(context.TODO(), "update import segment rows failed", WrapTaskLog(t, zap.Error(err))...)
+				mlog.Warn(context.TODO(), "update import segment rows failed", WrapTaskLog(t, mlog.Err(err))...)
 				return
 			}
-			mlog.Info(context.TODO(), "update import segment rows done", WrapTaskLog(t, zap.Int64("segmentID", info.GetSegmentID()), zap.Int64("importedRows", info.GetImportedRows()))...)
+			mlog.Info(context.TODO(), "update import segment rows done", WrapTaskLog(t, mlog.FieldSegmentID(info.GetSegmentID()), mlog.Int64("importedRows", info.GetImportedRows()))...)
 
 			metrics.DataCoordBulkVectors.WithLabelValues(
 				dbName,
@@ -226,7 +225,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 			err = binlog.CompressBinLogs(info.GetBinlogs(), info.GetDeltalogs(), info.GetStatslogs(), info.GetBm25Logs())
 			if err != nil {
 				mlog.Warn(context.TODO(), "fail to CompressBinLogs for import binlogs",
-					WrapTaskLog(t, zap.Int64("segmentID", info.GetSegmentID()), zap.Error(err))...)
+					WrapTaskLog(t, mlog.FieldSegmentID(info.GetSegmentID()), mlog.Err(err))...)
 				return
 			}
 
@@ -247,39 +246,39 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 			if err != nil {
 				updateErr := t.importMeta.UpdateJob(context.TODO(), t.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()))
 				if updateErr != nil {
-					mlog.Warn(context.TODO(), "failed to update job state to Failed", zap.Int64("jobID", t.GetJobID()), zap.Error(updateErr))
+					mlog.Warn(context.TODO(), "failed to update job state to Failed", mlog.FieldJobID(t.GetJobID()), mlog.Err(updateErr))
 				}
-				mlog.Warn(context.TODO(), "update import segment binlogs failed", WrapTaskLog(t, zap.String("err", err.Error()))...)
+				mlog.Warn(context.TODO(), "update import segment binlogs failed", WrapTaskLog(t, mlog.String("err", err.Error()))...)
 				return
 			}
 			mlog.Info(context.TODO(), "update import segment info done", WrapTaskLog(t,
-				zap.Int64("segmentID", info.GetSegmentID()),
-				zap.Uint64("minTs", minTs),
-				zap.Uint64("maxTs", maxTs),
-				zap.Any("segmentInfo", info))...)
+				mlog.FieldSegmentID(info.GetSegmentID()),
+				mlog.Uint64("minTs", minTs),
+				mlog.Uint64("maxTs", maxTs),
+				mlog.Any("segmentInfo", info))...)
 			totalRows += info.GetImportedRows()
 		}
 		completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
 		err = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed), UpdateCompleteTime(completeTime))
 		if err != nil {
-			mlog.Warn(context.TODO(), "update import task failed", WrapTaskLog(t, zap.Error(err))...)
+			mlog.Warn(context.TODO(), "update import task failed", WrapTaskLog(t, mlog.Err(err))...)
 			return
 		}
 		importDuration := t.GetTR().RecordSpan()
 		metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStageImport).Observe(float64(importDuration.Milliseconds()))
-		mlog.Info(context.TODO(), "import done", WrapTaskLog(t, zap.Int64("totalRows", totalRows), zap.Duration("taskTimeCost/import", importDuration))...)
+		mlog.Info(context.TODO(), "import done", WrapTaskLog(t, mlog.Int64("totalRows", totalRows), mlog.Duration("taskTimeCost/import", importDuration))...)
 	}
-	mlog.Info(context.TODO(), "query import", WrapTaskLog(t, zap.String("respState", resp.GetState().String()),
-		zap.String("reason", resp.GetReason()))...)
+	mlog.Info(context.TODO(), "query import", WrapTaskLog(t, mlog.String("respState", resp.GetState().String()),
+		mlog.String("reason", resp.GetReason()))...)
 }
 
 func (t *importTask) DropTaskOnWorker(cluster session.Cluster) {
 	err := DropImportTask(t, cluster, t.importMeta)
 	if err != nil {
-		mlog.Warn(context.TODO(), "drop import failed", WrapTaskLog(t, zap.Error(err))...)
+		mlog.Warn(context.TODO(), "drop import failed", WrapTaskLog(t, mlog.Err(err))...)
 		return
 	}
-	mlog.Info(context.TODO(), "drop import task done", WrapTaskLog(t, zap.Int64("nodeID", t.GetNodeID()))...)
+	mlog.Info(context.TODO(), "drop import task done", WrapTaskLog(t, mlog.FieldNodeID(t.GetNodeID()))...)
 }
 
 func (t *importTask) GetType() TaskType {

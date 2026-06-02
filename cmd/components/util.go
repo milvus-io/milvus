@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -25,9 +24,9 @@ func exitWhenStopTimeout(stop func() error, timeout time.Duration) error {
 		start := time.Now()
 		dumpPprof()
 		mlog.Info(context.TODO(), "stop progress timeout, force exit",
-			zap.String("component", paramtable.GetRole()),
-			zap.Duration("cost", time.Since(start)),
-			zap.Error(err))
+			mlog.FieldComponent(paramtable.GetRole()),
+			mlog.Duration("cost", time.Since(start)),
+			mlog.Err(err))
 		mlog.Cleanup()
 		os.Exit(1)
 	}
@@ -66,16 +65,16 @@ func dumpPprof() {
 	if pprofDir != "" {
 		if err := os.RemoveAll(pprofDir); err != nil {
 			mlog.Error(context.TODO(), "failed to clean pprof directory",
-				zap.String("path", pprofDir),
-				zap.Error(err))
+				mlog.String("path", pprofDir),
+				mlog.Err(err))
 		}
 	}
 
 	// Recreate directory with proper permissions
 	if err := os.MkdirAll(pprofDir, 0o755); err != nil {
 		mlog.Error(context.TODO(), "failed to create pprof directory",
-			zap.String("path", pprofDir),
-			zap.Error(err))
+			mlog.String("path", pprofDir),
+			mlog.Err(err))
 		return
 	}
 
@@ -126,8 +125,8 @@ func dumpPprof() {
 		f, err := os.Create(p.filename)
 		if err != nil {
 			mlog.Error(context.TODO(), "could not create profile file",
-				zap.String("profile", p.name),
-				zap.Error(err))
+				mlog.String("profile", p.name),
+				mlog.Err(err))
 			for filename, f := range files {
 				f.Close()
 				os.Remove(filename)
@@ -146,8 +145,8 @@ func dumpPprof() {
 	for _, p := range profiles {
 		if err := p.dump(files[p.filename]); err != nil {
 			mlog.Error(context.TODO(), "could not write profile",
-				zap.String("profile", p.name),
-				zap.Error(err))
+				mlog.String("profile", p.name),
+				mlog.Err(err))
 		}
 	}
 }

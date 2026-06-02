@@ -22,8 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -134,7 +132,7 @@ func (s *copySegmentInspector) Start() {
 
 	// Log inspection interval for observability
 	inspectInterval := Params.DataCoordCfg.CopySegmentCheckInterval.GetAsDuration(time.Second)
-	mlog.Info(s.ctx, "start copy segment inspector", zap.Duration("inspectInterval", inspectInterval))
+	mlog.Info(s.ctx, "start copy segment inspector", mlog.Duration("inspectInterval", inspectInterval))
 
 	ticker := time.NewTicker(inspectInterval)
 	defer ticker.Stop()
@@ -197,7 +195,7 @@ func (s *copySegmentInspector) reloadFromMeta() {
 		}
 	}
 	mlog.Info(s.ctx, "copy segment inspector reloaded tasks from meta",
-		zap.Int("jobCount", len(jobs)))
+		mlog.Int("jobCount", len(jobs)))
 }
 
 // inspect runs a single inspection cycle to process all pending and failed tasks.

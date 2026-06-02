@@ -7,7 +7,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -75,7 +74,7 @@ func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 	config := req.GetConfiguration()
 
 	mlog.Info(ctx, "UpdateReplicateConfiguration received",
-		zap.Bool("forcePromote", req.GetForcePromote()),
+		mlog.Bool("forcePromote", req.GetForcePromote()),
 		replicateutil.ConfigLogField(config),
 	)
 
@@ -169,7 +168,7 @@ func (s *assignmentServiceImpl) validateReplicateConfiguration(ctx context.Conte
 	incomingConfig := config
 	validator := replicateutil.NewReplicateConfigValidator(incomingConfig, currentConfig, currentClusterID, cc.Channels)
 	if err := validator.Validate(); err != nil {
-		mlog.Warn(ctx, "UpdateReplicateConfiguration fail", zap.Error(err))
+		mlog.Warn(ctx, "UpdateReplicateConfiguration fail", mlog.Err(err))
 		return nil, err
 	}
 
@@ -284,7 +283,7 @@ func (s *assignmentServiceImpl) handleForcePromote(ctx context.Context, config *
 	// The ACK callback will handle DDL fixing and meta saving
 	_, err = broadcaster.Broadcast(ctx, msg)
 	if err != nil {
-		mlog.Error(ctx, "Failed to broadcast force promote AlterReplicateConfigMessage", zap.Error(err))
+		mlog.Error(ctx, "Failed to broadcast force promote AlterReplicateConfigMessage", mlog.Err(err))
 		return nil, err
 	}
 
@@ -348,7 +347,7 @@ func (s *assignmentServiceImpl) buildForcePromoteConfiguration(ctx context.Conte
 	// Validate the configuration using existing validator
 	validator := replicateutil.NewReplicateConfigValidator(forcePromoteConfig, currentConfig, currentClusterID, pchannels)
 	if err := validator.Validate(); err != nil {
-		mlog.Warn(ctx, "Force promote replicate configuration validation failed", zap.Error(err))
+		mlog.Warn(ctx, "Force promote replicate configuration validation failed", mlog.Err(err))
 		return nil, nil, err
 	}
 
@@ -364,7 +363,7 @@ func (s *assignmentServiceImpl) alterReplicateConfiguration(ctx context.Context,
 	// This is used for incomplete switchover messages that should be ignored after force promote
 	if header.Ignore {
 		mlog.Info(ctx, "AlterReplicateConfig message has ignore flag set, skipping processing",
-			zap.Bool("forcePromote", header.ForcePromote))
+			mlog.Bool("forcePromote", header.ForcePromote))
 		return nil
 	}
 

@@ -30,7 +30,6 @@ import (
 	"github.com/tikv/client-go/v2/txnkv"
 	"github.com/tikv/client-go/v2/txnkv/transaction"
 	"github.com/tikv/client-go/v2/txnkv/txnsnapshot"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
@@ -122,7 +121,7 @@ func NewTiKV(txn *txnkv.Client, rootPath string, options ...Option) *txnTiKV {
 
 // Close closes the connection to TiKV.
 func (kv *txnTiKV) Close() {
-	mlog.Info(context.TODO(), "txnTiKV closed", zap.String("path", kv.rootPath))
+	mlog.Info(context.TODO(), "txnTiKV closed", mlog.String("path", kv.rootPath))
 }
 
 // GetPath returns the path of the key/prefix.
@@ -132,9 +131,9 @@ func (kv *txnTiKV) GetPath(key string) string {
 
 // Log if error is not nil. We use error pointer as in most cases this function
 // is Deferred. Deferred functions evaluate their args immediately.
-func logWarnOnFailure(err *error, msg string, fields ...zap.Field) {
+func logWarnOnFailure(err *error, msg string, fields ...mlog.Field) {
 	if *err != nil {
-		fields = append(fields, zap.Error(*err))
+		fields = append(fields, mlog.Err(*err))
 		mlog.Warn(context.TODO(),
 			msg, fields...)
 	}
@@ -148,7 +147,7 @@ func (kv *txnTiKV) Has(ctx context.Context, key string) (bool, error) {
 	defer cancel()
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV Has() error", zap.String("key", key))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV Has() error", mlog.String("key", key))
 
 	_, err := kv.getTiKVMeta(ctx, key)
 	if err != nil {
@@ -159,7 +158,7 @@ func (kv *txnTiKV) Has(ctx context.Context, key string) (bool, error) {
 		loggingErr = merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to read key: %s", key), err.Error())
 		return false, loggingErr
 	}
-	CheckElapseAndWarn(start, "Slow txnTiKV Has() operation", zap.String("key", key))
+	CheckElapseAndWarn(start, "Slow txnTiKV Has() operation", mlog.String("key", key))
 	return true, nil
 }
 
@@ -175,7 +174,7 @@ func (kv *txnTiKV) HasPrefix(ctx context.Context, prefix string) (bool, error) {
 	prefix = kv.GetPath(prefix)
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV HasPrefix() error", zap.String("prefix", prefix))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV HasPrefix() error", mlog.String("prefix", prefix))
 
 	ss := getSnapshot(kv.txn, SnapshotScanSize)
 
@@ -193,7 +192,7 @@ func (kv *txnTiKV) HasPrefix(ctx context.Context, prefix string) (bool, error) {
 	r := iter.Valid()
 	// Iterater only needs to check the first key-value pair
 
-	CheckElapseAndWarn(start, "Slow txnTiKV HasPrefix() operation", zap.String("prefix", prefix))
+	CheckElapseAndWarn(start, "Slow txnTiKV HasPrefix() operation", mlog.String("prefix", prefix))
 	return r, nil
 }
 
@@ -205,7 +204,7 @@ func (kv *txnTiKV) Load(ctx context.Context, key string) (string, error) {
 	defer cancel()
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV Load() error", zap.String("key", key))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV Load() error", mlog.String("key", key))
 
 	val, err := kv.getTiKVMeta(ctx, key)
 	if err != nil {
@@ -216,7 +215,7 @@ func (kv *txnTiKV) Load(ctx context.Context, key string) (string, error) {
 		}
 		return "", loggingErr
 	}
-	CheckElapseAndWarn(start, "Slow txnTiKV Load() operation", zap.String("key", key))
+	CheckElapseAndWarn(start, "Slow txnTiKV Load() operation", mlog.String("key", key))
 	return val, nil
 }
 
@@ -236,7 +235,7 @@ func (kv *txnTiKV) MultiLoad(ctx context.Context, keys []string) ([]string, erro
 	defer cancel()
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiLoad() error", zap.Strings("keys", keys))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiLoad() error", mlog.Strings("keys", keys))
 
 	// Convert from []string to [][]byte
 	byteKeys := batchConvertFromString(kv.rootPath, keys)
@@ -267,7 +266,7 @@ func (kv *txnTiKV) MultiLoad(ctx context.Context, keys []string) ([]string, erro
 		loggingErr = merr.WrapErrIoKeyNotFound(fmt.Sprintf("%v", missingValues))
 	}
 
-	CheckElapseAndWarn(start, "Slow txnTiKV MultiLoad() operation", zap.Any("keys", keys))
+	CheckElapseAndWarn(start, "Slow txnTiKV MultiLoad() operation", mlog.Any("keys", keys))
 	return validValues, loggingErr
 }
 
@@ -277,7 +276,7 @@ func (kv *txnTiKV) LoadWithPrefix(ctx context.Context, prefix string) ([]string,
 	prefix = kv.GetPath(prefix)
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV LoadWithPrefix() error", zap.String("prefix", prefix))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV LoadWithPrefix() error", mlog.String("prefix", prefix))
 
 	ss := getSnapshot(kv.txn, SnapshotScanSize)
 
@@ -307,7 +306,7 @@ func (kv *txnTiKV) LoadWithPrefix(ctx context.Context, prefix string) ([]string,
 			return nil, nil, loggingErr
 		}
 	}
-	CheckElapseAndWarn(start, "Slow txnTiKV LoadWithPrefix() operation", zap.String("prefix", prefix))
+	CheckElapseAndWarn(start, "Slow txnTiKV LoadWithPrefix() operation", mlog.String("prefix", prefix))
 	return keys, values, nil
 }
 
@@ -318,7 +317,7 @@ func (kv *txnTiKV) Save(ctx context.Context, key, value string) error {
 	defer cancel()
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV Save() error", zap.String("key", key), zap.String("value", value))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV Save() error", mlog.String("key", key), mlog.String("value", value))
 
 	loggingErr = kv.putTiKVMeta(ctx, key, value)
 	return loggingErr
@@ -331,7 +330,7 @@ func (kv *txnTiKV) MultiSave(ctx context.Context, kvs map[string]string) error {
 	defer cancel()
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSave() error", zap.Any("kvs", kvs), zap.Int("len", len(kvs)))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSave() error", mlog.Any("kvs", kvs), mlog.Int("len", len(kvs)))
 
 	txn, err := beginTxn(kv.txn)
 	if err != nil {
@@ -362,7 +361,7 @@ func (kv *txnTiKV) MultiSave(ctx context.Context, kvs map[string]string) error {
 		loggingErr = merr.WrapErrIoFailedReason("Failed to commit for MultiSave()", err.Error())
 		return loggingErr
 	}
-	CheckElapseAndWarn(start, "Slow txnTiKV MultiSave() operation", zap.Any("kvs", kvs))
+	CheckElapseAndWarn(start, "Slow txnTiKV MultiSave() operation", mlog.Any("kvs", kvs))
 	return nil
 }
 
@@ -373,7 +372,7 @@ func (kv *txnTiKV) Remove(ctx context.Context, key string) error {
 	defer cancel()
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV Remove() error", zap.String("key", key))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV Remove() error", mlog.String("key", key))
 
 	loggingErr = kv.removeTiKVMeta(ctx, key)
 	return loggingErr
@@ -386,7 +385,7 @@ func (kv *txnTiKV) MultiRemove(ctx context.Context, keys []string) error {
 	defer cancel()
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiRemove() error", zap.Strings("keys", keys), zap.Int("len", len(keys)))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiRemove() error", mlog.Strings("keys", keys), mlog.Int("len", len(keys)))
 
 	txn, err := beginTxn(kv.txn)
 	if err != nil {
@@ -411,7 +410,7 @@ func (kv *txnTiKV) MultiRemove(ctx context.Context, keys []string) error {
 		loggingErr = merr.WrapErrIoFailedReason("Failed to commit for MultiRemove()", err.Error())
 		return loggingErr
 	}
-	CheckElapseAndWarn(start, "Slow txnTiKV MultiRemove() operation", zap.Strings("keys", keys))
+	CheckElapseAndWarn(start, "Slow txnTiKV MultiRemove() operation", mlog.Strings("keys", keys))
 	return nil
 }
 
@@ -423,7 +422,7 @@ func (kv *txnTiKV) RemoveWithPrefix(ctx context.Context, prefix string) error {
 	defer cancel()
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV RemoveWithPrefix() error", zap.String("prefix", prefix))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV RemoveWithPrefix() error", mlog.String("prefix", prefix))
 
 	startKey := []byte(prefix)
 	endKey := tikv.PrefixNextKey(startKey)
@@ -432,7 +431,7 @@ func (kv *txnTiKV) RemoveWithPrefix(ctx context.Context, prefix string) error {
 		loggingErr = merr.WrapErrIoFailedReason("Failed to DeleteRange for RemoveWithPrefix", err.Error())
 		return loggingErr
 	}
-	CheckElapseAndWarn(start, "Slow txnTiKV RemoveWithPrefix() operation", zap.String("prefix", prefix))
+	CheckElapseAndWarn(start, "Slow txnTiKV RemoveWithPrefix() operation", mlog.String("prefix", prefix))
 	return nil
 }
 
@@ -443,7 +442,7 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 	defer cancel()
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSaveAndRemove error", zap.Any("saves", saves), zap.Strings("removes", removals), zap.Int("saveLength", len(saves)), zap.Int("removeLength", len(removals)))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSaveAndRemove error", mlog.Any("saves", saves), mlog.Strings("removes", removals), mlog.Int("saveLength", len(saves)), mlog.Int("removeLength", len(removals)))
 
 	txn, err := beginTxn(kv.txn)
 	if err != nil {
@@ -500,7 +499,7 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 		loggingErr = merr.WrapErrIoFailedReason("Failed to commit for MultiSaveAndRemove", err.Error())
 		return loggingErr
 	}
-	CheckElapseAndWarn(start, "Slow txnTiKV MultiSaveAndRemove() operation", zap.Any("saves", saves), zap.Strings("removals", removals))
+	CheckElapseAndWarn(start, "Slow txnTiKV MultiSaveAndRemove() operation", mlog.Any("saves", saves), mlog.Strings("removals", removals))
 	return nil
 }
 
@@ -511,7 +510,7 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 	defer cancel()
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSaveAndRemoveWithPrefix() error", zap.Any("saves", saves), zap.Strings("removes", removals), zap.Int("saveLength", len(saves)), zap.Int("removeLength", len(removals)))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSaveAndRemoveWithPrefix() error", mlog.Any("saves", saves), mlog.Strings("removes", removals), mlog.Int("saveLength", len(saves)), mlog.Int("removeLength", len(removals)))
 
 	txn, err := beginTxn(kv.txn)
 	if err != nil {
@@ -588,7 +587,7 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 		loggingErr = merr.WrapErrIoFailedReason("Failed to commit for MultiSaveAndRemoveWithPrefix", err.Error())
 		return loggingErr
 	}
-	CheckElapseAndWarn(start, "Slow txnTiKV MultiSaveAndRemoveWithPrefix() operation", zap.Any("saves", saves), zap.Strings("removals", removals))
+	CheckElapseAndWarn(start, "Slow txnTiKV MultiSaveAndRemoveWithPrefix() operation", mlog.Any("saves", saves), mlog.Strings("removals", removals))
 	return nil
 }
 
@@ -598,7 +597,7 @@ func (kv *txnTiKV) WalkWithPrefix(ctx context.Context, prefix string, pagination
 	prefix = kv.GetPath(prefix)
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV WalkWithPagination error", zap.String("prefix", prefix))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV WalkWithPagination error", mlog.String("prefix", prefix))
 
 	// Since only reading, use Snapshot for less overhead
 	ss := getSnapshot(kv.txn, paginationSize)
@@ -632,7 +631,7 @@ func (kv *txnTiKV) WalkWithPrefix(ctx context.Context, prefix string, pagination
 			return loggingErr
 		}
 	}
-	CheckElapseAndWarn(start, "Slow txnTiKV WalkWithPagination() operation", zap.String("prefix", prefix))
+	CheckElapseAndWarn(start, "Slow txnTiKV WalkWithPagination() operation", mlog.String("prefix", prefix))
 	return nil
 }
 
@@ -761,11 +760,11 @@ func (kv *txnTiKV) CompareVersionAndSwap(ctx context.Context, key string, versio
 }
 
 // CheckElapseAndWarn checks the elapsed time and warns if it is too long.
-func CheckElapseAndWarn(start time.Time, message string, fields ...zap.Field) bool {
+func CheckElapseAndWarn(start time.Time, message string, fields ...mlog.Field) bool {
 	elapsed := time.Since(start)
 	if elapsed.Milliseconds() > 2000 {
 		mlog.Warn(context.TODO(),
-			message, append([]zap.Field{zap.String("time spent", elapsed.String())}, fields...)...)
+			message, append([]mlog.Field{mlog.String("time spent", elapsed.String())}, fields...)...)
 		return true
 	}
 	return false

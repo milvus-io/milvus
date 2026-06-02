@@ -24,7 +24,6 @@ import (
 
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/cdc/meta"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
@@ -73,8 +72,8 @@ func (c *controller) recoverReplicatePChannelMeta(channels []*meta.ReplicateChan
 			continue
 		}
 		mlog.Info(c.ctx, "recover replicate pchannel meta",
-			zap.String("key", channelMeta.Key),
-			zap.Int64("revision", channelMeta.ModRevision),
+			mlog.String("key", channelMeta.Key),
+			mlog.Int64("revision", channelMeta.ModRevision),
 		)
 		channel := &meta.ReplicateChannel{
 			Key:         channelMeta.Key,
@@ -95,7 +94,7 @@ func (c *controller) watchEvents(revision int64) clientv3.WatchChan {
 		clientv3.WithRev(revision),
 	)
 	mlog.Info(c.ctx, "succeed to watch replicate pchannel meta events",
-		zap.Int64("revision", revision), zap.String("prefix", c.prefix))
+		mlog.Int64("revision", revision), mlog.String("prefix", c.prefix))
 	return eventCh
 }
 
@@ -106,7 +105,7 @@ func (c *controller) startWatchLoop() {
 		for {
 			m, err := meta.ListReplicatePChannels(c.ctx, resource.Resource().ETCD(), c.prefix)
 			if err != nil && c.ctx.Err() == nil {
-				mlog.Warn(c.ctx, "failed to list replicate pchannels", zap.Error(err))
+				mlog.Warn(c.ctx, "failed to list replicate pchannels", mlog.Err(err))
 				continue
 			}
 			c.recoverReplicatePChannelMeta(m.Channels)
@@ -129,15 +128,15 @@ func (c *controller) watchLoop(eventCh clientv3.WatchChan) error {
 				panic("etcd event channel closed")
 			}
 			if err := event.Err(); err != nil {
-				mlog.Warn(c.ctx, "etcd event error", zap.Error(err))
+				mlog.Warn(c.ctx, "etcd event error", mlog.Err(err))
 				return err
 			}
 			for _, e := range event.Events {
 				switch e.Type {
 				case mvccpb.PUT:
 					mlog.Info(c.ctx, "handle replicate pchannel PUT event",
-						zap.String("key", string(e.Kv.Key)),
-						zap.Int64("modRevision", e.Kv.ModRevision),
+						mlog.String("key", string(e.Kv.Key)),
+						mlog.Int64("modRevision", e.Kv.ModRevision),
 					)
 					currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 					replicate := meta.MustParseReplicateChannelFromEvent(e)
@@ -153,8 +152,8 @@ func (c *controller) watchLoop(eventCh clientv3.WatchChan) error {
 					resource.Resource().ReplicateManagerClient().CreateReplicator(channel)
 				case mvccpb.DELETE:
 					mlog.Info(c.ctx, "handle replicate pchannel DELETE event",
-						zap.String("key", string(e.Kv.Key)),
-						zap.Int64("prevModRevision", e.PrevKv.ModRevision),
+						mlog.String("key", string(e.Kv.Key)),
+						mlog.Int64("prevModRevision", e.PrevKv.ModRevision),
 					)
 					key := string(e.Kv.Key)
 					revision := e.PrevKv.ModRevision

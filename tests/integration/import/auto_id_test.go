@@ -22,7 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -103,7 +102,7 @@ func (s *BulkInsertSuite) runTestAutoID() {
 			importResp, err := c.ProxyClient.ImportV2(ctx, importReqs[i])
 			s.NoError(err)
 			s.Equal(int32(0), importResp.GetStatus().GetCode())
-			mlog.Info(context.TODO(), "Import result", zap.Any("importResp", importResp))
+			mlog.Info(context.TODO(), "Import result", mlog.Any("importResp", importResp))
 			err = WaitForImportDone(ctx, c, importResp.GetJobID())
 			s.NoError(err)
 		}()

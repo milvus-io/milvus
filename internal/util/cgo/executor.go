@@ -11,8 +11,6 @@ import (
 	"context"
 	"math"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -31,7 +29,7 @@ func initExecutor() {
 		if evt.HasUpdated {
 			pt := paramtable.Get()
 			newSize := int(math.Ceil(pt.QueryNodeCfg.MaxReadConcurrency.GetAsFloat() * pt.QueryNodeCfg.CGOPoolSizeRatio.GetAsFloat()))
-			mlog.Info(context.TODO(), "reset cgo search thread num", zap.Int("thread_num", newSize))
+			mlog.Info(context.TODO(), "reset cgo search thread num", mlog.Int("thread_num", newSize))
 			C.executor_set_search_thread_num(C.int(newSize))
 		}
 	}
@@ -46,7 +44,7 @@ func initExecutor() {
 		if evt.HasUpdated {
 			pt := paramtable.Get()
 			newSize := hardware.GetCPUNum() * pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt()
-			mlog.Info(context.TODO(), "reset cgo load thread num", zap.Int("thread_num", newSize))
+			mlog.Info(context.TODO(), "reset cgo load thread num", mlog.Int("thread_num", newSize))
 			C.executor_set_load_thread_num(C.int(newSize))
 		}
 	}

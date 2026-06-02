@@ -21,7 +21,6 @@ import (
 	"sync"
 
 	"github.com/tidwall/gjson"
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -70,7 +69,7 @@ func (s *Server) getChannelsJSON(ctx context.Context, req *milvuspb.GetMetricsRe
 		if cp, ok := channel2Checkpoints[channel.Name]; ok {
 			channel.CheckpointTS = tsoutil.PhysicalTimeFormat(cp.GetTimestamp())
 		} else {
-			mlog.Warn(ctx, "channel not found in meta cache", zap.String("channel", channel.Name))
+			mlog.Warn(ctx, "channel not found in meta cache", mlog.String("channel", channel.Name))
 		}
 	}
 	return metricsinfo.MarshalGetMetricsValues(channels, err)
@@ -131,7 +130,7 @@ func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRe
 
 		bs, err := json.Marshal(segments)
 		if err != nil {
-			mlog.Warn(ctx, "marshal segment value failed", zap.Int64("collectionID", collectionID), zap.String("err", err.Error()))
+			mlog.Warn(ctx, "marshal segment value failed", mlog.FieldCollectionID(collectionID), mlog.String("err", err.Error()))
 			return "", nil
 		}
 		return string(bs), nil
@@ -147,7 +146,7 @@ func (s *Server) getDistJSON(ctx context.Context, req *milvuspb.GetMetricsReques
 
 	bs, err := json.Marshal(dist)
 	if err != nil {
-		mlog.Warn(ctx, "marshal dist value failed", zap.String("err", err.Error()))
+		mlog.Warn(ctx, "marshal dist value failed", mlog.String("err", err.Error()))
 		return ""
 	}
 	return string(bs)
@@ -195,7 +194,7 @@ func (s *Server) getDataCoordTopology(
 	for _, node := range nodes {
 		infos, err := s.getDataNodeMetrics(ctx, req, node)
 		if err != nil {
-			mlog.Warn(ctx, "fails to get DataNode metrics", zap.Error(err))
+			mlog.Warn(ctx, "fails to get DataNode metrics", mlog.Err(err))
 			continue
 		}
 		clusterTopology.ConnectedDataNodes = append(clusterTopology.ConnectedDataNodes, infos)
@@ -216,12 +215,12 @@ func (s *Server) getDataCoordTopology(
 func (s *Server) getDataCoordMetrics(ctx context.Context) metricsinfo.DataCoordInfos {
 	used, total, err := hardware.GetDiskUsage(paramtable.Get().LocalStorageCfg.Path.GetValue())
 	if err != nil {
-		mlog.Warn(ctx, "get disk usage failed", zap.Error(err))
+		mlog.Warn(ctx, "get disk usage failed", mlog.Err(err))
 	}
 
 	ioWait, err := hardware.GetIOWait()
 	if err != nil {
-		mlog.Warn(ctx, "get iowait failed", zap.Error(err))
+		mlog.Warn(ctx, "get iowait failed", mlog.Err(err))
 	}
 
 	ret := metricsinfo.DataCoordInfos{
@@ -272,7 +271,7 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 	metrics, err := cli.GetMetrics(ctx, req)
 	if err != nil {
 		mlog.Warn(ctx, "invalid metrics of DataNode was found",
-			zap.Error(err))
+			mlog.Err(err))
 		infos.ErrorReason = err.Error()
 		// err handled, returns nil
 		return infos, nil
@@ -281,8 +280,8 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 
 	if metrics.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		mlog.Warn(ctx, "invalid metrics of DataNode was found",
-			zap.Any("error_code", metrics.GetStatus().GetErrorCode()),
-			zap.Any("error_reason", metrics.GetStatus().GetReason()))
+			mlog.Any("error_code", metrics.GetStatus().GetErrorCode()),
+			mlog.Any("error_reason", metrics.GetStatus().GetReason()))
 		infos.ErrorReason = metrics.GetStatus().GetReason()
 		return infos, nil
 	}
@@ -290,7 +289,7 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 	err = metricsinfo.UnmarshalComponentInfos(metrics.GetResponse(), &infos)
 	if err != nil {
 		mlog.Warn(ctx, "invalid metrics of DataNode found",
-			zap.Error(err))
+			mlog.Err(err))
 		infos.ErrorReason = err.Error()
 		return infos, nil
 	}
@@ -312,7 +311,7 @@ func (s *Server) getIndexNodeMetrics(ctx context.Context, req *milvuspb.GetMetri
 	metrics, err := node.GetMetrics(ctx, req)
 	if err != nil {
 		mlog.Warn(ctx, "invalid metrics of IndexNode was found",
-			zap.Error(err))
+			mlog.Err(err))
 		infos.ErrorReason = err.Error()
 		// err handled, returns nil
 		return infos, nil
@@ -321,8 +320,8 @@ func (s *Server) getIndexNodeMetrics(ctx context.Context, req *milvuspb.GetMetri
 
 	if metrics.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		mlog.Warn(ctx, "invalid metrics of DataNode was found",
-			zap.Any("error_code", metrics.GetStatus().GetErrorCode()),
-			zap.Any("error_reason", metrics.GetStatus().GetReason()))
+			mlog.Any("error_code", metrics.GetStatus().GetErrorCode()),
+			mlog.Any("error_reason", metrics.GetStatus().GetReason()))
 		infos.ErrorReason = metrics.GetStatus().GetReason()
 		return infos, nil
 	}
@@ -330,7 +329,7 @@ func (s *Server) getIndexNodeMetrics(ctx context.Context, req *milvuspb.GetMetri
 	err = metricsinfo.UnmarshalComponentInfos(metrics.GetResponse(), &infos)
 	if err != nil {
 		mlog.Warn(ctx, "invalid metrics of DataNode found",
-			zap.Error(err))
+			mlog.Err(err))
 		infos.ErrorReason = err.Error()
 		return infos, nil
 	}
@@ -353,7 +352,7 @@ func getMetrics[T any](ctx context.Context, s *Server, req *milvuspb.GetMetricsR
 			}
 			resp, err := cli.GetMetrics(ctx, req)
 			if err != nil {
-				mlog.Warn(ctx, "failed to get metric from DataNode", zap.Int64("nodeID", node))
+				mlog.Warn(ctx, "failed to get metric from DataNode", mlog.FieldNodeID(node))
 				return err
 			}
 
@@ -364,7 +363,7 @@ func getMetrics[T any](ctx context.Context, s *Server, req *milvuspb.GetMetricsR
 			var infos []T
 			err = json.Unmarshal([]byte(resp.Response), &infos)
 			if err != nil {
-				mlog.Warn(ctx, "invalid metrics of data node was found", zap.Error(err))
+				mlog.Warn(ctx, "invalid metrics of data node was found", mlog.Err(err))
 				return err
 			}
 

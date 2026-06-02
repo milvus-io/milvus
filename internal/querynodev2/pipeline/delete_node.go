@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -55,11 +54,11 @@ func (dNode *deleteNode) addDeleteData(deleteDatas map[UniqueID]*delegator.Delet
 	deleteData.RowCount += int64(len(pks))
 
 	mlog.Info(context.TODO(), "pipeline fetch delete msg",
-		zap.Int64("collectionID", dNode.collectionID),
-		zap.Int64("partitionID", msg.PartitionID),
-		zap.Int("deleteRowNum", len(pks)),
-		zap.Uint64("timestampMin", msg.BeginTimestamp),
-		zap.Uint64("timestampMax", msg.EndTimestamp))
+		mlog.FieldCollectionID(dNode.collectionID),
+		mlog.FieldPartitionID(msg.PartitionID),
+		mlog.Int("deleteRowNum", len(pks)),
+		mlog.Uint64("timestampMin", msg.BeginTimestamp),
+		mlog.Uint64("timestampMax", msg.EndTimestamp))
 }
 
 func (dNode *deleteNode) Operate(in Msg) Msg {

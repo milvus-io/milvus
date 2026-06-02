@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -37,10 +36,10 @@ import (
 func (s *DDLCallbacks) refreshExternalCollectionV2AckCallback(ctx context.Context, result message.BroadcastResultRefreshExternalCollectionMessageV2) error {
 	header := result.Message.Header()
 	log := mlog.With(
-		zap.Int64("collectionID", header.CollectionId),
-		zap.String("collectionName", header.CollectionName),
-		zap.Int64("jobID", header.JobId),
-		zap.String("externalSource", header.ExternalSource),
+		mlog.FieldCollectionID(header.CollectionId),
+		mlog.FieldCollectionName(header.CollectionName),
+		mlog.FieldJobID(header.JobId),
+		mlog.String("externalSource", header.ExternalSource),
 	)
 	log.Info(ctx, "refreshExternalCollectionV2AckCallback received")
 
@@ -61,17 +60,17 @@ func (s *DDLCallbacks) refreshExternalCollectionV2AckCallback(ctx context.Contex
 		// We return nil to allow WAL to proceed without retrying
 		if isNonRetriableRefreshError(err) {
 			log.Warn(ctx, "non-retriable error in refresh job submission, proceeding without retry",
-				zap.Error(err))
+				mlog.Err(err))
 			return nil
 		}
 
 		// Retriable errors: return error to trigger WAL retry
 		log.Error(ctx, "retriable error in refresh job submission, will retry",
-			zap.Error(err))
+			mlog.Err(err))
 		return err
 	}
 
-	log.Info(ctx, "refresh external collection job submitted via DDL callback", zap.Int64("jobID", jobID))
+	log.Info(ctx, "refresh external collection job submitted via DDL callback", mlog.FieldJobID(jobID))
 	return nil
 }
 

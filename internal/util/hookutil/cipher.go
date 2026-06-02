@@ -28,7 +28,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
@@ -203,11 +202,11 @@ func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) (
 					common.EncryptionEnabledKey, property.Value)
 			}
 			defaultEncrypt = value == "true"
-			mlog.Info(context.TODO(), "User explicitly controls encryption", zap.Int64("ezID", ezID), zap.Bool("value", defaultEncrypt))
+			mlog.Info(context.TODO(), "User explicitly controls encryption", mlog.Int64("ezID", ezID), mlog.Bool("value", defaultEncrypt))
 
 		case common.EncryptionRootKeyKey:
 			defaultRootKey = property.Value
-			mlog.Info(context.TODO(), "User explicitly set rootKey", zap.Int64("ezID", ezID), zap.String("value", property.GetValue()))
+			mlog.Info(context.TODO(), "User explicitly set rootKey", mlog.Int64("ezID", ezID), mlog.String("value", property.GetValue()))
 		}
 	}
 
@@ -308,7 +307,7 @@ func GetStoragePluginContext(collProps []*commonpb.KeyValuePair, collectionID in
 	if ez := GetEzByCollProperties(collProps, collectionID); ez != nil {
 		pluginContext, err := GetPluginContext(ez.EzID, ez.CollectionID)
 		if err != nil {
-			mlog.Error(context.TODO(), "failed to get plugin context", zap.Error(err))
+			mlog.Error(context.TODO(), "failed to get plugin context", mlog.Err(err))
 			return nil
 		}
 		return pluginContext
@@ -320,7 +319,7 @@ func GetStoragePluginContext(collProps []*commonpb.KeyValuePair, collectionID in
 func GetReadStoragePluginContext(importEzk string) []*commonpb.KeyValuePair {
 	readContext, err := ImportEZ(importEzk)
 	if err != nil {
-		mlog.Error(context.TODO(), "failed to import ezk", zap.Error(err))
+		mlog.Error(context.TODO(), "failed to import ezk", mlog.Err(err))
 		return []*commonpb.KeyValuePair{}
 	}
 	return readContext
@@ -475,7 +474,7 @@ func registerCallback() {
 func reloadCipherConfig(ctx context.Context, key, oldValue, newValue string) error {
 	cipher := GetCipher()
 	if cipher == nil {
-		mlog.Warn(ctx, "cipher plugin not loaded, skip config reload", zap.String("key", key))
+		mlog.Warn(ctx, "cipher plugin not loaded, skip config reload", mlog.String("key", key))
 		return nil
 	}
 
@@ -483,19 +482,19 @@ func reloadCipherConfig(ctx context.Context, key, oldValue, newValue string) err
 	defer cipherReloadMutex.Unlock()
 
 	mlog.Info(ctx, "reloading cipher plugin config",
-		zap.String("key", key),
-		zap.String("oldValue", oldValue),
-		zap.String("newValue", newValue))
+		mlog.String("key", key),
+		mlog.String("oldValue", oldValue),
+		mlog.String("newValue", newValue))
 
 	initConfigs := buildCipherInitConfig()
 	if err := cipher.Init(initConfigs); err != nil {
 		mlog.Error(ctx, "fail to reload cipher plugin config",
-			zap.String("key", key),
-			zap.Error(err))
+			mlog.String("key", key),
+			mlog.Err(err))
 		return err
 	}
 
-	mlog.Info(ctx, "cipher plugin config reloaded successfully", zap.String("key", key))
+	mlog.Info(ctx, "cipher plugin config reloaded successfully", mlog.String("key", key))
 	return nil
 }
 

@@ -34,7 +34,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/proto"
@@ -254,12 +253,12 @@ func (s *proxyTestServer) startGrpc(ctx context.Context, p *paramtable.GrpcServe
 	mlog.Debug(ctx, "Proxy server about to listen on localhost:0")
 	lis, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
-		mlog.Warn(ctx, "Proxy server failed to listen on", zap.Error(err))
+		mlog.Warn(ctx, "Proxy server failed to listen on", mlog.Err(err))
 		s.ch <- err
 		return
 	}
 	s.lisAddr = lis.Addr().String()
-	mlog.Debug(ctx, "Proxy server listening on", zap.String("addr", s.lisAddr))
+	mlog.Debug(ctx, "Proxy server listening on", mlog.String("addr", s.lisAddr))
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -281,15 +280,15 @@ func (s *proxyTestServer) startGrpc(ctx context.Context, p *paramtable.GrpcServe
 	milvuspb.RegisterMilvusServiceServer(s.grpcServer, s)
 
 	mlog.Debug(ctx, "create Proxy grpc server",
-		zap.Any("enforcement policy", kaep),
-		zap.Any("server parameters", kasp))
+		mlog.Any("enforcement policy", kaep),
+		mlog.Any("server parameters", kasp))
 
 	mlog.Debug(ctx, "waiting for Proxy grpc server to be ready")
 	go funcutil.CheckGrpcReady(ctx, s.ch)
 
 	mlog.Debug(ctx, "Proxy grpc server has been ready, serve grpc requests on listen")
 	if err := s.grpcServer.Serve(lis); err != nil {
-		mlog.Warn(ctx, "failed to serve on Proxy's listener", zap.Error(err))
+		mlog.Warn(ctx, "failed to serve on Proxy's listener", mlog.Err(err))
 		s.ch <- err
 	}
 }
@@ -1546,7 +1545,7 @@ func TestProxy(t *testing.T) {
 		// it can only be seen by streamingnode right away, so we need to check the flush state at streamingnode but not here.
 		// use timetick for GetFlushState in-future but not segment list.
 		time.Sleep(5 * time.Second)
-		mlog.Info(context.TODO(), "flush collection", zap.Int64s("segments to be flushed", segmentIDs))
+		mlog.Info(context.TODO(), "flush collection", mlog.Int64s("segments to be flushed", segmentIDs))
 
 		// waiting for flush operation to be done
 		counter := 0

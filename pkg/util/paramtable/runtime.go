@@ -23,8 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -48,7 +46,7 @@ func Init() {
 		opts := []Option{}
 		if refreshInterval := os.Getenv(MilvusConfigRefreshIntervalEnvKey); refreshInterval != "" {
 			if duration, err := time.ParseDuration(refreshInterval); err == nil {
-				mlog.Info(context.TODO(), "set config refresh interval", zap.Duration("duration", duration))
+				mlog.Info(context.TODO(), "set config refresh interval", mlog.Duration("duration", duration))
 				opts = append(opts, Interval(duration))
 			}
 		}

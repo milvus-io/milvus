@@ -21,7 +21,6 @@ import (
 	"sort"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
@@ -73,17 +72,17 @@ func (b *ScoreBasedBalancer) GetAssignPolicy() assign.AssignPolicy {
 // workload through score calculation.
 func (b *ScoreBasedBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) (segmentPlans []assign.SegmentAssignPlan, channelPlans []assign.ChannelAssignPlan) {
 	log := mlog.With(
-		zap.Int64("collection", replica.GetCollectionID()),
-		zap.Int64("replica id", replica.GetID()),
-		zap.String("replica group", replica.GetResourceGroup()),
+		mlog.Int64("collection", replica.GetCollectionID()),
+		mlog.Int64("replica id", replica.GetID()),
+		mlog.String("replica group", replica.GetResourceGroup()),
 	)
 	br := NewBalanceReport()
 	defer func() {
 		if len(segmentPlans) == 0 && len(channelPlans) == 0 {
 			log.
-				RatedDebug(ctx, rate.Limit(60), "no plan generated, balance report", zap.Stringers("nodesInfo", br.NodesInfo()), zap.Stringers("records", br.detailRecords))
+				RatedDebug(ctx, rate.Limit(60), "no plan generated, balance report", mlog.Stringers("nodesInfo", br.NodesInfo()), mlog.Stringers("records", br.detailRecords))
 		} else {
-			log.Info(ctx, "balance plan generated", zap.Stringers("nodesInfo", br.NodesInfo()), zap.Stringers("report details", br.records))
+			log.Info(ctx, "balance plan generated", mlog.Stringers("nodesInfo", br.NodesInfo()), mlog.Stringers("report details", br.records))
 		}
 	}()
 
@@ -138,9 +137,9 @@ func (b *ScoreBasedBalancer) genSegmentPlan(ctx context.Context, br *balanceRepo
 		return nil
 	}
 	mlog.RatedInfo(ctx, rate.Limit(30), "node segment workload status",
-		zap.Int64("collectionID", replica.GetCollectionID()),
-		zap.Int64("replicaID", replica.GetID()),
-		zap.Stringers("nodes", lo.Values(nodeItemsMap)))
+		mlog.FieldCollectionID(replica.GetCollectionID()),
+		mlog.Int64("replicaID", replica.GetID()),
+		mlog.Stringers("nodes", lo.Values(nodeItemsMap)))
 
 	segmentDist := make(map[int64][]*meta.Segment)
 	// list all segment which could be balanced, and calculate node's score
@@ -214,9 +213,9 @@ func (b *ScoreBasedBalancer) genChannelPlan(ctx context.Context, br *balanceRepo
 		return nil
 	}
 	mlog.RatedInfo(ctx, rate.Limit(30), "node channel workload status",
-		zap.Int64("collectionID", replica.GetCollectionID()),
-		zap.Int64("replicaID", replica.GetID()),
-		zap.Stringers("nodes", lo.Values(nodeItemsMap)))
+		mlog.FieldCollectionID(replica.GetCollectionID()),
+		mlog.Int64("replicaID", replica.GetID()),
+		mlog.Stringers("nodes", lo.Values(nodeItemsMap)))
 
 	channelDist := make(map[int64][]*meta.DmChannel)
 	for _, node := range onlineNodes {

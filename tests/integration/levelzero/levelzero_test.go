@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -76,7 +75,7 @@ func (s *LevelZeroSuite) createCollection(req *milvuspb.CreateCollectionRequest)
 	status, err := s.Cluster.MilvusClient.CreateCollection(context.TODO(), req)
 	s.Require().NoError(err)
 	s.Require().True(merr.Ok(status))
-	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("status", status))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("status", status))
 }
 
 // For PrimaryKey field, startPK will be the start PK of this generation
@@ -117,15 +116,15 @@ func (s *LevelZeroSuite) generateSegment(collection string, numRows int, startPk
 
 	if seal {
 		mlog.Info(context.TODO(), "=========================Start to flush =========================",
-			zap.String("collection", collection),
-			zap.Int("numRows", numRows),
-			zap.Int64("startPK", startPk),
+			mlog.String("collection", collection),
+			mlog.Int("numRows", numRows),
+			mlog.Int64("startPK", startPk),
 		)
 		s.Flush(collection)
 		mlog.Info(context.TODO(), "=========================Finish to generate one segment=========================",
-			zap.String("collection", collection),
-			zap.Int("numRows", numRows),
-			zap.Int64("startPK", startPk),
+			mlog.String("collection", collection),
+			mlog.Int("numRows", numRows),
+			mlog.Int64("startPK", startPk),
 		)
 	}
 }

@@ -22,8 +22,6 @@ import (
 	"sync"
 	"unsafe"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
@@ -70,14 +68,14 @@ var MsgPins = NewPinnedResourceManager("msg-pins")
 func (r *PinnedResourceManager) Pin(obj any, cleanup func()) {
 	key := ptrOf(obj)
 	if key == 0 {
-		mlog.Warn(context.TODO(), "PinnedResourceManager.Pin: nil obj, ignored", zap.String("registry", r.name))
+		mlog.Warn(context.TODO(), "PinnedResourceManager.Pin: nil obj, ignored", mlog.String("registry", r.name))
 		return
 	}
 	r.mu.Lock()
 	if _, existed := r.entries[key]; existed {
 		r.mu.Unlock()
 		mlog.Warn(context.TODO(), "PinnedResourceManager: double-Pin detected — new cleanup ignored",
-			zap.String("registry", r.name))
+			mlog.String("registry", r.name))
 		return
 	}
 	r.entries[key] = cleanup
@@ -87,7 +85,7 @@ func (r *PinnedResourceManager) Pin(obj any, cleanup func()) {
 	// The parameter o is provided by the runtime when the finalizer fires.
 	runtime.SetFinalizer(obj, func(o any) {
 		mlog.Warn(context.TODO(), "PinnedResourceManager: obj GC'd without Release — triggering cleanup",
-			zap.String("registry", r.name))
+			mlog.String("registry", r.name))
 		r.Release(o)
 	})
 }

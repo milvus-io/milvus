@@ -29,7 +29,6 @@ import (
 
 	"github.com/tidwall/gjson"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -154,7 +153,7 @@ func (node *DataNode) SetMixCoordClient(mixc types.MixCoordClient) error {
 
 // Register register datanode to etcd
 func (node *DataNode) Register() error {
-	mlog.Debug(node.ctx, "node begin to register to etcd", zap.String("serverName", node.session.ServerName), zap.Int64("ServerID", node.session.ServerID))
+	mlog.Debug(node.ctx, "node begin to register to etcd", mlog.String("serverName", node.session.ServerName), mlog.Int64("ServerID", node.session.ServerID))
 	node.session.Register()
 
 	metrics.NumNodes.WithLabelValues(fmt.Sprint(node.GetNodeID()), typeutil.DataNodeRole).Inc()
@@ -185,13 +184,13 @@ func (node *DataNode) Init() error {
 		node.registerMetricsRequest()
 		mlog.Info(node.ctx, "DataNode server initializing")
 		if err := node.initSession(); err != nil {
-			mlog.Error(node.ctx, "DataNode server init session failed", zap.Error(err))
+			mlog.Error(node.ctx, "DataNode server init session failed", mlog.Err(err))
 			initError = err
 			return
 		}
 
 		serverID := node.GetNodeID()
-		log := mlog.With(zap.String("role", typeutil.DataNodeRole), zap.Int64("nodeID", serverID))
+		log := mlog.With(mlog.String("role", typeutil.DataNodeRole), mlog.FieldNodeID(serverID))
 		log.Info(node.ctx, "DataNode server init succeeded")
 
 		syncMgr := syncmgr.NewSyncManager(nil)
@@ -206,7 +205,7 @@ func (node *DataNode) Init() error {
 			} else {
 				cm, err := node.storageFactory.NewChunkManager(node.ctx, storageConfig)
 				if err != nil {
-					log.Error(node.ctx, "Init chunk manager for file resource manager failed", zap.Error(err))
+					log.Error(node.ctx, "Init chunk manager for file resource manager failed", mlog.Err(err))
 					initError = err
 					return
 				}
@@ -225,7 +224,7 @@ func (node *DataNode) Init() error {
 		}
 
 		analyzer.InitOptions()
-		log.Info(node.ctx, "init datanode done", zap.String("Address", node.address))
+		log.Info(node.ctx, "init datanode done", mlog.String("Address", node.address))
 	})
 	return initError
 }
@@ -295,7 +294,7 @@ func (node *DataNode) Stop() error {
 		if node.syncMgr != nil {
 			err := node.syncMgr.Close()
 			if err != nil {
-				mlog.Error(node.ctx, "sync manager close failed", zap.Error(err))
+				mlog.Error(node.ctx, "sync manager close failed", mlog.Err(err))
 			}
 		}
 

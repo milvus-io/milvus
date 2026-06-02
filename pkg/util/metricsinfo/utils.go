@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -46,7 +45,7 @@ func MarshalGetMetricsValues[T any](metrics []T, err error) (string, error) {
 
 	bs, err := json.Marshal(metrics)
 	if err != nil {
-		mlog.Warn(context.TODO(), "marshal metrics value failed", zap.Any("metrics", metrics), zap.String("err", err.Error()))
+		mlog.Warn(context.TODO(), "marshal metrics value failed", mlog.Any("metrics", metrics), mlog.String("err", err.Error()))
 		return "", nil
 	}
 	return string(bs), nil

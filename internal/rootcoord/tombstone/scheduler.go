@@ -20,8 +20,6 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -70,7 +68,7 @@ func (s *tombstoneSweeperImpl) background() {
 	}()
 	s.Logger().Info(context.TODO(),
 
-		"tombstone sweeper background start", zap.Duration("interval", s.interval))
+		"tombstone sweeper background start", mlog.Duration("interval", s.interval))
 
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
@@ -82,7 +80,7 @@ func (s *tombstoneSweeperImpl) background() {
 				s.tombstones[tombstone.ID()] = tombstone
 				s.Logger().Info(context.TODO(),
 
-					"tombstone added", zap.String("tombstone", tombstone.ID()))
+					"tombstone added", mlog.String("tombstone", tombstone.ID()))
 			}
 		case <-ticker.C:
 			s.triggerGCTombstone(s.notifier.Context())
@@ -107,7 +105,7 @@ func (s *tombstoneSweeperImpl) triggerGCTombstone(ctx context.Context) {
 		if err != nil {
 			s.Logger().Warn(ctx,
 
-				"fail to confirm if tombstone can be removed", zap.String("tombstone", tombstoneID), zap.Error(err))
+				"fail to confirm if tombstone can be removed", mlog.String("tombstone", tombstoneID), mlog.Err(err))
 			continue
 		}
 		if !confirmed {
@@ -116,13 +114,13 @@ func (s *tombstoneSweeperImpl) triggerGCTombstone(ctx context.Context) {
 		if err := tombstone.Remove(ctx); err != nil {
 			s.Logger().Warn(ctx,
 
-				"fail to remove tombstone", zap.String("tombstone", tombstoneID), zap.Error(err))
+				"fail to remove tombstone", mlog.String("tombstone", tombstoneID), mlog.Err(err))
 			continue
 		}
 		delete(s.tombstones, tombstoneID)
 		s.Logger().Info(ctx,
 
-			"tombstone removed", zap.String("tombstone", tombstoneID))
+			"tombstone removed", mlog.String("tombstone", tombstoneID))
 	}
 }
 

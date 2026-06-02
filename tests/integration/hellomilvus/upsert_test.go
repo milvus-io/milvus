@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -60,14 +59,14 @@ func (s *HelloMilvusSuite) TestUpsertAutoIDFalse() {
 
 	err = merr.Error(createCollectionStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.Err(err))
 	}
 
-	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
-	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	pkFieldData := integration.NewInt64FieldDataWithStart(integration.Int64Field, rowNum, int64(start))
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
@@ -100,7 +99,7 @@ func (s *HelloMilvusSuite) TestUpsertAutoIDFalse() {
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
-		mlog.Info(context.TODO(), "ShowSegments result", zap.String("segment", segment.String()))
+		mlog.Info(context.TODO(), "ShowSegments result", mlog.String("segment", segment.String()))
 	}
 
 	// create index
@@ -113,7 +112,7 @@ func (s *HelloMilvusSuite) TestUpsertAutoIDFalse() {
 	s.NoError(err)
 	err = merr.Error(createIndexStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "createIndexStatus fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "createIndexStatus fail reason", mlog.Err(err))
 	}
 
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
@@ -126,7 +125,7 @@ func (s *HelloMilvusSuite) TestUpsertAutoIDFalse() {
 	s.NoError(err)
 	err = merr.Error(loadStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "LoadCollection fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "LoadCollection fail reason", mlog.Err(err))
 	}
 	s.WaitForLoad(ctx, collectionName)
 	// search
@@ -155,7 +154,7 @@ func (s *HelloMilvusSuite) TestUpsertAutoIDFalse() {
 
 	err = merr.Error(searchResult.GetStatus())
 	if err != nil {
-		mlog.Warn(context.TODO(), "searchResult fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "searchResult fail reason", mlog.Err(err))
 	}
 	s.NoError(err)
 
@@ -192,14 +191,14 @@ func (s *HelloMilvusSuite) TestUpsertAutoIDTrue() {
 
 	err = merr.Error(createCollectionStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.Err(err))
 	}
 
-	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
-	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	pkFieldData := integration.NewInt64FieldDataWithStart(integration.Int64Field, rowNum, 0)
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
@@ -232,7 +231,7 @@ func (s *HelloMilvusSuite) TestUpsertAutoIDTrue() {
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
-		mlog.Info(context.TODO(), "ShowSegments result", zap.String("segment", segment.String()))
+		mlog.Info(context.TODO(), "ShowSegments result", mlog.String("segment", segment.String()))
 	}
 
 	// create index
@@ -245,7 +244,7 @@ func (s *HelloMilvusSuite) TestUpsertAutoIDTrue() {
 	s.NoError(err)
 	err = merr.Error(createIndexStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "createIndexStatus fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "createIndexStatus fail reason", mlog.Err(err))
 	}
 
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
@@ -258,7 +257,7 @@ func (s *HelloMilvusSuite) TestUpsertAutoIDTrue() {
 	s.NoError(err)
 	err = merr.Error(loadStatus)
 	if err != nil {
-		mlog.Warn(context.TODO(), "LoadCollection fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "LoadCollection fail reason", mlog.Err(err))
 	}
 	s.WaitForLoad(ctx, collectionName)
 	// search
@@ -287,7 +286,7 @@ func (s *HelloMilvusSuite) TestUpsertAutoIDTrue() {
 
 	err = merr.Error(searchResult.GetStatus())
 	if err != nil {
-		mlog.Warn(context.TODO(), "searchResult fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "searchResult fail reason", mlog.Err(err))
 	}
 	s.NoError(err)
 

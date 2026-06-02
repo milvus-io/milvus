@@ -20,8 +20,6 @@ import (
 	"context"
 	"path"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
@@ -75,19 +73,19 @@ func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
 	err error,
 ) {
 	if inserts, err = bw.writeInserts(ctx, pack); err != nil {
-		mlog.Error(ctx, "failed to write insert data", zap.Error(err))
+		mlog.Error(ctx, "failed to write insert data", mlog.Err(err))
 		return inserts, deltas, stats, bm25Stats, size, err
 	}
 	if stats, err = bw.writeStats(ctx, pack); err != nil {
-		mlog.Error(ctx, "failed to process stats blob", zap.Error(err))
+		mlog.Error(ctx, "failed to process stats blob", mlog.Err(err))
 		return inserts, deltas, stats, bm25Stats, size, err
 	}
 	if deltas, err = bw.writeDelta(ctx, pack); err != nil {
-		mlog.Error(ctx, "failed to process delta blob", zap.Error(err))
+		mlog.Error(ctx, "failed to process delta blob", mlog.Err(err))
 		return inserts, deltas, stats, bm25Stats, size, err
 	}
 	if bm25Stats, err = bw.writeBM25Stasts(ctx, pack); err != nil {
-		mlog.Error(ctx, "failed to process bm25 stats blob", zap.Error(err))
+		mlog.Error(ctx, "failed to process bm25 stats blob", mlog.Err(err))
 		return inserts, deltas, stats, bm25Stats, size, err
 	}
 

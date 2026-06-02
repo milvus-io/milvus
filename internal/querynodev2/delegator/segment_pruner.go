@@ -8,7 +8,6 @@ import (
 	"strconv"
 
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
@@ -108,7 +107,7 @@ func PruneSegments(ctx context.Context,
 		// 1. parse expr for prune
 		expr, err := ParseExpr(exprPb, NewParseContext(clusteringKeyField.GetFieldID(), clusteringKeyField.GetDataType()))
 		if err != nil {
-			mlog.RatedWarn(ctx, rate.Limit(10), "failed to parse expr for segment prune, fallback to common search/query", zap.Error(err))
+			mlog.RatedWarn(ctx, rate.Limit(10), "failed to parse expr for segment prune, fallback to common search/query", mlog.Err(err))
 			return
 		}
 
@@ -183,10 +182,10 @@ func PruneSegments(ctx context.Context,
 				pruneType,
 			).Set(float64(filterRatio))
 		mlog.Debug(ctx, "Pruned segment for search/query",
-			zap.Int("filtered_segment_num[stats]", len(filteredSegments)),
-			zap.Int("filtered_segment_num[excluded]", realFilteredSegments),
-			zap.Int("total_segment_num", totalSegNum),
-			zap.Float32("filtered_ratio", filterRatio),
+			mlog.Int("filtered_segment_num[stats]", len(filteredSegments)),
+			mlog.Int("filtered_segment_num[excluded]", realFilteredSegments),
+			mlog.Int("total_segment_num", totalSegNum),
+			mlog.Float32("filtered_ratio", filterRatio),
 		)
 	}
 
@@ -196,7 +195,7 @@ func PruneSegments(ctx context.Context,
 		pruneType).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 	mlog.Debug(ctx, "Pruned segment for search/query",
-		zap.Duration("duration", tr.ElapseSpan()))
+		mlog.Duration("duration", tr.ElapseSpan()))
 }
 
 type segmentDisStruct struct {
@@ -241,7 +240,7 @@ func FilterSegmentsByVector(partitionStats *storage.PartitionStatsSnapshot,
 					}
 					// currently, we only support float vector and only one center one segment
 					if disErr != nil {
-						mlog.Error(context.TODO(), "calculate distance error", zap.Error(disErr))
+						mlog.Error(context.TODO(), "calculate distance error", mlog.Err(disErr))
 						neededSegments[segId] = struct{}{}
 						break
 					}
@@ -271,9 +270,9 @@ func FilterSegmentsByVector(partitionStats *storage.PartitionStatsSnapshot,
 		targetSegNum := int(math.Sqrt(float64(segmentCount)) * filterRatio)
 		if targetSegNum > segmentCount {
 			mlog.Debug(context.TODO(), "Warn! targetSegNum is larger or equal than segmentCount, no prune effect at all",
-				zap.Int("targetSegNum", targetSegNum),
-				zap.Int("segmentCount", segmentCount),
-				zap.Float64("filterRatio", filterRatio))
+				mlog.Int("targetSegNum", targetSegNum),
+				mlog.Int("segmentCount", segmentCount),
+				mlog.Float64("filterRatio", filterRatio))
 			targetSegNum = segmentCount
 		}
 		optimizedRowCount := 0
@@ -357,7 +356,7 @@ func PruneSealedSegmentsByPKFilter(
 	plan := &planpb.PlanNode{}
 	if err := proto.Unmarshal(serializedExprPlan, plan); err != nil {
 		mlog.Warn(ctx, "PruneSealedSegmentsByPKFilter: failed to unmarshal plan, skipping",
-			zap.Error(err))
+			mlog.Err(err))
 		return
 	}
 

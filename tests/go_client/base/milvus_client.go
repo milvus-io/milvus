@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
 
@@ -21,9 +20,9 @@ func LoggingUnaryInterceptor() grpc.UnaryClientInterceptor {
 	// Limit debug logging for these methods
 	ratedLogMethods := typeutil.NewSet("GetFlushState", "GetLoadingProgress", "DescribeIndex")
 
-	logWithRateLimit := func(ctx context.Context, methodShortName string, logFunc func(context.Context, string, ...zap.Field),
-		logRateFunc func(context.Context, rate.Limit, string, ...zap.Field),
-		msg string, fields ...zap.Field,
+	logWithRateLimit := func(ctx context.Context, methodShortName string, logFunc func(context.Context, string, ...mlog.Field),
+		logRateFunc func(context.Context, rate.Limit, string, ...mlog.Field),
+		msg string, fields ...mlog.Field,
 	) {
 		if ratedLogMethods.Contain(methodShortName) {
 			logRateFunc(ctx, rate.Limit(10), msg, fields...)
@@ -41,7 +40,7 @@ func LoggingUnaryInterceptor() grpc.UnaryClientInterceptor {
 		marshalWithFallback := func(v interface{}, fallbackMsg string) string {
 			dataJSON, err := json.Marshal(v)
 			if err != nil {
-				mlog.Error(ctx, "Failed to marshal", zap.Error(err))
+				mlog.Error(ctx, "Failed to marshal", mlog.Err(err))
 				return fallbackMsg
 			}
 			dataStr := string(dataJSON)
@@ -52,7 +51,7 @@ func LoggingUnaryInterceptor() grpc.UnaryClientInterceptor {
 		}
 
 		reqStr := marshalWithFallback(req, "could not marshal request")
-		logWithRateLimit(ctx, _methodShortName, mlog.Info, mlog.RatedInfo, "Request", zap.String("method", _methodShortName), zap.String("reqs", reqStr))
+		logWithRateLimit(ctx, _methodShortName, mlog.Info, mlog.RatedInfo, "Request", mlog.String("method", _methodShortName), mlog.String("reqs", reqStr))
 
 		// Invoke the actual method
 		start := time.Now()
@@ -61,8 +60,8 @@ func LoggingUnaryInterceptor() grpc.UnaryClientInterceptor {
 
 		// Marshal response
 		respStr := marshalWithFallback(reply, "could not marshal response")
-		logWithRateLimit(ctx, _methodShortName, mlog.Info, mlog.RatedInfo, "Response", zap.String("method", _methodShortName), zap.String("resp", respStr))
-		logWithRateLimit(ctx, _methodShortName, mlog.Debug, mlog.RatedDebug, "Cost", zap.String("method", _methodShortName), zap.Duration("cost", cost))
+		logWithRateLimit(ctx, _methodShortName, mlog.Info, mlog.RatedInfo, "Response", mlog.String("method", _methodShortName), mlog.String("resp", respStr))
+		logWithRateLimit(ctx, _methodShortName, mlog.Debug, mlog.RatedDebug, "Cost", mlog.String("method", _methodShortName), mlog.Duration("cost", cost))
 
 		return errResp
 	}

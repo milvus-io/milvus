@@ -23,7 +23,6 @@ import (
 	"strconv"
 	"time"
 
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -192,8 +191,8 @@ func getRateLimitConfig(properties map[string]string, configKey string, configVa
 		rate, err := strconv.ParseFloat(v, 64)
 		if err != nil {
 			mlog.Warn(context.TODO(), "invalid configuration for collection dml rate",
-				zap.String("config item", configKey),
-				zap.String("config value", v))
+				mlog.String("config item", configKey),
+				mlog.String("config value", v))
 			return configValue
 		}
 
@@ -435,8 +434,8 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 				jsonData := make(map[string]interface{})
 				if err := json.Unmarshal(defVal, &jsonData); err != nil {
 					mlog.Info(context.TODO(), "invalid default json value, milvus only support json map",
-						zap.ByteString("data", defVal),
-						zap.Error(err),
+						mlog.ByteString("data", defVal),
+						mlog.Err(err),
 					)
 					return merr.WrapErrParameterInvalidErr(err, "invalid default json value, milvus only supports json map")
 				}

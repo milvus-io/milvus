@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -53,7 +52,7 @@ func (s *CompactionSuite) deleteAndFlush(pks []int64, collection string) {
 
 	expr := fmt.Sprintf("%s in [%s]", integration.Int64Field, strings.Join(lo.Map(pks, func(pk int64, _ int) string { return strconv.FormatInt(pk, 10) }), ","))
 	mlog.Info(context.TODO(), "========================delete expr==================",
-		zap.String("expr", expr),
+		mlog.String("expr", expr),
 	)
 	deleteResp, err := s.Cluster.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
 		CollectionName: collection,
@@ -186,7 +185,7 @@ func (s *CompactionSuite) generateSegment(collection string, segmentCount int) [
 	rowNum := 3000
 	pks := []int64{}
 	for i := 0; i < segmentCount; i++ {
-		mlog.Info(context.TODO(), "=========================Data insertion=========================", zap.Any("count", i))
+		mlog.Info(context.TODO(), "=========================Data insertion=========================", mlog.Any("count", i))
 		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, s.dim)
 		hashKeys := integration.GenerateHashKeys(rowNum)
 		insertResult, err := c.MilvusClient.Insert(context.TODO(), &milvuspb.InsertRequest{
@@ -202,7 +201,7 @@ func (s *CompactionSuite) generateSegment(collection string, segmentCount int) [
 
 		pks = append(pks, insertResult.GetIDs().GetIntId().GetData()...)
 
-		mlog.Info(context.TODO(), "=========================Data flush=========================", zap.Any("count", i))
+		mlog.Info(context.TODO(), "=========================Data flush=========================", mlog.Any("count", i))
 		flushResp, err := c.MilvusClient.Flush(context.TODO(), &milvuspb.FlushRequest{
 			CollectionNames: []string{collection},
 		})
@@ -219,7 +218,7 @@ func (s *CompactionSuite) generateSegment(collection string, segmentCount int) [
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		s.WaitForFlush(ctx, segmentIDs, flushTs, "", collection)
-		mlog.Info(context.TODO(), "=========================Data flush done=========================", zap.Any("count", i))
+		mlog.Info(context.TODO(), "=========================Data flush done=========================", mlog.Any("count", i))
 	}
 	mlog.Info(context.TODO(), "=========================Data insertion finished=========================")
 

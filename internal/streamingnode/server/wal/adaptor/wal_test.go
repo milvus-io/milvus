@@ -13,7 +13,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -447,7 +446,7 @@ func (f *testOneWALFramework) testRead(ctx context.Context, w wal.ROWAL) ([]mess
 	cnt := 5
 	for {
 		msg, ok := <-s.Chan()
-		mlog.Info(ctx, "read message", zap.Uint64("msg", msg.TimeTick()))
+		mlog.Info(ctx, "read message", mlog.Uint64("msg", msg.TimeTick()))
 		// make a random slow down to trigger cache expire.
 		if rand.Int31n(10) == 0 && cnt > 0 {
 			cnt--

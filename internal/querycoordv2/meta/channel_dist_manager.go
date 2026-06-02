@@ -355,16 +355,16 @@ func (m *ChannelDistManager) GetShardLeader(channelName string, replica *Replica
 	}
 	if mlog.LevelEnabled(zap.DebugLevel) {
 		logger := mlog.With(
-			zap.String("Scope", "ChannelDistManager"),
-			zap.String("channelName", channelName),
-			zap.Int64("replicaID", replica.GetID()),
+			mlog.String("Scope", "ChannelDistManager"),
+			mlog.String("channelName", channelName),
+			mlog.Int64("replicaID", replica.GetID()),
 		)
 		if candidates != nil {
 			logger.RatedDebug(context.TODO(), rate.Limit(1.0), "final",
-				zap.String("candidates", candidates.GetChannelName()),
-				zap.Int64("candidates version", candidates.Version),
-				zap.Int64("candidates node", candidates.Node),
-				zap.String("reason", setReason),
+				mlog.String("candidates", candidates.GetChannelName()),
+				mlog.Int64("candidates version", candidates.Version),
+				mlog.Int64("candidates node", candidates.Node),
+				mlog.String("reason", setReason),
 			)
 		} else {
 			logger.RatedDebug(context.TODO(), rate.Limit(1.0), "no candidates found")

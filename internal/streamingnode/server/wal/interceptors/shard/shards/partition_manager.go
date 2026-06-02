@@ -5,7 +5,6 @@ import (
 	"math"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
@@ -48,7 +47,7 @@ func newPartitionSegmentManager(
 		fencedAssignTimeTick: fencedAssignTimeTick,
 		metrics:              metrics,
 	}
-	m.SetLogger(logger.With(zap.String("vchannel", vchannel), zap.Int64("collectionID", collectionID), zap.Int64("partitionID", paritionID)))
+	m.SetLogger(logger.With(mlog.FieldVChannel(vchannel), mlog.FieldCollectionID(collectionID), mlog.FieldPartitionID(paritionID)))
 	return m
 }
 

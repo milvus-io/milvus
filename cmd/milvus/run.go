@@ -9,8 +9,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -90,24 +88,24 @@ func (c *run) injectVariablesToEnv() {
 	err = os.Setenv(metricsinfo.GitCommitEnvKey, GitCommit)
 	if err != nil {
 		mlog.Warn(context.TODO(), fmt.Sprintf("failed to inject %s to environment variable", metricsinfo.GitCommitEnvKey),
-			zap.Error(err))
+			mlog.Err(err))
 	}
 
 	err = os.Setenv(metricsinfo.GitBuildTagsEnvKey, getEffectiveVersion())
 	if err != nil {
 		mlog.Warn(context.TODO(), fmt.Sprintf("failed to inject %s to environment variable", metricsinfo.GitBuildTagsEnvKey),
-			zap.Error(err))
+			mlog.Err(err))
 	}
 
 	err = os.Setenv(metricsinfo.MilvusBuildTimeEnvKey, BuildTime)
 	if err != nil {
 		mlog.Warn(context.TODO(), fmt.Sprintf("failed to inject %s to environment variable", metricsinfo.MilvusBuildTimeEnvKey),
-			zap.Error(err))
+			mlog.Err(err))
 	}
 
 	err = os.Setenv(metricsinfo.MilvusUsedGoVersion, GoVersion)
 	if err != nil {
 		mlog.Warn(context.TODO(), fmt.Sprintf("failed to inject %s to environment variable", metricsinfo.MilvusUsedGoVersion),
-			zap.Error(err))
+			mlog.Err(err))
 	}
 }

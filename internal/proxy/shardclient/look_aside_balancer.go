@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -207,13 +206,13 @@ func (b *LookAsideBalancer) calculateScore(node int64, cost *internalpb.CostAggr
 	executeSpeed := cost.ResponseTime - cost.ServiceTime
 	if executingNQ < 0 {
 		mlog.Warn(context.TODO(), "unexpected executing nq value",
-			zap.Int64("executingNQ", executingNQ))
+			mlog.Int64("executingNQ", executingNQ))
 		return executeSpeed
 	}
 
 	if cost.GetTotalNQ() < 0 {
 		mlog.Warn(context.TODO(), "unexpected total nq value",
-			zap.Int64("totalNq", cost.GetTotalNQ()))
+			mlog.Int64("totalNq", cost.GetTotalNQ()))
 		return executeSpeed
 	}
 
@@ -259,20 +258,20 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 						if err != nil {
 							// get client from clientMgr failed, which means this qn isn't a shard leader anymore, skip it's health check
 							b.trySetQueryNodeUnReachable(node, err)
-							mlog.RatedInfo(ctx, rate.Limit(10), "get client failed", zap.Int64("node", node), zap.Error(err))
+							mlog.RatedInfo(ctx, rate.Limit(10), "get client failed", mlog.Int64("node", node), mlog.Err(err))
 							return struct{}{}, nil
 						}
 
 						resp, err := qn.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 						if err != nil {
 							b.trySetQueryNodeUnReachable(node, err)
-							mlog.RatedWarn(ctx, rate.Limit(10), "get component status failed, set node unreachable", zap.Int64("node", node), zap.Error(err))
+							mlog.RatedWarn(ctx, rate.Limit(10), "get component status failed, set node unreachable", mlog.Int64("node", node), mlog.Err(err))
 							return struct{}{}, nil
 						}
 
 						if resp.GetState().GetStateCode() != commonpb.StateCode_Healthy {
 							b.trySetQueryNodeUnReachable(node, merr.ErrServiceUnavailable)
-							mlog.RatedWarn(ctx, rate.Limit(10), "component status unhealthy, set node unreachable", zap.Int64("node", node), zap.Error(err))
+							mlog.RatedWarn(ctx, rate.Limit(10), "component status unhealthy, set node unreachable", mlog.Int64("node", node), mlog.Err(err))
 
 							return struct{}{}, nil
 						}
@@ -299,9 +298,9 @@ func (b *LookAsideBalancer) trySetQueryNodeUnReachable(node int64, err error) {
 	b.failedHeartBeatCounter.Insert(node, failures)
 
 	mlog.Info(context.TODO(), "get component status failed",
-		zap.Int64("node", node),
-		zap.Int64("times", failures.Load()),
-		zap.Error(err))
+		mlog.Int64("node", node),
+		mlog.Int64("times", failures.Load()),
+		mlog.Err(err))
 
 	if failures.Load() < paramtable.Get().ProxyCfg.RetryTimesOnHealthCheck.GetAsInt64() {
 		return
@@ -312,7 +311,7 @@ func (b *LookAsideBalancer) trySetQueryNodeUnReachable(node int64, err error) {
 		paramtable.Get().ProxyCfg.HealthCheckTimeout.GetAsDuration(time.Millisecond).Seconds()
 	if failures.Load() > paramtable.Get().ProxyCfg.RetryTimesOnHealthCheck.GetAsInt64() && float64(failures.Load()) >= limit {
 		mlog.Info(context.TODO(), "the heartbeat failures has reach it's upper limit, remove the query node",
-			zap.Int64("nodeID", node))
+			mlog.FieldNodeID(node))
 		// stop the heartbeat
 		b.metricsMap.Remove(node)
 		b.knownNodeInfos.Remove(node)
@@ -334,6 +333,6 @@ func (b *LookAsideBalancer) trySetQueryNodeReachable(node int64) {
 
 	metrics, ok := b.metricsMap.Get(node)
 	if !ok || metrics.unavailable.CompareAndSwap(true, false) {
-		mlog.Info(context.TODO(), "component recuperated, set node reachable", zap.Int64("node", node))
+		mlog.Info(context.TODO(), "component recuperated, set node reachable", mlog.Int64("node", node))
 	}
 }

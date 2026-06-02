@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
@@ -28,7 +26,7 @@ func main() {
 		f, err := os.Create("configs.csv")
 		defer f.Close()
 		if err != nil {
-			mlog.Error(context.TODO(), "create file failed", zap.Error(err))
+			mlog.Error(context.TODO(), "create file failed", mlog.Err(err))
 			os.Exit(-2)
 		}
 		WriteCsv(f)
@@ -36,7 +34,7 @@ func main() {
 		f, err := os.Create("milvus.yaml")
 		defer f.Close()
 		if err != nil {
-			mlog.Error(context.TODO(), "create file failed", zap.Error(err))
+			mlog.Error(context.TODO(), "create file failed", mlog.Err(err))
 			os.Exit(-2)
 		}
 		WriteYaml(f)

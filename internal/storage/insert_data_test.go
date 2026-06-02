@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -148,7 +147,7 @@ func (s *InsertDataSuite) TestInsertData() {
 			s.Equal(2, field.RowNum())
 
 			err := field.AppendRow(struct{}{})
-			mlog.Warn(context.TODO(), "error", zap.Error(err))
+			mlog.Warn(context.TODO(), "error", mlog.Err(err))
 			s.ErrorIs(err, merr.ErrParameterInvalid)
 		}
 	})

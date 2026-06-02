@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -120,7 +119,7 @@ func (m *bufferManager) memoryCheck() {
 	defer func() {
 		dur := time.Since(startTime)
 		if dur > 30*time.Second {
-			mlog.Warn(context.TODO(), "memory check takes too long", zap.Duration("time", dur))
+			mlog.Warn(context.TODO(), "memory check takes too long", mlog.Duration("time", dur))
 		}
 	}()
 
@@ -152,15 +151,15 @@ func (m *bufferManager) memoryCheck() {
 		memoryWatermark := float64(totalMemory) * paramtable.Get().DataNodeCfg.MemoryForceSyncWatermark.GetAsFloat()
 		if float64(total) < memoryWatermark {
 			mlog.RatedDebug(context.TODO(), rate.Limit(20), "skip force sync because memory level is not high enough",
-				zap.Float64("current_total_memory_usage", logutil.ToMB(float64(total))),
-				zap.Float64("current_memory_watermark", logutil.ToMB(memoryWatermark)))
+				mlog.Float64("current_total_memory_usage", logutil.ToMB(float64(total))),
+				mlog.Float64("current_memory_watermark", logutil.ToMB(memoryWatermark)))
 			return
 		}
 
 		if candidate != nil {
 			candidate.EvictBuffer(GetOldestBufferPolicy(paramtable.Get().DataNodeCfg.MemoryForceSyncSegmentNum.GetAsInt()))
 			mlog.Info(context.TODO(), "notify writebuffer to sync",
-				zap.String("channel", candiChan), zap.Float64("bufferSize(MB)", logutil.ToMB(float64(candiSize))))
+				mlog.String("channel", candiChan), mlog.Float64("bufferSize(MB)", logutil.ToMB(float64(candiSize))))
 		}
 	}
 }
@@ -190,9 +189,9 @@ func (m *bufferManager) CreateNewGrowingSegment(ctx context.Context, channel str
 	buf, loaded := m.buffers.Get(channel)
 	if !loaded {
 		mlog.Warn(ctx, "write buffer not found when create new growing segment",
-			zap.String("channel", channel),
-			zap.Int64("partitionID", partitionID),
-			zap.Int64("segmentID", segmentID))
+			mlog.String("channel", channel),
+			mlog.FieldPartitionID(partitionID),
+			mlog.FieldSegmentID(segmentID))
 		return merr.WrapErrChannelNotFound(channel)
 	}
 	buf.CreateNewGrowingSegment(partitionID, segmentID, nil, schemaVersion)
@@ -204,8 +203,8 @@ func (m *bufferManager) SealSegments(ctx context.Context, channel string, segmen
 	buf, loaded := m.buffers.Get(channel)
 	if !loaded {
 		mlog.Warn(ctx, "write buffer not found when flush segments",
-			zap.String("channel", channel),
-			zap.Int64s("segmentIDs", segmentIDs))
+			mlog.String("channel", channel),
+			mlog.Int64s("segmentIDs", segmentIDs))
 		return merr.WrapErrChannelNotFound(channel)
 	}
 
@@ -217,7 +216,7 @@ func (m *bufferManager) SealAllSegments(ctx context.Context, channel string) err
 	buf, loaded := m.buffers.Get(channel)
 	if !loaded {
 		mlog.Warn(ctx, "write buffer not found",
-			zap.String("channel", channel))
+			mlog.String("channel", channel))
 		return merr.WrapErrChannelNotFound(channel)
 	}
 
@@ -229,8 +228,8 @@ func (m *bufferManager) FlushChannel(ctx context.Context, channel string, flushT
 	buf, loaded := m.buffers.Get(channel)
 	if !loaded {
 		mlog.Warn(ctx, "write buffer not found when flush channel",
-			zap.String("channel", channel),
-			zap.Uint64("flushTs", flushTs))
+			mlog.String("channel", channel),
+			mlog.Uint64("flushTs", flushTs))
 		return merr.WrapErrChannelNotFound(channel)
 	}
 	buf.SetFlushTimestamp(flushTs)
@@ -242,7 +241,7 @@ func (m *bufferManager) BufferData(channel string, insertData []*InsertData, del
 	buf, loaded := m.buffers.Get(channel)
 	if !loaded {
 		mlog.Warn(context.TODO(), "write buffer not found when buffer data",
-			zap.String("channel", channel))
+			mlog.String("channel", channel))
 		return merr.WrapErrChannelNotFound(channel)
 	}
 
@@ -305,7 +304,7 @@ func (m *bufferManager) NotifyCheckpointUpdated(channel string, ts uint64) {
 	}
 	flushTs := buf.GetFlushTimestamp()
 	if flushTs != nonFlushTS && ts > flushTs {
-		mlog.Info(context.TODO(), "reset channel flushTs", zap.String("channel", channel))
+		mlog.Info(context.TODO(), "reset channel flushTs", mlog.String("channel", channel))
 		buf.SetFlushTimestamp(nonFlushTS)
 	}
 }
@@ -315,7 +314,7 @@ func (m *bufferManager) NotifyCheckpointUpdated(channel string, ts uint64) {
 func (m *bufferManager) RemoveChannel(channel string) {
 	buf, loaded := m.buffers.GetAndRemove(channel)
 	if !loaded {
-		mlog.Warn(context.TODO(), "failed to remove channel, channel not maintained in manager", zap.String("channel", channel))
+		mlog.Warn(context.TODO(), "failed to remove channel, channel not maintained in manager", mlog.String("channel", channel))
 		return
 	}
 
@@ -327,7 +326,7 @@ func (m *bufferManager) RemoveChannel(channel string) {
 func (m *bufferManager) DropChannel(channel string) {
 	buf, loaded := m.buffers.GetAndRemove(channel)
 	if !loaded {
-		mlog.Warn(context.TODO(), "failed to drop channel, channel not maintained in manager", zap.String("channel", channel))
+		mlog.Warn(context.TODO(), "failed to drop channel, channel not maintained in manager", mlog.String("channel", channel))
 		return
 	}
 
@@ -337,7 +336,7 @@ func (m *bufferManager) DropChannel(channel string) {
 func (m *bufferManager) DropPartitions(channel string, partitionIDs []int64) {
 	buf, loaded := m.buffers.Get(channel)
 	if !loaded {
-		mlog.Warn(context.TODO(), "failed to drop partition, channel not maintained in manager", zap.String("channel", channel), zap.Int64s("partitionIDs", partitionIDs))
+		mlog.Warn(context.TODO(), "failed to drop partition, channel not maintained in manager", mlog.String("channel", channel), mlog.Int64s("partitionIDs", partitionIDs))
 		return
 	}
 

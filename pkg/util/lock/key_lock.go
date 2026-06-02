@@ -21,7 +21,6 @@ import (
 	"sync"
 
 	pool "github.com/jolestar/go-commons-pool/v2"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
@@ -104,7 +103,7 @@ func (k *KeyLock[K]) Unlock(lockedKey K) {
 	defer k.keyLocksMutex.Unlock()
 	keyLock, ok := k.refLocks[lockedKey]
 	if !ok {
-		mlog.Warn(context.TODO(), "Unlocking non-existing key", zap.Any("key", lockedKey))
+		mlog.Warn(context.TODO(), "Unlocking non-existing key", mlog.Any("key", lockedKey))
 		return
 	}
 	keyLock.unref()
@@ -152,7 +151,7 @@ func (k *KeyLock[K]) tryLockInternal(key K, tryLocker func(mutex *sync.RWMutex) 
 	} else {
 		obj, err := refLockPoolPool.BorrowObject(ctx)
 		if err != nil {
-			mlog.Error(ctx, "BorrowObject failed", zap.Error(err))
+			mlog.Error(ctx, "BorrowObject failed", mlog.Err(err))
 			k.keyLocksMutex.Unlock()
 			return false
 		}
@@ -176,7 +175,7 @@ func (k *KeyLock[K]) RUnlock(lockedKey K) {
 	defer k.keyLocksMutex.Unlock()
 	keyLock, ok := k.refLocks[lockedKey]
 	if !ok {
-		mlog.Warn(context.TODO(), "Unlocking non-existing key", zap.Any("key", lockedKey))
+		mlog.Warn(context.TODO(), "Unlocking non-existing key", mlog.Any("key", lockedKey))
 		return
 	}
 	keyLock.unref()

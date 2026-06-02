@@ -20,8 +20,6 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	grpcdatanode "github.com/milvus-io/milvus/internal/distributed/datanode"
@@ -57,7 +55,7 @@ func (d *DataNode) Prepare() error {
 // Run starts service
 func (d *DataNode) Run() error {
 	if err := d.svr.Run(); err != nil {
-		mlog.Error(d.ctx, "DataNode starts error", zap.Error(err))
+		mlog.Error(d.ctx, "DataNode starts error", mlog.Err(err))
 		return err
 	}
 	mlog.Info(d.ctx, "Datanode successfully started")

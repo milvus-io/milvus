@@ -4,8 +4,6 @@ import (
 	"context"
 	"sync"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -41,7 +39,7 @@ func (w *watcherImpl) execute() {
 	var err error
 	defer func() {
 		// error can be ignored here, so use info level log here.
-		mlog.Info(w.ctx, "assignment watcher close", zap.Error(err))
+		mlog.Info(w.ctx, "assignment watcher close", mlog.Err(err))
 	}()
 
 	// error can be ignored here, error is always cancel by watcher's close as expected.

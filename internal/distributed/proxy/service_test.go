@@ -37,7 +37,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	"golang.org/x/net/http2"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
@@ -158,13 +157,13 @@ func waitForGrpcReady(opt *WaitOption) {
 	case err := <-ch:
 		if err != nil {
 			mlog.Error(context.TODO(), "grpc service not ready",
-				zap.Error(err),
-				zap.Any("option", opt))
+				mlog.Err(err),
+				mlog.Any("option", opt))
 			panic(err)
 		}
 	case <-timer.C:
 		mlog.Error(context.TODO(), "grpc service not ready",
-			zap.Any("option", opt))
+			mlog.Any("option", opt))
 		panic("grpc service not ready")
 	}
 }

@@ -20,8 +20,6 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord"
@@ -56,7 +54,7 @@ func (rc *MixCoord) Prepare() error {
 // Run starts service
 func (rc *MixCoord) Run() error {
 	if err := rc.svr.Run(); err != nil {
-		mlog.Error(rc.ctx, "MixCoord starts error", zap.Error(err))
+		mlog.Error(rc.ctx, "MixCoord starts error", mlog.Err(err))
 		return err
 	}
 	mlog.Info(rc.ctx, "MixCoord successfully started")

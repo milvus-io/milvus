@@ -3,9 +3,9 @@ package rmq
 import (
 	"context"
 
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/client"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -41,7 +41,7 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 		Properties: pb.Properties,
 	})
 	if err != nil {
-		w.Log().RatedWarn(ctx, rate.Limit(1), "send message to rmq failed", zap.Error(err))
+		w.Log().RatedWarn(ctx, rate.Limit(1), "send message to rmq failed", mlog.Err(err))
 		return nil, err
 	}
 	return rmqID(id), nil

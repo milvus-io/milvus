@@ -24,7 +24,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -139,10 +138,10 @@ func (t *L0ImportTask) Clone() Task {
 func (t *L0ImportTask) Execute() []*conc.Future[any] {
 	bufferSize := int(t.GetBufferSize())
 	mlog.Info(t.ctx, "start to import l0", WrapLogFields(t,
-		zap.Int("bufferSize", bufferSize),
-		zap.Int64("taskSlot", t.GetSlots()),
-		zap.Any("files", t.req.GetFiles()),
-		zap.Any("schema", t.GetSchema()),
+		mlog.Int("bufferSize", bufferSize),
+		mlog.Int64("taskSlot", t.GetSlots()),
+		mlog.Any("files", t.req.GetFiles()),
+		mlog.Any("schema", t.GetSchema()),
 	)...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 
@@ -155,7 +154,7 @@ func (t *L0ImportTask) Execute() []*conc.Future[any] {
 				if len(t.req.GetFiles()) == 1 {
 					reason = fmt.Sprintf("error: %v, file: %s", err, t.req.GetFiles()[0].String())
 				}
-				mlog.Warn(t.ctx, "l0 import task execute failed", WrapLogFields(t, zap.Any("file", t.req.GetFiles()), zap.String("err", reason))...)
+				mlog.Warn(t.ctx, "l0 import task execute failed", WrapLogFields(t, mlog.Any("file", t.req.GetFiles()), mlog.String("err", reason))...)
 				t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			}
 		}()
@@ -183,8 +182,8 @@ func (t *L0ImportTask) Execute() []*conc.Future[any] {
 			return err
 		}
 		mlog.Info(t.ctx, "l0 import done", WrapLogFields(t,
-			zap.Strings("l0 prefix", file.GetPaths()),
-			zap.Duration("dur", time.Since(start)))...)
+			mlog.Strings("l0 prefix", file.GetPaths()),
+			mlog.Duration("dur", time.Since(start)))...)
 		return nil
 	}
 
@@ -232,7 +231,7 @@ func (t *L0ImportTask) importL0(reader binlog.L0Reader) error {
 			return err
 		}
 		t.manager.Update(t.GetTaskID(), UpdateSegmentInfo(segmentInfo))
-		mlog.Info(t.ctx, "sync l0 data done", WrapLogFields(t, zap.Any("segmentInfo", segmentInfo))...)
+		mlog.Info(t.ctx, "sync l0 data done", WrapLogFields(t, mlog.Any("segmentInfo", segmentInfo))...)
 	}
 	return nil
 }
@@ -259,7 +258,7 @@ func (t *L0ImportTask) syncDelete(delData []*storage.DeleteData) ([]*conc.Future
 		}
 		future, err := t.syncMgr.SyncDataWithChunkManager(t.ctx, syncTask, t.cm)
 		if err != nil {
-			mlog.Error(t.ctx, "failed to sync l0 delete data", WrapLogFields(t, zap.Error(err))...)
+			mlog.Error(t.ctx, "failed to sync l0 delete data", WrapLogFields(t, mlog.Err(err))...)
 			return nil, nil, err
 		}
 		futures = append(futures, future)

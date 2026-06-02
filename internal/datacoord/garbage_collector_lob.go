@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -149,10 +148,10 @@ func (gc *garbageCollector) recycleUnusedLOBFiles(ctx context.Context) {
 	}
 
 	start := time.Now()
-	logger := mlog.With(zap.String("gcName", "recycleUnusedLOBFiles"), zap.Time("startAt", start))
+	logger := mlog.With(mlog.String("gcName", "recycleUnusedLOBFiles"), mlog.Time("startAt", start))
 	logger.Info(ctx, "start recycleUnusedLOBFiles...")
 	defer func() {
-		logger.Info(ctx, "recycleUnusedLOBFiles done", zap.Duration("timeCost", time.Since(start)))
+		logger.Info(ctx, "recycleUnusedLOBFiles done", mlog.Duration("timeCost", time.Since(start)))
 	}()
 
 	storageConfig := gc.getStorageConfig()
@@ -169,16 +168,16 @@ func (gc *garbageCollector) recycleUnusedLOBFiles(ctx context.Context) {
 	// deleting LOB files that may still be referenced.
 	usedLOBFiles, err := lobCtx.collectUsedLOBFiles(ctx)
 	if err != nil {
-		logger.Warn(ctx, "abort LOB GC: failed to collect used LOB files", zap.Error(err))
+		logger.Warn(ctx, "abort LOB GC: failed to collect used LOB files", mlog.Err(err))
 		return
 	}
 	logger.Info(ctx, "collected used LOB files",
-		zap.Int("usedFileCount", len(usedLOBFiles)),
-		zap.Int("cacheSize", lobCtx.cache.Size()))
+		mlog.Int("usedFileCount", len(usedLOBFiles)),
+		mlog.Int("cacheSize", lobCtx.cache.Size()))
 
 	// Step 2: Scan LOB directories and find orphan files
 	orphanFiles := lobCtx.scanOrphanLOBFiles(ctx, usedLOBFiles)
-	logger.Info(ctx, "found orphan LOB files", zap.Int("orphanCount", len(orphanFiles)))
+	logger.Info(ctx, "found orphan LOB files", mlog.Int("orphanCount", len(orphanFiles)))
 
 	// Step 3: Delete orphan files
 	if len(orphanFiles) > 0 {
@@ -313,9 +312,9 @@ func (lobCtx *lobGCContext) scanOrphanLOBFiles(ctx context.Context, usedFiles ty
 		// check safety window - only delete files older than safety window
 		if time.Since(info.ModifyTime) < safetyWindow {
 			mlog.Debug(ctx, "LOB file within safety window, skip",
-				zap.String("filePath", info.FilePath),
-				zap.Time("modifyTime", info.ModifyTime),
-				zap.Duration("safetyWindow", safetyWindow))
+				mlog.String("filePath", info.FilePath),
+				mlog.Time("modifyTime", info.ModifyTime),
+				mlog.Duration("safetyWindow", safetyWindow))
 			return true
 		}
 
@@ -324,7 +323,7 @@ func (lobCtx *lobGCContext) scanOrphanLOBFiles(ctx context.Context, usedFiles ty
 		return true
 	})
 	if err != nil {
-		mlog.Warn(ctx, "failed to scan LOB files", zap.Error(err))
+		mlog.Warn(ctx, "failed to scan LOB files", mlog.Err(err))
 	}
 
 	return orphanFiles
@@ -332,7 +331,7 @@ func (lobCtx *lobGCContext) scanOrphanLOBFiles(ctx context.Context, usedFiles ty
 
 // removeOrphanLOBFiles deletes orphan LOB files from storage
 func (lobCtx *lobGCContext) removeOrphanLOBFiles(ctx context.Context, orphanFiles []*storage.ChunkObjectInfo) {
-	logger := mlog.With(zap.Int("orphanCount", len(orphanFiles)))
+	logger := mlog.With(mlog.Int("orphanCount", len(orphanFiles)))
 	logger.Info(ctx, "removing orphan LOB files...")
 
 	removed := atomic.NewInt32(0)
@@ -344,12 +343,12 @@ func (lobCtx *lobGCContext) removeOrphanLOBFiles(ctx context.Context, orphanFile
 		future := lobCtx.gc.option.removeObjectPool.Submit(func() (struct{}, error) {
 			if err := lobCtx.gc.option.cli.Remove(ctx, filePath); err != nil {
 				mlog.Warn(ctx, "failed to remove orphan LOB file",
-					zap.String("filePath", filePath),
-					zap.Error(err))
+					mlog.String("filePath", filePath),
+					mlog.Err(err))
 				failed.Inc()
 				return struct{}{}, err
 			}
-			mlog.Info(ctx, "removed orphan LOB file", zap.String("filePath", filePath))
+			mlog.Info(ctx, "removed orphan LOB file", mlog.String("filePath", filePath))
 			removed.Inc()
 			return struct{}{}, nil
 		})
@@ -358,12 +357,12 @@ func (lobCtx *lobGCContext) removeOrphanLOBFiles(ctx context.Context, orphanFile
 
 	// wait for all deletions to complete
 	if err := conc.BlockOnAll(futures...); err != nil {
-		logger.Warn(ctx, "some LOB file deletions failed", zap.Error(err))
+		logger.Warn(ctx, "some LOB file deletions failed", mlog.Err(err))
 	}
 
 	logger.Info(ctx, "orphan LOB files removal completed",
-		zap.Int32("removed", removed.Load()),
-		zap.Int32("failed", failed.Load()))
+		mlog.Int32("removed", removed.Load()),
+		mlog.Int32("failed", failed.Load()))
 }
 
 // isLOBFile checks if a file path is a LOB file

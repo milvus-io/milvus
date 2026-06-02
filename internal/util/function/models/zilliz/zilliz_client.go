@@ -24,7 +24,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/connectivity"
@@ -97,7 +96,7 @@ func (m *clientManager) GetConn(clientConf *clientConfig) (*grpc.ClientConn, err
 		if clientConf.endpoint != m.config.endpoint {
 			err := m.conn.Close()
 			if err != nil {
-				mlog.Warn(context.TODO(), "Close connect failed", zap.String("endpoint", m.config.endpoint), zap.Error(err))
+				mlog.Warn(context.TODO(), "Close connect failed", mlog.String("endpoint", m.config.endpoint), mlog.Err(err))
 			}
 			m.conn = nil
 		} else {

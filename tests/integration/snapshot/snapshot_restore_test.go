@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -103,7 +102,7 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 	})
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, createResp.GetErrorCode())
-	mlog.Info(context.TODO(), "Created collection", zap.String("name", collectionName))
+	mlog.Info(context.TODO(), "Created collection", mlog.String("name", collectionName))
 
 	// Step 2: Create indexes
 	// Vector index (HNSW)
@@ -199,7 +198,7 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 	})
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, insertResult.GetStatus().GetErrorCode())
-	mlog.Info(context.TODO(), "Inserted data", zap.Int("rows", rowNum))
+	mlog.Info(context.TODO(), "Inserted data", mlog.Int("rows", rowNum))
 
 	// Step 4: Flush
 	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
@@ -231,7 +230,7 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 	s.Equal(commonpb.ErrorCode_Success, queryResult.GetStatus().GetErrorCode())
 	initialCount := queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0]
 	s.Equal(int64(rowNum), initialCount)
-	mlog.Info(context.TODO(), "Verified initial data", zap.Int64("count", initialCount))
+	mlog.Info(context.TODO(), "Verified initial data", mlog.Int64("count", initialCount))
 
 	// Step 6: Create snapshot
 	snapshotName := fmt.Sprintf("snap_%s", funcutil.GenRandomStr())
@@ -242,7 +241,7 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 	})
 	err = merr.CheckRPCCall(createSnapResp, err)
 	s.NoError(err)
-	mlog.Info(context.TODO(), "Created snapshot", zap.String("name", snapshotName))
+	mlog.Info(context.TODO(), "Created snapshot", mlog.String("name", snapshotName))
 
 	// Step 7: Insert more data after snapshot (to verify point-in-time restore)
 	extraIDs := make([]int64, 1000)
@@ -293,7 +292,7 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 	err = merr.CheckRPCCall(restoreResp, err)
 	s.NoError(err)
 	jobID := restoreResp.GetJobId()
-	mlog.Info(context.TODO(), "Restore started", zap.Int64("jobID", jobID), zap.String("target", restoredCollName))
+	mlog.Info(context.TODO(), "Restore started", mlog.FieldJobID(jobID), mlog.String("target", restoredCollName))
 
 	// Step 9: Wait for restore to complete
 	s.waitForRestoreComplete(ctx, jobID)
@@ -319,7 +318,7 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 	s.Equal(commonpb.ErrorCode_Success, queryRestored.GetStatus().GetErrorCode())
 	restoredCount := queryRestored.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0]
 	s.Equal(int64(rowNum), restoredCount, "Restored count should match snapshot point-in-time, not include post-snapshot inserts")
-	mlog.Info(context.TODO(), "Verified restored data count", zap.Int64("count", restoredCount))
+	mlog.Info(context.TODO(), "Verified restored data count", mlog.Int64("count", restoredCount))
 
 	// Step 12: Verify JSON path index is functional via filter query
 	categoryQuery, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
@@ -332,7 +331,7 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 	categoryCount := categoryQuery.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0]
 	// "electronics" is categories[0], assigned to i%5==0, so count = rowNum/5
 	s.Equal(int64(rowNum/5), categoryCount, "JSON path index filter should return correct count")
-	mlog.Info(context.TODO(), "Verified JSON path index query", zap.Int64("electronicsCount", categoryCount))
+	mlog.Info(context.TODO(), "Verified JSON path index query", mlog.Int64("electronicsCount", categoryCount))
 
 	// Step 13: Verify search works on restored collection
 	searchVec := make([]float32, dim)
@@ -378,7 +377,7 @@ func (s *SnapshotRestoreSuite) waitForRestoreComplete(ctx context.Context, jobID
 
 		info := resp.GetInfo()
 		state := info.GetState()
-		mlog.Info(ctx, "Restore progress", zap.Int32("progress", info.GetProgress()), zap.String("state", state.String()))
+		mlog.Info(ctx, "Restore progress", mlog.Int32("progress", info.GetProgress()), mlog.String("state", state.String()))
 
 		switch state {
 		case milvuspb.RestoreSnapshotState_RestoreSnapshotCompleted:

@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -165,7 +164,7 @@ func (s *BulkInsertSuite) run() {
 	})
 	s.NoError(err)
 	s.Equal(int32(0), importResp.GetStatus().GetCode())
-	mlog.Info(context.TODO(), "Import result", zap.Any("importResp", importResp))
+	mlog.Info(context.TODO(), "Import result", mlog.Any("importResp", importResp))
 
 	jobID := importResp.GetJobID()
 	err = WaitForImportDone(ctx, c, jobID)
@@ -323,7 +322,7 @@ func (s *BulkInsertSuite) TestZeroRowCount() {
 		Files:          files,
 	})
 	s.NoError(err)
-	mlog.Info(context.TODO(), "Import result", zap.Any("importResp", importResp))
+	mlog.Info(context.TODO(), "Import result", mlog.Any("importResp", importResp))
 
 	jobID := importResp.GetJobID()
 	err = WaitForImportDone(ctx, c, jobID)

@@ -29,7 +29,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -2764,7 +2763,7 @@ func (s *CompactionTriggerSuite) TestSqueezeSmallSegments() {
 
 	s.Equal(1, len(buckets))
 	s.Equal(2, len(buckets[0]))
-	mlog.Info(context.TODO(), "buckets", zap.Any("buckets", buckets))
+	mlog.Info(context.TODO(), "buckets", mlog.Any("buckets", buckets))
 }
 
 func TestCompactionTriggerSuite(t *testing.T) {

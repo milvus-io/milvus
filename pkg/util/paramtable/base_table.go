@@ -25,8 +25,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
@@ -149,14 +147,14 @@ func (bt *BaseTable) init() {
 	var err error
 	bt.mgr, err = config.Init()
 	if err != nil {
-		mlog.Error(context.TODO(), "failed to initialize config manager", zap.Error(err))
+		mlog.Error(context.TODO(), "failed to initialize config manager", mlog.Err(err))
 		panic(err)
 	}
 
 	if !bt.config.skipEnv {
 		err := bt.mgr.AddSource(config.NewEnvSource(formatter))
 		if err != nil {
-			mlog.Warn(context.TODO(), "init baseTable with env failed", zap.Error(err))
+			mlog.Warn(context.TODO(), "init baseTable with env failed", mlog.Err(err))
 			return
 		}
 	}
@@ -176,7 +174,7 @@ func (bt *BaseTable) initConfigsFromLocal() {
 			continue
 		}
 		if err != nil {
-			mlog.Warn(context.TODO(), "failed to check file", zap.String("file", file), zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to check file", mlog.String("file", file), mlog.Err(err))
 			panic(err)
 		}
 		files = append(files, path.Join(bt.config.configDir, file))
@@ -187,7 +185,7 @@ func (bt *BaseTable) initConfigsFromLocal() {
 		RefreshInterval: refreshInterval,
 	}))
 	if err != nil {
-		mlog.Warn(context.TODO(), "init baseTable with file failed", zap.Strings("configFile", bt.config.yamlFiles), zap.Error(err))
+		mlog.Warn(context.TODO(), "init baseTable with file failed", mlog.Strings("configFile", bt.config.yamlFiles), mlog.Err(err))
 		return
 	}
 }
@@ -221,7 +219,7 @@ func (bt *BaseTable) initConfigsFromRemote() {
 
 	s, err := config.NewEtcdSource(info)
 	if err != nil {
-		mlog.Info(context.TODO(), "init with etcd failed", zap.Error(err))
+		mlog.Info(context.TODO(), "init with etcd failed", mlog.Err(err))
 		return
 	}
 	bt.mgr.AddSource(s)

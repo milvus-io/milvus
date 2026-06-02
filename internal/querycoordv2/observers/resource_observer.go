@@ -22,8 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -95,11 +93,11 @@ func (ob *ResourceObserver) checkAndRecoverResourceGroup(ctx context.Context) {
 	rgNames := manager.ListResourceGroups(ctx)
 	enableRGAutoRecover := params.Params.QueryCoordCfg.EnableRGAutoRecover.GetAsBool()
 
-	mlog.Debug(ctx, "start to check resource group", zap.Bool("enableRGAutoRecover", enableRGAutoRecover), zap.Int("resourceGroupNum", len(rgNames)))
+	mlog.Debug(ctx, "start to check resource group", mlog.Bool("enableRGAutoRecover", enableRGAutoRecover), mlog.Int("resourceGroupNum", len(rgNames)))
 
 	// Check if there is any incoming node.
 	if manager.CheckIncomingNodeNum(ctx) > 0 {
-		mlog.Info(ctx, "new incoming node is ready to be assigned...", zap.Int("incomingNodeNum", manager.CheckIncomingNodeNum(ctx)))
+		mlog.Info(ctx, "new incoming node is ready to be assigned...", mlog.Int("incomingNodeNum", manager.CheckIncomingNodeNum(ctx)))
 		manager.AssignPendingIncomingNode(ctx)
 	}
 
@@ -112,20 +110,20 @@ func (ob *ResourceObserver) checkAndRecoverResourceGroup(ctx context.Context) {
 	for _, rgName := range rgNames {
 		if err := manager.MeetRequirement(ctx, rgName); err != nil {
 			mlog.Info(ctx, "found resource group need to be recovered",
-				zap.String("rgName", rgName),
-				zap.String("reason", err.Error()),
+				mlog.String("rgName", rgName),
+				mlog.String("reason", err.Error()),
 			)
 
 			if enableRGAutoRecover {
 				err := manager.AutoRecoverResourceGroup(ctx, rgName)
 				if err != nil {
 					mlog.Warn(ctx, "failed to recover resource group",
-						zap.String("rgName", rgName),
-						zap.Error(err),
+						mlog.String("rgName", rgName),
+						mlog.Err(err),
 					)
 				}
 			}
 		}
 	}
-	mlog.Debug(ctx, "check resource group done", zap.Bool("enableRGAutoRecover", enableRGAutoRecover), zap.Int("resourceGroupNum", len(rgNames)))
+	mlog.Debug(ctx, "check resource group done", mlog.Bool("enableRGAutoRecover", enableRGAutoRecover), mlog.Int("resourceGroupNum", len(rgNames)))
 }

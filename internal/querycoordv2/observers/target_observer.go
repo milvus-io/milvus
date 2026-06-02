@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -207,8 +206,8 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 
 		case req := <-ob.updateChan:
 			mlog.Info(ctx, "manually trigger update target",
-				zap.Int64("collectionID", req.CollectionID),
-				zap.String("opType", req.opType.String()),
+				mlog.FieldCollectionID(req.CollectionID),
+				mlog.String("opType", req.opType.String()),
 			)
 			switch req.opType {
 			case UpdateCollection:
@@ -217,9 +216,9 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 				ob.keylocks.Unlock(req.CollectionID)
 				if err != nil {
 					mlog.Warn(ctx, "failed to manually update next target",
-						zap.Int64("collectionID", req.CollectionID),
-						zap.String("opType", req.opType.String()),
-						zap.Error(err))
+						mlog.FieldCollectionID(req.CollectionID),
+						mlog.String("opType", req.opType.String()),
+						mlog.Err(err))
 					close(req.ReadyNotifier)
 				} else {
 					ob.mut.Lock()
@@ -264,9 +263,9 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 						err := ob.updateNextTarget(ctx, req.CollectionID)
 						if err != nil {
 							mlog.Warn(ctx, "failed to manually update next target",
-								zap.Int64("collectionID", req.CollectionID),
-								zap.String("opType", req.opType.String()),
-								zap.Error(err))
+								mlog.FieldCollectionID(req.CollectionID),
+								mlog.String("opType", req.opType.String()),
+								mlog.Err(err))
 							close(req.ReadyNotifier)
 						} else {
 							ob.mut.Lock()
@@ -279,8 +278,8 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 				}
 			}
 			mlog.Info(ctx, "manually trigger update target done",
-				zap.Int64("collectionID", req.CollectionID),
-				zap.String("opType", req.opType.String()))
+				mlog.FieldCollectionID(req.CollectionID),
+				mlog.String("opType", req.opType.String()))
 		}
 	}
 }
@@ -430,13 +429,13 @@ func (ob *TargetObserver) isNextTargetExpired(collectionID int64) bool {
 }
 
 func (ob *TargetObserver) updateNextTarget(ctx context.Context, collectionID int64) error {
-	log := mlog.With(zap.Int64("collectionID", collectionID))
+	log := mlog.With(mlog.FieldCollectionID(collectionID))
 
 	log.RatedInfo(ctx, rate.Limit(10), "observer trigger update next target")
 	err := ob.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 	if err != nil {
 		log.Warn(ctx, "failed to update next target for collection",
-			zap.Error(err))
+			mlog.Err(err))
 		return err
 	}
 	ob.updateNextTargetTimestamp(collectionID)
@@ -450,8 +449,8 @@ func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
 func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collectionID int64) bool {
 	replicaNum := ob.meta.GetReplicaNumber(ctx, collectionID)
 	log := mlog.With(
-		zap.Int64("collectionID", collectionID),
-		zap.Int32("replicaNum", replicaNum),
+		mlog.FieldCollectionID(collectionID),
+		mlog.Int32("replicaNum", replicaNum),
 	)
 
 	// check channel first
@@ -473,15 +472,15 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 		dataReadyForNextTarget := err == nil
 		if !dataReadyForNextTarget {
 			log.Info(ctx, "check delegator",
-				zap.Int64("collectionID", collectionID),
-				zap.Int64("replicaID", replica.GetID()),
-				zap.Int64("nodeID", channel.Node),
-				zap.String("channelName", channel.GetChannelName()),
-				zap.Int64("targetVersion", channel.View.TargetVersion),
-				zap.Int64("newTargetVersion", newVersion),
-				zap.Bool("isServiceable", channel.IsServiceable()),
-				zap.Int64("version", channel.Version),
-				zap.Error(err),
+				mlog.FieldCollectionID(collectionID),
+				mlog.Int64("replicaID", replica.GetID()),
+				mlog.FieldNodeID(channel.Node),
+				mlog.String("channelName", channel.GetChannelName()),
+				mlog.Int64("targetVersion", channel.View.TargetVersion),
+				mlog.Int64("newTargetVersion", newVersion),
+				mlog.Bool("isServiceable", channel.IsServiceable()),
+				mlog.Int64("version", channel.Version),
+				mlog.Err(err),
 			)
 		}
 		return (newVersion == channel.View.TargetVersion && channel.IsServiceable()) || dataReadyForNextTarget
@@ -532,7 +531,7 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 		updateVersionAction := ob.genSyncAction(ctx, d.View, newVersion)
 		replica := ob.meta.GetByCollectionAndNode(ctx, collectionID, d.Node)
 		if replica == nil {
-			mlog.Warn(ctx, "replica not found", zap.Int64("nodeID", d.Node), zap.Int64("collectionID", collectionID))
+			mlog.Warn(ctx, "replica not found", mlog.FieldNodeID(d.Node), mlog.FieldCollectionID(collectionID))
 			// should not happen, don't update current target if replica not found
 			return false
 		}
@@ -540,14 +539,14 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 		if partitions == nil {
 			partitions, err = utils.GetPartitions(ctx, ob.targetMgr, collectionID)
 			if err != nil {
-				mlog.Warn(ctx, "failed to get partitions", zap.Error(err))
+				mlog.Warn(ctx, "failed to get partitions", mlog.Err(err))
 				return false
 			}
 
 			// Get collection index info
 			indexInfo, err = ob.broker.ListIndexes(ctx, collectionID)
 			if err != nil {
-				mlog.Warn(ctx, "fail to get index info of collection", zap.Error(err))
+				mlog.Warn(ctx, "fail to get index info of collection", mlog.Err(err))
 				return false
 			}
 		}
@@ -565,9 +564,9 @@ func (ob *TargetObserver) syncToDelegator(ctx context.Context, replica *meta.Rep
 	replicaID := replica.GetID()
 
 	log := mlog.With(
-		zap.Int64("leaderID", LeaderView.ID),
-		zap.Int64("collectionID", LeaderView.CollectionID),
-		zap.String("channel", LeaderView.Channel),
+		mlog.Int64("leaderID", LeaderView.ID),
+		mlog.FieldCollectionID(LeaderView.CollectionID),
+		mlog.String("channel", LeaderView.Channel),
 	)
 
 	req := &querypb.SyncDistributionRequest{
@@ -592,12 +591,12 @@ func (ob *TargetObserver) syncToDelegator(ctx context.Context, replica *meta.Rep
 
 	resp, err := ob.cluster.SyncDistribution(ctx, LeaderView.ID, req)
 	if err != nil {
-		log.Warn(ctx, "failed to sync distribution", zap.Error(err))
+		log.Warn(ctx, "failed to sync distribution", mlog.Err(err))
 		return false
 	}
 
 	if resp.ErrorCode != commonpb.ErrorCode_Success {
-		log.Warn(ctx, "failed to sync distribution", zap.String("reason", resp.GetReason()))
+		log.Warn(ctx, "failed to sync distribution", mlog.String("reason", resp.GetReason()))
 		return false
 	}
 
@@ -609,11 +608,11 @@ func (ob *TargetObserver) syncToDelegator(ctx context.Context, replica *meta.Rep
 // 2. if next target is ready to read, we need to sync the next target to delegator to support full search
 func (ob *TargetObserver) genSyncAction(ctx context.Context, leaderView *meta.LeaderView, targetVersion int64) *querypb.SyncAction {
 	mlog.RatedInfo(ctx, rate.Limit(10), "Update readable segment version",
-		zap.Int64("collectionID", leaderView.CollectionID),
-		zap.String("channelName", leaderView.Channel),
-		zap.Int64("nodeID", leaderView.ID),
-		zap.Int64("oldVersion", leaderView.TargetVersion),
-		zap.Int64("newVersion", targetVersion),
+		mlog.FieldCollectionID(leaderView.CollectionID),
+		mlog.String("channelName", leaderView.Channel),
+		mlog.FieldNodeID(leaderView.ID),
+		mlog.Int64("oldVersion", leaderView.TargetVersion),
+		mlog.Int64("newVersion", targetVersion),
 	)
 
 	sealedSegments := ob.targetMgr.GetSealedSegmentsByChannel(ctx, leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
@@ -684,7 +683,7 @@ func (ob *TargetObserver) updateAllReplicasCheckpointMetric(ctx context.Context,
 }
 
 func (ob *TargetObserver) updateCurrentTarget(ctx context.Context, collectionID int64) {
-	mlog.RatedInfo(ctx, rate.Limit(10), "observer trigger update current target", zap.Int64("collectionID", collectionID))
+	mlog.RatedInfo(ctx, rate.Limit(10), "observer trigger update current target", mlog.FieldCollectionID(collectionID))
 	if ob.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID) {
 		ob.mut.Lock()
 		defer ob.mut.Unlock()

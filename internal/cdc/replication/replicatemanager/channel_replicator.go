@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
@@ -77,7 +76,7 @@ func NewChannelReplicator(channel *meta.ReplicateChannel) Replicator {
 }
 
 func (r *channelReplicator) StartReplication() {
-	logger := mlog.With(zap.String("key", r.channel.Key), zap.Int64("modRevision", r.channel.ModRevision))
+	logger := mlog.With(mlog.String("key", r.channel.Key), mlog.Int64("modRevision", r.channel.ModRevision))
 	logger.Info(context.TODO(), "start replicate channel")
 	go func() {
 		defer func() {
@@ -100,7 +99,7 @@ func (r *channelReplicator) StartReplication() {
 			default:
 				err := r.init()
 				if err != nil {
-					logger.Warn(context.TODO(), "initialize replicator failed", zap.Error(err))
+					logger.Warn(context.TODO(), "initialize replicator failed", mlog.Err(err))
 					continue
 				}
 				break INIT_LOOP
@@ -111,7 +110,7 @@ func (r *channelReplicator) StartReplication() {
 }
 
 func (r *channelReplicator) init() error {
-	logger := mlog.With(zap.String("key", r.channel.Key), zap.Int64("modRevision", r.channel.ModRevision))
+	logger := mlog.With(mlog.String("key", r.channel.Key), mlog.Int64("modRevision", r.channel.ModRevision))
 	// init target client
 	if r.targetClient == nil {
 		dialCtx, dialCancel := context.WithTimeout(r.asyncNotifier.Context(), 30*time.Second)
@@ -139,7 +138,7 @@ func (r *channelReplicator) init() error {
 		})
 		r.msgScanner = scanner
 		r.msgChan = ch
-		logger.Info(context.TODO(), "scanner initialized", zap.Any("checkpoint", cp))
+		logger.Info(context.TODO(), "scanner initialized", mlog.Any("checkpoint", cp))
 	}
 	// init replicate stream client
 	if r.streamClient == nil {
@@ -151,7 +150,7 @@ func (r *channelReplicator) init() error {
 
 // startConsumeLoop starts the replicate loop.
 func (r *channelReplicator) startConsumeLoop() {
-	logger := mlog.With(zap.String("key", r.channel.Key), zap.Int64("modRevision", r.channel.ModRevision))
+	logger := mlog.With(mlog.String("key", r.channel.Key), mlog.Int64("modRevision", r.channel.ModRevision))
 	logger.Info(context.TODO(), "start consume loop")
 
 	for {
@@ -180,15 +179,15 @@ func (r *channelReplicator) startConsumeLoop() {
 }
 
 func (r *channelReplicator) getReplicateCheckpoint() (*utility.ReplicateCheckpoint, error) {
-	logger := mlog.With(zap.String("key", r.channel.Key), zap.Int64("modRevision", r.channel.ModRevision))
+	logger := mlog.With(mlog.String("key", r.channel.Key), mlog.Int64("modRevision", r.channel.ModRevision))
 
 	// For pchannel-increasing tasks, the secondary WAL for new pchannels hasn't received the
 	// AlterReplicateConfig yet, so GetReplicateInfo would fail. Use InitializedCheckpoint directly.
 	if r.channel.Value.GetSkipGetReplicateCheckpoint() {
 		initializedCheckpoint := utility.NewReplicateCheckpointFromProto(r.channel.Value.InitializedCheckpoint)
 		logger.Info(context.TODO(), "skip get replicate checkpoint for pchannel-increasing task, use initialized checkpoint",
-			zap.Stringer("messageID", initializedCheckpoint.MessageID),
-			zap.Uint64("timeTick", initializedCheckpoint.TimeTick),
+			mlog.Stringer("messageID", initializedCheckpoint.MessageID),
+			mlog.Uint64("timeTick", initializedCheckpoint.TimeTick),
 		)
 		return initializedCheckpoint, nil
 	}
@@ -210,16 +209,16 @@ func (r *channelReplicator) getReplicateCheckpoint() (*utility.ReplicateCheckpoi
 	if checkpoint == nil || checkpoint.MessageId == nil {
 		initializedCheckpoint := utility.NewReplicateCheckpointFromProto(r.channel.Value.InitializedCheckpoint)
 		logger.Info(context.TODO(), "channel not found in replicate info, will start from the beginning",
-			zap.Stringer("messageID", initializedCheckpoint.MessageID),
-			zap.Uint64("timeTick", initializedCheckpoint.TimeTick),
+			mlog.Stringer("messageID", initializedCheckpoint.MessageID),
+			mlog.Uint64("timeTick", initializedCheckpoint.TimeTick),
 		)
 		return initializedCheckpoint, nil
 	}
 
 	cp := utility.NewReplicateCheckpointFromProto(checkpoint)
 	logger.Info(context.TODO(), "replicate messages from position",
-		zap.Stringer("messageID", cp.MessageID),
-		zap.Uint64("timeTick", cp.TimeTick),
+		mlog.Stringer("messageID", cp.MessageID),
+		mlog.Uint64("timeTick", cp.TimeTick),
 	)
 	return cp, nil
 }

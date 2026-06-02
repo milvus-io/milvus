@@ -12,7 +12,6 @@ import (
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
@@ -118,7 +117,7 @@ func (s *mixCoordImpl) Register() error {
 				mlog.Info(s.ctx, "standby process canceled due to server shutdown")
 				return
 			}
-			mlog.Error(s.ctx, "failed to activate standby server", zap.Error(err))
+			mlog.Error(s.ctx, "failed to activate standby server", mlog.Err(err))
 			panic(err)
 		}
 		afterRegister()
@@ -144,13 +143,13 @@ func (s *mixCoordImpl) activateFunc() error {
 	var err error
 	s.initOnce.Do(func() {
 		if err = s.initInternal(); err != nil {
-			mlog.Error(s.ctx, "mixCoord init failed", zap.Error(err))
+			mlog.Error(s.ctx, "mixCoord init failed", mlog.Err(err))
 		}
 	})
 	if err != nil {
 		return err
 	}
-	mlog.Info(s.ctx, "mixCoord startup success", zap.String("address", s.session.GetAddress()))
+	mlog.Info(s.ctx, "mixCoord startup success", mlog.String("address", s.session.GetAddress()))
 	s.startAndUpdateHealthy()
 	return err
 }
@@ -165,18 +164,18 @@ func (s *mixCoordImpl) initInternal() error {
 	RegisterWALCallbacks(s)
 
 	if err := s.streamingCoord.Start(s.ctx, s.fileResourceObserver); err != nil {
-		mlog.Error(s.ctx, "streamCoord start failed", zap.Error(err))
+		mlog.Error(s.ctx, "streamCoord start failed", mlog.Err(err))
 		return err
 	}
 
 	s.rootcoordServer.SetFileResourceObserver(s.fileResourceObserver)
 	if err := s.rootcoordServer.Init(); err != nil {
-		mlog.Error(s.ctx, "rootCoord init failed", zap.Error(err))
+		mlog.Error(s.ctx, "rootCoord init failed", mlog.Err(err))
 		return err
 	}
 
 	if err := s.rootcoordServer.Start(); err != nil {
-		mlog.Error(s.ctx, "rootCoord start failed", zap.Error(err))
+		mlog.Error(s.ctx, "rootCoord start failed", mlog.Err(err))
 		return err
 	}
 
@@ -186,11 +185,11 @@ func (s *mixCoordImpl) initInternal() error {
 	g.Go(func() error {
 		s.datacoordServer.SetFileResourceObserver(s.fileResourceObserver)
 		if err := s.datacoordServer.Init(); err != nil {
-			mlog.Error(s.ctx, "dataCoord init failed", zap.Error(err))
+			mlog.Error(s.ctx, "dataCoord init failed", mlog.Err(err))
 			return err
 		}
 		if err := s.datacoordServer.Start(); err != nil {
-			mlog.Error(s.ctx, "dataCoord start failed", zap.Error(err))
+			mlog.Error(s.ctx, "dataCoord start failed", mlog.Err(err))
 			return err
 		}
 		return nil
@@ -198,11 +197,11 @@ func (s *mixCoordImpl) initInternal() error {
 	g.Go(func() error {
 		s.queryCoordServer.SetFileResourceObserver(s.fileResourceObserver)
 		if err := s.queryCoordServer.Init(); err != nil {
-			mlog.Error(s.ctx, "queryCoord init failed", zap.Error(err))
+			mlog.Error(s.ctx, "queryCoord init failed", mlog.Err(err))
 			return err
 		}
 		if err := s.queryCoordServer.Start(); err != nil {
-			mlog.Error(s.ctx, "queryCoord start failed", zap.Error(err))
+			mlog.Error(s.ctx, "queryCoord start failed", mlog.Err(err))
 			return err
 		}
 		return nil
@@ -258,7 +257,7 @@ func (s *mixCoordImpl) checkExpiredPOSIXDIR() {
 	var entries []os.DirEntry
 	var err error
 	if entries, err = os.ReadDir(rootCachePath); err != nil {
-		mlog.Warn(s.ctx, "failed to read root cache directory", zap.String("path", rootCachePath), zap.String("error", err.Error()))
+		mlog.Warn(s.ctx, "failed to read root cache directory", mlog.String("path", rootCachePath), mlog.String("error", err.Error()))
 		return
 	}
 	var subdirs []string
@@ -268,19 +267,19 @@ func (s *mixCoordImpl) checkExpiredPOSIXDIR() {
 		if entry.IsDir() {
 			subdirs = append(subdirs, entry.Name())
 			if nodeID, err := strconv.ParseInt(entry.Name(), 10, 64); err != nil {
-				mlog.Warn(s.ctx, "invalid node directory name", zap.String("dirName", entry.Name()), zap.String("error", err.Error()))
+				mlog.Warn(s.ctx, "invalid node directory name", mlog.String("dirName", entry.Name()), mlog.String("error", err.Error()))
 			} else {
 				if !s.IsServerActive(nodeID) {
 					expiredDirPath := filepath.Join(rootCachePath, entry.Name())
 					if err := os.RemoveAll(expiredDirPath); err != nil {
 						mlog.Error(s.ctx, "failed to remove expired node directory",
-							zap.String("path", expiredDirPath),
-							zap.Int64("nodeID", nodeID),
-							zap.String("error", err.Error()))
+							mlog.String("path", expiredDirPath),
+							mlog.FieldNodeID(nodeID),
+							mlog.String("error", err.Error()))
 					} else {
 						mlog.Info(s.ctx, "removed expired node directory",
-							zap.String("path", expiredDirPath),
-							zap.Int64("nodeID", nodeID))
+							mlog.String("path", expiredDirPath),
+							mlog.FieldNodeID(nodeID))
 						removedDirs = append(removedDirs, entry.Name())
 					}
 				}
@@ -289,11 +288,11 @@ func (s *mixCoordImpl) checkExpiredPOSIXDIR() {
 	}
 	if len(removedDirs) > 0 {
 		mlog.Info(s.ctx, "root cache directory cleanup completed",
-			zap.String("path", rootCachePath),
-			zap.Strings("allSubdirectories", subdirs),
-			zap.Strings("removedDirectories", removedDirs),
-			zap.Int("totalDirs", len(subdirs)),
-			zap.Int("removedDirs", len(removedDirs)))
+			mlog.String("path", rootCachePath),
+			mlog.Strings("allSubdirectories", subdirs),
+			mlog.Strings("removedDirectories", removedDirs),
+			mlog.Int("totalDirs", len(subdirs)),
+			mlog.Int("removedDirs", len(removedDirs)))
 	}
 }
 
@@ -344,15 +343,15 @@ func (s *mixCoordImpl) Stop() error {
 	mlog.Info(s.ctx, "graceful stop done")
 
 	if err := s.queryCoordServer.Stop(); err != nil {
-		mlog.Error(s.ctx, "Failed to stop queryCoord", zap.Error(err))
+		mlog.Error(s.ctx, "Failed to stop queryCoord", mlog.Err(err))
 	}
 
 	if err := s.datacoordServer.Stop(); err != nil {
-		mlog.Error(s.ctx, "Failed to stop dataCoord", zap.Error(err))
+		mlog.Error(s.ctx, "Failed to stop dataCoord", mlog.Err(err))
 	}
 
 	if err := s.rootcoordServer.Stop(); err != nil {
-		mlog.Error(s.ctx, "Failed to stop rootCoord", zap.Error(err))
+		mlog.Error(s.ctx, "Failed to stop rootCoord", mlog.Err(err))
 	}
 
 	// All coordinators have stopped. Now stop the session.
@@ -686,7 +685,7 @@ func (s *mixCoordImpl) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.
 // GetComponentStates get states of components
 func (s *mixCoordImpl) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	code := s.GetStateCode()
-	mlog.Debug(ctx, "Mix coord current state", zap.String("StateCode", code.String()))
+	mlog.Debug(ctx, "Mix coord current state", mlog.String("StateCode", code.String()))
 
 	nodeID := common.NotRegisteredID
 	if s.session != nil && s.session.Registered() {
@@ -1296,13 +1295,13 @@ func (s *mixCoordImpl) ClearReadTaskQueue(ctx context.Context, req *internalpb.C
 	}
 
 	mlog.Info(ctx, "cleared cluster read task queues",
-		zap.String("taskType", req.GetTaskType()),
-		zap.String("reason", req.GetReason()),
-		zap.Int64("proxyQueuedCleared", resp.GetProxyQueuedCleared()),
-		zap.Int64("queryNodeQueuedCleared", resp.GetQuerynodeQueuedCleared()),
-		zap.Int64("queuedNQCleared", resp.GetQueuedNqCleared()),
-		zap.Int("results", len(resp.GetResults())),
-		zap.Error(merr.Error(resp.GetStatus())))
+		mlog.String("taskType", req.GetTaskType()),
+		mlog.String("reason", req.GetReason()),
+		mlog.Int64("proxyQueuedCleared", resp.GetProxyQueuedCleared()),
+		mlog.Int64("queryNodeQueuedCleared", resp.GetQuerynodeQueuedCleared()),
+		mlog.Int64("queuedNQCleared", resp.GetQueuedNqCleared()),
+		mlog.Int("results", len(resp.GetResults())),
+		mlog.Err(merr.Error(resp.GetStatus())))
 	return resp, nil
 }
 

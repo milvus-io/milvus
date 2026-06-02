@@ -35,7 +35,6 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -223,7 +222,7 @@ func (s *sealedBm25Stats) Remove() {
 	if s.localDir != "" {
 		err := os.RemoveAll(s.localDir)
 		if err != nil {
-			mlog.Warn(context.TODO(), "remove local bm25 stats failed", zap.Error(err), zap.String("path", s.localDir))
+			mlog.Warn(context.TODO(), "remove local bm25 stats failed", mlog.Err(err), mlog.String("path", s.localDir))
 		}
 	}
 }
@@ -429,8 +428,8 @@ func (o *idfOracle) LoadSealed(ctx context.Context, segmentID int64, loadInfo *q
 		logpaths, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BM25StatsPaths()
 		if err != nil {
 			mlog.Warn(ctx, "load remote segment bm25 stats failed",
-				zap.Int64("segmentID", segmentID),
-				zap.Error(err),
+				mlog.FieldSegmentID(segmentID),
+				mlog.Err(err),
 			)
 			return nil, err
 		}
@@ -446,7 +445,7 @@ func (o *idfOracle) LoadSealed(ctx context.Context, segmentID int64, loadInfo *q
 			// cleanup on failure
 			cleanupPath := path.Join(o.dirPath, fmt.Sprintf("%d", segmentID))
 			if rmErr := os.RemoveAll(cleanupPath); rmErr != nil {
-				mlog.Warn(ctx, "failed to cleanup bm25 stats dir on load failure", zap.Error(rmErr), zap.String("path", cleanupPath))
+				mlog.Warn(ctx, "failed to cleanup bm25 stats dir on load failure", mlog.Err(rmErr), mlog.String("path", cleanupPath))
 			}
 			return nil, err
 		}
@@ -615,7 +614,7 @@ type streamLoadResult struct {
 // streamLoad downloads BM25 stats from remote storage to local disk.
 // When needParse is true, also parses stats using TeeReader.
 func (o *idfOracle) streamLoad(ctx context.Context, segmentID int64, binlogPaths map[int64][]string, cm storage.ChunkManager, needParse bool) (streamLoadResult, error) {
-	log := mlog.With(zap.Int64("segmentID", segmentID))
+	log := mlog.With(mlog.FieldSegmentID(segmentID))
 	startTs := time.Now()
 
 	segDir := path.Join(o.dirPath, fmt.Sprintf("%d", segmentID))
@@ -650,11 +649,11 @@ func (o *idfOracle) streamLoad(ctx context.Context, segmentID int64, binlogPaths
 
 		if needParse {
 			stats[fieldID] = fieldStats
-			log.Info(ctx, "loaded bm25 stats", zap.Duration("time", time.Since(startTs)), zap.Int64("numRow", fieldStats.NumRow()), zap.Int64("fieldID", fieldID))
+			log.Info(ctx, "loaded bm25 stats", mlog.Duration("time", time.Since(startTs)), mlog.Int64("numRow", fieldStats.NumRow()), mlog.FieldFieldID(fieldID))
 		}
 	}
 
-	log.Info(ctx, "stream load bm25 stats done", zap.Duration("time", time.Since(startTs)), zap.Int64("diskSize", totalDiskSize), zap.Bool("parsed", needParse))
+	log.Info(ctx, "stream load bm25 stats done", mlog.Duration("time", time.Since(startTs)), mlog.Int64("diskSize", totalDiskSize), mlog.Bool("parsed", needParse))
 
 	return streamLoadResult{
 		localDir:  segDir,
@@ -857,7 +856,7 @@ func (o *idfOracle) Close() {
 	o.resourceMu.Unlock()
 
 	if err := os.RemoveAll(o.dirPath); err != nil {
-		mlog.Warn(context.TODO(), "failed to remove bm25 stats dir on close", zap.Error(err), zap.String("path", o.dirPath))
+		mlog.Warn(context.TODO(), "failed to remove bm25 stats dir on close", mlog.Err(err), mlog.String("path", o.dirPath))
 	}
 }
 
@@ -886,7 +885,7 @@ func (o *idfOracle) syncloop() {
 		case <-o.syncNotify:
 			err := o.SyncDistribution()
 			if err != nil {
-				mlog.Warn(context.TODO(), "idf oracle sync distribution failed", zap.Error(err))
+				mlog.Warn(context.TODO(), "idf oracle sync distribution failed", mlog.Err(err))
 				time.Sleep(time.Second * 10)
 				o.NotifySync()
 			}
@@ -922,7 +921,7 @@ func (o *idfOracle) SyncDistribution() error {
 			case snapshot.targetVersion:
 				targetMap.Insert(segment.SegmentID)
 				if !o.sealed.Contain(segment.SegmentID) {
-					mlog.Warn(context.TODO(), "idf oracle lack some sealed segment", zap.Int64("segment", segment.SegmentID))
+					mlog.Warn(context.TODO(), "idf oracle lack some sealed segment", mlog.Int64("segment", segment.SegmentID))
 				}
 			case unreadableTargetVersion:
 				reserveMap.Insert(segment.SegmentID)
@@ -1020,7 +1019,7 @@ func (o *idfOracle) SyncDistribution() error {
 	o.Unlock()
 
 	o.syncResource()
-	mlog.Info(context.TODO(), "sync idf distribution finished", zap.Int64("version", snapshot.targetVersion), zap.Int64("numrow", numRow), zap.Int("growing", growingLen), zap.Int("sealed", sealedLen))
+	mlog.Info(context.TODO(), "sync idf distribution finished", mlog.Int64("version", snapshot.targetVersion), mlog.Int64("numrow", numRow), mlog.Int("growing", growingLen), mlog.Int("sealed", sealedLen))
 	return nil
 }
 

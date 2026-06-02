@@ -8,7 +8,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -31,7 +30,7 @@ const (
 // newScheduler create a scheduler with given schedule policy.
 func newScheduler(policy schedulePolicy) Scheduler {
 	maxReadConcurrency := paramtable.Get().QueryNodeCfg.MaxReadConcurrency.GetAsInt()
-	mlog.Info(context.TODO(), "query node use concurrent safe scheduler", zap.Int("max_concurrency", maxReadConcurrency))
+	mlog.Info(context.TODO(), "query node use concurrent safe scheduler", mlog.Int("max_concurrency", maxReadConcurrency))
 	return &scheduler{
 		policy:           policy,
 		receiveChan:      make(chan addTaskReq),
@@ -229,7 +228,7 @@ func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64, n
 	}
 
 	if err := req.task.Context().Err(); err != nil {
-		mlog.Warn(context.TODO(), "task canceled before enqueue", zap.Error(err))
+		mlog.Warn(context.TODO(), "task canceled before enqueue", mlog.Err(err))
 		req.err <- err
 	} else if maxWaitTaskNum > 0 && s.GetWaitingTaskTotal() >= maxWaitTaskNum {
 		err := merr.WrapErrTooManyRequests(
@@ -288,12 +287,12 @@ func (s *scheduler) exec() {
 		}
 		// Skip this task if task is canceled.
 		if err := t.Context().Err(); err != nil {
-			mlog.Warn(context.TODO(), "task canceled before executing", zap.Error(err))
+			mlog.Warn(context.TODO(), "task canceled before executing", mlog.Err(err))
 			t.Done(err)
 			continue
 		}
 		if err := t.PreExecute(); err != nil {
-			mlog.Warn(context.TODO(), "failed to pre-execute task", zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to pre-execute task", mlog.Err(err))
 			t.Done(err)
 			continue
 		}

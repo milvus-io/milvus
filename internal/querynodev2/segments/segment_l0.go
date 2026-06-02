@@ -21,7 +21,6 @@ import (
 	"sync"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -54,10 +53,10 @@ func NewL0Segment(collection *Collection,
 	*/
 
 	mlog.Info(context.TODO(), "create L0 segment",
-		zap.Int64("collectionID", loadInfo.GetCollectionID()),
-		zap.Int64("partitionID", loadInfo.GetPartitionID()),
-		zap.Int64("segmentID", loadInfo.GetSegmentID()),
-		zap.String("segmentType", segmentType.String()))
+		mlog.FieldCollectionID(loadInfo.GetCollectionID()),
+		mlog.FieldPartitionID(loadInfo.GetPartitionID()),
+		mlog.FieldSegmentID(loadInfo.GetSegmentID()),
+		mlog.String("segmentType", segmentType.String()))
 
 	base, err := newBaseSegment(collection, segmentType, version, loadInfo)
 	if err != nil {
@@ -204,10 +203,10 @@ func (s *L0Segment) Release(ctx context.Context, opts ...releaseOption) {
 	s.pks = nil
 	s.tss = nil
 	mlog.Info(ctx, "release L0 segment from memory",
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("partitionID", s.Partition()),
-		zap.Int64("segmentID", s.ID()),
-		zap.String("segmentType", s.segmentType.String()),
+		mlog.FieldCollectionID(s.Collection()),
+		mlog.FieldPartitionID(s.Partition()),
+		mlog.FieldSegmentID(s.ID()),
+		mlog.String("segmentType", s.segmentType.String()),
 	)
 }
 

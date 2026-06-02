@@ -19,8 +19,6 @@ package job
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -53,14 +51,14 @@ func NewUndoList(ctx context.Context, meta *meta.Meta,
 
 func (u *UndoList) RollBack() {
 	log := mlog.With(
-		zap.Int64("collectionID", u.CollectionID),
-		zap.Int64s("partitionIDs", u.LackPartitions),
+		mlog.FieldCollectionID(u.CollectionID),
+		mlog.Int64s("partitionIDs", u.LackPartitions),
 	)
 
 	log.Warn(u.ctx, "rollback failed loading request...",
-		zap.Bool("isNewCollection", u.IsNewCollection),
-		zap.Bool("isReplicaCreated", u.IsReplicaCreated),
-		zap.Bool("isTargetUpdated", u.IsTargetUpdated),
+		mlog.Bool("isNewCollection", u.IsNewCollection),
+		mlog.Bool("isReplicaCreated", u.IsReplicaCreated),
+		mlog.Bool("isTargetUpdated", u.IsTargetUpdated),
 	)
 
 	var err error
@@ -70,7 +68,7 @@ func (u *UndoList) RollBack() {
 		err = u.meta.RemovePartition(u.ctx, u.CollectionID, u.LackPartitions...)
 	}
 	if err != nil {
-		log.Warn(u.ctx, "failed to rollback collection from meta", zap.Error(err))
+		log.Warn(u.ctx, "failed to rollback collection from meta", mlog.Err(err))
 	}
 
 	if u.IsTargetUpdated {

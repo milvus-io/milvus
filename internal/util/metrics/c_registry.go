@@ -40,7 +40,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
-	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 
@@ -150,7 +149,7 @@ func (r *CRegistry) Gather() (res []*dto.MetricFamily, err error) {
 
 	out, err := parser.TextToMetricFamilies(strings.NewReader(metricsStr))
 	if err != nil {
-		mlog.Error(context.TODO(), "fail to parse knowhere prometheus metrics", zap.Error(err))
+		mlog.Error(context.TODO(), "fail to parse knowhere prometheus metrics", mlog.Err(err))
 		return res, err
 	}
 
@@ -160,7 +159,7 @@ func (r *CRegistry) Gather() (res []*dto.MetricFamily, err error) {
 
 	out1, err := parser.TextToMetricFamilies(strings.NewReader(metricsStr))
 	if err != nil {
-		mlog.Error(context.TODO(), "fail to parse storage prometheus metrics", zap.Error(err))
+		mlog.Error(context.TODO(), "fail to parse storage prometheus metrics", mlog.Err(err))
 		return res, err
 	}
 
@@ -185,7 +184,7 @@ func gatherJemallocMetrics() map[string]*dto.MetricFamily {
 		cached := jemallocMetricsCache.metrics
 		jemallocMetricsCache.RUnlock()
 		mlog.Debug(context.TODO(), "using cached jemalloc metrics",
-			zap.Duration("age", time.Since(jemallocMetricsCache.timestamp)))
+			mlog.Duration("age", time.Since(jemallocMetricsCache.timestamp)))
 		return cached
 	}
 	jemallocMetricsCache.RUnlock()
@@ -247,7 +246,7 @@ func gatherJemallocMetrics() map[string]*dto.MetricFamily {
 	jemallocMetricsCache.Unlock()
 
 	mlog.Debug(context.TODO(), "refreshed jemalloc metrics cache",
-		zap.Int("num_metrics", len(result)))
+		mlog.Int("num_metrics", len(result)))
 
 	return result
 }

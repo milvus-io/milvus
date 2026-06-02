@@ -5,8 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -48,7 +46,7 @@ func (s *timeTickSyncInspectorImpl) MustGetOperator(pChannelInfo types.PChannelI
 
 // RegisterSyncOperator registers a sync operator.
 func (s *timeTickSyncInspectorImpl) RegisterSyncOperator(operator TimeTickSyncOperator) {
-	mlog.Info(context.TODO(), "RegisterSyncOperator", zap.String("channel", operator.Channel().Name))
+	mlog.Info(context.TODO(), "RegisterSyncOperator", mlog.String("channel", operator.Channel().Name))
 	_, loaded := s.operators.GetOrInsert(operator.Channel().Name, operator)
 	if loaded {
 		panic("sync operator already exists, critical bug in code")
@@ -57,7 +55,7 @@ func (s *timeTickSyncInspectorImpl) RegisterSyncOperator(operator TimeTickSyncOp
 
 // UnregisterSyncOperator unregisters a sync operator.
 func (s *timeTickSyncInspectorImpl) UnregisterSyncOperator(operator TimeTickSyncOperator) {
-	mlog.Info(context.TODO(), "UnregisterSyncOperator", zap.String("channel", operator.Channel().Name))
+	mlog.Info(context.TODO(), "UnregisterSyncOperator", mlog.String("channel", operator.Channel().Name))
 	_, loaded := s.operators.GetAndRemove(operator.Channel().Name)
 	if !loaded {
 		panic("sync operator not found, critical bug in code")

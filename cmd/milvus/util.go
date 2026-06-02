@@ -17,7 +17,6 @@ import (
 	"github.com/gofrs/flock"
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/cmd/roles"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -226,7 +225,7 @@ func CleanSession(metaPath string, etcdEndpoints []string, sessionSuffix []strin
 	for _, key := range keys {
 		_, _ = etcdCli.Delete(ctx, key)
 	}
-	mlog.Info(ctx, "clean sessions from etcd", zap.Any("keys", keys))
+	mlog.Info(ctx, "clean sessions from etcd", mlog.Any("keys", keys))
 	return nil
 }
 
@@ -253,26 +252,26 @@ func addActiveKeySuffix(ctx context.Context, client *clientv3.Client, sessionPat
 			res := strings.Split(suffix, "-")
 			if len(res) != 2 {
 				// skip illegal keys
-				mlog.Warn(ctx, "skip illegal key", zap.String("suffix", suffix))
+				mlog.Warn(ctx, "skip illegal key", mlog.String("suffix", suffix))
 				continue
 			}
 
 			serverType := res[0]
 			targetServerID, err := strconv.ParseInt(res[1], 10, 64)
 			if err != nil {
-				mlog.Warn(ctx, "get server id failed from key", zap.String("suffix", suffix), zap.Error(err))
+				mlog.Warn(ctx, "get server id failed from key", mlog.String("suffix", suffix), mlog.Err(err))
 				continue
 			}
 
 			key := path.Join(sessionPathPrefix, serverType)
 			serverID, err := getServerID(ctx, client, key)
 			if err != nil {
-				mlog.Warn(ctx, "get server id failed from key", zap.String("suffix", suffix), zap.Error(err))
+				mlog.Warn(ctx, "get server id failed from key", mlog.String("suffix", suffix), mlog.Err(err))
 				continue
 			}
 
 			if serverID == targetServerID {
-				mlog.Info(ctx, "add active serverID key", zap.String("suffix", suffix), zap.String("key", key))
+				mlog.Info(ctx, "add active serverID key", mlog.String("suffix", suffix), mlog.String("key", key))
 				suffixSet[serverType] = struct{}{}
 			}
 		}

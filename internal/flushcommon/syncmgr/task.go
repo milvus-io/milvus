@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -94,11 +93,11 @@ type SyncTask struct {
 
 func (t *SyncTask) getLogger() *mlog.Logger {
 	return mlog.With(
-		zap.Int64("collectionID", t.collectionID),
-		zap.Int64("partitionID", t.partitionID),
-		zap.Int64("segmentID", t.segmentID),
-		zap.String("channel", t.channelName),
-		zap.String("level", t.level.String()),
+		mlog.FieldCollectionID(t.collectionID),
+		mlog.FieldPartitionID(t.partitionID),
+		mlog.FieldSegmentID(t.segmentID),
+		mlog.String("channel", t.channelName),
+		mlog.String("level", t.level.String()),
 	)
 }
 
@@ -154,7 +153,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	}
 
 	if err != nil {
-		logger.Warn(ctx, "failed to write sync data with storage v2 format", zap.Error(err))
+		logger.Warn(ctx, "failed to write sync data with storage v2 format", mlog.Err(err))
 		return err
 	}
 
@@ -178,7 +177,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	if t.metaWriter != nil {
 		err = t.writeMeta(ctx)
 		if err != nil {
-			logger.Warn(ctx, "failed to save serialized data into storage", zap.Error(err))
+			logger.Warn(ctx, "failed to save serialized data into storage", mlog.Err(err))
 			return err
 		}
 	}
@@ -196,11 +195,11 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 
 	if t.pack.isDrop {
 		t.metacache.RemoveSegments(metacache.WithSegmentIDs(t.segmentID))
-		logger.Info(ctx, "segment removed", zap.Int64("segmentID", t.segmentID), zap.String("channel", t.channelName))
+		logger.Info(ctx, "segment removed", mlog.FieldSegmentID(t.segmentID), mlog.String("channel", t.channelName))
 	}
 
 	t.execTime = t.tr.ElapseSpan()
-	logger.Info(ctx, "task done", zap.Int64("flushedSize", t.flushedSize), zap.Duration("timeTaken", t.execTime))
+	logger.Info(ctx, "task done", mlog.Int64("flushedSize", t.flushedSize), mlog.Duration("timeTaken", t.execTime))
 
 	if !t.pack.isFlush {
 		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.SuccessLabel, t.level.String()).Inc()

@@ -15,7 +15,6 @@ import (
 	"runtime"
 	"unsafe"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
 
@@ -111,9 +110,9 @@ func CreateIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo)
 	buildIndexInfoBlob, err := proto.Marshal(buildIndexInfo)
 	if err != nil {
 		mlog.Warn(ctx, "marshal buildIndexInfo failed",
-			zap.String("clusterID", buildIndexInfo.GetClusterID()),
-			zap.Int64("buildID", buildIndexInfo.GetBuildID()),
-			zap.Error(err))
+			mlog.String("clusterID", buildIndexInfo.GetClusterID()),
+			mlog.FieldBuildID(buildIndexInfo.GetBuildID()),
+			mlog.Err(err))
 		return nil, err
 	}
 	var indexPtr C.CIndex
@@ -147,9 +146,9 @@ func CreateJSONKeyStats(ctx context.Context, buildIndexInfo *indexcgopb.BuildInd
 	buildIndexInfoBlob, err := proto.Marshal(buildIndexInfo)
 	if err != nil {
 		mlog.Warn(ctx, "marshal buildIndexInfo failed",
-			zap.String("clusterID", buildIndexInfo.GetClusterID()),
-			zap.Int64("buildID", buildIndexInfo.GetBuildID()),
-			zap.Error(err))
+			mlog.String("clusterID", buildIndexInfo.GetClusterID()),
+			mlog.FieldBuildID(buildIndexInfo.GetBuildID()),
+			mlog.Err(err))
 		return nil, err
 	}
 	result := C.CreateProtoLayout()

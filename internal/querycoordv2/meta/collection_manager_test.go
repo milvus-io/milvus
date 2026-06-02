@@ -25,7 +25,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -405,7 +404,7 @@ func (suite *CollectionManagerSuite) TestRecoverLoadingCollection() {
 
 	// test recover loading collection reach limit
 	for i := 0; i < int(paramtable.Get().QueryCoordCfg.CollectionRecoverTimesLimit.GetAsInt32()); i++ {
-		mlog.Info(suite.ctx, "stupid", zap.Int("count", i))
+		mlog.Info(suite.ctx, "stupid", mlog.Int("count", i))
 		suite.clearMemory()
 		err = mgr.Recover(ctx, suite.broker)
 		suite.NoError(err)

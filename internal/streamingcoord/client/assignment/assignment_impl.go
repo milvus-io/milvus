@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
@@ -220,7 +219,7 @@ func (c *AssignmentServiceImpl) getAssignmentDiscoverOrWait(ctx context.Context)
 func (c *AssignmentServiceImpl) resumeLoop() (err error) {
 	defer func() {
 		if err != nil {
-			c.logger.Warn(c.ctx, "stop resuming", zap.Error(err))
+			c.logger.Warn(c.ctx, "stop resuming", mlog.Err(err))
 		} else {
 			c.logger.Info(c.ctx, "stop resuming")
 		}
@@ -271,7 +270,7 @@ func (c *AssignmentServiceImpl) createNewAssignmentDiscoverClient() (*assignment
 			return nil, err
 		}
 		if err != nil {
-			c.logger.Warn(c.ctx, "create a assignment discover stream failed", zap.Error(err))
+			c.logger.Warn(c.ctx, "create a assignment discover stream failed", mlog.Err(err))
 			// TODO: backoff
 			time.Sleep(50 * time.Millisecond)
 			continue

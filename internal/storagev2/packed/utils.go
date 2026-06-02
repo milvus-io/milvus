@@ -18,8 +18,6 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -207,11 +205,11 @@ func FetchFragmentsFromExternalSourceWithRange(
 	// indexed views agree.
 	fileInfos, skipped := NormalizeFileInfos(fileInfos, format)
 	mlog.Info(ctx, "Read file list from explore manifest",
-		zap.String("manifestPath", exploreManifestPath),
-		zap.Int("rawFileCount", rawCount),
-		zap.Int("normalizedFileCount", len(fileInfos)),
-		zap.Int("skippedNonFormat", skipped),
-		zap.Duration("readDuration", time.Since(exploreStart)))
+		mlog.String("manifestPath", exploreManifestPath),
+		mlog.Int("rawFileCount", rawCount),
+		mlog.Int("normalizedFileCount", len(fileInfos)),
+		mlog.Int("skippedNonFormat", skipped),
+		mlog.Duration("readDuration", time.Since(exploreStart)))
 
 	// Slice to assigned range.
 	if fileIndexEnd > int64(len(fileInfos)) {
@@ -231,8 +229,8 @@ func FetchFragmentsFromExternalSourceWithRange(
 		return nil, err
 	}
 	mlog.Info(ctx, "GetFileInfo phase completed",
-		zap.Int("totalFiles", len(fileInfos)),
-		zap.Duration("getFileInfoDuration", time.Since(getFileInfoStart)))
+		mlog.Int("totalFiles", len(fileInfos)),
+		mlog.Duration("getFileInfoDuration", time.Since(getFileInfoStart)))
 
 	rowLimit := opts.rowLimitOrDefault()
 	fragmentIDGenerator := NewFragmentIDGenerator(0)
@@ -245,10 +243,10 @@ func FetchFragmentsFromExternalSourceWithRange(
 	}
 
 	mlog.Info(ctx, "Created fragments from file range",
-		zap.Int("totalFragments", len(fragments)),
-		zap.Int("fileCount", len(fileInfos)),
-		zap.Int64("fileIndexBegin", fileIndexBegin),
-		zap.Int64("fileIndexEnd", fileIndexEnd))
+		mlog.Int("totalFragments", len(fragments)),
+		mlog.Int("fileCount", len(fileInfos)),
+		mlog.Int64("fileIndexBegin", fileIndexBegin),
+		mlog.Int64("fileIndexEnd", fileIndexEnd))
 
 	return fragments, nil
 }
@@ -276,8 +274,8 @@ func BuildCurrentSegmentFragments(
 				continue
 			}
 			mlog.Warn(context.TODO(), "manifest returned 0 fragments, using virtual fragment",
-				zap.Int64("segmentID", seg.GetID()),
-				zap.String("manifestPath", seg.GetManifestPath()))
+				mlog.FieldSegmentID(seg.GetID()),
+				mlog.String("manifestPath", seg.GetManifestPath()))
 		}
 
 		// Virtual fragment for segments without manifest (initial state)

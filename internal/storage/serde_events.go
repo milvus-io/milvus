@@ -29,7 +29,6 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -342,11 +341,11 @@ func (bsw *BinlogStreamWriter) Finalize() (*Blob, error) {
 			return nil, err
 		}
 		mlog.Debug(context.TODO(), "Binlog stream writer encrypted cipher text",
-			zap.Int64("collectionID", bsw.collectionID),
-			zap.Int64("segmentID", bsw.segmentID),
-			zap.Int64("fieldID", bsw.fieldSchema.FieldID),
-			zap.Int("plain size", tmpBuf.Len()),
-			zap.Int("cipher size", len(cipherText)),
+			mlog.FieldCollectionID(bsw.collectionID),
+			mlog.FieldSegmentID(bsw.segmentID),
+			mlog.FieldFieldID(bsw.fieldSchema.FieldID),
+			mlog.Int("plain size", tmpBuf.Len()),
+			mlog.Int("cipher size", len(cipherText)),
 		)
 		if err := binary.Write(&b, common.Endian, cipherText); err != nil {
 			return nil, err

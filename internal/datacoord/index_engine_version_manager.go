@@ -6,7 +6,6 @@ import (
 
 	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -142,13 +141,13 @@ func (m *versionManagerImpl) GetClusterMinIndexStorePathVersion() indexpb.IndexS
 }
 
 func (m *versionManagerImpl) addOrUpdate(session *sessionutil.Session) {
-	mlog.Info(context.TODO(), "addOrUpdate version", zap.Int64("nodeId", session.ServerID),
-		zap.String("sessionVersion", session.Version.String()),
-		zap.Int32("minimal", session.IndexEngineVersion.MinimalIndexVersion),
-		zap.Int32("current", session.IndexEngineVersion.CurrentIndexVersion),
-		zap.Int32("maximum", session.IndexEngineVersion.MaximumIndexVersion),
-		zap.Int32("currentScalar", session.ScalarIndexEngineVersion.CurrentIndexVersion),
-		zap.Int32("maximumScalar", session.ScalarIndexEngineVersion.MaximumIndexVersion))
+	mlog.Info(context.TODO(), "addOrUpdate version", mlog.Int64("nodeId", session.ServerID),
+		mlog.String("sessionVersion", session.Version.String()),
+		mlog.Int32("minimal", session.IndexEngineVersion.MinimalIndexVersion),
+		mlog.Int32("current", session.IndexEngineVersion.CurrentIndexVersion),
+		mlog.Int32("maximum", session.IndexEngineVersion.MaximumIndexVersion),
+		mlog.Int32("currentScalar", session.ScalarIndexEngineVersion.CurrentIndexVersion),
+		mlog.Int32("maximumScalar", session.ScalarIndexEngineVersion.MaximumIndexVersion))
 	m.versions[session.ServerID] = session.IndexEngineVersion
 	m.scalarIndexVersions[session.ServerID] = session.ScalarIndexEngineVersion
 	m.indexNonEncoding[session.ServerID] = session.IndexNonEncoding
@@ -286,12 +285,12 @@ func getMaximumVersionFrom(versions map[int64]sessionutil.IndexEngineVersion) in
 func clampVersion(v, minV, maxV int32, name string) int32 {
 	if v < minV {
 		mlog.RatedWarn(context.TODO(), rate.Limit(60), name+" below cluster minimum, clamping",
-			zap.Int32("target", v), zap.Int32("minimum", minV))
+			mlog.Int32("target", v), mlog.Int32("minimum", minV))
 		v = minV
 	}
 	if v > maxV {
 		mlog.RatedWarn(context.TODO(), rate.Limit(60), name+" exceeds cluster maximum, clamping",
-			zap.Int32("target", v), zap.Int32("maximum", maxV))
+			mlog.Int32("target", v), mlog.Int32("maximum", maxV))
 		v = maxV
 	}
 	return v

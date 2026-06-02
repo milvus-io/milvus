@@ -22,6 +22,9 @@ func Strings(key string, val []string) Field      { return zap.Strings(key, val)
 func ByteString(key string, val []byte) Field     { return zap.ByteString(key, val) }
 func ByteStrings(key string, val [][]byte) Field  { return zap.ByteStrings(key, val) }
 func Stringer(key string, val fmt.Stringer) Field { return zap.Stringer(key, val) }
+func Stringers[T fmt.Stringer](key string, values []T) Field {
+	return zap.Stringers(key, values)
+}
 
 // Bool types
 func Bool(key string, val bool) Field    { return zap.Bool(key, val) }

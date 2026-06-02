@@ -30,7 +30,6 @@ import (
 	"sync"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/eventlog"
@@ -53,10 +52,10 @@ type SegmentAction func(segment Segment) bool
 func IncreaseVersion(version int64) SegmentAction {
 	return func(segment Segment) bool {
 		log := mlog.With(
-			zap.Int64("segmentID", segment.ID()),
-			zap.String("type", segment.Type().String()),
-			zap.Int64("segmentVersion", segment.Version()),
-			zap.Int64("updateVersion", version),
+			mlog.FieldSegmentID(segment.ID()),
+			mlog.String("type", segment.Type().String()),
+			mlog.Int64("segmentVersion", segment.Version()),
+			mlog.Int64("updateVersion", version),
 		)
 		for oldVersion := segment.Version(); oldVersion < version; {
 			if segment.CASVersion(oldVersion, version) {
@@ -370,8 +369,8 @@ func (mgr *segmentManager) SubLoadedBinlogSize(size int64) {
 		if mgr.loadedBinlogSize.CompareAndSwap(current, newVal) {
 			if current < size {
 				mlog.Warn(context.TODO(), "Loaded binlog size subtraction exceeds current value, clamped to 0",
-					zap.Int64("current", current),
-					zap.Int64("subtracted", size))
+					mlog.Int64("current", current),
+					mlog.Int64("subtracted", size))
 			}
 			return
 		}
@@ -382,7 +381,7 @@ func (mgr *segmentManager) SubLoadedBinlogSize(size int64) {
 func (mgr *segmentManager) GetLoadedBinlogSize() int64 {
 	current := mgr.loadedBinlogSize.Load()
 	if current < 0 {
-		mlog.Warn(context.TODO(), "Loaded binlog size is negative, returning 0", zap.Int64("current", current))
+		mlog.Warn(context.TODO(), "Loaded binlog size is negative, returning 0", mlog.Int64("current", current))
 		return 0
 	}
 	return current
@@ -402,9 +401,9 @@ func (mgr *segmentManager) Put(ctx context.Context, segmentType SegmentType, seg
 		if ok {
 			if oldSegment.Version() >= segment.Version() {
 				mlog.Warn(ctx, "Invalid segment distribution changed, skip it",
-					zap.Int64("segmentID", segment.ID()),
-					zap.Int64("oldVersion", oldSegment.Version()),
-					zap.Int64("newVersion", segment.Version()),
+					mlog.FieldSegmentID(segment.ID()),
+					mlog.Int64("oldVersion", oldSegment.Version()),
+					mlog.Int64("newVersion", segment.Version()),
 				)
 				// delete redundant segment
 				segment.Release(ctx)
@@ -768,7 +767,7 @@ func (mgr *segmentManager) registerReleaseCallback(callback func(s Segment)) {
 func (mgr *segmentManager) release(ctx context.Context, segment Segment) {
 	if mgr.releaseCallback != nil {
 		mgr.releaseCallback(segment)
-		mlog.Info(ctx, "remove segment from cache", zap.Int64("segmentID", segment.ID()))
+		mlog.Info(ctx, "remove segment from cache", mlog.FieldSegmentID(segment.ID()))
 	}
 	segment.Release(ctx)
 
