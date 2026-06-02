@@ -19,27 +19,17 @@ func parsePredicates(rootPath string, preds ...predicates.Predicate) ([]clientv3
 	}
 	result := make([]clientv3.Cmp, 0, len(preds))
 	for _, pred := range preds {
-		target := pred.Target()
-		switch target {
-		case predicates.PredTargetValue, predicates.PredTargetCreateRevision, predicates.PredTargetModRevision:
-		default:
-			return nil, merr.WrapErrParameterInvalid("valid predicate target", fmt.Sprintf("%d", target))
-		}
-		pt, err := parsePredicateType(pred.Type())
-		if err != nil {
-			return nil, err
-		}
-		fullKey := util.GetPath(rootPath, pred.Key())
-		var cmp clientv3.Cmp
-		switch target {
+		switch pred.Target() {
 		case predicates.PredTargetValue:
-			cmp = clientv3.Compare(clientv3.Value(fullKey), pt, pred.TargetValue())
-		case predicates.PredTargetCreateRevision:
-			cmp = clientv3.Compare(clientv3.CreateRevision(fullKey), pt, pred.TargetValue())
-		case predicates.PredTargetModRevision:
-			cmp = clientv3.Compare(clientv3.ModRevision(fullKey), pt, pred.TargetValue())
+			pt, err := parsePredicateType(pred.Type())
+			if err != nil {
+				return nil, err
+			}
+			cmp := clientv3.Compare(clientv3.Value(util.GetPath(rootPath, pred.Key())), pt, pred.TargetValue())
+			result = append(result, cmp)
+		default:
+			return nil, merr.WrapErrParameterInvalid("valid predicate target", fmt.Sprintf("%d", pred.Target()))
 		}
-		result = append(result, cmp)
 	}
 	return result, nil
 }

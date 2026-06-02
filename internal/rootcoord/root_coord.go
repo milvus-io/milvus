@@ -391,17 +391,23 @@ func (c *Core) initMetaTable(initCtx context.Context) error {
 		var catalog metastore.RootCoordCatalog
 		var err error
 
-		metaStoreType := Params.MetaStoreCfg.MetaStoreType.GetValue()
-		switch metaStoreType {
-		case util.MetaStoreTypeEtcd, util.MetaStoreTypeTiKV:
-			log.Ctx(initCtx).Info("Using meta storage", zap.String("type", metaStoreType))
+		switch Params.MetaStoreCfg.MetaStoreType.GetValue() {
+		case util.MetaStoreTypeEtcd:
+			log.Ctx(initCtx).Info("Using etcd as meta storage.")
+			metaKV := c.metaKVCreator()
+			kvmetastore.StartLegacySnapshotGC(c.ctx, metaKV)
+			kvmetastore.StartLegacyTombstoneGC(c.ctx, metaKV)
+			compatCatalog := milvuscompat.Wrap(milvuscompat.Catalogs{RootCoord: kvmetastore.NewCatalog(metaKV)})
+			catalog = milvuscompat.New(compatCatalog).RootCoord
+		case util.MetaStoreTypeTiKV:
+			log.Ctx(initCtx).Info("Using tikv as meta storage.")
 			metaKV := c.metaKVCreator()
 			kvmetastore.StartLegacySnapshotGC(c.ctx, metaKV)
 			kvmetastore.StartLegacyTombstoneGC(c.ctx, metaKV)
 			compatCatalog := milvuscompat.Wrap(milvuscompat.Catalogs{RootCoord: kvmetastore.NewCatalog(metaKV)})
 			catalog = milvuscompat.New(compatCatalog).RootCoord
 		default:
-			return retry.Unrecoverable(fmt.Errorf("not supported meta store: %s", metaStoreType))
+			return retry.Unrecoverable(fmt.Errorf("not supported meta store: %s", Params.MetaStoreCfg.MetaStoreType.GetValue()))
 		}
 
 		if c.meta, err = NewMetaTable(c.ctx, catalog, c.tsoAllocator); err != nil {

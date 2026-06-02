@@ -918,35 +918,6 @@ func (s *EmbedEtcdKVSuite) TestTxnWithPredicates() {
 	}
 }
 
-func (s *EmbedEtcdKVSuite) TestLoadWithModRevision() {
-	etcdKV := s.kv
-
-	s.Run("missing_key", func() {
-		val, rev, err := etcdKV.LoadWithModRevision(context.TODO(), "missing")
-		s.NoError(err)
-		s.Empty(val)
-		s.Zero(rev)
-	})
-
-	s.Run("existing_key_revision_bumps", func() {
-		err := etcdKV.Save(context.TODO(), "rev-key", "v1")
-		s.Require().NoError(err)
-
-		val, rev1, err := etcdKV.LoadWithModRevision(context.TODO(), "rev-key")
-		s.NoError(err)
-		s.Equal("v1", val)
-		s.Positive(rev1)
-
-		err = etcdKV.Save(context.TODO(), "rev-key", "v2")
-		s.Require().NoError(err)
-
-		val, rev2, err := etcdKV.LoadWithModRevision(context.TODO(), "rev-key")
-		s.NoError(err)
-		s.Equal("v2", val)
-		s.Greater(rev2, rev1)
-	})
-}
-
 func TestEmbedEtcdKV(t *testing.T) {
 	suite.Run(t, new(EmbedEtcdKVSuite))
 }
