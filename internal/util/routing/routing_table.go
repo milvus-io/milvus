@@ -87,6 +87,33 @@ func (t *RoutingTable) LookupBucket(rawHash uint32) string {
 	return t.channels[rawHash%uint32(len(t.channels))]
 }
 
+// RouteInsert returns the map channelName->rowOffsets and the per-row hash values
+// for the given primary keys, bit-for-bit equal to internal/proxy.assignChannelsByPK.
+func (t *RoutingTable) RouteInsert(pks *schemapb.IDs) (map[string][]int, []uint32) {
+	numChannels := len(t.channels)
+	if numChannels == 0 {
+		return nil, nil
+	}
+	hashValues := t.HashPKs(pks)
+	avgCapacity := (len(hashValues) / numChannels) + 1
+	out := make(map[string][]int, numChannels)
+	for offset, channelID := range hashValues {
+		idx := int(channelID)
+		// idx is always in [0, numChannels) because HashPKs reduces modulo
+		// numChannels. The guard is kept to mirror proxy.assignChannelsByPK
+		// verbatim, so the two stay structurally identical.
+		if idx >= numChannels {
+			continue
+		}
+		name := t.channels[idx]
+		if _, ok := out[name]; !ok {
+			out[name] = make([]int, 0, avgCapacity)
+		}
+		out[name] = append(out[name], offset)
+	}
+	return out, hashValues
+}
+
 // HashPKs maps each primary key in pks to a shard index (0-based position in
 // the channel list). The result is bit-for-bit identical to
 // typeutil.HashPK2Channels(pks, channelNames) for both int64 and varchar PKs;
