@@ -25,6 +25,7 @@
 #include "DeletedRecord.h"
 #include "SealedIndexingRecord.h"
 #include "SegmentSealed.h"
+#include "common/ArrayOffsets.h"
 #include "common/EasyAssert.h"
 #include "common/Schema.h"
 #include "folly/Synchronized.h"
@@ -171,6 +172,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                          FieldId field_id,
                          const std::string& nested_path) const override;
 
+    std::shared_ptr<const IArrayOffsets>
+    GetArrayOffsets(FieldId field_id) const override;
+
     void
     BulkGetJsonData(milvus::OpContext* op_ctx,
                     FieldId field_id,
@@ -186,6 +190,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     Reopen(
+        milvus::OpContext* op_ctx,
         const milvus::proto::segcore::SegmentLoadInfo& new_load_info) override;
 
     void
@@ -885,7 +890,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         google::protobuf::RepeatedPtrField<T>* dst);
 
     std::unique_ptr<DataArray>
-    fill_with_empty(FieldId field_id, int64_t count) const;
+    fill_with_empty(FieldId field_id,
+                    int64_t count,
+                    int64_t valid_count = 0,
+                    const void* valid_data = nullptr) const;
 
     std::unique_ptr<DataArray>
     get_raw_data(milvus::OpContext* op_ctx,
@@ -893,6 +901,24 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                  const FieldMeta& field_meta,
                  const int64_t* seg_offsets,
                  int64_t count) const;
+
+    struct ValidResult {
+        int64_t valid_count = 0;
+        std::unique_ptr<bool[]> valid_data;
+        std::vector<int64_t> valid_offsets;
+    };
+
+    ValidResult
+    FilterVectorValidOffsetsFromIndex(milvus::OpContext* op_ctx,
+                                      FieldId field_id,
+                                      const int64_t* seg_offsets,
+                                      int64_t count) const;
+
+    ValidResult
+    FilterVectorValidOffsetsFromColumn(milvus::OpContext* op_ctx,
+                                       const ChunkedColumnInterface* column,
+                                       const int64_t* seg_offsets,
+                                       int64_t count) const;
 
     void
     update_row_count(int64_t row_count) {
@@ -935,7 +961,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadScalarIndex(const LoadIndexInfo& info);
 
     bool
-    generate_interim_index(const FieldId field_id, int64_t num_rows);
+    generate_interim_index(const FieldId field_id,
+                           int64_t num_rows,
+                           milvus::OpContext* op_ctx);
 
     void
     fill_empty_field(const FieldMeta& field_meta);
@@ -1011,14 +1039,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
      * updating the segment's loaded fields and indexes accordingly. It handles
      * incremental updates during segment reopen operations.
      *
+     * @param op_ctx The operation context
      * @param segment_load_info The segment load information to be updated
      * @param load_diff The differences to apply, containing fields and indexes to add/remove
-     * @param op_ctx The operation context
      */
     void
-    ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
-                  LoadDiff& load_diff,
-                  milvus::OpContext* op_ctx = nullptr);
+    ApplyLoadDiff(milvus::OpContext* op_ctx,
+                  SegmentLoadInfo& segment_load_info,
+                  LoadDiff& load_diff);
 
     void
     load_field_data_common(
@@ -1107,6 +1135,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     // milvus storage internal api reader instance
     std::unique_ptr<milvus_storage::api::Reader> reader_;
+
+    mutable std::unordered_map<FieldId, std::shared_ptr<ArrayOffsetsSealed>>
+        array_offsets_map_;
+    std::unordered_map<std::string, std::shared_ptr<ArrayOffsetsSealed>>
+        struct_to_array_offsets_;
 };
 
 inline SegmentSealedUPtr

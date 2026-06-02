@@ -369,32 +369,35 @@ func TestValidatePartitionKeyIsolation(t *testing.T) {
 		{
 			name:                "partition key isolation equal OR with same field equal",
 			expr:                "key_field == 10 || key_field == 11",
-			expectedErrorString: "partition key isolation does not support OR",
+			expectedErrorString: "partition key isolation does not support",
 		},
 		{
 			name:                "partition key isolation equal OR with same field equal Reversed",
 			expr:                "key_field == 11 || key_field == 10",
-			expectedErrorString: "partition key isolation does not support OR",
+			expectedErrorString: "partition key isolation does not support",
 		},
 		{
 			name:                "partition key isolation equal OR with other field equal",
 			expr:                "key_field == 10 || varChar_field == 'a'",
-			expectedErrorString: "partition key isolation does not support OR",
+			expectedErrorString: "partition key isolation does not support",
 		},
 		{
 			name:                "partition key isolation equal OR with other field equal Reversed",
 			expr:                "varChar_field == 'a' || key_field == 10",
-			expectedErrorString: "partition key isolation does not support OR",
+			expectedErrorString: "partition key isolation does not support",
 		},
 		{
 			name:                "partition key isolation equal OR with other field equal",
 			expr:                "key_field == 10 || varChar_field == 'a'",
-			expectedErrorString: "partition key isolation does not support OR",
+			expectedErrorString: "partition key isolation does not support",
 		},
 		{
+			// Rewriter merges OR into IN, then AND+IN+Equal simplifies:
+			// key_field == 10 && key_field in [10, 11] → key_field == 10
+			// Final plan is just ==, so isolation validation passes.
 			name:                "partition key isolation equal AND",
 			expr:                "key_field == 10 && (key_field == 10 || key_field == 11)",
-			expectedErrorString: "partition key isolation does not support OR",
+			expectedErrorString: "",
 		},
 		{
 			name:                "partition key isolation other field equal",
@@ -409,7 +412,7 @@ func TestValidatePartitionKeyIsolation(t *testing.T) {
 		{
 			name:                "partition key isolation complex OR",
 			expr:                "(key_field == 10 and int64_field == 11) or (key_field == 10 and varChar_field == 'a')",
-			expectedErrorString: "partition key isolation does not support OR",
+			expectedErrorString: "partition key isolation does not support",
 		},
 	}
 

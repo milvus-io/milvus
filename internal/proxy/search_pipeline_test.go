@@ -194,6 +194,206 @@ func (s *SearchPipelineSuite) TestRerankOp() {
 	s.NoError(err)
 }
 
+func (s *SearchPipelineSuite) TestElementBestCollapseOpCollapsesElementLevelResultsByRowID() {
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       4,
+			Topks:      []int64{4},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 1, 2, 3}},
+				},
+			},
+			Scores:         []float32{0.72, 0.85, 0.60, 0.95},
+			Distances:      []float32{7.2, 8.5, 6.0, 9.5},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0, 3, 1, 0}},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "value",
+					FieldId:   101,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{10, 30, 20, 90}},
+							},
+						},
+					},
+				},
+			},
+			AllSearchCount: 4,
+		},
+	}
+
+	op := &elementBestCollapseOperator{}
+	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{"IP"})
+	s.Require().NoError(err)
+
+	results := out[0].([]*milvuspb.SearchResults)
+	s.Require().Len(results, 1)
+	result := results[0].GetResults()
+
+	s.Nil(result.GetElementIndices())
+	s.Equal(int64(1), result.GetNumQueries())
+	s.Equal(int64(3), result.GetTopK())
+	s.Equal([]int64{3}, result.GetTopks())
+	s.Equal([]int64{3, 1, 2}, result.GetIds().GetIntId().GetData())
+	s.Equal([]float32{0.95, 0.85, 0.60}, result.GetScores())
+	s.Equal([]float32{9.5, 8.5, 6.0}, result.GetDistances())
+	s.Equal([]int64{90, 30, 20}, result.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	s.Equal(int64(4), result.GetAllSearchCount())
+}
+
+func (s *SearchPipelineSuite) TestElementBestCollapseOpCollapsesEachQueryChunkIndependently() {
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 2,
+			TopK:       3,
+			Topks:      []int64{3, 3},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 1, 2, 1, 2, 2}},
+				},
+			},
+			Scores:         []float32{0.30, 0.90, 0.70, 0.80, 0.20, 0.60},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0, 2, 0, 1, 0, 3}},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "value",
+					FieldId:   101,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{10, 11, 20, 30, 40, 41}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	op := &elementBestCollapseOperator{}
+	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{"IP"})
+	s.Require().NoError(err)
+
+	results := out[0].([]*milvuspb.SearchResults)
+	result := results[0].GetResults()
+
+	s.Nil(result.GetElementIndices())
+	s.Equal(int64(2), result.GetNumQueries())
+	s.Equal(int64(2), result.GetTopK())
+	s.Equal([]int64{2, 2}, result.GetTopks())
+	s.Equal([]int64{1, 2, 1, 2}, result.GetIds().GetIntId().GetData())
+	s.Equal([]float32{0.90, 0.70, 0.80, 0.60}, result.GetScores())
+	s.Equal([]int64{11, 20, 30, 41}, result.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+}
+
+func (s *SearchPipelineSuite) TestElementBestCollapseOpPassesRowLevelResultsThrough() {
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       2,
+			Topks:      []int64{2},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{10, 20}},
+				},
+			},
+			Scores: []float32{0.90, 0.80},
+		},
+	}
+
+	op := &elementBestCollapseOperator{}
+	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{""})
+	s.Require().NoError(err)
+
+	results := out[0].([]*milvuspb.SearchResults)
+	s.Require().Len(results, 1)
+	s.Same(input, results[0])
+}
+
+func (s *SearchPipelineSuite) TestHybridAssembleOpPicksFieldsFromCollapsedSubResults() {
+	reduced := []*milvuspb.SearchResults{
+		{
+			Status: merr.Success(),
+			Results: &schemapb.SearchResultData{
+				Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2}}}},
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_Int64,
+						FieldName: "value",
+						FieldId:   101,
+						Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 20}}},
+						}},
+					},
+				},
+			},
+		},
+		{
+			Status: merr.Success(),
+			Results: &schemapb.SearchResultData{
+				Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{3}}}},
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_Int64,
+						FieldName: "value",
+						FieldId:   101,
+						Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{30}}},
+						}},
+					},
+				},
+			},
+		},
+	}
+	rankResult := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{3, 1}}}},
+		},
+	}
+
+	op := &hybridAssembleOperator{collectionID: 1}
+	out, err := op.run(context.Background(), s.span, reduced, rankResult)
+	s.Require().NoError(err)
+
+	result := out[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]int64{30, 10}, result.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+}
+
+func (s *SearchPipelineSuite) TestComputeFieldIdxsByOriginalOrderUsesAscendingRowsAndPreservesOutputOrder() {
+	rowIdxs := []int64{5, 1, 4, 2}
+	calls := make([]int64, 0, len(rowIdxs))
+
+	fieldIdxs := computeFieldIdxsByOriginalOrder(rowIdxs, func(rowIdx int64) []int64 {
+		calls = append(calls, rowIdx)
+		return []int64{rowIdx + 100}
+	})
+
+	s.Equal([]int64{1, 2, 4, 5}, calls)
+	s.Equal([][]int64{{105}, {101}, {104}, {102}}, fieldIdxs)
+}
+
+func (s *SearchPipelineSuite) TestComputeFieldIdxsByOriginalOrderCopiesSharedComputeBuffer() {
+	rowIdxs := []int64{5, 1, 4, 2}
+	shared := []int64{0, 0}
+
+	fieldIdxs := computeFieldIdxsByOriginalOrder(rowIdxs, func(rowIdx int64) []int64 {
+		shared[0] = rowIdx + 100
+		shared[1] = rowIdx + 200
+		return shared
+	})
+
+	s.Equal([][]int64{{105, 205}, {101, 201}, {104, 204}, {102, 202}}, fieldIdxs)
+}
+
 func (s *SearchPipelineSuite) TestRequeryOp() {
 	f1 := testutils.GenerateScalarFieldData(schemapb.DataType_Int64, "int64", 20)
 	f1.FieldId = 101
@@ -1635,4 +1835,209 @@ func (s *SearchPipelineSuite) TestNewRequeryOperator_WithHighlighterNoDynamicFie
 
 	// Verify only translated output fields are included (no dynamic fields added)
 	s.Equal([]string{"title"}, reqOp.outputFieldNames)
+}
+
+// TestPickFieldDataWithNullableSparseVector tests pickFieldData with nullable sparse vector fields.
+// This test ensures that when reordering query results (which may return in different order than requested),
+// nullable sparse vectors are correctly handled using FieldDataIdxComputer to map row indices to data indices.
+func (s *SearchPipelineSuite) TestPickFieldDataWithNullableSparseVector() {
+	// Scenario: Search returns IDs [3, 1, 2], but Query returns them in order [1, 2, 3]
+	// with a nullable sparse vector where row 1 (middle) is null.
+	// pickFieldData should correctly reorder the data to match search result order.
+
+	// Search result IDs (the order we want)
+	searchIDs := &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: []int64{3, 1, 2}, // Want this order in final result
+			},
+		},
+	}
+
+	// Query returns data in different order: [1, 2, 3]
+	// pkOffset maps each PK to its position in the query result
+	pkOffset := map[any]int{
+		int64(1): 0, // PK 1 is at index 0 in query result
+		int64(2): 1, // PK 2 is at index 1 in query result
+		int64(3): 2, // PK 3 is at index 2 in query result
+	}
+
+	// Create sparse vector data for 3 rows, but row index 1 (PK=2) is null
+	// ValidData: [true, false, true] means row 0 and 2 have data, row 1 is null
+	// Contents only has 2 entries (for the non-null rows)
+	sparseContent0, _ := testutils.GenerateSparseFloatVectorsData(1)
+	sparseContent2, _ := testutils.GenerateSparseFloatVectorsData(1)
+
+	queryFields := []*schemapb.FieldData{
+		{
+			Type:      schemapb.DataType_Int64,
+			FieldName: "pk",
+			FieldId:   100,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{1, 2, 3}, // Query result order
+						},
+					},
+				},
+			},
+		},
+		{
+			Type:      schemapb.DataType_SparseFloatVector,
+			FieldName: "sparse_vec",
+			FieldId:   101,
+			ValidData: []bool{true, false, true}, // Row 1 is null
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 700,
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      700,
+							Contents: [][]byte{sparseContent0[0], sparseContent2[0]}, // Only 2 entries for non-null rows
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Call pickFieldData - this should NOT panic
+	result, err := pickFieldData(searchIDs, pkOffset, queryFields, nil, 12345)
+	s.NoError(err)
+	s.NotNil(result)
+	s.Len(result, 2)
+
+	// Verify PK field is reordered correctly: [3, 1, 2]
+	pkData := result[0].GetScalars().GetLongData().GetData()
+	s.Equal([]int64{3, 1, 2}, pkData)
+
+	// Verify sparse vector ValidData is reordered correctly
+	// Original ValidData: [true, false, true] for rows [1, 2, 3]
+	// After reorder to [3, 1, 2]: ValidData should be [true, true, false]
+	sparseValidData := result[1].GetValidData()
+	s.Equal([]bool{true, true, false}, sparseValidData)
+
+	// Verify sparse vector Contents has correct number of entries (2 non-null values)
+	sparseContents := result[1].GetVectors().GetSparseFloatVector().GetContents()
+	s.Len(sparseContents, 2)
+}
+
+// TestPickFieldDataWithAllNullSparseVector tests pickFieldData when all sparse vector values are null.
+func (s *SearchPipelineSuite) TestPickFieldDataWithAllNullSparseVector() {
+	searchIDs := &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: []int64{2, 1},
+			},
+		},
+	}
+
+	pkOffset := map[any]int{
+		int64(1): 0,
+		int64(2): 1,
+	}
+
+	queryFields := []*schemapb.FieldData{
+		{
+			Type:      schemapb.DataType_Int64,
+			FieldName: "pk",
+			FieldId:   100,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{1, 2},
+						},
+					},
+				},
+			},
+		},
+		{
+			Type:      schemapb.DataType_SparseFloatVector,
+			FieldName: "sparse_vec",
+			FieldId:   101,
+			ValidData: []bool{false, false}, // All null
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 700,
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      700,
+							Contents: [][]byte{}, // Empty - all null
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := pickFieldData(searchIDs, pkOffset, queryFields, nil, 12345)
+	s.NoError(err)
+	s.NotNil(result)
+
+	// All should still be null after reorder
+	sparseValidData := result[1].GetValidData()
+	s.Equal([]bool{false, false}, sparseValidData)
+	s.Len(result[1].GetVectors().GetSparseFloatVector().GetContents(), 0)
+}
+
+func (s *SearchPipelineSuite) TestPickFieldDataWithNullableSparseVectorMissingValidData() {
+	searchIDs := &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{Data: []int64{2, 1}},
+		},
+	}
+	pkOffset := map[any]int{
+		int64(1): 0,
+		int64(2): 1,
+	}
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				FieldID:  101,
+				Name:     "sparse_vec",
+				DataType: schemapb.DataType_SparseFloatVector,
+				Nullable: true,
+			},
+		},
+	}
+	queryFields := []*schemapb.FieldData{
+		{
+			Type:      schemapb.DataType_Int64,
+			FieldName: "pk",
+			FieldId:   100,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{1, 2}},
+					},
+				},
+			},
+		},
+		{
+			Type:      schemapb.DataType_SparseFloatVector,
+			FieldName: "sparse_vec",
+			FieldId:   101,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := pickFieldData(searchIDs, pkOffset, queryFields, schema, 12345)
+	s.NoError(err)
+	s.Equal([]int64{2, 1}, result[0].GetScalars().GetLongData().GetData())
+	s.Equal([]bool{false, false}, result[1].GetValidData())
+	s.Empty(result[1].GetVectors().GetSparseFloatVector().GetContents())
 }

@@ -11,7 +11,17 @@
 
 #include <gtest/gtest.h>
 
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "arrow/type.h"
+#include "arrow/util/key_value_metadata.h"
+#include "common/Consts.h"
 #include "common/Schema.h"
+#include "common/Types.h"
+#include "milvus-storage/common/constants.h"
+#include "pb/schema.pb.h"
 
 using namespace milvus;
 
@@ -411,4 +421,88 @@ TEST_F(SchemaTest, WarmupPolicyFallbackToCollectionLevel) {
         data_field_id, /*is_vector=*/false, /*is_index=*/false);
     EXPECT_TRUE(has_setting2);
     EXPECT_EQ(policy2, "disable");
+}
+
+TEST_F(SchemaTest, ShouldLoadFieldReturnsFalseForBM25FunctionOutput) {
+    milvus::proto::schema::CollectionSchema schema_proto;
+
+    auto* pk_field = schema_proto.add_fields();
+    pk_field->set_fieldid(100);
+    pk_field->set_name("pk");
+    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk_field->set_is_primary_key(true);
+
+    auto* bm25_vector = schema_proto.add_fields();
+    bm25_vector->set_fieldid(101);
+    bm25_vector->set_name("sparse");
+    bm25_vector->set_data_type(
+        milvus::proto::schema::DataType::SparseFloatVector);
+
+    auto* function = schema_proto.add_functions();
+    function->set_type(milvus::proto::schema::BM25);
+    function->add_output_field_ids(101);
+
+    auto schema = Schema::ParseFrom(schema_proto);
+
+    EXPECT_TRUE(schema->ShouldLoadField(FieldId(100)));
+    EXPECT_FALSE(schema->ShouldLoadField(FieldId(101)));
+
+    schema->UpdateLoadFields({101});
+    EXPECT_FALSE(schema->ShouldLoadField(FieldId(101)));
+}
+
+TEST_F(SchemaTest, NullableFixedWidthVectorUsesBinaryInArrowSchemas) {
+    constexpr int64_t dim = 16;
+    struct VectorCase {
+        std::string name;
+        DataType data_type;
+        int64_t dim;
+        int64_t byte_width;
+    };
+    const std::vector<VectorCase> cases = {
+        {"float_vec", DataType::VECTOR_FLOAT, dim, dim * sizeof(float)},
+        {"binary_vec", DataType::VECTOR_BINARY, 128, 16},
+        {"float16_vec", DataType::VECTOR_FLOAT16, dim, dim * 2},
+        {"bfloat16_vec", DataType::VECTOR_BFLOAT16, dim, dim * 2},
+        {"int8_vec", DataType::VECTOR_INT8, dim, dim},
+    };
+
+    auto pk_id = schema_->AddDebugField("pk_field", DataType::INT64, false);
+    schema_->set_primary_field_id(pk_id);
+
+    std::vector<FieldId> nullable_field_ids;
+    for (const auto& c : cases) {
+        nullable_field_ids.push_back(schema_->AddDebugField(
+            "nullable_" + c.name, c.data_type, c.dim, std::nullopt, true));
+        schema_->AddDebugField(
+            "non_nullable_" + c.name, c.data_type, c.dim, std::nullopt, false);
+    }
+
+    auto arrow_schema = schema_->ConvertToArrowSchema();
+
+    for (size_t i = 0; i < cases.size(); ++i) {
+        const auto& c = cases[i];
+        auto nullable_field =
+            arrow_schema->GetFieldByName("nullable_" + c.name);
+        ASSERT_NE(nullable_field, nullptr);
+        EXPECT_TRUE(nullable_field->type()->Equals(*arrow::binary()))
+            << nullable_field->type()->ToString();
+        ASSERT_NE(nullable_field->metadata(), nullptr);
+        ASSERT_TRUE(nullable_field->metadata()->Contains(DIM_KEY));
+        EXPECT_EQ(nullable_field->metadata()->Get(DIM_KEY).ValueOrDie(),
+                  std::to_string(c.dim));
+        ASSERT_TRUE(nullable_field->metadata()->Contains(
+            milvus_storage::ARROW_FIELD_ID_KEY));
+        EXPECT_EQ(nullable_field->metadata()
+                      ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
+                      .ValueOrDie(),
+                  std::to_string(nullable_field_ids[i].get()));
+
+        auto non_nullable_field =
+            arrow_schema->GetFieldByName("non_nullable_" + c.name);
+        ASSERT_NE(non_nullable_field, nullptr);
+        EXPECT_TRUE(non_nullable_field->type()->Equals(
+            *arrow::fixed_size_binary(c.byte_width)))
+            << non_nullable_field->type()->ToString();
+    }
 }

@@ -544,16 +544,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartSegments, error) {
 	// default filter, select segments which could be compacted
 	filters := []SegmentFilter{
-		SegmentFilterFunc(func(segment *SegmentInfo) bool {
-			return isSegmentHealthy(segment) &&
-				isFlushed(segment) &&
-				!segment.isCompacting && // not compacting now
-				!segment.GetIsImporting() && // not importing now
-				segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
-				segment.GetLevel() != datapb.SegmentLevel_L2 && // ignore l2 segment
-				!segment.GetIsInvisible() &&
-				segment.GetIsSorted()
-		}),
+		SegmentFilterFunc(isNormalManualCompactionCandidate),
 	}
 
 	// add segment filter if criterion provided
@@ -755,18 +746,25 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *SegmentInfo) bool
 			indexType := GetIndexType(indexParams)
 			isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 
-			if !isVectorIndex {
-				continue
+			var currentEngineVersion int32
+			var segmentIndexVersion int32
+			if isVectorIndex {
+				currentEngineVersion = t.indexEngineVersionManager.GetCurrentIndexEngineVersion()
+				segmentIndexVersion = index.CurrentIndexVersion
+			} else {
+				currentEngineVersion = t.indexEngineVersionManager.GetCurrentScalarIndexEngineVersion()
+				segmentIndexVersion = index.CurrentScalarIndexVersion
 			}
 
-			if index.CurrentIndexVersion < t.indexEngineVersionManager.GetCurrentIndexEngineVersion() {
+			if segmentIndexVersion < currentEngineVersion {
 				log.Info("index version is too old, trigger compaction",
 					zap.Int64("segmentID", segment.ID),
 					zap.Int64("indexID", index.IndexID),
 					zap.String("indexType", indexType),
+					zap.Bool("isVectorIndex", isVectorIndex),
 					zap.Strings("indexFileKeys", index.IndexFileKeys),
-					zap.Int32("currentIndexVersion", index.CurrentIndexVersion),
-					zap.Int32("currentEngineVersion", t.indexEngineVersionManager.GetCurrentIndexEngineVersion()))
+					zap.Int32("segmentIndexVersion", segmentIndexVersion),
+					zap.Int32("currentEngineVersion", currentEngineVersion))
 				return true
 			}
 		}
@@ -798,6 +796,35 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *SegmentInfo) bool
 					zap.Strings("indexFileKeys", index.IndexFileKeys),
 					zap.Int32("currentIndexVersion", index.CurrentIndexVersion),
 					zap.Int32("resolvedTargetVersion", resolvedVecTarget))
+				return true
+			}
+		}
+	}
+
+	// enable force rebuild scalar index with target scalar index version
+	if Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.GetAsBool() && Params.DataCoordCfg.TargetScalarIndexVersion.GetAsInt64() != -1 {
+		resolvedScalarTarget := t.indexEngineVersionManager.ResolveScalarIndexVersion()
+		indexIDToSegIdxes := t.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
+		for _, index := range indexIDToSegIdxes {
+			if len(index.IndexFileKeys) == 0 {
+				continue
+			}
+
+			indexParams := t.meta.indexMeta.GetIndexParams(segment.CollectionID, index.IndexID)
+			indexType := GetIndexType(indexParams)
+			isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
+
+			if isVectorIndex {
+				continue
+			}
+
+			if index.CurrentScalarIndexVersion != resolvedScalarTarget {
+				log.Info("scalar index version != target, trigger compaction",
+					zap.Int64("segmentID", segment.ID),
+					zap.Int64("indexID", index.IndexID),
+					zap.String("indexType", indexType),
+					zap.Int32("currentScalarIndexVersion", index.CurrentScalarIndexVersion),
+					zap.Int32("resolvedTargetVersion", resolvedScalarTarget))
 				return true
 			}
 		}

@@ -25,6 +25,7 @@
 #include <cstring>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <boost/container/vector.hpp>
 #include <folly/small_vector.h>
 
 #include "index/StringIndex.h"
@@ -106,12 +107,12 @@ class StringIndexSort : public StringIndex {
     IsNotNull() override;
 
     const TargetBitmap
-    Range(std::string value, OpType op) override;
+    Range(const std::string& value, OpType op) override;
 
     const TargetBitmap
-    Range(std::string lower_bound_value,
+    Range(const std::string& lower_bound_value,
           bool lb_inclusive,
-          std::string upper_bound_value,
+          const std::string& upper_bound_value,
           bool ub_inclusive) override;
 
     const TargetBitmap
@@ -136,6 +137,13 @@ class StringIndexSort : public StringIndex {
     void
     ComputeByteSize() override;
 
+    void
+    WriteEntries(storage::IndexEntryWriter* writer) override;
+
+    void
+    LoadEntries(storage::IndexEntryReader& reader,
+                const Config& config) override;
+
  protected:
     int64_t
     CalculateTotalSize() const;
@@ -144,7 +152,6 @@ class StringIndexSort : public StringIndex {
     int64_t field_id_ = 0;
     bool is_built_ = false;
     Config config_;
-    std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
     size_t total_num_rows_{0};
     TargetBitmap valid_bitset_;
     std::vector<int32_t> idx_to_offsets_;
@@ -164,6 +171,14 @@ class StringIndexSortImpl {
                    size_t total_num_rows,
                    TargetBitmap& valid_bitset,
                    std::vector<int32_t>& idx_to_offsets) = 0;
+
+    // Load directly from raw data pointer (used by V3 streaming load)
+    virtual void
+    LoadFromData(const uint8_t* data,
+                 size_t data_size,
+                 size_t total_num_rows,
+                 TargetBitmap& valid_bitset,
+                 std::vector<int32_t>& idx_to_offsets) = 0;
 
     struct ParsedData {
         uint32_t unique_count;
@@ -192,12 +207,12 @@ class StringIndexSortImpl {
     IsNotNull(const TargetBitmap& valid_bitset) = 0;
 
     virtual const TargetBitmap
-    Range(std::string value, OpType op, size_t total_num_rows) = 0;
+    Range(const std::string& value, OpType op, size_t total_num_rows) = 0;
 
     virtual const TargetBitmap
-    Range(std::string lower_bound_value,
+    Range(const std::string& lower_bound_value,
           bool lb_inclusive,
-          std::string upper_bound_value,
+          const std::string& upper_bound_value,
           bool ub_inclusive,
           size_t total_num_rows) = 0;
 
@@ -258,6 +273,13 @@ class StringIndexSortMemoryImpl : public StringIndexSortImpl {
                    TargetBitmap& valid_bitset,
                    std::vector<int32_t>& idx_to_offsets) override;
 
+    void
+    LoadFromData(const uint8_t* data,
+                 size_t data_size,
+                 size_t total_num_rows,
+                 TargetBitmap& valid_bitset,
+                 std::vector<int32_t>& idx_to_offsets) override;
+
     const TargetBitmap
     In(size_t n, const std::string* values, size_t total_num_rows) override;
 
@@ -274,12 +296,12 @@ class StringIndexSortMemoryImpl : public StringIndexSortImpl {
     IsNotNull(const TargetBitmap& valid_bitset) override;
 
     const TargetBitmap
-    Range(std::string value, OpType op, size_t total_num_rows) override;
+    Range(const std::string& value, OpType op, size_t total_num_rows) override;
 
     const TargetBitmap
-    Range(std::string lower_bound_value,
+    Range(const std::string& lower_bound_value,
           bool lb_inclusive,
-          std::string upper_bound_value,
+          const std::string& upper_bound_value,
           bool ub_inclusive,
           size_t total_num_rows) override;
 
@@ -386,6 +408,13 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
                    std::vector<int32_t>& idx_to_offsets) override;
 
     void
+    LoadFromData(const uint8_t* data,
+                 size_t data_size,
+                 size_t total_num_rows,
+                 TargetBitmap& valid_bitset,
+                 std::vector<int32_t>& idx_to_offsets) override;
+
+    void
     SetMmapFilePath(const std::string& filepath) {
         mmap_filepath_ = filepath;
     }
@@ -406,12 +435,12 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
     IsNotNull(const TargetBitmap& valid_bitset) override;
 
     const TargetBitmap
-    Range(std::string value, OpType op, size_t total_num_rows) override;
+    Range(const std::string& value, OpType op, size_t total_num_rows) override;
 
     const TargetBitmap
-    Range(std::string lower_bound_value,
+    Range(const std::string& lower_bound_value,
           bool lb_inclusive,
-          std::string upper_bound_value,
+          const std::string& upper_bound_value,
           bool ub_inclusive,
           size_t total_num_rows) override;
 

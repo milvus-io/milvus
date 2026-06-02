@@ -511,12 +511,13 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			mu.Lock()
 			totalSize := lo.SumBy(lo.Values(uploaded), func(fileSize int64) int64 { return fileSize })
 			textIndexLogs[field.GetFieldID()] = &datapb.TextIndexStats{
-				FieldID:    field.GetFieldID(),
-				Version:    version,
-				BuildID:    taskID,
-				Files:      lo.Keys(uploaded),
-				LogSize:    totalSize,
-				MemorySize: totalSize,
+				FieldID:                   field.GetFieldID(),
+				Version:                   version,
+				BuildID:                   taskID,
+				Files:                     lo.Keys(uploaded),
+				LogSize:                   totalSize,
+				MemorySize:                totalSize,
+				CurrentScalarIndexVersion: common.ClampScalarIndexVersion(st.req.GetCurrentScalarIndexVersion()),
 			}
 			mu.Unlock()
 
@@ -709,10 +710,11 @@ func buildIndexParams(
 		PartitionID:                      req.GetPartitionID(),
 		SegmentID:                        req.GetTargetSegmentID(),
 		IndexVersion:                     req.GetTaskVersion(),
+		NumRows:                          req.GetNumRows(),
 		InsertFiles:                      files,
 		FieldSchema:                      field,
 		StorageConfig:                    storageConfig,
-		CurrentScalarIndexVersion:        req.GetCurrentScalarIndexVersion(),
+		CurrentScalarIndexVersion:        common.ClampScalarIndexVersion(req.GetCurrentScalarIndexVersion()),
 		StorageVersion:                   req.GetStorageVersion(),
 		JsonStatsMaxShreddingColumns:     options.JSONStatsMaxShreddingColumns,
 		JsonStatsShreddingRatioThreshold: options.JSONStatsShreddingRatio,

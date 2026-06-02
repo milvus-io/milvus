@@ -97,6 +97,10 @@ func (t *SearchTask) IsGpuIndex() bool {
 	return t.collection.IsGpuIndex()
 }
 
+func (t *SearchTask) Context() context.Context {
+	return t.ctx
+}
+
 func (t *SearchTask) PreExecute() error {
 	// Update task wait time metric before execute
 	nodeID := strconv.FormatInt(t.GetNodeID(), 10)
@@ -296,8 +300,7 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 		t.req.GetReq().GetMvccTimestamp() != other.req.GetReq().GetMvccTimestamp() ||
 		t.req.GetReq().GetDslType() != other.req.GetReq().GetDslType() ||
 		t.req.GetDmlChannels()[0] != other.req.GetDmlChannels()[0] ||
-		nq+otherNq > paramtable.Get().QueryNodeCfg.MaxGroupNQ.GetAsInt64() ||
-		diffTopk && ratio > paramtable.Get().QueryNodeCfg.TopKMergeRatio.GetAsFloat() ||
+		(diffTopk && ratio > paramtable.Get().QueryNodeCfg.TopKMergeRatio.GetAsFloat()) ||
 		!funcutil.SliceSetEqual(t.req.GetReq().GetPartitionIDs(), other.req.GetReq().GetPartitionIDs()) ||
 		!funcutil.SliceSetEqual(t.req.GetSegmentIDs(), other.req.GetSegmentIDs()) ||
 		!bytes.Equal(t.req.GetReq().GetSerializedExprPlan(), other.req.GetReq().GetSerializedExprPlan()) {
@@ -328,10 +331,6 @@ func (t *SearchTask) Done(err error) {
 	}
 }
 
-func (t *SearchTask) Canceled() error {
-	return t.ctx.Err()
-}
-
 func (t *SearchTask) Wait() error {
 	return <-t.notifier
 }
@@ -349,6 +348,19 @@ func (t *SearchTask) SearchResult() *internalpb.SearchResults {
 
 func (t *SearchTask) NQ() int64 {
 	return t.nq
+}
+
+func (t *SearchTask) MinNQ() int64 {
+	if len(t.originNqs) == 0 {
+		return t.nq
+	}
+	minNQ := t.originNqs[0]
+	for _, nq := range t.originNqs[1:] {
+		if nq < minNQ {
+			minNQ = nq
+		}
+	}
+	return minNQ
 }
 
 func (t *SearchTask) MergeWith(other scheduler.Task) bool {

@@ -56,8 +56,21 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
             if (iterators_val.has_value()) {
                 bool larger_is_closer =
                     PositivelyRelated(search_info.metric_type_);
+                // Element-level search skips row-level mapping (element IDs
+                // are not row-aligned); see ChunkMergeIterator ctor.
+                const auto& offset_mapping = index.GetOffsetMapping();
+                const milvus::OffsetMapping* iter_offset_mapping =
+                    (search_info.array_offsets_ != nullptr ||
+                     !offset_mapping.IsEnabled())
+                        ? nullptr
+                        : &offset_mapping;
                 search_result.AssembleChunkVectorIterators(
-                    nq, 1, {0}, iterators_val.value(), larger_is_closer);
+                    nq,
+                    1,
+                    {0},
+                    iterators_val.value(),
+                    iter_offset_mapping,
+                    larger_is_closer);
             } else {
                 std::string operator_type = "";
                 if (search_info.group_by_field_id_.has_value()) {
@@ -113,6 +126,12 @@ sort_search_result(milvus::SearchResult& result, bool large_is_better) {
     new_distances.reserve(size);
     new_seg_offsets.reserve(size);
 
+    bool has_element_indices = !result.element_indices_.empty();
+    std::vector<int32_t> new_element_indices;
+    if (has_element_indices) {
+        new_element_indices.reserve(size);
+    }
+
     std::vector<size_t> idx(topk);
 
     for (size_t start = 0; start < size; start += topk) {
@@ -136,11 +155,17 @@ sort_search_result(milvus::SearchResult& result, bool large_is_better) {
         for (auto i : idx) {
             new_distances.push_back(result.distances_[i]);
             new_seg_offsets.push_back(result.seg_offsets_[i]);
+            if (has_element_indices) {
+                new_element_indices.push_back(result.element_indices_[i]);
+            }
         }
     }
 
-    result.distances_ = new_distances;
-    result.seg_offsets_ = new_seg_offsets;
+    result.distances_ = std::move(new_distances);
+    result.seg_offsets_ = std::move(new_seg_offsets);
+    if (has_element_indices) {
+        result.element_indices_ = std::move(new_element_indices);
+    }
 }
 
 }  // namespace exec

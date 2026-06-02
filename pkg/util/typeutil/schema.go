@@ -268,9 +268,13 @@ func calcVectorSize(column *schemapb.VectorField, vectorType schemapb.DataType) 
 	return res
 }
 
-func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int) (int, error) {
+func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldIdxs ...int64) (int, error) {
 	res := 0
-	for _, fs := range fieldsData {
+	for i, fs := range fieldsData {
+		fieldIdx := int64(rowOffset)
+		if i < len(fieldIdxs) {
+			fieldIdx = fieldIdxs[i]
+		}
 		switch fs.GetType() {
 		case schemapb.DataType_Bool, schemapb.DataType_Int8:
 			res++
@@ -304,27 +308,40 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int) (int, e
 				return 0, fmt.Errorf("offset out range of field datas")
 			}
 			res += len(fs.GetScalars().GetGeometryData().GetData()[rowOffset])
-		case schemapb.DataType_BinaryVector:
-			res += int(fs.GetVectors().GetDim())
-		case schemapb.DataType_FloatVector:
-			res += int(fs.GetVectors().GetDim() * 4)
-		case schemapb.DataType_Float16Vector:
-			res += int(fs.GetVectors().GetDim() * 2)
-		case schemapb.DataType_BFloat16Vector:
-			res += int(fs.GetVectors().GetDim() * 2)
-		case schemapb.DataType_SparseFloatVector:
-			vec := fs.GetVectors().GetSparseFloatVector()
-			// counting only the size of the vector data, ignoring other
-			// bytes used in proto.
-			res += len(vec.Contents[rowOffset])
-		case schemapb.DataType_Int8Vector:
-			res += int(fs.GetVectors().GetDim())
+		case schemapb.DataType_BinaryVector,
+			schemapb.DataType_FloatVector,
+			schemapb.DataType_Float16Vector,
+			schemapb.DataType_BFloat16Vector,
+			schemapb.DataType_Int8Vector,
+			schemapb.DataType_SparseFloatVector:
+			validData := fs.GetValidData()
+			isNullRow := len(validData) > 0 && rowOffset < len(validData) && !validData[rowOffset]
+			if isNullRow {
+				continue
+			}
+			switch fs.GetType() {
+			case schemapb.DataType_BinaryVector:
+				res += int(fs.GetVectors().GetDim() / 8)
+			case schemapb.DataType_FloatVector:
+				res += int(fs.GetVectors().GetDim() * 4)
+			case schemapb.DataType_Float16Vector:
+				res += int(fs.GetVectors().GetDim() * 2)
+			case schemapb.DataType_BFloat16Vector:
+				res += int(fs.GetVectors().GetDim() * 2)
+			case schemapb.DataType_SparseFloatVector:
+				vec := fs.GetVectors().GetSparseFloatVector()
+				if int(fieldIdx) < len(vec.Contents) {
+					res += len(vec.Contents[fieldIdx])
+				}
+			case schemapb.DataType_Int8Vector:
+				res += int(fs.GetVectors().GetDim())
+			}
 		case schemapb.DataType_ArrayOfVector:
 			arrayVector := fs.GetVectors().GetVectorArray()
-			if rowOffset >= len(arrayVector.GetData()) {
+			if int(fieldIdx) >= len(arrayVector.GetData()) {
 				return 0, errors.New("offset out range of field datas")
 			}
-			res += calcVectorSize(arrayVector.GetData()[rowOffset], arrayVector.GetElementType())
+			res += calcVectorSize(arrayVector.GetData()[fieldIdx], arrayVector.GetElementType())
 		default:
 			panic("Unknown data type:" + fs.GetType().String())
 		}
@@ -777,6 +794,12 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 						Data: make([][]byte, 0, topK),
 					},
 				}
+			case *schemapb.ScalarField_GeometryWktData:
+				scalar.Scalars.Data = &schemapb.ScalarField_GeometryWktData{
+					GeometryWktData: &schemapb.GeometryWktArray{
+						Data: make([]string, 0, topK),
+					},
+				}
 			case *schemapb.ScalarField_ArrayData:
 				scalar.Scalars.Data = &schemapb.ScalarField_ArrayData{
 					ArrayData: &schemapb.ArrayArray{
@@ -834,7 +857,82 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 	return result
 }
 
-func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int64) {
+type FieldDataIdxComputer struct {
+	fieldsData                     []*schemapb.FieldData
+	lastRowIdx                     int64
+	dataIndices                    []int64
+	isVector                       []bool
+	nullableVectorWithoutValidData []bool
+	resultBuffer                   []int64
+}
+
+func NewFieldDataIdxComputer(fieldsData []*schemapb.FieldData) *FieldDataIdxComputer {
+	return NewFieldDataIdxComputerWithSchema(fieldsData, nil)
+}
+
+func NewFieldDataIdxComputerWithSchema(fieldsData []*schemapb.FieldData, schema *schemapb.CollectionSchema) *FieldDataIdxComputer {
+	c := &FieldDataIdxComputer{
+		fieldsData:                     fieldsData,
+		lastRowIdx:                     0,
+		dataIndices:                    make([]int64, len(fieldsData)),
+		isVector:                       make([]bool, len(fieldsData)),
+		nullableVectorWithoutValidData: make([]bool, len(fieldsData)),
+		resultBuffer:                   make([]int64, len(fieldsData)),
+	}
+
+	fieldSchemas := make(map[int64]*schemapb.FieldSchema)
+	if schema != nil {
+		for _, field := range schema.GetFields() {
+			fieldSchemas[field.GetFieldID()] = field
+		}
+	}
+
+	for i, fieldData := range fieldsData {
+		validData := fieldData.GetValidData()
+		fieldSchema := fieldSchemas[fieldData.GetFieldId()]
+		isVector := IsSupportedNullableVectorType(fieldData.GetType())
+		isNullableVector := false
+		if fieldSchema != nil {
+			isVector = IsSupportedNullableVectorType(fieldSchema.GetDataType())
+			isNullableVector = fieldSchema.GetNullable() && isVector
+		}
+		c.isVector[i] = isVector && (len(validData) > 0 || isNullableVector)
+		c.nullableVectorWithoutValidData[i] = isNullableVector && len(validData) == 0
+	}
+	return c
+}
+
+func (c *FieldDataIdxComputer) Compute(rowIdx int64) []int64 {
+	if rowIdx < c.lastRowIdx {
+		c.lastRowIdx = 0
+		for i := range c.dataIndices {
+			c.dataIndices[i] = 0
+		}
+	}
+
+	for i, fieldData := range c.fieldsData {
+		if c.isVector[i] {
+			if c.nullableVectorWithoutValidData[i] {
+				c.resultBuffer[i] = -1
+				continue
+			}
+			validData := fieldData.GetValidData()
+			for j := c.lastRowIdx; j < rowIdx && j < int64(len(validData)); j++ {
+				if validData[j] {
+					c.dataIndices[i]++
+				}
+			}
+			c.resultBuffer[i] = c.dataIndices[i]
+		} else {
+			c.resultBuffer[i] = rowIdx
+		}
+	}
+
+	c.lastRowIdx = rowIdx
+	return c.resultBuffer
+}
+
+func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int64) (appendSize int64) {
 	dstMap := make(map[int64]*schemapb.FieldData)
 	for _, fieldData := range dst {
 		if fieldData != nil {
@@ -842,6 +940,10 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int6
 		}
 	}
 	for i, fieldData := range src {
+		fieldIdx := idx
+		if i < len(fieldIdxs) {
+			fieldIdx = fieldIdxs[i]
+		}
 		dstFieldData, ok := dstMap[fieldData.FieldId]
 		if !ok {
 			dstFieldData = &schemapb.FieldData{
@@ -859,6 +961,11 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int6
 			}
 			valid := fieldData.ValidData[idx]
 			dstFieldData.ValidData = append(dstFieldData.ValidData, valid)
+		} else if fieldIdx < 0 {
+			if dstFieldData.ValidData == nil {
+				dstFieldData.ValidData = make([]bool, 0)
+			}
+			dstFieldData.ValidData = append(dstFieldData.ValidData, false)
 		}
 		switch fieldType := fieldData.Field.(type) {
 		case *schemapb.FieldData_Scalars:
@@ -1011,102 +1118,342 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int6
 				}
 			}
 			dstVector := dstFieldData.GetVectors()
+			isNullRow := fieldIdx < 0 || (len(fieldData.GetValidData()) > 0 && !fieldData.GetValidData()[idx])
+
 			switch srcVector := fieldType.Vectors.Data.(type) {
 			case *schemapb.VectorField_BinaryVector:
-				if dstVector.GetBinaryVector() == nil {
-					srcToCopy := srcVector.BinaryVector[idx*(dim/8) : (idx+1)*(dim/8)]
-					dstVector.Data = &schemapb.VectorField_BinaryVector{
-						BinaryVector: make([]byte, len(srcToCopy)),
+				if !isNullRow {
+					if dstVector.GetBinaryVector() == nil {
+						srcToCopy := srcVector.BinaryVector[fieldIdx*(dim/8) : (fieldIdx+1)*(dim/8)]
+						dstVector.Data = &schemapb.VectorField_BinaryVector{
+							BinaryVector: make([]byte, len(srcToCopy)),
+						}
+						copy(dstVector.Data.(*schemapb.VectorField_BinaryVector).BinaryVector, srcToCopy)
+					} else {
+						dstBinaryVector := dstVector.Data.(*schemapb.VectorField_BinaryVector)
+						dstBinaryVector.BinaryVector = append(dstBinaryVector.BinaryVector, srcVector.BinaryVector[fieldIdx*(dim/8):(fieldIdx+1)*(dim/8)]...)
 					}
-					copy(dstVector.Data.(*schemapb.VectorField_BinaryVector).BinaryVector, srcToCopy)
-				} else {
-					dstBinaryVector := dstVector.Data.(*schemapb.VectorField_BinaryVector)
-					dstBinaryVector.BinaryVector = append(dstBinaryVector.BinaryVector, srcVector.BinaryVector[idx*(dim/8):(idx+1)*(dim/8)]...)
+					/* #nosec G103 */
+					appendSize += int64(unsafe.Sizeof(srcVector.BinaryVector[fieldIdx*(dim/8) : (fieldIdx+1)*(dim/8)]))
 				}
-				/* #nosec G103 */
-				appendSize += int64(unsafe.Sizeof(srcVector.BinaryVector[idx*(dim/8) : (idx+1)*(dim/8)]))
 			case *schemapb.VectorField_FloatVector:
-				if dstVector.GetFloatVector() == nil {
-					srcToCopy := srcVector.FloatVector.Data[idx*dim : (idx+1)*dim]
-					dstVector.Data = &schemapb.VectorField_FloatVector{
-						FloatVector: &schemapb.FloatArray{
-							Data: make([]float32, len(srcToCopy)),
-						},
+				if !isNullRow {
+					if dstVector.GetFloatVector() == nil {
+						srcToCopy := srcVector.FloatVector.Data[fieldIdx*dim : (fieldIdx+1)*dim]
+						dstVector.Data = &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: make([]float32, len(srcToCopy)),
+							},
+						}
+						copy(dstVector.Data.(*schemapb.VectorField_FloatVector).FloatVector.Data, srcToCopy)
+					} else {
+						dstVector.GetFloatVector().Data = append(dstVector.GetFloatVector().Data, srcVector.FloatVector.Data[fieldIdx*dim:(fieldIdx+1)*dim]...)
 					}
-					copy(dstVector.Data.(*schemapb.VectorField_FloatVector).FloatVector.Data, srcToCopy)
-				} else {
-					dstVector.GetFloatVector().Data = append(dstVector.GetFloatVector().Data, srcVector.FloatVector.Data[idx*dim:(idx+1)*dim]...)
+					/* #nosec G103 */
+					appendSize += int64(unsafe.Sizeof(srcVector.FloatVector.Data[fieldIdx*dim : (fieldIdx+1)*dim]))
 				}
-				/* #nosec G103 */
-				appendSize += int64(unsafe.Sizeof(srcVector.FloatVector.Data[idx*dim : (idx+1)*dim]))
 			case *schemapb.VectorField_Float16Vector:
-				if dstVector.GetFloat16Vector() == nil {
-					srcToCopy := srcVector.Float16Vector[idx*(dim*2) : (idx+1)*(dim*2)]
-					dstVector.Data = &schemapb.VectorField_Float16Vector{
-						Float16Vector: make([]byte, len(srcToCopy)),
+				if !isNullRow {
+					if dstVector.GetFloat16Vector() == nil {
+						srcToCopy := srcVector.Float16Vector[fieldIdx*(dim*2) : (fieldIdx+1)*(dim*2)]
+						dstVector.Data = &schemapb.VectorField_Float16Vector{
+							Float16Vector: make([]byte, len(srcToCopy)),
+						}
+						copy(dstVector.Data.(*schemapb.VectorField_Float16Vector).Float16Vector, srcToCopy)
+					} else {
+						dstFloat16Vector := dstVector.Data.(*schemapb.VectorField_Float16Vector)
+						dstFloat16Vector.Float16Vector = append(dstFloat16Vector.Float16Vector, srcVector.Float16Vector[fieldIdx*(dim*2):(fieldIdx+1)*(dim*2)]...)
 					}
-					copy(dstVector.Data.(*schemapb.VectorField_Float16Vector).Float16Vector, srcToCopy)
-				} else {
-					dstFloat16Vector := dstVector.Data.(*schemapb.VectorField_Float16Vector)
-					dstFloat16Vector.Float16Vector = append(dstFloat16Vector.Float16Vector, srcVector.Float16Vector[idx*(dim*2):(idx+1)*(dim*2)]...)
+					/* #nosec G103 */
+					appendSize += int64(unsafe.Sizeof(srcVector.Float16Vector[fieldIdx*(dim*2) : (fieldIdx+1)*(dim*2)]))
 				}
-				/* #nosec G103 */
-				appendSize += int64(unsafe.Sizeof(srcVector.Float16Vector[idx*(dim*2) : (idx+1)*(dim*2)]))
 			case *schemapb.VectorField_Bfloat16Vector:
-				if dstVector.GetBfloat16Vector() == nil {
-					srcToCopy := srcVector.Bfloat16Vector[idx*(dim*2) : (idx+1)*(dim*2)]
-					dstVector.Data = &schemapb.VectorField_Bfloat16Vector{
-						Bfloat16Vector: make([]byte, len(srcToCopy)),
+				if !isNullRow {
+					if dstVector.GetBfloat16Vector() == nil {
+						srcToCopy := srcVector.Bfloat16Vector[fieldIdx*(dim*2) : (fieldIdx+1)*(dim*2)]
+						dstVector.Data = &schemapb.VectorField_Bfloat16Vector{
+							Bfloat16Vector: make([]byte, len(srcToCopy)),
+						}
+						copy(dstVector.Data.(*schemapb.VectorField_Bfloat16Vector).Bfloat16Vector, srcToCopy)
+					} else {
+						dstBfloat16Vector := dstVector.Data.(*schemapb.VectorField_Bfloat16Vector)
+						dstBfloat16Vector.Bfloat16Vector = append(dstBfloat16Vector.Bfloat16Vector, srcVector.Bfloat16Vector[fieldIdx*(dim*2):(fieldIdx+1)*(dim*2)]...)
 					}
-					copy(dstVector.Data.(*schemapb.VectorField_Bfloat16Vector).Bfloat16Vector, srcToCopy)
-				} else {
-					dstBfloat16Vector := dstVector.Data.(*schemapb.VectorField_Bfloat16Vector)
-					dstBfloat16Vector.Bfloat16Vector = append(dstBfloat16Vector.Bfloat16Vector, srcVector.Bfloat16Vector[idx*(dim*2):(idx+1)*(dim*2)]...)
+					/* #nosec G103 */
+					appendSize += int64(unsafe.Sizeof(srcVector.Bfloat16Vector[fieldIdx*(dim*2) : (fieldIdx+1)*(dim*2)]))
 				}
-				/* #nosec G103 */
-				appendSize += int64(unsafe.Sizeof(srcVector.Bfloat16Vector[idx*(dim*2) : (idx+1)*(dim*2)]))
 			case *schemapb.VectorField_SparseFloatVector:
-				if dstVector.GetSparseFloatVector() == nil {
-					dstVector.Data = &schemapb.VectorField_SparseFloatVector{
-						SparseFloatVector: &schemapb.SparseFloatArray{
-							Dim:      0,
-							Contents: make([][]byte, 0),
-						},
+				if !isNullRow {
+					if dstVector.GetSparseFloatVector() == nil {
+						dstVector.Data = &schemapb.VectorField_SparseFloatVector{
+							SparseFloatVector: &schemapb.SparseFloatArray{
+								Dim:      0,
+								Contents: make([][]byte, 0),
+							},
+						}
+						dstVector.Dim = srcVector.SparseFloatVector.Dim
 					}
-					dstVector.Dim = srcVector.SparseFloatVector.Dim
+					vec := dstVector.Data.(*schemapb.VectorField_SparseFloatVector).SparseFloatVector
+					appendSize += appendSparseFloatArraySingleRow(vec, srcVector.SparseFloatVector, fieldIdx)
 				}
-				vec := dstVector.Data.(*schemapb.VectorField_SparseFloatVector).SparseFloatVector
-				appendSize += appendSparseFloatArraySingleRow(vec, srcVector.SparseFloatVector, idx)
 			case *schemapb.VectorField_Int8Vector:
-				if dstVector.GetInt8Vector() == nil {
-					srcToCopy := srcVector.Int8Vector[idx*dim : (idx+1)*dim]
-					dstVector.Data = &schemapb.VectorField_Int8Vector{
-						Int8Vector: make([]byte, len(srcToCopy)),
+				if !isNullRow {
+					if dstVector.GetInt8Vector() == nil {
+						srcToCopy := srcVector.Int8Vector[fieldIdx*dim : (fieldIdx+1)*dim]
+						dstVector.Data = &schemapb.VectorField_Int8Vector{
+							Int8Vector: make([]byte, len(srcToCopy)),
+						}
+						copy(dstVector.Data.(*schemapb.VectorField_Int8Vector).Int8Vector, srcToCopy)
+					} else {
+						dstInt8Vector := dstVector.Data.(*schemapb.VectorField_Int8Vector)
+						dstInt8Vector.Int8Vector = append(dstInt8Vector.Int8Vector, srcVector.Int8Vector[fieldIdx*dim:(fieldIdx+1)*dim]...)
 					}
-					copy(dstVector.Data.(*schemapb.VectorField_Int8Vector).Int8Vector, srcToCopy)
-				} else {
-					dstInt8Vector := dstVector.Data.(*schemapb.VectorField_Int8Vector)
-					dstInt8Vector.Int8Vector = append(dstInt8Vector.Int8Vector, srcVector.Int8Vector[idx*dim:(idx+1)*dim]...)
+					/* #nosec G103 */
+					appendSize += int64(unsafe.Sizeof(srcVector.Int8Vector[fieldIdx*dim : (fieldIdx+1)*dim]))
 				}
-				/* #nosec G103 */
-				appendSize += int64(unsafe.Sizeof(srcVector.Int8Vector[idx*dim : (idx+1)*dim]))
 			case *schemapb.VectorField_VectorArray:
 				if dstVector.GetVectorArray() == nil {
 					dstVector.Data = &schemapb.VectorField_VectorArray{
 						VectorArray: &schemapb.VectorArray{
-							Data:        []*schemapb.VectorField{srcVector.VectorArray.Data[idx]},
+							Data:        []*schemapb.VectorField{srcVector.VectorArray.Data[fieldIdx]},
 							Dim:         srcVector.VectorArray.Dim,
 							ElementType: srcVector.VectorArray.ElementType,
 						},
 					}
 				} else {
-					dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data[idx])
+					dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data[fieldIdx])
 				}
 			}
 		}
 	}
 
 	return
+}
+
+func AppendFieldDataByColumn(dst, src *schemapb.FieldData, dataIndices []int64, rowIndices ...[]int64) {
+	if dst == nil || src == nil {
+		return
+	}
+
+	// Handle ValidData: use rowIndices if provided, otherwise use dataIndices
+	if len(src.GetValidData()) > 0 {
+		validIndices := dataIndices
+		if len(rowIndices) > 0 {
+			validIndices = rowIndices[0]
+		}
+		if dst.ValidData == nil {
+			dst.ValidData = make([]bool, 0, len(validIndices))
+		}
+		for _, idx := range validIndices {
+			dst.ValidData = append(dst.ValidData, src.ValidData[int(idx)])
+		}
+	}
+
+	// Return early if no data to copy
+	if len(dataIndices) == 0 {
+		return
+	}
+
+	switch srcField := src.Field.(type) {
+	case *schemapb.FieldData_Scalars:
+		if dst.GetScalars() == nil {
+			dst.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{},
+			}
+		}
+		dstScalar := dst.GetScalars()
+		switch srcScalar := srcField.Scalars.Data.(type) {
+		case *schemapb.ScalarField_BoolData:
+			if dstScalar.GetBoolData() == nil {
+				dstScalar.Data = &schemapb.ScalarField_BoolData{
+					BoolData: &schemapb.BoolArray{Data: make([]bool, 0, len(dataIndices))},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstScalar.GetBoolData().Data = append(dstScalar.GetBoolData().Data, srcScalar.BoolData.Data[idx])
+			}
+		case *schemapb.ScalarField_IntData:
+			if dstScalar.GetIntData() == nil {
+				dstScalar.Data = &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{Data: make([]int32, 0, len(dataIndices))},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstScalar.GetIntData().Data = append(dstScalar.GetIntData().Data, srcScalar.IntData.Data[idx])
+			}
+		case *schemapb.ScalarField_LongData:
+			if dstScalar.GetLongData() == nil {
+				dstScalar.Data = &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{Data: make([]int64, 0, len(dataIndices))},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstScalar.GetLongData().Data = append(dstScalar.GetLongData().Data, srcScalar.LongData.Data[idx])
+			}
+		case *schemapb.ScalarField_FloatData:
+			if dstScalar.GetFloatData() == nil {
+				dstScalar.Data = &schemapb.ScalarField_FloatData{
+					FloatData: &schemapb.FloatArray{Data: make([]float32, 0, len(dataIndices))},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstScalar.GetFloatData().Data = append(dstScalar.GetFloatData().Data, srcScalar.FloatData.Data[idx])
+			}
+		case *schemapb.ScalarField_DoubleData:
+			if dstScalar.GetDoubleData() == nil {
+				dstScalar.Data = &schemapb.ScalarField_DoubleData{
+					DoubleData: &schemapb.DoubleArray{Data: make([]float64, 0, len(dataIndices))},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstScalar.GetDoubleData().Data = append(dstScalar.GetDoubleData().Data, srcScalar.DoubleData.Data[idx])
+			}
+		case *schemapb.ScalarField_StringData:
+			if dstScalar.GetStringData() == nil {
+				dstScalar.Data = &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{Data: make([]string, 0, len(dataIndices))},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstScalar.GetStringData().Data = append(dstScalar.GetStringData().Data, srcScalar.StringData.Data[idx])
+			}
+		case *schemapb.ScalarField_ArrayData:
+			if dstScalar.GetArrayData() == nil {
+				dstScalar.Data = &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						Data:        make([]*schemapb.ScalarField, 0, len(dataIndices)),
+						ElementType: srcScalar.ArrayData.ElementType,
+					},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstScalar.GetArrayData().Data = append(dstScalar.GetArrayData().Data, srcScalar.ArrayData.Data[idx])
+			}
+		case *schemapb.ScalarField_JsonData:
+			if dstScalar.GetJsonData() == nil {
+				dstScalar.Data = &schemapb.ScalarField_JsonData{
+					JsonData: &schemapb.JSONArray{Data: make([][]byte, 0, len(dataIndices))},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstScalar.GetJsonData().Data = append(dstScalar.GetJsonData().Data, srcScalar.JsonData.Data[idx])
+			}
+		case *schemapb.ScalarField_GeometryData:
+			if dstScalar.GetGeometryData() == nil {
+				dstScalar.Data = &schemapb.ScalarField_GeometryData{
+					GeometryData: &schemapb.GeometryArray{Data: make([][]byte, 0, len(dataIndices))},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstScalar.GetGeometryData().Data = append(dstScalar.GetGeometryData().Data, srcScalar.GeometryData.Data[idx])
+			}
+		case *schemapb.ScalarField_GeometryWktData:
+			if dstScalar.GetGeometryWktData() == nil {
+				dstScalar.Data = &schemapb.ScalarField_GeometryWktData{
+					GeometryWktData: &schemapb.GeometryWktArray{Data: make([]string, 0, len(dataIndices))},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstScalar.GetGeometryWktData().Data = append(dstScalar.GetGeometryWktData().Data, srcScalar.GeometryWktData.Data[idx])
+			}
+		case *schemapb.ScalarField_TimestamptzData:
+			if dstScalar.GetTimestamptzData() == nil {
+				dstScalar.Data = &schemapb.ScalarField_TimestamptzData{
+					TimestamptzData: &schemapb.TimestamptzArray{Data: make([]int64, 0, len(dataIndices))},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstScalar.GetTimestamptzData().Data = append(dstScalar.GetTimestamptzData().Data, srcScalar.TimestamptzData.Data[idx])
+			}
+		}
+	case *schemapb.FieldData_Vectors:
+		dim := srcField.Vectors.Dim
+		if dst.GetVectors() == nil {
+			dst.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{Dim: dim},
+			}
+		}
+		dstVector := dst.GetVectors()
+		switch srcVector := srcField.Vectors.Data.(type) {
+		case *schemapb.VectorField_BinaryVector:
+			if dstVector.GetBinaryVector() == nil {
+				dstVector.Data = &schemapb.VectorField_BinaryVector{
+					BinaryVector: make([]byte, 0, len(dataIndices)*int(dim/8)),
+				}
+			}
+			for _, idx := range dataIndices {
+				start := idx * (dim / 8)
+				end := (idx + 1) * (dim / 8)
+				dstVector.Data.(*schemapb.VectorField_BinaryVector).BinaryVector = append(
+					dstVector.Data.(*schemapb.VectorField_BinaryVector).BinaryVector,
+					srcVector.BinaryVector[start:end]...)
+			}
+		case *schemapb.VectorField_FloatVector:
+			if dstVector.GetFloatVector() == nil {
+				dstVector.Data = &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{Data: make([]float32, 0, len(dataIndices)*int(dim))},
+				}
+			}
+			for _, idx := range dataIndices {
+				start := idx * dim
+				end := (idx + 1) * dim
+				dstVector.GetFloatVector().Data = append(dstVector.GetFloatVector().Data, srcVector.FloatVector.Data[start:end]...)
+			}
+		case *schemapb.VectorField_Float16Vector:
+			if dstVector.GetFloat16Vector() == nil {
+				dstVector.Data = &schemapb.VectorField_Float16Vector{
+					Float16Vector: make([]byte, 0, len(dataIndices)*int(dim*2)),
+				}
+			}
+			for _, idx := range dataIndices {
+				start := idx * (dim * 2)
+				end := (idx + 1) * (dim * 2)
+				dstVector.Data.(*schemapb.VectorField_Float16Vector).Float16Vector = append(
+					dstVector.Data.(*schemapb.VectorField_Float16Vector).Float16Vector,
+					srcVector.Float16Vector[start:end]...)
+			}
+		case *schemapb.VectorField_Bfloat16Vector:
+			if dstVector.GetBfloat16Vector() == nil {
+				dstVector.Data = &schemapb.VectorField_Bfloat16Vector{
+					Bfloat16Vector: make([]byte, 0, len(dataIndices)*int(dim*2)),
+				}
+			}
+			for _, idx := range dataIndices {
+				start := idx * (dim * 2)
+				end := (idx + 1) * (dim * 2)
+				dstVector.Data.(*schemapb.VectorField_Bfloat16Vector).Bfloat16Vector = append(
+					dstVector.Data.(*schemapb.VectorField_Bfloat16Vector).Bfloat16Vector,
+					srcVector.Bfloat16Vector[start:end]...)
+			}
+		case *schemapb.VectorField_SparseFloatVector:
+			if dstVector.GetSparseFloatVector() == nil {
+				dstVector.Data = &schemapb.VectorField_SparseFloatVector{
+					SparseFloatVector: &schemapb.SparseFloatArray{
+						Dim:      srcVector.SparseFloatVector.Dim,
+						Contents: make([][]byte, 0, len(dataIndices)),
+					},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstVector.GetSparseFloatVector().Contents = append(
+					dstVector.GetSparseFloatVector().Contents,
+					srcVector.SparseFloatVector.Contents[idx])
+			}
+		case *schemapb.VectorField_Int8Vector:
+			if dstVector.GetInt8Vector() == nil {
+				dstVector.Data = &schemapb.VectorField_Int8Vector{
+					Int8Vector: make([]byte, 0, len(dataIndices)*int(dim)),
+				}
+			}
+			for _, idx := range dataIndices {
+				start := idx * dim
+				end := (idx + 1) * dim
+				dstVector.Data.(*schemapb.VectorField_Int8Vector).Int8Vector = append(
+					dstVector.Data.(*schemapb.VectorField_Int8Vector).Int8Vector,
+					srcVector.Int8Vector[start:end]...)
+			}
+		}
+	}
 }
 
 // DeleteFieldData delete fields data appended last time
@@ -1388,6 +1735,456 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 	return nil
 }
 
+// UpdateArrayFieldByColumnWithOp merges an Array field's update rows into
+// the base rows while applying a FieldPartialUpdateOp. Non-Array field
+// types or a REPLACE op fall back to UpdateFieldDataByColumn's behavior.
+//
+// maxCapacity caps ARRAY_APPEND's post-merge length; pass -1 to skip the
+// check (proxy should pass the schema-declared max_capacity).
+func UpdateArrayFieldByColumnWithOp(
+	base, update *schemapb.FieldData,
+	baseIndices, updateIndices []int64,
+	op schemapb.FieldPartialUpdateOp_OpType,
+	maxCapacity int,
+) error {
+	if op == schemapb.FieldPartialUpdateOp_REPLACE {
+		return UpdateFieldDataByColumn(base, update, baseIndices, updateIndices)
+	}
+	if base == nil || update == nil || len(baseIndices) == 0 {
+		return nil
+	}
+	if len(baseIndices) != len(updateIndices) {
+		return fmt.Errorf("baseIndices and updateIndices length mismatch: %d vs %d", len(baseIndices), len(updateIndices))
+	}
+	if base.GetType() != schemapb.DataType_Array {
+		return fmt.Errorf("op %s requires Array field, got %s", op.String(), base.GetType().String())
+	}
+	baseScalar := base.GetScalars()
+	updateScalar := update.GetScalars()
+	if baseScalar.GetArrayData() == nil || updateScalar.GetArrayData() == nil {
+		return fmt.Errorf("op %s requires non-nil ArrayData on both base and update", op.String())
+	}
+	baseData := baseScalar.GetArrayData().Data
+	updateData := updateScalar.GetArrayData().Data
+	elementType := baseScalar.GetArrayData().GetElementType()
+	for i, baseIdx := range baseIndices {
+		updateIdx := updateIndices[i]
+		// If the upsert payload row is explicitly null, there is nothing to
+		// append/remove; leave the existing base row untouched.
+		if len(update.ValidData) > 0 && !update.ValidData[updateIdx] {
+			continue
+		}
+		merged, err := ApplyArrayRowOp(baseData[baseIdx], updateData[updateIdx], op, elementType, maxCapacity)
+		if err != nil {
+			return err
+		}
+		baseData[baseIdx] = merged
+		// After a successful merge the base row carries concrete data and
+		// must be marked valid, otherwise downstream readers keep treating
+		// it as null and drop the merged payload silently.
+		if len(base.ValidData) > 0 {
+			base.ValidData[baseIdx] = true
+		}
+	}
+
+	return nil
+}
+
+func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, updateIndices []int64) error {
+	if base == nil || update == nil || len(baseIndices) == 0 {
+		return nil
+	}
+	if len(baseIndices) != len(updateIndices) {
+		return fmt.Errorf("baseIndices and updateIndices length mismatch: %d vs %d", len(baseIndices), len(updateIndices))
+	}
+	if IsCompactNullableVectorFieldData(base) {
+		return updateCompactNullableVectorFieldDataByColumn(base, update, baseIndices, updateIndices)
+	}
+
+	// Handle ValidData
+	if len(update.GetValidData()) > 0 && len(base.GetValidData()) > 0 {
+		for i, baseIdx := range baseIndices {
+			updateIdx := updateIndices[i]
+			base.ValidData[baseIdx] = update.ValidData[updateIdx]
+		}
+	}
+
+	switch baseField := base.Field.(type) {
+	case *schemapb.FieldData_Scalars:
+		updateField := update.Field.(*schemapb.FieldData_Scalars)
+		baseScalar := baseField.Scalars
+		updateScalar := updateField.Scalars
+
+		switch baseScalar.Data.(type) {
+		case *schemapb.ScalarField_BoolData:
+			baseData := baseScalar.GetBoolData().Data
+			updateData := updateScalar.GetBoolData().Data
+			for i, baseIdx := range baseIndices {
+				baseData[baseIdx] = updateData[updateIndices[i]]
+			}
+		case *schemapb.ScalarField_IntData:
+			baseData := baseScalar.GetIntData().Data
+			updateData := updateScalar.GetIntData().Data
+			for i, baseIdx := range baseIndices {
+				baseData[baseIdx] = updateData[updateIndices[i]]
+			}
+		case *schemapb.ScalarField_LongData:
+			baseData := baseScalar.GetLongData().Data
+			updateData := updateScalar.GetLongData().Data
+			for i, baseIdx := range baseIndices {
+				baseData[baseIdx] = updateData[updateIndices[i]]
+			}
+		case *schemapb.ScalarField_FloatData:
+			baseData := baseScalar.GetFloatData().Data
+			updateData := updateScalar.GetFloatData().Data
+			for i, baseIdx := range baseIndices {
+				baseData[baseIdx] = updateData[updateIndices[i]]
+			}
+		case *schemapb.ScalarField_DoubleData:
+			baseData := baseScalar.GetDoubleData().Data
+			updateData := updateScalar.GetDoubleData().Data
+			for i, baseIdx := range baseIndices {
+				baseData[baseIdx] = updateData[updateIndices[i]]
+			}
+		case *schemapb.ScalarField_StringData:
+			baseData := baseScalar.GetStringData().Data
+			updateData := updateScalar.GetStringData().Data
+			for i, baseIdx := range baseIndices {
+				baseData[baseIdx] = updateData[updateIndices[i]]
+			}
+		case *schemapb.ScalarField_ArrayData:
+			baseData := baseScalar.GetArrayData().Data
+			updateData := updateScalar.GetArrayData().Data
+			for i, baseIdx := range baseIndices {
+				baseData[baseIdx] = updateData[updateIndices[i]]
+			}
+		case *schemapb.ScalarField_JsonData:
+			baseData := baseScalar.GetJsonData().Data
+			updateData := updateScalar.GetJsonData().Data
+			if base.GetIsDynamic() {
+				// dynamic field is a json with only 1 level nested struct,
+				// so we need to unmarshal and iterate updateData's key value, and update the baseData's key value
+				for i, baseIdx := range baseIndices {
+					updateIdx := updateIndices[i]
+					var baseMap map[string]interface{}
+					var updateMap map[string]interface{}
+					// unmarshal base and update
+					if err := json.Unmarshal(baseData[baseIdx], &baseMap); err != nil {
+						return fmt.Errorf("failed to unmarshal base json: %v", err)
+					}
+					if err := json.Unmarshal(updateData[updateIdx], &updateMap); err != nil {
+						return fmt.Errorf("failed to unmarshal update json: %v", err)
+					}
+					// merge
+					for k, v := range updateMap {
+						baseMap[k] = v
+					}
+					// marshal back
+					newJSON, err := json.Marshal(baseMap)
+					if err != nil {
+						return fmt.Errorf("failed to marshal merged json: %v", err)
+					}
+					baseData[baseIdx] = newJSON
+				}
+			} else {
+				for i, baseIdx := range baseIndices {
+					baseData[baseIdx] = updateData[updateIndices[i]]
+				}
+			}
+		case *schemapb.ScalarField_GeometryData:
+			baseData := baseScalar.GetGeometryData().Data
+			updateData := updateScalar.GetGeometryData().Data
+			for i, baseIdx := range baseIndices {
+				baseData[baseIdx] = updateData[updateIndices[i]]
+			}
+		case *schemapb.ScalarField_GeometryWktData:
+			baseData := baseScalar.GetGeometryWktData().Data
+			updateData := updateScalar.GetGeometryWktData().Data
+			for i, baseIdx := range baseIndices {
+				baseData[baseIdx] = updateData[updateIndices[i]]
+			}
+		case *schemapb.ScalarField_TimestamptzData:
+			baseData := baseScalar.GetTimestamptzData().Data
+			updateData := updateScalar.GetTimestamptzData().Data
+			for i, baseIdx := range baseIndices {
+				baseData[baseIdx] = updateData[updateIndices[i]]
+			}
+		}
+	case *schemapb.FieldData_Vectors:
+		updateField := update.Field.(*schemapb.FieldData_Vectors)
+		baseVector := baseField.Vectors
+		updateVector := updateField.Vectors
+		dim := baseVector.Dim
+
+		switch baseVector.Data.(type) {
+		case *schemapb.VectorField_BinaryVector:
+			baseData := baseVector.GetBinaryVector()
+			updateData := updateVector.GetBinaryVector()
+			elemSize := dim / 8
+			for i, baseIdx := range baseIndices {
+				updateIdx := updateIndices[i]
+				copy(baseData[baseIdx*elemSize:(baseIdx+1)*elemSize], updateData[updateIdx*elemSize:(updateIdx+1)*elemSize])
+			}
+		case *schemapb.VectorField_FloatVector:
+			baseData := baseVector.GetFloatVector().Data
+			updateData := updateVector.GetFloatVector().Data
+			for i, baseIdx := range baseIndices {
+				updateIdx := updateIndices[i]
+				copy(baseData[baseIdx*dim:(baseIdx+1)*dim], updateData[updateIdx*dim:(updateIdx+1)*dim])
+			}
+		case *schemapb.VectorField_Float16Vector:
+			baseData := baseVector.GetFloat16Vector()
+			updateData := updateVector.GetFloat16Vector()
+			elemSize := dim * 2
+			for i, baseIdx := range baseIndices {
+				updateIdx := updateIndices[i]
+				copy(baseData[baseIdx*elemSize:(baseIdx+1)*elemSize], updateData[updateIdx*elemSize:(updateIdx+1)*elemSize])
+			}
+		case *schemapb.VectorField_Bfloat16Vector:
+			baseData := baseVector.GetBfloat16Vector()
+			updateData := updateVector.GetBfloat16Vector()
+			elemSize := dim * 2
+			for i, baseIdx := range baseIndices {
+				updateIdx := updateIndices[i]
+				copy(baseData[baseIdx*elemSize:(baseIdx+1)*elemSize], updateData[updateIdx*elemSize:(updateIdx+1)*elemSize])
+			}
+		case *schemapb.VectorField_SparseFloatVector:
+			baseData := baseVector.GetSparseFloatVector().Contents
+			updateData := updateVector.GetSparseFloatVector().Contents
+			for i, baseIdx := range baseIndices {
+				baseData[baseIdx] = updateData[updateIndices[i]]
+			}
+		case *schemapb.VectorField_Int8Vector:
+			baseData := baseVector.GetInt8Vector()
+			updateData := updateVector.GetInt8Vector()
+			for i, baseIdx := range baseIndices {
+				updateIdx := updateIndices[i]
+				copy(baseData[baseIdx*dim:(baseIdx+1)*dim], updateData[updateIdx*dim:(updateIdx+1)*dim])
+			}
+		}
+	}
+
+	return nil
+}
+
+// IsCompactNullableVectorFieldData reports whether field uses compact nullable vector payload.
+func IsCompactNullableVectorFieldData(field *schemapb.FieldData) bool {
+	return len(field.GetValidData()) > 0 && IsSupportedNullableVectorType(field.GetType())
+}
+
+func updateCompactNullableVectorFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, updateIndices []int64) error {
+	if !IsSupportedNullableVectorType(update.GetType()) {
+		return fmt.Errorf("cannot update nullable vector field %s with %s", base.GetType().String(), update.GetType().String())
+	}
+	if update.GetType() != base.GetType() {
+		return fmt.Errorf("cannot update nullable vector field %s with %s", base.GetType().String(), update.GetType().String())
+	}
+
+	baseValidData := base.GetValidData()
+	updateValidData := update.GetValidData()
+	if len(updateValidData) == 0 {
+		return fmt.Errorf("nullable vector field %s missing ValidData", update.GetFieldName())
+	}
+
+	updateByBaseIdx := make(map[int]int, len(baseIndices))
+	for i, baseIdx := range baseIndices {
+		updateIdx := updateIndices[i]
+		if baseIdx < 0 || int(baseIdx) >= len(baseValidData) {
+			return fmt.Errorf("base index %d out of range for nullable vector field %s", baseIdx, base.GetFieldName())
+		}
+		if updateIdx < 0 || int(updateIdx) >= len(updateValidData) {
+			return fmt.Errorf("update index %d out of range for nullable vector field %s", updateIdx, update.GetFieldName())
+		}
+		updateByBaseIdx[int(baseIdx)] = int(updateIdx)
+	}
+
+	basePhysicalIndices, _ := BuildNullableVectorDataIndices(baseValidData)
+	updatePhysicalIndices, _ := BuildNullableVectorDataIndices(updateValidData)
+	newValidData := append([]bool(nil), baseValidData...)
+	for baseIdx, updateIdx := range updateByBaseIdx {
+		newValidData[baseIdx] = updateValidData[updateIdx]
+	}
+
+	baseVector := base.GetVectors()
+	updateVector := update.GetVectors()
+	if baseVector == nil || updateVector == nil {
+		return fmt.Errorf("nullable vector field data is nil")
+	}
+	dim := baseVector.GetDim()
+	if dim == 0 {
+		dim = updateVector.GetDim()
+	}
+	if dim != 0 {
+		baseVector.Dim = dim
+	}
+
+	switch base.GetType() {
+	case schemapb.DataType_BinaryVector:
+		elemSize := dim / 8
+		newData := make([]byte, 0, int64(countValid(newValidData))*elemSize)
+		appendRow := func(vector *schemapb.VectorField, physicalIdx int) error {
+			data := vector.GetBinaryVector()
+			start := int64(physicalIdx) * elemSize
+			end := start + elemSize
+			if start < 0 || end > int64(len(data)) {
+				return fmt.Errorf("binary vector physical index %d out of range", physicalIdx)
+			}
+			newData = append(newData, data[start:end]...)
+			return nil
+		}
+		if err := rebuildCompactNullableVectorData(newValidData, updateByBaseIdx, basePhysicalIndices, updatePhysicalIndices, appendRow, baseVector, updateVector); err != nil {
+			return err
+		}
+		baseVector.Data = &schemapb.VectorField_BinaryVector{BinaryVector: newData}
+	case schemapb.DataType_FloatVector:
+		newData := make([]float32, 0, int64(countValid(newValidData))*dim)
+		appendRow := func(vector *schemapb.VectorField, physicalIdx int) error {
+			data := vector.GetFloatVector().GetData()
+			start := int64(physicalIdx) * dim
+			end := start + dim
+			if start < 0 || end > int64(len(data)) {
+				return fmt.Errorf("float vector physical index %d out of range", physicalIdx)
+			}
+			newData = append(newData, data[start:end]...)
+			return nil
+		}
+		if err := rebuildCompactNullableVectorData(newValidData, updateByBaseIdx, basePhysicalIndices, updatePhysicalIndices, appendRow, baseVector, updateVector); err != nil {
+			return err
+		}
+		baseVector.Data = &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: newData}}
+	case schemapb.DataType_Float16Vector:
+		elemSize := dim * 2
+		newData := make([]byte, 0, int64(countValid(newValidData))*elemSize)
+		appendRow := func(vector *schemapb.VectorField, physicalIdx int) error {
+			data := vector.GetFloat16Vector()
+			start := int64(physicalIdx) * elemSize
+			end := start + elemSize
+			if start < 0 || end > int64(len(data)) {
+				return fmt.Errorf("float16 vector physical index %d out of range", physicalIdx)
+			}
+			newData = append(newData, data[start:end]...)
+			return nil
+		}
+		if err := rebuildCompactNullableVectorData(newValidData, updateByBaseIdx, basePhysicalIndices, updatePhysicalIndices, appendRow, baseVector, updateVector); err != nil {
+			return err
+		}
+		baseVector.Data = &schemapb.VectorField_Float16Vector{Float16Vector: newData}
+	case schemapb.DataType_BFloat16Vector:
+		elemSize := dim * 2
+		newData := make([]byte, 0, int64(countValid(newValidData))*elemSize)
+		appendRow := func(vector *schemapb.VectorField, physicalIdx int) error {
+			data := vector.GetBfloat16Vector()
+			start := int64(physicalIdx) * elemSize
+			end := start + elemSize
+			if start < 0 || end > int64(len(data)) {
+				return fmt.Errorf("bfloat16 vector physical index %d out of range", physicalIdx)
+			}
+			newData = append(newData, data[start:end]...)
+			return nil
+		}
+		if err := rebuildCompactNullableVectorData(newValidData, updateByBaseIdx, basePhysicalIndices, updatePhysicalIndices, appendRow, baseVector, updateVector); err != nil {
+			return err
+		}
+		baseVector.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: newData}
+	case schemapb.DataType_SparseFloatVector:
+		baseSparse := baseVector.GetSparseFloatVector()
+		updateSparse := updateVector.GetSparseFloatVector()
+		if updateSparse == nil {
+			return fmt.Errorf("sparse float vector update data is nil")
+		}
+		baseDim := int64(0)
+		if baseSparse != nil {
+			baseDim = baseSparse.GetDim()
+		}
+		newSparse := &schemapb.SparseFloatArray{
+			Dim:      maxInt64(baseDim, updateSparse.GetDim()),
+			Contents: make([][]byte, 0, countValid(newValidData)),
+		}
+		appendRow := func(vector *schemapb.VectorField, physicalIdx int) error {
+			data := vector.GetSparseFloatVector()
+			if data == nil || physicalIdx < 0 || physicalIdx >= len(data.GetContents()) {
+				return fmt.Errorf("sparse vector physical index %d out of range", physicalIdx)
+			}
+			row := data.GetContents()[physicalIdx]
+			newSparse.Contents = append(newSparse.Contents, row)
+			if rowDim := SparseFloatRowDim(row); rowDim > newSparse.Dim {
+				newSparse.Dim = rowDim
+			}
+			return nil
+		}
+		if err := rebuildCompactNullableVectorData(newValidData, updateByBaseIdx, basePhysicalIndices, updatePhysicalIndices, appendRow, baseVector, updateVector); err != nil {
+			return err
+		}
+		baseVector.Data = &schemapb.VectorField_SparseFloatVector{SparseFloatVector: newSparse}
+		baseVector.Dim = newSparse.GetDim()
+	case schemapb.DataType_Int8Vector:
+		elemSize := dim
+		newData := make([]byte, 0, int64(countValid(newValidData))*elemSize)
+		appendRow := func(vector *schemapb.VectorField, physicalIdx int) error {
+			data := vector.GetInt8Vector()
+			start := int64(physicalIdx) * elemSize
+			end := start + elemSize
+			if start < 0 || end > int64(len(data)) {
+				return fmt.Errorf("int8 vector physical index %d out of range", physicalIdx)
+			}
+			newData = append(newData, data[start:end]...)
+			return nil
+		}
+		if err := rebuildCompactNullableVectorData(newValidData, updateByBaseIdx, basePhysicalIndices, updatePhysicalIndices, appendRow, baseVector, updateVector); err != nil {
+			return err
+		}
+		baseVector.Data = &schemapb.VectorField_Int8Vector{Int8Vector: newData}
+	default:
+		return fmt.Errorf("unsupported nullable vector field type %s", base.GetType().String())
+	}
+
+	base.ValidData = newValidData
+	return nil
+}
+
+func rebuildCompactNullableVectorData(
+	validData []bool,
+	updateByBaseIdx map[int]int,
+	basePhysicalIndices []int,
+	updatePhysicalIndices []int,
+	appendRow func(vector *schemapb.VectorField, physicalIdx int) error,
+	baseVector *schemapb.VectorField,
+	updateVector *schemapb.VectorField,
+) error {
+	for logicalIdx, valid := range validData {
+		if !valid {
+			continue
+		}
+		if updateIdx, ok := updateByBaseIdx[logicalIdx]; ok {
+			if err := appendRow(updateVector, updatePhysicalIndices[updateIdx]); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := appendRow(baseVector, basePhysicalIndices[logicalIdx]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func maxInt64(lhs, rhs int64) int64 {
+	if lhs > rhs {
+		return lhs
+	}
+	return rhs
+}
+
+func countValid(validData []bool) int {
+	validCount := 0
+	for _, valid := range validData {
+		if valid {
+			validCount++
+		}
+	}
+	return validCount
+}
+
 // MergeFieldData appends fields data to dst
 func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error {
 	fieldID2Data := make(map[int64]*schemapb.FieldData)
@@ -1526,7 +2323,10 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 			if _, ok := fieldID2Data[srcFieldData.FieldId]; !ok {
 				return errors.New("fields in src but not in dst: " + srcFieldData.Type.String())
 			}
-			dstVector := fieldID2Data[srcFieldData.FieldId].GetVectors()
+			fieldData := fieldID2Data[srcFieldData.FieldId]
+			// Merge ValidData for nullable vectors
+			fieldData.ValidData = append(fieldData.ValidData, srcFieldData.GetValidData()...)
+			dstVector := fieldData.GetVectors()
 			switch srcVector := fieldType.Vectors.Data.(type) {
 			case *schemapb.VectorField_BinaryVector:
 				if dstVector.GetBinaryVector() == nil {
@@ -1594,6 +2394,8 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 				} else {
 					dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data...)
 				}
+			case nil:
+				// nullable vector field where all rows are null — no vector data to merge
 			default:
 				return errors.New("unsupported data type: " + srcFieldData.Type.String())
 			}
@@ -1603,12 +2405,12 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 	return nil
 }
 
-// GetTotalFieldsNum get total fields number
-// We exclude StructArrayField itself as it does not contain data directly.
+// GetTotalFieldsNum get total fields number, including StructArrayField itself.
 func GetTotalFieldsNum(schema *schemapb.CollectionSchema) int {
 	num := len(schema.GetFields())
 	for _, structArrayField := range schema.GetStructArrayFields() {
-		num += len(structArrayField.GetFields())
+		// +1 for the StructArrayField itself
+		num += len(structArrayField.GetFields()) + 1
 	}
 	return num
 }
@@ -1933,6 +2735,15 @@ func GetPK(data *schemapb.IDs, idx int64) interface{} {
 func GetDataIterator(field *schemapb.FieldData) func(int) any {
 	if field.GetValidData() != nil {
 		validData := field.GetValidData()
+		if IsCompactNullableVectorFieldData(field) {
+			idxs, _ := BuildNullableVectorDataIndices(validData)
+			return func(idx int) any {
+				if idxs[idx] == -1 {
+					return nil
+				}
+				return getData(field, idxs[idx])
+			}
+		}
 		dataLen := getScalarDataLen(field)
 		if dataLen == len(validData) {
 			// Full-size format: data array has the same length as ValidData,
@@ -1944,8 +2755,6 @@ func GetDataIterator(field *schemapb.FieldData) func(int) any {
 				return getData(field, idx)
 			}
 		}
-		// Compact format: data array only contains valid entries.
-		// Build a mapping from logical index to physical index.
 		idxs := make([]int, len(validData))
 		cnt := 0
 		for i, valid := range validData {
@@ -2546,4 +3355,234 @@ func IsBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.F
 		}
 	}
 	return false
+}
+
+// ApplyArrayRowOp applies a FieldPartialUpdateOp to a single Array-field row.
+//
+// base and update are per-row ScalarField values (as stored in
+// ArrayArray.Data[i]). elementType is the Array field's declared element type,
+// used to dispatch the concrete typed-array handling. maxCapacity caps the
+// resulting array length for ARRAY_APPEND; pass -1 to skip the check (the
+// proxy is expected to enforce the schema-declared max_capacity).
+//
+// Returned ScalarField is a newly constructed value; base/update are not
+// mutated. Nil base or update is treated as an empty row for that side.
+func ApplyArrayRowOp(
+	base, update *schemapb.ScalarField,
+	op schemapb.FieldPartialUpdateOp_OpType,
+	elementType schemapb.DataType,
+	maxCapacity int,
+) (*schemapb.ScalarField, error) {
+	switch op {
+	case schemapb.FieldPartialUpdateOp_REPLACE:
+		return update, nil
+	case schemapb.FieldPartialUpdateOp_ARRAY_APPEND:
+		return appendArrayRow(base, update, elementType, maxCapacity)
+	case schemapb.FieldPartialUpdateOp_ARRAY_REMOVE:
+		return removeArrayRow(base, update, elementType)
+	default:
+		return nil, fmt.Errorf("unsupported FieldPartialUpdateOp: %s", op.String())
+	}
+}
+
+func appendArrayRow(
+	base, update *schemapb.ScalarField,
+	elementType schemapb.DataType,
+	maxCapacity int,
+) (*schemapb.ScalarField, error) {
+	switch elementType {
+	case schemapb.DataType_Bool:
+		b := base.GetBoolData().GetData()
+		u := update.GetBoolData().GetData()
+		merged := make([]bool, 0, len(b)+len(u))
+		merged = append(merged, b...)
+		merged = append(merged, u...)
+		if maxCapacity >= 0 && len(merged) > maxCapacity {
+			return nil, newArrayCapacityError(len(merged), maxCapacity)
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: merged}}}, nil
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		b := base.GetIntData().GetData()
+		u := update.GetIntData().GetData()
+		merged := make([]int32, 0, len(b)+len(u))
+		merged = append(merged, b...)
+		merged = append(merged, u...)
+		if maxCapacity >= 0 && len(merged) > maxCapacity {
+			return nil, newArrayCapacityError(len(merged), maxCapacity)
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: merged}}}, nil
+	case schemapb.DataType_Int64:
+		b := base.GetLongData().GetData()
+		u := update.GetLongData().GetData()
+		merged := make([]int64, 0, len(b)+len(u))
+		merged = append(merged, b...)
+		merged = append(merged, u...)
+		if maxCapacity >= 0 && len(merged) > maxCapacity {
+			return nil, newArrayCapacityError(len(merged), maxCapacity)
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: merged}}}, nil
+	case schemapb.DataType_Float:
+		b := base.GetFloatData().GetData()
+		u := update.GetFloatData().GetData()
+		merged := make([]float32, 0, len(b)+len(u))
+		merged = append(merged, b...)
+		merged = append(merged, u...)
+		if maxCapacity >= 0 && len(merged) > maxCapacity {
+			return nil, newArrayCapacityError(len(merged), maxCapacity)
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: merged}}}, nil
+	case schemapb.DataType_Double:
+		b := base.GetDoubleData().GetData()
+		u := update.GetDoubleData().GetData()
+		merged := make([]float64, 0, len(b)+len(u))
+		merged = append(merged, b...)
+		merged = append(merged, u...)
+		if maxCapacity >= 0 && len(merged) > maxCapacity {
+			return nil, newArrayCapacityError(len(merged), maxCapacity)
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: merged}}}, nil
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		b := base.GetStringData().GetData()
+		u := update.GetStringData().GetData()
+		merged := make([]string, 0, len(b)+len(u))
+		merged = append(merged, b...)
+		merged = append(merged, u...)
+		if maxCapacity >= 0 && len(merged) > maxCapacity {
+			return nil, newArrayCapacityError(len(merged), maxCapacity)
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: merged}}}, nil
+	default:
+		return nil, fmt.Errorf("ARRAY_APPEND does not support element type: %s", elementType.String())
+	}
+}
+
+func removeArrayRow(
+	base, update *schemapb.ScalarField,
+	elementType schemapb.DataType,
+) (*schemapb.ScalarField, error) {
+	switch elementType {
+	case schemapb.DataType_Bool:
+		b := base.GetBoolData().GetData()
+		u := update.GetBoolData().GetData()
+		if len(b) == 0 || len(u) == 0 {
+			return base, nil
+		}
+		remove := make(map[bool]struct{}, len(u))
+		for _, v := range u {
+			remove[v] = struct{}{}
+		}
+		out := make([]bool, 0, len(b))
+		for _, v := range b {
+			if _, skip := remove[v]; !skip {
+				out = append(out, v)
+			}
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: out}}}, nil
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		b := base.GetIntData().GetData()
+		u := update.GetIntData().GetData()
+		if len(b) == 0 || len(u) == 0 {
+			return base, nil
+		}
+		remove := make(map[int32]struct{}, len(u))
+		for _, v := range u {
+			remove[v] = struct{}{}
+		}
+		out := make([]int32, 0, len(b))
+		for _, v := range b {
+			if _, skip := remove[v]; !skip {
+				out = append(out, v)
+			}
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: out}}}, nil
+	case schemapb.DataType_Int64:
+		b := base.GetLongData().GetData()
+		u := update.GetLongData().GetData()
+		if len(b) == 0 || len(u) == 0 {
+			return base, nil
+		}
+		remove := make(map[int64]struct{}, len(u))
+		for _, v := range u {
+			remove[v] = struct{}{}
+		}
+		out := make([]int64, 0, len(b))
+		for _, v := range b {
+			if _, skip := remove[v]; !skip {
+				out = append(out, v)
+			}
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: out}}}, nil
+	case schemapb.DataType_Float:
+		// Linear scan: float32 equality is position-wise exact; hashing is
+		// valid but yields no speedup in typical cardinalities.
+		b := base.GetFloatData().GetData()
+		u := update.GetFloatData().GetData()
+		if len(b) == 0 || len(u) == 0 {
+			return base, nil
+		}
+		out := make([]float32, 0, len(b))
+		for _, v := range b {
+			if !containsFloat32(u, v) {
+				out = append(out, v)
+			}
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: out}}}, nil
+	case schemapb.DataType_Double:
+		b := base.GetDoubleData().GetData()
+		u := update.GetDoubleData().GetData()
+		if len(b) == 0 || len(u) == 0 {
+			return base, nil
+		}
+		out := make([]float64, 0, len(b))
+		for _, v := range b {
+			if !containsFloat64(u, v) {
+				out = append(out, v)
+			}
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: out}}}, nil
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		b := base.GetStringData().GetData()
+		u := update.GetStringData().GetData()
+		if len(b) == 0 || len(u) == 0 {
+			return base, nil
+		}
+		remove := make(map[string]struct{}, len(u))
+		for _, v := range u {
+			remove[v] = struct{}{}
+		}
+		out := make([]string, 0, len(b))
+		for _, v := range b {
+			if _, skip := remove[v]; !skip {
+				out = append(out, v)
+			}
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: out}}}, nil
+	default:
+		return nil, fmt.Errorf("ARRAY_REMOVE does not support element type: %s", elementType.String())
+	}
+}
+
+func containsFloat32(haystack []float32, needle float32) bool {
+	// NaN is intentionally treated as never equal to any value, matching
+	// IEEE-754 semantics — an ARRAY_REMOVE request targeting NaN cannot
+	// delete NaN elements from the base.
+	for _, v := range haystack {
+		if v == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func containsFloat64(haystack []float64, needle float64) bool {
+	for _, v := range haystack {
+		if v == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func newArrayCapacityError(got, max int) error {
+	return fmt.Errorf("array length %d exceeds max_capacity %d", got, max)
 }

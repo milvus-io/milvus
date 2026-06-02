@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "SearchOnIndex.h"
+#include "Utils.h"
 #include "exec/operator/Utils.h"
 #include "CachedSearchIterator.h"
 
@@ -28,23 +29,57 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     auto dataset =
         knowhere::GenDataSet(num_queries, dim, search_dataset.query_data);
     dataset->SetIsSparse(is_sparse);
+
+    const auto& offset_mapping = indexing.GetOffsetMapping();
+    TargetBitmap transformed_bitset;
+    BitsetView search_bitset = bitset;
+    const auto has_offset_mapping = offset_mapping.IsEnabled();
+    if (has_offset_mapping) {
+        if (offset_mapping.GetValidCount() == 0) {
+            // All vectors are null, return empty result
+            FillEmptySearchResult(
+                search_result, num_queries, search_conf.topk_);
+            return;
+        }
+        if (!bitset.empty()) {
+            auto status =
+                offset_mapping.TransformBitset(bitset, transformed_bitset);
+            if (status == OffsetMapping::BitsetTransformStatus::AllFiltered) {
+                FillEmptySearchResult(
+                    search_result, num_queries, search_conf.topk_);
+                return;
+            }
+            search_bitset =
+                status == OffsetMapping::BitsetTransformStatus::NoFilter
+                    ? BitsetView{}
+                    : search_result.PinBitset(std::move(transformed_bitset));
+        }
+    }
+
     if (milvus::exec::PrepareVectorIteratorsFromIndex(search_conf,
                                                       num_queries,
                                                       dataset,
                                                       search_result,
-                                                      bitset,
+                                                      search_bitset,
                                                       indexing)) {
         return;
     }
 
     if (search_conf.iterator_v2_info_.has_value()) {
         auto iter =
-            CachedSearchIterator(indexing, dataset, search_conf, bitset);
+            CachedSearchIterator(indexing, dataset, search_conf, search_bitset);
         iter.NextBatch(search_conf, search_result);
+        if (has_offset_mapping) {
+            offset_mapping.TransformOffsets(search_result.seg_offsets_);
+        }
         return;
     }
 
-    indexing.Query(dataset, search_conf, bitset, op_context, search_result);
+    indexing.Query(
+        dataset, search_conf, search_bitset, op_context, search_result);
+    if (has_offset_mapping) {
+        offset_mapping.TransformOffsets(search_result.seg_offsets_);
+    }
 }
 
 }  // namespace milvus::query

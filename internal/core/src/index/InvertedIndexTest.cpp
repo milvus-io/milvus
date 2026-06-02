@@ -52,6 +52,19 @@ struct ChunkManagerWrapper {
     const storage::ChunkManagerPtr cm_;
     std::unordered_set<std::string> written_;
 };
+
+struct FileSliceSizeGuard {
+    explicit FileSliceSizeGuard(int64_t slice_size)
+        : old_slice_size_(FILE_SLICE_SIZE.load()) {
+        FILE_SLICE_SIZE.store(slice_size);
+    }
+
+    ~FileSliceSizeGuard() {
+        FILE_SLICE_SIZE.store(old_slice_size_);
+    }
+
+    int64_t old_slice_size_;
+};
 }  // namespace milvus::test
 
 template <typename T,
@@ -171,6 +184,7 @@ test_run() {
         config["index_type"] = milvus::index::INVERTED_INDEX_TYPE;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
         config[INDEX_NUM_ROWS_KEY] = nb;
+        config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 3;
         if (has_lack_binlog_row_) {
             config[INDEX_NUM_ROWS_KEY] = nb + lack_binlog_row;
         }
@@ -199,7 +213,7 @@ test_run() {
         ctx.set_for_loading_index(true);
         auto index =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
-        index->Load(milvus::tracer::TraceContext{}, config);
+        index->LoadUnified(config);
 
         auto cnt = index->Count();
         if (has_lack_binlog_row_) {
@@ -566,6 +580,7 @@ test_string() {
         config["index_type"] = milvus::index::INVERTED_INDEX_TYPE;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
         config[INDEX_NUM_ROWS_KEY] = nb;
+        config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 3;
         if (has_lack_binlog_row_) {
             config[INDEX_NUM_ROWS_KEY] = nb + lack_binlog_row;
         }
@@ -594,7 +609,7 @@ test_string() {
         ctx.set_for_loading_index(true);
         auto index =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
-        index->Load(milvus::tracer::TraceContext{}, config);
+        index->LoadUnified(config);
 
         auto cnt = index->Count();
         if (has_lack_binlog_row_) {
@@ -877,6 +892,11 @@ TEST(InvertedIndex, Naive) {
     test_run<double, DataType::DOUBLE, DataType::NONE, true>();
 
     test_string<true>();
+}
+
+TEST(InvertedIndex, LoadSlicedNullOffsets) {
+    milvus::test::FileSliceSizeGuard slice_size_guard(64);
+    test_run<int64_t, DataType::INT64, DataType::NONE, true>();
 }
 
 TEST(InvertedIndex, HasLackBinlogRows) {

@@ -48,7 +48,16 @@ const (
 	CacheMissLabel   = "miss"
 	TimetickLabel    = "timetick"
 	AllLabel         = "all"
+)
 
+const (
+	PreferredNodeHitLabel         = "hit"
+	PreferredNodeMissLabel        = "miss"
+	PreferredNodeUnavailableLabel = "unavailable"
+	PreferredNodeRejectedLabel    = "rejected"
+)
+
+const (
 	UnissuedIndexTaskLabel   = "unissued"
 	InProgressIndexTaskLabel = "in-progress"
 	FinishedIndexTaskLabel   = "finished"
@@ -133,6 +142,8 @@ const (
 	cgoNameLabelName               = `cgo_name`
 	cgoTypeLabelName               = `cgo_type`
 	queueTypeLabelName             = `queue_type`
+	poolNameLabelName              = "pool_name"
+	outcomeLabelName               = "outcome"
 
 	// model function/UDF labels
 	functionTypeName = "function_type_name"

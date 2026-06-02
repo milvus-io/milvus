@@ -11,6 +11,11 @@
 
 #include <gtest/gtest.h>
 
+#include <folly/CancellationToken.h>
+#include <folly/FBVector.h>
+#include <array>
+#include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -20,6 +25,11 @@
 #include "common/OpContext.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "knowhere/comp/index_param.h"
+#include "pb/schema.pb.h"
+#include "query/Utils.h"
+#include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/DeletedRecord.h"
 #include "segcore/InsertRecord.h"
@@ -94,6 +104,132 @@ TEST(Util_Segcore, GetDeleteBitmap) {
     BitsetTypeView res_view(res_bitmap);
     delete_record.Query(res_view, insert_barrier, query_timestamp);
     ASSERT_EQ(res_view.count(), 0);
+}
+
+TEST(Util_Segcore, MergeDataArrayWithNullableByteVectorsAppendsRows) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    struct TestCase {
+        DataType data_type;
+        int64_t dim;
+        std::string metric_type;
+        int64_t bytes_per_row;
+    };
+
+    std::vector<TestCase> test_cases = {
+        {DataType::VECTOR_BINARY, 16, knowhere::metric::HAMMING, 2},
+        {DataType::VECTOR_FLOAT16, 2, knowhere::metric::L2, 4},
+        {DataType::VECTOR_BFLOAT16, 2, knowhere::metric::L2, 4},
+        {DataType::VECTOR_INT8, 3, knowhere::metric::L2, 3},
+    };
+
+    for (const auto& test_case : test_cases) {
+        SCOPED_TRACE(fmt::format("data_type={}", test_case.data_type));
+
+        auto schema = std::make_shared<Schema>();
+        auto vec = schema->AddDebugField("embeddings",
+                                         test_case.data_type,
+                                         test_case.dim,
+                                         test_case.metric_type,
+                                         true);
+        auto& field_meta = (*schema)[vec];
+
+        constexpr int64_t total_count = 4;
+        constexpr int64_t valid_count = 3;
+        std::array<bool, total_count> valid_flags = {true, false, true, true};
+
+        std::string compact_data(valid_count * test_case.bytes_per_row, '\0');
+        for (size_t i = 0; i < compact_data.size(); ++i) {
+            compact_data[i] = static_cast<char>(i + 1);
+        }
+
+        auto data_array = CreateVectorDataArrayFrom(compact_data.data(),
+                                                    valid_flags.data(),
+                                                    total_count,
+                                                    valid_count,
+                                                    field_meta);
+
+        std::map<FieldId, std::unique_ptr<milvus::DataArray>>
+            output_fields_data;
+        output_fields_data[vec] = std::move(data_array);
+
+        std::vector<MergeBase> merge_bases;
+        std::array<size_t, total_count> physical_offsets = {0, 0, 1, 2};
+        for (size_t i = 0; i < total_count; ++i) {
+            merge_bases.emplace_back(&output_fields_data, i);
+            if (valid_flags[i]) {
+                merge_bases.back().setValidDataOffset(vec, physical_offsets[i]);
+            }
+        }
+
+        auto merged_result = MergeDataArray(merge_bases, field_meta);
+
+        ASSERT_EQ(merged_result->valid_data().size(), total_count);
+        EXPECT_TRUE(merged_result->valid_data(0));
+        EXPECT_FALSE(merged_result->valid_data(1));
+        EXPECT_TRUE(merged_result->valid_data(2));
+        EXPECT_TRUE(merged_result->valid_data(3));
+
+        std::string actual;
+        switch (test_case.data_type) {
+            case DataType::VECTOR_BINARY:
+                actual = merged_result->vectors().binary_vector();
+                break;
+            case DataType::VECTOR_FLOAT16:
+                actual = merged_result->vectors().float16_vector();
+                break;
+            case DataType::VECTOR_BFLOAT16:
+                actual = merged_result->vectors().bfloat16_vector();
+                break;
+            case DataType::VECTOR_INT8:
+                actual = merged_result->vectors().int8_vector();
+                break;
+            default:
+                ThrowInfo(DataTypeInvalid, "unexpected test vector type");
+        }
+
+        ASSERT_EQ(actual.size(), compact_data.size());
+        EXPECT_EQ(actual, compact_data);
+    }
+}
+
+TEST(Util_Segcore, TransformBitsetMasksNullableVectorRowsOutsideLogicalView) {
+    using namespace milvus;
+
+    std::array<bool, 3> valid_data = {true, true, true};
+    GrowingOffsetMapping mapping;
+    mapping.Append(valid_data.data(), valid_data.size(), 0, 0);
+
+    // Growing search passes a logical bitset sized by the query timestamp's
+    // active row count. Rows beyond that logical view are not visible yet and
+    // must be masked in the transformed physical bitset.
+    BitsetType logical_bitset(2);
+    BitsetView logical_view(logical_bitset);
+
+    TargetBitmap physical_bitset;
+    auto status = mapping.TransformBitset(logical_view, physical_bitset);
+
+    EXPECT_EQ(status, OffsetMapping::BitsetTransformStatus::Transformed);
+    ASSERT_EQ(physical_bitset.size(), 3);
+    EXPECT_FALSE(physical_bitset[0]);
+    EXPECT_FALSE(physical_bitset[1]);
+    EXPECT_TRUE(physical_bitset[2]);
+}
+
+TEST(Util_Segcore, TransformBitsetKeepsEmptyViewAsNoFilter) {
+    using namespace milvus;
+
+    std::array<bool, 3> valid_data = {true, true, true};
+    SealedOffsetMapping mapping;
+    mapping.Build(valid_data.data(), valid_data.size());
+
+    BitsetView all_visible;
+    TargetBitmap physical_bitset;
+    auto status = mapping.TransformBitset(all_visible, physical_bitset);
+
+    EXPECT_EQ(status, OffsetMapping::BitsetTransformStatus::NoFilter);
+    EXPECT_TRUE(physical_bitset.empty());
 }
 
 // Tests for CheckCancellation utility function
@@ -178,4 +314,130 @@ TEST(UtilSegcore, CheckCancellationCancelAfterCheck) {
     // Second check should throw
     EXPECT_THROW(CheckCancellation(&op_ctx, 123, "TestOperation"),
                  SegcoreError);
+}
+
+TEST(Util_Segcore, CreateVectorDataArrayFromNullableVectors) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto vec = schema->AddDebugField(
+        "embeddings", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2, true);
+    auto& field_meta = (*schema)[vec];
+
+    int64_t dim = 16;
+    int64_t total_count = 10;
+    int64_t valid_count = 5;
+
+    std::vector<float> data(valid_count * dim);
+    for (size_t i = 0; i < data.size(); ++i) {
+        data[i] = static_cast<float>(i);
+    }
+
+    std::unique_ptr<bool[]> valid_flags = std::make_unique<bool[]>(total_count);
+    for (int64_t i = 0; i < total_count; ++i) {
+        if (i % 2 == 0) {
+            valid_flags[i] = true;
+        } else {
+            valid_flags[i] = false;
+        }
+    }
+
+    auto result = CreateVectorDataArrayFrom(
+        data.data(), valid_flags.get(), total_count, valid_count, field_meta);
+
+    ASSERT_TRUE(result->valid_data().size() > 0);
+    ASSERT_EQ(result->valid_data().size(), total_count);
+    ASSERT_EQ(result->vectors().float_vector().data_size(), valid_count * dim);
+}
+
+TEST(Util_Segcore, CreateEmptyVectorDataArrayForNullableVectors) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto vec = schema->AddDebugField(
+        "embeddings", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2, true);
+    auto sparse_vec = schema->AddDebugField("sparse",
+                                            DataType::VECTOR_SPARSE_U32_F32,
+                                            0,
+                                            knowhere::metric::IP,
+                                            true);
+
+    auto dense_result =
+        CreateEmptyVectorDataArray(3, 0, nullptr, (*schema)[vec]);
+    ASSERT_EQ(dense_result->valid_data().size(), 3);
+    ASSERT_FALSE(dense_result->valid_data(0));
+    ASSERT_FALSE(dense_result->valid_data(1));
+    ASSERT_FALSE(dense_result->valid_data(2));
+    ASSERT_EQ(dense_result->vectors().float_vector().data_size(), 0);
+
+    auto sparse_result =
+        CreateEmptyVectorDataArray(3, 0, nullptr, (*schema)[sparse_vec]);
+    ASSERT_EQ(sparse_result->valid_data().size(), 3);
+    ASSERT_FALSE(sparse_result->valid_data(0));
+    ASSERT_FALSE(sparse_result->valid_data(1));
+    ASSERT_FALSE(sparse_result->valid_data(2));
+    ASSERT_EQ(sparse_result->vectors().data_case(),
+              proto::schema::VectorField::kSparseFloatVector);
+    ASSERT_EQ(sparse_result->vectors().sparse_float_vector().contents_size(),
+              0);
+}
+
+TEST(Util_Segcore, MergeDataArrayWithNullableVectors) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto vec = schema->AddDebugField(
+        "embeddings", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2, true);
+    auto& field_meta = (*schema)[vec];
+
+    int64_t dim = 16;
+    int64_t total_count = 10;
+    int64_t valid_count = 5;
+
+    std::vector<float> data(valid_count * dim);
+    for (size_t i = 0; i < data.size(); ++i) {
+        data[i] = static_cast<float>(i);
+    }
+
+    std::unique_ptr<bool[]> valid_flags = std::make_unique<bool[]>(total_count);
+    for (int64_t i = 0; i < total_count; ++i) {
+        if (i % 2 == 0) {
+            valid_flags[i] = true;
+        } else {
+            valid_flags[i] = false;
+        }
+    }
+
+    auto data_array = CreateVectorDataArrayFrom(
+        data.data(), valid_flags.get(), total_count, valid_count, field_meta);
+
+    std::map<FieldId, std::unique_ptr<milvus::DataArray>> output_fields_data;
+    output_fields_data[vec] = std::move(data_array);
+
+    std::vector<MergeBase> merge_bases;
+    merge_bases.emplace_back(&output_fields_data, 0);
+    merge_bases.back().setValidDataOffset(vec, 0);
+    merge_bases.emplace_back(&output_fields_data, 2);
+    merge_bases.back().setValidDataOffset(vec, 1);
+    merge_bases.emplace_back(&output_fields_data, 4);
+    merge_bases.back().setValidDataOffset(vec, 2);
+    merge_bases.emplace_back(&output_fields_data, 6);
+    merge_bases.back().setValidDataOffset(vec, 3);
+    merge_bases.emplace_back(&output_fields_data, 8);
+    merge_bases.back().setValidDataOffset(vec, 4);
+
+    auto merged_result = MergeDataArray(merge_bases, field_meta);
+
+    ASSERT_TRUE(merged_result->valid_data().size() > 0);
+    ASSERT_EQ(merged_result->valid_data().size(), 5);
+    ASSERT_EQ(merged_result->vectors().float_vector().data_size(), 5 * dim);
+
+    ASSERT_TRUE(merged_result->valid_data(0));
+    ASSERT_TRUE(merged_result->valid_data(1));
+    ASSERT_TRUE(merged_result->valid_data(2));
+    ASSERT_TRUE(merged_result->valid_data(3));
+    ASSERT_TRUE(merged_result->valid_data(4));
 }

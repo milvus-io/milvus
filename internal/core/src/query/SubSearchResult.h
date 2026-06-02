@@ -17,6 +17,7 @@
 
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "common/ArrayOffsets.h"
 #include "knowhere/index/index_node.h"
 
 namespace milvus::query {
@@ -114,6 +115,27 @@ class SubSearchResult {
     const std::vector<knowhere::IndexNode::IteratorPtr>&
     chunk_iterators() {
         return this->chunk_iterators_;
+    }
+
+    std::pair<std::vector<int64_t>, std::vector<int32_t>>
+    convert_to_element_offsets(const IArrayOffsets* array_offsets) {
+        std::vector<int64_t> doc_offsets;
+        std::vector<int32_t> element_indices;
+        doc_offsets.reserve(seg_offsets_.size());
+        element_indices.reserve(seg_offsets_.size());
+        for (size_t i = 0; i < seg_offsets_.size(); i++) {
+            if (seg_offsets_[i] == INVALID_SEG_OFFSET) {
+                doc_offsets.push_back(INVALID_SEG_OFFSET);
+                element_indices.push_back(-1);
+            } else {
+                auto [doc_id, elem_index] =
+                    array_offsets->ElementIDToRowID(seg_offsets_[i]);
+                doc_offsets.push_back(doc_id);
+                element_indices.push_back(elem_index);
+            }
+        }
+        return std::make_pair(std::move(doc_offsets),
+                              std::move(element_indices));
     }
 
  private:

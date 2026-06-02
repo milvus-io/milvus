@@ -1195,6 +1195,18 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             f"{spatial_func} query should return IDs {expected_ids}, got {list(result_ids)}"
         )
 
+        template_results, _ = self.query(
+            client,
+            collection_name=collection_name,
+            filter=f"{spatial_func}(geo, {{query_geom}})",
+            filter_params={"query_geom": query_geom},
+            output_fields=["id", "geo"],
+        )
+        template_result_ids = {r["id"] for r in template_results}
+        assert template_result_ids == expected_ids_set, (
+            f"{spatial_func} templated query should return IDs {expected_ids}, got {list(template_result_ids)}"
+        )
+
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
         "spatial_func", ["ST_INTERSECTS", "ST_CONTAINS", "ST_WITHIN"]
@@ -2963,6 +2975,16 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             f"ST_DWITHIN({distance_meters}m, index={with_geo_index}) should return expected IDs "
             f"(count: {len(expected_within)}), but got different IDs (count: {len(result_ids)})"
         )
+
+        template_results, _ = self.query(
+            client,
+            collection_name=collection_name,
+            filter=f"ST_DWITHIN(geo, {{query_point}}, {distance_meters})",
+            filter_params={"query_point": query_point},
+            output_fields=["id", "geo"],
+        )
+        template_result_ids = {result["id"] for result in template_results}
+        assert template_result_ids == result_ids
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("with_geo_index", [True, False])

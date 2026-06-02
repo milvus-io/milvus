@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 )
@@ -44,6 +45,154 @@ func (s *ColumnBasedDataOptionSuite) NullableCompatible() {
 	fd := req.GetFieldsData()[0]
 	s.ElementsMatch([]int64{1, 2, 3}, fd.GetScalars().GetLongData())
 	s.ElementsMatch([]bool{true, true, true}, fd.GetValidData())
+}
+
+func (s *ColumnBasedDataOptionSuite) TestWithStructArrayColumn() {
+	dim := 4
+	structSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("clip_str").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64)).
+		WithField(entity.NewField().WithName("clip_emb").WithDataType(entity.FieldTypeFloatVector).WithDim(int64(dim)))
+
+	collSchema := entity.NewSchema().WithName("c").
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("vec").WithDataType(entity.FieldTypeFloatVector).WithDim(int64(dim))).
+		WithField(entity.NewField().
+			WithName("clips").
+			WithDataType(entity.FieldTypeArray).
+			WithElementType(entity.FieldTypeStruct).
+			WithMaxCapacity(16).
+			WithStructSchema(structSchema))
+
+	rows := []map[string]any{
+		{"clip_str": []string{"a", "b"}, "clip_emb": [][]float32{{0.1, 0.2, 0.3, 0.4}, {0.5, 0.6, 0.7, 0.8}}},
+		{"clip_str": []string{"c"}, "clip_emb": [][]float32{{1.0, 1.0, 1.0, 1.0}}},
+	}
+
+	opt := NewColumnBasedInsertOption("c").
+		WithInt64Column("id", []int64{1, 2}).
+		WithFloatVectorColumn("vec", dim, [][]float32{{0, 0, 0, 0}, {1, 1, 1, 1}}).
+		WithStructArrayColumn("clips", structSchema, rows)
+
+	coll := &entity.Collection{Schema: collSchema}
+	req, err := opt.InsertRequest(coll)
+	s.Require().NoError(err)
+	s.EqualValues(2, req.GetNumRows())
+
+	var clipsFD *schemapb.FieldData
+	for _, fd := range req.GetFieldsData() {
+		if fd.GetFieldName() == "clips" {
+			clipsFD = fd
+			break
+		}
+	}
+	s.Require().NotNil(clipsFD)
+	s.Equal(schemapb.DataType_ArrayOfStruct, clipsFD.GetType())
+
+	subs := clipsFD.GetStructArrays().GetFields()
+	s.Require().Equal(2, len(subs))
+
+	// Find each sub by name (order is not guaranteed by builder).
+	var strSub, embSub *schemapb.FieldData
+	for _, sub := range subs {
+		switch sub.GetFieldName() {
+		case "clip_str":
+			strSub = sub
+		case "clip_emb":
+			embSub = sub
+		}
+	}
+	s.Require().NotNil(strSub)
+	s.Require().NotNil(embSub)
+
+	s.Equal(schemapb.DataType_Array, strSub.GetType())
+	arr := strSub.GetScalars().GetArrayData().GetData()
+	s.Require().Equal(2, len(arr))
+	s.Equal([]string{"a", "b"}, arr[0].GetStringData().GetData())
+	s.Equal([]string{"c"}, arr[1].GetStringData().GetData())
+
+	s.Equal(schemapb.DataType_ArrayOfVector, embSub.GetType())
+	va := embSub.GetVectors().GetVectorArray()
+	s.Require().NotNil(va)
+	s.EqualValues(dim, va.GetDim())
+	s.Equal(schemapb.DataType_FloatVector, va.GetElementType())
+	s.Require().Equal(2, len(va.GetData()))
+	s.EqualValues(2*dim, len(va.GetData()[0].GetFloatVector().GetData()))
+	s.EqualValues(1*dim, len(va.GetData()[1].GetFloatVector().GetData()))
+}
+
+func (s *ColumnBasedDataOptionSuite) TestWithStructArrayColumnDeferredError() {
+	structSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("clip_str").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64))
+
+	// Pass rows with missing sub-field — builder must NOT panic; error surfaces on InsertRequest.
+	s.NotPanics(func() {
+		opt := NewColumnBasedInsertOption("c").
+			WithInt64Column("id", []int64{1}).
+			WithStructArrayColumn("clips", structSchema, []map[string]any{{"wrong_key": []string{"a"}}})
+
+		coll := &entity.Collection{Schema: entity.NewSchema().WithName("c").
+			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true))}
+		_, err := opt.InsertRequest(coll)
+		s.Require().Error(err)
+
+		// UpsertRequest must also surface the deferred error instead of panicking.
+		_, upsertErr := opt.UpsertRequest(coll)
+		s.Require().Error(upsertErr)
+	})
+}
+
+func (s *ColumnBasedDataOptionSuite) TestWithStructArrayColumnNilSchema() {
+	// nil schema must be rejected at build time (deferred).
+	opt := NewColumnBasedInsertOption("c").
+		WithStructArrayColumn("clips", nil, nil)
+	coll := &entity.Collection{Schema: entity.NewSchema().WithName("c")}
+	_, err := opt.InsertRequest(coll)
+	s.Error(err)
+}
+
+func (s *ColumnBasedDataOptionSuite) TestNewStructSubColumnAllSupportedTypes() {
+	// All scalar and vector sub-field types supported by newStructSubColumn; each must produce
+	// a non-nil sub-column without error. Vector types also require a valid dim.
+	dim := 8
+	cases := []*entity.Field{
+		entity.NewField().WithName("b").WithDataType(entity.FieldTypeBool),
+		entity.NewField().WithName("i8").WithDataType(entity.FieldTypeInt8),
+		entity.NewField().WithName("i16").WithDataType(entity.FieldTypeInt16),
+		entity.NewField().WithName("i32").WithDataType(entity.FieldTypeInt32),
+		entity.NewField().WithName("i64").WithDataType(entity.FieldTypeInt64),
+		entity.NewField().WithName("f").WithDataType(entity.FieldTypeFloat),
+		entity.NewField().WithName("d").WithDataType(entity.FieldTypeDouble),
+		entity.NewField().WithName("s").WithDataType(entity.FieldTypeVarChar).WithMaxLength(16),
+		entity.NewField().WithName("str").WithDataType(entity.FieldTypeString),
+		entity.NewField().WithName("fv").WithDataType(entity.FieldTypeFloatVector).WithDim(int64(dim)),
+		entity.NewField().WithName("fp16").WithDataType(entity.FieldTypeFloat16Vector).WithDim(int64(dim)),
+		entity.NewField().WithName("bf16").WithDataType(entity.FieldTypeBFloat16Vector).WithDim(int64(dim)),
+		entity.NewField().WithName("bv").WithDataType(entity.FieldTypeBinaryVector).WithDim(int64(dim)),
+		entity.NewField().WithName("i8v").WithDataType(entity.FieldTypeInt8Vector).WithDim(int64(dim)),
+	}
+	for _, f := range cases {
+		c, err := newStructSubColumn(f)
+		s.Require().NoError(err, "type %v", f.DataType)
+		s.NotNil(c)
+	}
+}
+
+func (s *ColumnBasedDataOptionSuite) TestNewStructSubColumnErrors() {
+	// Unsupported data type in a struct sub-field must error.
+	_, err := newStructSubColumn(entity.NewField().WithName("bad").WithDataType(entity.FieldTypeJSON))
+	s.Error(err)
+
+	// Vector sub-fields without dim must surface GetDim's error.
+	for _, dt := range []entity.FieldType{
+		entity.FieldTypeFloatVector,
+		entity.FieldTypeFloat16Vector,
+		entity.FieldTypeBFloat16Vector,
+		entity.FieldTypeBinaryVector,
+		entity.FieldTypeInt8Vector,
+	} {
+		_, err := newStructSubColumn(entity.NewField().WithName("no_dim").WithDataType(dt))
+		s.Error(err, "type %v", dt)
+	}
 }
 
 func TestRowBasedDataOption(t *testing.T) {

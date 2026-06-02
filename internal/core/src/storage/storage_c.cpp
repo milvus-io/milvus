@@ -24,6 +24,7 @@
 #include "storage/ThreadPools.h"
 #include "monitor/scope_metric.h"
 #include "common/EasyAssert.h"
+#include "storage/KeyRetriever.h"
 
 CStatus
 GetLocalUsedSize(const char* c_dir, int64_t* size) {
@@ -155,6 +156,28 @@ InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config) {
             c_disk_write_config.rate_limiter_config.high_priority_ratio,
             c_disk_write_config.rate_limiter_config.middle_priority_ratio,
             c_disk_write_config.rate_limiter_config.low_priority_ratio);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config) {
+    try {
+        if (c_arrow_reader_config.hole_size_limit_bytes < 0) {
+            return milvus::FailureCStatus(
+                milvus::ConfigInvalid,
+                "arrow reader hole size limit must be non-negative");
+        }
+        if (c_arrow_reader_config.range_size_limit_bytes < 0) {
+            return milvus::FailureCStatus(
+                milvus::ConfigInvalid,
+                "arrow reader range size limit must be non-negative");
+        }
+        milvus::storage::ConfigureArrowReaderProperties(
+            c_arrow_reader_config.hole_size_limit_bytes,
+            c_arrow_reader_config.range_size_limit_bytes);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

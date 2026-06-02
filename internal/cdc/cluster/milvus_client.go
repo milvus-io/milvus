@@ -58,6 +58,13 @@ func NewMilvusClient(ctx context.Context, cluster *commonpb.MilvusCluster) (Milv
 		config.WithTLSConfig(tlsConfig)
 	}
 
+	if authority := paramtable.Get().ProxyGrpcServerCfg.GetClusterAuthority(cluster.GetClusterId()); authority != "" {
+		config.WithGrpcAuthority(authority)
+		log.Info("CDC outbound gRPC authority set",
+			zap.String("targetCluster", cluster.GetClusterId()),
+			zap.String("authority", authority))
+	}
+
 	cli, err := milvusclient.New(ctx, config)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create milvus client")

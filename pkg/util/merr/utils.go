@@ -57,8 +57,9 @@ func Code(err error) int32 {
 }
 
 func IsRetryableErr(err error) bool {
-	if err, ok := err.(milvusError); ok {
-		return err.retriable
+	var milvusErr milvusError
+	if errors.As(err, &milvusErr) {
+		return milvusErr.retriable
 	}
 
 	return false
@@ -190,7 +191,12 @@ func oldCode(code int32) commonpb.ErrorCode {
 	case ErrPartitionNotFound.code(), ErrReplicaNotFound.code():
 		return commonpb.ErrorCode_MetaFailed
 
-	case ErrReplicaNotAvailable.code(), ErrChannelNotAvailable.code(), ErrNodeNotAvailable.code():
+	case ErrReplicaNotAvailable.code(), ErrChannelNotAvailable.code(), ErrChannelDroppedSentinel.code(), ErrNodeNotAvailable.code():
+		// ErrChannelDroppedSentinel is an internal-only signal that is currently
+		// swallowed by the alter-load-config ack callback and never serialized to a
+		// client Status. It is mapped alongside its ErrChannelNotAvailable sibling so
+		// that, if it is ever surfaced to a client, an old SDK keeps seeing
+		// NoReplicaAvailable instead of falling through to UnexpectedError.
 		return commonpb.ErrorCode_NoReplicaAvailable
 
 	case ErrServiceMemoryLimitExceeded.code():
@@ -199,7 +205,7 @@ func oldCode(code int32) commonpb.ErrorCode {
 	case ErrServiceDiskLimitExceeded.code():
 		return commonpb.ErrorCode_DiskQuotaExhausted
 
-	case ErrServiceTimeTickLongDelay.code():
+	case ErrServiceTimeTickLongDelay.code(), ErrChannelTSafeStalled.code():
 		return commonpb.ErrorCode_TimeTickLongDelay
 
 	case ErrServiceRateLimit.code():
@@ -754,6 +760,10 @@ func WrapErrChannelCPExceededMaxLag(name string, msg ...string) error {
 	return warpChannelErr(ErrChannelCPExceededMaxLag, name, msg...)
 }
 
+func WrapErrChannelTSafeStalled(name string, msg ...string) error {
+	return warpChannelErr(ErrChannelTSafeStalled, name, msg...)
+}
+
 func WrapErrChannelLack(name string, msg ...string) error {
 	return warpChannelErr(ErrChannelLack, name, msg...)
 }
@@ -764,6 +774,10 @@ func WrapErrChannelReduplicate(name string, msg ...string) error {
 
 func WrapErrChannelNotAvailable(name string, msg ...string) error {
 	return warpChannelErr(ErrChannelNotAvailable, name, msg...)
+}
+
+func WrapErrChannelDroppedSentinel(name string, msg ...string) error {
+	return warpChannelErr(ErrChannelDroppedSentinel, name, msg...)
 }
 
 // Segment related

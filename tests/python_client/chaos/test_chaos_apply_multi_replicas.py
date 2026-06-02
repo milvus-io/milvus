@@ -21,12 +21,54 @@ def parse_duration(duration_str):
     return eval(s)
 
 
+# All available chaos actions, keyed by selectable name.
+# "mixed" selects all of them.
+ALL_CHAOS_ACTIONS = {
+    'container-kill': {'kind': 'PodChaos', 'action': 'container-kill', 'grace_period': 0},
+    'pod-failure': {'kind': 'PodChaos', 'action': 'pod-failure', 'grace_period': 0},
+    'pod-kill': {'kind': 'PodChaos', 'action': 'pod-kill', 'grace_period': 0},
+    'pod-kill-graceful': {'kind': 'PodChaos', 'action': 'pod-kill', 'grace_period': 180},
+    'network-delay': {
+        'kind': 'NetworkChaos', 'action': 'delay',
+        'params': {'latency': '200ms', 'jitter': '100ms', 'correlation': '50'},
+    },
+    'network-loss': {
+        'kind': 'NetworkChaos', 'action': 'loss',
+        'params': {'loss': '30', 'correlation': '50'},
+    },
+}
+
+
+def build_chaos_action_pool(chaos_type_str):
+    """Build a list of chaos actions from a comma-separated chaos_type string.
+
+    Supports individual types (e.g. "pod-kill,network-delay") or "mixed" for all.
+    Single legacy values like "pod-failure" also work as a pool of one.
+    """
+    types = [t.strip() for t in chaos_type_str.split(',') if t.strip()]
+    if 'mixed' in types:
+        return list(ALL_CHAOS_ACTIONS.values())
+
+    pool = []
+    for t in types:
+        if t in ALL_CHAOS_ACTIONS:
+            pool.append(ALL_CHAOS_ACTIONS[t])
+        else:
+            return None
+    return pool if pool else None
+
+
+def pick_mixed_chaos_action(pool):
+    """Randomly pick one chaos action from the given pool."""
+    return random.choice(pool)
+
+
 def build_rg_chaos_config(chaos_type, release_name, namespace, target_rgs,
-                          component=None, mode="one", duration="2m"):
+                          component=None, mode="one", duration="2m", grace_period=0):
     """Build a chaos config that targets pods in target RGs.
 
     Args:
-        chaos_type: pod-failure or pod-kill
+        chaos_type: pod-failure, pod-kill, or container-kill
         release_name: milvus helm release name
         namespace: k8s namespace
         target_rgs: list of RG names to target
@@ -34,6 +76,7 @@ def build_rg_chaos_config(chaos_type, release_name, namespace, target_rgs,
                    If None, targets all pods in the RG.
         mode: 'one' (random single pod) or 'all' (all matching pods)
         duration: chaos duration string (e.g. '2m')
+        grace_period: grace period in seconds for pod-kill (0 = force kill)
     """
     action = chaos_type
     component_suffix = f"-{component}" if component else ""
@@ -65,7 +108,7 @@ def build_rg_chaos_config(chaos_type, release_name, namespace, target_rgs,
             },
             "mode": mode,
             "action": action,
-            "gracePeriod": 0,
+            "gracePeriod": grace_period,
         },
     }
 
@@ -75,6 +118,56 @@ def build_rg_chaos_config(chaos_type, release_name, namespace, target_rgs,
         # Container name matches the component name (e.g. querynode, streamingnode)
         if component:
             config["spec"]["containerNames"] = [component]
+
+    return config
+
+
+def build_rg_network_chaos_config(action, release_name, namespace, target_rgs,
+                                  component=None, mode="one", duration="2m", params=None):
+    """Build a NetworkChaos config that targets pods in target RGs.
+
+    Args:
+        action: delay, loss, duplicate, corrupt, partition, or bandwidth
+        release_name: milvus helm release name
+        namespace: k8s namespace
+        target_rgs: list of RG names to target
+        component: optional component filter (e.g. 'querynode', 'streamingnode')
+        mode: 'one' (random single pod) or 'all' (all matching pods)
+        duration: chaos duration string (e.g. '2m')
+        params: dict of action-specific parameters (e.g. {"latency": "200ms"})
+    """
+    component_suffix = f"-{component}" if component else ""
+    label_selectors = {
+        "app.kubernetes.io/instance": release_name,
+    }
+    if component:
+        label_selectors["component"] = component
+
+    config = {
+        "apiVersion": constants.CHAOS_API_VERSION,
+        "kind": "NetworkChaos",
+        "metadata": {
+            "name": f"test-multi-rg-net{component_suffix}-{int(time.time())}",
+            "namespace": namespace,
+        },
+        "spec": {
+            "selector": {
+                "namespaces": [namespace],
+                "labelSelectors": label_selectors,
+                "expressionSelectors": [{
+                    "key": "milvus.io/resource-group",
+                    "operator": "In",
+                    "values": list(target_rgs),
+                }],
+            },
+            "mode": mode,
+            "action": action,
+            "direction": "both",
+            "duration": duration,
+        },
+    }
+    if params:
+        config["spec"][action] = params
 
     return config
 
@@ -229,19 +322,21 @@ class TestChaosApplyMultiReplicas:
         return recovery_time, pods_ready_time
 
     def _apply_and_wait_chaos(self, chaos_type, target_rg, chaos_duration_seconds,
-                              mode="one", components=None, template_path=None):
+                              mode="one", components=None, template_path=None, chaos_pool=None):
         """Apply chaos to one RG with per-component injection, wait and recover.
 
         If template_path is provided, uses the external template directly.
-        Otherwise builds chaos configs per component with the given mode.
+        If chaos_pool is provided, randomly picks from the pool per component.
+        Otherwise builds a single chaos config with chaos_type.
 
         Args:
-            chaos_type: pod-failure or pod-kill
+            chaos_type: chaos type string (for record keeping)
             target_rg: single RG name to target
             chaos_duration_seconds: duration in seconds
             mode: 'one' or 'all'
             components: list of components to inject sequentially (e.g. ['querynode', 'streamingnode'])
             template_path: optional path to external ChaosMesh YAML template
+            chaos_pool: list of chaos action dicts to randomly pick from
 
         Returns:
             Event record dict with per-component details.
@@ -273,19 +368,52 @@ class TestChaosApplyMultiReplicas:
             log.info(f"injection order: {components} (mode={mode})")
 
             for component in components:
-                log.info(f"injecting {chaos_type} to RG={target_rg}, component={component or 'all'}, mode={mode}")
-                chaos_config = build_rg_chaos_config(
-                    chaos_type=chaos_type,
-                    release_name=release_name,
-                    namespace=self.milvus_ns,
-                    target_rgs=[target_rg],
-                    component=component,
-                    mode=mode,
-                    duration=duration_str,
-                )
+                if chaos_pool:
+                    # Pick from pool (mixed or multi-select)
+                    picked = pick_mixed_chaos_action(chaos_pool)
+                    actual_kind = picked['kind']
+                    actual_action = picked['action']
+                    actual_grace_period = picked.get('grace_period', 0)
+                    actual_params = picked.get('params', None)
+                    log.info(
+                        f"chaos picked: kind={actual_kind}, action={actual_action}, "
+                        f"grace_period={actual_grace_period}s, params={actual_params} "
+                        f"for RG={target_rg}, component={component or 'all'}, mode={mode}")
+                else:
+                    # Single fixed chaos type (legacy)
+                    actual_kind = 'PodChaos'
+                    actual_action = chaos_type
+                    actual_grace_period = 0
+                    actual_params = None
+
+                if actual_kind == 'NetworkChaos':
+                    chaos_config = build_rg_network_chaos_config(
+                        action=actual_action,
+                        release_name=release_name,
+                        namespace=self.milvus_ns,
+                        target_rgs=[target_rg],
+                        component=component,
+                        mode=mode,
+                        duration=duration_str,
+                        params=actual_params,
+                    )
+                else:
+                    chaos_config = build_rg_chaos_config(
+                        chaos_type=actual_action,
+                        release_name=release_name,
+                        namespace=self.milvus_ns,
+                        target_rgs=[target_rg],
+                        component=component,
+                        mode=mode,
+                        duration=duration_str,
+                        grace_period=actual_grace_period,
+                    )
                 step_record = self._apply_single_chaos(chaos_config, chaos_duration_seconds)
                 step_record["component"] = component or "all"
                 step_record["mode"] = mode
+                step_record["actual_kind"] = actual_kind
+                step_record["actual_action"] = actual_action
+                step_record["grace_period"] = actual_grace_period
                 record["steps"].append(step_record)
 
         # Wait recovery after all injections in this cycle
@@ -314,9 +442,11 @@ class TestChaosApplyMultiReplicas:
         template_path = chaos_template if chaos_template else None
 
         chaos_duration_seconds = parse_duration(chaos_duration)
+        chaos_pool = build_chaos_action_pool(chaos_type)
         record = self._apply_and_wait_chaos(
             chaos_type, rg_list[0], chaos_duration_seconds,
             mode=chaos_mode, components=components, template_path=template_path,
+            chaos_pool=chaos_pool,
         )
 
         with open(constants.CHAOS_INFO_SAVE_PATH, 'w') as f:
@@ -363,6 +493,7 @@ class TestChaosApplyMultiReplicas:
         total_seconds = parse_duration(request_duration)
         interval_seconds = parse_duration(chaos_interval)
         chaos_dur_seconds = parse_duration(chaos_duration)
+        chaos_pool = build_chaos_action_pool(chaos_type)
 
         log.info(f"periodic chaos config:")
         log.info(f"  target RGs (round-robin): {rg_list}")
@@ -374,6 +505,9 @@ class TestChaosApplyMultiReplicas:
         log.info(f"  interval between cycles: {chaos_interval} ({interval_seconds}s)")
         log.info(f"  total duration: {request_duration} ({total_seconds}s)")
         log.info(f"  expected cycles: ~{total_seconds // interval_seconds}")
+        if chaos_pool:
+            pool_desc = [f'{a["kind"]}:{a["action"]}' for a in chaos_pool]
+            log.info(f"  chaos pool: {pool_desc}")
 
         start_time = time.time()
         round_num = 0
@@ -398,6 +532,7 @@ class TestChaosApplyMultiReplicas:
                 record = self._apply_and_wait_chaos(
                     chaos_type, target_rg, chaos_dur_seconds,
                     mode=chaos_mode, components=components, template_path=template_path,
+                    chaos_pool=chaos_pool,
                 )
                 record["round"] = round_num
                 all_records.append(record)

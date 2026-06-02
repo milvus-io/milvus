@@ -233,6 +233,10 @@ type commonConfig struct {
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
 	BM25LoadThreadCoreCoefficient       ParamItem `refreshable:"true"`
 	ThreadPoolMaxThreadsSize            ParamItem `refreshable:"true"`
+	ArrowIOThreadPoolCoefficient        ParamItem `refreshable:"true"`
+	ArrowIOThreadPoolMaxCapacity        ParamItem `refreshable:"true"`
+	ArrowReaderHoleSizeLimitBytes       ParamItem `refreshable:"true"`
+	ArrowReaderRangeSizeLimitBytes      ParamItem `refreshable:"true"`
 	EnableMaterializedView              ParamItem `refreshable:"false"`
 	BuildIndexThreadPoolRatio           ParamItem `refreshable:"false"`
 	MaxDegree                           ParamItem `refreshable:"true"`
@@ -715,6 +719,60 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.ThreadPoolMaxThreadsSize.Init(base.mgr)
+
+	p.ArrowIOThreadPoolCoefficient = ParamItem{
+		Key:          "common.arrow.ioThreadPoolCoefficient",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc: `Coefficient for arrow's internal IO thread pool size ` +
+			`(threads = CPU cores × coefficient, then clamped by ` +
+			`common.arrow.ioThreadPoolMaxCapacity when > 0). Arrow runs async ` +
+			`range reads (ReadRangeCache) on this pool, which issue the actual ` +
+			`S3 GetObject requests — it is the real ceiling on parallel ` +
+			`object-storage reads, independent of segcore HIGH/MIDDLE pools and ` +
+			`minio.maxConnections. Arrow's built-in default is a fixed constant ` +
+			`of 8, which is almost always undersized. Typical range 2–8. 0 keeps ` +
+			`arrow's default (and the cap is ignored).`,
+		Export: false,
+	}
+	p.ArrowIOThreadPoolCoefficient.Init(base.mgr)
+
+	p.ArrowIOThreadPoolMaxCapacity = ParamItem{
+		Key:          "common.arrow.ioThreadPoolMaxCapacity",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc: `Upper bound on arrow's IO thread pool size after applying ` +
+			`common.arrow.ioThreadPoolCoefficient. When > 0, the computed ` +
+			`threads = coefficient × CPU cores is clamped to this value — ` +
+			`useful on very large hosts where the coefficient would otherwise ` +
+			`produce a pool larger than minio.maxConnections or the S3 gateway ` +
+			`can service. 0 disables the cap. Has no effect when coefficient ` +
+			`is 0.`,
+		Export: false,
+	}
+	p.ArrowIOThreadPoolMaxCapacity.Init(base.mgr)
+
+	p.ArrowReaderHoleSizeLimitBytes = ParamItem{
+		Key:          "common.arrow.reader.holeSizeLimitBytes",
+		Version:      "2.6.16",
+		DefaultValue: "0",
+		Doc: `Maximum byte gap between adjacent Arrow read ranges that can be coalesced. ` +
+			`0 keeps Arrow's default. Increasing this can reduce remote object-store GET ` +
+			`count by reading small holes between Parquet column chunk ranges.`,
+		Export: false,
+	}
+	p.ArrowReaderHoleSizeLimitBytes.Init(base.mgr)
+
+	p.ArrowReaderRangeSizeLimitBytes = ParamItem{
+		Key:          "common.arrow.reader.rangeSizeLimitBytes",
+		Version:      "2.6.16",
+		DefaultValue: "0",
+		Doc: `Maximum size in bytes of a coalesced Arrow read range. 0 keeps Arrow's ` +
+			`default. Increase this with holeSizeLimitBytes when larger remote reads ` +
+			`are needed to amortize object-store request latency.`,
+		Export: false,
+	}
+	p.ArrowReaderRangeSizeLimitBytes.Init(base.mgr)
 
 	p.DiskWriteMode = ParamItem{
 		Key:          "common.diskWriteMode",
@@ -2072,7 +2130,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.MaxVectorFieldNum = ParamItem{
 		Key:          "proxy.maxVectorFieldNum",
 		Version:      "2.4.0",
-		DefaultValue: "4",
+		DefaultValue: "10",
 		PanicIfEmpty: true,
 		Doc:          "The maximum number of vector fields that can be specified in a collection",
 		Export:       true,
@@ -2569,7 +2627,6 @@ type queryCoordConfig struct {
 	ChannelExclusiveNodeFactor     ParamItem `refreshable:"true"`
 
 	CollectionObserverInterval         ParamItem `refreshable:"false"`
-	CheckExecutedFlagInterval          ParamItem `refreshable:"false"`
 	CollectionBalanceSegmentBatchSize  ParamItem `refreshable:"true"`
 	CollectionBalanceChannelBatchSize  ParamItem `refreshable:"true"`
 	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
@@ -3148,15 +3205,6 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	}
 	p.CollectionObserverInterval.Init(base.mgr)
 
-	p.CheckExecutedFlagInterval = ParamItem{
-		Key:          "queryCoord.checkExecutedFlagInterval",
-		Version:      "2.4.4",
-		DefaultValue: "100",
-		Doc:          "the interval of check executed flag to force to pull dist",
-		Export:       true,
-	}
-	p.CheckExecutedFlagInterval.Init(base.mgr)
-
 	p.CollectionBalanceSegmentBatchSize = ParamItem{
 		Key:          "queryCoord.collectionBalanceSegmentBatchSize",
 		Version:      "2.4.7",
@@ -3404,11 +3452,12 @@ type queryNodeConfig struct {
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
 	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
-	MaxReceiveChanSize    ParamItem `refreshable:"false"`
 	MaxUnsolvedQueueSize  ParamItem `refreshable:"true"`
 	MaxReadConcurrency    ParamItem `refreshable:"true"`
 	MaxGpuReadConcurrency ParamItem `refreshable:"false"`
 	MaxGroupNQ            ParamItem `refreshable:"true"`
+	NQMergeRatio          ParamItem `refreshable:"true"`
+	MaxDeadlineMergeGap   ParamItem `refreshable:"true"`
 	TopKMergeRatio        ParamItem `refreshable:"true"`
 	CPURatio              ParamItem `refreshable:"true"`
 	GracefulStopTimeout   ParamItem `refreshable:"false"`
@@ -3424,9 +3473,10 @@ type queryNodeConfig struct {
 	DeleteBufferBlockSize  ParamItem `refreshable:"false"`
 
 	// delta forward
-	LevelZeroForwardPolicy      ParamItem `refreshable:"true"`
-	StreamingDeltaForwardPolicy ParamItem `refreshable:"true"`
-	ForwardBatchSize            ParamItem `refreshable:"true"`
+	LevelZeroForwardPolicy             ParamItem `refreshable:"true"`
+	StreamingDeltaForwardPolicy        ParamItem `refreshable:"true"`
+	ForwardBatchSize                   ParamItem `refreshable:"true"`
+	DelegatorPostLoadConcurrencyFactor ParamItem `refreshable:"true"`
 
 	// loader
 	IoPoolSize                  ParamItem `refreshable:"false"`
@@ -3438,6 +3488,7 @@ type queryNodeConfig struct {
 	// schedule task policy.
 	SchedulePolicyName                    ParamItem `refreshable:"false"`
 	SchedulePolicyTaskQueueExpire         ParamItem `refreshable:"true"`
+	SchedulePolicyTaskDeadlineAdvance     ParamItem `refreshable:"true"`
 	SchedulePolicyEnableCrossUserGrouping ParamItem `refreshable:"true"`
 	SchedulePolicyMaxPendingTaskPerUser   ParamItem `refreshable:"true"`
 
@@ -3487,6 +3538,20 @@ type queryNodeConfig struct {
 	BM25StatsBytesPerEntry ParamItem `refreshable:"true"`
 	// partial search
 	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
+}
+
+func formatDurationWithMillisecondFallback(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return v
+	}
+	if _, err := time.ParseDuration(v); err == nil {
+		return v
+	}
+	if _, err := strconv.ParseFloat(v, 64); err == nil {
+		return v + "ms"
+	}
+	return v
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -4274,14 +4339,6 @@ However, this optimization may come at the cost of a slight decrease in query la
 	}
 	p.ChunkCacheWarmingUp.Init(base.mgr)
 
-	p.MaxReceiveChanSize = ParamItem{
-		Key:          "queryNode.scheduler.receiveChanSize",
-		Version:      "2.0.0",
-		DefaultValue: "10240",
-		Export:       true,
-	}
-	p.MaxReceiveChanSize.Init(base.mgr)
-
 	p.MaxReadConcurrency = ParamItem{
 		Key:          "queryNode.scheduler.maxReadConcurrentRatio",
 		Version:      "2.0.0",
@@ -4316,7 +4373,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	p.MaxUnsolvedQueueSize = ParamItem{
 		Key:          "queryNode.scheduler.unsolvedQueueSize",
 		Version:      "2.0.0",
-		DefaultValue: "10240",
+		DefaultValue: "1024",
 		Export:       true,
 	}
 	p.MaxUnsolvedQueueSize.Init(base.mgr)
@@ -4324,10 +4381,29 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	p.MaxGroupNQ = ParamItem{
 		Key:          "queryNode.grouping.maxNQ",
 		Version:      "2.0.0",
-		DefaultValue: "1000",
+		DefaultValue: "16",
 		Export:       true,
 	}
 	p.MaxGroupNQ.Init(base.mgr)
+
+	p.NQMergeRatio = ParamItem{
+		Key:          "queryNode.grouping.nqMergeRatio",
+		Version:      "2.6.17",
+		DefaultValue: "3.0",
+		Doc:          "Maximum ratio between merged total NQ and the smaller task NQ when grouping query node read tasks.",
+		Export:       true,
+	}
+	p.NQMergeRatio.Init(base.mgr)
+
+	p.MaxDeadlineMergeGap = ParamItem{
+		Key:          "queryNode.grouping.maxDeadlineMergeGap",
+		Version:      "2.6.17",
+		DefaultValue: "50ms",
+		Doc:          "Maximum allowed gap between task context deadlines when grouping query node read tasks. Tasks with only one deadline cannot be grouped. Set a negative duration to disable this check.",
+		Formatter:    formatDurationWithMillisecondFallback,
+		Export:       true,
+	}
+	p.MaxDeadlineMergeGap.Init(base.mgr)
 
 	p.TopKMergeRatio = ParamItem{
 		Key:          "queryNode.grouping.topKMergeRatio",
@@ -4487,6 +4563,23 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.ForwardBatchSize.Init(base.mgr)
 
+	p.DelegatorPostLoadConcurrencyFactor = ParamItem{
+		Key:          "queryNode.delegatorPostLoadConcurrencyFactor",
+		Version:      "2.6.16",
+		Doc:          "delegator post-load concurrency factor after worker LoadSegments returns. Concurrency is hardware.GetCPUNum * factor",
+		DefaultValue: "1",
+		Formatter: func(v string) string {
+			factor := getAsInt(v)
+			if factor < 1 {
+				factor = 1
+			}
+			concurrency := hardware.GetCPUNum() * factor
+			return strconv.FormatInt(int64(concurrency), 10)
+		},
+		Export: true,
+	}
+	p.DelegatorPostLoadConcurrencyFactor.Init(base.mgr)
+
 	p.IoPoolSize = ParamItem{
 		Key:          "queryNode.ioPoolSize",
 		Version:      "2.3.0",
@@ -4538,7 +4631,7 @@ user-task-polling:
 	Scheduling is fair on task granularity.
 	The policy is based on the username for authentication.
 	And an empty username is considered the same user.
-	When there are no multi-users, the policy decay into FIFO"`,
+	When there are no multi-users, the policy decay into FIFO.`,
 		Export: true,
 	}
 	p.SchedulePolicyName.Init(base.mgr)
@@ -4550,6 +4643,15 @@ user-task-polling:
 		Export:       true,
 	}
 	p.SchedulePolicyTaskQueueExpire.Init(base.mgr)
+	p.SchedulePolicyTaskDeadlineAdvance = ParamItem{
+		Key:          "queryNode.scheduler.scheduleReadPolicy.taskDeadlineAdvance",
+		Version:      "2.6.17",
+		DefaultValue: "50ms",
+		Doc:          "Advance duration for cleaning queued query node read tasks before their context deadline. It supports duration strings such as 50ms and 1s. A bare number is interpreted as milliseconds for compatibility.",
+		Formatter:    formatDurationWithMillisecondFallback,
+		Export:       true,
+	}
+	p.SchedulePolicyTaskDeadlineAdvance.Init(base.mgr)
 	p.SchedulePolicyEnableCrossUserGrouping = ParamItem{
 		Key:          "queryNode.scheduler.scheduleReadPolicy.enableCrossUserGrouping",
 		Version:      "2.3.0",
@@ -4566,7 +4668,6 @@ user-task-polling:
 		Export:       true,
 	}
 	p.SchedulePolicyMaxPendingTaskPerUser.Init(base.mgr)
-
 	p.CGOPoolSizeRatio = ParamItem{
 		Key:          "queryNode.segcore.cgoPoolSizeRatio",
 		Version:      "2.3.0",
@@ -4761,6 +4862,8 @@ type dataCoordConfig struct {
 	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
 	ForceRebuildSegmentIndex       ParamItem `refreshable:"true"`
 	TargetVecIndexVersion          ParamItem `refreshable:"true"`
+	ForceRebuildScalarSegmentIndex ParamItem `refreshable:"true"`
+	TargetScalarIndexVersion       ParamItem `refreshable:"true"`
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
 	BlockingL0EntryNum             ParamItem `refreshable:"true"`
 	BlockingL0SizeInMB             ParamItem `refreshable:"true"`
@@ -4807,7 +4910,9 @@ type dataCoordConfig struct {
 	SyncSegmentsInterval    ParamItem `refreshable:"false"`
 
 	// Index related configuration
-	IndexMemSizeEstimateMultiplier ParamItem `refreshable:"true"`
+	IndexMemSizeEstimateMultiplier      ParamItem `refreshable:"true"`
+	HybridIndexLowCardinalityIndexType  ParamItem `refreshable:"true"`
+	HybridIndexHighCardinalityIndexType ParamItem `refreshable:"true"`
 
 	// Clustering Compaction
 	ClusteringCompactionEnable                 ParamItem `refreshable:"true"`
@@ -5450,6 +5555,24 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.IndexMemSizeEstimateMultiplier.Init(base.mgr)
 
+	p.HybridIndexLowCardinalityIndexType = ParamItem{
+		Key:          "dataCoord.index.hybridIndex.lowCardinalityIndexType",
+		Version:      "2.6.10",
+		DefaultValue: "BITMAP",
+		Doc:          "Index type for low cardinality fields in hybrid index. Does not apply to Array types (always BITMAP).",
+		Export:       false,
+	}
+	p.HybridIndexLowCardinalityIndexType.Init(base.mgr)
+
+	p.HybridIndexHighCardinalityIndexType = ParamItem{
+		Key:          "dataCoord.index.hybridIndex.highCardinalityIndexType",
+		Version:      "2.6.10",
+		DefaultValue: "STL_SORT",
+		Doc:          "Index type for high cardinality fields in hybrid index. Does not apply to Array types (always INVERTED).",
+		Export:       false,
+	}
+	p.HybridIndexHighCardinalityIndexType.Init(base.mgr)
+
 	p.ClusteringCompactionEnable = ParamItem{
 		Key:          "dataCoord.compaction.clustering.enable",
 		Version:      "2.4.7",
@@ -5778,6 +5901,28 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	}
 	p.TargetVecIndexVersion.Init(base.mgr)
 
+	p.ForceRebuildScalarSegmentIndex = ParamItem{
+		Key:          "dataCoord.forceRebuildScalarSegmentIndex",
+		Version:      "2.6.10",
+		DefaultValue: "false",
+		PanicIfEmpty: true,
+		Doc:          "force rebuild scalar segment index to specified scalar index engine's version",
+		Export:       true,
+	}
+	p.ForceRebuildScalarSegmentIndex.Init(base.mgr)
+
+	p.TargetScalarIndexVersion = ParamItem{
+		Key:          "dataCoord.targetScalarIndexVersion",
+		Version:      "2.6.10",
+		DefaultValue: "-1",
+		PanicIfEmpty: true,
+		Doc: `if param forceRebuildScalarSegmentIndex is enabled, the scalar index will be rebuilt to aligned with targetScalarIndexVersion.
+if param forceRebuildScalarSegmentIndex is not enabled, the newly created scalar index will be aligned with the newer one of scalar index engine's version and targetScalarIndexVersion.
+if param targetScalarIndexVersion is not set, the default value is -1, which means no target scalar index version, then the scalar index will be aligned with scalar index engine's version`,
+		Export: true,
+	}
+	p.TargetScalarIndexVersion.Init(base.mgr)
+
 	p.SegmentFlushInterval = ParamItem{
 		Key:          "dataCoord.segmentFlushInterval",
 		Version:      "2.4.6",
@@ -5890,7 +6035,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Key:          "dataCoord.import.fileNumPerSlot",
 		Version:      "2.5.15",
 		Doc:          "The files number per slot for pre-import/import task.",
-		DefaultValue: "1",
+		DefaultValue: "4",
 		PanicIfEmpty: false,
 		Export:       true,
 	}

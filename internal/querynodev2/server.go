@@ -162,7 +162,10 @@ func (node *QueryNode) initSession() error {
 	minimalIndexVersion, currentIndexVersion, maximumIndexVersion := getIndexEngineVersion()
 	node.session = sessionutil.NewSession(node.ctx,
 		sessionutil.WithIndexEngineVersion(minimalIndexVersion, currentIndexVersion, maximumIndexVersion),
-		sessionutil.WithScalarIndexEngineVersion(common.MinimalScalarIndexEngineVersion, common.CurrentScalarIndexEngineVersion),
+		sessionutil.WithScalarIndexEngineVersion(
+			common.MinimalScalarIndexEngineVersion,
+			common.CurrentScalarIndexEngineVersion,
+			common.MaximumScalarIndexEngineVersion),
 		sessionutil.WithIndexNonEncoding())
 	if node.session == nil {
 		return errors.New("session is nil, the etcd client connection may have failed")
@@ -265,6 +268,8 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 		config.NewHandler("common.diskWriteRateLimiter.middlePriorityRatio", node.ReconfigDiskFileWriterParams))
 	pt.Watch(pt.CommonCfg.DiskWriteRateLimiterLowPriorityRatio.Key,
 		config.NewHandler("common.diskWriteRateLimiter.lowPriorityRatio", node.ReconfigDiskFileWriterParams))
+	initcore.RegisterArrowIOThreadPoolWatchers(pt, "querynode")
+	initcore.RegisterArrowReaderConfigWatchers(pt, "querynode")
 }
 
 func getIndexEngineVersion() (minimal, current, maximum int32) {
@@ -416,6 +421,11 @@ func (node *QueryNode) Start() error {
 		mmapScalarField := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		metrics.SetPoolCollectFn(
+			fmt.Sprint(node.GetNodeID()),
+			segments.CollectPoolStats,
+		)
 
 		registry.GetInMemoryResolver().RegisterQueryNode(node.GetNodeID(), node)
 		log.Info("query node start successfully",

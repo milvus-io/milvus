@@ -145,11 +145,18 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cExprResCacheCapacityBytes := C.int64_t(paramtable.Get().QueryNodeCfg.ExprResCacheCapacityBytes.GetAsInt64())
 	C.SetExprResCacheCapacityBytes(cExprResCacheCapacityBytes)
 
+	C.SetArrowIOThreadPoolCapacity(C.int(ResolveArrowIOThreadPoolCapacity()))
+
+	err := InitArrowReaderConfig(paramtable.Get())
+	if err != nil {
+		return err
+	}
+
 	localDataRootPath := pathutil.GetPath(pathutil.LocalChunkPath, nodeID)
 
 	InitLocalChunkManager(localDataRootPath)
 
-	err := InitRemoteChunkManager(paramtable.Get())
+	err = InitRemoteChunkManager(paramtable.Get())
 	if err != nil {
 		return err
 	}

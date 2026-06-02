@@ -83,7 +83,11 @@ ScalarIndexCreator::ScalarIndexCreator(
 }
 
 void
-ScalarIndexCreator::Build(const milvus::DatasetPtr& dataset) {
+ScalarIndexCreator::Build(const milvus::DatasetPtr& dataset,
+                          const bool* valid_data,
+                          const int64_t valid_data_len) {
+    (void)valid_data;
+    (void)valid_data_len;
     auto size = dataset->GetRows();
     auto data = dataset->GetTensor();
     index_->BuildWithRawDataForUT(size, data);
@@ -111,6 +115,12 @@ ScalarIndexCreator::index_type() {
 
 index::IndexStatsPtr
 ScalarIndexCreator::Upload() {
-    return index_->Upload();
+    auto version = index::GetValueFromConfig<int32_t>(
+                       config_, index::SCALAR_INDEX_ENGINE_VERSION)
+                       .value_or(1);
+    if (version >= 3) {
+        return index_->UploadUnified(config_);
+    }
+    return index_->Upload(config_);
 }
 }  // namespace milvus::indexbuilder

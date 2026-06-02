@@ -1,0 +1,40 @@
+line-length = 120
+target-version = "py312"
+extend-exclude = [
+    ".venv",
+    "__pycache__",
+    "assets",
+    "*.ipynb_checkpoints",
+]
+
+[lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line-too-long handled by formatter
+    "E741",  # ambiguous variable names (l, I, O) common in test code
+]
+
+[lint.per-file-ignores]
+"__init__.py" = ["F401", "F403"]
+"conftest.py" = ["F401", "F811"]
+"python_client/base/collection_wrapper.py" = ["F401", "I001"]
+"python_client/base/partition_wrapper.py" = ["I001"]
+"python_client/milvus_client/test_milvus_client_data_integrity.py" = ["F401", "F403", "F405", "I001"]
+"python_client/milvus_client/test_milvus_client_data_integrity_new.py" = ["F401", "F403", "F405", "I001"]
+"python_client/milvus_client/test_milvus_client_index.py" = ["F401", "F403", "F405", "F541", "I001"]
+"python_client/testcases/test_collection.py" = ["F403", "F405", "I001"]
+"python_client/testcases/test_insert.py" = ["F401", "I001", "UP031", "W291"]
+"python_client/utils/util_pymilvus.py" = ["E722", "F401", "F811", "F841", "I001", "UP008", "UP031"]
+"**/testcases/**/*.py" = ["E402"]
+"**/chaos/**/*.py" = ["E402"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"

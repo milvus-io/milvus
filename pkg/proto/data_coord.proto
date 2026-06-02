@@ -513,6 +513,7 @@ message TextIndexStats {
   int64 log_size = 4;
   int64 memory_size = 5;
   int64 buildID = 6;
+  int32 current_scalar_index_version = 7;
 }
 
 message JsonKeyStats {
@@ -537,6 +538,8 @@ message Binlog {
   // log_size represents the size after data serialized.
   // for stats_log, the memory_size always equal log_size.
   int64 memory_size = 7;
+  // null counts per field in this column group.
+  map<int64, int64> field_null_counts = 8;
 }
 
 message GetRecoveryInfoResponse {

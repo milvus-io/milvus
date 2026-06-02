@@ -60,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -694,6 +695,52 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		}, segmentEntryCoreFields(sealed[0].Segments))
 	})
 
+	s.Run("load_scope_reopen_skips_post_load", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+			s.loader.ExpectedCalls = nil
+		}()
+
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := &cluster.MockWorker{}
+		workers[1] = worker1
+
+		worker1.EXPECT().LoadSegments(mock.Anything, mock.MatchedBy(func(req *querypb.LoadSegmentsRequest) bool {
+			return req.GetLoadScope() == querypb.LoadScope_Reopen
+		})).Return(nil)
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+			Base:         commonpbutil.NewMsgBase(),
+			DstNodeID:    1,
+			CollectionID: s.collectionID,
+			LoadScope:    querypb.LoadScope_Reopen,
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:     101,
+					PartitionID:   500,
+					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					Level:         datapb.SegmentLevel_L1,
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				},
+			},
+		})
+
+		s.NoError(err)
+		sealed, _ := s.delegator.GetSegmentInfo(false)
+		hasReopenSegment := lo.SomeBy(sealed, func(info SnapshotItem) bool {
+			return lo.SomeBy(info.Segments, func(segment SegmentEntry) bool {
+				return segment.SegmentID == 101
+			})
+		})
+		s.False(hasReopenSegment)
+	})
+
 	s.Run("load_segments_with_delete", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil
@@ -925,6 +972,65 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		})
 
 		s.Error(err)
+	})
+}
+
+func (s *DelegatorDataSuite) TestPostLoadLimiter() {
+	s.Run("serializes_post_load_work", func() {
+		sd := &shardDelegator{
+			postLoadSem: syncutil.NewSemaphore(1),
+		}
+		var current int32
+		var maxConcurrent int32
+		start := make(chan struct{})
+		errCh := make(chan error, 8)
+		wg := sync.WaitGroup{}
+		for i := 0; i < 8; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				err := sd.withPostLoadLimit(context.Background(), func() error {
+					running := atomic.AddInt32(&current, 1)
+					for {
+						maxValue := atomic.LoadInt32(&maxConcurrent)
+						if running <= maxValue || atomic.CompareAndSwapInt32(&maxConcurrent, maxValue, running) {
+							break
+						}
+					}
+					time.Sleep(5 * time.Millisecond)
+					atomic.AddInt32(&current, -1)
+					return nil
+				})
+				errCh <- err
+			}()
+		}
+		close(start)
+		wg.Wait()
+		close(errCh)
+		for err := range errCh {
+			s.NoError(err)
+		}
+		s.Equal(int32(1), maxConcurrent)
+		s.Equal(0, sd.postLoadSem.Current())
+	})
+
+	s.Run("returns_context_error_while_waiting", func() {
+		sd := &shardDelegator{
+			postLoadSem: syncutil.NewSemaphore(1),
+		}
+		s.NoError(sd.postLoadSem.Acquire(context.Background()))
+		defer sd.postLoadSem.Release()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+		defer cancel()
+		called := false
+		err := sd.withPostLoadLimit(ctx, func() error {
+			called = true
+			return nil
+		})
+		s.ErrorIs(err, context.DeadlineExceeded)
+		s.False(called)
 	})
 }
 

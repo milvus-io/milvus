@@ -29,6 +29,12 @@ import (
 
 // CreateCollection is the API for create a collection in Milvus.
 func (c *Client) CreateCollection(ctx context.Context, option CreateCollectionOption, callOptions ...grpc.CallOption) error {
+	// Client-side schema validation: options that expose Validate() get a pre-flight sanity check.
+	if v, ok := option.(interface{ Validate() error }); ok {
+		if err := v.Validate(); err != nil {
+			return err
+		}
+	}
 	req := option.Request()
 
 	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
@@ -193,6 +199,10 @@ func (c *Client) GetCollectionStats(ctx context.Context, opt GetCollectionOption
 
 // AddCollectionField adds a field to a collection.
 func (c *Client) AddCollectionField(ctx context.Context, opt AddCollectionFieldOption, callOpts ...grpc.CallOption) error {
+	if err := opt.Validate(); err != nil {
+		return err
+	}
+
 	req := opt.Request()
 
 	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {

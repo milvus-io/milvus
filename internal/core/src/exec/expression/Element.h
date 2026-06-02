@@ -17,8 +17,10 @@
 #pragma once
 
 #include <algorithm>
+#include <cstring>
 #include <memory>
 #include <string>
+#include <type_traits>
 
 #include "common/Types.h"
 #include "exec/expression/EvalCtx.h"
@@ -27,6 +29,8 @@
 #include "expr/ITypeExpr.h"
 #include "query/PlanProto.h"
 #include "ankerl/unordered_dense.h"
+
+#include "exec/expression/SimdFilter.h"
 
 namespace milvus {
 namespace exec {
@@ -270,12 +274,14 @@ class SetElement : public MultiElement {
 
  public:
     explicit SetElement(const std::vector<proto::plan::GenericValue>& values) {
+        values_.max_load_factor(0.5f);
         for (auto& value : values) {
             values_.insert(GetValueWithCastNumber<T>(value));
         }
     }
 
     explicit SetElement(const std::vector<T>& values) {
+        values_.max_load_factor(0.5f);
         for (const auto& value : values) {
             values_.insert(value);
         }
@@ -310,6 +316,39 @@ class SetElement : public MultiElement {
         return values_.size();
     }
 
+    // Batch filter: bypass ValueType variant construction.
+    // Looks up each data[i] directly in the hash set (zero-copy for strings
+    // via transparent hash).
+    void
+    FilterChunk(const T* data, const int size, TargetBitmapView res) const {
+        for (int i = 0; i < size; ++i) {
+            if constexpr (std::is_same_v<T, std::string>) {
+                // Use string_view to avoid copying into the hash function
+                if (values_.find(std::string_view(data[i])) != values_.end()) {
+                    res[i] = true;
+                }
+            } else {
+                if (values_.find(data[i]) != values_.end()) {
+                    res[i] = true;
+                }
+            }
+        }
+    }
+
+    // string_view data overload for sealed/mmap segments (T=string only).
+    template <typename U = T,
+              typename = std::enable_if_t<std::is_same_v<U, std::string>>>
+    void
+    FilterChunk(const std::string_view* data,
+                const int size,
+                TargetBitmapView res) const {
+        for (int i = 0; i < size; ++i) {
+            if (values_.find(data[i]) != values_.end()) {
+                res[i] = true;
+            }
+        }
+    }
+
     std::vector<T>
     GetElements() const {
         return std::vector<T>(values_.begin(), values_.end());
@@ -319,40 +358,43 @@ class SetElement : public MultiElement {
     SetType values_;
 };
 
+// SetElement<bool> specialization: avoids ankerl::unordered_dense::set<bool>
+// whose wyhash reads 8 bytes from a 1-byte bool, causing ASAN
+// stack-use-after-scope.  Bool has at most 2 distinct values, so two flags
+// are both faster and correct.
 template <>
 class SetElement<bool> : public MultiElement {
  public:
     explicit SetElement(const std::vector<proto::plan::GenericValue>& values) {
         for (auto& value : values) {
-            bool v = GetValueFromProto<bool>(value);
+            bool v = GetValueWithCastNumber<bool>(value);
             if (v) {
-                contains_true = true;
+                has_true_ = true;
             } else {
-                contains_false = true;
+                has_false_ = true;
             }
         }
     }
 
     explicit SetElement(const std::vector<bool>& values) {
-        for (const auto& value : values) {
-            if (value) {
-                contains_true = true;
+        for (bool v : values) {
+            if (v) {
+                has_true_ = true;
             } else {
-                contains_false = true;
+                has_false_ = true;
             }
         }
     }
 
     bool
     Empty() const override {
-        return !contains_true && !contains_false;
+        return !has_true_ && !has_false_;
     }
 
     bool
     In(const ValueType& value) const override {
-        if (std::holds_alternative<bool>(value)) {
-            bool v = std::get<bool>(value);
-            return (v && contains_true) || (!v && contains_false);
+        if (auto* b = std::get_if<bool>(&value)) {
+            return *b ? has_true_ : has_false_;
         }
         return false;
     }
@@ -360,26 +402,151 @@ class SetElement<bool> : public MultiElement {
     void
     AddElement(const bool& value) {
         if (value) {
-            contains_true = true;
+            has_true_ = true;
         } else {
-            contains_false = true;
+            has_false_ = true;
         }
     }
 
     size_t
     Size() const override {
-        return (contains_true ? 1 : 0) + (contains_false ? 1 : 0);
+        return static_cast<size_t>(has_true_) + static_cast<size_t>(has_false_);
     }
 
     std::vector<bool>
     GetElements() const {
-        return {contains_true, contains_false};
+        std::vector<bool> result;
+        if (has_true_) {
+            result.push_back(true);
+        }
+        if (has_false_) {
+            result.push_back(false);
+        }
+        return result;
     }
 
  private:
-    bool contains_true = false;
-    bool contains_false = false;
+    bool has_true_ = false;
+    bool has_false_ = false;
 };
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SimdBatchElement: SIMD batch-data comparison for all numeric types.
+// Supports: int8, int16, int32, int64, float, double.
+//
+// Uses runtime-dispatched SIMD — at startup selects the best instruction set
+// available on the current CPU (AVX512, AVX2, SSE2, NEON).
+//
+// Two execution modes:
+//   In()          — per-row fallback (linear scan, no hash overhead)
+//   FilterChunk() — batch SIMD via simdFilterChunk() (preferred)
+// ═══════════════════════════════════════════════════════════════════════════
+template <typename T>
+class SimdBatchElement : public MultiElement {
+    static_assert(std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t> ||
+                      std::is_same_v<T, int16_t> ||
+                      std::is_same_v<T, int32_t> ||
+                      std::is_same_v<T, int64_t> || std::is_same_v<T, float> ||
+                      std::is_same_v<T, double>,
+                  "SimdBatchElement supports numeric types only");
+
+    // Sorted and deduplicated by the Go rewriter layer
+    // (sortTermValues in rewriter/util.go).
+    std::vector<T> vals_;
+
+ public:
+    explicit SimdBatchElement(
+        const std::vector<proto::plan::GenericValue>& values) {
+        vals_.reserve(values.size());
+        for (auto& value : values) {
+            vals_.push_back(GetValueWithCastNumber<T>(value));
+        }
+    }
+
+    explicit SimdBatchElement(const std::vector<T>& values) : vals_(values) {
+    }
+
+    bool
+    Empty() const override {
+        return vals_.empty();
+    }
+
+    size_t
+    Size() const override {
+        return vals_.size();
+    }
+
+    // Per-row fallback: binary search (vals_ is pre-sorted by Go rewriter)
+    // Callers should use std::in_place_type<T> when constructing ValueType
+    // to avoid implicit integer promotion (e.g. int8_t -> int32_t).
+    bool
+    In(const ValueType& value) const override {
+        T v = std::get<T>(value);
+        return std::binary_search(vals_.begin(), vals_.end(), v);
+    }
+
+    // Batch SIMD filter — delegates to runtime-dispatched simdFilterChunk().
+    void
+    FilterChunk(const T* data, const int size, TargetBitmapView res) const {
+        if (vals_.empty() || size <= 0) {
+            return;
+        }
+
+        int offset = res.offset();
+        int start = 0;
+
+        // Head: scalar for unaligned leading bits (up to 7 rows)
+        int bit_offset = offset % 8;
+        if (bit_offset != 0) {
+            int head = std::min(size, 8 - bit_offset);
+            for (int i = 0; i < head; ++i) {
+                if (std::binary_search(vals_.begin(), vals_.end(), data[i])) {
+                    res[i] = true;
+                }
+            }
+            start = head;
+        }
+
+        // Middle: SIMD for the byte-aligned bulk
+        int remaining = size - start;
+        if (remaining > 0) {
+            uint8_t* bitmap =
+                reinterpret_cast<uint8_t*>(res.data()) + (start + offset) / 8;
+            simdFilterChunk<T>(data + start,
+                               remaining,
+                               bitmap,
+                               vals_.data(),
+                               static_cast<int>(vals_.size()));
+        }
+    }
+
+    std::vector<T>
+    GetElements() const {
+        return vals_;
+    }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GetElementValues: extract typed element vector from any MultiElement.
+// Used by skip index to get IN values regardless of element type.
+// ═══════════════════════════════════════════════════════════════════════════
+template <typename T>
+std::vector<T>
+GetElementValues(const std::shared_ptr<MultiElement>& ptr) {
+    if (auto p = std::dynamic_pointer_cast<SetElement<T>>(ptr)) {
+        return p->GetElements();
+    }
+    if constexpr (!std::is_same_v<T, bool> && !std::is_same_v<T, std::string> &&
+                  !std::is_same_v<T, std::string_view>) {
+        if (auto p = std::dynamic_pointer_cast<SimdBatchElement<T>>(ptr)) {
+            return p->GetElements();
+        }
+    }
+    if (auto p = std::dynamic_pointer_cast<SortVectorElement<T>>(ptr)) {
+        return p->GetElements();
+    }
+    return {};
+}
 
 }  //namespace exec
 }  // namespace milvus

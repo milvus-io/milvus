@@ -110,6 +110,8 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			if val, ok := v.(bool); ok {
 				boolData[i] = val
+			} else {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected bool for field '%s' but got %T", r.field.GetName(), v))
 			}
 		}
 		return &schemapb.ScalarField{
@@ -122,6 +124,8 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			if val, ok := v.(int8); ok {
 				intData[i] = int32(val)
+			} else {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected int8 for field '%s' but got %T", r.field.GetName(), v))
 			}
 		}
 		return &schemapb.ScalarField{
@@ -134,6 +138,8 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			if val, ok := v.(int16); ok {
 				intData[i] = int32(val)
+			} else {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected int16 for field '%s' but got %T", r.field.GetName(), v))
 			}
 		}
 		return &schemapb.ScalarField{
@@ -146,6 +152,8 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			if val, ok := v.(int32); ok {
 				intData[i] = val
+			} else {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected int32 for field '%s' but got %T", r.field.GetName(), v))
 			}
 		}
 		return &schemapb.ScalarField{
@@ -158,6 +166,8 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			if val, ok := v.(int64); ok {
 				intData[i] = val
+			} else {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected int64 for field '%s' but got %T", r.field.GetName(), v))
 			}
 		}
 		return &schemapb.ScalarField{
@@ -170,6 +180,8 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			if val, ok := v.(float32); ok {
 				floatData[i] = val
+			} else {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected float32 for field '%s' but got %T", r.field.GetName(), v))
 			}
 		}
 		return &schemapb.ScalarField{
@@ -182,6 +194,8 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			if val, ok := v.(float64); ok {
 				floatData[i] = val
+			} else {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected float64 for field '%s' but got %T", r.field.GetName(), v))
 			}
 		}
 		return &schemapb.ScalarField{
@@ -194,6 +208,8 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			if val, ok := v.(string); ok {
 				strData[i] = val
+			} else {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected string for field '%s' but got %T", r.field.GetName(), v))
 			}
 		}
 		return &schemapb.ScalarField{
@@ -279,6 +295,9 @@ func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, er
 }
 
 func (r *StructFieldReader) readArrayOfVectorField(chunked *arrow.Chunked) (any, any, error) {
+	if r.field.GetNullable() {
+		return nil, nil, merr.WrapErrImportFailed("ArrayOfVector does not support nullable")
+	}
 	var result []*schemapb.VectorField
 
 	for _, chunk := range chunked.Chunks() {

@@ -122,6 +122,15 @@ func (opt *createCollectionOption) WithNumPartitions(numPartitions int64) *creat
 	return opt
 }
 
+// Validate runs client-side sanity checks against the user-provided schema. Invoked automatically
+// from Client.CreateCollection via interface assertion.
+func (opt *createCollectionOption) Validate() error {
+	if opt.schema == nil {
+		return nil
+	}
+	return opt.schema.Validate()
+}
+
 func (opt *createCollectionOption) Request() *milvuspb.CreateCollectionRequest {
 	// fast create collection
 	if opt.isFast {
@@ -424,6 +433,8 @@ func NewGetCollectionStatsOption(collectionName string) *getCollectionStatsOptio
 
 type AddCollectionFieldOption interface {
 	Request() *milvuspb.AddCollectionFieldRequest
+	// Validate validates the option before sending request
+	Validate() error
 }
 
 type addCollectionFieldOption struct {
@@ -437,6 +448,15 @@ func (c *addCollectionFieldOption) Request() *milvuspb.AddCollectionFieldRequest
 		CollectionName: c.collectionName,
 		Schema:         bs,
 	}
+}
+
+// Validate validates the option before sending request
+func (c *addCollectionFieldOption) Validate() error {
+	// Vector fields must be nullable when adding to existing collection
+	if c.fieldSch.DataType.IsVectorType() && !c.fieldSch.Nullable {
+		return fmt.Errorf("adding vector field to existing collection requires nullable=true, field name = %s", c.fieldSch.Name)
+	}
+	return nil
 }
 
 func NewAddCollectionFieldOption(collectionName string, field *entity.Field) *addCollectionFieldOption {

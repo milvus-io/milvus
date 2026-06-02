@@ -27,7 +27,11 @@
 #include <boost/dynamic_bitset.hpp>
 #include <NamedType/named_type.hpp>
 
+#include "common/BitsetView.h"
 #include "common/FieldMeta.h"
+#include "common/ArrayOffsets.h"
+#include "common/OffsetMapping.h"
+#include "common/Types.h"
 #include "pb/schema.pb.h"
 #include "knowhere/index/index_node.h"
 
@@ -139,9 +143,11 @@ struct OffsetDisPairComparator {
 struct VectorIterator {
  public:
     VectorIterator(int chunk_count,
+                   const milvus::OffsetMapping* offset_mapping,
                    const std::vector<int64_t>& total_rows_until_chunk = {},
                    bool larger_is_closer = false)
-        : total_rows_until_chunk_(total_rows_until_chunk),
+        : offset_mapping_(offset_mapping),
+          total_rows_until_chunk_(total_rows_until_chunk),
           larger_is_closer_(larger_is_closer),
           heap_(OffsetDisPairComparator(larger_is_closer)) {
         iterators_.reserve(chunk_count);
@@ -158,7 +164,11 @@ struct VectorIterator {
                     origin_pair, top->GetIteratorIdx());
                 heap_.push(off_dis_pair);
             }
-            return top->GetOffDis();
+            auto result = top->GetOffDis();
+            if (offset_mapping_ != nullptr) {
+                result.first = offset_mapping_->GetLogicalOffset(result.first);
+            }
+            return result;
         }
         return std::nullopt;
     }
@@ -211,6 +221,7 @@ struct VectorIterator {
                         OffsetDisPairComparator>
         heap_;
     bool sealed = false;
+    const milvus::OffsetMapping* offset_mapping_ = nullptr;
     std::vector<int64_t> total_rows_until_chunk_;
     bool larger_is_closer_ = false;
     //currently, VectorIterator is guaranteed to be used serially without concurrent problem, in the future
@@ -238,6 +249,7 @@ struct SearchResult {
         int chunk_count,
         const std::vector<int64_t>& total_rows_until_chunk,
         const std::vector<knowhere::IndexNode::IteratorPtr>& kw_iterators,
+        const milvus::OffsetMapping* offset_mapping,
         bool larger_is_closer = false) {
         AssertInfo(kw_iterators.size() == nq * chunk_count,
                    "kw_iterators count:{} is not equal to nq*chunk_count:{}, "
@@ -249,8 +261,11 @@ struct SearchResult {
         for (int i = 0, vec_iter_idx = 0; i < kw_iterators.size(); i++) {
             vec_iter_idx = vec_iter_idx % nq;
             if (vector_iterators.size() < nq) {
-                auto vector_iterator = std::make_shared<VectorIterator>(
-                    chunk_count, total_rows_until_chunk, larger_is_closer);
+                auto vector_iterator =
+                    std::make_shared<VectorIterator>(chunk_count,
+                                                     offset_mapping,
+                                                     total_rows_until_chunk,
+                                                     larger_is_closer);
                 vector_iterators.emplace_back(vector_iterator);
             }
             const auto& kw_iterator = kw_iterators[i];
@@ -260,6 +275,14 @@ struct SearchResult {
             vector_iter->seal();
         }
         this->vector_iterators_ = vector_iterators;
+    }
+
+    BitsetView
+    PinBitset(TargetBitmap&& bitset) {
+        auto pinned = std::make_unique<TargetBitmap>(std::move(bitset));
+        auto view = BitsetView(*pinned);
+        pinned_bitsets_.emplace_back(std::move(pinned));
+        return view;
     }
 
  public:
@@ -294,6 +317,11 @@ struct SearchResult {
         vector_iterators_;
     // record the storage usage in search
     StorageCost search_storage_cost_;
+    std::vector<TargetBitmapPtr> pinned_bitsets_{};
+
+    bool element_level_{false};
+    std::vector<int32_t> element_indices_;
+    std::vector<std::unique_ptr<uint8_t[]>> chunk_buffers_{};
 };
 
 using SearchResultPtr = std::shared_ptr<SearchResult>;

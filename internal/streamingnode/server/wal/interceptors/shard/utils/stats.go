@@ -40,15 +40,16 @@ func (s *SegmentBelongs) PartitionUniqueKey() PartitionUniqueKey {
 
 // SegmentStats is the usage stats of a segment.
 type SegmentStats struct {
-	Modified          ModifiedMetrics
-	MaxRows           uint64    // MaxRows of current segment should be assigned, it's a fixed value when segment is transfer int growing.
-	MaxBinarySize     uint64    // MaxBinarySize of current segment should be assigned, it's a fixed value when segment is transfer int growing.
-	CreateTime        time.Time // created timestamp of this segment, it's a fixed value when segment is created, not a tso.
-	LastModifiedTime  time.Time // LastWriteTime is the last write time of this segment, it's not a tso, just a local time.
-	BinLogCounter     uint64    // BinLogCounter is the counter of binlog (equal to the binlog file count of primary key), it's an async stat not real time.
-	BinLogFileCounter uint64    // BinLogFileCounter is the counter of binlog files, it's an async stat not real time.
-	ReachLimit        bool      // ReachLimit is a flag to indicate the segment reach the limit once.
-	Level             datapb.SegmentLevel
+	Modified              ModifiedMetrics
+	MaxRows               uint64    // MaxRows of current segment should be assigned, it's a fixed value when segment is transfer int growing.
+	MaxBinarySize         uint64    // MaxBinarySize of current segment should be assigned, it's a fixed value when segment is transfer int growing.
+	CreateTime            time.Time // created timestamp of this segment, it's a fixed value when segment is created, not a tso.
+	LastModifiedTime      time.Time // LastWriteTime is the last write time of this segment, it's not a tso, just a local time.
+	CreateSegmentTimeTick uint64
+	BinLogCounter         uint64 // BinLogCounter is the counter of binlog (equal to the binlog file count of primary key), it's an async stat not real time.
+	BinLogFileCounter     uint64 // BinLogFileCounter is the counter of binlog files, it's an async stat not real time.
+	ReachLimit            bool   // ReachLimit is a flag to indicate the segment reach the limit once.
+	Level                 datapb.SegmentLevel
 }
 
 // NewSegmentStatFromProto creates a new segment assignment stat from proto.
@@ -72,12 +73,13 @@ func NewSegmentStatFromProto(statProto *streamingpb.SegmentAssignmentStat) *Segm
 			Rows:       statProto.ModifiedRows,
 			BinarySize: statProto.ModifiedBinarySize,
 		},
-		MaxRows:          maxRows,
-		MaxBinarySize:    statProto.MaxBinarySize,
-		CreateTime:       time.Unix(statProto.CreateTimestamp, 0),
-		BinLogCounter:    statProto.BinlogCounter,
-		LastModifiedTime: time.Unix(statProto.LastModifiedTimestamp, 0),
-		Level:            lv,
+		MaxRows:               maxRows,
+		MaxBinarySize:         statProto.MaxBinarySize,
+		CreateTime:            time.Unix(statProto.CreateTimestamp, 0),
+		CreateSegmentTimeTick: statProto.CreateSegmentTimeTick,
+		BinLogCounter:         statProto.BinlogCounter,
+		LastModifiedTime:      time.Unix(statProto.LastModifiedTimestamp, 0),
+		Level:                 lv,
 	}
 }
 
@@ -92,6 +94,7 @@ func NewProtoFromSegmentStat(stat *SegmentStats) *streamingpb.SegmentAssignmentS
 		ModifiedRows:          stat.Modified.Rows,
 		ModifiedBinarySize:    stat.Modified.BinarySize,
 		CreateTimestamp:       stat.CreateTime.Unix(),
+		CreateSegmentTimeTick: stat.CreateSegmentTimeTick,
 		BinlogCounter:         stat.BinLogCounter,
 		LastModifiedTimestamp: stat.LastModifiedTime.Unix(),
 		Level:                 stat.Level,

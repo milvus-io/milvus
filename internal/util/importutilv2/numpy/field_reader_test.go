@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -196,6 +197,82 @@ func TestNormalRead(t *testing.T) {
 
 	checkFn(false)
 	checkFn(true)
+}
+
+func TestNullableVectorValidDataUsesLogicalRows(t *testing.T) {
+	tests := []struct {
+		name      string
+		dataType  schemapb.DataType
+		fieldData storage.FieldData
+	}{
+		{
+			name:     "float vector",
+			dataType: schemapb.DataType_FloatVector,
+			fieldData: &storage.FloatVectorFieldData{
+				Data: make([]float32, 2*dim),
+				Dim:  dim,
+			},
+		},
+		{
+			name:     "float16 vector",
+			dataType: schemapb.DataType_Float16Vector,
+			fieldData: &storage.Float16VectorFieldData{
+				Data: make([]byte, 2*dim*2),
+				Dim:  dim,
+			},
+		},
+		{
+			name:     "bfloat16 vector",
+			dataType: schemapb.DataType_BFloat16Vector,
+			fieldData: &storage.BFloat16VectorFieldData{
+				Data: make([]byte, 2*dim*2),
+				Dim:  dim,
+			},
+		},
+		{
+			name:     "int8 vector",
+			dataType: schemapb.DataType_Int8Vector,
+			fieldData: &storage.Int8VectorFieldData{
+				Data: make([]int8, 2*dim),
+				Dim:  dim,
+			},
+		},
+		{
+			name:     "binary vector",
+			dataType: schemapb.DataType_BinaryVector,
+			fieldData: &storage.BinaryVectorFieldData{
+				Data: make([]byte, 2*dim/8),
+				Dim:  dim,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			field := &schemapb.FieldSchema{
+				FieldID:  100,
+				Name:     "nullable_vector",
+				DataType: tt.dataType,
+				Nullable: true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "8"},
+				},
+			}
+			reader, err := createReader(tt.fieldData, tt.dataType)
+			assert.NoError(t, err)
+
+			fr, err := NewFieldReader(reader, field, common.DefaultTimezone)
+			assert.NoError(t, err)
+			data, validData, err := fr.Next(2)
+			assert.NoError(t, err)
+			assert.Len(t, validData.([]bool), 2)
+
+			dst, err := storage.NewFieldData(tt.dataType, field, 0)
+			assert.NoError(t, err)
+			assert.NoError(t, dst.AppendRows(data, validData))
+			assert.Equal(t, 2, dst.RowNum())
+		})
+	}
 }
 
 type ErrReader struct {

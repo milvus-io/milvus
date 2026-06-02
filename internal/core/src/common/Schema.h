@@ -120,7 +120,8 @@ class Schema {
     AddDebugField(const std::string& name,
                   DataType data_type,
                   int64_t dim,
-                  std::optional<knowhere::MetricType> metric_type) {
+                  std::optional<knowhere::MetricType> metric_type,
+                  bool nullable = false) {
         auto field_id = FieldId(debug_id);
         debug_id++;
         auto field_meta = FieldMeta(FieldName(name),
@@ -128,7 +129,7 @@ class Schema {
                                     data_type,
                                     dim,
                                     metric_type,
-                                    false,
+                                    nullable,
                                     std::nullopt);
         this->AddField(std::move(field_meta));
         return field_id;
@@ -250,7 +251,7 @@ class Schema {
              std::optional<knowhere::MetricType> metric_type,
              bool nullable) {
         auto field_meta = FieldMeta(
-            name, id, data_type, dim, metric_type, false, std::nullopt);
+            name, id, data_type, dim, metric_type, nullable, std::nullopt);
         this->AddField(std::move(field_meta));
     }
 
@@ -287,6 +288,22 @@ class Schema {
     int
     size() const {
         return fields_.size();
+    }
+
+    size_t
+    get_field_id_bitset_size() const {
+        size_t bitset_size = 0;
+        for (const auto& field_id : field_ids_) {
+            if (field_id.get() < START_USER_FIELDID) {
+                continue;
+            }
+            auto required_size =
+                static_cast<size_t>(field_id.get() - START_USER_FIELDID + 1);
+            if (required_size > bitset_size) {
+                bitset_size = required_size;
+            }
+        }
+        return bitset_size;
     }
 
     const FieldMeta&
@@ -357,6 +374,9 @@ class Schema {
 
     bool
     ShouldLoadField(FieldId field_id) {
+        if (bm25_function_output_fields_.count(field_id) > 0) {
+            return false;
+        }
         return load_fields_.empty() || load_fields_.count(field_id) > 0;
     }
 
@@ -446,6 +466,7 @@ class Schema {
     // field partial load list
     // work as hint now
     std::unordered_set<FieldId> load_fields_;
+    std::unordered_set<FieldId> bm25_function_output_fields_;
 
     // schema_version_, currently marked with update timestamp
     uint64_t schema_version_;

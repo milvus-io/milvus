@@ -369,7 +369,10 @@ func (suite *ServiceSuite) TestShowCollections() {
 	meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
 	resp, err = server.ShowLoadCollections(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_InsufficientMemoryToLoad, resp.GetStatus().GetErrorCode())
+	suite.Equal(merr.Code(merr.ErrCollectionNotLoaded), resp.GetStatus().GetCode())
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrCollectionNotLoaded)
+	suite.Contains(resp.GetStatus().GetReason(), merr.ErrServiceMemoryLimitExceeded.Error())
 	meta.GlobalFailedLoadCache.Remove(collection)
 	err = suite.meta.PutCollection(ctx, colBak)
 	suite.NoError(err)
@@ -1473,8 +1476,8 @@ func (suite *ServiceSuite) TestLoadBalanceWithEmptySegmentList() {
 	defer func() {
 		for _, collection := range suite.collections {
 			replicas := suite.meta.GetByCollection(ctx, collection)
-			suite.meta.RemoveNode(ctx, replicas[0].GetID(), srcNode)
-			suite.meta.RemoveNode(ctx, replicas[0].GetID(), dstNode)
+			suite.meta.RemoveNode(ctx, collection, replicas[0].GetID(), srcNode)
+			suite.meta.RemoveNode(ctx, collection, replicas[0].GetID(), dstNode)
 		}
 		suite.nodeMgr.Remove(1001)
 		suite.nodeMgr.Remove(1002)
@@ -1617,7 +1620,7 @@ func (suite *ServiceSuite) TestLoadBalanceFailed() {
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
 		suite.nodeMgr.Remove(10)
-		suite.meta.RemoveNode(ctx, replicas[0].GetID(), 10)
+		suite.meta.RemoveNode(ctx, collection, replicas[0].GetID(), 10)
 	}
 }
 

@@ -107,35 +107,41 @@ func (suite *RowParserSuite) createAllTypesSchema() *schemapb.CollectionSchema {
 				Name:       "float_vector",
 				DataType:   schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+				Nullable:   suite.hasNullable,
 			},
 			{
 				FieldID:    22,
 				Name:       "bin_vector",
 				DataType:   schemapb.DataType_BinaryVector,
 				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "16"}},
+				Nullable:   suite.hasNullable,
 			},
 			{
 				FieldID:  23,
 				Name:     "sparse_vector",
 				DataType: schemapb.DataType_SparseFloatVector,
+				Nullable: suite.hasNullable,
 			},
 			{
 				FieldID:    24,
 				Name:       "f16_vector",
 				DataType:   schemapb.DataType_Float16Vector,
 				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+				Nullable:   suite.hasNullable,
 			},
 			{
 				FieldID:    25,
 				Name:       "bf16_vector",
 				DataType:   schemapb.DataType_BFloat16Vector,
 				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+				Nullable:   suite.hasNullable,
 			},
 			{
 				FieldID:    26,
 				Name:       "int8_vector",
 				DataType:   schemapb.DataType_Int8Vector,
 				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+				Nullable:   suite.hasNullable,
 			},
 			{
 				FieldID:          27,
@@ -628,6 +634,12 @@ func (suite *RowParserSuite) TestValid() {
 	suite.runValid(&testCase{name: "A/N/D nullable field varchar is nil", content: suite.genAllTypesRowData("varchar", nil)})
 	suite.runValid(&testCase{name: "A/N/D nullable field json is nil", content: suite.genAllTypesRowData("json", nil)})
 	suite.runValid(&testCase{name: "A/N/D nullable field array_int8 is nil", content: suite.genAllTypesRowData("array_int8", nil)})
+	suite.runValid(&testCase{name: "A/N/D nullable field float_vector is nil", content: suite.genAllTypesRowData("float_vector", nil)})
+	suite.runValid(&testCase{name: "A/N/D nullable field bin_vector is nil", content: suite.genAllTypesRowData("bin_vector", nil)})
+	suite.runValid(&testCase{name: "A/N/D nullable field sparse_vector is nil", content: suite.genAllTypesRowData("sparse_vector", nil)})
+	suite.runValid(&testCase{name: "A/N/D nullable field f16_vector is nil", content: suite.genAllTypesRowData("f16_vector", nil)})
+	suite.runValid(&testCase{name: "A/N/D nullable field bf16_vector is nil", content: suite.genAllTypesRowData("bf16_vector", nil)})
+	suite.runValid(&testCase{name: "A/N/D nullable field int8_vector is nil", content: suite.genAllTypesRowData("int8_vector", nil)})
 
 	suite.setSchema(false, true, true)
 	suite.runValid(&testCase{name: "N/D valid parse", content: suite.genAllTypesRowData("x", 2)})
@@ -670,7 +682,6 @@ func (suite *RowParserSuite) TestParseError() {
 			{name: "not a JSON for dynamic", content: suite.genAllTypesRowData("$meta", []int{})},
 			{name: "exceeds max length varchar", content: suite.genAllTypesRowData("varchar", "aaaaaaaaaa")},
 			{name: "exceeds max capacity", content: suite.genAllTypesRowData("array_int8", []int{1, 2, 3, 4, 5})},
-			{name: "field value missed", content: suite.genAllTypesRowData("x", 2, "float_vector")},
 			{name: "type error bool", content: suite.genAllTypesRowData("bool", 0.2)},
 			{name: "type error int8", content: suite.genAllTypesRowData("int8", []int32{})},
 			{name: "type error int16", content: suite.genAllTypesRowData("int16", []int32{})},
@@ -739,6 +750,114 @@ func (suite *RowParserSuite) TestParseError() {
 		}
 		suite.runParseError(&testCase{name: "_ " + c.name, content: c.content})
 	}
+}
+
+func TestReconstructArrayForStructArray_InconsistentFields(t *testing.T) {
+	// Element missing a field should produce an error
+	raw := []any{
+		map[string]any{"sub_int": 1, "sub_str": "hello"},
+		map[string]any{"sub_int": 2}, // missing "sub_str"
+	}
+	_, err := reconstructArrayForStructArray(raw)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "inconsistent field count in StructArray")
+
+	// Element with an extra field should produce an error
+	raw = []any{
+		map[string]any{"sub_int": 1, "sub_str": "hello"},
+		map[string]any{"sub_int": 2, "sub_str": "world", "sub_extra": true},
+	}
+	_, err = reconstructArrayForStructArray(raw)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "inconsistent field count in StructArray")
+
+	// Consistent fields should succeed
+	raw = []any{
+		map[string]any{"sub_int": 1, "sub_str": "hello1"},
+		map[string]any{"sub_int": 2, "sub_str": "hello2"},
+	}
+	result, err := reconstructArrayForStructArray(raw)
+	assert.NoError(t, err)
+	assert.Len(t, result, 2)
+
+	// Empty array should succeed
+	raw = []any{}
+	result, err = reconstructArrayForStructArray(raw)
+	assert.NoError(t, err)
+	assert.Len(t, result, 0)
+
+	// Single element should succeed
+	raw = []any{
+		map[string]any{"sub_int": 1, "sub_str": "hello"},
+	}
+	result, err = reconstructArrayForStructArray(raw)
+	assert.NoError(t, err)
+	assert.Len(t, result, 2)
+}
+
+func TestArrayOfVectorToFieldData_DimensionMismatch(t *testing.T) {
+	dim := 3
+	fieldID := int64(100)
+	field := &schemapb.FieldSchema{
+		FieldID:     fieldID,
+		Name:        "test_vec",
+		DataType:    schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "3"},
+		},
+	}
+	parser := &rowParser{
+		id2Dim:   map[int64]int{fieldID: dim},
+		id2Field: map[int64]*schemapb.FieldSchema{fieldID: field},
+	}
+
+	// Mismatched dimension: expect 3, got 2
+	vectors := []any{
+		[]any{json.Number("1.0"), json.Number("2.0")}, // dim=2, expected 3
+	}
+	_, err := parser.arrayOfVectorToFieldData(vectors, field)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "expected dim")
+
+	// Correct dimension should succeed
+	vectors = []any{
+		[]any{json.Number("1.0"), json.Number("2.0"), json.Number("3.0")},
+	}
+	result, err := parser.arrayOfVectorToFieldData(vectors, field)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(dim), result.Dim)
+}
+
+func TestNewRowParserRejectsNullableArrayOfVector(t *testing.T) {
+	rpSuite := &RowParserSuite{autoID: true, hasNullable: true, hasDynamic: true}
+
+	t.Run("nullable top-level ArrayOfVector", func(t *testing.T) {
+		schema := rpSuite.createAllTypesSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID:     200,
+			Name:        "top_array_of_vector",
+			DataType:    schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector,
+			Nullable:    true,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "2"},
+			},
+		})
+
+		_, err := NewRowParser(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ArrayOfVector does not support nullable")
+	})
+
+	t.Run("nullable ArrayOfVector subfield", func(t *testing.T) {
+		schema := rpSuite.createAllTypesSchema()
+		schema.StructArrayFields[0].Fields[0].Nullable = true
+
+		_, err := NewRowParser(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ArrayOfVector does not support nullable")
+	})
 }
 
 func TestJsonRowParser(t *testing.T) {

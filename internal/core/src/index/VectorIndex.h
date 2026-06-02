@@ -27,6 +27,7 @@
 #include "index/Index.h"
 #include "common/Types.h"
 #include "common/BitsetView.h"
+#include "common/OffsetMapping.h"
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
 #include "common/OpContext.h"
@@ -34,11 +35,17 @@
 
 namespace milvus::index {
 
+// valid data keys for nullable vector index serialization
+constexpr const char* VALID_DATA_KEY = "valid_data";
+constexpr const char* VALID_DATA_COUNT_KEY = "valid_data_count";
+
 class VectorIndex : public IndexBase {
  public:
     explicit VectorIndex(const IndexType& index_type,
                          const MetricType& metric_type)
-        : IndexBase(index_type), metric_type_(metric_type) {
+        : IndexBase(index_type),
+          offset_mapping_(std::make_unique<milvus::GrowingOffsetMapping>()),
+          metric_type_(metric_type) {
     }
 
  public:
@@ -144,6 +151,58 @@ class VectorIndex : public IndexBase {
 
         return search_cfg;
     }
+
+    void
+    UpdateValidData(const bool* valid_data, int64_t count) {
+        auto* growing_mapping =
+            dynamic_cast<milvus::GrowingOffsetMapping*>(offset_mapping_.get());
+        AssertInfo(growing_mapping != nullptr,
+                   "cannot update growing valid data from sealed mapping");
+        growing_mapping->Append(valid_data, count);
+    }
+
+    void
+    BuildValidData(const bool* valid_data, int64_t total_count) {
+        auto sealed_mapping = std::make_unique<milvus::SealedOffsetMapping>();
+        sealed_mapping->Build(valid_data, total_count);
+        offset_mapping_ = std::move(sealed_mapping);
+    }
+
+    bool
+    IsRowValid(int64_t logical_offset) const {
+        if (!offset_mapping_->IsEnabled()) {
+            return true;
+        }
+        return offset_mapping_->IsValid(logical_offset);
+    }
+
+    bool
+    HasValidData() const {
+        return offset_mapping_->IsEnabled();
+    }
+
+    int64_t
+    GetValidCount() const {
+        return offset_mapping_->GetValidCount();
+    }
+
+    int64_t
+    GetPhysicalOffset(int64_t logical_offset) const {
+        return offset_mapping_->GetPhysicalOffset(logical_offset);
+    }
+
+    int64_t
+    GetLogicalOffset(int64_t physical_offset) const {
+        return offset_mapping_->GetLogicalOffset(physical_offset);
+    }
+
+    const milvus::OffsetMapping&
+    GetOffsetMapping() const {
+        return *offset_mapping_;
+    }
+
+ protected:
+    std::unique_ptr<milvus::OffsetMapping> offset_mapping_;
 
  private:
     MetricType metric_type_;

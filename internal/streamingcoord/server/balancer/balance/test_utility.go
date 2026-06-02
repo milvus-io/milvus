@@ -9,5 +9,7 @@ import (
 )
 
 func ResetBalancer() {
+	singletonMu.Lock()
+	defer singletonMu.Unlock()
 	singleton = syncutil.NewFuture[balancer.Balancer]()
 }

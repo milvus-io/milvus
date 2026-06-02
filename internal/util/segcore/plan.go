@@ -97,15 +97,6 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 		return nil, errors.New("empty search request")
 	}
 
-	blobPtr := unsafe.Pointer(&placeholderGrp[0])
-	blobSize := C.int64_t(len(placeholderGrp))
-	var cPlaceholderGroup C.CPlaceholderGroup
-	status := C.ParsePlaceholderGroup(plan.cSearchPlan, blobPtr, blobSize, &cPlaceholderGroup)
-	if err := ConsumeCStatusIntoError(&status); err != nil {
-		plan.delete()
-		return nil, errors.Wrap(err, "parser searchRequest failed")
-	}
-
 	metricTypeInPlan := plan.GetMetricType()
 	if len(metricType) != 0 && metricType != metricTypeInPlan {
 		plan.delete()
@@ -113,10 +104,19 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 	}
 
 	var fieldID C.int64_t
-	status = C.GetFieldID(plan.cSearchPlan, &fieldID)
+	status := C.GetFieldID(plan.cSearchPlan, &fieldID)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		plan.delete()
 		return nil, errors.Wrap(err, "get fieldID from plan failed")
+	}
+
+	blobPtr := unsafe.Pointer(&placeholderGrp[0])
+	blobSize := C.int64_t(len(placeholderGrp))
+	var cPlaceholderGroup C.CPlaceholderGroup
+	status = C.ParsePlaceholderGroup(plan.cSearchPlan, blobPtr, blobSize, &cPlaceholderGroup)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		plan.delete()
+		return nil, errors.Wrap(err, "parser searchRequest failed")
 	}
 
 	return &SearchRequest{

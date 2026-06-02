@@ -145,6 +145,10 @@ CachedSearchIterator::CachedSearchIterator(
                               return static_cast<const void*>(x);
                           });
             int64_t chunk_size = column->chunk_row_nums(chunk_id);
+            const auto& offset_mapping = column->GetOffsetMapping();
+            if (offset_mapping.IsEnabled()) {
+                chunk_size = column->GetValidCountInChunk(chunk_id);
+            }
             // pw guarantees chunk_data is kept alive.
             auto chunk_data = pw.get();
             pin_wrappers_.emplace_back(std::move(pw));

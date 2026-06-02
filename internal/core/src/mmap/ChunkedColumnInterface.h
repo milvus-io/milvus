@@ -15,8 +15,12 @@
 // limitations under the License.
 #pragma once
 
+#include <atomic>
+#include <mutex>
+
 #include "cachinglayer/CacheSlot.h"
 #include "common/Chunk.h"
+#include "common/OffsetMapping.h"
 #include "common/bson_view.h"
 namespace milvus {
 
@@ -134,6 +138,84 @@ class ChunkedColumnInterface {
     virtual const std::vector<int64_t>&
     GetNumRowsUntilChunk() const = 0;
 
+    const FixedVector<bool>&
+    GetValidData() const {
+        return valid_data_;
+    }
+
+    int64_t
+    GetValidCountInChunk(int64_t chunk_id) const {
+        if (!IsNullable()) {
+            return chunk_row_nums(chunk_id);
+        }
+        AssertInfo(!valid_count_per_chunk_.empty(),
+                   "Valid row mapping is not built for nullable column");
+        AssertInfo(
+            chunk_id >= 0 &&
+                chunk_id < static_cast<int64_t>(valid_count_per_chunk_.size()),
+            "Chunk id {} out of range, valid count chunks {}",
+            chunk_id,
+            valid_count_per_chunk_.size());
+        return valid_count_per_chunk_[chunk_id];
+    }
+
+    const OffsetMapping&
+    GetOffsetMapping() const {
+        return offset_mapping_;
+    }
+
+    virtual void
+    BuildValidRowIds(milvus::OpContext* op_ctx) {
+        if (!IsNullable()) {
+            return;
+        }
+        if (valid_row_ids_built_.load(std::memory_order_acquire)) {
+            return;
+        }
+        std::lock_guard<std::mutex> lock(offset_mapping_build_mutex_);
+        if (valid_row_ids_built_.load(std::memory_order_relaxed)) {
+            return;
+        }
+        const auto total_chunks = num_chunks();
+        const auto total_rows = NumRows();
+        auto chunk_pws = GetAllChunks(op_ctx);
+
+        valid_data_.resize(total_rows);
+        valid_count_per_chunk_.assign(total_chunks, 0);
+
+        int64_t logical_offset = 0;
+        for (int64_t i = 0; i < total_chunks; i++) {
+            auto chunk = chunk_pws[i].get();
+            const auto rows = chunk_row_nums(i);
+            int64_t valid_count = 0;
+            for (int64_t j = 0; j < rows; j++) {
+                const bool v = chunk->isValid(j);
+                valid_data_[logical_offset + j] = v;
+                valid_count += v ? 1 : 0;
+            }
+            valid_count_per_chunk_[i] = valid_count;
+            logical_offset += rows;
+        }
+
+        num_valid_rows_until_chunk_.clear();
+        num_valid_rows_until_chunk_.reserve(total_chunks + 1);
+        num_valid_rows_until_chunk_.push_back(0);
+        for (int64_t i = 0; i < total_chunks; i++) {
+            num_valid_rows_until_chunk_.push_back(
+                num_valid_rows_until_chunk_.back() + valid_count_per_chunk_[i]);
+        }
+        BuildOffsetMapping();
+        valid_row_ids_built_.store(true, std::memory_order_release);
+    }
+
+    // Build offset mapping from valid_data
+    void
+    BuildOffsetMapping() {
+        if (!valid_data_.empty()) {
+            offset_mapping_.Build(valid_data_.data(), valid_data_.size());
+        }
+    }
+
     virtual void
     BulkValueAt(milvus::OpContext* op_ctx,
                 std::function<void(const char*, size_t)> fn,
@@ -240,6 +322,13 @@ class ChunkedColumnInterface {
     }
 
  protected:
+    FixedVector<bool> valid_data_;
+    std::vector<int64_t> valid_count_per_chunk_;
+    std::vector<int64_t> num_valid_rows_until_chunk_;
+    SealedOffsetMapping offset_mapping_;
+    std::atomic<bool> valid_row_ids_built_{false};
+    std::mutex offset_mapping_build_mutex_;
+
     std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
     ToChunkIdAndOffset(const int64_t* offsets, int64_t count) const {
         AssertInfo(offsets != nullptr, "Offsets cannot be nullptr");

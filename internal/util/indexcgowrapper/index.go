@@ -54,6 +54,12 @@ type CgoIndex struct {
 	close    bool
 }
 
+var (
+	emptyFloatVectorPayload = []float32{0}
+	emptyByteVectorPayload  = []byte{0}
+	emptyInt8VectorPayload  = []int8{0}
+)
+
 // used only in test
 // TODO: use proto.Marshal instead of proto.MarshalTextString for better compatibility.
 func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]string) (CodecIndex, error) {
@@ -214,6 +220,8 @@ func (index *CgoIndex) Build(dataset *Dataset) error {
 		return index.buildBinaryVecIndex(dataset)
 	case schemapb.DataType_Int8Vector:
 		return index.buildInt8VecIndex(dataset)
+	case schemapb.DataType_SparseFloatVector:
+		return index.buildSparseFloatVecIndex(dataset)
 	case schemapb.DataType_Bool:
 		return index.buildBoolIndex(dataset)
 	case schemapb.DataType_Int8:
@@ -237,39 +245,139 @@ func (index *CgoIndex) Build(dataset *Dataset) error {
 	}
 }
 
+func cFloatPtr(data []float32) *C.float {
+	if len(data) == 0 {
+		return (*C.float)(&emptyFloatVectorPayload[0])
+	}
+	return (*C.float)(&data[0])
+}
+
+func cUint8Ptr(data []byte) *C.uint8_t {
+	if len(data) == 0 {
+		return (*C.uint8_t)(&emptyByteVectorPayload[0])
+	}
+	return (*C.uint8_t)(&data[0])
+}
+
+func cInt8Ptr(data []int8) *C.int8_t {
+	if len(data) == 0 {
+		return (*C.int8_t)(&emptyInt8VectorPayload[0])
+	}
+	return (*C.int8_t)(&data[0])
+}
+
+func cBoolPtr(data []bool) *C.bool {
+	if len(data) == 0 {
+		return nil
+	}
+	return (*C.bool)(&data[0])
+}
+
+func validCount(validData []bool) int64 {
+	count := int64(0)
+	for _, valid := range validData {
+		if valid {
+			count++
+		}
+	}
+	return count
+}
+
 func (index *CgoIndex) buildFloatVecIndex(dataset *Dataset) error {
 	vectors := dataset.Data[keyRawArr].([]float32)
-	status := C.BuildFloatVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.float)(&vectors[0]))
+	if validData, ok := dataset.Data[keyValidArr].([]bool); ok && len(validData) > 0 {
+		status := C.BuildFloatVecIndexWithValidData(
+			index.indexPtr,
+			(C.int64_t)(len(vectors)),
+			cFloatPtr(vectors),
+			cBoolPtr(validData),
+			(C.int64_t)(len(validData)))
+		return HandleCStatus(&status, "failed to build float vector index with valid data")
+	}
+	status := C.BuildFloatVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), cFloatPtr(vectors))
 	return HandleCStatus(&status, "failed to build float vector index")
 }
 
 func (index *CgoIndex) buildFloat16VecIndex(dataset *Dataset) error {
 	vectors := dataset.Data[keyRawArr].([]byte)
-	status := C.BuildFloat16VecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.uint8_t)(&vectors[0]))
+	if validData, ok := dataset.Data[keyValidArr].([]bool); ok && len(validData) > 0 {
+		status := C.BuildFloat16VecIndexWithValidData(
+			index.indexPtr,
+			(C.int64_t)(len(vectors)),
+			cUint8Ptr(vectors),
+			cBoolPtr(validData),
+			(C.int64_t)(len(validData)))
+		return HandleCStatus(&status, "failed to build float16 vector index with valid data")
+	}
+	status := C.BuildFloat16VecIndex(index.indexPtr, (C.int64_t)(len(vectors)), cUint8Ptr(vectors))
 	return HandleCStatus(&status, "failed to build float16 vector index")
 }
 
 func (index *CgoIndex) buildBFloat16VecIndex(dataset *Dataset) error {
 	vectors := dataset.Data[keyRawArr].([]byte)
-	status := C.BuildBFloat16VecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.uint8_t)(&vectors[0]))
+	if validData, ok := dataset.Data[keyValidArr].([]bool); ok && len(validData) > 0 {
+		status := C.BuildBFloat16VecIndexWithValidData(
+			index.indexPtr,
+			(C.int64_t)(len(vectors)),
+			cUint8Ptr(vectors),
+			cBoolPtr(validData),
+			(C.int64_t)(len(validData)))
+		return HandleCStatus(&status, "failed to build bfloat16 vector index with valid data")
+	}
+	status := C.BuildBFloat16VecIndex(index.indexPtr, (C.int64_t)(len(vectors)), cUint8Ptr(vectors))
 	return HandleCStatus(&status, "failed to build bfloat16 vector index")
 }
 
 func (index *CgoIndex) buildSparseFloatVecIndex(dataset *Dataset) error {
-	vectors := dataset.Data[keyRawArr].([]byte)
-	status := C.BuildSparseFloatVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (C.int64_t)(0), (*C.uint8_t)(&vectors[0]))
+	vectors, _ := dataset.Data[keyRawArr].([]byte)
+	if validData, ok := dataset.Data[keyValidArr].([]bool); ok && len(validData) > 0 {
+		validRows := validCount(validData)
+		if validRows > 0 && len(vectors) == 0 {
+			return fmt.Errorf("sparse float vector cgo build requires encoded sparse rows")
+		}
+		status := C.BuildSparseFloatVecIndexWithValidData(
+			index.indexPtr,
+			(C.int64_t)(validRows),
+			(C.int64_t)(0),
+			cUint8Ptr(vectors),
+			cBoolPtr(validData),
+			(C.int64_t)(len(validData)))
+		return HandleCStatus(&status, "failed to build sparse float vector index with valid data")
+	}
+	if len(vectors) == 0 {
+		return fmt.Errorf("sparse float vector cgo build requires encoded sparse rows")
+	}
+	status := C.BuildSparseFloatVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (C.int64_t)(0), cUint8Ptr(vectors))
 	return HandleCStatus(&status, "failed to build sparse float vector index")
 }
 
 func (index *CgoIndex) buildBinaryVecIndex(dataset *Dataset) error {
 	vectors := dataset.Data[keyRawArr].([]byte)
-	status := C.BuildBinaryVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.uint8_t)(&vectors[0]))
+	if validData, ok := dataset.Data[keyValidArr].([]bool); ok && len(validData) > 0 {
+		status := C.BuildBinaryVecIndexWithValidData(
+			index.indexPtr,
+			(C.int64_t)(len(vectors)),
+			cUint8Ptr(vectors),
+			cBoolPtr(validData),
+			(C.int64_t)(len(validData)))
+		return HandleCStatus(&status, "failed to build binary vector index with valid data")
+	}
+	status := C.BuildBinaryVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), cUint8Ptr(vectors))
 	return HandleCStatus(&status, "failed to build binary vector index")
 }
 
 func (index *CgoIndex) buildInt8VecIndex(dataset *Dataset) error {
 	vectors := dataset.Data[keyRawArr].([]int8)
-	status := C.BuildInt8VecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.int8_t)(&vectors[0]))
+	if validData, ok := dataset.Data[keyValidArr].([]bool); ok && len(validData) > 0 {
+		status := C.BuildInt8VecIndexWithValidData(
+			index.indexPtr,
+			(C.int64_t)(len(vectors)),
+			cInt8Ptr(vectors),
+			cBoolPtr(validData),
+			(C.int64_t)(len(validData)))
+		return HandleCStatus(&status, "failed to build int8 vector index with valid data")
+	}
+	status := C.BuildInt8VecIndex(index.indexPtr, (C.int64_t)(len(vectors)), cInt8Ptr(vectors))
 	return HandleCStatus(&status, "failed to build int8 vector index")
 }
 

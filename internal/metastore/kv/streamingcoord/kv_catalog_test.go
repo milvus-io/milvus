@@ -2,52 +2,100 @@ package streamingcoord
 
 import (
 	"context"
+	"maps"
 	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/pkg/v2/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/mock_kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
-func TestCatalog(t *testing.T) {
-	kv := mock_kv.NewMockMetaKv(t)
+const (
+	canonicalCChannelMetaKeyForTest = "streamingcoord-meta/cchannel"
+	legacyCChannelMetaKeyForTest    = canonicalCChannelMetaKeyForTest + "/"
+	canonicalVersionKeyForTest      = "streamingcoord-meta/version"
+	legacyVersionKeyForTest         = canonicalVersionKeyForTest + "/"
+)
 
+func newTestCatalog(t *testing.T) (metastore.StreamingCoordCataLog, map[string]string, *mock_kv.MockMetaKv) {
+	kv := mock_kv.NewMockMetaKv(t)
 	kvStorage := make(map[string]string)
-	kv.EXPECT().Load(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (string, error) {
-		return kvStorage[s], nil
-	})
-	kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) ([]string, []string, error) {
+	kv.EXPECT().Load(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, key string) (string, error) {
+		value, ok := kvStorage[key]
+		if !ok {
+			return "", merr.WrapErrIoKeyNotFound(key)
+		}
+		return value, nil
+	}).Maybe()
+	kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, prefix string) ([]string, []string, error) {
 		keys := make([]string, 0, len(kvStorage))
 		vals := make([]string, 0, len(kvStorage))
-		for k, v := range kvStorage {
-			if strings.HasPrefix(k, s) {
-				keys = append(keys, k)
-				vals = append(vals, v)
+		for key, value := range kvStorage {
+			if strings.HasPrefix(key, prefix) {
+				keys = append(keys, key)
+				vals = append(vals, value)
 			}
 		}
 		return keys, vals, nil
-	})
-	kv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, kvs map[string]string) error {
-		for k, v := range kvs {
-			kvStorage[k] = v
+	}).Maybe()
+	kv.EXPECT().MultiLoad(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, keys []string) ([]string, error) {
+		values := make([]string, 0, len(keys))
+		missing := make([]string, 0)
+		for _, key := range keys {
+			value, ok := kvStorage[key]
+			if !ok {
+				missing = append(missing, key)
+			}
+			values = append(values, value)
 		}
+		if len(missing) > 0 {
+			return values, errors.New("missing keys")
+		}
+		return values, nil
+	}).Maybe()
+	kv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, kvs map[string]string) error {
+		maps.Copy(kvStorage, kvs)
 		return nil
-	})
+	}).Maybe()
+	kv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+		if len(preds) > 0 {
+			return merr.WrapErrServiceUnavailable("predicates not supported")
+		}
+		for _, key := range removals {
+			delete(kvStorage, key)
+		}
+		maps.Copy(kvStorage, saves)
+		return nil
+	}).Maybe()
 	kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, key, value string) error {
 		kvStorage[key] = value
 		return nil
-	})
+	}).Maybe()
 	kv.EXPECT().Remove(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, key string) error {
 		delete(kvStorage, key)
 		return nil
-	})
+	}).Maybe()
+	return NewCataLog(kv), kvStorage, kv
+}
 
-	catalog := NewCataLog(kv)
+func TestCatalogMetaKeys(t *testing.T) {
+	assert.Equal(t, canonicalCChannelMetaKeyForTest, CChannelMetaKey)
+	assert.Equal(t, canonicalVersionKeyForTest, VersionKey)
+}
+
+func TestCatalog(t *testing.T) {
+	catalog, _, kv := newTestCatalog(t)
+
 	metas, err := catalog.ListPChannel(context.Background())
 	assert.NoError(t, err)
 	assert.Empty(t, metas)
@@ -129,20 +177,269 @@ func TestCatalog(t *testing.T) {
 	assert.Nil(t, tasks)
 }
 
-func TestCatalog_ReplicationCatalog(t *testing.T) {
-	kv := mock_kv.NewMockMetaKv(t)
-	kvStorage := make(map[string]string)
-	kv.EXPECT().Load(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (string, error) {
-		return kvStorage[s], nil
-	})
-	kv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, kvs map[string]string) error {
-		for k, v := range kvs {
-			kvStorage[k] = v
-		}
-		return nil
+func TestCatalog_CChannelMetaKeyCompatibility(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("reads and repairs legacy key", func(t *testing.T) {
+		catalog, kvStorage, _ := newTestCatalog(t)
+		legacyValue, err := proto.Marshal(&streamingpb.CChannelMeta{Pchannel: "legacy-channel"})
+		require.NoError(t, err)
+		kvStorage[legacyCChannelMetaKeyForTest] = string(legacyValue)
+
+		cchannel, err := catalog.GetCChannel(ctx)
+
+		require.NoError(t, err)
+		require.NotNil(t, cchannel)
+		assert.Equal(t, "legacy-channel", cchannel.GetPchannel())
+		assert.Contains(t, kvStorage, canonicalCChannelMetaKeyForTest)
+		assert.NotContains(t, kvStorage, legacyCChannelMetaKeyForTest)
 	})
 
-	catalog := NewCataLog(kv)
+	t.Run("prefers canonical key", func(t *testing.T) {
+		catalog, kvStorage, _ := newTestCatalog(t)
+		canonicalValue, err := proto.Marshal(&streamingpb.CChannelMeta{Pchannel: "canonical-channel"})
+		require.NoError(t, err)
+		legacyValue, err := proto.Marshal(&streamingpb.CChannelMeta{Pchannel: "legacy-channel"})
+		require.NoError(t, err)
+		kvStorage[canonicalCChannelMetaKeyForTest] = string(canonicalValue)
+		kvStorage[legacyCChannelMetaKeyForTest] = string(legacyValue)
+
+		cchannel, err := catalog.GetCChannel(ctx)
+
+		require.NoError(t, err)
+		require.NotNil(t, cchannel)
+		assert.Equal(t, "canonical-channel", cchannel.GetPchannel())
+		assert.Contains(t, kvStorage, canonicalCChannelMetaKeyForTest)
+		assert.NotContains(t, kvStorage, legacyCChannelMetaKeyForTest)
+	})
+
+	t.Run("does not repair when only canonical key exists", func(t *testing.T) {
+		catalog, kvStorage, kv := newTestCatalog(t)
+		canonicalValue, err := proto.Marshal(&streamingpb.CChannelMeta{Pchannel: "canonical-channel"})
+		require.NoError(t, err)
+		kvStorage[canonicalCChannelMetaKeyForTest] = string(canonicalValue)
+
+		cchannel, err := catalog.GetCChannel(ctx)
+
+		require.NoError(t, err)
+		require.NotNil(t, cchannel)
+		assert.Equal(t, "canonical-channel", cchannel.GetPchannel())
+		kv.AssertNotCalled(t, "Remove", mock.Anything, legacyCChannelMetaKeyForTest)
+		kv.AssertNotCalled(t, "MultiSaveAndRemove", mock.Anything, mock.Anything, mock.Anything)
+	})
+
+	t.Run("ignores child keys", func(t *testing.T) {
+		catalog, kvStorage, kv := newTestCatalog(t)
+		childValue, err := proto.Marshal(&streamingpb.CChannelMeta{Pchannel: "child-channel"})
+		require.NoError(t, err)
+		kvStorage[canonicalCChannelMetaKeyForTest+"/child"] = string(childValue)
+
+		cchannel, err := catalog.GetCChannel(ctx)
+
+		require.NoError(t, err)
+		assert.Nil(t, cchannel)
+		kv.AssertNotCalled(t, "Remove", mock.Anything, legacyCChannelMetaKeyForTest)
+		kv.AssertNotCalled(t, "MultiSaveAndRemove", mock.Anything, mock.Anything, mock.Anything)
+	})
+
+	t.Run("ignores sibling keys ending with slash", func(t *testing.T) {
+		catalog, kvStorage, kv := newTestCatalog(t)
+		siblingValue, err := proto.Marshal(&streamingpb.CChannelMeta{Pchannel: "sibling-channel"})
+		require.NoError(t, err)
+		kvStorage[canonicalCChannelMetaKeyForTest+"-foo/"] = string(siblingValue)
+
+		cchannel, err := catalog.GetCChannel(ctx)
+
+		require.NoError(t, err)
+		assert.Nil(t, cchannel)
+		kv.AssertNotCalled(t, "Remove", mock.Anything, legacyCChannelMetaKeyForTest)
+		kv.AssertNotCalled(t, "MultiSaveAndRemove", mock.Anything, mock.Anything, mock.Anything)
+	})
+
+	t.Run("save writes canonical key and removes legacy key", func(t *testing.T) {
+		catalog, kvStorage, _ := newTestCatalog(t)
+		legacyValue, err := proto.Marshal(&streamingpb.CChannelMeta{Pchannel: "legacy-channel"})
+		require.NoError(t, err)
+		kvStorage[legacyCChannelMetaKeyForTest] = string(legacyValue)
+
+		err = catalog.SaveCChannel(ctx, &streamingpb.CChannelMeta{Pchannel: "saved-channel"})
+
+		require.NoError(t, err)
+		assert.Contains(t, kvStorage, canonicalCChannelMetaKeyForTest)
+		assert.NotContains(t, kvStorage, legacyCChannelMetaKeyForTest)
+		cchannel, err := catalog.GetCChannel(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, cchannel)
+		assert.Equal(t, "saved-channel", cchannel.GetPchannel())
+	})
+
+	t.Run("keeps legacy key when read repair value is invalid", func(t *testing.T) {
+		catalog, kvStorage, _ := newTestCatalog(t)
+		kvStorage[legacyCChannelMetaKeyForTest] = "invalid"
+
+		cchannel, err := catalog.GetCChannel(ctx)
+
+		assert.Error(t, err)
+		assert.Nil(t, cchannel)
+		assert.NotContains(t, kvStorage, canonicalCChannelMetaKeyForTest)
+		assert.Contains(t, kvStorage, legacyCChannelMetaKeyForTest)
+	})
+
+	t.Run("does not fall back when canonical value is invalid", func(t *testing.T) {
+		catalog, kvStorage, _ := newTestCatalog(t)
+		legacyValue, err := proto.Marshal(&streamingpb.CChannelMeta{Pchannel: "legacy-channel"})
+		require.NoError(t, err)
+		kvStorage[canonicalCChannelMetaKeyForTest] = "invalid"
+		kvStorage[legacyCChannelMetaKeyForTest] = string(legacyValue)
+
+		cchannel, err := catalog.GetCChannel(ctx)
+
+		assert.Error(t, err)
+		assert.Nil(t, cchannel)
+		assert.Contains(t, kvStorage, canonicalCChannelMetaKeyForTest)
+		assert.Contains(t, kvStorage, legacyCChannelMetaKeyForTest)
+	})
+}
+
+func TestCatalog_VersionMetaKeyCompatibility(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("reads and repairs legacy key", func(t *testing.T) {
+		catalog, kvStorage, _ := newTestCatalog(t)
+		legacyValue, err := proto.Marshal(&streamingpb.StreamingVersion{Version: 1})
+		require.NoError(t, err)
+		kvStorage[legacyVersionKeyForTest] = string(legacyValue)
+
+		version, err := catalog.GetVersion(ctx)
+
+		require.NoError(t, err)
+		require.NotNil(t, version)
+		assert.Equal(t, int64(1), version.GetVersion())
+		assert.Contains(t, kvStorage, canonicalVersionKeyForTest)
+		assert.NotContains(t, kvStorage, legacyVersionKeyForTest)
+	})
+
+	t.Run("prefers canonical key", func(t *testing.T) {
+		catalog, kvStorage, _ := newTestCatalog(t)
+		canonicalValue, err := proto.Marshal(&streamingpb.StreamingVersion{Version: 2})
+		require.NoError(t, err)
+		legacyValue, err := proto.Marshal(&streamingpb.StreamingVersion{Version: 1})
+		require.NoError(t, err)
+		kvStorage[canonicalVersionKeyForTest] = string(canonicalValue)
+		kvStorage[legacyVersionKeyForTest] = string(legacyValue)
+
+		version, err := catalog.GetVersion(ctx)
+
+		require.NoError(t, err)
+		require.NotNil(t, version)
+		assert.Equal(t, int64(2), version.GetVersion())
+		assert.Contains(t, kvStorage, canonicalVersionKeyForTest)
+		assert.NotContains(t, kvStorage, legacyVersionKeyForTest)
+	})
+
+	t.Run("does not repair when only canonical key exists", func(t *testing.T) {
+		catalog, kvStorage, kv := newTestCatalog(t)
+		canonicalValue, err := proto.Marshal(&streamingpb.StreamingVersion{Version: 2})
+		require.NoError(t, err)
+		kvStorage[canonicalVersionKeyForTest] = string(canonicalValue)
+
+		version, err := catalog.GetVersion(ctx)
+
+		require.NoError(t, err)
+		require.NotNil(t, version)
+		assert.Equal(t, int64(2), version.GetVersion())
+		kv.AssertNotCalled(t, "Remove", mock.Anything, legacyVersionKeyForTest)
+		kv.AssertNotCalled(t, "MultiSaveAndRemove", mock.Anything, mock.Anything, mock.Anything)
+	})
+
+	t.Run("reads empty canonical value", func(t *testing.T) {
+		catalog, kvStorage, _ := newTestCatalog(t)
+		canonicalValue, err := proto.Marshal(&streamingpb.StreamingVersion{})
+		require.NoError(t, err)
+		kvStorage[canonicalVersionKeyForTest] = string(canonicalValue)
+
+		version, err := catalog.GetVersion(ctx)
+
+		require.NoError(t, err)
+		require.NotNil(t, version)
+		assert.Equal(t, int64(0), version.GetVersion())
+	})
+
+	t.Run("ignores child keys", func(t *testing.T) {
+		catalog, kvStorage, kv := newTestCatalog(t)
+		childValue, err := proto.Marshal(&streamingpb.StreamingVersion{Version: 3})
+		require.NoError(t, err)
+		kvStorage[canonicalVersionKeyForTest+"/child"] = string(childValue)
+
+		version, err := catalog.GetVersion(ctx)
+
+		require.NoError(t, err)
+		assert.Nil(t, version)
+		kv.AssertNotCalled(t, "Remove", mock.Anything, legacyVersionKeyForTest)
+		kv.AssertNotCalled(t, "MultiSaveAndRemove", mock.Anything, mock.Anything, mock.Anything)
+	})
+
+	t.Run("ignores sibling keys ending with slash", func(t *testing.T) {
+		catalog, kvStorage, kv := newTestCatalog(t)
+		siblingValue, err := proto.Marshal(&streamingpb.StreamingVersion{Version: 3})
+		require.NoError(t, err)
+		kvStorage[canonicalVersionKeyForTest+"-foo/"] = string(siblingValue)
+
+		version, err := catalog.GetVersion(ctx)
+
+		require.NoError(t, err)
+		assert.Nil(t, version)
+		kv.AssertNotCalled(t, "Remove", mock.Anything, legacyVersionKeyForTest)
+		kv.AssertNotCalled(t, "MultiSaveAndRemove", mock.Anything, mock.Anything, mock.Anything)
+	})
+
+	t.Run("save writes canonical key and removes legacy key", func(t *testing.T) {
+		catalog, kvStorage, _ := newTestCatalog(t)
+		legacyValue, err := proto.Marshal(&streamingpb.StreamingVersion{Version: 1})
+		require.NoError(t, err)
+		kvStorage[legacyVersionKeyForTest] = string(legacyValue)
+
+		err = catalog.SaveVersion(ctx, &streamingpb.StreamingVersion{Version: 2})
+
+		require.NoError(t, err)
+		assert.Contains(t, kvStorage, canonicalVersionKeyForTest)
+		assert.NotContains(t, kvStorage, legacyVersionKeyForTest)
+		version, err := catalog.GetVersion(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, version)
+		assert.Equal(t, int64(2), version.GetVersion())
+	})
+
+	t.Run("keeps legacy key when read repair value is invalid", func(t *testing.T) {
+		catalog, kvStorage, _ := newTestCatalog(t)
+		kvStorage[legacyVersionKeyForTest] = "invalid"
+
+		version, err := catalog.GetVersion(ctx)
+
+		assert.Error(t, err)
+		assert.Nil(t, version)
+		assert.NotContains(t, kvStorage, canonicalVersionKeyForTest)
+		assert.Contains(t, kvStorage, legacyVersionKeyForTest)
+	})
+
+	t.Run("does not fall back when canonical value is invalid", func(t *testing.T) {
+		catalog, kvStorage, _ := newTestCatalog(t)
+		legacyValue, err := proto.Marshal(&streamingpb.StreamingVersion{Version: 1})
+		require.NoError(t, err)
+		kvStorage[canonicalVersionKeyForTest] = "invalid"
+		kvStorage[legacyVersionKeyForTest] = string(legacyValue)
+
+		version, err := catalog.GetVersion(ctx)
+
+		assert.Error(t, err)
+		assert.Nil(t, version)
+		assert.Contains(t, kvStorage, canonicalVersionKeyForTest)
+		assert.Contains(t, kvStorage, legacyVersionKeyForTest)
+	})
+}
+
+func TestCatalog_ReplicationCatalog(t *testing.T) {
+	catalog, _, _ := newTestCatalog(t)
 
 	// ReplicateConfiguration test
 	config := &commonpb.ReplicateConfiguration{

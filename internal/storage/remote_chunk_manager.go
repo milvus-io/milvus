@@ -138,6 +138,19 @@ func (mcm *RemoteChunkManager) Reader(ctx context.Context, filePath string) (Fil
 	return reader, nil
 }
 
+func (mcm *RemoteChunkManager) ReaderAtOffset(ctx context.Context, filePath string, offset int64) (FileReader, error) {
+	if offset < 0 {
+		return nil, io.EOF
+	}
+
+	reader, err := mcm.getObject(ctx, mcm.bucketName, filePath, offset, int64(0))
+	if err != nil {
+		log.Warn("failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Int64("offset", offset), zap.Error(err))
+		return nil, err
+	}
+	return reader, nil
+}
+
 func (mcm *RemoteChunkManager) Size(ctx context.Context, filePath string) (int64, error) {
 	var objectInfo int64
 	var err error

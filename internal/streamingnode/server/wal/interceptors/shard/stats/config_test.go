@@ -20,6 +20,20 @@ func TestNewStatConfig(t *testing.T) {
 	assert.Greater(t, cfg.l1MinSizeFromIdleTime, int64(0))
 }
 
+func TestStatsConfigBlockingL0(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	params.Save(params.DataCoordCfg.BlockingL0EntryNum.Key, "12345")
+	params.Save(params.DataCoordCfg.BlockingL0SizeInMB.Key, "7")
+	defer params.Reset(params.DataCoordCfg.BlockingL0EntryNum.Key)
+	defer params.Reset(params.DataCoordCfg.BlockingL0SizeInMB.Key)
+
+	cfg := newStatsConfig()
+
+	assert.Equal(t, int64(12345), cfg.blockingL0EntryNum)
+	assert.Equal(t, int64(7*1024*1024), cfg.blockingL0SizeBytes)
+}
+
 func TestStatsConfig_Validate(t *testing.T) {
 	tests := []struct {
 		name    string

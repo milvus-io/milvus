@@ -55,6 +55,40 @@ func (suite *SearchReduceSuite) TestResult_ReduceSearchResultData() {
 		suite.Nil(err)
 		suite.ElementsMatch([]int64{1, 5, 2, 3}, res.Ids.GetIntId().Data)
 	})
+	suite.Run("element_level_dedup_by_pk_and_element_index", func() {
+		ids1 := []int64{1, 1, 2}
+		scores1 := []float32{-1.0, -2.0, -3.0}
+		topks1 := []int64{int64(len(ids1))}
+		data1 := mock_segcore.GenSearchResultData(nq, topk, ids1, scores1, topks1)
+		data1.ElementIndices = &schemapb.LongArray{Data: []int64{0, 1, 0}}
+
+		ids2 := []int64{1, 3}
+		scores2 := []float32{-0.5, -4.0}
+		topks2 := []int64{int64(len(ids2))}
+		data2 := mock_segcore.GenSearchResultData(nq, topk, ids2, scores2, topks2)
+		data2.ElementIndices = &schemapb.LongArray{Data: []int64{0, 0}}
+
+		reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(1)
+		searchReduce := InitSearchReducer(reduceInfo)
+		res, err := searchReduce.ReduceSearchResultData(
+			context.TODO(), []*schemapb.SearchResultData{data1, data2}, reduceInfo)
+		suite.Nil(err)
+		suite.Equal([]int64{1, 1, 2, 3}, res.Ids.GetIntId().Data)
+		suite.Equal([]int64{0, 1, 0, 0}, res.GetElementIndices().GetData())
+	})
+	suite.Run("element_indices_length_mismatch", func() {
+		ids := []int64{1, 2}
+		scores := []float32{-1.0, -2.0}
+		topks := []int64{int64(len(ids))}
+		data := mock_segcore.GenSearchResultData(nq, topk, ids, scores, topks)
+		data.ElementIndices = &schemapb.LongArray{Data: []int64{0}}
+
+		reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(1)
+		searchReduce := InitSearchReducer(reduceInfo)
+		_, err := searchReduce.ReduceSearchResultData(
+			context.TODO(), []*schemapb.SearchResultData{data}, reduceInfo)
+		suite.Error(err)
+	})
 }
 
 func (suite *SearchReduceSuite) TestResult_SearchGroupByResult() {
@@ -252,6 +286,139 @@ func (suite *SearchReduceSuite) TestResult_SearchGroupByResult() {
 		suite.Equal(int64(topk), res.GetTopK())
 		suite.Equal(0, len(res.GetFieldsData()))
 	})
+}
+
+func (suite *SearchReduceSuite) TestElementIndices_BackfillNilForEmptyResult() {
+	const (
+		nq   = 1
+		topk = 4
+	)
+
+	suite.Run("common_reduce", func() {
+		data1 := mock_segcore.GenSearchResultData(nq, topk,
+			[]int64{1, 2, 3, 4},
+			[]float32{-1.0, -2.0, -3.0, -4.0},
+			[]int64{4},
+		)
+		data1.ElementIndices = &schemapb.LongArray{Data: []int64{0, 1, 2, 3}}
+
+		data2 := mock_segcore.GenSearchResultData(nq, topk,
+			[]int64{},
+			[]float32{},
+			[]int64{0},
+		)
+		data2.Ids = nil
+		data2.ElementIndices = nil
+
+		reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(1)
+		searchReduce := &SearchCommonReduce{}
+		res, err := searchReduce.ReduceSearchResultData(context.TODO(), []*schemapb.SearchResultData{data1, data2}, reduceInfo)
+		suite.NoError(err)
+		suite.NotNil(res.GetElementIndices())
+		suite.Equal([]int64{0, 1, 2, 3}, res.GetElementIndices().GetData())
+		suite.Equal([]int64{1, 2, 3, 4}, res.GetIds().GetIntId().GetData())
+	})
+
+	suite.Run("common_reduce_empty_first", func() {
+		data1 := mock_segcore.GenSearchResultData(nq, topk,
+			[]int64{},
+			[]float32{},
+			[]int64{0},
+		)
+		data1.Ids = nil
+		data1.ElementIndices = nil
+
+		data2 := mock_segcore.GenSearchResultData(nq, topk,
+			[]int64{1, 2},
+			[]float32{-1.0, -2.0},
+			[]int64{2},
+		)
+		data2.ElementIndices = &schemapb.LongArray{Data: []int64{5, 6}}
+
+		reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(1)
+		searchReduce := &SearchCommonReduce{}
+		res, err := searchReduce.ReduceSearchResultData(context.TODO(), []*schemapb.SearchResultData{data1, data2}, reduceInfo)
+		suite.NoError(err)
+		suite.NotNil(res.GetElementIndices())
+		suite.Equal([]int64{5, 6}, res.GetElementIndices().GetData())
+	})
+
+	suite.Run("group_by_reduce", func() {
+		data1 := mock_segcore.GenSearchResultData(nq, topk,
+			[]int64{1, 2},
+			[]float32{-1.0, -2.0},
+			[]int64{2},
+		)
+		data1.ElementIndices = &schemapb.LongArray{Data: []int64{10, 11}}
+		data1.GroupByFieldValue = &schemapb.FieldData{
+			Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{100, 200}}},
+				},
+			},
+		}
+
+		data2 := mock_segcore.GenSearchResultData(nq, topk,
+			[]int64{},
+			[]float32{},
+			[]int64{0},
+		)
+		data2.Ids = nil
+		data2.ElementIndices = nil
+		data2.GroupByFieldValue = &schemapb.FieldData{
+			Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{}}},
+				},
+			},
+		}
+
+		reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(1).WithGroupByField(101)
+		searchReduce := &SearchGroupByReduce{}
+		res, err := searchReduce.ReduceSearchResultData(context.TODO(), []*schemapb.SearchResultData{data1, data2}, reduceInfo)
+		suite.NoError(err)
+		suite.NotNil(res.GetElementIndices())
+		suite.Equal([]int64{10, 11}, res.GetElementIndices().GetData())
+	})
+}
+
+func (suite *SearchReduceSuite) TestElementIndices_NoElementLevel() {
+	const (
+		nq   = 1
+		topk = 4
+	)
+	data1 := mock_segcore.GenSearchResultData(nq, topk,
+		[]int64{1, 2}, []float32{-1.0, -2.0}, []int64{2})
+	data2 := mock_segcore.GenSearchResultData(nq, topk,
+		[]int64{3, 4}, []float32{-3.0, -4.0}, []int64{2})
+
+	reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(1)
+	searchReduce := &SearchCommonReduce{}
+	res, err := searchReduce.ReduceSearchResultData(context.TODO(), []*schemapb.SearchResultData{data1, data2}, reduceInfo)
+	suite.NoError(err)
+	suite.Nil(res.GetElementIndices())
+}
+
+func (suite *SearchReduceSuite) TestElementIndices_InconsistentWithData() {
+	const (
+		nq   = 1
+		topk = 4
+	)
+	data1 := mock_segcore.GenSearchResultData(nq, topk,
+		[]int64{1, 2}, []float32{-1.0, -2.0}, []int64{2})
+	data1.ElementIndices = &schemapb.LongArray{Data: []int64{0, 1}}
+
+	data2 := mock_segcore.GenSearchResultData(nq, topk,
+		[]int64{3, 4}, []float32{-3.0, -4.0}, []int64{2})
+	data2.ElementIndices = nil
+
+	reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(1)
+	searchReduce := &SearchCommonReduce{}
+	_, err := searchReduce.ReduceSearchResultData(context.TODO(), []*schemapb.SearchResultData{data1, data2}, reduceInfo)
+	suite.Error(err)
+	suite.Contains(err.Error(), "misses element indices")
 }
 
 func TestSearchReduce(t *testing.T) {

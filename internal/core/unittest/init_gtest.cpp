@@ -19,6 +19,7 @@
 #include <string>
 
 #include "folly/init/Init.h"
+#include "exec/expression/function/init_c.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
@@ -67,6 +68,9 @@ main(int argc, char** argv) {
     std::filesystem::create_directories(TestLocalPath);
     std::filesystem::create_directories(TestRemotePath);
     std::filesystem::create_directories(TestMmapPath);
+
+    // Initialize expression function factory for expression-related C++ UTs.
+    InitExecExpressionFunctionFactory();
 
     milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(
         TestLocalPath);

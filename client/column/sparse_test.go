@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
@@ -100,4 +101,33 @@ func TestColumnSparseEmbedding(t *testing.T) {
 			assert.Equal(t, column.Data()[:l], slicedColumn.Data())
 		}
 	})
+}
+
+func TestFieldDataColumnNullableSparseVectorAllNull(t *testing.T) {
+	fd := &schemapb.FieldData{
+		Type:      schemapb.DataType_SparseFloatVector,
+		FieldName: "sparse",
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{},
+		},
+		ValidData: []bool{false, false, false},
+	}
+
+	result, err := FieldDataColumn(fd, 0, -1)
+	require.NoError(t, err)
+
+	column, ok := result.(*ColumnSparseFloatVector)
+	require.True(t, ok)
+	require.True(t, column.Nullable())
+	require.Equal(t, 3, column.Len())
+	require.Equal(t, 0, column.ValidCount())
+	for i := 0; i < column.Len(); i++ {
+		isNull, err := column.IsNull(i)
+		require.NoError(t, err)
+		require.True(t, isNull)
+
+		value, err := column.Get(i)
+		require.NoError(t, err)
+		require.Nil(t, value)
+	}
 }

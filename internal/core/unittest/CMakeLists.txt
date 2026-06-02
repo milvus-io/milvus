@@ -119,8 +119,9 @@ target_link_libraries(all_tests
         knowhere
         milvus-storage
         milvus-common
-        milvus-planparser-cpp
         )
+target_link_options(all_tests PRIVATE "-L${PLANPARSER_LIB_DIR}")
+target_link_libraries(all_tests milvus-planparser-cpp)
 
 # Add RPATH for plan parser library to find libmilvus-planparser.so at runtime
 set_target_properties(all_tests PROPERTIES

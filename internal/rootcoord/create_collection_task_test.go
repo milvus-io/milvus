@@ -667,6 +667,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 							DataType:    schemapb.DataType_ArrayOfVector,
 							ElementType: schemapb.DataType_FloatVector,
 							Nullable:    true,
+							TypeParams:  []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}},
 						},
 					},
 				},
@@ -674,7 +675,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		}
 		err := task.validateSchema(context.TODO(), schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "vector type not support null")
+		assert.Contains(t, err.Error(), "ArrayOfVector does not support nullable")
 	})
 
 	t.Run("struct array field - field with default value", func(t *testing.T) {
@@ -820,6 +821,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 							Name:        "nested_array",
 							DataType:    schemapb.DataType_Array,
 							ElementType: schemapb.DataType_Array,
+							TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
 						},
 					},
 				},
@@ -848,6 +850,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 							Name:        "array_field",
 							DataType:    schemapb.DataType_Array,
 							ElementType: schemapb.DataType_None,
+							TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
 						},
 					},
 				},
@@ -878,12 +881,14 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 							ElementType: schemapb.DataType_VarChar,
 							TypeParams: []*commonpb.KeyValuePair{
 								{Key: common.MaxLengthKey, Value: "100"},
+								{Key: common.MaxCapacityKey, Value: "100"},
 							},
 						},
 						{
 							Name:        "int_array",
 							DataType:    schemapb.DataType_Array,
 							ElementType: schemapb.DataType_Int32,
+							TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
 						},
 						{
 							Name:        "vector_array",
@@ -891,6 +896,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 							ElementType: schemapb.DataType_FloatVector,
 							TypeParams: []*commonpb.KeyValuePair{
 								{Key: common.DimKey, Value: "128"},
+								{Key: common.MaxCapacityKey, Value: "100"},
 							},
 						},
 					},
@@ -980,7 +986,7 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("vector type not support null", func(t *testing.T) {
+	t.Run("vector type with nullable", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		field1 := funcutil.GenRandomStr()
 		schema := &schemapb.CollectionSchema{
@@ -989,9 +995,17 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 			AutoID:      false,
 			Fields: []*schemapb.FieldSchema{
 				{
-					Name:     field1,
-					DataType: 101,
-					Nullable: true,
+					FieldID:      100,
+					Name:         "pk",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:    101,
+					Name:       field1,
+					DataType:   schemapb.DataType_FloatVector,
+					Nullable:   true,
+					TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}},
 				},
 			},
 		}
@@ -1005,7 +1019,7 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 			},
 		}
 		err := task.prepareSchema(context.TODO())
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 }
 

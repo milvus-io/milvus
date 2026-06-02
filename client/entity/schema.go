@@ -17,6 +17,7 @@
 package entity
 
 import (
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -138,17 +139,28 @@ func (s *Schema) ProtoMessage() *schemapb.CollectionSchema {
 			Description: field.Description,
 			TypeParams:  MapKvPairs(field.TypeParams),
 		}
+		// max_capacity declared on the parent struct field must be carried onto each sub-field's
+		// type params — the server validates it per sub-field on insert.
+		parentMaxCap, hasParentMaxCap := field.TypeParams[TypeParamMaxCapacity]
 		if field.StructSchema != nil {
-			f.Fields = lo.Map(field.StructSchema.Fields, func(field *Field, _ int) *schemapb.FieldSchema {
+			f.Fields = lo.Map(field.StructSchema.Fields, func(sub *Field, _ int) *schemapb.FieldSchema {
 				// translate to ArrayStruct
-				f := field.ProtoMessage()
-				f.ElementType = f.DataType
-				if typeutil.IsVectorType(f.DataType) {
-					f.DataType = schemapb.DataType_ArrayOfVector
+				p := sub.ProtoMessage()
+				p.ElementType = p.DataType
+				if typeutil.IsVectorType(p.DataType) {
+					p.DataType = schemapb.DataType_ArrayOfVector
 				} else {
-					f.DataType = schemapb.DataType_Array
+					p.DataType = schemapb.DataType_Array
 				}
-				return f
+				if hasParentMaxCap {
+					if _, ok := sub.TypeParams[TypeParamMaxCapacity]; !ok {
+						p.TypeParams = append(p.TypeParams, &commonpb.KeyValuePair{
+							Key:   TypeParamMaxCapacity,
+							Value: parentMaxCap,
+						})
+					}
+				}
+				return p
 			})
 		}
 		return f, true
@@ -163,7 +175,7 @@ func (s *Schema) ReadProto(p *schemapb.CollectionSchema) *Schema {
 	s.CollectionName = p.GetName()
 	s.EnableDynamicField = p.GetEnableDynamicField()
 	// fields
-	s.Fields = make([]*Field, 0, len(p.GetFields()))
+	s.Fields = make([]*Field, 0, len(p.GetFields())+len(p.GetStructArrayFields()))
 	for _, fp := range p.GetFields() {
 		field := NewField().ReadProto(fp)
 		if fp.GetAutoID() {
@@ -174,12 +186,63 @@ func (s *Schema) ReadProto(p *schemapb.CollectionSchema) *Schema {
 		}
 		s.Fields = append(s.Fields, field)
 	}
+	// struct array fields
+	for _, sp := range p.GetStructArrayFields() {
+		s.Fields = append(s.Fields, structArrayFieldFromProto(sp))
+	}
 	// functions
 	s.Functions = lo.Map(p.GetFunctions(), func(fn *schemapb.FunctionSchema, _ int) *Function {
 		return NewFunction().ReadProto(fn)
 	})
 
 	return s
+}
+
+// structArrayFieldFromProto reverses the ProtoMessage transformation for struct array fields.
+// Server returns struct sub-fields with DataType_Array / DataType_ArrayOfVector and the original
+// element type carried in ElementType. We restore the user-facing Field where DataType is the
+// original (scalar or vector) type.
+func structArrayFieldFromProto(p *schemapb.StructArrayFieldSchema) *Field {
+	structSchema := NewStructSchema()
+	for _, sf := range p.GetFields() {
+		field := NewField().ReadProto(sf)
+		// unwrap Array/ArrayOfVector wrapper added by ProtoMessage()
+		switch sf.GetDataType() {
+		case schemapb.DataType_Array, schemapb.DataType_ArrayOfVector:
+			field.DataType = FieldType(sf.GetElementType())
+			field.ElementType = 0
+		}
+		structSchema.WithField(field)
+	}
+	return &Field{
+		ID:           p.GetFieldID(),
+		Name:         p.GetName(),
+		Description:  p.GetDescription(),
+		DataType:     FieldTypeArray,
+		ElementType:  FieldTypeStruct,
+		TypeParams:   KvPairsMap(p.GetTypeParams()),
+		StructSchema: structSchema,
+	}
+}
+
+// Validate performs client-side sanity checks on the schema. Currently enforces struct-array
+// sub-field rules; may grow over time. Callers should invoke this before CreateCollection; the
+// CreateCollection client path invokes it automatically so users opt in by default.
+func (s *Schema) Validate() error {
+	if s == nil {
+		return errors.New("nil schema")
+	}
+	for _, field := range s.Fields {
+		if field == nil {
+			return errors.New("schema contains nil field")
+		}
+		if field.DataType == FieldTypeArray && field.ElementType == FieldTypeStruct {
+			if err := field.StructSchema.Validate(field.Name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // PKFieldName returns pk field name for this schemapb.

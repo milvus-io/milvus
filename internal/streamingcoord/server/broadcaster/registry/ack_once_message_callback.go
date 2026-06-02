@@ -20,12 +20,19 @@ type (
 )
 
 // messageAckOnceCallbacks is the map of message type to the ack once callback function.
-var messageAckOnceCallbacks map[message.MessageTypeWithVersion]*syncutil.Future[messageInnerAckOnceCallback]
+// Protected by messageAckOnceCallbacksMu for concurrent access from tests (ResetRegistration)
+// and broadcaster goroutines (CallMessageAckOnceCallbacks).
+var (
+	messageAckOnceCallbacksMu sync.RWMutex
+	messageAckOnceCallbacks   map[message.MessageTypeWithVersion]*syncutil.Future[messageInnerAckOnceCallback]
+)
 
 // registerMessageAckOnceCallback registers the ack once callback function for the message type.
 func registerMessageAckOnceCallback[H proto.Message, B proto.Message](callback MessageAckOnceCallback[H, B]) {
 	typ := message.MustGetMessageTypeWithVersion[H, B]()
+	messageAckOnceCallbacksMu.RLock()
 	future, ok := messageAckOnceCallbacks[typ]
+	messageAckOnceCallbacksMu.RUnlock()
 	if !ok {
 		panic(fmt.Sprintf("the future of ack once callback for type %s is not registered", typ))
 	}
@@ -70,7 +77,9 @@ func CallMessageAckOnceCallbacks(ctx context.Context, msgs ...message.ImmutableM
 
 // callMessageAckOnceCallback calls the ack once callback function for the message type.
 func callMessageAckOnceCallback(ctx context.Context, msg message.ImmutableMessage) error {
+	messageAckOnceCallbacksMu.RLock()
 	callbackFuture, ok := messageAckOnceCallbacks[msg.MessageTypeWithVersion()]
+	messageAckOnceCallbacksMu.RUnlock()
 	if !ok {
 		// No callback need tobe called, return nil
 		return nil

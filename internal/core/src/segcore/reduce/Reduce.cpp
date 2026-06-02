@@ -82,6 +82,22 @@ ReduceHelper::Marshal() {
 }
 
 void
+ReduceHelper::CheckElementIndicesSize(const SearchResult* search_result,
+                                      size_t expected_size,
+                                      const char* context) const {
+    if (!search_result->element_level_) {
+        return;
+    }
+
+    AssertInfo(search_result->element_indices_.size() == expected_size,
+               "wrong element_indices size in {}, size = {}, expected size = "
+               "{}",
+               context,
+               search_result->element_indices_.size(),
+               expected_size);
+}
+
+void
 ReduceHelper::FilterInvalidSearchResult(SearchResult* search_result) {
     auto nq = search_result->total_nq_;
     auto topK = search_result->unity_topK_;
@@ -93,6 +109,8 @@ ReduceHelper::FilterInvalidSearchResult(SearchResult* search_result) {
                "wrong distances size, size = {}, expected size = {}",
                search_result->distances_.size(),
                nq * topK);
+    CheckElementIndicesSize(
+        search_result, static_cast<size_t>(nq * topK), "filter invalid result");
     std::vector<int64_t> real_topks(nq, 0);
     uint32_t valid_index = 0;
     auto segment = static_cast<SegmentInterface*>(search_result->segment_);
@@ -117,12 +135,19 @@ ReduceHelper::FilterInvalidSearchResult(SearchResult* search_result) {
                 real_topks[i]++;
                 offsets[valid_index] = offsets[index];
                 distances[valid_index] = distances[index];
+                if (search_result->element_level_) {
+                    search_result->element_indices_[valid_index] =
+                        search_result->element_indices_[index];
+                }
                 valid_index++;
             }
         }
     }
     offsets.resize(valid_index);
     distances.resize(valid_index);
+    if (search_result->element_level_) {
+        search_result->element_indices_.resize(valid_index);
+    }
     search_result->topk_per_nq_prefix_sum_.resize(nq + 1);
     std::partial_sum(real_topks.begin(),
                      real_topks.end(),
@@ -158,6 +183,9 @@ ReduceHelper::SortEqualScoresByPks() {
     tracer::AutoSpan span("ReduceHelper::SortEqualScoresByPks",
                           tracer::GetRootSpan());
     for (auto& search_result : search_results_) {
+        CheckElementIndicesSize(search_result,
+                                search_result->seg_offsets_.size(),
+                                "sort equal scores");
         for (int64_t i = 0; i < search_result->total_nq_; i++) {
             auto nq_begin = search_result->topk_per_nq_prefix_sum_[i];
             auto nq_end = search_result->topk_per_nq_prefix_sum_[i + 1];
@@ -209,6 +237,10 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
                 PkType temp_pk =
                     std::move(search_result->primary_keys_[start + i]);
                 int64_t temp_offset = search_result->seg_offsets_[start + i];
+                int32_t temp_element_index =
+                    search_result->element_level_
+                        ? search_result->element_indices_[start + i]
+                        : -1;
 
                 size_t curr = i;
                 while (indices[curr] != i) {
@@ -217,12 +249,20 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
                         std::move(search_result->primary_keys_[start + next]);
                     search_result->seg_offsets_[start + curr] =
                         search_result->seg_offsets_[start + next];
+                    if (search_result->element_level_) {
+                        search_result->element_indices_[start + curr] =
+                            search_result->element_indices_[start + next];
+                    }
                     indices[curr] = curr;  // Mark as processed
                     curr = next;
                 }
 
                 search_result->primary_keys_[start + curr] = std::move(temp_pk);
                 search_result->seg_offsets_[start + curr] = temp_offset;
+                if (search_result->element_level_) {
+                    search_result->element_indices_[start + curr] =
+                        temp_element_index;
+                }
                 indices[curr] = curr;
             }
         }
@@ -249,6 +289,9 @@ void
 ReduceHelper::RefreshSingleSearchResult(SearchResult* search_result,
                                         int seg_res_idx,
                                         std::vector<int64_t>& real_topks) {
+    CheckElementIndicesSize(search_result,
+                            search_result->primary_keys_.size(),
+                            "refresh search result");
     uint32_t index = 0;
     for (int j = 0; j < total_nq_; j++) {
         for (auto offset : final_search_records_[seg_res_idx][j]) {
@@ -258,6 +301,10 @@ ReduceHelper::RefreshSingleSearchResult(SearchResult* search_result,
                 search_result->distances_[offset];
             search_result->seg_offsets_[index] =
                 search_result->seg_offsets_[offset];
+            if (search_result->element_level_) {
+                search_result->element_indices_[index] =
+                    search_result->element_indices_[offset];
+            }
             index++;
             real_topks[j]++;
         }
@@ -265,6 +312,9 @@ ReduceHelper::RefreshSingleSearchResult(SearchResult* search_result,
     search_result->primary_keys_.resize(index);
     search_result->distances_.resize(index);
     search_result->seg_offsets_.resize(index);
+    if (search_result->element_level_) {
+        search_result->element_indices_.resize(index);
+    }
 }
 
 void
@@ -287,6 +337,27 @@ ReduceHelper::FillEntryData() {
     }
 }
 
+bool
+ReduceHelper::TryAcceptSearchResult(const SearchResultPair& result) {
+    auto search_result = result.search_result_;
+    if (!search_result->element_level_) {
+        return pk_set_.insert(result.primary_key_).second;
+    }
+
+    AssertInfo(
+        result.offset_ >= 0 && static_cast<size_t>(result.offset_) <
+                                   search_result->element_indices_.size(),
+        "invalid element-level search result offset {}, element_indices size "
+        "{}",
+        result.offset_,
+        search_result->element_indices_.size());
+
+    return element_result_set_
+        .insert({result.primary_key_,
+                 search_result->element_indices_[result.offset_]})
+        .second;
+}
+
 int64_t
 ReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
                                          int64_t topk,
@@ -296,6 +367,7 @@ ReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
                         SearchResultPairComparator>
         heap;
     pk_set_.clear();
+    element_result_set_.clear();
     pairs_.clear();
 
     pairs_.reserve(num_segments_);
@@ -330,11 +402,12 @@ ReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
         if (pk == INVALID_PK) {
             break;
         }
-        // remove duplicates
-        if (pk_set_.count(pk) == 0) {
+
+        // Row-level search is deduplicated by PK. Element-level search has
+        // multiple result identities per row, so use (PK, element_index).
+        if (TryAcceptSearchResult(*pilot)) {
             pilot->search_result_->result_offsets_.push_back(offset++);
             final_search_records_[index][qi].push_back(pilot->offset_);
-            pk_set_.insert(pk);
         } else {
             // skip entity with same primary key
             dup_cnt++;
@@ -362,6 +435,8 @@ ReduceHelper::ReduceResultData() {
                    "incorrect search result seg offset size");
         AssertInfo(search_result->primary_keys_.size() == result_count,
                    "incorrect search result primary key size");
+        CheckElementIndicesSize(
+            search_result, result_count, "reduce search result");
     }
 
     int64_t filtered_count = 0;
@@ -402,6 +477,9 @@ ReduceHelper::GetSearchResultDataSlice(const int slice_index,
         AssertInfo(search_result->topk_per_nq_prefix_sum_.size() ==
                        search_result->total_nq_ + 1,
                    "incorrect topk_per_nq_prefix_sum_ size in search result");
+        CheckElementIndicesSize(search_result,
+                                search_result->seg_offsets_.size(),
+                                "marshal search result");
         result_count += search_result->topk_per_nq_prefix_sum_[nq_end] -
                         search_result->topk_per_nq_prefix_sum_[nq_begin];
         all_search_count += search_result->total_data_cnt_;
@@ -451,6 +529,14 @@ ReduceHelper::GetSearchResultDataSlice(const int slice_index,
 
     // reserve space for distances
     search_result_data->mutable_scores()->Resize(result_count, 0);
+    for (auto search_result : search_results_) {
+        if (search_result->element_level_) {
+            search_result_data->mutable_element_indices()
+                ->mutable_data()
+                ->Resize(result_count, -1);
+            break;
+        }
+    }
 
     // fill pks and distances
     for (auto qi = nq_begin; qi < nq_end; qi++) {
@@ -501,8 +587,34 @@ ReduceHelper::GetSearchResultDataSlice(const int slice_index,
 
                 search_result_data->mutable_scores()->Set(
                     loc, search_result->distances_[ki]);
+                if (search_result->element_level_) {
+                    search_result_data->mutable_element_indices()
+                        ->mutable_data()
+                        ->Set(loc, search_result->element_indices_[ki]);
+                }
                 // set result offset to fill output fields data
                 result_pairs[loc] = {&search_result->output_fields_data_, ki};
+
+                for (auto field_id : plan_->target_entries_) {
+                    auto& field_meta = plan_->schema_->operator[](field_id);
+                    if (field_meta.is_vector() && field_meta.is_nullable()) {
+                        auto it =
+                            search_result->output_fields_data_.find(field_id);
+                        if (it != search_result->output_fields_data_.end()) {
+                            auto& field_data = it->second;
+                            if (field_data->valid_data_size() > 0) {
+                                int64_t valid_idx = 0;
+                                for (int64_t i = 0; i < ki; ++i) {
+                                    if (field_data->valid_data(i)) {
+                                        valid_idx++;
+                                    }
+                                }
+                                result_pairs[loc].setValidDataOffset(field_id,
+                                                                     valid_idx);
+                            }
+                        }
+                    }
+                }
             }
         }
 

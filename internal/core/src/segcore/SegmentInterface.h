@@ -24,6 +24,7 @@
 #include <index/ScalarIndex.h>
 
 #include "cachinglayer/CacheSlot.h"
+#include "common/ArrayOffsets.h"
 #include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/OpContext.h"
@@ -238,7 +239,8 @@ class SegmentInterface {
     Reopen(SchemaPtr sch) = 0;
 
     virtual void
-    Reopen(const milvus::proto::segcore::SegmentLoadInfo& new_load_info) = 0;
+    Reopen(milvus::OpContext* op_ctx,
+           const milvus::proto::segcore::SegmentLoadInfo& new_load_info) = 0;
 
     // FinishLoad notifies the segment that all load operation are done
     // currently it's used to sync field data list with updated schema.
@@ -251,6 +253,9 @@ class SegmentInterface {
     virtual void
     Load(milvus::tracer::TraceContext& trace_ctx,
          milvus::OpContext* op_ctx = nullptr) = 0;
+
+    virtual std::shared_ptr<const IArrayOffsets>
+    GetArrayOffsets(FieldId field_id) const = 0;
 };
 
 // internal API for DSL calculation

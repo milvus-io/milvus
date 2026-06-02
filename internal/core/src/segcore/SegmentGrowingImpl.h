@@ -16,6 +16,8 @@
 #include <mutex>
 #include <shared_mutex>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <tbb/concurrent_priority_queue.h>
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_vector.h>
@@ -32,6 +34,7 @@
 #include "SealedIndexingRecord.h"
 #include "SegmentGrowing.h"
 #include "common/EasyAssert.h"
+#include "common/ArrayOffsets.h"
 #include "common/IndexMeta.h"
 #include "common/Types.h"
 #include "query/PlanNode.h"
@@ -106,6 +109,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     Reopen(
+        milvus::OpContext* op_ctx,
         const milvus::proto::segcore::SegmentLoadInfo& new_load_info) override;
 
     void
@@ -344,6 +348,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
               },
               segment_id) {
         this->CreateTextIndexes();
+        this->InitializeArrayOffsets();
         this->UpdateResourceTracking();
     }
 
@@ -391,6 +396,15 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     DataType
     GetFieldDataType(FieldId fieldId) const override;
+
+    std::shared_ptr<const IArrayOffsets>
+    GetArrayOffsets(FieldId field_id) const override {
+        auto it = array_offsets_map_.find(field_id);
+        if (it != array_offsets_map_.end()) {
+            return it->second;
+        }
+        return nullptr;
+    }
 
  public:
     void
@@ -529,6 +543,18 @@ class SegmentGrowingImpl : public SegmentGrowing {
     ResourceUsage
     EstimateSegmentResourceUsage() const;
 
+    struct ValidResult {
+        int64_t valid_count = 0;
+        std::unique_ptr<bool[]> valid_data;
+        std::vector<int64_t> valid_offsets;
+    };
+
+    ValidResult
+    FilterVectorValidOffsets(milvus::OpContext* op_ctx,
+                             FieldId field_id,
+                             const int64_t* seg_offsets,
+                             int64_t count) const;
+
  protected:
     int64_t
     num_chunk(FieldId field_id) const override;
@@ -611,6 +637,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     CreateTextIndexes();
 
+    void
+    InitializeArrayOffsets();
+
     /**
      * @brief Load all column groups from a manifest file path
      *
@@ -662,6 +691,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     // milvus storage internal api reader instance
     std::unique_ptr<milvus_storage::api::Reader> reader_;
+
+    std::unordered_map<FieldId, std::shared_ptr<ArrayOffsetsGrowing>>
+        array_offsets_map_;
+
+    std::unordered_set<FieldId> struct_representative_fields_;
 
     // Tracked resource usage for refund-then-charge pattern
     // This stores the last estimated resource usage that was charged to the cache manager

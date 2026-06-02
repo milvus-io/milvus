@@ -1,24 +1,24 @@
+# ruff: noqa: E712,E731,F401,F403,F405,F541,F841,I001,UP031,UP032,W291,W292,W293
+# fmt: off
 import json
+import random
 
-from pymilvus import (
-    FieldSchema,
-    CollectionSchema,
-    DataType,
-    Function,
-    FunctionType,
-    AnnSearchRequest,
-    WeightedRanker,
-)
-from common.common_type import CaseLabel, CheckTasks
+import pandas as pd
+import pytest
+from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
-from utils.util_log import test_log as log
-from base.client_base import TestcaseBase
-
-import random
-import pytest
-import pandas as pd
+from common.common_type import CaseLabel, CheckTasks
 from faker import Faker
+from pymilvus import (
+    AnnSearchRequest,
+    CollectionSchema,
+    DataType,
+    FieldSchema,
+    Function,
+    FunctionType,
+    WeightedRanker,
+)
 
 Faker.seed(19530)
 fake_en = Faker("en_US")
@@ -87,9 +87,7 @@ class TestCreateCollectionWIthFullTextSearch(TestcaseBase):
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
-            FieldSchema(
-                name="paragraph_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR
-            ),
+            FieldSchema(name="paragraph_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         text_fields = ["text", "paragraph"]
@@ -102,17 +100,13 @@ class TestCreateCollectionWIthFullTextSearch(TestcaseBase):
                 params={},
             )
             schema.add_function(bm25_function)
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         res, _ = collection_w.describe()
         assert len(res["functions"]) == len(text_fields)
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("tokenizer", ["standard"])
-    def test_create_collection_for_full_text_search_twice_with_same_schema(
-        self, tokenizer
-    ):
+    def test_create_collection_for_full_text_search_twice_with_same_schema(self, tokenizer):
         """
         target: test create collection with full text search twice with same schema
         method: create collection with full text search, use bm25 function, then create again
@@ -155,9 +149,7 @@ class TestCreateCollectionWIthFullTextSearch(TestcaseBase):
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
-            FieldSchema(
-                name="paragraph_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR
-            ),
+            FieldSchema(name="paragraph_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         text_fields = ["text", "paragraph"]
@@ -188,9 +180,7 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("tokenizer", ["unsupported"])
     @pytest.mark.skip(reason="check not implement may cause panic")
-    def test_create_collection_for_full_text_search_with_unsupported_tokenizer(
-        self, tokenizer
-    ):
+    def test_create_collection_for_full_text_search_with_unsupported_tokenizer(self, tokenizer):
         """
         target: test create collection with full text search with unsupported tokenizer
         method: create collection with full text search, use bm25 function and unsupported tokenizer
@@ -233,9 +223,7 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
-            FieldSchema(
-                name="paragraph_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR
-            ),
+            FieldSchema(name="paragraph_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         text_fields = ["text", "paragraph"]
@@ -248,21 +236,15 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
                 params={},
             )
             schema.add_function(bm25_function)
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         res, result = collection_w.describe()
         # log.info(f"collection describe {res}")
-        assert not result, (
-            "create collection with unsupported tokenizer should be failed"
-        )
+        assert not result, "create collection with unsupported tokenizer should be failed"
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("valid_output", [True, False])
     @pytest.mark.parametrize("valid_input", [True, False])
-    def test_create_collection_for_full_text_search_with_invalid_input_output(
-        self, valid_output, valid_input
-    ):
+    def test_create_collection_for_full_text_search_with_invalid_input_output(self, valid_output, valid_input):
         """
         target: test create collection with full text search with invalid input/output in bm25 function
         method: create collection with full text search, use bm25 function and invalid input/output
@@ -305,9 +287,7 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
-            FieldSchema(
-                name="paragraph_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR
-            ),
+            FieldSchema(name="paragraph_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         if valid_input:
@@ -338,14 +318,10 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
                 },
             )
         else:
-            collection_w = self.init_collection_wrap(
-                name=cf.gen_unique_str(prefix), schema=schema
-            )
+            collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
             res, result = collection_w.describe()
             # log.info(f"collection describe {res}")
-            assert result, (
-                "create collection with valid input/output should be successful"
-            )
+            assert result, "create collection with valid input/output should be successful"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_collection_for_full_text_search_with_field_not_tokenized(self):
@@ -391,9 +367,7 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
-            FieldSchema(
-                name="paragraph_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR
-            ),
+            FieldSchema(name="paragraph_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
 
@@ -414,6 +388,54 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
             name=cf.gen_unique_str(prefix),
             schema=schema,
             check_task=check_task,
+            check_items=check_items,
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_collection_for_full_text_search_with_nullable_function_output(self):
+        """
+        target: test create collection with nullable BM25 function output
+        method: create collection with BM25 output sparse vector field set nullable
+        expected: create collection failed
+        """
+        analyzer_params = {
+            "tokenizer": "standard",
+        }
+        dim = 128
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(
+                name="text",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                nullable=True,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
+            ),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema(
+                name="text_sparse_emb",
+                dtype=DataType.SPARSE_FLOAT_VECTOR,
+                nullable=True,
+            ),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+        bm25_function = Function(
+            name="text_bm25_emb",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["text_sparse_emb"],
+            params={},
+        )
+        schema.add_function(bm25_function)
+        check_items = {
+            ct.err_code: 65535,
+            ct.err_msg: "function output field cannot be nullable",
+        }
+        self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix),
+            schema=schema,
+            check_task=CheckTasks.err_res,
             check_items=check_items,
         )
 
@@ -471,6 +493,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
+                nullable=nullable,
                 enable_analyzer=True,
                 analyzer_params=analyzer_params,
             ),
@@ -487,9 +510,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         if text_lang == "zh":
             fake = fake_zh
@@ -501,13 +522,9 @@ class TestInsertWithFullTextSearch(TestcaseBase):
                 {
                     "id": i,
                     "word": fake.word().lower(),
-                    "sentence": fake.sentence().lower()
-                    if random.random() < 0.5
-                    else None,
-                    "paragraph": fake.paragraph().lower()
-                    if random.random() < 0.5
-                    else None,
-                    "text": fake.text().lower(),  # function input should not be None
+                    "sentence": fake.sentence().lower() if random.random() < 0.5 else None,
+                    "paragraph": fake.paragraph().lower() if random.random() < 0.5 else None,
+                    "text": fake.text().lower() if random.random() < 0.3 else None,  # function input supports None now
                     "emb": [random.random() for _ in range(dim)],
                 }
                 for i in range(data_size)
@@ -542,11 +559,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         # log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i : i + batch_size]
-                if i + batch_size < len(df)
-                else data[i : len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         collection_w.create_index(
             "emb",
             {
@@ -644,9 +657,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         if text_lang == "zh":
             fake = fake_zh
@@ -660,12 +671,8 @@ class TestInsertWithFullTextSearch(TestcaseBase):
                 {
                     "id": i,
                     "word": fake.word().lower(),
-                    "sentence": fake.sentence().lower()
-                    if random.random() < 0.5
-                    else None,
-                    "paragraph": fake.paragraph().lower()
-                    if random.random() < 0.5
-                    else None,
+                    "sentence": fake.sentence().lower() if random.random() < 0.5 else None,
+                    "paragraph": fake.paragraph().lower() if random.random() < 0.5 else None,
                     "text": fake.text().lower(),  # function input should not be None
                     "emb": [random.random() for _ in range(dim)],
                     f"dynamic_field_{i}": f"dynamic_value_{i}",
@@ -704,11 +711,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         # log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(data), batch_size):
-            collection_w.insert(
-                data[i : i + batch_size]
-                if i + batch_size < len(data)
-                else data[i : len(data)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(data) else data[i : len(data)])
         collection_w.create_index(
             "emb",
             {
@@ -741,9 +744,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("nullable", [True])
     @pytest.mark.parametrize("text_lang", ["en"])
     @pytest.mark.parametrize("tokenizer", ["standard"])
-    def test_insert_for_full_text_search_with_dataframe(
-        self, tokenizer, text_lang, nullable
-    ):
+    def test_insert_for_full_text_search_with_dataframe(self, tokenizer, text_lang, nullable):
         """
         target: test insert data for full text search with dataframe
         method: 1. insert data with varchar in dataframe format
@@ -799,9 +800,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         if text_lang == "zh":
             fake = fake_zh
@@ -815,12 +814,8 @@ class TestInsertWithFullTextSearch(TestcaseBase):
                 {
                     "id": i,
                     "word": fake.word().lower(),
-                    "sentence": fake.sentence().lower()
-                    if random.random() < 0.5
-                    else None,
-                    "paragraph": fake.paragraph().lower()
-                    if random.random() < 0.5
-                    else None,
+                    "sentence": fake.sentence().lower() if random.random() < 0.5 else None,
+                    "paragraph": fake.paragraph().lower() if random.random() < 0.5 else None,
                     "text": fake.text().lower(),  # function input should not be None
                     "emb": [random.random() for _ in range(dim)],
                 }
@@ -944,9 +939,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         # log.info(f"collection describe {collection_w.describe()}")
         fake = fake_en
         language = "en"
@@ -994,11 +987,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         tokens = list(word_freq.keys())
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i : i + batch_size]
-                if i + batch_size < len(df)
-                else data[i : len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         num_entities = collection_w.num_entities
         # query with count(*)
         res, _ = collection_w.query(expr="", output_fields=["count(*)"])
@@ -1029,9 +1018,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
             for j in range(len(res)):
                 r = res[j]
                 result_text = r.text
-                overlap, word_freq_a, word_freq_b = cf.check_token_overlap(
-                    search_text, result_text, language=language
-                )
+                overlap, word_freq_a, word_freq_b = cf.check_token_overlap(search_text, result_text, language=language)
                 assert len(overlap) > 0, (
                     f"query text: {search_text}, \ntext: {result_text} \n overlap: {overlap} \n word freq a: {word_freq_a} \n word freq b: {word_freq_b}\n result: {r}"
                 )
@@ -1048,9 +1035,7 @@ class TestInsertWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nullable", [True])
     @pytest.mark.parametrize("tokenizer", ["standard"])
-    def test_insert_with_full_text_search_with_non_varchar_data(
-        self, tokenizer, nullable
-    ):
+    def test_insert_with_full_text_search_with_non_varchar_data(self, tokenizer, nullable):
         """
         target: test insert data with full text search with non varchar data
         method: 1. insert data with non varchar data
@@ -1107,9 +1092,7 @@ class TestInsertWithFullTextSearchNegative(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         if tokenizer == "jieba":
             fake = fake_zh
@@ -1120,9 +1103,7 @@ class TestInsertWithFullTextSearchNegative(TestcaseBase):
                 "word": fake.word().lower(),
                 "sentence": fake.sentence().lower(),
                 "paragraph": fake.paragraph().lower(),
-                "text": fake.text().lower()
-                if random.random() < 0.5
-                else 1,  # mix some int data
+                "text": fake.text().lower() if random.random() < 0.5 else 1,  # mix some int data
                 "emb": [random.random() for _ in range(dim)],
             }
             for i in range(data_size)
@@ -1132,9 +1113,7 @@ class TestInsertWithFullTextSearchNegative(TestcaseBase):
         batch_size = 5000
         for i in range(0, len(df), batch_size):
             collection_w.insert(
-                data[i : i + batch_size]
-                if i + batch_size < len(df)
-                else data[i : len(df)],
+                data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)],
                 check_task=CheckTasks.err_res,
                 check_items={
                     ct.err_code: 1,
@@ -1212,9 +1191,7 @@ class TestUpsertWithFullTextSearch(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         if tokenizer == "jieba":
             fake = fake_zh
@@ -1224,12 +1201,8 @@ class TestUpsertWithFullTextSearch(TestcaseBase):
                 {
                     "id": i,
                     "word": fake.word().lower(),
-                    "sentence": fake.sentence().lower()
-                    if random.random() < 0.5
-                    else None,
-                    "paragraph": fake.paragraph().lower()
-                    if random.random() < 0.5
-                    else None,
+                    "sentence": fake.sentence().lower() if random.random() < 0.5 else None,
+                    "paragraph": fake.paragraph().lower() if random.random() < 0.5 else None,
                     "text": fake.text().lower(),  # function input should not be None
                     "emb": [random.random() for _ in range(dim)],
                 }
@@ -1251,11 +1224,7 @@ class TestUpsertWithFullTextSearch(TestcaseBase):
         # log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i : i + batch_size]
-                if i + batch_size < len(df)
-                else data[i : len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         collection_w.create_index(
             "emb",
             {
@@ -1324,9 +1293,7 @@ class TestUpsertWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nullable", [False])
     @pytest.mark.parametrize("tokenizer", ["standard"])
-    def test_upsert_for_full_text_search_with_no_varchar_data(
-        self, tokenizer, nullable
-    ):
+    def test_upsert_for_full_text_search_with_no_varchar_data(self, tokenizer, nullable):
         """
         target: test upsert data for full text search with no varchar data
         method: 1. insert data with varchar data
@@ -1383,9 +1350,7 @@ class TestUpsertWithFullTextSearchNegative(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         if tokenizer == "jieba":
             fake = fake_zh
@@ -1405,11 +1370,7 @@ class TestUpsertWithFullTextSearchNegative(TestcaseBase):
         # log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i : i + batch_size]
-                if i + batch_size < len(df)
-                else data[i : len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         collection_w.create_index(
             "emb",
             {
@@ -1445,9 +1406,7 @@ class TestUpsertWithFullTextSearchNegative(TestcaseBase):
                 "word": fake.word().lower(),
                 "sentence": fake.sentence().lower(),
                 "paragraph": fake.paragraph().lower(),
-                "text": fake.text().lower()
-                if random.random() < 0.5
-                else 1,  # mix some int data
+                "text": fake.text().lower() if random.random() < 0.5 else 1,  # mix some int data
                 "emb": [random.random() for _ in range(dim)],
             }
             for i in range(data_size)
@@ -1522,9 +1481,7 @@ class TestDeleteWithFullTextSearch(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         if tokenizer == "jieba":
             fake = fake_zh
@@ -1543,11 +1500,7 @@ class TestDeleteWithFullTextSearch(TestcaseBase):
         # log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i : i + batch_size]
-                if i + batch_size < len(df)
-                else data[i : len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         collection_w.create_index(
             "emb",
             {
@@ -1623,9 +1576,7 @@ class TestCreateIndexWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("k", [1.2])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX", "SPARSE_WAND"])
     @pytest.mark.parametrize("tokenizer", ["standard"])
-    def test_create_index_for_full_text_search_default(
-        self, tokenizer, index_type, k, b
-    ):
+    def test_create_index_for_full_text_search_default(self, tokenizer, index_type, k, b):
         """
         target: test create index for full text search
         method: 1. enable full text search and insert data with varchar
@@ -1683,20 +1634,14 @@ class TestCreateIndexWithFullTextSearch(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         data = [
             {
                 "id": i,
                 "word": fake.word().lower() if random.random() >= empty_percent else "",
-                "sentence": fake.sentence().lower()
-                if random.random() >= empty_percent
-                else "",
-                "paragraph": fake.paragraph().lower()
-                if random.random() >= empty_percent
-                else "",
+                "sentence": fake.sentence().lower() if random.random() >= empty_percent else "",
+                "paragraph": fake.paragraph().lower() if random.random() >= empty_percent else "",
                 "text": fake.text().lower() if random.random() >= empty_percent else "",
                 "emb": [random.random() for _ in range(dim)],
             }
@@ -1706,11 +1651,7 @@ class TestCreateIndexWithFullTextSearch(TestcaseBase):
         # log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i : i + batch_size]
-                if i + batch_size < len(df)
-                else data[i : len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         collection_w.create_index(
             "emb",
             {
@@ -1755,9 +1696,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.parametrize("k", [1.5])
     @pytest.mark.parametrize("index_type", ["HNSW", "INVALID_INDEX_TYPE"])
     @pytest.mark.parametrize("tokenizer", ["standard"])
-    def test_create_full_text_search_with_invalid_index_type(
-        self, tokenizer, index_type, k, b
-    ):
+    def test_create_full_text_search_with_invalid_index_type(self, tokenizer, index_type, k, b):
         """
         target: test create index for full text search with invalid index type
         method: 1. enable full text search and insert data with varchar
@@ -1814,20 +1753,14 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         data = [
             {
                 "id": i,
                 "word": fake.word().lower() if random.random() >= empty_percent else "",
-                "sentence": fake.sentence().lower()
-                if random.random() >= empty_percent
-                else "",
-                "paragraph": fake.paragraph().lower()
-                if random.random() >= empty_percent
-                else "",
+                "sentence": fake.sentence().lower() if random.random() >= empty_percent else "",
+                "paragraph": fake.paragraph().lower() if random.random() >= empty_percent else "",
                 "text": fake.text().lower() if random.random() >= empty_percent else "",
                 "emb": [random.random() for _ in range(dim)],
             }
@@ -1837,11 +1770,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
         # log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i : i + batch_size]
-                if i + batch_size < len(df)
-                else data[i : len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         collection_w.create_index(
             "emb",
             {
@@ -1871,9 +1800,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
     @pytest.mark.parametrize("metric_type", ["COSINE", "L2", "IP"])
     @pytest.mark.parametrize("tokenizer", ["standard"])
-    def test_create_full_text_search_index_with_invalid_metric_type(
-        self, tokenizer, index_type, metric_type, k, b
-    ):
+    def test_create_full_text_search_index_with_invalid_metric_type(self, tokenizer, index_type, metric_type, k, b):
         """
         target: test create index for full text search with invalid metric type
         method: 1. enable full text search and insert data with varchar
@@ -1930,20 +1857,14 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         data = [
             {
                 "id": i,
                 "word": fake.word().lower() if random.random() >= empty_percent else "",
-                "sentence": fake.sentence().lower()
-                if random.random() >= empty_percent
-                else "",
-                "paragraph": fake.paragraph().lower()
-                if random.random() >= empty_percent
-                else "",
+                "sentence": fake.sentence().lower() if random.random() >= empty_percent else "",
+                "paragraph": fake.paragraph().lower() if random.random() >= empty_percent else "",
                 "text": fake.text().lower() if random.random() >= empty_percent else "",
                 "emb": [random.random() for _ in range(dim)],
             }
@@ -1953,11 +1874,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
         # log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i : i + batch_size]
-                if i + batch_size < len(df)
-                else data[i : len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         collection_w.create_index(
             "emb",
             {
@@ -1989,9 +1906,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.parametrize("k", [1.5])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
     @pytest.mark.parametrize("tokenizer", ["standard"])
-    def test_create_index_using_bm25_metric_type_for_non_bm25_output_field(
-        self, tokenizer, index_type, k, b
-    ):
+    def test_create_index_using_bm25_metric_type_for_non_bm25_output_field(self, tokenizer, index_type, k, b):
         """
         target: test create index using bm25 metric type for non bm25 output field (dense float vector or
                 sparse float vector not for bm25)
@@ -2049,20 +1964,14 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         data = [
             {
                 "id": i,
                 "word": fake.word().lower() if random.random() >= empty_percent else "",
-                "sentence": fake.sentence().lower()
-                if random.random() >= empty_percent
-                else "",
-                "paragraph": fake.paragraph().lower()
-                if random.random() >= empty_percent
-                else "",
+                "sentence": fake.sentence().lower() if random.random() >= empty_percent else "",
+                "paragraph": fake.paragraph().lower() if random.random() >= empty_percent else "",
                 "text": fake.text().lower() if random.random() >= empty_percent else "",
                 "emb": [random.random() for _ in range(dim)],
             }
@@ -2072,11 +1981,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
         # log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i : i + batch_size]
-                if i + batch_size < len(df)
-                else data[i : len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         error = {
             ct.err_code: 1100,
             ct.err_msg: "float vector index does not support metric type: BM25",
@@ -2097,9 +2002,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.parametrize("k", [-1])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
     @pytest.mark.parametrize("tokenizer", ["standard"])
-    def test_create_full_text_search_with_invalid_bm25_params(
-        self, tokenizer, index_type, k, b
-    ):
+    def test_create_full_text_search_with_invalid_bm25_params(self, tokenizer, index_type, k, b):
         """
         target: test create index for full text search with invalid bm25 params
         method: 1. enable full text search and insert data with varchar
@@ -2156,20 +2059,14 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         data = [
             {
                 "id": i,
                 "word": fake.word().lower() if random.random() >= empty_percent else "",
-                "sentence": fake.sentence().lower()
-                if random.random() >= empty_percent
-                else "",
-                "paragraph": fake.paragraph().lower()
-                if random.random() >= empty_percent
-                else "",
+                "sentence": fake.sentence().lower() if random.random() >= empty_percent else "",
+                "paragraph": fake.paragraph().lower() if random.random() >= empty_percent else "",
                 "text": fake.text().lower() if random.random() >= empty_percent else "",
                 "emb": [random.random() for _ in range(dim)],
             }
@@ -2179,11 +2076,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
         # log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i : i + batch_size]
-                if i + batch_size < len(df)
-                else data[i : len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         collection_w.create_index(
             "emb",
             {
@@ -2221,6 +2114,83 @@ class TestSearchWithFullTextSearch(TestcaseBase):
     ******************************************************************
     """
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_full_text_search_with_nullable_text_input(self):
+        """
+        target: test full text search with nullable function input
+        method: insert data with None text and search on BM25 sparse field
+        expected: nullable input rows are accepted and not matched by BM25 search
+        """
+        analyzer_params = {
+            "tokenizer": "standard",
+        }
+        dim = 8
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(
+                name="text",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                nullable=True,
+                enable_analyzer=True,
+                enable_match=True,
+                analyzer_params=analyzer_params,
+            ),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+        bm25_function = Function(
+            name="text_bm25_emb",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["text_sparse_emb"],
+            params={},
+        )
+        schema.add_function(bm25_function)
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix), schema=schema
+        )
+        data = [
+            {"id": 0, "text": "milvus vector database", "emb": [0.1] * dim},
+            {"id": 1, "text": None, "emb": [0.2] * dim},
+            {"id": 2, "text": "", "emb": [0.3] * dim},
+            {"id": 3, "text": "vector search", "emb": [0.4] * dim},
+        ]
+        collection_w.insert(data)
+        collection_w.flush()
+        collection_w.create_index(
+            "emb",
+            {
+                "index_type": "FLAT",
+                "metric_type": "L2",
+            },
+        )
+        collection_w.create_index(
+            "text_sparse_emb",
+            {
+                "index_type": "SPARSE_INVERTED_INDEX",
+                "metric_type": "BM25",
+            },
+        )
+        collection_w.create_index("text", {"index_type": "INVERTED"})
+        collection_w.load()
+
+        query_res, _ = collection_w.query(
+            expr="id in [1]", output_fields=["id", "text"]
+        )
+        assert query_res == [{"id": 1, "text": None}]
+        search_res, _ = collection_w.search(
+            data=["vector"],
+            anns_field="text_sparse_emb",
+            param={},
+            limit=4,
+            output_fields=["id", "text"],
+        )
+        search_ids = [hit.id for hit in search_res[0]]
+        assert len(search_ids) > 0
+        assert 1 not in search_ids
+
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("nq", [2])
     @pytest.mark.parametrize("empty_percent", [0.5])
@@ -2230,8 +2200,10 @@ class TestSearchWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("expr", ["text_match", "id_range"])
     @pytest.mark.parametrize("tokenizer", ["standard"])
     @pytest.mark.parametrize("offset", [10, 0])
+    @pytest.mark.parametrize("nullable", [False, True])
     def test_full_text_search_default(
         self,
+        nullable,
         offset,
         tokenizer,
         expr,
@@ -2266,6 +2238,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
+                nullable=nullable,
                 enable_analyzer=True,
                 analyzer_params=analyzer_params,
             ),
@@ -2273,6 +2246,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
+                nullable=nullable,
                 enable_analyzer=True,
                 analyzer_params=analyzer_params,
             ),
@@ -2280,6 +2254,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
+                nullable=nullable,  # function input supports None now
                 enable_analyzer=True,
                 enable_match=True,
                 analyzer_params=analyzer_params,
@@ -2297,9 +2272,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         if tokenizer == "jieba":
             language = "zh"
@@ -2307,17 +2280,18 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         else:
             language = "en"
 
+        empty_value = ""
+        if nullable is True:
+            empty_value = None
         data = [
             {
                 "id": i,
-                "word": fake.word().lower() if random.random() >= empty_percent else "",
-                "sentence": fake.sentence().lower()
+                "word": fake.word().lower()
                 if random.random() >= empty_percent
-                else "",
-                "paragraph": fake.paragraph().lower()
-                if random.random() >= empty_percent
-                else "",
-                "text": fake.text().lower() if random.random() >= empty_percent else "",
+                else "",  # partition key not support none
+                "sentence": fake.sentence().lower() if random.random() >= empty_percent else empty_value,
+                "paragraph": fake.paragraph().lower() if random.random() >= empty_percent else empty_value,
+                "text": fake.text().lower() if random.random() >= empty_percent else empty_value,
                 "emb": [random.random() for _ in range(dim)],
             }
             for i in range(data_size)
@@ -2333,11 +2307,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             tokens = ["dummy"]
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i : i + batch_size]
-                if i + batch_size < len(df)
-                else data[i : len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         collection_w.flush()
         collection_w.create_index(
             "emb",
@@ -2428,9 +2398,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 if expr == "id_range":
                     assert _id < data_size // 2
                 # verify search result has overlap with search text
-                overlap, word_freq_a, word_freq_b = cf.check_token_overlap(
-                    search_text, result_text, language=language
-                )
+                overlap, word_freq_a, word_freq_b = cf.check_token_overlap(search_text, result_text, language=language)
                 # log.info(f"overlap {overlap}")
                 assert len(overlap) > 0, (
                     f"query text: {search_text}, \ntext: {result_text} \n overlap: {overlap} \n word freq a: {word_freq_a} \n word freq b: {word_freq_b}\n result: {r}"
@@ -2532,9 +2500,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         if tokenizer == "jieba":
             language = "zh"
@@ -2546,12 +2512,8 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             {
                 "id": i,
                 "word": fake.word().lower() if random.random() >= empty_percent else "",
-                "sentence": fake.sentence().lower()
-                if random.random() >= empty_percent
-                else "",
-                "paragraph": fake.paragraph().lower()
-                if random.random() >= empty_percent
-                else "",
+                "sentence": fake.sentence().lower() if random.random() >= empty_percent else "",
+                "paragraph": fake.paragraph().lower() if random.random() >= empty_percent else "",
                 "text": fake.text().lower() if random.random() >= empty_percent else "",
                 "emb": [random.random() for _ in range(dim)],
             }
@@ -2570,11 +2532,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             tokens = ["dummy"]
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i : i + batch_size]
-                if i + batch_size < len(df)
-                else data[i : len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         collection_w.flush()
         collection_w.create_index(
             "emb",
@@ -2666,9 +2624,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 if expr == "id_range":
                     assert _id < data_size // 2
                 # verify search result has overlap with search text
-                overlap, word_freq_a, word_freq_b = cf.check_token_overlap(
-                    search_text, result_text, language=language
-                )
+                overlap, word_freq_a, word_freq_b = cf.check_token_overlap(search_text, result_text, language=language)
                 # log.info(f"overlap {overlap}")
                 assert len(overlap) > 0, (
                     f"query text: {search_text}, \ntext: {result_text} \n overlap: {overlap} \n word freq a: {word_freq_a} \n word freq b: {word_freq_b}\n result: {r}"
@@ -2750,9 +2706,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         if tokenizer == "jieba":
             language = "zh"
@@ -2764,12 +2718,8 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             {
                 "id": i,
                 "word": fake.word().lower() if random.random() >= empty_percent else "",
-                "sentence": fake.sentence().lower()
-                if random.random() >= empty_percent
-                else "",
-                "paragraph": fake.paragraph().lower()
-                if random.random() >= empty_percent
-                else "",
+                "sentence": fake.sentence().lower() if random.random() >= empty_percent else "",
+                "paragraph": fake.paragraph().lower() if random.random() >= empty_percent else "",
                 "text": fake.text().lower() if random.random() >= empty_percent else "",
                 "emb": [random.random() for _ in range(dim)],
             }
@@ -2808,15 +2758,9 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         collection_w.load()
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i : i + batch_size]
-                if i + batch_size < len(df)
-                else data[i : len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         limit = 100
-        search_data = [
-            fake.text().lower() + " " + random.choice(tokens) for _ in range(nq)
-        ]
+        search_data = [fake.text().lower() + " " + random.choice(tokens) for _ in range(nq)]
         if expr == "text_match":
             filter = f"TextMatch(text, '{tokens[0]}')"
             res, _ = collection_w.query(
@@ -2881,31 +2825,23 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 if expr == "id_range":
                     assert _id < data_size // 2
                 # verify search result has overlap with search text
-                overlap, word_freq_a, word_freq_b = cf.check_token_overlap(
-                    search_text, result_text, language=language
-                )
+                overlap, word_freq_a, word_freq_b = cf.check_token_overlap(search_text, result_text, language=language)
                 # log.info(f"overlap {overlap}")
                 assert len(overlap) > 0, (
                     f"query text: {search_text}, \ntext: {result_text} \n overlap: {overlap} \n word freq a: {word_freq_a} \n word freq b: {word_freq_b}\n result: {r}"
                 )
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("nullable", [False, True])
     @pytest.mark.parametrize("nq", [2])
-    @pytest.mark.parametrize("empty_percent", [0])
+    @pytest.mark.parametrize("empty_percent", [0.2])
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
     @pytest.mark.parametrize("expr", [None])
     @pytest.mark.parametrize("tokenizer", ["standard"])
     def test_full_text_search_with_range_search(
-        self,
-        tokenizer,
-        expr,
-        enable_inverted_index,
-        enable_partition_key,
-        empty_percent,
-        index_type,
-        nq,
+        self, tokenizer, expr, enable_inverted_index, enable_partition_key, empty_percent, index_type, nq, nullable
     ):
         """
         target: test full text search
@@ -2932,6 +2868,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
+                nullable=nullable,
                 enable_analyzer=True,
                 analyzer_params=analyzer_params,
             ),
@@ -2939,6 +2876,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
+                nullable=nullable,
                 enable_analyzer=True,
                 analyzer_params=analyzer_params,
             ),
@@ -2946,11 +2884,12 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
+                nullable=nullable,
                 enable_analyzer=True,
                 enable_match=True,
                 analyzer_params=analyzer_params,
             ),
-            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim, nullable=nullable),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
@@ -2963,9 +2902,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         if tokenizer == "jieba":
             language = "zh"
@@ -2973,18 +2910,21 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         else:
             language = "en"
 
+        empty_value = ""
+        if nullable is True:
+            empty_value = None
         data = [
             {
                 "id": i,
-                "word": fake.word().lower() if random.random() >= empty_percent else "",
-                "sentence": fake.sentence().lower()
+                "word": fake.word().lower()
                 if random.random() >= empty_percent
-                else "",
-                "paragraph": fake.paragraph().lower()
-                if random.random() >= empty_percent
-                else "",
-                "text": fake.text().lower() if random.random() >= empty_percent else "",
-                "emb": [random.random() for _ in range(dim)],
+                else "",  # partition key not support none
+                "sentence": fake.sentence().lower() if random.random() >= empty_percent else empty_value,
+                "paragraph": fake.paragraph().lower() if random.random() >= empty_percent else empty_value,
+                "text": fake.text().lower() if random.random() >= empty_percent else empty_value,
+                "emb": None
+                if nullable is True and random.random() < empty_percent
+                else [random.random() for _ in range(dim)],  # null vector supported
             }
             for i in range(data_size)
         ]
@@ -2998,11 +2938,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             tokens = ["dummy"]
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i : i + batch_size]
-                if i + batch_size < len(df)
-                else data[i : len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         collection_w.create_index(
             "emb",
             {
@@ -3140,9 +3076,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         if tokenizer == "jieba":
             language = "zh"
@@ -3154,12 +3088,8 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             {
                 "id": i,
                 "word": fake.word().lower() if random.random() >= empty_percent else "",
-                "sentence": fake.sentence().lower()
-                if random.random() >= empty_percent
-                else "",
-                "paragraph": fake.paragraph().lower()
-                if random.random() >= empty_percent
-                else "",
+                "sentence": fake.sentence().lower() if random.random() >= empty_percent else "",
+                "paragraph": fake.paragraph().lower() if random.random() >= empty_percent else "",
                 "text": fake.text().lower() if random.random() >= empty_percent else "",
                 "emb": [random.random() for _ in range(dim)],
             }
@@ -3175,11 +3105,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
             tokens = ["dummy"]
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i : i + batch_size]
-                if i + batch_size < len(df)
-                else data[i : len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         collection_w.create_index(
             "emb",
             {
@@ -3202,9 +3128,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         if enable_inverted_index:
             collection_w.create_index("text", {"index_type": "INVERTED"})
         collection_w.load()
-        search_data = [
-            fake.text().lower() + " " + random.choice(tokens) for _ in range(nq)
-        ]
+        search_data = [fake.text().lower() + " " + random.choice(tokens) for _ in range(nq)]
         # log.info(f"search data: {search_data}")
         # get distance with search data
         batch_size = 100
@@ -3310,9 +3234,7 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         if tokenizer == "jieba":
             fake = fake_zh
@@ -3321,12 +3243,8 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
             {
                 "id": i,
                 "word": fake.word().lower() if random.random() >= empty_percent else "",
-                "sentence": fake.sentence().lower()
-                if random.random() >= empty_percent
-                else "",
-                "paragraph": fake.paragraph().lower()
-                if random.random() >= empty_percent
-                else "",
+                "sentence": fake.sentence().lower() if random.random() >= empty_percent else "",
+                "paragraph": fake.paragraph().lower() if random.random() >= empty_percent else "",
                 "text": fake.text().lower() if random.random() >= empty_percent else "",
                 "emb": [random.random() for _ in range(dim)],
             }
@@ -3336,11 +3254,7 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
         # log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i : i + batch_size]
-                if i + batch_size < len(df)
-                else data[i : len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         collection_w.create_index(
             "emb",
             {
@@ -3449,9 +3363,7 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         if tokenizer == "jieba":
             language = "zh"
@@ -3463,12 +3375,8 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
             {
                 "id": i,
                 "word": fake.word().lower() if random.random() >= empty_percent else "",
-                "sentence": fake.sentence().lower()
-                if random.random() >= empty_percent
-                else "",
-                "paragraph": fake.paragraph().lower()
-                if random.random() >= empty_percent
-                else "",
+                "sentence": fake.sentence().lower() if random.random() >= empty_percent else "",
+                "paragraph": fake.paragraph().lower() if random.random() >= empty_percent else "",
                 "text": fake.text().lower() if random.random() >= empty_percent else "",
                 "emb": [random.random() for _ in range(dim)],
             }
@@ -3484,11 +3392,7 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
             tokens = ["dummy"]
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i : i + batch_size]
-                if i + batch_size < len(df)
-                else data[i : len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         collection_w.create_index(
             "emb",
             {
@@ -3514,13 +3418,9 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
         nq = 2
         limit = 100
         if invalid_search_data == "sparse_vector":
-            search_data = cf.gen_vectors(
-                nb=nq, dim=1000, vector_data_type=DataType.SPARSE_FLOAT_VECTOR
-            )
+            search_data = cf.gen_vectors(nb=nq, dim=1000, vector_data_type=DataType.SPARSE_FLOAT_VECTOR)
         else:
-            search_data = cf.gen_vectors(
-                nb=nq, dim=1000, vector_data_type=DataType.FLOAT_VECTOR
-            )
+            search_data = cf.gen_vectors(nb=nq, dim=1000, vector_data_type=DataType.FLOAT_VECTOR)
         # log.info(f"search data: {search_data}")
         error = {
             ct.err_code: 65535,
@@ -3625,9 +3525,7 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
         )
         schema.add_function(bm25_function)
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         language_list = ["en", "zh", "de", "jp", "unknown"]
         fake = fake_en
         data = [
@@ -3635,17 +3533,11 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
                 "id": i,
                 "language": random.choice(language_list),
                 "word": fake.word().lower() if random.random() >= empty_percent else "",
-                "sentence": fake.sentence().lower()
-                if random.random() >= empty_percent
-                else "",
-                "paragraph": fake.paragraph().lower()
-                if random.random() >= empty_percent
-                else "",
+                "sentence": fake.sentence().lower() if random.random() >= empty_percent else "",
+                "paragraph": fake.paragraph().lower() if random.random() >= empty_percent else "",
                 "text": fake.text().lower() if random.random() >= empty_percent else "",
                 "dense_emb": [random.random() for _ in range(dim)],
-                "neural_sparse_emb": cf.gen_vectors(
-                    nb=1, dim=1000, vector_data_type=DataType.SPARSE_FLOAT_VECTOR
-                )[0],
+                "neural_sparse_emb": cf.gen_vectors(nb=1, dim=1000, vector_data_type=DataType.SPARSE_FLOAT_VECTOR)[0],
             }
             for i in range(data_size)
         ]
@@ -3653,11 +3545,7 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
         # log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i : i + batch_size]
-                if i + batch_size < len(df)
-                else data[i : len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         collection_w.create_index(
             "dense_emb",
             {
@@ -3700,9 +3588,7 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
             limit=limit,
         )
         sparse_search = AnnSearchRequest(
-            data=cf.gen_vectors(
-                nb=nq, dim=dim, vector_data_type=DataType.SPARSE_FLOAT_VECTOR
-            ),
+            data=cf.gen_vectors(nb=nq, dim=dim, vector_data_type=DataType.SPARSE_FLOAT_VECTOR),
             anns_field="neural_sparse_emb",
             param={},
             limit=limit,
@@ -3761,9 +3647,7 @@ class TestFullTextSearchMultiAnalyzer(TestcaseBase):
             ),
             FieldSchema(name="bm25_sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
-        schema = CollectionSchema(
-            fields=fields, description="Multi-analyzer BM25 test collection"
-        )
+        schema = CollectionSchema(fields=fields, description="Multi-analyzer BM25 test collection")
         bm25_func = Function(
             name="bm25",
             function_type=FunctionType.BM25,
@@ -3777,10 +3661,7 @@ class TestFullTextSearchMultiAnalyzer(TestcaseBase):
         assert len(res["functions"]) == 1
         assert res["fields"][2]["name"] == "article_content"
         assert "multi_analyzer_params" in res["fields"][2]["params"]
-        assert (
-            json.loads(res["fields"][2]["params"]["multi_analyzer_params"])
-            == multi_analyzer_params
-        )
+        assert json.loads(res["fields"][2]["params"]["multi_analyzer_params"]) == multi_analyzer_params
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_and_search_with_multi_analyzer(self):
@@ -3810,9 +3691,7 @@ class TestFullTextSearchMultiAnalyzer(TestcaseBase):
             ),
             FieldSchema(name="bm25_sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
-        schema = CollectionSchema(
-            fields=fields, description="Multi-analyzer BM25 test collection"
-        )
+        schema = CollectionSchema(fields=fields, description="Multi-analyzer BM25 test collection")
         bm25_func = Function(
             name="bm25",
             function_type=FunctionType.BM25,
@@ -3847,9 +3726,7 @@ class TestFullTextSearchMultiAnalyzer(TestcaseBase):
         for doc_id in range(idx, 3000):
             lang = random.choice(["en", "zh", "de", "jp", "unknown"])
             content = fake_map[lang].sentence()
-            add_data.append(
-                {"doc_id": doc_id, "language": lang, "article_content": content}
-            )
+            add_data.append({"doc_id": doc_id, "language": lang, "article_content": content})
         collection_w.insert(add_data)
         collection_w.create_index(
             "bm25_sparse_vector",
@@ -3912,9 +3789,7 @@ class TestFullTextSearchMultiAnalyzer(TestcaseBase):
             ),
             FieldSchema(name="bm25_sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
-        schema = CollectionSchema(
-            fields=fields, description="Multi-analyzer fallback test"
-        )
+        schema = CollectionSchema(fields=fields, description="Multi-analyzer fallback test")
         bm25_func = Function(
             name="bm25",
             function_type=FunctionType.BM25,
@@ -4015,9 +3890,7 @@ class TestFullTextSearchMultiAnalyzer(TestcaseBase):
             ),
             FieldSchema(name="bm25_sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
-        schema = CollectionSchema(
-            fields=fields, description="Multi-analyzer fallback test"
-        )
+        schema = CollectionSchema(fields=fields, description="Multi-analyzer fallback test")
         bm25_func = Function(
             name="bm25",
             function_type=FunctionType.BM25,
@@ -4036,8 +3909,7 @@ class TestFullTextSearchMultiAnalyzer(TestcaseBase):
             {
                 "doc_id": 2,
                 "language": "eng",
-                "article_content": "English text for testing"
-                + " ".join(stop_words * 5),
+                "article_content": "English text for testing" + " ".join(stop_words * 5),
             },
             {"doc_id": 3, "language": "zh", "article_content": "中文测试文本 "},
             {
@@ -4163,13 +4035,9 @@ class TestFullTextSearchMultiAnalyzer(TestcaseBase):
         for item in sample_data:
             doc_id = item["doc_id"]
             tokenized_query = item[text_field]
-            original_query = original_data.loc[
-                original_data["doc_id"] == doc_id, text_field
-            ].iloc[0]
+            original_query = original_data.loc[original_data["doc_id"] == doc_id, text_field].iloc[0]
             language = item[language_field]
-            res, mock_res = ft_checker.search(
-                original_query, tokenized_query, language, limit=5
-            )
+            res, mock_res = ft_checker.search(original_query, tokenized_query, language, limit=5)
             res_set = set([r["doc_id"] for r in res[0]])
             mock_res_set = set([r["doc_id"] for r in mock_res[0]])
             res_diff = res_set - mock_res_set
@@ -4211,9 +4079,7 @@ class TestFullTextSearchMultiAnalyzerInvalid(TestcaseBase):
             ),
             FieldSchema(name="bm25_sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
-        schema = CollectionSchema(
-            fields=fields, description="Invalid multi-analyzer test"
-        )
+        schema = CollectionSchema(fields=fields, description="Invalid multi-analyzer test")
         bm25_func = Function(
             name="bm25",
             function_type=FunctionType.BM25,
@@ -4251,9 +4117,7 @@ class TestFullTextSearchMultiAnalyzerInvalid(TestcaseBase):
             ),
             FieldSchema(name="bm25_sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
-        schema = CollectionSchema(
-            fields=fields, description="Invalid multi-analyzer test"
-        )
+        schema = CollectionSchema(fields=fields, description="Invalid multi-analyzer test")
         bm25_func = Function(
             name="bm25",
             function_type=FunctionType.BM25,
@@ -4291,9 +4155,7 @@ class TestFullTextSearchMultiAnalyzerInvalid(TestcaseBase):
             ),
             FieldSchema(name="bm25_sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
-        schema = CollectionSchema(
-            fields=fields, description="Invalid multi-analyzer test"
-        )
+        schema = CollectionSchema(fields=fields, description="Invalid multi-analyzer test")
         bm25_func = Function(
             name="bm25",
             function_type=FunctionType.BM25,
@@ -4379,9 +4241,7 @@ class TestFullTextSearchMultiAnalyzerInvalid(TestcaseBase):
             ),
             FieldSchema(name="bm25_sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
-        schema = CollectionSchema(
-            fields=fields, description="Invalid multi-analyzer test"
-        )
+        schema = CollectionSchema(fields=fields, description="Invalid multi-analyzer test")
         bm25_func = Function(
             name="bm25",
             function_type=FunctionType.BM25,
@@ -4421,9 +4281,7 @@ class TestFullTextSearchMultiAnalyzerInvalid(TestcaseBase):
             ),
             FieldSchema(name="bm25_sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
-        schema = CollectionSchema(
-            fields=fields, description="Invalid multi-analyzer test"
-        )
+        schema = CollectionSchema(fields=fields, description="Invalid multi-analyzer test")
         bm25_func = Function(
             name="bm25",
             function_type=FunctionType.BM25,

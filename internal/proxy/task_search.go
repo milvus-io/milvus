@@ -10,6 +10,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -88,13 +89,14 @@ type searchTask struct {
 
 	partitionIDsSet *typeutil.ConcurrentSet[UniqueID]
 
-	mixCoord        types.MixCoordClient
-	node            types.ProxyComponent
-	lb              shardclient.LBPolicy
-	shardClientMgr  shardclient.ShardClientMgr
-	queryChannelsTs map[string]Timestamp
-	queryInfos      []*planpb.QueryInfo
-	relatedDataSize int64
+	mixCoord          types.MixCoordClient
+	node              types.ProxyComponent
+	lb                shardclient.LBPolicy
+	shardClientMgr    shardclient.ShardClientMgr
+	queryChannelsTs   map[string]Timestamp
+	queryChannelsNode *typeutil.ConcurrentMap[string, int64]
+	queryInfos        []*planpb.QueryInfo
+	relatedDataSize   int64
 
 	// New reranker functions
 	functionScore *rerank.FunctionScore
@@ -442,9 +444,27 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
 	queryFieldIDs := []int64{}
 	for index, subReq := range t.request.GetSubReqs() {
-		plan, queryInfo, offset, _, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
+		plan, queryInfo, offset, subIsIterator, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
 		if err != nil {
 			return err
+		}
+
+		// Hybrid search supports plain top-K on ArrayOfVector fields. Advanced
+		// element-level features are intentionally not enabled in this 2.6 path.
+		annsField := typeutil.GetField(t.schema.CollectionSchema, queryInfo.GetQueryFieldId())
+		if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
+			if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
+				return merr.WrapErrParameterInvalid("", "",
+					"range search is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
+			}
+			if t.rankParams.GetGroupByFieldId() > 0 {
+				return merr.WrapErrParameterInvalid("", "",
+					"group by search is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
+			}
+			if subIsIterator {
+				return merr.WrapErrParameterInvalid("", "",
+					"search iterator is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
+			}
 		}
 
 		ignoreGrowing := t.IgnoreGrowing
@@ -853,6 +873,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute search %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
 
+	t.queryChannelsNode = typeutil.NewConcurrentMap[string, int64]()
 	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
 		Db:             t.request.GetDbName(),
 		CollectionID:   t.CollectionID,
@@ -1064,6 +1085,9 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	}
 	if t.resultBuf != nil {
 		t.resultBuf.Insert(result)
+	}
+	if t.queryChannelsNode != nil {
+		t.queryChannelsNode.Insert(channel, nodeID)
 	}
 	t.lb.UpdateCostMetrics(nodeID, result.CostAggregation)
 

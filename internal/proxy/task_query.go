@@ -75,6 +75,7 @@ type queryTask struct {
 	shardclientMgr   shardclient.ShardClientMgr
 	lb               shardclient.LBPolicy
 	channelsMvcc     map[string]Timestamp
+	preferredNodes   map[string]int64
 	fastSkip         bool
 
 	reQuery              bool
@@ -601,6 +602,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		CollectionName: t.collectionName,
 		Nq:             1,
 		Exec:           t.queryShard,
+		PreferredNodes: t.preferredNodes,
 	})
 	if err != nil {
 		log.Warn("fail to execute query", zap.Error(err))
@@ -772,7 +774,7 @@ func IDs2Expr(fieldName string, ids *schemapb.IDs) string {
 	return fieldName + " in [ " + idsStr + " ]"
 }
 
-func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, queryParams *queryParams) (*milvuspb.QueryResults, error) {
+func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, queryParams *queryParams, schema *schemapb.CollectionSchema) (*milvuspb.QueryResults, error) {
 	log.Ctx(ctx).Debug("reduceInternalRetrieveResults", zap.Int("len(retrieveResults)", len(retrieveResults)))
 	var (
 		ret     = &milvuspb.QueryResults{}
@@ -794,6 +796,10 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	}
 
 	cursors := make([]int64, len(validRetrieveResults))
+	idxComputers := make([]*typeutil.FieldDataIdxComputer, len(validRetrieveResults))
+	for i, vr := range validRetrieveResults {
+		idxComputers[i] = typeutil.NewFieldDataIdxComputerWithSchema(vr.GetFieldsData(), schema)
+	}
 
 	if queryParams != nil && queryParams.limit != typeutil.Unlimited {
 		// IReduceInOrderForBest will try to get as many results as possible
@@ -823,7 +829,8 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		if sel == -1 || (reduce.ShouldStopWhenDrained(queryParams.reduceType) && drainOneResult) {
 			break
 		}
-		retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
+		fieldIdxs := idxComputers[sel].Compute(cursors[sel])
+		retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel], fieldIdxs...)
 
 		// limit retrieve result to avoid oom
 		if retSize > maxOutputSize {
@@ -837,7 +844,7 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 }
 
 func reduceRetrieveResultsAndFillIfEmpty(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, queryParams *queryParams, outputFieldsID []int64, schema *schemapb.CollectionSchema) (*milvuspb.QueryResults, error) {
-	result, err := reduceRetrieveResults(ctx, retrieveResults, queryParams)
+	result, err := reduceRetrieveResults(ctx, retrieveResults, queryParams, schema)
 	if err != nil {
 		return nil, err
 	}

@@ -327,6 +327,10 @@ func (t *createCollectionTask) validateClusteringKey(ctx context.Context) error 
 	idx := -1
 	for i, field := range t.schema.Fields {
 		if field.GetIsClusteringKey() {
+			if !typeutil.IsClusteringKeyType(field.GetDataType()) {
+				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
+					fmt.Sprintf("clustering key field %s has unsupported data type %s", field.Name, field.GetDataType().String()))
+			}
 			if typeutil.IsVectorType(field.GetDataType()) &&
 				!paramtable.Get().CommonCfg.EnableVectorClusteringKey.GetAsBool() {
 				return merr.WrapErrCollectionVectorClusteringKeyNotAllowed(t.CollectionName)
@@ -601,13 +605,17 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg(msg)
 	}
 
+	if typeutil.IsVectorType(t.fieldSchema.DataType) {
+		vectorFields := len(typeutil.GetVectorFieldSchemas(t.oldSchema))
+		if vectorFields >= Params.ProxyCfg.MaxVectorFieldNum.GetAsInt() {
+			return fmt.Errorf("maximum vector field's number should be limited to %d", Params.ProxyCfg.MaxVectorFieldNum.GetAsInt())
+		}
+	}
+
 	if _, ok := schemapb.DataType_name[int32(t.fieldSchema.DataType)]; !ok || t.fieldSchema.GetDataType() == schemapb.DataType_None {
 		return merr.WrapErrParameterInvalid("valid field", fmt.Sprintf("field data type: %s is not supported", t.fieldSchema.GetDataType()))
 	}
 
-	if typeutil.IsVectorType(t.fieldSchema.DataType) {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add vector field, field name = %s", t.fieldSchema.Name))
-	}
 	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName}, t.fieldSchema.GetName()) {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add system field, field name = %s", t.fieldSchema.Name))
 	}
@@ -616,6 +624,17 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 	}
 	if !t.fieldSchema.Nullable {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("added field must be nullable, please check it, field name = %s", t.fieldSchema.Name))
+	}
+	if typeutil.IsVectorType(t.fieldSchema.DataType) && t.fieldSchema.Nullable {
+		if t.fieldSchema.DataType == schemapb.DataType_FloatVector ||
+			t.fieldSchema.DataType == schemapb.DataType_Float16Vector ||
+			t.fieldSchema.DataType == schemapb.DataType_BFloat16Vector ||
+			t.fieldSchema.DataType == schemapb.DataType_BinaryVector ||
+			t.fieldSchema.DataType == schemapb.DataType_Int8Vector {
+			if len(t.fieldSchema.TypeParams) == 0 {
+				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("vector field must have dimension specified, field name = %s", t.fieldSchema.Name))
+			}
+		}
 	}
 	if t.fieldSchema.AutoID {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("only primary field can speficy AutoID with true, field name = %s", t.fieldSchema.Name))

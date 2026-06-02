@@ -43,9 +43,9 @@ func GrpcAuthInterceptor(authFunc grpc_auth.AuthFunc) grpc.UnaryServerIntercepto
 			newCtx, err = authFunc(ctx)
 		}
 		if err != nil {
-			hookutil.GetExtension().ReportRefused(context.Background(), req, &milvuspb.BoolResponse{
+			hookutil.GetExtension().ReportAction(context.Background(), req, &milvuspb.BoolResponse{
 				Status: merr.Status(err),
-			}, err, info.FullMethod)
+			}, err, info.FullMethod, hookutil.ActionAuthorize)
 			return nil, err
 		}
 		return handler(newCtx, req)

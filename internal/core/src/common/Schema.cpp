@@ -87,6 +87,15 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         }
     }
 
+    for (const auto& function : schema_proto.functions()) {
+        if (function.type() != milvus::proto::schema::BM25) {
+            continue;
+        }
+        for (const auto output_field_id : function.output_field_ids()) {
+            schema->bm25_function_output_fields_.emplace(output_field_id);
+        }
+    }
+
     std::tie(schema->has_mmap_setting_, schema->mmap_enabled_) =
         GetBoolFromRepeatedKVs(schema_proto.properties(), MMAP_ENABLED_KEY);
 
@@ -109,6 +118,52 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
 const FieldMeta FieldMeta::RowIdMeta(
     FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
 
+namespace {
+
+bool
+IsNullableFixedWidthVectorField(const FieldMeta& meta) {
+    if (!meta.is_nullable()) {
+        return false;
+    }
+
+    switch (meta.get_data_type()) {
+        case DataType::VECTOR_FLOAT:
+        case DataType::VECTOR_BINARY:
+        case DataType::VECTOR_FLOAT16:
+        case DataType::VECTOR_BFLOAT16:
+        case DataType::VECTOR_INT8:
+            return true;
+        default:
+            return false;
+    }
+}
+
+std::shared_ptr<arrow::DataType>
+GetArrowDataTypeForSchema(const FieldMeta& meta, int dim) {
+    auto data_type = meta.get_data_type();
+    if (data_type == DataType::VECTOR_ARRAY) {
+        return GetArrowDataTypeForVectorArray(meta.get_element_type(),
+                                              meta.get_dim());
+    }
+    if (IsNullableFixedWidthVectorField(meta)) {
+        return arrow::binary();
+    }
+    return GetArrowDataType(data_type, dim);
+}
+
+std::shared_ptr<arrow::KeyValueMetadata>
+BuildArrowFieldMetadata(const FieldMeta& meta, int dim) {
+    auto metadata = std::make_shared<arrow::KeyValueMetadata>();
+    metadata->Append(milvus_storage::ARROW_FIELD_ID_KEY,
+                     std::to_string(meta.get_id().get()));
+    if (IsNullableFixedWidthVectorField(meta)) {
+        metadata->Append(DIM_KEY, std::to_string(dim));
+    }
+    return metadata;
+}
+
+}  // namespace
+
 const ArrowSchemaPtr
 Schema::ConvertToArrowSchema() const {
     arrow::FieldVector arrow_fields;
@@ -120,21 +175,13 @@ Schema::ConvertToArrowSchema() const {
                       ? meta.get_dim()
                       : 1;
 
-        std::shared_ptr<arrow::DataType> arrow_data_type = nullptr;
-        auto data_type = meta.get_data_type();
-        if (data_type == DataType::VECTOR_ARRAY) {
-            arrow_data_type = GetArrowDataTypeForVectorArray(
-                meta.get_element_type(), meta.get_dim());
-        } else {
-            arrow_data_type = GetArrowDataType(data_type, dim);
-        }
+        auto arrow_data_type = GetArrowDataTypeForSchema(meta, dim);
 
-        auto arrow_field = std::make_shared<arrow::Field>(
-            meta.get_name().get(),
-            arrow_data_type,
-            meta.is_nullable(),
-            arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
-                                      {std::to_string(meta.get_id().get())}));
+        auto arrow_field =
+            std::make_shared<arrow::Field>(meta.get_name().get(),
+                                           arrow_data_type,
+                                           meta.is_nullable(),
+                                           BuildArrowFieldMetadata(meta, dim));
         arrow_fields.push_back(arrow_field);
     }
     return arrow::schema(arrow_fields);

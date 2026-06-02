@@ -35,6 +35,7 @@
 #include "index/IndexInfo.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
+#include "index/VectorIndexValidDataUtils.h"
 #include "common/EasyAssert.h"
 #include "config/ConfigKnowhere.h"
 #include "knowhere/index/index_factory.h"
@@ -127,7 +128,7 @@ knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
 VectorMemIndex<T>::VectorIterators(const milvus::DatasetPtr dataset,
                                    const knowhere::Json& conf,
                                    const milvus::BitsetView& bitset) const {
-    return this->index_.AnnIterator(dataset, conf, bitset);
+    return this->index_.AnnIterator(dataset, conf, bitset, false);
 }
 
 template <typename T>
@@ -145,11 +146,17 @@ template <typename T>
 BinarySet
 VectorMemIndex<T>::Serialize(const Config& config) {
     knowhere::BinarySet ret;
-    auto stat = index_.Serialize(ret);
-    if (stat != knowhere::Status::success)
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  "failed to serialize index: {}",
-                  KnowhereStatusString(stat));
+    const auto& offset_mapping = GetOffsetMapping();
+    bool all_null_nullable = IsAllNullNullable(offset_mapping);
+    if (!all_null_nullable) {
+        auto stat = index_.Serialize(ret);
+        if (stat != knowhere::Status::success)
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "failed to serialize index: {}",
+                      KnowhereStatusString(stat));
+    }
+
+    AppendValidDataToBinarySet(offset_mapping, ret);
     Disassemble(ret);
 
     return ret;
@@ -159,12 +166,20 @@ template <typename T>
 void
 VectorMemIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
                                        const Config& config) {
-    auto stat = index_.Deserialize(binary_set, config);
-    if (stat != knowhere::Status::success)
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  "failed to Deserialize index: {}",
-                  KnowhereStatusString(stat));
-    SetDim(index_.Dim());
+    if (ContainsOnlyValidData(binary_set)) {
+        if (config.contains(DIM_KEY)) {
+            SetDim(GetDimFromConfig(config));
+        }
+    } else {
+        auto stat = index_.Deserialize(binary_set, config);
+        if (stat != knowhere::Status::success)
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "failed to Deserialize index: {}",
+                      KnowhereStatusString(stat));
+        SetDim(index_.Dim());
+    }
+
+    LoadValidDataFromBinarySet(binary_set, this);
 }
 
 template <typename T>
@@ -344,19 +359,53 @@ VectorMemIndex<T>::Build(const Config& config) {
     build_config.update(config);
     build_config.erase(INSERT_FILES_KEY);
     build_config.erase(VEC_OPT_FIELDS);
-    if (!IndexIsSparse(GetIndexType())) {
-        int64_t total_size = 0;
-        int64_t total_num_rows = 0;
-        int64_t dim = 0;
-        for (auto data : field_datas) {
-            total_size += data->Size();
-            total_num_rows += data->get_num_rows();
 
+    bool nullable = false;
+    int64_t total_valid_rows = 0;
+    int64_t total_num_rows = 0;
+    for (auto data : field_datas) {
+        auto num_rows = data->get_num_rows();
+        auto valid_rows = data->get_valid_rows();
+        total_valid_rows += valid_rows;
+        total_num_rows += num_rows;
+        if (data->IsNullable()) {
+            nullable = true;
+        }
+    }
+    std::unique_ptr<bool[]> valid_data;
+    if (nullable) {
+        valid_data.reset(new bool[total_num_rows]);
+        int64_t chunk_offset = 0;
+        for (auto data : field_datas) {
+            auto rows = data->get_num_rows();
+            // Copy valid data from FieldData (bitmap format to bool array)
+            auto src_bitmap = data->ValidData();
+            for (int64_t i = 0; i < rows; ++i) {
+                valid_data[chunk_offset + i] =
+                    (src_bitmap[i >> 3] >> (i & 7)) & 1;
+            }
+            chunk_offset += rows;
+        }
+    }
+
+    if (!IndexIsSparse(GetIndexType())) {
+        int64_t dim = 0;
+        int64_t total_size = 0;
+        for (auto data : field_datas) {
             AssertInfo(dim == 0 || dim == data->get_dim(),
                        "inconsistent dim value between field datas!");
             dim = data->get_dim();
+            if (elem_type_ == DataType::NONE) {
+                total_size += data->DataSize();
+            } else {
+                total_size += data->Size();
+            }
         }
-
+        if (nullable && total_valid_rows == 0) {
+            SetDim(dim);
+            BuildValidData(valid_data.get(), total_num_rows);
+            return;
+        }
         auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[total_size]);
 
         size_t lim_offset = 0;
@@ -367,8 +416,9 @@ VectorMemIndex<T>::Build(const Config& config) {
         if (elem_type_ == DataType::NONE) {
             // TODO: avoid copying
             for (auto data : field_datas) {
-                std::memcpy(buf.get() + offset, data->Data(), data->Size());
-                offset += data->Size();
+                auto valid_size = data->DataSize();
+                std::memcpy(buf.get() + offset, data->Data(), valid_size);
+                offset += valid_size;
                 data.reset();
             }
         } else {
@@ -401,12 +451,12 @@ VectorMemIndex<T>::Build(const Config& config) {
                 data.reset();
             }
 
-            total_num_rows = lim_offset;
+            total_valid_rows = lim_offset;
         }
 
         field_datas.clear();
 
-        auto dataset = GenDataset(total_num_rows, dim, buf.get());
+        auto dataset = GenDataset(total_valid_rows, dim, buf.get());
         if (!scalar_info.empty()) {
             dataset->Set(knowhere::meta::SCALAR_INFO, std::move(scalar_info));
         }
@@ -415,41 +465,50 @@ VectorMemIndex<T>::Build(const Config& config) {
                          const_cast<const size_t*>(offsets.data()));
         }
         BuildWithDataset(dataset, build_config);
+        if (nullable) {
+            BuildValidData(valid_data.get(), total_num_rows);
+        }
     } else {
         // sparse
-        int64_t total_rows = 0;
         int64_t dim = 0;
         for (auto field_data : field_datas) {
-            total_rows += field_data->Length();
             dim = std::max(
                 dim,
                 std::dynamic_pointer_cast<FieldData<SparseFloatVector>>(
                     field_data)
                     ->Dim());
         }
+        if (nullable && total_valid_rows == 0) {
+            SetDim(dim);
+            BuildValidData(valid_data.get(), total_num_rows);
+            return;
+        }
         std::vector<knowhere::sparse::SparseRow<SparseValueType>> vec(
-            total_rows);
+            total_valid_rows);
         int64_t offset = 0;
         for (auto field_data : field_datas) {
             auto ptr = static_cast<
                 const knowhere::sparse::SparseRow<SparseValueType>*>(
                 field_data->Data());
             AssertInfo(ptr, "failed to cast field data to sparse rows");
-            for (size_t i = 0; i < field_data->Length(); ++i) {
+            for (size_t i = 0; i < field_data->get_valid_rows(); ++i) {
                 // this does a deep copy of field_data's data.
                 // TODO: avoid copying by enforcing field data to give up
                 // ownership.
-                AssertInfo(dim >= ptr[i].dim(), "bad dim");
+                dim = std::max(dim, static_cast<int64_t>(ptr[i].dim()));
                 vec[offset + i] = ptr[i];
             }
-            offset += field_data->Length();
+            offset += field_data->get_valid_rows();
         }
-        auto dataset = GenDataset(total_rows, dim, vec.data());
+        auto dataset = GenDataset(total_valid_rows, dim, vec.data());
         dataset->SetIsSparse(true);
         if (!scalar_info.empty()) {
             dataset->Set(knowhere::meta::SCALAR_INFO, std::move(scalar_info));
         }
         BuildWithDataset(dataset, build_config);
+        if (nullable) {
+            BuildValidData(valid_data.get(), total_num_rows);
+        }
     }
 }
 
@@ -579,6 +638,10 @@ VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
 template <typename T>
 std::unique_ptr<const knowhere::sparse::SparseRow<SparseValueType>[]>
 VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
+    if (dataset->GetRows() == 0) {
+        return nullptr;
+    }
+
     auto res = index_.GetVectorByIds(dataset);
     if (!res.has_value()) {
         ThrowInfo(ErrorCode::UnexpectedError,
@@ -654,6 +717,40 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     LOG_INFO("load with slice meta: {}", !slice_meta_filepath.empty());
     std::chrono::duration<double> load_duration_sum;
     std::chrono::duration<double> write_disk_duration_sum;
+    std::unique_ptr<storage::DataCodec> valid_data_count_codec;
+    std::unique_ptr<storage::DataCodec> valid_data_codec;
+    std::map<std::string, IndexDataCodec> deferred_index_data_codecs;
+    bool wrote_index_data = false;
+    auto DeferIndexData = [&](const std::string& prefix,
+                              std::unique_ptr<storage::DataCodec>& index_data) {
+        auto& codec = deferred_index_data_codecs[prefix];
+        codec.size_ += index_data->PayloadSize();
+        codec.codecs_.push_back(std::move(index_data));
+    };
+    auto AssembleDeferredIndexData =
+        [&](const std::string& prefix) -> std::unique_ptr<storage::DataCodec> {
+        auto it = deferred_index_data_codecs.find(prefix);
+        if (it == deferred_index_data_codecs.end()) {
+            return nullptr;
+        }
+        return AssembleIndexDataCodec(std::move(it->second));
+    };
+    auto WriteIndexData = [&](const std::string& prefix,
+                              std::unique_ptr<storage::DataCodec>& index_data) {
+        if (prefix == knowhere::meta::EMB_LIST_META &&
+            embedding_list_meta_writer_ptr) {
+            embedding_list_meta_writer_ptr->Write(index_data->PayloadData(),
+                                                  index_data->PayloadSize());
+        } else if (prefix == VALID_DATA_COUNT_KEY) {
+            DeferIndexData(prefix, index_data);
+        } else if (prefix == VALID_DATA_KEY) {
+            DeferIndexData(prefix, index_data);
+        } else {
+            file_writer.Write(index_data->PayloadData(),
+                              index_data->PayloadSize());
+            wrote_index_data = true;
+        }
+    };
     // load files in two parts:
     // 1. EMB_LIST_META: Written separately to embedding_list_meta_writer_ptr (if embedding list type)
     // 2. All other binaries: Merged and written to file_writer, forming a unified index file for knowhere
@@ -687,14 +784,7 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
                                "lost index slice data");
                     auto&& data = batch_data[file_name];
                     auto start_write_file = std::chrono::system_clock::now();
-                    if (prefix == knowhere::meta::EMB_LIST_META &&
-                        embedding_list_meta_writer_ptr) {
-                        embedding_list_meta_writer_ptr->Write(
-                            data->PayloadData(), data->PayloadSize());
-                    } else {
-                        file_writer.Write(data->PayloadData(),
-                                          data->PayloadSize());
-                    }
+                    WriteIndexData(prefix, data);
                     write_disk_duration_sum +=
                         (std::chrono::system_clock::now() - start_write_file);
                 }
@@ -728,18 +818,13 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
         //2. write data into files
         auto start_write_file = std::chrono::system_clock::now();
         for (auto& [prefix, index_data] : result) {
-            if (prefix == knowhere::meta::EMB_LIST_META &&
-                embedding_list_meta_writer_ptr) {
-                embedding_list_meta_writer_ptr->Write(
-                    index_data->PayloadData(), index_data->PayloadSize());
-            } else {
-                file_writer.Write(index_data->PayloadData(),
-                                  index_data->PayloadSize());
-            }
+            WriteIndexData(prefix, index_data);
         }
         write_disk_duration_sum +=
             (std::chrono::system_clock::now() - start_write_file);
     }
+    valid_data_count_codec = AssembleDeferredIndexData(VALID_DATA_COUNT_KEY);
+    valid_data_codec = AssembleDeferredIndexData(VALID_DATA_KEY);
     milvus::monitor::internal_storage_download_duration.Observe(
         std::chrono::duration_cast<std::chrono::milliseconds>(load_duration_sum)
             .count());
@@ -752,7 +837,6 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
         embedding_list_meta_writer_ptr->Finish();
     }
 
-    LOG_INFO("load index into Knowhere...");
     auto conf = config;
     conf.erase(MMAP_FILE_PATH);
     conf[ENABLE_MMAP] = true;
@@ -760,21 +844,44 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
         conf["emb_list_meta_file_path"] = embedding_list_meta_path.value();
     }
     auto start_deserialize = std::chrono::system_clock::now();
-    auto stat = index_.DeserializeFromFile(local_filepath.value(), conf);
-    auto deserialize_duration =
-        std::chrono::system_clock::now() - start_deserialize;
-    if (stat != knowhere::Status::success) {
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  "failed to Deserialize index: {}",
-                  KnowhereStatusString(stat));
+    std::chrono::duration<double> deserialize_duration{};
+    if (wrote_index_data) {
+        LOG_INFO("load index into Knowhere...");
+        auto stat = index_.DeserializeFromFile(local_filepath.value(), conf);
+        deserialize_duration =
+            std::chrono::system_clock::now() - start_deserialize;
+        if (stat != knowhere::Status::success) {
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "failed to Deserialize index: {}",
+                      KnowhereStatusString(stat));
+        }
+        this->SetDim(index_.Dim());
+    } else {
+        LOG_INFO("load all-null nullable vector index valid data only...");
+        AssertInfo(valid_data_count_codec && valid_data_codec,
+                   "nullable vector index valid_data files are incomplete");
+        if (conf.contains(DIM_KEY)) {
+            this->SetDim(GetDimFromConfig(conf));
+        }
     }
     milvus::monitor::internal_storage_deserialize_duration.Observe(
         std::chrono::duration_cast<std::chrono::milliseconds>(
             deserialize_duration)
             .count());
 
-    auto dim = index_.Dim();
-    this->SetDim(index_.Dim());
+    // Restore valid_data for nullable vector support
+    if (valid_data_count_codec && valid_data_codec) {
+        size_t count;
+        std::memcpy(
+            &count, valid_data_count_codec->PayloadData(), sizeof(size_t));
+
+        std::unique_ptr<bool[]> valid_data(new bool[count]);
+        auto bitmap = valid_data_codec->PayloadData();
+        for (size_t i = 0; i < count; ++i) {
+            valid_data[i] = (bitmap[i / 8] >> (i % 8)) & 1;
+        }
+        BuildValidData(valid_data.get(), count);
+    }
 
     this->mmap_file_raii_ =
         std::make_unique<MmapFileRAII>(local_filepath.value());

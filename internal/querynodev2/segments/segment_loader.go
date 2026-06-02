@@ -957,12 +957,18 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 			IsLoaded:  true,
 		})
 	}
+	loadDataIndexSpan := tr.RecordSpan()
 
-	// load text indexes.
+	// Load text indexes in parallel through LoadPool.
+	futures := make([]*conc.Future[any], 0, len(textIndexes))
 	for _, info := range textIndexes {
-		if err := segment.LoadTextIndex(ctx, info, schemaHelper); err != nil {
-			return err
-		}
+		textIndexInfo := info
+		futures = append(futures, GetLoadPool().Submit(func() (any, error) {
+			return nil, segment.loadTextIndexCgo(ctx, textIndexInfo, schemaHelper)
+		}))
+	}
+	if err := conc.BlockOnAll(futures...); err != nil {
+		return err
 	}
 	loadTextIndexesSpan := tr.RecordSpan()
 
@@ -988,9 +994,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	}
 	patchEntryNumberSpan := tr.RecordSpan()
 	log.Info("Finish loading segment",
-		// zap.Duration("loadFieldsIndexSpan", loadFieldsIndexSpan),
-		// zap.Duration("complementScalarDataSpan", complementScalarDataSpan),
-		// zap.Duration("loadRawDataSpan", loadRawDataSpan),
+		zap.Duration("loadDataIndexSpan", loadDataIndexSpan),
 		zap.Duration("patchEntryNumberSpan", patchEntryNumberSpan),
 		zap.Duration("loadTextIndexesSpan", loadTextIndexesSpan),
 		zap.Duration("loadJsonKeyIndexSpan", loadJSONKeyIndexesSpan),

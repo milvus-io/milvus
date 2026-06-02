@@ -674,6 +674,8 @@ func Test_parseIndexParams(t *testing.T) {
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.HybridLowCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexLowCardinalityIndexType.GetValue()},
+			{Key: common.HybridHighCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexHighCardinalityIndexType.GetValue()},
 			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
@@ -718,6 +720,8 @@ func Test_parseIndexParams(t *testing.T) {
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.HybridLowCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexLowCardinalityIndexType.GetValue()},
+			{Key: common.HybridHighCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexHighCardinalityIndexType.GetValue()},
 			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
@@ -947,6 +951,8 @@ func Test_parseIndexParams(t *testing.T) {
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.HybridLowCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexLowCardinalityIndexType.GetValue()},
+			{Key: common.HybridHighCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexHighCardinalityIndexType.GetValue()},
 			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
@@ -977,6 +983,8 @@ func Test_parseIndexParams(t *testing.T) {
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.HybridLowCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexLowCardinalityIndexType.GetValue()},
+			{Key: common.HybridHighCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexHighCardinalityIndexType.GetValue()},
 			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
@@ -1007,6 +1015,8 @@ func Test_parseIndexParams(t *testing.T) {
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.HybridLowCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexLowCardinalityIndexType.GetValue()},
+			{Key: common.HybridHighCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexHighCardinalityIndexType.GetValue()},
 			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
@@ -1246,7 +1256,7 @@ func Test_checkEmbeddingListIndex(t *testing.T) {
 					},
 					{
 						Key:   common.MetricTypeKey,
-						Value: metric.L2,
+						Value: metric.HAMMING,
 					},
 				},
 				IndexName: "",
@@ -1263,7 +1273,7 @@ func Test_checkEmbeddingListIndex(t *testing.T) {
 			},
 		}
 		err := cit.parseIndexParams(context.TODO())
-		assert.True(t, strings.Contains(err.Error(), "array of vector index does not support metric type: L2"))
+		assert.True(t, strings.Contains(err.Error(), "array of vector with float element type does not support metric type: HAMMING"))
 	})
 
 	t.Run("metric type wrong", func(t *testing.T) {
@@ -1294,6 +1304,75 @@ func Test_checkEmbeddingListIndex(t *testing.T) {
 		}
 		err := cit.parseIndexParams(context.TODO())
 		assert.True(t, strings.Contains(err.Error(), "float vector index does not support metric type: MAX_SIM"))
+	})
+}
+
+func Test_arrayOfVector_nonEmbListMetric_indexCompat(t *testing.T) {
+	t.Run("ArrayOfVector with COSINE should accept IVF_FLAT", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+					{Key: common.MetricTypeKey, Value: metric.COSINE},
+					{Key: "nlist", Value: "128"},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:     101,
+				Name:        "vec_field",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+	})
+
+	t.Run("ArrayOfVector with COSINE should accept HNSW", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "HNSW"},
+					{Key: common.MetricTypeKey, Value: metric.COSINE},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:     101,
+				Name:        "vec_field",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+	})
+
+	t.Run("ArrayOfVector with MaxSimCosine should accept HNSW", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "HNSW"},
+					{Key: common.MetricTypeKey, Value: metric.MaxSimCosine},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:     101,
+				Name:        "vec_field",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
 	})
 }
 

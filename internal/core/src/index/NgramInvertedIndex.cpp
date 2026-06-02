@@ -10,10 +10,48 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "index/NgramInvertedIndex.h"
+
+#include <simdjson.h>
+#include <string.h>
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <exception>
+#include <map>
+#include <string_view>
+#include <utility>
+
+#include "bitset/bitset.h"
+#include "boost/filesystem/operations.hpp"
+#include "common/EasyAssert.h"
+#include "common/FieldDataInterface.h"
+#include "common/Json.h"
+#include "common/JsonCastFunction.h"
+#include "common/JsonCastType.h"
+#include "common/RegexQuery.h"
 #include "exec/expression/Expr.h"
+#include "glog/logging.h"
 #include "index/JsonIndexBuilder.h"
+#include "index/Meta.h"
+#include "index/Utils.h"
+#include "knowhere/binaryset.h"
+#include "log/Log.h"
+#include "nlohmann/json.hpp"
+#include "opentelemetry/trace/span.h"
+#include "pb/common.pb.h"
+#include "pb/schema.pb.h"
+#include "simdjson/error.h"
+#include "storage/DataCodec.h"
+#include "storage/DiskFileManagerImpl.h"
+#include "storage/IndexEntryReader.h"
+#include "storage/IndexEntryWriter.h"
+#include "storage/MemFileManagerImpl.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
 
 namespace milvus::index {
+
+const std::string NGRAM_AVG_ROW_SIZE_FILE_NAME = "ngram_avg_row_size";
 
 const JsonCastType JSON_CAST_TYPE = JsonCastType::FromString("VARCHAR");
 // ngram index doesn't need cast function
@@ -26,7 +64,7 @@ NgramInvertedIndex::NgramInvertedIndex(const storage::FileManagerContext& ctx,
     : min_gram_(params.min_gram), max_gram_(params.max_gram) {
     schema_ = ctx.fieldDataMeta.field_schema;
     field_id_ = ctx.fieldDataMeta.field_id;
-    mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
+    file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
 
     if (params.loading_index) {
@@ -65,6 +103,25 @@ NgramInvertedIndex::BuildWithFieldData(const std::vector<FieldDataPtr>& datas) {
     if (schema_.data_type() == proto::schema::DataType::JSON) {
         BuildWithJsonFieldData(datas);
     } else {
+        // Calculate avg_row_size for String/VarChar types
+        size_t total_bytes = 0;
+        size_t total_rows = 0;
+        for (const auto& data : datas) {
+            auto n = data->get_num_rows();
+            for (size_t i = 0; i < n; i++) {
+                if (schema_.nullable() && !data->is_valid(i)) {
+                    continue;
+                }
+                auto* str = static_cast<const std::string*>(data->RawValue(i));
+                if (str) {
+                    total_bytes += str->size();
+                    total_rows += 1;
+                }
+            }
+        }
+        avg_row_size_ = total_rows > 0 ? total_bytes / total_rows : 0;
+        LOG_INFO("Ngram index avg_row_size: {} bytes", avg_row_size_);
+
         InvertedIndexTantivy<std::string>::BuildWithFieldData(datas);
     }
 }
@@ -80,6 +137,11 @@ NgramInvertedIndex::BuildWithJsonFieldData(
              nested_path_);
 
     index_build_begin_ = std::chrono::system_clock::now();
+
+    // Track total bytes and rows for avg_row_size calculation
+    size_t total_bytes = 0;
+    size_t total_rows = 0;
+
     ProcessJsonFieldData<std::string>(
         field_datas,
         this->schema_,
@@ -87,22 +149,34 @@ NgramInvertedIndex::BuildWithJsonFieldData(
         JSON_CAST_TYPE,
         JSON_CAST_FUNCTION,
         // add data
-        [this](const std::string* data, int64_t size, int64_t offset) {
+        [this, &total_bytes, &total_rows](
+            const std::string* data, int64_t size, int64_t offset) {
             this->wrapper_->template add_array_data<std::string>(
                 data, size, offset);
+            // Track row size
+            if (data && size > 0) {
+                total_bytes += data->size();
+                total_rows++;
+            }
         },
         // handle null
         [this](int64_t offset) { this->null_offset_.push_back(offset); },
         // handle non exist
-        [this](int64_t offset) {},
+        [](int64_t offset) {},
         // handle error
         [this](const Json& json,
                const std::string& nested_path,
                simdjson::error_code error) {
             this->error_recorder_.Record(json, nested_path, error);
         });
-
+    avg_row_size_ = total_rows > 0 ? total_bytes / total_rows : 0;
+    LOG_INFO("Ngram index (JSON) avg_row_size: {} bytes", avg_row_size_);
     error_recorder_.PrintErrStats();
+}
+
+BinarySet
+NgramInvertedIndex::Serialize(const Config& config) {
+    return InvertedIndexTantivy<std::string>::Serialize(config);
 }
 
 IndexStatsPtr
@@ -114,11 +188,84 @@ NgramInvertedIndex::Upload(const Config& config) {
             .count();
     LOG_INFO(
         "index build done for ngram index, data type {}, field id: {}, "
-        "duration: {}s",
+        "duration: {}s, avg_row_size: {} bytes",
         schema_.data_type(),
         field_id_,
-        index_build_duration);
+        index_build_duration,
+        avg_row_size_);
+
     return InvertedIndexTantivy<std::string>::Upload(config);
+}
+
+void
+NgramInvertedIndex::WriteEntries(storage::IndexEntryWriter* writer) {
+    // Call parent to write tantivy index files and null_offset
+    InvertedIndexTantivy<std::string>::WriteEntries(writer);
+
+    // Write ngram-specific metadata (avg_row_size)
+    writer->WriteEntry(
+        NGRAM_AVG_ROW_SIZE_FILE_NAME, &avg_row_size_, sizeof(size_t));
+    LOG_INFO("wrote ngram avg_row_size: {} bytes", avg_row_size_);
+}
+
+void
+NgramInvertedIndex::LoadEntries(storage::IndexEntryReader& reader,
+                                const Config& config) {
+    InvertedIndexTantivy<std::string>::LoadEntries(reader, config);
+
+    auto avg_row_entry = reader.ReadEntry(NGRAM_AVG_ROW_SIZE_FILE_NAME);
+    std::memcpy(&avg_row_size_, avg_row_entry.data.data(), sizeof(size_t));
+
+    LOG_INFO("LoadEntries NgramInvertedIndex done, avg_row_size: {} bytes",
+             avg_row_size_);
+}
+
+void
+NgramInvertedIndex::LoadIndexMetas(const std::vector<std::string>& index_files,
+                                   const Config& config) {
+    // Call parent to load null_offset
+    InvertedIndexTantivy<std::string>::LoadIndexMetas(index_files, config);
+
+    // Load avg_row_size
+    auto avg_row_size_it = std::find_if(
+        index_files.begin(), index_files.end(), [](const std::string& file) {
+            return file.find(NGRAM_AVG_ROW_SIZE_FILE_NAME) != std::string::npos;
+        });
+
+    if (avg_row_size_it != index_files.end()) {
+        auto load_priority =
+            GetValueFromConfig<milvus::proto::common::LoadPriority>(
+                config, milvus::LOAD_PRIORITY)
+                .value_or(milvus::proto::common::LoadPriority::HIGH);
+        // avg_row_size is only 8 bytes, never sliced
+        auto index_datas =
+            file_manager_->LoadIndexToMemory({*avg_row_size_it}, load_priority);
+        auto avg_row_size_data =
+            std::move(index_datas.at(NGRAM_AVG_ROW_SIZE_FILE_NAME));
+        memcpy(
+            &avg_row_size_, avg_row_size_data->PayloadData(), sizeof(size_t));
+        LOG_INFO("Loaded ngram index avg_row_size: {} bytes", avg_row_size_);
+    } else {
+        avg_row_size_ = 0;
+        LOG_INFO("No avg_row_size metadata found");
+    }
+}
+
+void
+NgramInvertedIndex::RetainTantivyIndexFiles(
+    std::vector<std::string>& index_files) {
+    // Call parent to filter null_offset
+    InvertedIndexTantivy<std::string>::RetainTantivyIndexFiles(index_files);
+
+    // Also filter avg_row_size
+    index_files.erase(
+        std::remove_if(index_files.begin(),
+                       index_files.end(),
+                       [](const std::string& file) {
+                           return file.find(NGRAM_AVG_ROW_SIZE_FILE_NAME) !=
+                                  std::string::npos;
+                       }),
+        index_files.end());
 }
 
 void
@@ -128,35 +275,15 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load ngram index");
+    auto files_value = index_files.value();
+
+    LoadIndexMetas(files_value, config);
+    RetainTantivyIndexFiles(files_value);
 
     auto load_priority =
         GetValueFromConfig<milvus::proto::common::LoadPriority>(
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
-    auto files_value = std::move(*index_files);
-    auto it = std::find_if(
-        files_value.begin(), files_value.end(), [](const std::string& file) {
-            constexpr std::string_view suffix{"/index_null_offset"};
-            return file.size() >= suffix.size() &&
-                   std::equal(suffix.rbegin(), suffix.rend(), file.rbegin());
-        });
-    if (it != files_value.end()) {
-        std::vector<std::string> file;
-        file.push_back(*it);
-        files_value.erase(it);
-        auto index_datas =
-            mem_file_manager_->LoadIndexToMemory(file, load_priority);
-        BinarySet binary_set;
-        AssembleIndexDatas(index_datas, binary_set);
-        // clear index_datas to free memory early
-        index_datas.clear();
-        auto index_valid_data = binary_set.GetByName("index_null_offset");
-        null_offset_.resize((size_t)index_valid_data->size / sizeof(size_t));
-        memcpy(null_offset_.data(),
-               index_valid_data->data.get(),
-               (size_t)index_valid_data->size);
-    }
-
     disk_file_manager_->CacheNgramIndexToDisk(files_value, load_priority);
     AssertInfo(
         tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
