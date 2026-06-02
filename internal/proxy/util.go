@@ -84,7 +84,7 @@ const (
 	DefaultStringIndexType = indexparamcheck.IndexINVERTED
 )
 
-var logger = mlog.L().WithOptions(mlog.Fields(mlog.String("role", typeutil.ProxyRole)))
+var logger = mlog.L().With(mlog.String("role", typeutil.ProxyRole))
 
 // transformStructFieldNames transforms struct field names to structName[fieldName] format
 // This ensures global uniqueness while allowing same field names across different structs
