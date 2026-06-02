@@ -37,13 +37,11 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
     FieldId field_id,
     int64_t& current_chunk_id,
     int64_t& current_chunk_pos,
-    const std::vector<PinWrapper<const index::IndexBase*>>& pinned_index)
-    const {
+    PinnedIndexView pinned_index) const {
     const index::IndexBase* index = nullptr;
     if (current_chunk_id < pinned_index.size()) {
         index = pinned_index[current_chunk_id].get();
     }
-
     if (index) {
         auto index_ptr = dynamic_cast<const index::ScalarIndex<T>*>(index);
         if (index_ptr->HasRawData()) {
@@ -61,6 +59,12 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
                 };
         }
     }
+    auto num_chunks = segment_->num_chunk_data(field_id);
+    AssertInfo(current_chunk_id < num_chunks,
+               "field {} cursor chunk_id {} exceeds num_chunks {}",
+               field_id.get(),
+               current_chunk_id,
+               num_chunks);
     // pw is captured by value, each time we need to access a new chunk, we need to
     // pin a new Chunk.
     auto pw = segment_->chunk_data<T>(op_ctx_, field_id, current_chunk_id);
@@ -75,6 +79,11 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
         if (current_chunk_pos >= current_chunk_size) {
             current_chunk_id++;
             current_chunk_pos = 0;
+            AssertInfo(current_chunk_id < num_chunks,
+                       "field {} cursor chunk_id {} exceeds num_chunks {}",
+                       field_id.get(),
+                       current_chunk_id,
+                       num_chunks);
             // the old chunk will be unpinned, pw will now pin the new chunk.
             pw = segment_->chunk_data<T>(op_ctx_, field_id, current_chunk_id);
             chunk_data = pw.get().data();
@@ -96,13 +105,11 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
     FieldId field_id,
     int64_t& current_chunk_id,
     int64_t& current_chunk_pos,
-    const std::vector<PinWrapper<const index::IndexBase*>>& pinned_index)
-    const {
+    PinnedIndexView pinned_index) const {
     const index::IndexBase* index = nullptr;
     if (current_chunk_id < pinned_index.size()) {
         index = pinned_index[current_chunk_id].get();
     }
-
     if (index) {
         auto index_ptr =
             dynamic_cast<const index::ScalarIndex<std::string>*>(index);
@@ -120,6 +127,12 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
             };
         }
     }
+    auto num_chunks = segment_->num_chunk_data(field_id);
+    AssertInfo(current_chunk_id < num_chunks,
+               "field {} cursor chunk_id {} exceeds num_chunks {}",
+               field_id.get(),
+               current_chunk_id,
+               num_chunks);
     if (segment_->type() == SegmentType::Growing &&
         !storage::MmapManager::GetInstance()
              .GetMmapConfig()
@@ -137,12 +150,18 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
                 chunk_data,
                 chunk_valid_data,
                 current_chunk_size,
+                num_chunks,
                 // pw = std::move(pw),
                 &current_chunk_id,
                 &current_chunk_pos]() mutable -> const data_access_type {
             if (current_chunk_pos >= current_chunk_size) {
                 current_chunk_id++;
                 current_chunk_pos = 0;
+                AssertInfo(current_chunk_id < num_chunks,
+                           "field {} cursor chunk_id {} exceeds num_chunks {}",
+                           field_id.get(),
+                           current_chunk_id,
+                           num_chunks);
                 pw = segment_->chunk_data<std::string>(
                     op_ctx_, field_id, current_chunk_id);
                 chunk_data = pw.get().data();
@@ -169,6 +188,11 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
             if (current_chunk_pos >= current_chunk_size) {
                 current_chunk_id++;
                 current_chunk_pos = 0;
+                AssertInfo(current_chunk_id < num_chunks,
+                           "field {} cursor chunk_id {} exceeds num_chunks {}",
+                           field_id.get(),
+                           current_chunk_id,
+                           num_chunks);
                 pw = segment_->chunk_view<std::string_view>(
                     op_ctx_, field_id, current_chunk_id);
                 current_chunk_size =
@@ -192,8 +216,7 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
     FieldId field_id,
     int64_t& current_chunk_id,
     int64_t& current_chunk_pos,
-    const std::vector<PinWrapper<const index::IndexBase*>>& pinned_index)
-    const {
+    PinnedIndexView pinned_index) const {
     switch (data_type) {
         case DataType::BOOL:
             return GetMultipleChunkDataAccessor<bool>(
@@ -230,12 +253,10 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
 
 template <typename T>
 ChunkDataAccessor
-SegmentChunkReader::GetChunkDataAccessor(
-    FieldId field_id,
-    int chunk_id,
-    int data_barrier,
-    const std::vector<PinWrapper<const index::IndexBase*>>& pinned_index)
-    const {
+SegmentChunkReader::GetChunkDataAccessor(FieldId field_id,
+                                         int chunk_id,
+                                         int data_barrier,
+                                         PinnedIndexView pinned_index) const {
     if (chunk_id >= data_barrier) {
         auto index = pinned_index[chunk_id].get();
         auto index_ptr = dynamic_cast<const index::ScalarIndex<T>*>(index);
@@ -267,8 +288,7 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
     FieldId field_id,
     int chunk_id,
     int data_barrier,
-    const std::vector<PinWrapper<const index::IndexBase*>>& pinned_index)
-    const {
+    PinnedIndexView pinned_index) const {
     if (chunk_id >= data_barrier) {
         auto index = pinned_index[chunk_id].get();
         auto index_ptr =
@@ -312,13 +332,11 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
 }
 
 ChunkDataAccessor
-SegmentChunkReader::GetChunkDataAccessor(
-    DataType data_type,
-    FieldId field_id,
-    int chunk_id,
-    int data_barrier,
-    const std::vector<PinWrapper<const index::IndexBase*>>& pinned_index)
-    const {
+SegmentChunkReader::GetChunkDataAccessor(DataType data_type,
+                                         FieldId field_id,
+                                         int chunk_id,
+                                         int data_barrier,
+                                         PinnedIndexView pinned_index) const {
     switch (data_type) {
         case DataType::BOOL:
             return GetChunkDataAccessor<bool>(
