@@ -19,6 +19,7 @@
 #include <math.h>
 #include <string.h>
 #include <algorithm>
+#include <boost/filesystem/path.hpp>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
@@ -59,6 +60,49 @@
 #include "storage/Util.h"
 
 namespace milvus::index {
+
+namespace {
+
+std::string
+GetDiskAnnFilePrefix(const std::string& index_file) {
+    auto file_name = boost::filesystem::path(index_file).filename().string();
+    AssertInfo(!file_name.empty() && file_name.size() < index_file.size(),
+               "index file path has no parent path: {}",
+               index_file);
+    // Keep the original trailing separator. Knowhere appends fixed file names
+    // such as "_mem.index.bin" directly to this prefix when stream loading.
+    return index_file.substr(0, index_file.size() - file_name.size());
+}
+
+}  // namespace
+
+std::string
+ResolveDiskAnnLoadIndexPrefix(const Config& config,
+                              const std::string& local_index_path_prefix,
+                              bool load_index_with_stream) {
+    if (!load_index_with_stream) {
+        return local_index_path_prefix;
+    }
+
+    auto index_files =
+        GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
+    AssertInfo(index_files.has_value() && !index_files->empty(),
+               "index file paths is empty when load disk ann index with "
+               "stream");
+
+    auto index_prefix = GetDiskAnnFilePrefix(index_files->front());
+
+    for (const auto& index_file : index_files.value()) {
+        auto file_prefix = GetDiskAnnFilePrefix(index_file);
+        AssertInfo(file_prefix == index_prefix,
+                   "stream-loaded disk index files must share the same parent "
+                   "path, expected {}, got {} from {}",
+                   index_prefix,
+                   file_prefix,
+                   index_file);
+    }
+    return index_prefix;
+}
 
 #define kSearchListMaxValue1 200    // used if tok <= 20
 #define kSearchListMaxValue2 65535  // used for topk > 20
@@ -911,9 +955,11 @@ VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
     knowhere::Json load_config;
     load_config.update(config);
 
-    // set data path
+    // Non-stream load reads the local cache populated by CacheIndexToDisk.
+    // Stream load skips that cache, so the prefix must stay remote/logical.
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
-    load_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
+    load_config[DISK_ANN_PREFIX_PATH] = ResolveDiskAnnLoadIndexPrefix(
+        config, local_index_path_prefix, index_.LoadIndexWithStream());
 
     if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
         // set base info

@@ -329,6 +329,45 @@ TEST_F(DiskAnnFileManagerTest, GetRemoteIndexObjectPrefix_V1CollectionRooted) {
                 std::string::npos);
 }
 
+TEST_F(DiskAnnFileManagerTest, ResolveStreamLoadPrefixFromIndexFiles) {
+    const std::string local_prefix =
+        "/milvus/data/cache/12/local_chunk/index_files/1000_1_30_5/";
+    milvus::Config config;
+    config[milvus::index::INDEX_FILES] =
+        std::vector<std::string>{"index_v1/100/20/30/1000/1/_mem.index.bin"};
+
+    auto prefix = milvus::index::ResolveDiskAnnLoadIndexPrefix(
+        config, local_prefix, true);
+
+    EXPECT_EQ(prefix, "index_v1/100/20/30/1000/1/");
+    EXPECT_EQ(prefix + "_mem.index.bin",
+              "index_v1/100/20/30/1000/1/_mem.index.bin");
+}
+
+TEST_F(DiskAnnFileManagerTest, ResolveNonStreamLoadPrefixFromLocalCache) {
+    const std::string local_prefix =
+        "/milvus/data/cache/12/local_chunk/index_files/1000_1_30_5/";
+    milvus::Config config;
+    config[milvus::index::INDEX_FILES] =
+        std::vector<std::string>{"index_v1/100/20/30/1000/1/_mem.index.bin"};
+
+    auto prefix = milvus::index::ResolveDiskAnnLoadIndexPrefix(
+        config, local_prefix, false);
+
+    EXPECT_EQ(prefix, local_prefix);
+}
+
+TEST_F(DiskAnnFileManagerTest, LocalIndexCachePathIsDetected) {
+    EXPECT_TRUE(FileManagerImpl::IsLocalIndexCachePath(
+        "/milvus/data/cache/12/local_chunk/index_files/"
+        "1000_1_3_100/_mem.index.bin"));
+    EXPECT_FALSE(FileManagerImpl::IsLocalIndexCachePath(
+        "local_chunk/index_files/1000_1_3_100/_mem.index.bin"));
+    EXPECT_FALSE(FileManagerImpl::IsLocalIndexCachePath(
+        "/milvus/data/cache/12/local_chunk/text_log/"
+        "1000_1_3_100/log.bin"));
+}
+
 TEST_F(DiskAnnFileManagerTest, V3PackedIndexPathMismatch) {
     FieldDataMeta filed_data_meta = {1, 2, 3, 100};
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};

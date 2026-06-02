@@ -17,12 +17,18 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "index/VectorIndex.h"
 #include "storage/DiskFileManagerImpl.h"
 
 namespace milvus::index {
+
+std::string
+ResolveDiskAnnLoadIndexPrefix(const Config& config,
+                              const std::string& local_index_path_prefix,
+                              bool load_index_with_stream);
 
 template <typename T>
 class VectorDiskAnnIndex : public VectorIndex {

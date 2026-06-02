@@ -192,6 +192,10 @@ class FileManagerImpl : public milvus::FileManager {
     std::shared_ptr<InputStream>
     OpenInputStream(const std::string& filename, bool is_index_file) {
         AssertInfo(fs_, "fs_ is nullptr, cannot open input stream");
+        AssertInfo(
+            !IsLocalCachePathForRemoteIndexStream(filename, is_index_file),
+            "remote index stream received local cache path: {}",
+            filename);
         std::string remote_file_path;
         if (ShouldOpenIndexFileDirectly(filename, is_index_file)) {
             remote_file_path = NormalizePath(filename);
@@ -327,6 +331,33 @@ class FileManagerImpl : public milvus::FileManager {
     static std::string
     GetFileName(const std::string& filepath) {
         return boost::filesystem::path(filepath).filename().string();
+    }
+
+    bool
+    IsLocalCachePathForRemoteIndexStream(const std::string& filename,
+                                         bool is_index_file) const {
+        if (!is_index_file || milvus_storage::IsLocalFileSystem(fs_)) {
+            return false;
+        }
+
+        if (!boost::filesystem::path(filename).is_absolute()) {
+            return false;
+        }
+
+        return IsLocalIndexCachePath(filename);
+    }
+
+    // A local cache path is only valid after downloading index files to disk.
+    // Remote streams must not treat it as an object-store key.
+    static bool
+    IsLocalIndexCachePath(const std::string& filename) {
+        if (!boost::filesystem::path(filename).is_absolute()) {
+            return false;
+        }
+
+        auto normalized = NormalizePath(filename);
+        return normalized.find("/local_chunk/index_files/") !=
+               std::string::npos;
     }
 
     bool
