@@ -16,7 +16,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -102,13 +101,7 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 		return nil, 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("targetSize %d MB should be greater than or equal to configMaxSize %d MB", targetSize, configMaxSize/(1024*1024)))
 	}
 
-	segments := policy.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
-		return isSegmentHealthy(segment) &&
-			isFlushed(segment) &&
-			!segment.isCompacting &&
-			!segment.GetIsImporting() &&
-			segment.GetLevel() != datapb.SegmentLevel_L0
-	}))
+	segments := policy.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(isNormalManualCompactionCandidate))
 
 	if len(segments) == 0 {
 		log.Info("no eligible segments for force merge")
