@@ -7058,6 +7058,72 @@ func TestValidateAddFieldRequest(t *testing.T) {
 		assert.Contains(t, err.Error(), "does not support external field mapping")
 	})
 
+	t.Run("external collection requires external field mapping", func(t *testing.T) {
+		schema := baseSchema()
+		for _, field := range schema.GetFields() {
+			field.ExternalField = field.GetName()
+		}
+		newField := &schemapb.FieldSchema{
+			Name:     "score",
+			DataType: schemapb.DataType_Double,
+			Nullable: true,
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "requires external_field mapping")
+	})
+
+	t.Run("external collection allows external field mapping", func(t *testing.T) {
+		schema := baseSchema()
+		for _, field := range schema.GetFields() {
+			field.ExternalField = field.GetName()
+		}
+		newField := &schemapb.FieldSchema{
+			Name:          "score",
+			DataType:      schemapb.DataType_Double,
+			Nullable:      true,
+			ExternalField: "score",
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.NoError(t, err)
+	})
+
+	t.Run("external collection rejects unsupported field type", func(t *testing.T) {
+		schema := baseSchema()
+		for _, field := range schema.GetFields() {
+			field.ExternalField = field.GetName()
+		}
+		newField := &schemapb.FieldSchema{
+			Name:          "sparse",
+			DataType:      schemapb.DataType_SparseFloatVector,
+			ExternalField: "sparse",
+		}
+		err := validateAddFieldRequest(schema, newField)
+		if assert.Error(t, err) {
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "does not support field type")
+		}
+	})
+
+	t.Run("external collection rejects duplicate external field mapping", func(t *testing.T) {
+		schema := baseSchema()
+		for _, field := range schema.GetFields() {
+			field.ExternalField = field.GetName()
+		}
+		newField := &schemapb.FieldSchema{
+			Name:          "score",
+			DataType:      schemapb.DataType_Double,
+			Nullable:      true,
+			ExternalField: "vec",
+		}
+		err := validateAddFieldRequest(schema, newField)
+		if assert.Error(t, err) {
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "external_field \"vec\" is mapped by multiple fields")
+		}
+	})
+
 	t.Run("system field name RowID", func(t *testing.T) {
 		schema := baseSchema()
 		newField := &schemapb.FieldSchema{

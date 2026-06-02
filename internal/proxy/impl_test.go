@@ -2367,9 +2367,8 @@ func TestProxy_ImportV2_ExternalCollection(t *testing.T) {
 }
 
 func TestProxy_AddCollectionField_ExternalCollection(t *testing.T) {
-	cache := globalMetaCache
-	defer func() { globalMetaCache = cache }()
-	globalMetaCache = &MetaCache{}
+	node := createTestProxy()
+	defer node.sched.Close()
 
 	externalSchema := &schemapb.CollectionSchema{
 		Name: "external_col",
@@ -2377,25 +2376,31 @@ func TestProxy_AddCollectionField_ExternalCollection(t *testing.T) {
 			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
-
-	m1 := mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+	mockDescribe := mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 		Status: merr.Success(),
 		Schema: externalSchema,
 	}, nil).Build()
-	defer m1.UnPatch()
+	defer mockDescribe.UnPatch()
 
-	proxy := &Proxy{}
-	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+	mockEnqueue := mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, queued task) error {
+		_ = queued.OnEnqueue()
+		addTask := queued.(*addCollectionFieldTask)
+		assert.Equal(t, externalSchema, addTask.oldSchema)
+		addTask.result = merr.Success()
+		return nil
+	}).Build()
+	defer mockEnqueue.UnPatch()
 
-	req := &milvuspb.AddCollectionFieldRequest{
+	mockWait := mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
+	defer mockWait.UnPatch()
+
+	resp, err := node.AddCollectionField(context.Background(), &milvuspb.AddCollectionFieldRequest{
 		DbName:         "default",
 		CollectionName: "external_col",
-	}
-
-	resp, err := proxy.AddCollectionField(context.Background(), req)
+		Schema:         []byte{1},
+	})
 	assert.NoError(t, err)
-	assert.Error(t, merr.Error(resp))
-	assert.Contains(t, resp.GetReason(), "add field operation is not supported for external collection")
+	assert.True(t, merr.Ok(resp))
 }
 
 func TestProxy_AddCollectionField_DoesNotBlockOnSchemaVersion(t *testing.T) {

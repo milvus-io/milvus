@@ -2625,16 +2625,8 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 	// Each external_field column must back at most one user field. A single
 	// physical column cannot satisfy two distinct type bindings, and even
 	// same-type aliasing has no semantic value here.
-	for ext, owners := range externalFieldOwners {
-		if len(owners) <= 1 {
-			continue
-		}
-		parts := make([]string, 0, len(owners))
-		for _, f := range owners {
-			parts = append(parts, fmt.Sprintf("%s (%s)", f.GetName(), f.GetDataType().String()))
-		}
-		return fmt.Errorf("external_field %q is mapped by multiple fields: %s; each external_field must be referenced by at most one user field",
-			ext, strings.Join(parts, ", "))
+	if err := validateUniqueExternalFieldOwners(externalFieldOwners); err != nil {
+		return err
 	}
 
 	// Pass 2: normalize. All fields passed validation; safe to mutate.
@@ -2658,6 +2650,21 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 		}
 	}
 
+	return nil
+}
+
+func validateUniqueExternalFieldOwners(externalFieldOwners map[string][]*schemapb.FieldSchema) error {
+	for ext, owners := range externalFieldOwners {
+		if len(owners) <= 1 {
+			continue
+		}
+		parts := make([]string, 0, len(owners))
+		for _, f := range owners {
+			parts = append(parts, fmt.Sprintf("%s (%s)", f.GetName(), f.GetDataType().String()))
+		}
+		return fmt.Errorf("external_field %q is mapped by multiple fields: %s; each external_field must be referenced by at most one user field",
+			ext, strings.Join(parts, ", "))
+	}
 	return nil
 }
 
@@ -2704,13 +2711,20 @@ func isExternalGeneratedField(field *schemapb.FieldSchema, generatedColumns map[
 	return generatedColumns[strconv.FormatInt(field.GetFieldID(), 10)] == field
 }
 
-// ValidateExternalCollectionGeneratedColumns checks column-name collisions that
-// only become visible after RootCoord assigns field IDs to function outputs.
-func ValidateExternalCollectionGeneratedColumns(schema *schemapb.CollectionSchema) error {
+// ValidateExternalCollectionResolvedSchema checks external-collection
+// constraints after RootCoord has resolved field IDs and function output IDs.
+// At this point generated function outputs can be matched by their field-ID
+// based external column names, so this is the shared post-resolution validation
+// boundary for create, add-field, and alter-schema flows. Keep external user
+// field checks here as well so those flows consistently reject unsupported
+// source field types, duplicate external_field owners, and mappings that
+// collide with generated output columns.
+func ValidateExternalCollectionResolvedSchema(schema *schemapb.CollectionSchema) error {
 	if !IsExternalCollection(schema) {
 		return nil
 	}
 	generatedColumns := externalGeneratedColumnOwners(schema)
+	externalFieldOwners := make(map[string][]*schemapb.FieldSchema)
 	for _, field := range schema.GetFields() {
 		if IsExternalSystemOrVirtualField(field.GetName()) {
 			continue
@@ -2721,14 +2735,23 @@ func ValidateExternalCollectionGeneratedColumns(schema *schemapb.CollectionSchem
 			}
 			continue
 		}
-		outputField, ok := generatedColumns[field.GetExternalField()]
+		if !isExternalFieldTypeSupported(field.GetDataType()) {
+			return fmt.Errorf("external collection %s does not support field type %s on field %s",
+				schema.GetName(), field.GetDataType().String(), field.GetName())
+		}
+		ext := field.GetExternalField()
+		if ext == "" {
+			continue
+		}
+		outputField, ok := generatedColumns[ext]
 		if !ok {
+			externalFieldOwners[ext] = append(externalFieldOwners[ext], field)
 			continue
 		}
 		return fmt.Errorf("external_field %q on field '%s' in external collection %s conflicts with generated function output field '%s' (field id %d)",
-			field.GetExternalField(), field.GetName(), schema.GetName(), outputField.GetName(), outputField.GetFieldID())
+			ext, field.GetName(), schema.GetName(), outputField.GetName(), outputField.GetFieldID())
 	}
-	return nil
+	return validateUniqueExternalFieldOwners(externalFieldOwners)
 }
 
 // IsExternalSystemOrVirtualField returns true for names reserved by the

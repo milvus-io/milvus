@@ -487,7 +487,7 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 			return err
 		}
 	}
-	if err := typeutil.ValidateExternalCollectionGeneratedColumns(t.body.CollectionSchema); err != nil {
+	if err := typeutil.ValidateExternalCollectionResolvedSchema(t.body.CollectionSchema); err != nil {
 		return err
 	}
 

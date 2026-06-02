@@ -1953,7 +1953,7 @@ class TestMilvusClientExternalTableIndexes(ExternalTableTestBase):
 
 
 class TestMilvusClientExternalTableWriteBlocked(ExternalTableTestBase):
-    """All DML + partition/field DDL should be rejected on external collections."""
+    """DML and unsupported DDL should be rejected on external collections."""
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
@@ -1966,7 +1966,7 @@ class TestMilvusClientExternalTableWriteBlocked(ExternalTableTestBase):
             ("create_partition", "not supported for external collection"),
             ("drop_partition", "not supported for external collection"),
             ("compact", "not supported for external collection"),
-            ("add_collection_field", "not supported for external collection"),
+            ("add_collection_field", "requires external_field mapping"),
             ("truncate_collection", "not supported on external collections"),
         ],
         ids=[
@@ -1984,7 +1984,7 @@ class TestMilvusClientExternalTableWriteBlocked(ExternalTableTestBase):
     def test_milvus_client_external_table_write_operation_rejected(self, op_name, err_msg, minio_env, external_prefix):
         """
         target: test MilvusClient external table write operation rejected
-        method: DML, partition, and DDL operations are blocked on external collections
+        method: DML, partition, and unsupported DDL operations are blocked on external collections
         expected: behavior matches the case assertion.
         """
         client = self._client()

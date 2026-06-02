@@ -50,9 +50,14 @@ The following features are explicitly **NOT supported** for external tables in t
    - Built-in function outputs are covered by `20260521-external-table-function-output.md`
 
 3. **Schema Modifications**
-   - No support for schema evolution or alterations after creation
-   - No support for adding new columns (AddField)
-   - No support for altering existing field properties (AlterField)
+   - Additive external fields are supported by `AlterCollectionSchema`
+     followed by `RefreshExternalCollection`; see
+     [External Table Add-Column Refresh](20260526-external_table_add_column_refresh.md).
+   - No support for dropping fields, renaming fields, changing field data
+     types, changing vector dimensions, or remapping `external_field` after
+     creation.
+   - No support for altering existing field properties other than additive
+     external-field schema changes.
 
 4. **Dynamic Schema Features**
    - No support for dynamic fields (`EnableDynamicField`)
