@@ -237,8 +237,8 @@ func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 	}
 	opts = append(opts, grpc.WithDefaultServiceConfig(string(defaultServiceConfigJSON)))
 
-	// Add a unary interceptor to carry incoming metadata to outgoing calls.
-	opts = append(opts, grpc.WithUnaryInterceptor(
+	// Add unary interceptors to carry incoming metadata and mlog fields to outgoing calls.
+	opts = append(opts, grpc.WithChainUnaryInterceptor(
 		func(ctx context.Context, method string, req interface{}, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 			// carry incoming metadata into outgoing
 			newCtx := ctx
@@ -248,6 +248,7 @@ func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 			}
 			return invoker(newCtx, method, req, reply, cc, opts...)
 		},
+		mlog.UnaryClientInterceptor(),
 	))
 	return opts
 }

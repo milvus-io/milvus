@@ -92,7 +92,6 @@ func TraceIDHandlerFunc(c *gin.Context) {
 	traceID := span.SpanContext().TraceID()
 	if traceID.IsValid() {
 		traceIDStr := traceID.String()
-		ctx = mlog.WithTraceID(ctx, traceIDStr)
 		c.Set("traceID", traceIDStr)
 		c.Request = c.Request.WithContext(ctx)
 		setTraceIDHeader(c)

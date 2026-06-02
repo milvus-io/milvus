@@ -974,6 +974,21 @@ func TestPanicLogsAtPanicLevel(t *testing.T) {
 	assert.Equal(t, "panic message", entry["msg"])
 }
 
+func TestPanicStillPanicsWhenPanicLevelDisabled(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := createTestLogger(buf)
+	initForTest(logger)
+	defer resetLogger()
+
+	oldLevel := GetLevel()
+	SetLevel(FatalLevel)
+	defer SetLevel(oldLevel)
+
+	assert.Panics(t, func() {
+		Panic(context.Background(), "panic action")
+	})
+}
+
 func TestDPanicIncludesFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
@@ -1040,4 +1055,20 @@ func TestLoggerPanic(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "panic", entry["level"])
 	assert.Equal(t, "test", entry["module"])
+}
+
+func TestLoggerPanicStillPanicsWhenPanicLevelDisabled(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := createTestLogger(buf)
+	initForTest(logger)
+	defer resetLogger()
+
+	oldLevel := GetLevel()
+	SetLevel(FatalLevel)
+	defer SetLevel(oldLevel)
+
+	componentLogger := With(String("module", "test"))
+	assert.Panics(t, func() {
+		componentLogger.Panic(context.Background(), "component panic action")
+	})
 }

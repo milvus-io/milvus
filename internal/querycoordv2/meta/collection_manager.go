@@ -19,7 +19,6 @@ package meta
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"sync"
 	"time"
 
@@ -139,8 +138,6 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 	if err != nil {
 		return err
 	}
-
-	ctx = mlog.WithTraceID(ctx, strconv.FormatInt(time.Now().UnixNano(), 10))
 
 	mlog.Info(ctx, "recover partitions from kv store", zap.Duration("dur", time.Since(start)))
 
