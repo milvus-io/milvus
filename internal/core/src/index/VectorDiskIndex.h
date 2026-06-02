@@ -52,6 +52,13 @@ class VectorDiskAnnIndex : public VectorIndex {
 
     int64_t
     Count() override {
+        if (offset_mapping_.IsEnabled() &&
+            offset_mapping_.GetValidCount() == 0) {
+            return 0;
+        }
+        if (IsEmptyEmbListIndex()) {
+            return 0;
+        }
         return index_.Count();
     }
 
@@ -112,6 +119,11 @@ class VectorDiskAnnIndex : public VectorIndex {
                     const BitsetView& bitset) const override;
 
  private:
+    bool
+    IsEmptyEmbListIndex() const {
+        return elem_type_ != DataType::NONE && !empty_emb_list_offsets_.empty();
+    }
+
     knowhere::Json
     update_load_json(const Config& config);
 
@@ -121,6 +133,7 @@ class VectorDiskAnnIndex : public VectorIndex {
     uint32_t search_beamwidth_ = 8;
     // used for embedding list only
     DataType elem_type_;
+    std::vector<size_t> empty_emb_list_offsets_;
 };
 
 template <typename T>

@@ -2249,6 +2249,60 @@ TEST_P(ElementFilterEmptyDocHit, ActiveDocsWithZeroElements) {
     ASSERT_EQ(retrieve_results->offset_size(), 0);
 }
 
+TEST_P(ElementFilterEmptyDocHit, ElementLevelSearchWithZeroElements) {
+    bool with_sealed = GetParam();
+
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::L2);
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    size_t N = 16;
+    auto raw_data = DataGen(schema, N, 42, 0, 1, 0);
+
+    std::shared_ptr<SegmentInterface> segment;
+    if (with_sealed) {
+        segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    } else {
+        auto growing = CreateGrowingSegment(schema, empty_index_meta);
+        growing->PreInsert(N);
+        growing->Insert(0,
+                        N,
+                        raw_data.row_ids_.data(),
+                        raw_data.timestamps_.data(),
+                        raw_data.raw_);
+        segment = std::move(growing);
+    }
+
+    ScopedSchemaHandle handle(*schema);
+    auto plan_bytes =
+        handle.ParseSearch("element_filter(structA, $[price_array] >= 0)",
+                           "structA[array_float_vec]",
+                           1,
+                           knowhere::metric::L2,
+                           R"({"ef": 50})",
+                           3);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_bytes.data(), plan_bytes.size());
+    ASSERT_NE(plan, nullptr);
+
+    auto ph_group_raw = CreatePlaceholderGroup(1, dim, 1024, true);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    std::unique_ptr<SearchResult> search_result;
+    ASSERT_NO_THROW(search_result =
+                        segment->Search(plan.get(), ph_group.get(), 1L << 63));
+    ASSERT_NE(search_result, nullptr);
+    EXPECT_TRUE(search_result->seg_offsets_.empty());
+}
+
 enum class NestedIndexType { NONE, STL_SORT, INVERTED };
 
 std::string
@@ -3291,6 +3345,14 @@ constexpr int kElemTopK = 10;
 constexpr int64_t kElemTargetDoc = 5;
 constexpr int32_t kElemTargetElem = 1;
 
+constexpr int kNullableElemDim = 4;
+constexpr int kNullableElemArrayLen = 2;
+constexpr int kNullableElemN = 2;
+constexpr int64_t kNullableElemTargetDoc = 1;
+constexpr int32_t kNullableElemTargetElem = 0;
+constexpr int64_t kNullableElemTargetGlobal =
+    kNullableElemTargetDoc * kNullableElemArrayLen + kNullableElemTargetElem;
+
 struct ElementSearchFixture {
     SchemaPtr schema;
     FieldId vec_fid;
@@ -3360,10 +3422,74 @@ MakeElementSearchFixture() {
     return f;
 }
 
+struct NullableElementSearchFixture {
+    SchemaPtr schema;
+    FieldId vec_fid;
+    FieldId int64_fid;
+    GeneratedData raw_data;
+    std::vector<float> flat_data;
+    std::vector<float> query_data;
+};
+
+inline NullableElementSearchFixture
+MakeNullableElementSearchFixture() {
+    NullableElementSearchFixture f;
+    f.schema = std::make_shared<Schema>();
+    f.vec_fid = f.schema->AddDebugVectorArrayField("structA[array_vec]",
+                                                   DataType::VECTOR_FLOAT,
+                                                   kNullableElemDim,
+                                                   knowhere::metric::L2,
+                                                   /*nullable=*/true);
+    f.int64_fid = f.schema->AddDebugField("id", DataType::INT64);
+    f.schema->set_primary_field_id(f.int64_fid);
+
+    f.raw_data =
+        DataGen(f.schema, kNullableElemN, 42, 0, 1, kNullableElemArrayLen);
+
+    f.flat_data.resize(kNullableElemN * kNullableElemArrayLen *
+                       kNullableElemDim);
+    for (int i = 0; i < f.raw_data.raw_->fields_data_size(); ++i) {
+        auto* fd = f.raw_data.raw_->mutable_fields_data(i);
+        if (fd->field_id() != f.vec_fid.get()) {
+            continue;
+        }
+
+        auto* vec_array = fd->mutable_vectors()->mutable_vector_array();
+        for (int row = 0; row < kNullableElemN; ++row) {
+            auto* row_data = vec_array->mutable_data(row)
+                                 ->mutable_float_vector()
+                                 ->mutable_data();
+            row_data->Clear();
+            for (int elem = 0; elem < kNullableElemArrayLen; ++elem) {
+                const int axis = row * kNullableElemArrayLen + elem;
+                for (int dim = 0; dim < kNullableElemDim; ++dim) {
+                    const float value = axis == dim ? 1.0f : 0.0f;
+                    row_data->Add(value);
+                    f.flat_data[(row * kNullableElemArrayLen + elem) *
+                                    kNullableElemDim +
+                                dim] = value;
+                }
+            }
+        }
+
+        auto* valid_data = fd->mutable_valid_data();
+        valid_data->Clear();
+        for (int row = 0; row < kNullableElemN; ++row) {
+            valid_data->Add(true);
+        }
+        break;
+    }
+
+    const size_t target_off = kNullableElemTargetGlobal * kNullableElemDim;
+    f.query_data.assign(f.flat_data.begin() + target_off,
+                        f.flat_data.begin() + target_off + kNullableElemDim);
+    return f;
+}
+
 inline proto::common::PlaceholderGroup
 MakeElementLevelPlaceholder(const std::vector<float>& query_data) {
     auto raw = CreatePlaceholderGroupFromBlob<milvus::FloatVector>(
-        /*num_queries=*/1, kElemDim, query_data.data());
+        /*num_queries=*/1, query_data.size(), query_data.data());
     raw.mutable_placeholders(0)->set_element_level(true);
     return raw;
 }
@@ -3376,6 +3502,69 @@ LoadElementHnswIndex(SegmentSealed* segment,
                                    kElemDim,
                                    flat_data.data(),
                                    knowhere::IndexEnum::INDEX_HNSW);
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = vec_fid.get();
+    load_index_info.index_params = GenIndexParams(indexing.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index_params["metric_type"] = knowhere::metric::L2;
+    load_index_info.field_type = DataType::VECTOR_ARRAY;
+    load_index_info.element_type = DataType::VECTOR_FLOAT;
+    segment->LoadIndex(load_index_info);
+}
+
+inline std::unique_ptr<SegmentSealed>
+CreateNullableSealedSegment(const NullableElementSearchFixture& f) {
+    auto segment = CreateSealedSegment(f.schema);
+    LoadGeneratedDataIntoSegment(
+        f.raw_data, segment.get(), false, GetExcludedFieldIds(f.schema, {}));
+
+    auto vec_array_values = f.raw_data.get_col<VectorFieldProto>(f.vec_fid);
+    std::vector<milvus::VectorArray> vector_arrays;
+    vector_arrays.reserve(vec_array_values.size());
+    for (const auto& value : vec_array_values) {
+        vector_arrays.emplace_back(value);
+    }
+
+    std::vector<uint8_t> valid_bitmap((kNullableElemN + 7) / 8, 0);
+    for (int row = 0; row < kNullableElemN; ++row) {
+        valid_bitmap[row >> 3] |= (1 << (row & 0x07));
+    }
+
+    auto field_data = storage::CreateFieldData(DataType::VECTOR_ARRAY,
+                                               DataType::VECTOR_FLOAT,
+                                               /*nullable=*/true,
+                                               kNullableElemDim);
+    field_data->FillFieldData(
+        vector_arrays.data(), valid_bitmap.data(), kNullableElemN, 0);
+
+    auto storage_config = gen_local_storage_config(TestLocalPath);
+    auto cm = CreateChunkManager(storage_config);
+    auto field_data_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                          kPartitionID,
+                                                          kSegmentID,
+                                                          f.vec_fid.get(),
+                                                          {field_data},
+                                                          cm);
+    segment->LoadFieldData(field_data_info);
+    return segment;
+}
+
+inline void
+LoadNullableElementFlatIndex(SegmentSealed* segment,
+                             FieldId vec_fid,
+                             const std::vector<float>& flat_data) {
+    auto indexing = GenVecIndexing(kNullableElemN * kNullableElemArrayLen,
+                                   kNullableElemDim,
+                                   flat_data.data(),
+                                   knowhere::IndexEnum::INDEX_FAISS_IDMAP);
+
+    std::unique_ptr<bool[]> valid_rows(new bool[kNullableElemN]);
+    for (int row = 0; row < kNullableElemN; ++row) {
+        valid_rows[row] = true;
+    }
+    indexing->BuildValidData(valid_rows.get(), kNullableElemN);
+
     LoadIndexInfo load_index_info;
     load_index_info.field_id = vec_fid.get();
     load_index_info.index_params = GenIndexParams(indexing.get());
@@ -3454,7 +3643,69 @@ ExpectTargetInTopK(const milvus::SearchResult& sr) {
                        << ") not found in approximate search result";
 }
 
+inline std::unique_ptr<SearchResult>
+RunNullableElementSearch(SegmentInterface* segment,
+                         const NullableElementSearchFixture& f) {
+    ScopedSchemaHandle handle(*f.schema);
+    auto plan_bytes =
+        handle.ParseSearch("",
+                           "structA[array_vec]",
+                           /*topK=*/kNullableElemN * kNullableElemArrayLen,
+                           knowhere::metric::L2,
+                           R"({"ef": 50})",
+                           3);
+    auto plan =
+        CreateSearchPlanByExpr(f.schema, plan_bytes.data(), plan_bytes.size());
+    auto ph_group_raw = MakeElementLevelPlaceholder(f.query_data);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    return segment->Search(plan.get(), ph_group.get(), 1L << 63);
+}
+
+inline void
+ExpectNullableTargetTopOne(const milvus::SearchResult& sr) {
+    ASSERT_TRUE(sr.element_level_);
+    ASSERT_FALSE(sr.seg_offsets_.empty());
+    ASSERT_EQ(sr.seg_offsets_[0], kNullableElemTargetDoc);
+    ASSERT_EQ(sr.element_indices_[0], kNullableElemTargetElem);
+    ASSERT_NEAR(sr.distances_[0], 0.0f, 1e-5f);
+}
+
 }  // namespace
+
+TEST(ElementVectorSearch, NullableSealedBruteForce_ElementBitset) {
+    auto f = MakeNullableElementSearchFixture();
+    auto segment = CreateNullableSealedSegment(f);
+
+    auto sr = RunNullableElementSearch(segment.get(), f);
+    ASSERT_NE(sr, nullptr);
+    ExpectNullableTargetTopOne(*sr);
+}
+
+TEST(ElementVectorSearch, NullableSealedIndex_ElementBitset) {
+    auto f = MakeNullableElementSearchFixture();
+    auto segment = CreateNullableSealedSegment(f);
+    LoadNullableElementFlatIndex(segment.get(), f.vec_fid, f.flat_data);
+
+    auto sr = RunNullableElementSearch(segment.get(), f);
+    ASSERT_NE(sr, nullptr);
+    ExpectNullableTargetTopOne(*sr);
+}
+
+TEST(ElementVectorSearch, NullableGrowingBruteForce_ElementBitset) {
+    auto f = MakeNullableElementSearchFixture();
+    auto segment = CreateGrowingSegment(f.schema, empty_index_meta);
+    segment->PreInsert(kNullableElemN);
+    segment->Insert(0,
+                    kNullableElemN,
+                    f.raw_data.row_ids_.data(),
+                    f.raw_data.timestamps_.data(),
+                    f.raw_data.raw_);
+
+    auto sr = RunNullableElementSearch(segment.get(), f);
+    ASSERT_NE(sr, nullptr);
+    ExpectNullableTargetTopOne(*sr);
+}
 
 TEST(ElementVectorSearch, GrowingBruteForce_RangeSearch) {
     auto f = MakeElementSearchFixture();

@@ -461,6 +461,60 @@ TEST(storage, ExternalNullableVectorArrayPreservesNullRows) {
         storage::NormalizeExternalArrow(list_array, non_nullable_meta));
 }
 
+TEST(storage, InsertDataVectorArrayNullablePreservesNullRows) {
+    constexpr int dim = 2;
+    auto field_data = milvus::storage::CreateFieldData(
+        storage::DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, true, dim);
+
+    auto make_vector_array = [dim](std::initializer_list<float> values) {
+        return milvus::VectorArray(values.size() > 0 ? values.begin() : nullptr,
+                                   values.size() / dim,
+                                   dim,
+                                   DataType::VECTOR_FLOAT);
+    };
+
+    std::vector<milvus::VectorArray> data;
+    data.emplace_back(make_vector_array({1.0F, 2.0F}));
+    data.emplace_back(make_vector_array({}));
+    data.emplace_back(make_vector_array({3.0F, 4.0F, 5.0F, 6.0F}));
+    uint8_t valid_data[] = {0x0D};  // rows 0,2,3 valid; row 1 null.
+
+    field_data->FillFieldData(data.data(), valid_data, 4, 0);
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
+    std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
+                                                   [&](uint8_t*) {});
+    auto new_insert_data = storage::DeserializeFileData(
+        serialized_data_ptr, serialized_bytes.size());
+    auto new_payload = new_insert_data->GetFieldData();
+
+    ASSERT_EQ(new_payload->get_data_type(), storage::DataType::VECTOR_ARRAY);
+    ASSERT_TRUE(new_payload->IsNullable());
+    ASSERT_EQ(new_payload->get_num_rows(), 4);
+    ASSERT_EQ(new_payload->get_valid_rows(), 3);
+    ASSERT_EQ(new_payload->get_null_count(), 1);
+    EXPECT_TRUE(new_payload->is_valid(0));
+    EXPECT_FALSE(new_payload->is_valid(1));
+    EXPECT_TRUE(new_payload->is_valid(2));
+    EXPECT_TRUE(new_payload->is_valid(3));
+
+    auto vector_array_payload =
+        std::dynamic_pointer_cast<milvus::FieldData<milvus::VectorArray>>(
+            new_payload);
+    ASSERT_NE(vector_array_payload, nullptr);
+    ASSERT_EQ(vector_array_payload->get_element_type(), DataType::VECTOR_FLOAT);
+    EXPECT_EQ(vector_array_payload->value_at(0)->length(), 1);
+    EXPECT_EQ(vector_array_payload->value_at(1)->length(), 0);
+    EXPECT_EQ(vector_array_payload->value_at(2)->length(), 2);
+}
+
 TEST(storage, ExternalBinaryVectorListNormalizesToFixedSizeBinary) {
     auto value_builder = std::make_shared<arrow::UInt8Builder>();
     arrow::ListBuilder builder(arrow::default_memory_pool(), value_builder);
