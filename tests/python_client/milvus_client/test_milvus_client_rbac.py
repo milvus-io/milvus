@@ -998,7 +998,7 @@ class TestMilvusClientRbacInvalid(TestMilvusClientV2Base):
     def test_milvus_client_grant_privilege_with_db_not_exist(self, host, port):
         """
         target: test milvus client api grant privilege with nonexistent db
-        method: create user/role, grant on nonexistent db, user using_database
+        method: create user/role, grant on nonexistent db, root client using_database
         expected: raise exception when using nonexistent db
         """
         client = self._client()
@@ -1011,9 +1011,7 @@ class TestMilvusClientRbacInvalid(TestMilvusClientV2Base):
         nonexistent_db = cf.gen_unique_str(prefix)
         self.grant_privilege(client, role_name, "Global", "All", "*", db_name=nonexistent_db)
         time.sleep(10)
-        uri = f"http://{host}:{port}"
-        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
-        self.using_database(user_client, nonexistent_db,
+        self.using_database(client, nonexistent_db,
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 2,
                                          ct.err_msg: "database not found"})
@@ -1475,10 +1473,9 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         
         # create new client with the user credentials
         uri = f"http://{host}:{port}"
-        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
-        
+        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
+
         # test load privilege
-        self.using_database(user_client, db_name)
         self.load_collection(user_client, collection_name)
         
         # cleanup
@@ -1527,10 +1524,9 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         
         # create new client with the user credentials
         uri = f"http://{host}:{port}"
-        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
-        
+        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
+
         # test release privilege
-        self.using_database(user_client, db_name)
         self.release_collection(user_client, collection_name)
         
         # cleanup
@@ -1576,10 +1572,9 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         
         # create new client with the user credentials
         uri = f"http://{host}:{port}"
-        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
-        
+        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
+
         # test insert privilege
-        self.using_database(user_client, db_name)
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
@@ -1628,10 +1623,9 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         
         # create new client with the user credentials
         uri = f"http://{host}:{port}"
-        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
-        
+        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
+
         # test delete privilege
-        self.using_database(user_client, db_name)
         delete_expr = f'{default_primary_key_field_name} == 0'
         self.delete(user_client, collection_name, filter=delete_expr)
         
@@ -2769,9 +2763,9 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
 
     def test_milvus_client_public_role_privilege_all_dbs(self, host, port):
         """
-        target: test public role user can list_collections in all databases
-        method: create db_a and db_b, public user list_collections in all dbs
-        expected: list_collections succeeds in all dbs
+        target: test public role user can list_collections in default db only
+        method: create db_a and db_b, public user lists in default db and cannot switch to other dbs
+        expected: list_collections succeeds in default db and using_database is denied in db_a/db_b
         """
         client = self._client()
         user_name = cf.gen_unique_str(user_pre)
@@ -2790,15 +2784,15 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         res, _ = self.list_collections(user_client)
         assert isinstance(res, list)
 
-        # list_collections in db_a
-        self.using_database(user_client, db_a)
-        res, _ = self.list_collections(user_client)
-        assert isinstance(res, list)
-
-        # list_collections in db_b
-        self.using_database(user_client, db_b)
-        res, _ = self.list_collections(user_client)
-        assert isinstance(res, list)
+        # public role cannot switch to another db without DescribeDatabase privilege
+        self.using_database(user_client, db_a,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 7,
+                                         ct.err_msg: "PrivilegeDescribeDatabase: permission deny"})
+        self.using_database(user_client, db_b,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 7,
+                                         ct.err_msg: "PrivilegeDescribeDatabase: permission deny"})
 
         # cleanup
         self.using_database(client, "default")
