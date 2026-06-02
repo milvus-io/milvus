@@ -19,8 +19,9 @@ package logging
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 func TestLogging(t *testing.T) {
