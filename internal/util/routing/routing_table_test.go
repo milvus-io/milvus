@@ -17,6 +17,7 @@
 package routing
 
 import (
+	"math/rand"
 	"strings"
 	"testing"
 
@@ -86,4 +87,65 @@ func TestDeriveCompat_Fields(t *testing.T) {
 	assert.Equal(t, int64(CompatVersion), tbl.Version)
 	assert.Equal(t, ModeHash, tbl.Mode)
 	assert.Equal(t, 3, tbl.NumShards())
+}
+
+// legacyAssign mirrors internal/proxy.assignChannelsByPK's map building.
+// Note: the proxy computes the hash before the numChannels==0 guard, so its
+// empty-channel return for the hash slice differs from RouteInsert's (nil,nil);
+// callers below always use numChannels>=1, where the two are identical.
+func legacyAssign(pks *schemapb.IDs, channelNames []string) (map[string][]int, []uint32) {
+	hashValues := typeutil.HashPK2Channels(pks, channelNames)
+	numChannels := len(channelNames)
+	if numChannels == 0 {
+		return nil, hashValues
+	}
+	avgCapacity := (len(hashValues) / numChannels) + 1
+	out := make(map[string][]int, numChannels)
+	for offset, channelID := range hashValues {
+		idx := int(channelID)
+		if idx >= numChannels {
+			continue
+		}
+		name := channelNames[idx]
+		if _, ok := out[name]; !ok {
+			out[name] = make([]int, 0, avgCapacity)
+		}
+		out[name] = append(out[name], offset)
+	}
+	return out, hashValues
+}
+
+func TestRouteInsert_EquivalentToLegacy_Randomized(t *testing.T) {
+	r := rand.New(rand.NewSource(42))
+	for iter := 0; iter < 500; iter++ {
+		n := 1 + r.Intn(16)
+		ch := channels(n)
+		tbl := DeriveCompat(ch)
+		rows := 1 + r.Intn(50)
+		var pks *schemapb.IDs
+		if iter%2 == 0 {
+			data := make([]int64, rows)
+			for i := range data {
+				data[i] = r.Int63() - r.Int63()
+			}
+			pks = intIDs(data)
+		} else {
+			data := make([]string, rows)
+			for i := range data {
+				data[i] = strings.Repeat("k", r.Intn(8)) + string(rune('0'+r.Intn(10)))
+			}
+			pks = strIDs(data)
+		}
+		wantMap, wantHash := legacyAssign(pks, ch)
+		gotMap, gotHash := tbl.RouteInsert(pks)
+		assert.Equal(t, wantHash, gotHash, "iter=%d hash", iter)
+		assert.Equal(t, wantMap, gotMap, "iter=%d map", iter)
+	}
+}
+
+func TestRouteInsert_EmptyChannels(t *testing.T) {
+	tbl := DeriveCompat(nil)
+	m, h := tbl.RouteInsert(intIDs([]int64{1, 2}))
+	assert.Nil(t, m)
+	assert.Empty(t, h)
 }
