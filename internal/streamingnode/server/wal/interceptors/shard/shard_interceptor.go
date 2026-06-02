@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -170,6 +171,19 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	// Assign segment for insert message.
 	// !!! Current implementation a insert message only has one parition, but we need to merge the message for partition-key in future.
 	header := insertMsg.Header()
+
+	// Read the routing version carried by the producer and compare it against the
+	// current shard epoch. A legacy producer omits the field, so GetRoutingVersion()
+	// returns 0 → CompareRoutingVersion(0, CompatVersion=1, true) yields
+	// RoutingProcessAndReplyLatest, which proceeds safely — correct for mixed-version rollout.
+	// In P0 all outcomes proceed; forward/reject plumbing is added in a later sub-project.
+	switch routing.CompareRoutingVersion(header.GetRoutingVersion(), routing.CompatVersion, true /* shardNormal: always true in P0 */) {
+	case routing.RoutingProcess, routing.RoutingProcessAndReplyLatest:
+		// proceed; reply-latest plumbing is added in a later sub-project.
+	case routing.RoutingStale:
+		// forward/reject is added in a later sub-project; unreachable in P0.
+	}
+
 	collectionID := header.GetCollectionId()
 	schemaVersion := header.GetSchemaVersion()
 	if err := impl.shardManager.CheckIfVChannelCanBeWritten(collectionID); errors.Is(err, shards.ErrVChannelFenced) {
