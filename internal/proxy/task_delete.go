@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -176,6 +177,8 @@ func repackDeleteMsgByHash(
 		for i := 0; i < size; i++ {
 			hashValues[i] = channelID
 		}
+	} else if paramtable.Get().ProxyCfg.EnableRoutingTable.GetAsBool() {
+		hashValues = routing.DeriveCompat(vChannels).HashPKs(primaryKeys)
 	} else {
 		hashValues, err = typeutil.HashPK2Channels(primaryKeys, vChannels)
 		if err != nil {

@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -2624,6 +2625,11 @@ func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, dbName string, 
 }
 
 func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) (map[string][]int, error) {
+	if paramtable.Get().ProxyCfg.EnableRoutingTable.GetAsBool() {
+		offsets, hashValues := routing.DeriveCompat(channelNames).RouteInsert(pks)
+		insertMsg.HashValues = hashValues
+		return offsets, nil
+	}
 	hashValues, err := typeutil.HashPK2Channels(pks, channelNames)
 	if err != nil {
 		return nil, err
