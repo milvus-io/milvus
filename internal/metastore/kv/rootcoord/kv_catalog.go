@@ -1267,10 +1267,13 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 		}
 	}
 
-	appendRoleResult := func(roleName string, value string) error {
+	appendRoleResult := func(roleName string, value string) {
 		role, err := model.UnmarshalRoleModel(roleName, value)
 		if err != nil {
-			return err
+			log.Ctx(ctx).Warn("undecodable role value, fallback to empty description",
+				zap.String("role", roleName),
+				zap.Error(err))
+			role = &model.Role{Name: roleName}
 		}
 		var users []*milvuspb.UserEntity
 		for _, username := range roleToUsers[roleName] {
@@ -1280,7 +1283,6 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 			Role:  &milvuspb.RoleEntity{Name: role.Name, Description: role.Description},
 			Users: users,
 		})
-		return nil
 	}
 
 	if entity == nil {
@@ -1300,9 +1302,7 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 			if i < len(values) {
 				value = values[i]
 			}
-			if err := appendRoleResult(infoArr[0], value); err != nil {
-				return results, err
-			}
+			appendRoleResult(infoArr[0], value)
 		}
 	} else {
 		if funcutil.IsEmptyString(entity.Name) {
@@ -1314,9 +1314,7 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 			log.Ctx(ctx).Warn("fail to load a role", zap.String("key", roleKey), zap.Error(err))
 			return results, err
 		}
-		if err := appendRoleResult(entity.Name, value); err != nil {
-			return results, err
-		}
+		appendRoleResult(entity.Name, value)
 	}
 
 	return results, nil

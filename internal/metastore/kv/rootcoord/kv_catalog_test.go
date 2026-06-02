@@ -1956,6 +1956,22 @@ func TestRBAC_Role(t *testing.T) {
 		})
 		assert.Equal(t, "updated role description", roleDescriptions[roleName])
 		assert.Empty(t, roleDescriptions["legacy_role"])
+
+		require.NoError(t, metaKV.Save(ctx, RolePrefix+"/malformed_role", "{"))
+		roles, err = c.ListRole(ctx, tenant, nil, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 3)
+		roleDescriptions = lo.SliceToMap(roles, func(role *milvuspb.RoleResult) (string, string) {
+			return role.GetRole().GetName(), role.GetRole().GetDescription()
+		})
+		assert.Equal(t, "updated role description", roleDescriptions[roleName])
+		assert.Empty(t, roleDescriptions["legacy_role"])
+		assert.Empty(t, roleDescriptions["malformed_role"])
+
+		roles, err = c.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: "malformed_role"}, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Empty(t, roles[0].GetRole().GetDescription())
 	})
 	t.Run("test DropRole", func(t *testing.T) {
 		var (

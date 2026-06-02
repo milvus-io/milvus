@@ -253,6 +253,20 @@ func TestRbacAlterRoleDescription(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
 }
 
+func TestRbacCreateRoleToleratesMalformedStoredRoleValue(t *testing.T) {
+	ctx := context.TODO()
+	mt := generateMetaTable(t)
+	catalog := mt.catalog.(*rootcoord.Catalog)
+
+	require.NoError(t, catalog.CreateRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: "existing_role"}))
+	require.NoError(t, catalog.Txn.Save(ctx, rootcoord.RolePrefix+"/malformed_role", "{"))
+
+	err := mt.CheckIfCreateRole(ctx, &milvuspb.CreateRoleRequest{
+		Entity: &milvuspb.RoleEntity{Name: "new_role"},
+	})
+	require.NoError(t, err)
+}
+
 func TestRbacRoleDescriptionLengthLimit(t *testing.T) {
 	mt := generateMetaTable(t)
 

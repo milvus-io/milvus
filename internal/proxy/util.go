@@ -62,6 +62,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/rbacutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -1578,14 +1579,7 @@ func ValidateRoleName(entity string) error {
 }
 
 func ValidateRoleDescription(description string) error {
-	maxLength := Params.ProxyCfg.MaxRoleDescriptionLength.GetAsInt()
-	if len(description) > maxLength {
-		return merr.WrapErrParameterInvalidRange(0,
-			maxLength,
-			len(description),
-			"the length of role description must be not greater than limit")
-	}
-	return nil
+	return rbacutil.ValidateRoleDescription(description, Params.ProxyCfg.MaxRoleDescriptionLength.GetAsInt())
 }
 
 func IsDefaultRole(roleName string) bool {
