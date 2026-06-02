@@ -2095,6 +2095,7 @@ type proxyConfig struct {
 	PartitionNameRegexp               ParamItem `refreshable:"true"`
 	MustUsePartitionKey               ParamItem `refreshable:"true"`
 	SkipAutoIDCheck                   ParamItem `refreshable:"true"`
+	EnableRoutingTable                ParamItem `refreshable:"true"`
 	SkipPartitionKeyCheck             ParamItem `refreshable:"true"`
 	ResolveAliasForPrivilege          ParamItem `refreshable:"true"`
 	MaxVarCharLength                  ParamItem `refreshable:"false"`
@@ -2563,6 +2564,15 @@ please adjust in embedded Milvus: false`,
 		Doc:          "switch for whether proxy shall skip auto id check when inserting data",
 	}
 	p.SkipAutoIDCheck.Init(base.mgr)
+
+	p.EnableRoutingTable = ParamItem{
+		Key:          "proxy.enableRoutingTable",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          "kill-switch for shard-split routing abstraction; when false, fall back to legacy HashPK2Channels",
+		Export:       false,
+	}
+	p.EnableRoutingTable.Init(base.mgr)
 
 	p.SkipPartitionKeyCheck = ParamItem{
 		Key:          "proxy.skipPartitionKeyCheck",
