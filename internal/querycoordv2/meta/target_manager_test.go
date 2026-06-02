@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -38,6 +39,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -774,6 +777,131 @@ func (suite *TargetManagerSuite) TestGetTargetJSON() {
 	err = json.Unmarshal([]byte(jsonStr), &currentTarget)
 	suite.NoError(err)
 	assert.Len(suite.T(), currentTarget2, 0)
+}
+
+func (suite *TargetManagerSuite) TestUpdateNextTarget_DroppedSentinelRejected() {
+	ctx := suite.ctx
+	collectionID := int64(2001)
+
+	suite.meta.PutCollection(ctx, &Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID:  collectionID,
+			ReplicaNumber: 1,
+		},
+	})
+	suite.meta.PutPartition(ctx, &Partition{
+		PartitionLoadInfo: &querypb.PartitionLoadInfo{
+			CollectionID: collectionID,
+			PartitionID:  1,
+		},
+	})
+
+	sentinelChannels := []*datapb.VchannelInfo{
+		{
+			CollectionID: collectionID,
+			ChannelName:  "sentinel-channel",
+			SeekPosition: &msgpb.MsgPosition{
+				ChannelName: "sentinel-channel",
+				Timestamp:   funcutil.DroppedChannelCheckpointTimestamp,
+			},
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).
+		Return(sentinelChannels, nil, nil).Once()
+
+	err := suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
+	suite.Require().Error(err)
+	suite.True(errors.Is(err, merr.ErrChannelDroppedSentinel),
+		"error should wrap ErrChannelDroppedSentinel, got: %v", err)
+	suite.Contains(err.Error(), "sentinel-channel")
+
+	// Next target must NOT be advanced.
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget))
+}
+
+func (suite *TargetManagerSuite) TestUpdateNextTarget_SentinelAmongMultiple() {
+	ctx := suite.ctx
+	collectionID := int64(2002)
+
+	suite.meta.PutCollection(ctx, &Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID:  collectionID,
+			ReplicaNumber: 1,
+		},
+	})
+	suite.meta.PutPartition(ctx, &Partition{
+		PartitionLoadInfo: &querypb.PartitionLoadInfo{
+			CollectionID: collectionID,
+			PartitionID:  1,
+		},
+	})
+
+	mixedChannels := []*datapb.VchannelInfo{
+		{
+			CollectionID: collectionID,
+			ChannelName:  "normal-channel",
+			SeekPosition: &msgpb.MsgPosition{
+				ChannelName: "normal-channel",
+				Timestamp:   450000000000000000,
+			},
+		},
+		{
+			CollectionID: collectionID,
+			ChannelName:  "poisoned-channel",
+			SeekPosition: &msgpb.MsgPosition{
+				ChannelName: "poisoned-channel",
+				Timestamp:   funcutil.DroppedChannelCheckpointTimestamp,
+			},
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).
+		Return(mixedChannels, nil, nil).Once()
+
+	err := suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
+	suite.Require().Error(err)
+	suite.True(errors.Is(err, merr.ErrChannelDroppedSentinel))
+	suite.Contains(err.Error(), "poisoned-channel")
+
+	// Next target must remain empty — no partial build.
+	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget))
+}
+
+func (suite *TargetManagerSuite) TestUpdateNextTarget_SentinelDoesNotBurnRetries() {
+	ctx := suite.ctx
+	collectionID := int64(2003)
+
+	suite.meta.PutCollection(ctx, &Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID:  collectionID,
+			ReplicaNumber: 1,
+		},
+	})
+	suite.meta.PutPartition(ctx, &Partition{
+		PartitionLoadInfo: &querypb.PartitionLoadInfo{
+			CollectionID: collectionID,
+			PartitionID:  1,
+		},
+	})
+
+	sentinelChannels := []*datapb.VchannelInfo{
+		{
+			CollectionID: collectionID,
+			ChannelName:  "sentinel-once",
+			SeekPosition: &msgpb.MsgPosition{
+				ChannelName: "sentinel-once",
+				Timestamp:   funcutil.DroppedChannelCheckpointTimestamp,
+			},
+		},
+	}
+
+	// .Once() asserts that GetRecoveryInfoV2 is called exactly once: the
+	// sentinel must not re-enter the retry.Handle loop.
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).
+		Return(sentinelChannels, nil, nil).Once()
+
+	err := suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
+	suite.Require().Error(err)
+	suite.broker.AssertExpectations(suite.T())
 }
 
 func BenchmarkTargetManager(b *testing.B) {

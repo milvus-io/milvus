@@ -150,7 +150,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
         const milvus::proto::segcore::SegmentLoadInfo& new_load_info) override;
 
     void
-    LazyCheckSchema(SchemaPtr sch) override;
+    Reopen(milvus::OpContext* op_ctx,
+           const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
+           SchemaPtr new_schema) override;
+
+    void
+    LazyCheckSchema(SchemaPtr sch, milvus::OpContext* op_ctx) override;
 
     void
     Load(milvus::tracer::TraceContext& trace_ctx,
@@ -331,6 +336,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
         const VectorBase& vec_raw,
         const int64_t* seg_offsets,
         int64_t count,
+        const bool* valid_data,
         google::protobuf::RepeatedPtrField<T>* dst) const;
 
     template <typename T>
@@ -697,6 +703,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     fill_empty_field(const FieldMeta& field_meta);
+
+    void
+    EnsureArrayOffsetsForStructField(const FieldMeta& field_meta,
+                                     int64_t row_count);
 
     /**
      * @brief Update resource tracking by refunding old estimate and charging new

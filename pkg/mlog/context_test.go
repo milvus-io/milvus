@@ -1,0 +1,327 @@
+//go:build test
+
+package mlog
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+)
+
+// fieldsToMap converts a slice of Fields to a map for order-independent comparison
+func fieldsToMap(fields []Field) map[string]Field {
+	m := make(map[string]Field, len(fields))
+	for _, f := range fields {
+		m[f.Key] = f
+	}
+	return m
+}
+
+func TestWithFieldsBasic(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithFields(ctx, String("key1", "value1"))
+
+	fields := FieldsFromContext(ctx)
+	assert.Len(t, fields, 1)
+	fm := fieldsToMap(fields)
+	assert.Equal(t, zap.String("key1", "value1"), fm["key1"])
+}
+
+func TestWithFieldsAccumulates(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithFields(ctx, String("a", "1"))
+	ctx = WithFields(ctx, String("b", "2"))
+
+	fields := FieldsFromContext(ctx)
+	assert.Len(t, fields, 2)
+	fm := fieldsToMap(fields)
+	assert.Equal(t, zap.String("a", "1"), fm["a"])
+	assert.Equal(t, zap.String("b", "2"), fm["b"])
+}
+
+func TestWithFieldsMultipleFieldsAtOnce(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithFields(ctx,
+		String("a", "1"),
+		Int64("b", 2),
+		Bool("c", true),
+	)
+
+	fields := FieldsFromContext(ctx)
+	assert.Len(t, fields, 3)
+	fm := fieldsToMap(fields)
+	assert.Equal(t, zap.String("a", "1"), fm["a"])
+	assert.Equal(t, zap.Int64("b", 2), fm["b"])
+	assert.Equal(t, zap.Bool("c", true), fm["c"])
+}
+
+func TestWithFieldsChildInheritsParent(t *testing.T) {
+	ctx := context.Background()
+	parentCtx := WithFields(ctx, String("parent", "value"))
+	childCtx := WithFields(parentCtx, String("child", "value"))
+
+	parentFields := FieldsFromContext(parentCtx)
+	assert.Len(t, parentFields, 1)
+
+	childFields := FieldsFromContext(childCtx)
+	assert.Len(t, childFields, 2)
+	fm := fieldsToMap(childFields)
+	assert.Equal(t, zap.String("parent", "value"), fm["parent"])
+	assert.Equal(t, zap.String("child", "value"), fm["child"])
+}
+
+func TestWithFieldsNilContext(t *testing.T) {
+	ctx := WithFields(context.Background(), String("key", "value"))
+	assert.NotNil(t, ctx)
+
+	fields := FieldsFromContext(ctx)
+	assert.Len(t, fields, 1)
+	fm := fieldsToMap(fields)
+	assert.Equal(t, zap.String("key", "value"), fm["key"])
+}
+
+func TestFieldsFromContextNilContext(t *testing.T) {
+	fields := FieldsFromContext(context.Background())
+	assert.Nil(t, fields)
+}
+
+func TestFieldsFromContextNoFields(t *testing.T) {
+	ctx := context.Background()
+	fields := FieldsFromContext(ctx)
+	assert.Nil(t, fields)
+}
+
+func TestWithFieldsDoesNotMutateParent(t *testing.T) {
+	ctx := context.Background()
+	parentCtx := WithFields(ctx, String("a", "1"))
+
+	// Create child and add more fields
+	childCtx := WithFields(parentCtx, String("b", "2"))
+	_ = WithFields(childCtx, String("c", "3"))
+
+	// Parent should still only have one field
+	parentFields := FieldsFromContext(parentCtx)
+	assert.Len(t, parentFields, 1)
+}
+
+// Tests for propagatedStringField/propagatedInt64Field
+
+func TestPropagatedStringField(t *testing.T) {
+	f := propagatedStringField("key", "value")
+	assert.Equal(t, "key", f.Key)
+	assert.Equal(t, zapcore.StringType, f.Type)
+	assert.True(t, isPropagatedField(&f))
+	assert.Equal(t, "value", getPropagatedValue(&f))
+}
+
+func TestPropagatedInt64Field(t *testing.T) {
+	f := propagatedInt64Field("key", 12345)
+	assert.Equal(t, "key", f.Key)
+	assert.Equal(t, zapcore.Int64Type, f.Type)
+	assert.True(t, isPropagatedField(&f))
+	assert.Equal(t, "12345", getPropagatedValue(&f))
+}
+
+func TestPropagatedInt64NegativeValue(t *testing.T) {
+	f := propagatedInt64Field("offset", -100)
+	assert.Equal(t, "-100", getPropagatedValue(&f))
+}
+
+func TestRegularFieldIsNotPropagated(t *testing.T) {
+	f := String("key", "value")
+	assert.False(t, isPropagatedField(&f))
+	assert.Equal(t, "", getPropagatedValue(&f))
+}
+
+// Tests for propagated fields via WithFields
+
+func TestWithFieldsPropagatedAddsFieldsToContext(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithFields(ctx,
+		propagatedStringField(keyCollectionName, "my_collection"),
+		propagatedInt64Field(keyCollectionID, 12345),
+	)
+
+	fields := FieldsFromContext(ctx)
+	assert.Len(t, fields, 2)
+}
+
+func TestWithFieldsPropagatedFieldsAreAccessibleViaGetPropagated(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithFields(ctx,
+		propagatedStringField(keyCollectionName, "my_collection"),
+		propagatedInt64Field(keyCollectionID, 12345),
+	)
+
+	props := GetPropagated(ctx)
+	assert.Len(t, props, 2)
+	assert.Equal(t, "my_collection", props[keyCollectionName])
+	assert.Equal(t, "12345", props[keyCollectionID])
+}
+
+func TestWithFieldsPropagatedAccumulates(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithFields(ctx, propagatedStringField("a", "1"))
+	ctx = WithFields(ctx, propagatedStringField("b", "2"))
+
+	props := GetPropagated(ctx)
+	assert.Len(t, props, 2)
+	assert.Equal(t, "1", props["a"])
+	assert.Equal(t, "2", props["b"])
+
+	fields := FieldsFromContext(ctx)
+	assert.Len(t, fields, 2)
+}
+
+func TestWithFieldsPropagatedDoesNotMutateParent(t *testing.T) {
+	ctx := context.Background()
+	parentCtx := WithFields(ctx, propagatedStringField("a", "1"))
+	_ = WithFields(parentCtx, propagatedStringField("b", "2"))
+
+	props := GetPropagated(parentCtx)
+	assert.Len(t, props, 1)
+	assert.Equal(t, "1", props["a"])
+}
+
+func TestWithFieldsCombinesRegularAndPropagated(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithFields(ctx, String("local", "value"))
+	ctx = WithFields(ctx, propagatedStringField("propagated", "pvalue"))
+
+	fields := FieldsFromContext(ctx)
+	assert.Len(t, fields, 2)
+
+	props := GetPropagated(ctx)
+	assert.Len(t, props, 1)
+	assert.Equal(t, "pvalue", props["propagated"])
+}
+
+func TestGetPropagatedNilContext(t *testing.T) {
+	props := GetPropagated(context.Background())
+	assert.Nil(t, props)
+}
+
+func TestGetPropagatedNoFields(t *testing.T) {
+	ctx := context.Background()
+	props := GetPropagated(ctx)
+	assert.Nil(t, props)
+}
+
+func TestGetPropagatedOnlyRegularFields(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithFields(ctx, String("key", "value"))
+
+	props := GetPropagated(ctx)
+	assert.Nil(t, props)
+}
+
+func TestWithFieldsNilContextWithPropagated(t *testing.T) {
+	ctx := WithFields(context.Background(), propagatedStringField("key", "value"))
+	assert.NotNil(t, ctx)
+
+	fields := FieldsFromContext(ctx)
+	assert.Len(t, fields, 1)
+
+	props := GetPropagated(ctx)
+	assert.Len(t, props, 1)
+}
+
+func TestWithFieldsEmptyFields(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithFields(ctx)
+
+	// Should return original context unchanged
+	props := GetPropagated(ctx)
+	assert.Nil(t, props)
+}
+
+// Tests for field ordering and duplicate-key handling
+
+func TestWithFieldsPreservesDuplicateKeys(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithFields(ctx, String("key", "value1"))
+	ctx = WithFields(ctx, String("key", "value2"))
+
+	fields := FieldsFromContext(ctx)
+	assert.Len(t, fields, 2, "duplicate keys should be preserved")
+	assert.Equal(t, zap.String("key", "value1"), fields[0])
+	assert.Equal(t, zap.String("key", "value2"), fields[1])
+}
+
+func TestWithFieldsPreservesOrderAcrossCalls(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithFields(ctx, String("a", "1"), String("b", "2"))
+	ctx = WithFields(ctx, String("a", "3"), String("c", "4"))
+
+	fields := FieldsFromContext(ctx)
+	assert.Equal(t, []Field{
+		zap.String("a", "1"),
+		zap.String("b", "2"),
+		zap.String("a", "3"),
+		zap.String("c", "4"),
+	}, fields)
+}
+
+func TestWithFieldsPropagatedPreservesDuplicateKeys(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithFields(ctx, propagatedStringField("key", "value1"))
+	ctx = WithFields(ctx, propagatedStringField("key", "value2"))
+
+	fields := FieldsFromContext(ctx)
+	assert.Len(t, fields, 2, "duplicate keys should be preserved")
+
+	props := GetPropagated(ctx)
+	assert.Equal(t, "value2", props["key"], "map projection keeps the last propagated value")
+}
+
+func TestMixedFieldsAndPropagatedDuplicatesArePreserved(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithFields(ctx, String("shared", "from_fields"))
+	ctx = WithFields(ctx, propagatedStringField("shared", "from_propagated"))
+
+	fields := FieldsFromContext(ctx)
+	assert.Len(t, fields, 2, "same key from different sources should be preserved")
+
+	props := GetPropagated(ctx)
+	assert.Equal(t, "from_propagated", props["shared"], "propagated map should contain propagated field")
+}
+
+// Tests for cached logger
+
+func TestLogContextHasCachedLogger(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithFields(ctx, String("key", "value"))
+
+	lc := getLogContext(ctx)
+	assert.NotNil(t, lc.logger, "logContext should have cached logger")
+}
+
+func TestCachedLoggerIncludesFields(t *testing.T) {
+	// This test verifies that the cached logger has the fields applied
+	// We can't easily inspect the logger's fields, but we can verify
+	// the logger is not nil and is different from global logger
+	ctx := context.Background()
+	ctx = WithFields(ctx, String("key", "value"))
+
+	lc := getLogContext(ctx)
+	assert.NotNil(t, lc.logger)
+	assert.NotSame(t, getLogger(), lc.logger, "cached logger should be different from global")
+}
+
+// Tests for stored field slices
+
+func TestLogContextStoresFieldsInOrder(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithFields(ctx, String("key", "value"))
+
+	lc := getLogContext(ctx)
+	assert.Len(t, lc.fields, 1)
+
+	field := lc.fields[0]
+	assert.Equal(t, "key", field.Key)
+	assert.Equal(t, zapcore.StringType, field.Type)
+	assert.Equal(t, "value", field.String)
+}

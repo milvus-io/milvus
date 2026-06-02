@@ -115,6 +115,27 @@ MatchSingleRow(int64_t bitset_start,
     return false;
 }
 
+bool
+MatchEmptyElements(MatchType match_type, int64_t threshold) {
+    switch (match_type) {
+        case MatchType::MatchAny:
+            return false;
+        case MatchType::MatchAll:
+            return true;
+        case MatchType::MatchLeast:
+            return threshold <= 0;
+        case MatchType::MatchMost:
+            return threshold >= 0;
+        case MatchType::MatchExact:
+            return threshold == 0;
+        default:
+            ThrowInfo(OpTypeInvalid,
+                      "Unsupported match type: {}",
+                      static_cast<int>(match_type));
+    }
+    return false;
+}
+
 // Process contiguous rows [row_start, row_start + row_count)
 template <MatchType match_type, bool all_valid>
 void
@@ -216,6 +237,7 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     int64_t batch_rows;
     int64_t elem_start;
+    int64_t elem_count;
     FixedVector<int32_t> element_offsets_storage;
     EvalCtx eval_ctx(context.get_exec_context());
 
@@ -226,11 +248,15 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             array_offsets->RowOffsetsToElementOffsets(*input);
         eval_ctx.set_offset_input(&element_offsets_storage);
         elem_start = 0;
+        elem_count = element_offsets_storage.size();
     } else {
         // Sequential batch mode
         batch_rows = std::min(batch_size_, active_count_ - current_pos_);
-        auto [start, _] = array_offsets->ElementIDRangeOfRow(current_pos_);
-        elem_start = start;
+        auto start_range = array_offsets->ElementIDRangeOfRow(current_pos_);
+        auto end_range =
+            array_offsets->ElementIDRangeOfRow(current_pos_ + batch_rows);
+        elem_start = start_range.first;
+        elem_count = end_range.first - elem_start;
     }
 
     if (batch_rows <= 0) {
@@ -244,8 +270,29 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto col_vec = std::dynamic_pointer_cast<ColumnVector>(result);
     TargetBitmapView bitset_view(col_vec->GetRawData(), col_vec->size());
 
+    auto match_type = expr_->get_match_type();
+    int64_t threshold = expr_->get_count();
+
     VectorPtr match_result;
-    inputs_[0]->Eval(eval_ctx, match_result);
+    if (elem_count > 0) {
+        inputs_[0]->Eval(eval_ctx, match_result);
+    } else if (!has_offset_input_) {
+        // Keep element-level child expressions aligned across all-empty batches.
+        inputs_[0]->MoveCursor();
+    }
+    if (match_result == nullptr) {
+        AssertInfo(elem_count == 0,
+                   "Match child returned empty result for non-empty element "
+                   "batch, elem_count={}",
+                   elem_count);
+        if (MatchEmptyElements(match_type, threshold)) {
+            bitset_view.set();
+        }
+        if (!has_offset_input_) {
+            current_pos_ += batch_rows;
+        }
+        return;
+    }
     auto match_result_col_vec =
         std::dynamic_pointer_cast<ColumnVector>(match_result);
     AssertInfo(match_result_col_vec != nullptr,
@@ -258,8 +305,6 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         match_result_col_vec->GetValidRawData(), match_result_col_vec->size());
 
     bool all_valid = match_result_valid_view.all();
-    auto match_type = expr_->get_match_type();
-    int64_t threshold = expr_->get_count();
 
     auto dispatch = [&]<bool all_valid_v>() {
         switch (match_type) {

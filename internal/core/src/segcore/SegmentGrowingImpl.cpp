@@ -93,6 +93,29 @@ using namespace milvus::cachinglayer;
 
 namespace {
 
+int32_t
+GetVectorArrayLength(const proto::schema::VectorField& vec_field,
+                     DataType element_type,
+                     int64_t dim) {
+    switch (element_type) {
+        case DataType::VECTOR_FLOAT:
+            return vec_field.float_vector().data_size() / dim;
+        case DataType::VECTOR_FLOAT16:
+            return vec_field.float16_vector().size() / (dim * 2);
+        case DataType::VECTOR_BFLOAT16:
+            return vec_field.bfloat16_vector().size() / (dim * 2);
+        case DataType::VECTOR_BINARY:
+            return vec_field.binary_vector().size() / (dim / 8);
+        case DataType::VECTOR_INT8:
+            return vec_field.int8_vector().size() / dim;
+        default:
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "Unexpected VECTOR_ARRAY element type: {}",
+                      element_type);
+    }
+    return 0;
+}
+
 void
 ExtractArrayLengthsFromFieldData(const std::vector<FieldDataPtr>& field_data,
                                  const FieldMeta& field_meta,
@@ -104,10 +127,15 @@ ExtractArrayLengthsFromFieldData(const std::vector<FieldDataPtr>& field_data,
         auto num_rows = data->get_num_rows();
 
         if (data_type == DataType::VECTOR_ARRAY) {
-            // Get raw pointer to VectorArray data
             auto* raw_data = static_cast<const VectorArray*>(data->Data());
+            int64_t physical_row = 0;
             for (int64_t i = 0; i < num_rows; ++i) {
-                array_lengths[offset + i] = raw_data[i].length();
+                if (data->IsNullable() && !data->is_valid(i)) {
+                    array_lengths[offset + i] = 0;
+                    continue;
+                }
+                auto source_index = data->IsNullable() ? physical_row++ : i;
+                array_lengths[offset + i] = raw_data[source_index].length();
             }
         } else {
             // For regular array types (INT32, FLOAT, etc.)
@@ -130,34 +158,54 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
         const auto& vector_array = field_data.vectors().vector_array();
         int64_t dim = field_meta.get_dim();
         auto element_type = field_meta.get_element_type();
+        bool compact_nullable = false;
+        if (field_meta.is_nullable()) {
+            int64_t valid_count = 0;
+            if (field_data.valid_data_size() == num_rows) {
+                for (int64_t i = 0; i < num_rows; ++i) {
+                    if (field_data.valid_data(i)) {
+                        ++valid_count;
+                    }
+                }
+            }
+            auto dense_aligned = vector_array.data_size() == num_rows;
+            compact_nullable = field_data.valid_data_size() == num_rows &&
+                               vector_array.data_size() == valid_count;
+            AssertInfo(
+                dense_aligned || compact_nullable,
+                "nullable VECTOR_ARRAY supports only dense-aligned data "
+                "(data_size == num_rows) or compact data "
+                "(valid_data_size == num_rows and data_size == valid_count), "
+                "got data_size {}, valid_data_size {}, num_rows {}, "
+                "valid_count {}",
+                vector_array.data_size(),
+                field_data.valid_data_size(),
+                num_rows,
+                valid_count);
+            compact_nullable = compact_nullable && !dense_aligned;
+        } else {
+            AssertInfo(vector_array.data_size() == num_rows,
+                       "non-nullable VECTOR_ARRAY data_size {} must match "
+                       "num_rows {}",
+                       vector_array.data_size(),
+                       num_rows);
+        }
+        int64_t physical_row = 0;
+        auto has_valid_data = field_data.valid_data_size() == num_rows;
 
         for (int i = 0; i < num_rows; ++i) {
-            const auto& vec_field = vector_array.data(i);
-            int32_t array_len = 0;
-
-            switch (element_type) {
-                case DataType::VECTOR_FLOAT:
-                    array_len = vec_field.float_vector().data_size() / dim;
-                    break;
-                case DataType::VECTOR_FLOAT16:
-                    array_len = vec_field.float16_vector().size() / (dim * 2);
-                    break;
-                case DataType::VECTOR_BFLOAT16:
-                    array_len = vec_field.bfloat16_vector().size() / (dim * 2);
-                    break;
-                case DataType::VECTOR_BINARY:
-                    array_len = vec_field.binary_vector().size() / (dim / 8);
-                    break;
-                case DataType::VECTOR_INT8:
-                    array_len = vec_field.int8_vector().size() / dim;
-                    break;
-                default:
-                    ThrowInfo(ErrorCode::UnexpectedError,
-                              "Unexpected VECTOR_ARRAY element type: {}",
-                              element_type);
+            if (field_meta.is_nullable() && has_valid_data &&
+                !field_data.valid_data(i)) {
+                array_lengths[i] = 0;
+                continue;
             }
 
-            array_lengths[i] = array_len;
+            auto source_index = compact_nullable ? physical_row++ : i;
+            AssertInfo(source_index < vector_array.data_size(),
+                       "VECTOR_ARRAY row {} is missing from field data",
+                       source_index);
+            array_lengths[i] = GetVectorArrayLength(
+                vector_array.data(source_index), element_type, dim);
         }
     } else {
         // ARRAY: extract from scalars().array_data().data(i)
@@ -218,13 +266,9 @@ SegmentGrowingImpl::InitializeArrayOffsets() {
     std::unordered_map<std::string, std::vector<FieldId>> struct_fields;
 
     for (const auto& [field_id, field_meta] : schema_->get_fields()) {
-        const auto& field_name = field_meta.get_name().get();
-
-        // Check if field belongs to a struct: format = "struct_name[field_name]"
-        size_t bracket_pos = field_name.find('[');
-        if (bracket_pos != std::string::npos && bracket_pos > 0) {
-            std::string struct_name = field_name.substr(0, bracket_pos);
-            struct_fields[struct_name].push_back(field_id);
+        auto struct_name = GetStructNameForArrayField(field_meta);
+        if (struct_name.has_value()) {
+            struct_fields[*struct_name].push_back(field_id);
         }
     }
 
@@ -910,7 +954,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
                 fs,
                 file,
                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-                storage::GetReaderProperties());
+                storage::GetReaderProperties(),
+                storage::GetArrowReaderProperties());
             AssertInfo(result.ok(),
                        "[StorageV2] Failed to create file row group reader: " +
                            result.status().ToString());
@@ -1381,6 +1426,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                              *vec_ptr,
                                              seg_offsets,
                                              count,
+                                             valid_data,
                                              result->mutable_vectors()
                                                  ->mutable_vector_array()
                                                  ->mutable_data());
@@ -1719,15 +1765,22 @@ SegmentGrowingImpl::bulk_subscript_vector_array_impl(
     const VectorBase& vec_raw,
     const int64_t* seg_offsets,
     int64_t count,
+    const bool* valid_data,
     google::protobuf::RepeatedPtrField<T>* dst) const {
     auto vec_ptr = dynamic_cast<const ConcurrentVector<VectorArray>*>(&vec_raw);
     AssertInfo(vec_ptr, "Pointer of vec_raw is nullptr");
     auto& vec = *vec_ptr;
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
-        if (offset != INVALID_SEG_OFFSET) {
-            dst->at(i) = vec[offset].output_data();
+        if (offset == INVALID_SEG_OFFSET ||
+            (valid_data != nullptr && !valid_data[i])) {
+            continue;
         }
+        auto value = vec.get_element(offset);
+        AssertInfo(value != nullptr,
+                   "Cannot find VECTOR_ARRAY data at segment offset {}",
+                   offset);
+        dst->at(i) = value->output_data();
     }
 }
 
@@ -2090,7 +2143,8 @@ SegmentGrowingImpl::BulkGetJsonData(
 }
 
 void
-SegmentGrowingImpl::LazyCheckSchema(SchemaPtr sch) {
+SegmentGrowingImpl::LazyCheckSchema(SchemaPtr sch, milvus::OpContext* op_ctx) {
+    (void)op_ctx;
     if (sch->get_schema_version() > schema_->get_schema_version()) {
         LOG_INFO(
             "lazy check schema segment {} found newer schema version, "
@@ -2116,6 +2170,11 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
         }
 
         schema_ = sch;
+
+        auto row_count = insert_record_.row_count();
+        for (const auto& field_meta : *absent_fields) {
+            EnsureArrayOffsetsForStructField(field_meta, row_count);
+        }
     }
 
     UpdateResourceTracking();
@@ -2125,6 +2184,16 @@ void
 SegmentGrowingImpl::Reopen(
     milvus::OpContext* op_ctx,
     const milvus::proto::segcore::SegmentLoadInfo& new_load_info) {
+    ThrowInfo(milvus::UnexpectedError,
+              "Unexpected reopening growing segment {} with load info",
+              id_);
+}
+
+void
+SegmentGrowingImpl::Reopen(
+    milvus::OpContext* op_ctx,
+    const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
+    SchemaPtr new_schema) {
     ThrowInfo(milvus::UnexpectedError,
               "Unexpected reopening growing segment {} with load info",
               id_);
@@ -2384,6 +2453,41 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
              field_meta.get_data_type(),
              field_id.get(),
              id_);
+}
+
+void
+SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
+    const FieldMeta& field_meta, int64_t row_count) {
+    auto struct_name = GetStructNameForArrayField(field_meta);
+    if (!struct_name.has_value()) {
+        return;
+    }
+
+    std::shared_ptr<ArrayOffsetsGrowing> array_offsets;
+    for (const auto& [field_id, offsets] : array_offsets_map_) {
+        auto field_it = schema_->get_fields().find(field_id);
+        if (field_it == schema_->get_fields().end()) {
+            continue;
+        }
+
+        auto existing_struct_name =
+            GetStructNameForArrayField(field_it->second);
+        if (existing_struct_name == struct_name) {
+            array_offsets = offsets;
+            break;
+        }
+    }
+
+    if (!array_offsets) {
+        array_offsets = std::make_shared<ArrayOffsetsGrowing>();
+        if (row_count > 0) {
+            std::vector<int32_t> empty_lengths(row_count, 0);
+            array_offsets->Insert(0, empty_lengths.data(), row_count);
+        }
+        struct_representative_fields_.insert(field_meta.get_id());
+    }
+
+    array_offsets_map_[field_meta.get_id()] = array_offsets;
 }
 
 void

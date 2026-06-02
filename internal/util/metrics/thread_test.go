@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestThreadWatcher(t *testing.T) {
@@ -36,6 +36,30 @@ func TestThreadWatcher(t *testing.T) {
 	select {
 	case <-ch:
 	case <-time.After(time.Second * 5):
-		assert.FailNow(t, "watcher failed to close after 5 seconds")
+		require.FailNow(t, "watcher failed to close after 5 seconds")
 	}
+}
+
+func TestClassifyThreadName(t *testing.T) {
+	group, ok := classifyThreadName("knowhere_search")
+	require.True(t, ok)
+	require.Equal(t, "knowhere_search", group)
+
+	group, ok = classifyThreadName("MILVUS_FL_WR_0")
+	require.True(t, ok)
+	require.Equal(t, "file_write", group)
+
+	group, ok = classifyThreadName("knowhere_fetch_")
+	require.True(t, ok)
+	require.Equal(t, "knowhere_fetch", group)
+
+	_, ok = classifyThreadName("grpc_global_tim")
+	require.False(t, ok)
+}
+
+func TestParseThreadStat(t *testing.T) {
+	state, cpu, err := parseThreadStat("123 (knowhere search) R 1 2 3 4 5 6 7 8 9 10 34 56 0 0 0")
+	require.NoError(t, err)
+	require.Equal(t, byte('R'), state)
+	require.Equal(t, uint64(90), cpu)
 }

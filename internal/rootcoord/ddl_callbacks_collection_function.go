@@ -35,10 +35,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+const externalCollectionFunctionMutationUnsupportedMsg = "external collection does not support altering or dropping functions"
+
+func rejectExternalCollectionFunctionMutation(schema *schemapb.CollectionSchema) error {
+	if typeutil.IsExternalCollection(schema) {
+		return merr.WrapErrParameterInvalidMsg(externalCollectionFunctionMutationUnsupportedMsg)
+	}
+	return nil
+}
+
 func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.BroadcastAPI, coll *model.Collection, dbName string, collectionName string) error {
 	// build new collection schema.
 	schema := coll.ToCollectionSchemaPB()
 	schema.Version = coll.SchemaVersion + 1
+	if err := typeutil.ValidateExternalCollectionResolvedSchema(schema); err != nil {
+		return err
+	}
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, dbName, collectionName)
 	if err != nil {
@@ -149,6 +161,9 @@ func (c *Core) broadcastAlterCollectionForAlterFunction(ctx context.Context, req
 	if err != nil {
 		return err
 	}
+	if err := rejectExternalCollectionFunctionMutation(oldColl.ToCollectionSchemaPB()); err != nil {
+		return err
+	}
 
 	newColl := oldColl.Clone()
 	if err := alterFunctionGenNewCollection(ctx, req.FunctionSchema, newColl); err != nil {
@@ -167,6 +182,9 @@ func (c *Core) broadcastAlterCollectionForDropFunction(ctx context.Context, req 
 
 	oldColl, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
+		return err
+	}
+	if err := rejectExternalCollectionFunctionMutation(oldColl.ToCollectionSchemaPB()); err != nil {
 		return err
 	}
 

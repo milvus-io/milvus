@@ -1085,6 +1085,22 @@ func TestAddFieldTask(t *testing.T) {
 		err = task.PreExecute(ctx)
 		assert.NoError(t, err)
 
+		fSchema = &schemapb.FieldSchema{
+			Name:        "array_struct",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Struct,
+			Nullable:    true,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "4"},
+			},
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "element type Struct is not supported")
+
 		// not support system field
 		fSchema = &schemapb.FieldSchema{
 			Name: common.TimeStampFieldName,
@@ -2015,26 +2031,9 @@ func TestCreateCollectionTaskExternalCollection(t *testing.T) {
 		assert.Equal(t, "vec_field", freshTask.schema.Fields[2].Name)
 	})
 
-	t.Run("functions forbidden", func(t *testing.T) {
-		schema := buildExternalSchema()
-		schema.Functions = []*schemapb.FunctionSchema{{Name: "test_func"}}
-		task.Schema = marshal(schema)
-		err := task.PreExecute(ctx)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "does not support functions")
-	})
-
 	t.Run("dynamic field forbidden", func(t *testing.T) {
 		schema := buildExternalSchema()
 		schema.EnableDynamicField = true
-		task.Schema = marshal(schema)
-		err := task.PreExecute(ctx)
-		assert.Error(t, err)
-	})
-
-	t.Run("primary key forbidden", func(t *testing.T) {
-		schema := buildExternalSchema()
-		schema.Fields[0].IsPrimaryKey = true
 		task.Schema = marshal(schema)
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
@@ -2064,15 +2063,20 @@ func TestCreateCollectionTaskExternalCollection(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("text match forbidden", func(t *testing.T) {
+	t.Run("text match allowed", func(t *testing.T) {
 		schema := buildExternalSchema()
-		schema.Fields[0].TypeParams = append(schema.Fields[0].TypeParams, &commonpb.KeyValuePair{
-			Key:   "enable_match",
-			Value: "true",
-		})
+		schema.Fields[0].TypeParams = append(schema.Fields[0].TypeParams,
+			&commonpb.KeyValuePair{
+				Key:   "enable_match",
+				Value: "true",
+			},
+			&commonpb.KeyValuePair{
+				Key:   common.EnableAnalyzerKey,
+				Value: "true",
+			})
 		task.Schema = marshal(schema)
 		err := task.PreExecute(ctx)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("struct field forbidden", func(t *testing.T) {
@@ -7054,6 +7058,72 @@ func TestValidateAddFieldRequest(t *testing.T) {
 		assert.Contains(t, err.Error(), "does not support external field mapping")
 	})
 
+	t.Run("external collection requires external field mapping", func(t *testing.T) {
+		schema := baseSchema()
+		for _, field := range schema.GetFields() {
+			field.ExternalField = field.GetName()
+		}
+		newField := &schemapb.FieldSchema{
+			Name:     "score",
+			DataType: schemapb.DataType_Double,
+			Nullable: true,
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "requires external_field mapping")
+	})
+
+	t.Run("external collection allows external field mapping", func(t *testing.T) {
+		schema := baseSchema()
+		for _, field := range schema.GetFields() {
+			field.ExternalField = field.GetName()
+		}
+		newField := &schemapb.FieldSchema{
+			Name:          "score",
+			DataType:      schemapb.DataType_Double,
+			Nullable:      true,
+			ExternalField: "score",
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.NoError(t, err)
+	})
+
+	t.Run("external collection rejects unsupported field type", func(t *testing.T) {
+		schema := baseSchema()
+		for _, field := range schema.GetFields() {
+			field.ExternalField = field.GetName()
+		}
+		newField := &schemapb.FieldSchema{
+			Name:          "sparse",
+			DataType:      schemapb.DataType_SparseFloatVector,
+			ExternalField: "sparse",
+		}
+		err := validateAddFieldRequest(schema, newField)
+		if assert.Error(t, err) {
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "does not support field type")
+		}
+	})
+
+	t.Run("external collection rejects duplicate external field mapping", func(t *testing.T) {
+		schema := baseSchema()
+		for _, field := range schema.GetFields() {
+			field.ExternalField = field.GetName()
+		}
+		newField := &schemapb.FieldSchema{
+			Name:          "score",
+			DataType:      schemapb.DataType_Double,
+			Nullable:      true,
+			ExternalField: "vec",
+		}
+		err := validateAddFieldRequest(schema, newField)
+		if assert.Error(t, err) {
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "external_field \"vec\" is mapped by multiple fields")
+		}
+	})
+
 	t.Run("system field name RowID", func(t *testing.T) {
 		schema := baseSchema()
 		newField := &schemapb.FieldSchema{
@@ -7430,33 +7500,26 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
-	t.Run("PreExecute rejects non-BM25 function with DoPhysicalBackfill", func(t *testing.T) {
-		req := &milvuspb.AlterCollectionSchemaRequest{
-			DbName:         dbName,
-			CollectionName: collectionName,
-			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
-				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
-					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
-						DoPhysicalBackfill: true,
-						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
-							{FieldSchema: sparseOutputField},
-						},
-						FuncSchema: []*schemapb.FunctionSchema{
-							{
-								Name:             "text_embedding_func",
-								Type:             schemapb.FunctionType_TextEmbedding,
-								InputFieldNames:  []string{"text"},
-								OutputFieldNames: []string{"sparse_bm25"},
-							},
-						},
-					},
-				},
-			},
-		}
+	t.Run("PreExecute rejects non-BM25 function", func(t *testing.T) {
+		req := buildValidRequest()
+		addRequest := req.GetAction().GetAddRequest()
+		functionSchema := proto.Clone(addRequest.GetFuncSchema()[0]).(*schemapb.FunctionSchema)
+		functionSchema.Type = schemapb.FunctionType_MinHash
+		addRequest.FuncSchema = []*schemapb.FunctionSchema{functionSchema}
+
 		task := buildTask(req, oldSchema)
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "only BM25 function is supported")
+	})
+
+	t.Run("PreExecute ignores legacy DoPhysicalBackfill", func(t *testing.T) {
+		schema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		schema.DoPhysicalBackfill = true
+		task := buildTask(buildValidRequest(), schema)
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
 	})
 
 	t.Run("PreExecute happy path", func(t *testing.T) {

@@ -81,7 +81,12 @@ log:
   level: debug
 extraConfigFiles:
   user.yaml: |+
+    common:
+      storage:
+        # enable storage v3
+        useLoonFFI: true
     dataCoord:
+      targetVecIndexVersion: 10
       gc:
         interval: 1800
         missingTolerance: 1800

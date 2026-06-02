@@ -76,6 +76,12 @@ func TestGenerateTargetPath(t *testing.T) {
 			wantErr:    false,
 		},
 		{
+			name:       "external component in regular binlog root is not external table",
+			sourcePath: "files/external/insert_log/111/222/333/100/log1.log",
+			wantPath:   "files/external/insert_log/444/555/666/100/log1.log",
+			wantErr:    false,
+		},
+		{
 			name:       "invalid path - no log type",
 			sourcePath: "files/111/222/333/100/log1.log",
 			wantPath:   "",
@@ -100,6 +106,31 @@ func TestGenerateTargetPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGenerateMappingsFromFiles_ExternalTable(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId:         111,
+		PartitionId:          222,
+		SegmentId:            333,
+		StorageVersion:       storage.StorageV3,
+		ManifestPath:         packed.MarshalManifestPath("files/insert_log/111/222/333", 1),
+		IsExternalCollection: true,
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+	files := &SegmentFiles{
+		InsertBinlogs: []string{"files/insert_log/111/222/333/_metadata/manifest.json"},
+	}
+
+	mappings, err := generateMappingsFromFiles(files, source, target)
+	assert.NoError(t, err)
+	assert.Equal(t,
+		"files/insert_log/444/555/666/_metadata/manifest.json",
+		mappings["files/insert_log/111/222/333/_metadata/manifest.json"])
 }
 
 func TestGenerateTargetLOBPath(t *testing.T) {
@@ -490,7 +521,7 @@ func TestTransformFieldBinlogs(t *testing.T) {
 	}
 
 	t.Run("count rows for insert logs", func(t *testing.T) {
-		result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true)
+		result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true, false)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(3000), totalRows)
 		assert.Equal(t, 2, len(result))
@@ -510,7 +541,7 @@ func TestTransformFieldBinlogs(t *testing.T) {
 	})
 
 	t.Run("no row counting for stats logs", func(t *testing.T) {
-		result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, false)
+		result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, false, false)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(0), totalRows)
 		assert.Equal(t, 2, len(result))
@@ -528,7 +559,7 @@ func TestTransformFieldBinlogs(t *testing.T) {
 				},
 			},
 		}
-		result, _, err := transformFieldBinlogs(srcWithEmpty, mappings, false)
+		result, _, err := transformFieldBinlogs(srcWithEmpty, mappings, false, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 0, len(result))
 	})
@@ -545,7 +576,7 @@ func TestTransformFieldBinlogs(t *testing.T) {
 				},
 			},
 		}
-		result, totalRows, err := transformFieldBinlogs(srcWithUnmapped, mappings, true)
+		result, totalRows, err := transformFieldBinlogs(srcWithUnmapped, mappings, true, false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "no mapping found")
 		assert.Nil(t, result)
@@ -1246,7 +1277,7 @@ func TestBuildIndexInfoFromSource_UnmappedPaths(t *testing.T) {
 }
 
 func TestTransformFieldBinlogs_NilInput(t *testing.T) {
-	result, totalRows, err := transformFieldBinlogs(nil, map[string]string{}, true)
+	result, totalRows, err := transformFieldBinlogs(nil, map[string]string{}, true, false)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(0), totalRows)
 	assert.Equal(t, 0, len(result))
@@ -1270,7 +1301,7 @@ func TestTransformFieldBinlogs_MultipleBinlogsPerField(t *testing.T) {
 		},
 	}
 
-	result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true)
+	result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true, false)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(600), totalRows)
 	assert.Equal(t, 1, len(result))
@@ -1293,7 +1324,7 @@ func TestTransformFieldBinlogs_UnmappedPath(t *testing.T) {
 		},
 	}
 
-	_, _, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true)
+	_, _, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true, false)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no mapping found for source path")
 }
@@ -1502,12 +1533,6 @@ func TestShortenSingleJsonStatsPath_EdgeCases(t *testing.T) {
 }
 
 func TestTransformManifestPath(t *testing.T) {
-	source := &datapb.CopySegmentSource{
-		SegmentId:    449104621518610065,
-		CollectionId: 449104612037410004,
-		PartitionId:  449104621518610066,
-	}
-
 	target := &datapb.CopySegmentTarget{
 		SegmentId:    2001,
 		CollectionId: 111,
@@ -1519,6 +1544,7 @@ func TestTransformManifestPath(t *testing.T) {
 		2,
 	)
 
+	source := &datapb.CopySegmentSource{}
 	targetManifest, err := transformManifestPath(sourceManifest, source, target)
 	assert.NoError(t, err)
 
@@ -1528,6 +1554,165 @@ func TestTransformManifestPath(t *testing.T) {
 	assert.Contains(t, basePath, "111")
 	assert.Contains(t, basePath, "222")
 	assert.Contains(t, basePath, "2001")
+}
+
+func TestTransformManifestPath_ExternalTable(t *testing.T) {
+	target := &datapb.CopySegmentTarget{
+		SegmentId:    666,
+		CollectionId: 444,
+		PartitionId:  555,
+	}
+
+	sourceManifest := packed.MarshalManifestPath("files/insert_log/111/222/333", 2)
+	source := &datapb.CopySegmentSource{IsExternalCollection: true}
+	targetManifest, err := transformManifestPath(sourceManifest, source, target)
+	assert.NoError(t, err)
+
+	basePath, version, err := packed.UnmarshalManifestPath(targetManifest)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), version)
+	assert.Equal(t, "files/insert_log/444/555/666", basePath)
+}
+
+func TestTransformManifestPath_LegacyExternalTableLayoutUnsupported(t *testing.T) {
+	target := &datapb.CopySegmentTarget{
+		SegmentId:    666,
+		CollectionId: 444,
+		PartitionId:  555,
+	}
+
+	sourceManifest := packed.MarshalManifestPath("external/111/segments/333", 2)
+	source := &datapb.CopySegmentSource{IsExternalCollection: true}
+	targetManifest, err := transformManifestPath(sourceManifest, source, target)
+	assert.Error(t, err)
+	assert.Empty(t, targetManifest)
+	assert.Contains(t, err.Error(), "invalid binlog path structure")
+}
+
+func TestTransformFieldBinlogs_SkipsPathMappingForExternalTable(t *testing.T) {
+	src := []*datapb.FieldBinlog{
+		{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{
+				{
+					LogID:      10,
+					EntriesNum: 123,
+					MemorySize: 456,
+					LogSize:    456,
+				},
+			},
+		},
+	}
+	got, totalRows, err := transformFieldBinlogs(src, nil, true, true)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(123), totalRows)
+	assert.Len(t, got, 1)
+	assert.Equal(t, int64(100), got[0].GetFieldID())
+	assert.Len(t, got[0].GetBinlogs(), 1)
+	assert.Empty(t, got[0].GetBinlogs()[0].GetLogPath())
+	assert.Equal(t, int64(10), got[0].GetBinlogs()[0].GetLogID())
+	assert.Equal(t, int64(123), got[0].GetBinlogs()[0].GetEntriesNum())
+	assert.Equal(t, int64(456), got[0].GetBinlogs()[0].GetMemorySize())
+}
+
+func TestTransformFieldBinlogs_SkipsEmptyPathForInternalTable(t *testing.T) {
+	src := []*datapb.FieldBinlog{
+		{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{
+				{LogID: 10, EntriesNum: 123},
+			},
+		},
+	}
+
+	got, totalRows, err := transformFieldBinlogs(src, nil, false, false)
+	assert.NoError(t, err)
+	assert.Zero(t, totalRows)
+	assert.Empty(t, got)
+}
+
+func TestGenerateSegmentInfoFromSource_PreservesExternalTableBinlogMetadata(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId:         111,
+		PartitionId:          222,
+		SegmentId:            333,
+		StorageVersion:       storage.StorageV3,
+		ManifestPath:         packed.MarshalManifestPath("files/insert_log/111/222/333", 2),
+		IsExternalCollection: true,
+		InsertBinlogs: []*datapb.FieldBinlog{
+			{
+				FieldID:     0,
+				ChildFields: []int64{100, 101, 102},
+				Binlogs: []*datapb.Binlog{
+					{LogID: 10, EntriesNum: 123, MemorySize: 456},
+				},
+			},
+		},
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+
+	segmentInfo, err := generateSegmentInfoFromSource(source, target, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(123), segmentInfo.GetImportedRows())
+	assert.Len(t, segmentInfo.GetBinlogs(), 1)
+	assert.Empty(t, segmentInfo.GetBinlogs()[0].GetBinlogs()[0].GetLogPath())
+}
+
+func TestCopySegmentAndIndexFiles_ExternalTable(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId:         111,
+		PartitionId:          222,
+		SegmentId:            333,
+		StorageVersion:       storage.StorageV3,
+		ManifestPath:         packed.MarshalManifestPath("files/insert_log/111/222/333", 2),
+		IsExternalCollection: true,
+		InsertBinlogs: []*datapb.FieldBinlog{
+			{
+				FieldID:     0,
+				ChildFields: []int64{100, 101, 102},
+				Binlogs: []*datapb.Binlog{
+					{LogID: 10, EntriesNum: 123, MemorySize: 456},
+				},
+			},
+		},
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+
+	mList := mockey.Mock(listAllFiles).Return([]string{
+		"files/insert_log/111/222/333/_data/0",
+		"files/insert_log/111/222/333/_metadata/manifest.json",
+	}, nil).Build()
+	defer mList.UnPatch()
+
+	copied := make(map[string]string)
+	mCopy := mockey.Mock(copyFile).
+		To(func(_ context.Context, _ storage.ChunkManager, src, dst string) error {
+			copied[src] = dst
+			return nil
+		}).Build()
+	defer mCopy.UnPatch()
+
+	cm := &struct{ storage.ChunkManager }{}
+	result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(123), result.GetImportedRows())
+	assert.Equal(t, packed.MarshalManifestPath("files/insert_log/444/555/666", 2), result.GetManifestPath())
+	assert.Len(t, result.GetBinlogs(), 1)
+	assert.Empty(t, result.GetBinlogs()[0].GetBinlogs()[0].GetLogPath())
+	assert.Equal(t, "files/insert_log/444/555/666/_data/0", copied["files/insert_log/111/222/333/_data/0"])
+	assert.Equal(t, "files/insert_log/444/555/666/_metadata/manifest.json", copied["files/insert_log/111/222/333/_metadata/manifest.json"])
+	assert.ElementsMatch(t, []string{
+		"files/insert_log/444/555/666/_data/0",
+		"files/insert_log/444/555/666/_metadata/manifest.json",
+	}, copiedFiles)
 }
 
 func TestCollectSegmentFiles_WithManifest(t *testing.T) {

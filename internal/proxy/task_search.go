@@ -92,13 +92,14 @@ type searchTask struct {
 
 	partitionIDsSet *typeutil.ConcurrentSet[UniqueID]
 
-	mixCoord        types.MixCoordClient
-	node            types.ProxyComponent
-	lb              shardclient.LBPolicy
-	shardClientMgr  shardclient.ShardClientMgr
-	queryChannelsTs map[string]Timestamp
-	queryInfos      []*planpb.QueryInfo
-	relatedDataSize int64
+	mixCoord          types.MixCoordClient
+	node              types.ProxyComponent
+	lb                shardclient.LBPolicy
+	shardClientMgr    shardclient.ShardClientMgr
+	queryChannelsTs   map[string]Timestamp
+	queryChannelsNode *typeutil.ConcurrentMap[string, int64]
+	queryInfos        []*planpb.QueryInfo
+	relatedDataSize   int64
 
 	// Rerank configuration metadata (nil means no rerank)
 	rerankMeta rerankMeta
@@ -1104,6 +1105,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute search %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
 
+	t.queryChannelsNode = typeutil.NewConcurrentMap[string, int64]()
 	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
 		Db:             t.request.GetDbName(),
 		CollectionID:   t.CollectionID,
@@ -1342,6 +1344,9 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	}
 	if t.resultBuf != nil {
 		t.resultBuf.Insert(result)
+	}
+	if t.queryChannelsNode != nil {
+		t.queryChannelsNode.Insert(channel, nodeID)
 	}
 	t.lb.UpdateCostMetrics(nodeID, result.CostAggregation)
 

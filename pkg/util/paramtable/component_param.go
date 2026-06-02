@@ -41,6 +41,7 @@ import (
 const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize                      = 16
+	DefaultStreamBudgetRatio                   = 3.0
 	DefaultGracefulTime                        = 5000 // ms
 	DefaultGracefulStopTimeout                 = 1800 // s, for node
 	DefaultProxyGracefulStopTimeout            = 30   // s，for proxy
@@ -227,6 +228,7 @@ type commonConfig struct {
 	DefaultIndexName     ParamItem `refreshable:"true"`
 
 	IndexSliceSize                      ParamItem `refreshable:"false"`
+	StreamBudgetRatio                   ParamItem `refreshable:"true"`
 	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"true"`
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
@@ -234,6 +236,8 @@ type commonConfig struct {
 	ThreadPoolMaxThreadsSize            ParamItem `refreshable:"true"`
 	ArrowIOThreadPoolCoefficient        ParamItem `refreshable:"true"`
 	ArrowIOThreadPoolMaxCapacity        ParamItem `refreshable:"true"`
+	ArrowReaderHoleSizeLimitBytes       ParamItem `refreshable:"true"`
+	ArrowReaderRangeSizeLimitBytes      ParamItem `refreshable:"true"`
 	EnableMaterializedView              ParamItem `refreshable:"false"`
 	BuildIndexThreadPoolRatio           ParamItem `refreshable:"false"`
 	MaxDegree                           ParamItem `refreshable:"true"`
@@ -548,6 +552,15 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	}
 	p.IndexSliceSize.Init(base.mgr)
 
+	p.StreamBudgetRatio = ParamItem{
+		Key:          "common.entryStream.streamBudgetRatio",
+		Version:      "3.0.0",
+		DefaultValue: fmt.Sprintf("%f", DefaultStreamBudgetRatio),
+		Doc:          "Multiplier for entry stream transient memory budget, relative to CPU core count",
+		Export:       true,
+	}
+	p.StreamBudgetRatio.Init(base.mgr)
+
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",
 		Version:      "2.4.6",
@@ -737,6 +750,28 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export: false,
 	}
 	p.ArrowIOThreadPoolMaxCapacity.Init(base.mgr)
+
+	p.ArrowReaderHoleSizeLimitBytes = ParamItem{
+		Key:          "common.arrow.reader.holeSizeLimitBytes",
+		Version:      "2.6.16",
+		DefaultValue: "0",
+		Doc: `Maximum byte gap between adjacent Arrow read ranges that can be coalesced. ` +
+			`0 keeps Arrow's default. Increasing this can reduce remote object-store GET ` +
+			`count by reading small holes between Parquet column chunk ranges.`,
+		Export: false,
+	}
+	p.ArrowReaderHoleSizeLimitBytes.Init(base.mgr)
+
+	p.ArrowReaderRangeSizeLimitBytes = ParamItem{
+		Key:          "common.arrow.reader.rangeSizeLimitBytes",
+		Version:      "2.6.16",
+		DefaultValue: "0",
+		Doc: `Maximum size in bytes of a coalesced Arrow read range. 0 keeps Arrow's ` +
+			`default. Increase this with holeSizeLimitBytes when larger remote reads ` +
+			`are needed to amortize object-store request latency.`,
+		Export: false,
+	}
+	p.ArrowReaderRangeSizeLimitBytes.Init(base.mgr)
 
 	p.DiskWriteMode = ParamItem{
 		Key:          "common.diskWriteMode",
@@ -1037,7 +1072,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	p.UseLoonFFI = ParamItem{
 		Key:          "common.storage.useLoonFFI",
 		Version:      "2.6.7",
-		DefaultValue: "true",
+		DefaultValue: "false",
 		Export:       true,
 	}
 	p.UseLoonFFI.Init(base.mgr)
@@ -3491,11 +3526,12 @@ type queryNodeConfig struct {
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
 	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
-	MaxReceiveChanSize    ParamItem `refreshable:"false"`
 	MaxUnsolvedQueueSize  ParamItem `refreshable:"true"`
 	MaxReadConcurrency    ParamItem `refreshable:"true"`
 	MaxGpuReadConcurrency ParamItem `refreshable:"false"`
 	MaxGroupNQ            ParamItem `refreshable:"true"`
+	NQMergeRatio          ParamItem `refreshable:"true"`
+	MaxDeadlineMergeGap   ParamItem `refreshable:"true"`
 	TopKMergeRatio        ParamItem `refreshable:"true"`
 	CPURatio              ParamItem `refreshable:"true"`
 	GracefulStopTimeout   ParamItem `refreshable:"false"`
@@ -3513,9 +3549,10 @@ type queryNodeConfig struct {
 	DeleteBufferBlockSize  ParamItem `refreshable:"false"`
 
 	// delta forward
-	LevelZeroForwardPolicy      ParamItem `refreshable:"true"`
-	StreamingDeltaForwardPolicy ParamItem `refreshable:"true"`
-	ForwardBatchSize            ParamItem `refreshable:"true"`
+	LevelZeroForwardPolicy             ParamItem `refreshable:"true"`
+	StreamingDeltaForwardPolicy        ParamItem `refreshable:"true"`
+	ForwardBatchSize                   ParamItem `refreshable:"true"`
+	DelegatorPostLoadConcurrencyFactor ParamItem `refreshable:"true"`
 
 	// loader
 	DeltaDataExpansionRate      ParamItem `refreshable:"true"`
@@ -3526,6 +3563,7 @@ type queryNodeConfig struct {
 	// schedule task policy.
 	SchedulePolicyName                    ParamItem `refreshable:"false"`
 	SchedulePolicyTaskQueueExpire         ParamItem `refreshable:"true"`
+	SchedulePolicyTaskDeadlineAdvance     ParamItem `refreshable:"true"`
 	SchedulePolicyEnableCrossUserGrouping ParamItem `refreshable:"true"`
 	SchedulePolicyMaxPendingTaskPerUser   ParamItem `refreshable:"true"`
 
@@ -3580,11 +3618,26 @@ type queryNodeConfig struct {
 	// partial search
 	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
 
-	// external collection
+	// output fields take
+	InternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
 	ExternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
 	ExternalCollectionSamplePerSegment ParamItem `refreshable:"true"`
 	ExternalCollectionSampleRows       ParamItem `refreshable:"true"`
 	ExternalCollectionRawDataFactor    ParamItem `refreshable:"true"`
+}
+
+func formatDurationWithMillisecondFallback(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return v
+	}
+	if _, err := time.ParseDuration(v); err == nil {
+		return v
+	}
+	if _, err := strconv.ParseFloat(v, 64); err == nil {
+		return v + "ms"
+	}
+	return v
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -4325,14 +4378,6 @@ However, this optimization may come at the cost of a slight decrease in query la
 	}
 	p.ChunkCacheWarmingUp.Init(base.mgr)
 
-	p.MaxReceiveChanSize = ParamItem{
-		Key:          "queryNode.scheduler.receiveChanSize",
-		Version:      "2.0.0",
-		DefaultValue: "10240",
-		Export:       true,
-	}
-	p.MaxReceiveChanSize.Init(base.mgr)
-
 	p.MaxReadConcurrency = ParamItem{
 		Key:          "queryNode.scheduler.maxReadConcurrentRatio",
 		Version:      "2.0.0",
@@ -4367,7 +4412,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	p.MaxUnsolvedQueueSize = ParamItem{
 		Key:          "queryNode.scheduler.unsolvedQueueSize",
 		Version:      "2.0.0",
-		DefaultValue: "10240",
+		DefaultValue: "1024",
 		Export:       true,
 	}
 	p.MaxUnsolvedQueueSize.Init(base.mgr)
@@ -4375,10 +4420,29 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	p.MaxGroupNQ = ParamItem{
 		Key:          "queryNode.grouping.maxNQ",
 		Version:      "2.0.0",
-		DefaultValue: "1000",
+		DefaultValue: "16",
 		Export:       true,
 	}
 	p.MaxGroupNQ.Init(base.mgr)
+
+	p.NQMergeRatio = ParamItem{
+		Key:          "queryNode.grouping.nqMergeRatio",
+		Version:      "2.6.17",
+		DefaultValue: "3.0",
+		Doc:          "Maximum ratio between merged total NQ and the smaller task NQ when grouping query node read tasks.",
+		Export:       true,
+	}
+	p.NQMergeRatio.Init(base.mgr)
+
+	p.MaxDeadlineMergeGap = ParamItem{
+		Key:          "queryNode.grouping.maxDeadlineMergeGap",
+		Version:      "2.6.17",
+		DefaultValue: "50ms",
+		Doc:          "Maximum allowed gap between task context deadlines when grouping query node read tasks. Tasks with only one deadline cannot be grouped. Set a negative duration to disable this check.",
+		Formatter:    formatDurationWithMillisecondFallback,
+		Export:       true,
+	}
+	p.MaxDeadlineMergeGap.Init(base.mgr)
 
 	p.TopKMergeRatio = ParamItem{
 		Key:          "queryNode.grouping.topKMergeRatio",
@@ -4558,6 +4622,23 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.ForwardBatchSize.Init(base.mgr)
 
+	p.DelegatorPostLoadConcurrencyFactor = ParamItem{
+		Key:          "queryNode.delegatorPostLoadConcurrencyFactor",
+		Version:      "2.6.16",
+		Doc:          "delegator post-load concurrency factor after worker LoadSegments returns. Concurrency is hardware.GetCPUNum * factor",
+		DefaultValue: "1",
+		Formatter: func(v string) string {
+			factor := getAsInt(v)
+			if factor < 1 {
+				factor = 1
+			}
+			concurrency := hardware.GetCPUNum() * factor
+			return strconv.FormatInt(int64(concurrency), 10)
+		},
+		Export: true,
+	}
+	p.DelegatorPostLoadConcurrencyFactor.Init(base.mgr)
+
 	p.DeltaDataExpansionRate = ParamItem{
 		Key:          "querynode.deltaDataExpansionRate",
 		Version:      "2.4.0",
@@ -4601,7 +4682,7 @@ user-task-polling:
 	Scheduling is fair on task granularity.
 	The policy is based on the username for authentication.
 	And an empty username is considered the same user.
-	When there are no multi-users, the policy decay into FIFO"`,
+	When there are no multi-users, the policy decay into FIFO.`,
 		Export: true,
 	}
 	p.SchedulePolicyName.Init(base.mgr)
@@ -4613,6 +4694,15 @@ user-task-polling:
 		Export:       true,
 	}
 	p.SchedulePolicyTaskQueueExpire.Init(base.mgr)
+	p.SchedulePolicyTaskDeadlineAdvance = ParamItem{
+		Key:          "queryNode.scheduler.scheduleReadPolicy.taskDeadlineAdvance",
+		Version:      "2.6.17",
+		DefaultValue: "50ms",
+		Doc:          "Advance duration for cleaning queued query node read tasks before their context deadline. It supports duration strings such as 50ms and 1s. A bare number is interpreted as milliseconds for compatibility.",
+		Formatter:    formatDurationWithMillisecondFallback,
+		Export:       true,
+	}
+	p.SchedulePolicyTaskDeadlineAdvance.Init(base.mgr)
 	p.SchedulePolicyEnableCrossUserGrouping = ParamItem{
 		Key:          "queryNode.scheduler.scheduleReadPolicy.enableCrossUserGrouping",
 		Version:      "2.3.0",
@@ -4629,7 +4719,6 @@ user-task-polling:
 		Export:       true,
 	}
 	p.SchedulePolicyMaxPendingTaskPerUser.Init(base.mgr)
-
 	p.CGOPoolSizeRatio = ParamItem{
 		Key:          "queryNode.segcore.cgoPoolSizeRatio",
 		Version:      "2.3.0",
@@ -4818,6 +4907,15 @@ user-task-polling:
 	}
 	p.PartialResultRequiredDataRatio.Init(base.mgr)
 
+	p.InternalCollectionUseTakeForOutput = ParamItem{
+		Key:          "queryNode.internalCollection.useTakeForOutput",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          `When true, use take() API to fetch output fields from internal storage instead of bulk_subscript`,
+		Export:       false,
+	}
+	p.InternalCollectionUseTakeForOutput.Init(base.mgr)
+
 	p.ExternalCollectionUseTakeForOutput = ParamItem{
 		Key:          "queryNode.externalCollection.useTakeForOutput",
 		Version:      "3.0.0",
@@ -4896,26 +4994,28 @@ type dataCoordConfig struct {
 	CompactionTaskQueueCapacity            ParamItem `refreshable:"false"`
 	CompactionPreAllocateIDExpansionFactor ParamItem `refreshable:"false"`
 
-	CompactionRPCTimeout                      ParamItem `refreshable:"true"`
-	CompactionMaxParallelTasks                ParamItem `refreshable:"true"`
-	CompactionWorkerParallelTasks             ParamItem `refreshable:"true"`
-	CompactionMaxFullSegmentThreshold         ParamItem `refreshable:"true"`
-	CompactionForceMergeDataNodeMemoryFactor  ParamItem `refreshable:"true"`
-	CompactionForceMergeQueryNodeMemoryFactor ParamItem `refreshable:"true"`
-	MinSegmentToMerge                         ParamItem `refreshable:"true"`
-	SegmentSmallProportion                    ParamItem `refreshable:"true"`
-	SegmentCompactableProportion              ParamItem `refreshable:"true"`
-	SegmentExpansionRate                      ParamItem `refreshable:"true"`
-	CompactionTimeoutInSeconds                ParamItem `refreshable:"true"` // deprecated
-	CompactionDropToleranceInSeconds          ParamItem `refreshable:"true"`
-	CompactionGCIntervalInSeconds             ParamItem `refreshable:"true"`
-	CompactionCheckIntervalInSeconds          ParamItem `refreshable:"false"` // deprecated
-	CompactionScheduleInterval                ParamItem `refreshable:"false"`
-	MixCompactionTriggerInterval              ParamItem `refreshable:"false"`
-	L0CompactionTriggerInterval               ParamItem `refreshable:"false"`
-	GlobalCompactionInterval                  ParamItem `refreshable:"false"`
-	CompactionExpiryTolerance                 ParamItem `refreshable:"true"`
-	BackfillCompactionTriggerInterval         ParamItem `refreshable:"true"`
+	CompactionRPCTimeout                       ParamItem `refreshable:"true"`
+	CompactionMaxParallelTasks                 ParamItem `refreshable:"true"`
+	CompactionWorkerParallelTasks              ParamItem `refreshable:"true"`
+	CompactionMaxFullSegmentThreshold          ParamItem `refreshable:"true"`
+	CompactionForceMergeDataNodeMemoryFactor   ParamItem `refreshable:"true"`
+	CompactionForceMergeQueryNodeMemoryFactor  ParamItem `refreshable:"true"`
+	MinSegmentToMerge                          ParamItem `refreshable:"true"`
+	SegmentSmallProportion                     ParamItem `refreshable:"true"`
+	SegmentCompactableProportion               ParamItem `refreshable:"true"`
+	SegmentExpansionRate                       ParamItem `refreshable:"true"`
+	CompactionTimeoutInSeconds                 ParamItem `refreshable:"true"` // deprecated
+	CompactionDropToleranceInSeconds           ParamItem `refreshable:"true"`
+	CompactionGCIntervalInSeconds              ParamItem `refreshable:"true"`
+	CompactionCheckIntervalInSeconds           ParamItem `refreshable:"false"` // deprecated
+	CompactionScheduleInterval                 ParamItem `refreshable:"false"`
+	MixCompactionTriggerInterval               ParamItem `refreshable:"false"`
+	L0CompactionTriggerInterval                ParamItem `refreshable:"false"`
+	GlobalCompactionInterval                   ParamItem `refreshable:"false"`
+	CompactionExpiryTolerance                  ParamItem `refreshable:"true"`
+	BumpSchemaVersionCompactionEnabled         ParamItem `refreshable:"true"`
+	BumpSchemaVersionCompactionTriggerInterval ParamItem `refreshable:"true"`
+	L0ManifestUpdatePoolSize                   ParamItem `refreshable:"true"`
 
 	SingleCompactionRatioThreshold    ParamItem `refreshable:"true"`
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
@@ -5020,14 +5120,14 @@ type dataCoordConfig struct {
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
-	ClusteringCompactionSlotUsage ParamItem `refreshable:"true"`
-	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
-	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
-	BackfillCompactionSlotUsage   ParamItem `refreshable:"true"`
-	IndexTaskSlotUsage            ParamItem `refreshable:"true"`
-	ScalarIndexTaskSlotUsage      ParamItem `refreshable:"true"`
-	StatsTaskSlotUsage            ParamItem `refreshable:"true"`
-	AnalyzeTaskSlotUsage          ParamItem `refreshable:"true"`
+	ClusteringCompactionSlotUsage        ParamItem `refreshable:"true"`
+	MixCompactionSlotUsage               ParamItem `refreshable:"true"`
+	L0DeleteCompactionSlotUsage          ParamItem `refreshable:"true"`
+	BumpSchemaVersionCompactionSlotUsage ParamItem `refreshable:"true"`
+	IndexTaskSlotUsage                   ParamItem `refreshable:"true"`
+	ScalarIndexTaskSlotUsage             ParamItem `refreshable:"true"`
+	StatsTaskSlotUsage                   ParamItem `refreshable:"true"`
+	AnalyzeTaskSlotUsage                 ParamItem `refreshable:"true"`
 
 	EnableSortCompaction             ParamItem `refreshable:"true"`
 	TaskCheckInterval                ParamItem `refreshable:"true"`
@@ -5302,6 +5402,21 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 	}
 	p.CompactionMaxParallelTasks.Init(base.mgr)
 
+	p.L0ManifestUpdatePoolSize = ParamItem{
+		Key:          "dataCoord.compaction.levelzero.manifestUpdatePoolSize",
+		Version:      "3.0.0",
+		DefaultValue: "16",
+		Doc:          "The goroutine pool size for committing L0 compaction manifest updates inside DataCoord meta update.",
+		Export:       false,
+		Formatter: func(v string) string {
+			if getAsInt(v) < 1 {
+				return "1"
+			}
+			return v
+		},
+	}
+	p.L0ManifestUpdatePoolSize.Init(base.mgr)
+
 	p.MinSegmentToMerge = ParamItem{
 		Key:          "dataCoord.compaction.min.segment",
 		Version:      "2.0.0",
@@ -5517,14 +5632,23 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.CompactionExpiryTolerance.Init(base.mgr)
 
-	p.BackfillCompactionTriggerInterval = ParamItem{
-		Key:          "dataCoord.compaction.backfill.triggerInterval",
-		Version:      "2.6.2",
-		Doc:          "The time interval in seconds for trigger backfill compaction",
+	p.BumpSchemaVersionCompactionEnabled = ParamItem{
+		Key:          "dataCoord.compaction.bumpSchemaVersion.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Enable schema version bump compaction",
+		Export:       true,
+	}
+	p.BumpSchemaVersionCompactionEnabled.Init(base.mgr)
+
+	p.BumpSchemaVersionCompactionTriggerInterval = ParamItem{
+		Key:          "dataCoord.compaction.bumpSchemaVersion.triggerInterval",
+		Version:      "3.0.0",
+		Doc:          "The time interval in seconds for trigger schema bump compaction",
 		DefaultValue: "20",
 		Export:       true,
 	}
-	p.BackfillCompactionTriggerInterval.Init(base.mgr)
+	p.BumpSchemaVersionCompactionTriggerInterval.Init(base.mgr)
 
 	p.MixCompactionTriggerInterval = ParamItem{
 		Key:          "dataCoord.compaction.mix.triggerInterval",
@@ -6183,7 +6307,7 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 		Key:          "dataCoord.import.fileNumPerSlot",
 		Version:      "2.5.15",
 		Doc:          "The files number per slot for pre-import/import task.",
-		DefaultValue: "1",
+		DefaultValue: "4",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
@@ -6347,10 +6471,10 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	}
 	p.L0DeleteCompactionSlotUsage.Init(base.mgr)
 
-	p.BackfillCompactionSlotUsage = ParamItem{
-		Key:          "dataCoord.slot.backfillCompactionUsage",
-		Version:      "2.6.9",
-		Doc:          "slot usage of backfill compaction task.",
+	p.BumpSchemaVersionCompactionSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.bumpSchemaVersionCompactionUsage",
+		Version:      "3.0.0",
+		Doc:          "slot usage of schema bump compaction task.",
 		DefaultValue: "1",
 		PanicIfEmpty: false,
 		Export:       true,
@@ -6362,7 +6486,7 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 			return strconv.Itoa(slot)
 		},
 	}
-	p.BackfillCompactionSlotUsage.Init(base.mgr)
+	p.BumpSchemaVersionCompactionSlotUsage.Init(base.mgr)
 
 	p.IndexTaskSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.indexTaskSlotUsage",
@@ -6595,6 +6719,7 @@ type dataNodeConfig struct {
 
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
+	StorageFormat  ParamItem `refreshable:"false"`
 	DeltalogFormat ParamItem `refreshable:"false"`
 
 	// index services config
@@ -7069,6 +7194,15 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
+
+	p.StorageFormat = ParamItem{
+		Key:          "dataNode.storage.format",
+		Version:      "3.0.0",
+		DefaultValue: "parquet",
+		Doc:          "storage format for insert data, options: [parquet, vortex]",
+		Export:       true,
+	}
+	p.StorageFormat.Init(base.mgr)
 
 	p.DeltalogFormat = ParamItem{
 		Key:          "dataNode.storage.deltalog",

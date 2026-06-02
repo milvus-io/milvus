@@ -627,49 +627,67 @@ SegmentLoadInfo::ComputeDiffReloadFields(LoadDiff& diff,
     }
 }
 
-void
-SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
-                                          SegmentLoadInfo& new_info) {
-    // Helper lambda to collect all field ids with data source
-    auto collect_data_fields = [](SegmentLoadInfo& info) -> std::set<FieldId> {
-        std::set<FieldId> fields;
+std::set<FieldId>
+SegmentLoadInfo::CollectDataFields() const {
+    std::set<FieldId> fields;
 
-        // From binlog paths
-        for (int i = 0; i < info.GetBinlogPathCount(); i++) {
-            auto& binlog = info.GetBinlogPath(i);
-            std::vector<int64_t> child_fields(binlog.child_fields().begin(),
-                                              binlog.child_fields().end());
-            if (child_fields.empty()) {
-                child_fields.emplace_back(binlog.fieldid());
-            }
-            for (auto child_id : child_fields) {
-                fields.emplace(child_id);
-            }
+    for (int i = 0; i < GetBinlogPathCount(); i++) {
+        auto& binlog = GetBinlogPath(i);
+        std::vector<int64_t> child_fields(binlog.child_fields().begin(),
+                                          binlog.child_fields().end());
+        if (child_fields.empty()) {
+            child_fields.emplace_back(binlog.fieldid());
         }
-
-        // From index with raw data
-        for (const auto& field_id : info.field_index_has_raw_data_) {
-            fields.insert(field_id);
+        for (auto child_id : child_fields) {
+            fields.emplace(child_id);
         }
+    }
 
-        // From column groups (manifest mode)
-        if (info.HasManifestPath()) {
-            auto column_groups = info.GetColumnGroups();
-            if (column_groups) {
-                for (size_t i = 0; i < column_groups->size(); i++) {
-                    auto cg = column_groups->at(i);
-                    for (const auto& column : cg->columns) {
-                        fields.emplace(std::stoll(column));
-                    }
+    for (const auto& field_id : field_index_has_raw_data_) {
+        fields.insert(field_id);
+    }
+
+    if (HasManifestPath()) {
+        auto column_groups = GetColumnGroups();
+        if (column_groups) {
+            for (size_t i = 0; i < column_groups->size(); i++) {
+                auto cg = column_groups->at(i);
+                for (const auto& column : cg->columns) {
+                    fields.emplace(std::stoll(column));
                 }
             }
         }
-        return fields;
-    };
+    }
+    return fields;
+}
 
-    // Collect field ids with data source
-    std::set<FieldId> new_info_fields = collect_data_fields(new_info);
-    std::set<FieldId> current_fields = collect_data_fields(*this);
+std::set<FieldId>
+SegmentLoadInfo::GetDefaultFilledFieldsForNewInfo(
+    const SegmentLoadInfo& new_info) const {
+    if (schema_->is_external_collection() ||
+        new_info.schema_->is_external_collection()) {
+        return {};
+    }
+
+    auto new_info_fields = new_info.CollectDataFields();
+    std::set<FieldId> fields;
+    for (const auto& field_id : fields_filled_with_default_) {
+        if (!new_info.HasFieldInSchema(field_id)) {
+            continue;
+        }
+        if (new_info_fields.count(field_id) > 0) {
+            continue;
+        }
+        fields.insert(field_id);
+    }
+    return fields;
+}
+
+void
+SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
+                                          SegmentLoadInfo& new_info) {
+    std::set<FieldId> new_info_fields = new_info.CollectDataFields();
+    std::set<FieldId> current_fields = CollectDataFields();
 
     // Build "current handled" set:
     // - Fields with data source in current
@@ -689,12 +707,10 @@ SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
         }
 
         if (current_handled.count(field_id)) {
-            new_info.fields_filled_with_default_.insert(field_id);
             continue;
         }
 
         diff.fields_to_fill_default.push_back(field_id);
-        new_info.fields_filled_with_default_.insert(field_id);
     }
 }
 

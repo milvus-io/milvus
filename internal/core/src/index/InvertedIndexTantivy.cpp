@@ -305,10 +305,10 @@ InvertedIndexTantivy<T>::LoadIndexMetas(
             INDEX_NULL_OFFSET_FILE_NAME, std::move(slice_meta), index_datas);
         AssertInfo(null_offsets_data_codecs.codecs_.size() > 0,
                    "null offset file is empty");
-        for (auto&& null_offsets_codec : null_offsets_data_codecs.codecs_) {
-            fill_null_offsets(null_offsets_codec->PayloadData(),
-                              null_offsets_codec->PayloadSize());
-        }
+        auto null_offsets_codec =
+            AssembleIndexDataCodec(null_offsets_data_codecs);
+        fill_null_offsets(null_offsets_codec->PayloadData(),
+                          null_offsets_codec->PayloadSize());
     }
 }
 

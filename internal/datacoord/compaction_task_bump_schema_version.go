@@ -27,7 +27,6 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -39,68 +38,68 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-var _ CompactionTask = (*backfillCompactionTask)(nil)
+var _ CompactionTask = (*bumpSchemaVersionTask)(nil)
 
-type backfillCompactionTask struct {
+type bumpSchemaVersionTask struct {
 	taskProto atomic.Value // *datapb.CompactionTask
 	allocator allocator.Allocator
 	meta      CompactionMeta
 	ievm      IndexEngineVersionManager
-	functions []*schemapb.FunctionSchema
 	times     *taskcommon.Times
 }
 
-func newBackfillCompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, ievm IndexEngineVersionManager, functions []*schemapb.FunctionSchema) *backfillCompactionTask {
-	task := &backfillCompactionTask{
+func newBumpSchemaVersionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, ievm IndexEngineVersionManager) *bumpSchemaVersionTask {
+	task := &bumpSchemaVersionTask{
 		allocator: allocator,
 		meta:      meta,
 		ievm:      ievm,
-		functions: functions,
 		times:     taskcommon.NewTimes(),
 	}
 	task.taskProto.Store(t)
 	return task
 }
 
-func (t *backfillCompactionTask) GetTaskID() int64 {
+func (t *bumpSchemaVersionTask) GetTaskID() int64 {
 	return t.GetTaskProto().GetPlanID()
 }
 
-func (t *backfillCompactionTask) GetTaskType() taskcommon.Type {
+func (t *bumpSchemaVersionTask) GetTaskType() taskcommon.Type {
 	return taskcommon.Compaction
 }
 
-func (t *backfillCompactionTask) GetTaskState() taskcommon.State {
+func (t *bumpSchemaVersionTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCompactionState(t.GetTaskProto().GetState())
 }
 
-func (t *backfillCompactionTask) GetTaskProto() *datapb.CompactionTask {
+func (t *bumpSchemaVersionTask) GetTaskProto() *datapb.CompactionTask {
 	return t.taskProto.Load().(*datapb.CompactionTask)
 }
 
-func (t *backfillCompactionTask) GetTaskSlot() int64 {
-	return paramtable.Get().DataCoordCfg.BackfillCompactionSlotUsage.GetAsInt64()
+func (t *bumpSchemaVersionTask) GetTaskSlot() int64 {
+	return paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionSlotUsage.GetAsInt64()
 }
 
-func (t *backfillCompactionTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
+func (t *bumpSchemaVersionTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
 	t.times.SetTaskTime(timeType, time)
 }
 
-func (t *backfillCompactionTask) GetTaskTime(timeType taskcommon.TimeType) time.Time {
+func (t *bumpSchemaVersionTask) GetTaskTime(timeType taskcommon.TimeType) time.Time {
 	return timeType.GetTaskTime(t.times)
 }
 
-func (t *backfillCompactionTask) GetTaskVersion() int64 {
+func (t *bumpSchemaVersionTask) GetTaskVersion() int64 {
 	return int64(t.GetTaskProto().GetRetryTimes())
 }
 
-func (t *backfillCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
+func (t *bumpSchemaVersionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
 	taskProto := t.GetTaskProto()
+	if taskProto.GetSchema() == nil {
+		return nil, merr.WrapErrIllegalCompactionPlan("schema bump compaction task schema is nil")
+	}
 	compactionParams, err := compaction.GenerateJSONParams(taskProto.GetSchema())
 	if err != nil {
 		return nil, err
 	}
-	log := log.With(zap.Int64("triggerID", taskProto.GetTriggerID()), zap.Int64("PlanID", taskProto.GetPlanID()), zap.Int64("collectionID", taskProto.GetCollectionID()))
 	plan := &datapb.CompactionPlan{
 		PlanID:                    taskProto.GetPlanID(),
 		StartTime:                 taskProto.GetStartTime(),
@@ -114,7 +113,6 @@ func (t *backfillCompactionTask) BuildCompactionRequest() (*datapb.CompactionPla
 		MaxSize:                   taskProto.GetMaxSize(),
 		JsonParams:                compactionParams,
 		CurrentScalarIndexVersion: t.ievm.GetCurrentScalarIndexEngineVersion(),
-		Functions:                 t.functions,
 	}
 	segments := make([]*SegmentInfo, 0, len(taskProto.GetInputSegments()))
 	for _, segID := range taskProto.GetInputSegments() {
@@ -135,6 +133,7 @@ func (t *backfillCompactionTask) BuildCompactionRequest() (*datapb.CompactionPla
 			IsSortedByNamespace: segInfo.GetIsSortedByNamespace(),
 			StorageVersion:      segInfo.GetStorageVersion(),
 			Manifest:            segInfo.GetManifestPath(),
+			CommitTimestamp:     segInfo.GetCommitTimestamp(),
 		})
 		segments = append(segments, segInfo)
 	}
@@ -146,24 +145,22 @@ func (t *backfillCompactionTask) BuildCompactionRequest() (*datapb.CompactionPla
 	plan.PreAllocatedLogIDs = logIDRange
 	plan.BeginLogID = logIDRange.Begin
 	WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan)
-	log.Info("Compaction handler refreshed backfill compaction plan", zap.Int64("maxSize", plan.GetMaxSize()),
-		zap.Any("PreAllocatedLogIDs", logIDRange), zap.Int64s("inputSegments", taskProto.GetInputSegments()))
 	return plan, nil
 }
 
-func (t *backfillCompactionTask) GetSlotUsage() int64 {
+func (t *bumpSchemaVersionTask) GetSlotUsage() int64 {
 	return t.GetTaskSlot()
 }
 
-func (t *backfillCompactionTask) GetLabel() string {
+func (t *bumpSchemaVersionTask) GetLabel() string {
 	return fmt.Sprintf("%d-%s", t.GetTaskProto().GetPartitionID(), t.GetTaskProto().GetChannel())
 }
 
-func (t *backfillCompactionTask) SetTask(task *datapb.CompactionTask) {
+func (t *bumpSchemaVersionTask) SetTask(task *datapb.CompactionTask) {
 	t.taskProto.Store(task)
 }
 
-func (t *backfillCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.CompactionTask {
+func (t *bumpSchemaVersionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.CompactionTask {
 	cloned := proto.Clone(t.GetTaskProto()).(*datapb.CompactionTask)
 	for _, opt := range opts {
 		opt(cloned)
@@ -171,51 +168,51 @@ func (t *backfillCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.
 	return cloned
 }
 
-func (t *backfillCompactionTask) SetNodeID(nodeID int64) error {
+func (t *bumpSchemaVersionTask) SetNodeID(nodeID int64) error {
 	return t.updateAndSaveTaskMeta(setNodeID(nodeID))
 }
 
-func (t *backfillCompactionTask) NeedReAssignNodeID() bool {
+func (t *bumpSchemaVersionTask) NeedReAssignNodeID() bool {
 	return t.GetTaskProto().GetState() == datapb.CompactionTaskState_pipelining && (t.GetTaskProto().GetNodeID() == 0 || t.GetTaskProto().GetNodeID() == NullNodeID)
 }
 
-func (t *backfillCompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
+func (t *bumpSchemaVersionTask) saveTaskMeta(task *datapb.CompactionTask) error {
 	return t.meta.SaveCompactionTask(context.TODO(), task)
 }
 
-func (t *backfillCompactionTask) SaveTaskMeta() error {
+func (t *bumpSchemaVersionTask) SaveTaskMeta() error {
 	return t.saveTaskMeta(t.GetTaskProto())
 }
 
-func (t *backfillCompactionTask) Clean() bool {
+func (t *bumpSchemaVersionTask) Clean() bool {
 	return t.doClean() == nil
 }
 
-func (t *backfillCompactionTask) doClean() error {
+func (t *bumpSchemaVersionTask) doClean() error {
 	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
 		zap.Int64("PlanID", t.GetTaskProto().GetPlanID()),
 		zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
 	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_cleaned))
 	if err != nil {
-		log.Warn("backfillCompactionTask fail to updateAndSaveTaskMeta", zap.Error(err))
+		log.Warn("bumpSchemaVersionTask fail to updateAndSaveTaskMeta", zap.Error(err))
 		return err
 	}
 	// resetSegmentCompacting must be the last step of Clean, to make sure resetSegmentCompacting only called once
 	// otherwise, it may unlock segments locked by other compaction tasks
 	t.resetSegmentCompacting()
-	log.Info("backfillCompactionTask clean done")
+	log.Info("bumpSchemaVersionTask clean done")
 	return nil
 }
 
-func (t *backfillCompactionTask) resetSegmentCompacting() {
+func (t *bumpSchemaVersionTask) resetSegmentCompacting() {
 	t.meta.SetSegmentsCompacting(context.TODO(), t.GetTaskProto().GetInputSegments(), false)
 }
 
-func (t *backfillCompactionTask) processFailed() bool {
+func (t *bumpSchemaVersionTask) processFailed() bool {
 	return true
 }
 
-func (t *backfillCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
+func (t *bumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
 		zap.Int64("PlanID", t.GetTaskProto().GetPlanID()),
 		zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()),
@@ -223,37 +220,37 @@ func (t *backfillCompactionTask) CreateTaskOnWorker(nodeID int64, cluster sessio
 
 	plan, err := t.BuildCompactionRequest()
 	if err != nil {
-		log.Warn("backfillCompactionTask failed to build compaction request", zap.Error(err))
+		log.Warn("bumpSchemaVersionTask failed to build compaction request", zap.Error(err))
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
 		if err != nil {
-			log.Warn("backfillCompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+			log.Warn("bumpSchemaVersionTask failed to updateAndSaveTaskMeta", zap.Error(err))
 		}
 		return
 	}
 
-	err = cluster.CreateCompaction(nodeID, plan)
+	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID())
 	if err != nil {
-		log.Warn("backfillCompactionTask failed to notify compaction tasks to DataNode",
+		log.Warn("bumpSchemaVersionTask failed to notify compaction tasks to DataNode",
 			zap.Int64("planID", t.GetTaskProto().GetPlanID()),
 			zap.Int64("nodeID", nodeID),
 			zap.Error(err))
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		if err != nil {
-			log.Warn("backfillCompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+			log.Warn("bumpSchemaVersionTask failed to updateAndSaveTaskMeta", zap.Error(err))
 		}
 		return
 	}
 
-	log.Info("backfillCompactionTask created task on worker", zap.Int64("planID", t.GetTaskProto().GetPlanID()),
+	log.Info("bumpSchemaVersionTask created task on worker", zap.Int64("planID", t.GetTaskProto().GetPlanID()),
 		zap.Int64("nodeID", nodeID))
 
 	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing), setNodeID(nodeID))
 	if err != nil {
-		log.Warn("backfillCompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+		log.Warn("bumpSchemaVersionTask failed to updateAndSaveTaskMeta", zap.Error(err))
 	}
 }
 
-func (t *backfillCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
+func (t *bumpSchemaVersionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
 		zap.Int64("PlanID", t.GetTaskProto().GetPlanID()),
 		zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
@@ -263,35 +260,35 @@ func (t *backfillCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	if err != nil || result == nil {
 		if errors.Is(err, merr.ErrNodeNotFound) {
 			if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID)); err != nil {
-				log.Warn("backfillCompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+				log.Warn("bumpSchemaVersionTask failed to updateAndSaveTaskMeta", zap.Error(err))
 			}
 		}
-		log.Warn("backfillCompactionTask failed to get compaction result", zap.Error(err))
+		log.Warn("bumpSchemaVersionTask failed to get compaction result", zap.Error(err))
 		return
 	}
 	switch result.GetState() {
 	case datapb.CompactionTaskState_completed:
 		if len(result.GetSegments()) == 0 {
-			log.Warn("backfillCompactionTask illegal compaction results: no segments returned")
+			log.Warn("bumpSchemaVersionTask illegal compaction results: no segments returned")
 			if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed),
 				setFailReason("illegal compaction results: no segments returned")); err != nil {
-				log.Warn("backfillCompactionTask failed to setState failed", zap.Error(err))
+				log.Warn("bumpSchemaVersionTask failed to setState failed", zap.Error(err))
 			}
 			return
 		}
 		err = t.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t.GetTaskProto())
 		if err != nil {
 			if saveErr := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error())); saveErr != nil {
-				log.Warn("backfillCompactionTask failed to setState failed", zap.Error(saveErr))
+				log.Warn("bumpSchemaVersionTask failed to setState failed", zap.Error(saveErr))
 			}
 			return
 		}
 		if err := t.saveSegmentMeta(result); err != nil {
-			log.Warn("backfillCompactionTask failed to save segment meta", zap.Error(err))
+			log.Warn("bumpSchemaVersionTask failed to save segment meta", zap.Error(err))
 			if errors.Is(err, merr.ErrIllegalCompactionPlan) {
 				if saveErr := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed),
 					setFailReason(err.Error())); saveErr != nil {
-					log.Warn("backfillCompactionTask failed to setState failed", zap.Error(saveErr))
+					log.Warn("bumpSchemaVersionTask failed to setState failed", zap.Error(saveErr))
 				}
 			}
 			return
@@ -303,39 +300,39 @@ func (t *backfillCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	case datapb.CompactionTaskState_timeout:
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
 		if err != nil {
-			log.Warn("backfillCompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+			log.Warn("bumpSchemaVersionTask failed to updateAndSaveTaskMeta", zap.Error(err))
 			return
 		}
 	case datapb.CompactionTaskState_failed:
-		log.Warn("backfillCompactionTask fail in datanode")
+		log.Warn("bumpSchemaVersionTask fail in datanode")
 		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed),
 			setFailReason("compaction failed in datanode")); err != nil {
-			log.Warn("backfillCompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+			log.Warn("bumpSchemaVersionTask failed to updateAndSaveTaskMeta", zap.Error(err))
 		}
 	default:
 		log.Error("not support compaction task state", zap.String("state", result.GetState().String()))
 		reason := fmt.Sprintf("unsupported compaction state: %s", result.GetState().String())
 		if err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed),
 			setFailReason(reason)); err != nil {
-			log.Warn("backfillCompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+			log.Warn("bumpSchemaVersionTask failed to updateAndSaveTaskMeta", zap.Error(err))
 			return
 		}
 	}
 }
 
-func (t *backfillCompactionTask) DropTaskOnWorker(cluster session.Cluster) {
+func (t *bumpSchemaVersionTask) DropTaskOnWorker(cluster session.Cluster) {
 	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
 		zap.Int64("PlanID", t.GetTaskProto().GetPlanID()),
 		zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
 	if err := cluster.DropCompaction(t.GetTaskProto().GetNodeID(), t.GetTaskProto().GetPlanID()); err != nil {
-		log.Warn("backfillCompactionTask unable to drop compaction plan", zap.Error(err))
+		log.Warn("bumpSchemaVersionTask unable to drop compaction plan", zap.Error(err))
 	}
 }
 
 // Process performs the task's state machine
 // Note: return True means exit this state machine.
 // ONLY return True for Completed, Failed, Timeout
-func (t *backfillCompactionTask) Process() bool {
+func (t *bumpSchemaVersionTask) Process() bool {
 	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
 		zap.Int64("PlanID", t.GetTaskProto().GetPlanID()),
 		zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
@@ -353,12 +350,12 @@ func (t *backfillCompactionTask) Process() bool {
 	}
 	currentState := t.GetTaskProto().GetState().String()
 	if currentState != lastState {
-		log.Info("backfill compaction task state changed", zap.String("lastState", lastState), zap.String("currentState", currentState))
+		log.Info("schema bump compaction task state changed", zap.String("lastState", lastState), zap.String("currentState", currentState))
 	}
 	return processResult
 }
 
-func (t *backfillCompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult) error {
+func (t *bumpSchemaVersionTask) saveSegmentMeta(result *datapb.CompactionPlanResult) error {
 	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
 		zap.Int64("PlanID", t.GetTaskProto().GetPlanID()),
 		zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
@@ -380,17 +377,17 @@ func (t *backfillCompactionTask) saveSegmentMeta(result *datapb.CompactionPlanRe
 
 	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(newSegmentIDs))
 	if err != nil {
-		log.Warn("backfillCompactionTask failed to setState meta saved", zap.Error(err))
+		log.Warn("bumpSchemaVersionTask failed to setState meta saved", zap.Error(err))
 		return err
 	}
-	log.Info("backfillCompactionTask success to save segment meta")
+	log.Info("bumpSchemaVersionTask success to save segment meta")
 	return nil
 }
 
-func (t *backfillCompactionTask) processMetaSaved() bool {
+func (t *bumpSchemaVersionTask) processMetaSaved() bool {
 	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed))
 	if err != nil {
-		log.Warn("backfillCompactionTask unable to processMetaSaved",
+		log.Warn("bumpSchemaVersionTask unable to processMetaSaved",
 			zap.Int64("planID", t.GetTaskProto().GetPlanID()),
 			zap.Error(err))
 		return false
@@ -398,15 +395,15 @@ func (t *backfillCompactionTask) processMetaSaved() bool {
 	return t.processCompleted()
 }
 
-func (t *backfillCompactionTask) processCompleted() bool {
+func (t *bumpSchemaVersionTask) processCompleted() bool {
 	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
 		zap.Int64("PlanID", t.GetTaskProto().GetPlanID()),
 		zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
-	log.Info("backfillCompactionTask processCompleted done")
+	log.Info("bumpSchemaVersionTask processCompleted done")
 	return true
 }
 
-func (t *backfillCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) error {
+func (t *bumpSchemaVersionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) error {
 	// if task state is completed, cleaned, failed, timeout, then do append end time and save
 	if t.GetTaskProto().State == datapb.CompactionTaskState_completed ||
 		t.GetTaskProto().State == datapb.CompactionTaskState_cleaned ||

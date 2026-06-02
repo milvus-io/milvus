@@ -411,8 +411,7 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         if add_field:
             self.add_collection_field(client, collection_name, field_name="field_int", data_type=DataType.INT32,
                                       nullable=True)
-            # Wait for previous schema bump's backfill segment-version propagation tick.
-            self.add_collection_field_wait_schema_version_consistency(
+            self.add_collection_field(
                 client, collection_name, field_name="field_varchar", data_type=DataType.VARCHAR,
                 nullable=True, max_length=64)
         self.release_collection(client, collection_name)
@@ -595,7 +594,7 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  int64_field_name: np.random.randint(0, 99), ct.default_int32_field_name: np.int32(i),
-                 ct.default_int16_field_name: np.int16(i), ct.default_int8_field_name: np.int8(i),
+                 ct.default_int16_field_name: np.int16(i), ct.default_int8_field_name: i % 128,
                  default_string_field_name: str(np.random.randint(0, 99))} for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         # 3. prepare index params
@@ -631,7 +630,7 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  int64_field_name: np.random.randint(0, 99), ct.default_int32_field_name: np.int32(i),
-                 ct.default_int16_field_name: np.int16(i), ct.default_int8_field_name: np.int8(i),
+                 ct.default_int16_field_name: np.int16(i), ct.default_int8_field_name: i % 128,
                  default_string_field_name: str(np.random.randint(0, 99))} for i in range(default_nb, 2 * default_nb)]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)

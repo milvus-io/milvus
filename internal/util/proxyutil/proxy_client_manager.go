@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -95,6 +96,7 @@ type ProxyClientManagerInterface interface {
 	RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) error
 	GetProxyMetrics(ctx context.Context) ([]*milvuspb.GetMetricsResponse, error)
 	SetRates(ctx context.Context, request *proxypb.SetRatesRequest) error
+	ClearReadTaskQueue(ctx context.Context, request *internalpb.ClearReadTaskQueueRequest) ([]*internalpb.ClearReadTaskQueueComponentResult, error)
 	GetComponentStates(ctx context.Context) (map[int64]*milvuspb.ComponentStates, error)
 }
 
@@ -364,6 +366,59 @@ func (p *ProxyClientManager) SetRates(ctx context.Context, request *proxypb.SetR
 		return true
 	})
 	return group.Wait()
+}
+
+func (p *ProxyClientManager) ClearReadTaskQueue(ctx context.Context, request *internalpb.ClearReadTaskQueueRequest) ([]*internalpb.ClearReadTaskQueueComponentResult, error) {
+	if p.proxyClient.Len() == 0 {
+		log.Warn("proxy client is empty, ClearReadTaskQueue will not send to any client")
+		return nil, nil
+	}
+
+	group := &errgroup.Group{}
+	var resultsMu sync.Mutex
+	results := make([]*internalpb.ClearReadTaskQueueComponentResult, 0, p.proxyClient.Len())
+	p.proxyClient.Range(func(key int64, value types.ProxyClient) bool {
+		nodeID, client := key, value
+		group.Go(func() error {
+			resp, err := client.ClearReadTaskQueue(ctx, request)
+			if errors.Is(err, merr.ErrServiceUnimplemented) {
+				return nil
+			}
+			if err != nil {
+				result := &internalpb.ClearReadTaskQueueComponentResult{
+					Status: merr.Status(err),
+					Role:   typeutil.ProxyRole,
+					NodeID: nodeID,
+				}
+				resultsMu.Lock()
+				results = append(results, result)
+				resultsMu.Unlock()
+				return errors.Wrapf(err, "ClearReadTaskQueue failed, proxyID = %d", nodeID)
+			}
+
+			status := resp.GetStatus()
+			if len(resp.GetResults()) > 0 {
+				resultsMu.Lock()
+				results = append(results, resp.GetResults()...)
+				resultsMu.Unlock()
+			} else {
+				resultsMu.Lock()
+				results = append(results, &internalpb.ClearReadTaskQueueComponentResult{
+					Status:        status,
+					Role:          typeutil.ProxyRole,
+					NodeID:        nodeID,
+					QueuedCleared: resp.GetProxyQueuedCleared(),
+				})
+				resultsMu.Unlock()
+			}
+			if !merr.Ok(status) {
+				return errors.Wrapf(merr.Error(status), "ClearReadTaskQueue failed, proxyID = %d", nodeID)
+			}
+			return nil
+		})
+		return true
+	})
+	return results, group.Wait()
 }
 
 func (p *ProxyClientManager) GetComponentStates(ctx context.Context) (map[int64]*milvuspb.ComponentStates, error) {

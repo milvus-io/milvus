@@ -142,7 +142,7 @@ func compileMetricPlans(metrics map[string]MetricSpec) ([]metricPlan, error) {
 // deriveTopKAndGroupSize maps the ES-style nested aggregation sizes into the
 // (topK, groupSize) pair consumed by the Delegator/QN group-reduce algorithm:
 //
-//	topK      = product of every level's Size (distinct composite keys cap)
+//	topK      = product of every level's SearchSize
 //	groupSize = max TopHits.Size across all levels, or 1 when TopHits is absent
 //
 // groupSize is global because upstream group-reduce keeps rows per full
@@ -154,10 +154,17 @@ func normalizeAggregationSize(size int64) int64 {
 	return size
 }
 
+func candidateSize(level LevelContext) int64 {
+	if level.SearchSize > 0 {
+		return level.SearchSize
+	}
+	return normalizeAggregationSize(level.Size)
+}
+
 func deriveTopKAndGroupSize(levels []LevelContext) (topK, groupSize int64) {
 	topK = 1
 	for _, lvl := range levels {
-		topK *= normalizeAggregationSize(lvl.Size)
+		topK *= candidateSize(lvl)
 	}
 	return topK, deriveGroupSize(levels)
 }
@@ -166,7 +173,7 @@ func deriveTopKAndGroupSizeChecked(levels []LevelContext) (topK, groupSize int64
 	topK = 1
 	for _, lvl := range levels {
 		var ok bool
-		topK, ok = checkedMulInt64(topK, normalizeAggregationSize(lvl.Size))
+		topK, ok = checkedMulInt64(topK, candidateSize(lvl))
 		if !ok {
 			return 0, 0, fmt.Errorf("search_aggregation derived topK overflows int64")
 		}
@@ -263,10 +270,23 @@ func resolveAggregationSpec(groupBy *commonpb.SearchAggregationSpec, schema *sch
 		if spec.GetSize() < 0 {
 			return fmt.Errorf("search_aggregation size must be non-negative")
 		}
+		if spec.GetSearchSize() < 0 {
+			return fmt.Errorf("search_aggregation search_size must be non-negative")
+		}
+
+		levelSize := normalizeAggregationSize(spec.GetSize())
+		searchSize := spec.GetSearchSize()
+		if searchSize == 0 {
+			searchSize = levelSize
+		}
+		if searchSize < levelSize {
+			return fmt.Errorf("search_aggregation search_size must be greater than or equal to size")
+		}
 
 		level := LevelContext{
 			OwnFieldIDs: make([]int64, 0, len(spec.GetFields())),
-			Size:        normalizeAggregationSize(spec.GetSize()),
+			Size:        levelSize,
+			SearchSize:  searchSize,
 		}
 
 		levelFieldSeen := make(map[int64]struct{})

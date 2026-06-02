@@ -95,6 +95,10 @@ func isLikeMatchOp(op planpb.OpType) bool {
 	}
 }
 
+func isRegexMatchOp(op planpb.OpType) bool {
+	return op == planpb.OpType_RegexMatch
+}
+
 func FillUnaryRangeExpressionValue(expr *planpb.UnaryRangeExpr, templateValues map[string]*planpb.GenericValue) error {
 	value, ok := templateValues[expr.GetTemplateVariableName()]
 	if !ok {
@@ -109,6 +113,19 @@ func FillUnaryRangeExpressionValue(expr *planpb.UnaryRangeExpr, templateValues m
 			return fmt.Errorf("the value of like expression template variable {%s} is not string", expr.GetTemplateVariableName())
 		}
 		op, operand, err := translatePatternMatch(value.GetStringVal())
+		if err != nil {
+			return err
+		}
+		expr.Op = op
+		expr.Value = NewString(operand)
+		return nil
+	}
+
+	if isRegexMatchOp(expr.GetOp()) {
+		if !IsString(value) {
+			return fmt.Errorf("the value of regex expression template variable {%s} is not string", expr.GetTemplateVariableName())
+		}
+		op, operand, err := validateAndOptimizeRegexPattern(value.GetStringVal())
 		if err != nil {
 			return err
 		}

@@ -2951,6 +2951,33 @@ func (c *Core) DescribeDatabase(ctx context.Context, req *rootcoordpb.DescribeDa
 	return t.Rsp, nil
 }
 
+func (c *Core) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	resp := &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	proxyResults, err := c.proxyClientManager.ClearReadTaskQueue(ctx, req)
+	if err != nil {
+		resp.Status = merr.Status(err)
+	}
+	resp.Results = append(resp.Results, proxyResults...)
+	for _, result := range proxyResults {
+		if result.GetRole() == typeutil.ProxyRole && merr.Ok(result.GetStatus()) {
+			resp.ProxyQueuedCleared += result.GetQueuedCleared()
+		}
+	}
+
+	log.Ctx(ctx).Info("cleared proxy read task queues",
+		zap.String("taskType", req.GetTaskType()),
+		zap.String("reason", req.GetReason()),
+		zap.Int64("proxyQueuedCleared", resp.GetProxyQueuedCleared()),
+		zap.Int("results", len(resp.GetResults())),
+		zap.Error(merr.Error(resp.GetStatus())))
+	return resp, nil
+}
+
 func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return &milvuspb.CheckHealthResponse{

@@ -20,9 +20,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -30,10 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
-	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -59,107 +56,8 @@ func (s *L0CompactionTaskSuite) SetupSubTest() {
 	s.SetupTest()
 }
 
-func (s *L0CompactionTaskSuite) TestCommitV3ManifestDeltasOnDataCoord() {
-	basePath := "/tmp/milvus/insert_log/1/10/200"
+func (s *L0CompactionTaskSuite) TestSaveSegmentMetaUsesAtomicDeltalogOperator() {
 	actualDeltaPath := "/tmp/milvus/insert_log/1/10/200/_delta/not-log-id-suffix"
-	oldManifest := packed.MarshalManifestPath(basePath, 7)
-	newManifest := packed.MarshalManifestPath(basePath, 8)
-
-	task := s.generateTestL0Task(datapb.CompactionTaskState_executing)
-	seg := &datapb.CompactionSegment{
-		SegmentID: 200,
-		Deltalogs: []*datapb.FieldBinlog{{
-			Binlogs: []*datapb.Binlog{{
-				LogID:      9001,
-				LogPath:    actualDeltaPath,
-				EntriesNum: 3,
-				MemorySize: 128,
-			}},
-		}},
-	}
-
-	s.mockMeta.EXPECT().GetSegment(mock.Anything, int64(200)).Return(&SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:             200,
-			StorageVersion: storage.StorageV3,
-			ManifestPath:   oldManifest,
-		},
-	}).Once()
-
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
-		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
-			s.Equal(oldManifest, manifestPath)
-			s.NotNil(storageConfig)
-			s.Require().Len(deltaLogs, 1)
-			s.Equal(actualDeltaPath, deltaLogs[0].Path)
-			s.EqualValues(3, deltaLogs[0].NumEntries)
-			return newManifest, nil
-		},
-	).Build()
-	defer patch.UnPatch()
-
-	err := task.commitV3ManifestDeltas(context.Background(), []*datapb.CompactionSegment{seg})
-	s.NoError(err)
-	s.Equal(newManifest, seg.GetManifest())
-}
-
-func (s *L0CompactionTaskSuite) TestCommitV3ManifestDeltasRequiresLogPath() {
-	basePath := "/tmp/milvus/insert_log/1/10/200"
-	oldManifest := packed.MarshalManifestPath(basePath, 7)
-	task := s.generateTestL0Task(datapb.CompactionTaskState_executing)
-	seg := &datapb.CompactionSegment{
-		SegmentID: 200,
-		Deltalogs: []*datapb.FieldBinlog{{
-			Binlogs: []*datapb.Binlog{{LogID: 9001, EntriesNum: 3}},
-		}},
-	}
-
-	s.mockMeta.EXPECT().GetSegment(mock.Anything, int64(200)).Return(&SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 200, StorageVersion: storage.StorageV3, ManifestPath: oldManifest},
-	}).Once()
-
-	err := task.commitV3ManifestDeltas(context.Background(), []*datapb.CompactionSegment{seg})
-	s.Error(err)
-	s.Contains(err.Error(), "missing deltalog path")
-}
-
-func (s *L0CompactionTaskSuite) TestCommitV3ManifestDeltasReusesCachedManifest() {
-	basePath := "/tmp/milvus/insert_log/1/10/200"
-	actualDeltaPath := "/tmp/milvus/insert_log/1/10/200/_delta/not-log-id-suffix"
-	oldManifest := packed.MarshalManifestPath(basePath, 7)
-	newManifest := packed.MarshalManifestPath(basePath, 8)
-
-	task := s.generateTestL0Task(datapb.CompactionTaskState_executing)
-
-	s.mockMeta.EXPECT().GetSegment(mock.Anything, int64(200)).Return(&SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 200, StorageVersion: storage.StorageV3, ManifestPath: oldManifest},
-	}).Once()
-
-	calls := 0
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
-		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
-			calls++
-			return newManifest, nil
-		},
-	).Build()
-	defer patch.UnPatch()
-
-	first := &datapb.CompactionSegment{SegmentID: 200, Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: actualDeltaPath, EntriesNum: 3}}}}}
-	second := &datapb.CompactionSegment{SegmentID: 200, Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: actualDeltaPath, EntriesNum: 3}}}}}
-
-	s.NoError(task.commitV3ManifestDeltas(context.Background(), []*datapb.CompactionSegment{first}))
-	s.NoError(task.commitV3ManifestDeltas(context.Background(), []*datapb.CompactionSegment{second}))
-
-	s.Equal(1, calls)
-	s.Equal(newManifest, first.GetManifest())
-	s.Equal(newManifest, second.GetManifest())
-}
-
-func (s *L0CompactionTaskSuite) TestSaveSegmentMetaCommitsManifestBeforeMetaUpdate() {
-	basePath := "/tmp/milvus/insert_log/1/10/200"
-	actualDeltaPath := "/tmp/milvus/insert_log/1/10/200/_delta/not-log-id-suffix"
-	oldManifest := packed.MarshalManifestPath(basePath, 1)
-	newManifest := packed.MarshalManifestPath(basePath, 2)
 
 	task := s.generateTestL0Task(datapb.CompactionTaskState_executing)
 	output := []*datapb.CompactionSegment{{
@@ -169,25 +67,11 @@ func (s *L0CompactionTaskSuite) TestSaveSegmentMetaCommitsManifestBeforeMetaUpda
 		}},
 	}}
 
-	s.mockMeta.EXPECT().GetSegment(mock.Anything, int64(200)).Return(&SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 200, StorageVersion: storage.StorageV3, ManifestPath: oldManifest},
-	}).Once()
-
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
-		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
-			s.Require().Len(deltaLogs, 1)
-			s.Equal(actualDeltaPath, deltaLogs[0].Path)
-			return newManifest, nil
-		},
-	).Build()
-	defer patch.UnPatch()
-
-	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, operators ...UpdateOperator) error {
-			s.Equal(newManifest, output[0].GetManifest())
-			s.Empty(output[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
+			s.Len(operators, 5)
+			s.Equal(actualDeltaPath, output[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
 			s.EqualValues(9001, output[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogID())
-			s.Len(operators, 6)
 			return nil
 		},
 	).Once()
@@ -408,8 +292,9 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan) error {
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64) error {
 			s.Require().EqualValues(t.GetTaskProto().NodeID, nodeID)
+			s.Require().EqualValues(t.GetTaskProto().GetCollectionID(), collectionID)
 			return errors.New("mock error")
 		})
 
@@ -447,8 +332,9 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		}).Twice()
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan) error {
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64) error {
 			s.Require().EqualValues(t.GetTaskProto().NodeID, nodeID)
+			s.Require().EqualValues(t.GetTaskProto().GetCollectionID(), collectionID)
 			return nil
 		})
 
@@ -839,5 +725,79 @@ func (s *L0CompactionTaskSuite) TestSelectFlushedSegment_ForceSelectAllFlag() {
 		gotIDs := runSelectWithTriggeredPos()
 		s.ElementsMatch([]int64{200, 201}, gotIDs,
 			"with flag on, resolveLatestDeletePos must lift taskPos so segment 201 is included")
+	})
+}
+
+// TestSelectFlushedSegment_RespectsCommitTimestamp verifies that import segments
+// with a commit_timestamp are excluded from L0 compaction when the trigger
+// position is before the commit_timestamp.
+func TestSelectFlushedSegment_RespectsCommitTimestamp(t *testing.T) {
+	channel := "ch-1"
+
+	// Import segment: start_position.ts=1000, commit_ts=5000.
+	// Its effective timestamp is 5000 (controlled by segmentEffectiveTs).
+	importSeg := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:              777,
+		CollectionID:    1,
+		PartitionID:     10,
+		InsertChannel:   channel,
+		State:           commonpb.SegmentState_Flushed,
+		Level:           datapb.SegmentLevel_L1,
+		CommitTimestamp: 5000,
+		StartPosition:   &msgpb.MsgPosition{Timestamp: 1000},
+	}}
+
+	// applyFilters applies a SegmentFilter slice to a candidate list,
+	// mirroring what meta.SelectSegments does internally.
+	applyFilters := func(candidates []*SegmentInfo, filters ...SegmentFilter) []*SegmentInfo {
+		var result []*SegmentInfo
+		for _, seg := range candidates {
+			pass := true
+			for _, f := range filters {
+				if !f.Match(seg) {
+					pass = false
+					break
+				}
+			}
+			if pass {
+				result = append(result, seg)
+			}
+		}
+		return result
+	}
+
+	makeTask := func(triggerTs uint64) *l0CompactionTask {
+		mockAlloc := allocator.NewMockAllocator(t)
+		mockMeta := NewMockCompactionMeta(t)
+		mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
+				return applyFilters([]*SegmentInfo{importSeg}, filters...)
+			})
+		return newL0CompactionTask(&datapb.CompactionTask{
+			PlanID:       1,
+			TriggerID:    19530,
+			CollectionID: 1,
+			PartitionID:  10,
+			Type:         datapb.CompactionType_Level0DeleteCompaction,
+			Channel:      channel,
+			Pos:          &msgpb.MsgPosition{Timestamp: triggerTs},
+		}, mockAlloc, mockMeta)
+	}
+
+	t.Run("import segment not selected when trigger pos < commit_timestamp", func(t *testing.T) {
+		// triggerTs=3000 < commit_ts=5000 → segment must NOT be selected
+		task := makeTask(3000)
+		selected, _, err := task.selectFlushedSegment()
+		assert.NoError(t, err)
+		assert.Empty(t, selected, "import segment with commit_ts=5000 must not be selected at triggerTs=3000")
+	})
+
+	t.Run("import segment selected when trigger pos > commit_timestamp", func(t *testing.T) {
+		// triggerTs=6000 > commit_ts=5000 → segment must be selected
+		task := makeTask(6000)
+		selected, _, err := task.selectFlushedSegment()
+		assert.NoError(t, err)
+		assert.Len(t, selected, 1, "import segment with commit_ts=5000 must be selected at triggerTs=6000")
+		assert.Equal(t, int64(777), selected[0].GetID())
 	})
 }

@@ -131,6 +131,27 @@ func BuildTextIndexPrefix(rootPath string, buildID, version, collectionID, parti
 		strconv.FormatInt(segmentID, 10), strconv.FormatInt(fieldID, 10))
 }
 
+// BuildStatsFilePaths normalizes stats files to full object keys.
+// TextMatch stats upload returns relative filenames; this helper also tolerates
+// already-full paths for compatibility with older/intermediate producers.
+func BuildStatsFilePaths(basePath string, files []string) []string {
+	result := make([]string, 0, len(files))
+	if basePath == "" {
+		return append(result, files...)
+	}
+
+	basePath = strings.TrimSuffix(basePath, pathSep)
+	prefix := basePath + pathSep
+	for _, file := range files {
+		if strings.HasPrefix(file, prefix) {
+			result = append(result, file)
+			continue
+		}
+		result = append(result, path.Join(basePath, strings.TrimPrefix(file, pathSep)))
+	}
+	return result
+}
+
 // BuildJSONKeyStatsPrefix returns the remote base path for JSON key stats files.
 // Format: {rootPath}/json_stats/{dataFormat}/{buildID}/{version}/{collID}/{partID}/{segID}/{fieldID}
 func BuildJSONKeyStatsPrefix(rootPath string, dataFormat, buildID, version, collectionID, partitionID, segmentID, fieldID int64) string {

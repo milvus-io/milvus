@@ -32,9 +32,6 @@ const (
 	defaultToleranceMB = 0.05
 )
 
-// IsInlineExecutable returns false: force merge is real compaction work.
-func (v *ForceMergeSegmentView) IsInlineExecutable() bool { return false }
-
 // static segment view, only algothrims here, no IO
 type ForceMergeSegmentView struct {
 	label         *CompactionGroupLabel

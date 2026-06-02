@@ -553,8 +553,7 @@ queryNode:
     maxDiskUsagePercentageForMmapAlloc: 50 # disk percentage used in mmap chunk manager
   indexOffsetCacheEnabled: false # enable index offset cache for some scalar indexes, now is just for bitmap index, enable this param can improve performance for retrieving raw data from index
   scheduler:
-    receiveChanSize: 10240
-    unsolvedQueueSize: 10240
+    unsolvedQueueSize: 1024
     # maxReadConcurrentRatio is the concurrency ratio of read task (search task and query task).
     # Max read concurrency would be the value of hardware.GetCPUNum * maxReadConcurrentRatio.
     # It defaults to 2.0, which means max read concurrency would be the value of hardware.GetCPUNum * 2.
@@ -570,19 +569,23 @@ queryNode:
       # 	Scheduling is fair on task granularity.
       # 	The policy is based on the username for authentication.
       # 	And an empty username is considered the same user.
-      # 	When there are no multi-users, the policy decay into FIFO"
+      # 	When there are no multi-users, the policy decay into FIFO.
       name: fifo
       taskQueueExpire: 60 # Control how long (many seconds) that queue retains since queue is empty
+      taskDeadlineAdvance: 50ms # Advance duration for cleaning queued query node read tasks before their context deadline. It supports duration strings such as 50ms and 1s. A bare number is interpreted as milliseconds for compatibility.
       enableCrossUserGrouping: false # Enable Cross user grouping when using user-task-polling policy. (Disable it if user's task can not merge each other)
       maxPendingTaskPerUser: 1024 # Max pending task per user in scheduler
   grouping:
-    maxNQ: 1000
+    maxNQ: 16
+    nqMergeRatio: 3 # Maximum ratio between merged total NQ and the smaller task NQ when grouping query node read tasks.
+    maxDeadlineMergeGap: 50ms # Maximum allowed gap between task context deadlines when grouping query node read tasks. Tasks with only one deadline cannot be grouped. Set a negative duration to disable this check.
     topKMergeRatio: 20
   search:
     enableResultZeroCopy: false # When true, delegator passes reduced SearchResultData directly instead of re-marshaling to SlicedBlob. Toggle at runtime for instant fallback.
   levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
   streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]
   forwardBatchSize: 4194304 # the batch size delegator uses for forwarding stream delete in loading procedure
+  delegatorPostLoadConcurrencyFactor: 1 # delegator post-load concurrency factor after worker LoadSegments returns. Concurrency is hardware.GetCPUNum * factor
   exprCache:
     enabled: false # enable expression result cache
     capacityBytes: 268435456 # max capacity in bytes for expression result cache
@@ -707,8 +710,9 @@ dataCoord:
         deltalogMaxNum: 1000 # The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 1000
     expiry:
       tolerance: -1 # tolerant duration in hours for expiry data, negative value means no toleration and equivalent to zero
-    backfill:
-      triggerInterval: 20 # The time interval in seconds for trigger backfill compaction
+    bumpSchemaVersion:
+      enabled: false # Enable schema version bump compaction
+      triggerInterval: 20 # The time interval in seconds for trigger schema bump compaction
     single:
       ratio:
         threshold: 0.2 # The ratio threshold of a segment to trigger a single compaction, default as 0.2
@@ -763,7 +767,7 @@ dataCoord:
     maxImportFileNumPerReq: 1024 # The maximum number of files allowed per single import request.
     maxImportJobNum: 1024 # Maximum number of import jobs that are executing or pending.
     waitForIndex: true # Indicates whether the import operation waits for the completion of index building.
-    fileNumPerSlot: 1 # The files number per slot for pre-import/import task.
+    fileNumPerSlot: 4 # The files number per slot for pre-import/import task.
     memoryLimitPerSlot: 160 # The memory limit (in MB) of buffer size per slot for pre-import/import task.
     maxSegmentsPerCopyTask: 100 # Maximum number of segments that can be grouped into a single copy task during snapshot restore.
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
@@ -771,7 +775,7 @@ dataCoord:
     clusteringCompactionUsage: 65535 # slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.
     mixCompactionUsage: 4 # slot usage of mix compaction task.
     l0DeleteCompactionUsage: 8 # slot usage of l0 compaction task.
-    backfillCompactionUsage: 1 # slot usage of backfill compaction task.
+    bumpSchemaVersionCompactionUsage: 1 # slot usage of schema bump compaction task.
     indexTaskSlotUsage: 64 # slot usage of index task per 512mb
     scalarIndexTaskSlotUsage: 16 # slot usage of scalar index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
@@ -849,6 +853,7 @@ dataNode:
     workPoolSize: 8 # worker pool size for one clustering compaction job.
   bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
   storage:
+    format: parquet # storage format for insert data, options: [parquet, vortex]
     deltalog: json # deltalog format, options: [json, parquet]
   ip:  # TCP/IP address of dataNode. If not specified, use the first unicastable address
   port: 21124 # TCP port of dataNode
@@ -956,6 +961,8 @@ common:
   defaultPartitionName: _default # Name of the default partition when a collection is created
   defaultIndexName: _default_idx # Name of the index when it is created with name unspecified
   indexSliceSize: 16 # Index slice size in MB
+  entryStream:
+    streamBudgetRatio: 3 # Multiplier for entry stream transient memory budget, relative to CPU core count
   threadCoreCoefficient:
     highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority pool
     middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority pool
@@ -985,7 +992,7 @@ common:
       splitByAvgSize:
         enabled: true # enable split by average size policy in storage v2
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
-    useLoonFFI: true
+    useLoonFFI: false
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.

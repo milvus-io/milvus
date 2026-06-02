@@ -69,6 +69,47 @@ func TestSliceOperator_LimitOnly(t *testing.T) {
 	assert.Equal(t, int64(3), ids[2])
 }
 
+func TestSliceOperator_NullableCompactVectorWithoutIDsUsesLogicalRows(t *testing.T) {
+	op := NewSliceOperator(1, 2)
+	ctx := context.Background()
+
+	result := &internalpb.RetrieveResults{
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "nullable_vec",
+				FieldId:   100,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: 2,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}},
+					},
+				}},
+				ValidData: []bool{true, false, true},
+			},
+			{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "value",
+				FieldId:   101,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{10, 20, 30}},
+					},
+				}},
+			},
+		},
+	}
+
+	outputs, err := op.Run(ctx, nil, result)
+	require.NoError(t, err)
+
+	sliced := outputs[0].(*internalpb.RetrieveResults)
+	require.Len(t, sliced.GetFieldsData(), 2)
+	assert.Equal(t, []bool{true}, sliced.GetFieldsData()[0].GetValidData())
+	assert.Equal(t, []float32{3, 4}, sliced.GetFieldsData()[0].GetVectors().GetFloatVector().GetData())
+	assert.Equal(t, []int64{30}, sliced.GetFieldsData()[1].GetScalars().GetLongData().GetData())
+}
+
 func TestSliceOperator_OffsetOnly(t *testing.T) {
 	op := NewSliceOperator(-1, 2) // -1 means no limit
 	ctx := context.Background()

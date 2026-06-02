@@ -29,6 +29,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	grpcCodes "google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
@@ -379,6 +380,7 @@ func TestGetNumRowsOfFloat16VectorField(t *testing.T) {
 		{[]byte{}, 128, 0, true},
 		{[]byte{1.0, 2.0}, 1, 1, true},
 		{[]byte{1.0, 2.0, 3.0, 4.0}, 2, 1, true},
+		{[]byte{1.0, 2.0}, 2, 0, false}, // length % (dim * 2) != 0
 	}
 
 	for _, test := range cases {
@@ -407,6 +409,7 @@ func TestGetNumRowsOfBFloat16VectorField(t *testing.T) {
 		{[]byte{}, 128, 0, true},
 		{[]byte{1.0, 2.0}, 1, 1, true},
 		{[]byte{1.0, 2.0, 3.0, 4.0}, 2, 1, true},
+		{[]byte{1.0, 2.0}, 2, 0, false}, // length % (dim * 2) != 0
 	}
 
 	for _, test := range cases {
@@ -481,6 +484,101 @@ func TestGetNumRowsOfInt8VectorField(t *testing.T) {
 			assert.NotEqual(t, nil, err)
 		}
 	}
+}
+
+func TestValidateNullableVectorFieldDataCompact(t *testing.T) {
+	t.Run("float vector compact valid", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			FieldName: "vec",
+			Type:      schemapb.DataType_FloatVector,
+			ValidData: []bool{true, false, true},
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim: 2,
+				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{
+					Data: []float32{1, 2, 3, 4},
+				}},
+			}},
+		}
+		require.NoError(t, ValidateNullableVectorFieldDataCompact(fieldData, 3, true))
+	})
+
+	t.Run("full row payload rejected", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			FieldName: "vec",
+			Type:      schemapb.DataType_FloatVector,
+			ValidData: []bool{true, false, true},
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim: 2,
+				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{
+					Data: []float32{1, 2, 3, 4, 5, 6},
+				}},
+			}},
+		}
+		err := ValidateNullableVectorFieldDataCompact(fieldData, 3, true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "physical payload rows")
+	})
+
+	t.Run("partial dense row rejected", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			FieldName: "vec",
+			Type:      schemapb.DataType_Float16Vector,
+			ValidData: []bool{true, false},
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  2,
+				Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2}},
+			}},
+		}
+		err := ValidateNullableVectorFieldDataCompact(fieldData, 2, true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "row width")
+	})
+
+	t.Run("sparse vector compact valid", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			FieldName: "vec",
+			Type:      schemapb.DataType_SparseFloatVector,
+			ValidData: []bool{false, true, true},
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
+					Contents: [][]byte{
+						typeutil.CreateSparseFloatRow([]uint32{1}, []float32{1}),
+						typeutil.CreateSparseFloatRow([]uint32{2}, []float32{2}),
+					},
+				}},
+			}},
+		}
+		require.NoError(t, ValidateNullableVectorFieldDataCompact(fieldData, 3, true))
+	})
+
+	t.Run("missing valid data depends on caller boundary", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			FieldName: "vec",
+			Type:      schemapb.DataType_FloatVector,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim: 2,
+				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{
+					Data: []float32{1, 2},
+				}},
+			}},
+		}
+		require.NoError(t, ValidateNullableVectorFieldDataCompact(fieldData, 0, false))
+		err := ValidateNullableVectorFieldDataCompact(fieldData, 1, true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires valid_data")
+	})
+
+	t.Run("schema dim fallback", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			FieldName: "vec",
+			Type:      schemapb.DataType_BinaryVector,
+			ValidData: []bool{true, false},
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0xff}},
+			}},
+		}
+		require.NoError(t, ValidateNullableVectorFieldDataCompactWithDim(fieldData, 2, true, 8))
+	})
 }
 
 func Test_ReadBinary(t *testing.T) {

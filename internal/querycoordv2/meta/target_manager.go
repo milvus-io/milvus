@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -151,6 +152,22 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 	if err != nil {
 		log.Warn("failed to get next targets for collection", zap.Int64("collectionID", collectionID), zap.Error(err))
 		return err
+	}
+
+	// A dropped checkpoint sentinel is not a valid seek position; do not
+	// build a next target that could dispatch WatchDmChannels with it.
+	for _, channelInfo := range vChannelInfos {
+		if funcutil.IsDroppedChannelCheckpoint(channelInfo.GetSeekPosition()) {
+			log.Warn("refuse to build next target: channel checkpoint is a dropped sentinel; sticky until collection meta is fully dropped",
+				zap.Int64("collectionID", collectionID),
+				zap.String("channel", channelInfo.GetChannelName()),
+				zap.Uint64("seekTs", channelInfo.GetSeekPosition().GetTimestamp()),
+			)
+			return merr.WrapErrChannelDroppedSentinel(
+				channelInfo.GetChannelName(),
+				"refuse to build next target",
+			)
+		}
 	}
 
 	partitionIDs := mgr.meta.GetPartitionIDsByCollection(ctx, collectionID)

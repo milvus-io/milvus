@@ -93,28 +93,32 @@ func TestPackedFFIReader(t *testing.T) {
 		{Columns: []int{0, 1}, GroupID: storagecommon.DefaultShortColumnGroupID},
 	}
 
-	// Create FFI packed writer and write data
-	pw, err := NewFFIPackedWriter(basePath, version, schema, columnGroups, nil, nil)
-	require.NoError(t, err)
-
-	err = pw.WriteRecordBatch(rec)
-	require.NoError(t, err)
-
-	manifest, err := pw.Close()
-	require.NoError(t, err)
-	require.NotEmpty(t, manifest)
-
-	t.Logf("Successfully wrote %d rows with %d-dim float vectors, manifest: %s", numRows, dim, manifest)
-
-	// Create storage config for reader
 	storageConfig := &indexpb.StorageConfig{
 		RootPath:    dir,
 		StorageType: "local",
 	}
 
+	// Create FFI packed writer and write data
+	pw, err := NewFFIPackedWriter(basePath, schema, columnGroups, storageConfig, nil)
+	require.NoError(t, err)
+
+	err = pw.WriteRecordBatch(rec)
+	require.NoError(t, err)
+
+	out, err := pw.Close()
+	require.NoError(t, err)
+	defer out.Destroy()
+
+	manifest, err := CommitManifestUpdates(basePath, version, storageConfig,
+		&ManifestUpdates{NewFiles: out})
+	require.NoError(t, err)
+	require.NotEmpty(t, manifest)
+
+	t.Logf("Successfully wrote %d rows with %d-dim float vectors, manifest: %s", numRows, dim, manifest)
+
 	// Create FFI packed reader
 	neededColumns := []string{"pk", "vector"}
-	reader, err := NewFFIPackedReader(manifest, schema, neededColumns, 8192, storageConfig, nil)
+	reader, err := NewFFIPackedReader(manifest, schema, neededColumns, 8192, storageConfig, nil, ExternalReaderContext{})
 	require.NoError(t, err)
 	require.NotNil(t, reader)
 
@@ -238,21 +242,26 @@ func TestPackedFFIReaderPartialColumns(t *testing.T) {
 		{Columns: []int{0, 1, 2}, GroupID: storagecommon.DefaultShortColumnGroupID},
 	}
 
-	// Write data
-	pw, err := NewFFIPackedWriter(basePath, version, schema, columnGroups, nil, nil)
-	require.NoError(t, err)
-
-	err = pw.WriteRecordBatch(rec)
-	require.NoError(t, err)
-
-	manifest, err := pw.Close()
-	require.NoError(t, err)
-
 	// Create storage config
 	storageConfig := &indexpb.StorageConfig{
 		RootPath:    dir,
 		StorageType: "local",
 	}
+
+	// Write data
+	pw, err := NewFFIPackedWriter(basePath, schema, columnGroups, storageConfig, nil)
+	require.NoError(t, err)
+
+	err = pw.WriteRecordBatch(rec)
+	require.NoError(t, err)
+
+	out, err := pw.Close()
+	require.NoError(t, err)
+	defer out.Destroy()
+
+	manifest, err := CommitManifestUpdates(basePath, version, storageConfig,
+		&ManifestUpdates{NewFiles: out})
+	require.NoError(t, err)
 
 	// Read only pk and score columns (skip vector)
 	neededColumns := []string{"pk", "score"}
@@ -261,7 +270,7 @@ func TestPackedFFIReaderPartialColumns(t *testing.T) {
 		schema.Field(1),
 	}, nil)
 
-	reader, err := NewFFIPackedReader(manifest, partialSchema, neededColumns, 8192, storageConfig, nil)
+	reader, err := NewFFIPackedReader(manifest, partialSchema, neededColumns, 8192, storageConfig, nil, ExternalReaderContext{})
 	require.NoError(t, err)
 	require.NotNil(t, reader)
 
@@ -343,6 +352,11 @@ func TestPackedFFIReaderMultipleBatches(t *testing.T) {
 	var manifest string
 	totalWrittenRows := 0
 
+	storageConfig := &indexpb.StorageConfig{
+		RootPath:    dir,
+		StorageType: "local",
+	}
+
 	// Write multiple batches
 	for batch := 0; batch < numWrites; batch++ {
 		b := array.NewRecordBuilder(memory.DefaultAllocator, schema)
@@ -364,13 +378,18 @@ func TestPackedFFIReaderMultipleBatches(t *testing.T) {
 
 		rec := b.NewRecord()
 
-		pw, err := NewFFIPackedWriter(basePath, version, schema, columnGroups, nil, nil)
+		pw, err := NewFFIPackedWriter(basePath, schema, columnGroups, storageConfig, nil)
 		require.NoError(t, err)
 
 		err = pw.WriteRecordBatch(rec)
 		require.NoError(t, err)
 
-		manifest, err = pw.Close()
+		out, err := pw.Close()
+		require.NoError(t, err)
+
+		manifest, err = CommitManifestUpdates(basePath, version, storageConfig,
+			&ManifestUpdates{NewFiles: out})
+		out.Destroy()
 		require.NoError(t, err)
 
 		_, version, err = UnmarshalManifestPath(manifest)
@@ -382,14 +401,10 @@ func TestPackedFFIReaderMultipleBatches(t *testing.T) {
 		rec.Release()
 	}
 
-	// Read all data
-	storageConfig := &indexpb.StorageConfig{
-		RootPath:    dir,
-		StorageType: "local",
-	}
+	// Read all data using the same storageConfig
 
 	neededColumns := []string{"pk", "vector"}
-	reader, err := NewFFIPackedReader(manifest, schema, neededColumns, 8192, storageConfig, nil)
+	reader, err := NewFFIPackedReader(manifest, schema, neededColumns, 8192, storageConfig, nil, ExternalReaderContext{})
 	require.NoError(t, err)
 
 	totalRowsRead := int64(0)

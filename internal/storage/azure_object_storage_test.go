@@ -23,6 +23,7 @@ import (
 	"io"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
@@ -193,15 +194,29 @@ func TestAzureObjectStorage(t *testing.T) {
 	})
 
 	t.Run("test useIAM", func(t *testing.T) {
+		// newAzureObjectStorageWithConfig probes the Azure managed-identity
+		// IMDS endpoint (link-local 169.254.169.254). On hosts without an
+		// IMDS responder (bare-metal dev machines) the SDK blocks on the
+		// TCP connect until the 10min testing.M timeout. Bound each call
+		// with a short context so it fail-fast regardless of environment;
+		// the test only asserts that an error is returned.
 		var err error
 		config.UseIAM = true
-		_, err = newAzureObjectStorageWithConfig(ctx, &config)
+
+		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		_, err = newAzureObjectStorageWithConfig(cctx, &config)
+		cancel()
 		assert.Error(t, err)
+
 		os.Setenv("AZURE_CLIENT_ID", "00000000-0000-0000-0000-00000000000")
 		os.Setenv("AZURE_TENANT_ID", "00000000-0000-0000-0000-00000000000")
 		os.Setenv("AZURE_FEDERATED_TOKEN_FILE", "/var/run/secrets/tokens/azure-identity-token")
-		_, err = newAzureObjectStorageWithConfig(ctx, &config)
+
+		cctx, cancel = context.WithTimeout(ctx, 5*time.Second)
+		_, err = newAzureObjectStorageWithConfig(cctx, &config)
+		cancel()
 		assert.Error(t, err)
+
 		config.UseIAM = false
 	})
 

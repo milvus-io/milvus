@@ -105,7 +105,7 @@ func (_c *MockCache_Close_Call) Return() *MockCache_Close_Call {
 }
 
 func (_c *MockCache_Close_Call) RunAndReturn(run func()) *MockCache_Close_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -908,7 +908,7 @@ func (_c *MockCache_RemoveDatabase_Call) RunAndReturn(run func(context.Context, 
 }
 
 // RemovePartition provides a mock function with given fields: ctx, database, collectionID, collectionName, partitionName, version
-func (_m *MockCache) RemovePartition(ctx context.Context, database string, collectionID UniqueID, collectionName string, partitionName string, version uint64) {
+func (_m *MockCache) RemovePartition(ctx context.Context, database string, collectionID int64, collectionName string, partitionName string, version uint64) {
 	_m.Called(ctx, database, collectionID, collectionName, partitionName, version)
 }
 
@@ -920,7 +920,7 @@ type MockCache_RemovePartition_Call struct {
 // RemovePartition is a helper method to define mock.On call
 //   - ctx context.Context
 //   - database string
-//   - collectionID UniqueID
+//   - collectionID int64
 //   - collectionName string
 //   - partitionName string
 //   - version uint64
@@ -928,9 +928,9 @@ func (_e *MockCache_Expecter) RemovePartition(ctx interface{}, database interfac
 	return &MockCache_RemovePartition_Call{Call: _e.mock.On("RemovePartition", ctx, database, collectionID, collectionName, partitionName, version)}
 }
 
-func (_c *MockCache_RemovePartition_Call) Run(run func(ctx context.Context, database string, collectionID UniqueID, collectionName string, partitionName string, version uint64)) *MockCache_RemovePartition_Call {
+func (_c *MockCache_RemovePartition_Call) Run(run func(ctx context.Context, database string, collectionID int64, collectionName string, partitionName string, version uint64)) *MockCache_RemovePartition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(UniqueID), args[3].(string), args[4].(string), args[5].(uint64))
+		run(args[0].(context.Context), args[1].(string), args[2].(int64), args[3].(string), args[4].(string), args[5].(uint64))
 	})
 	return _c
 }
@@ -940,7 +940,7 @@ func (_c *MockCache_RemovePartition_Call) Return() *MockCache_RemovePartition_Ca
 	return _c
 }
 
-func (_c *MockCache_RemovePartition_Call) RunAndReturn(run func(context.Context, string, UniqueID, string, string, uint64)) *MockCache_RemovePartition_Call {
+func (_c *MockCache_RemovePartition_Call) RunAndReturn(run func(context.Context, string, int64, string, string, uint64)) *MockCache_RemovePartition_Call {
 	_c.Run(run)
 	return _c
 }

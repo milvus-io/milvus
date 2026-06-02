@@ -87,7 +87,16 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
 	}
-	return &cSegmentImpl{id: req.SegmentID, ptr: ptr}, nil
+	seg := &cSegmentImpl{id: req.SegmentID, ptr: ptr}
+	if req.LoadInfo != nil {
+		if commitTs := req.LoadInfo.GetCommitTimestamp(); commitTs != 0 {
+			if err := seg.SetCommitTimestamp(commitTs); err != nil {
+				C.DeleteSegment(ptr)
+				return nil, errors.Wrap(err, "failed to set commit timestamp on segment")
+			}
+		}
+	}
+	return seg, nil
 }
 
 // cSegmentImpl is a wrapper for cSegmentImplInterface.
@@ -336,6 +345,16 @@ func (s *cSegmentImpl) Load(ctx context.Context) error {
 }
 
 func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
+	if req == nil {
+		return errors.New("reopen request is nil")
+	}
+	if req.LoadInfo == nil {
+		return errors.New("reopen load info is nil")
+	}
+	if req.Schema == nil {
+		return errors.New("reopen schema is nil")
+	}
+
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(req)
@@ -345,6 +364,18 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	if err != nil {
 		return err
 	}
+	if len(loadInfoBlob) == 0 {
+		return errors.New("reopen load info blob is empty")
+	}
+
+	schemaBlob, err := proto.Marshal(req.Schema)
+	if err != nil {
+		return err
+	}
+	if len(schemaBlob) == 0 {
+		return errors.New("reopen schema blob is empty")
+	}
+	defer runtime.KeepAlive(schemaBlob)
 
 	future := cgo.Async(ctx,
 		func() cgo.CFuturePtr {
@@ -353,6 +384,9 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 				s.ptr,
 				(*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])),
 				C.int64_t(len(loadInfoBlob)),
+				unsafe.Pointer(&schemaBlob[0]),
+				C.int64_t(len(schemaBlob)),
+				C.uint64_t(req.SchemaVersion),
 			))
 		},
 		cgo.WithName("segment-reopen"),
@@ -381,6 +415,14 @@ func (s *cSegmentImpl) DropJSONIndex(ctx context.Context, fieldID int64, nestedP
 // Release releases the segment.
 func (s *cSegmentImpl) Release() {
 	C.DeleteSegment(s.ptr)
+}
+
+// SetCommitTimestamp sets the commit timestamp for the segment.
+// Import segments use this to ensure rows with old historical timestamps are
+// not visible to queries dispatched before T_commit.
+func (s *cSegmentImpl) SetCommitTimestamp(ts uint64) error {
+	status := C.SegmentSetCommitTimestamp(s.ptr, C.uint64_t(ts))
+	return ConsumeCStatusIntoError(&status)
 }
 
 // ConvertToSegcoreSegmentLoadInfo converts querypb.SegmentLoadInfo to segcorepb.SegmentLoadInfo.
@@ -418,8 +460,9 @@ func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) *segcorepb.Se
 		JsonKeyStatsLogs:     convertJSONKeyStats(jsonStats, jsonBasePaths),
 		Priority:             src.GetPriority(),
 		ManifestPath:         src.GetManifestPath(),
-		UseTakeForOutput:     paramtable.Get().QueryNodeCfg.ExternalCollectionUseTakeForOutput.GetAsBool(),
+		UseTakeForOutput:     src.GetUseTakeForOutput(),
 		EstimatedBytesPerRow: src.GetEstimatedBytesPerRow(),
+		CommitTimestamp:      src.GetCommitTimestamp(),
 	}
 }
 

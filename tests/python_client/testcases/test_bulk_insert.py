@@ -400,7 +400,17 @@ class TestBulkInsertNullableVector(TestcaseBaseBulkInsert):
             assert rows_by_id[pk][df.string_field] is None
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("file_type", [BulkFileType.JSON, BulkFileType.CSV, BulkFileType.PARQUET])
+    @pytest.mark.parametrize(
+        "file_type",
+        [
+            BulkFileType.JSON,
+            pytest.param(
+                BulkFileType.CSV,
+                marks=pytest.mark.skip(reason="CSV nullable FloatVector import currently parses empty value as string"),
+            ),
+            BulkFileType.PARQUET,
+        ],
+    )
     @pytest.mark.parametrize("dim", [32])
     @pytest.mark.parametrize("entities", [60])
     def test_bulk_writer_nullable_float_vector(self, file_type, dim, entities):

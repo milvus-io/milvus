@@ -105,7 +105,7 @@ type SegmentFiles struct {
 //
 // Process:
 // 1. Unmarshal JSON to get base_path and version
-// 2. Replace collection/partition/segment IDs in base_path using generateTargetPath
+// 2. Replace collection/partition/segment IDs in base_path
 // 3. Marshal back to JSON
 func transformManifestPath(
 	manifestPath string,
@@ -373,7 +373,8 @@ func CopySegmentAndIndexFiles(
 	log.Info("start copying segment and index files",
 		zap.Int64("sourceSegmentID", segmentID),
 		zap.Int64("storageVersion", source.GetStorageVersion()),
-		zap.Bool("useManifest", useManifest))
+		zap.Bool("useManifest", useManifest),
+		zap.Bool("isExternalCollection", source.GetIsExternalCollection()))
 
 	// Step 1: Collect all files to copy
 	files, err := collectSegmentFiles(ctx, cm, source)
@@ -495,6 +496,8 @@ func CopySegmentAndIndexFiles(
 //   - srcFieldBinlogs: Source field binlogs with original paths
 //   - mappings: Pre-calculated map of source path -> target path
 //   - countRows: If true, accumulate total row count from EntriesNum (for insert logs only)
+//   - isExternalTable: If true, skip path mapping because external table insert
+//     binlogs carry row metadata without physical log paths
 //
 // Returns:
 //   - []*datapb.FieldBinlog: Transformed binlog list with target paths
@@ -503,7 +506,8 @@ func CopySegmentAndIndexFiles(
 func transformFieldBinlogs(
 	srcFieldBinlogs []*datapb.FieldBinlog,
 	mappings map[string]string,
-	countRows bool, // true for insert logs to count total rows
+	countRows bool,
+	isExternalTable bool,
 ) ([]*datapb.FieldBinlog, int64, error) {
 	result := make([]*datapb.FieldBinlog, 0, len(srcFieldBinlogs))
 	var totalRows int64
@@ -513,18 +517,23 @@ func transformFieldBinlogs(
 		dstFieldBinlog.Binlogs = make([]*datapb.Binlog, 0, len(srcFieldBinlog.GetBinlogs()))
 
 		for _, srcBinlog := range srcFieldBinlog.GetBinlogs() {
-			if srcPath := srcBinlog.GetLogPath(); srcPath != "" {
+			dstBinlog := proto.Clone(srcBinlog).(*datapb.Binlog)
+
+			if !isExternalTable {
+				srcPath := srcBinlog.GetLogPath()
+				if srcPath == "" {
+					continue
+				}
 				dstPath, ok := mappings[srcPath]
 				if !ok {
 					return nil, 0, fmt.Errorf("no mapping found for source path: %s", srcPath)
 				}
-				dstBinlog := proto.Clone(srcBinlog).(*datapb.Binlog)
 				dstBinlog.LogPath = dstPath
-				dstFieldBinlog.Binlogs = append(dstFieldBinlog.Binlogs, dstBinlog)
+			}
 
-				if countRows {
-					totalRows += srcBinlog.GetEntriesNum()
-				}
+			dstFieldBinlog.Binlogs = append(dstFieldBinlog.Binlogs, dstBinlog)
+			if countRows {
+				totalRows += srcBinlog.GetEntriesNum()
 			}
 		}
 
@@ -572,7 +581,7 @@ func generateSegmentInfoFromSource(
 	}
 
 	// Process insert binlogs (count rows)
-	binlogs, totalRows, err := transformFieldBinlogs(source.GetInsertBinlogs(), mappings, true)
+	binlogs, totalRows, err := transformFieldBinlogs(source.GetInsertBinlogs(), mappings, true, source.GetIsExternalCollection())
 	if err != nil {
 		return nil, fmt.Errorf("failed to transform insert binlogs: %w", err)
 	}
@@ -580,21 +589,21 @@ func generateSegmentInfoFromSource(
 	segmentInfo.ImportedRows = totalRows
 
 	// Process stats binlogs (no row counting)
-	statslogs, _, err := transformFieldBinlogs(source.GetStatsBinlogs(), mappings, false)
+	statslogs, _, err := transformFieldBinlogs(source.GetStatsBinlogs(), mappings, false, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to transform stats binlogs: %w", err)
 	}
 	segmentInfo.Statslogs = statslogs
 
 	// Process delta binlogs (no row counting)
-	deltalogs, _, err := transformFieldBinlogs(source.GetDeltaBinlogs(), mappings, false)
+	deltalogs, _, err := transformFieldBinlogs(source.GetDeltaBinlogs(), mappings, false, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to transform delta binlogs: %w", err)
 	}
 	segmentInfo.Deltalogs = deltalogs
 
 	// Process BM25 binlogs (no row counting)
-	bm25logs, _, err := transformFieldBinlogs(source.GetBm25Binlogs(), mappings, false)
+	bm25logs, _, err := transformFieldBinlogs(source.GetBm25Binlogs(), mappings, false, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to transform BM25 binlogs: %w", err)
 	}

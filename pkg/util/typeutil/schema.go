@@ -638,6 +638,26 @@ func IsVectorArrayType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_ArrayOfVector
 }
 
+// NewEmptyArrayOfVectorRow builds a row-dense ArrayOfVector placeholder for a null row.
+func NewEmptyArrayOfVectorRow(dim int64, elementType schemapb.DataType) (*schemapb.VectorField, error) {
+	vf := &schemapb.VectorField{Dim: dim}
+	switch elementType {
+	case schemapb.DataType_FloatVector:
+		vf.Data = &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}}
+	case schemapb.DataType_BinaryVector:
+		vf.Data = &schemapb.VectorField_BinaryVector{BinaryVector: []byte{}}
+	case schemapb.DataType_Float16Vector:
+		vf.Data = &schemapb.VectorField_Float16Vector{Float16Vector: []byte{}}
+	case schemapb.DataType_BFloat16Vector:
+		vf.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{}}
+	case schemapb.DataType_Int8Vector:
+		vf.Data = &schemapb.VectorField_Int8Vector{Int8Vector: []byte{}}
+	default:
+		return nil, fmt.Errorf("unsupported ArrayOfVector element type %s", elementType)
+	}
+	return vf, nil
+}
+
 // IsClusteringKeyType returns true if the data type is supported as a clustering key.
 // Supported scalar types: Int8, Int16, Int32, Int64, Float, Double, VarChar, String, FloatVector.
 func IsClusteringKeyType(dataType schemapb.DataType) bool {
@@ -874,27 +894,46 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 }
 
 type FieldDataIdxComputer struct {
-	fieldsData   []*schemapb.FieldData
-	lastRowIdx   int64
-	dataIndices  []int64
-	isVector     []bool
-	resultBuffer []int64
+	fieldsData                     []*schemapb.FieldData
+	lastRowIdx                     int64
+	dataIndices                    []int64
+	isVector                       []bool
+	nullableVectorWithoutValidData []bool
+	resultBuffer                   []int64
 }
 
 func NewFieldDataIdxComputer(fieldsData []*schemapb.FieldData) *FieldDataIdxComputer {
+	return NewFieldDataIdxComputerWithSchema(fieldsData, nil)
+}
+
+func NewFieldDataIdxComputerWithSchema(fieldsData []*schemapb.FieldData, schema *schemapb.CollectionSchema) *FieldDataIdxComputer {
 	c := &FieldDataIdxComputer{
-		fieldsData:   fieldsData,
-		lastRowIdx:   0,
-		dataIndices:  make([]int64, len(fieldsData)),
-		isVector:     make([]bool, len(fieldsData)),
-		resultBuffer: make([]int64, len(fieldsData)),
+		fieldsData:                     fieldsData,
+		lastRowIdx:                     0,
+		dataIndices:                    make([]int64, len(fieldsData)),
+		isVector:                       make([]bool, len(fieldsData)),
+		nullableVectorWithoutValidData: make([]bool, len(fieldsData)),
+		resultBuffer:                   make([]int64, len(fieldsData)),
 	}
+
+	fieldSchemas := make(map[int64]*schemapb.FieldSchema)
+	if schema != nil {
+		for _, field := range schema.GetFields() {
+			fieldSchemas[field.GetFieldID()] = field
+		}
+	}
+
 	for i, fieldData := range fieldsData {
 		validData := fieldData.GetValidData()
-		// ArrayOfVector stores null rows as dense empty-array placeholders (expanded
-		// in FillWithNullValue), so indexing should follow the scalar convention
-		// (rowIdx maps directly to Data[rowIdx]), not the compact vector convention.
-		c.isVector[i] = len(validData) > 0 && IsVectorType(fieldData.Type) && !IsVectorArrayType(fieldData.Type)
+		fieldSchema := fieldSchemas[fieldData.GetFieldId()]
+		isVector := IsSupportedNullableVectorType(fieldData.GetType())
+		isNullableVector := false
+		if fieldSchema != nil {
+			isVector = IsSupportedNullableVectorType(fieldSchema.GetDataType())
+			isNullableVector = fieldSchema.GetNullable() && isVector
+		}
+		c.isVector[i] = isVector && (len(validData) > 0 || isNullableVector)
+		c.nullableVectorWithoutValidData[i] = isNullableVector && len(validData) == 0
 	}
 	return c
 }
@@ -909,6 +948,10 @@ func (c *FieldDataIdxComputer) Compute(rowIdx int64) []int64 {
 
 	for i, fieldData := range c.fieldsData {
 		if c.isVector[i] {
+			if c.nullableVectorWithoutValidData[i] {
+				c.resultBuffer[i] = -1
+				continue
+			}
 			validData := fieldData.GetValidData()
 			for j := c.lastRowIdx; j < rowIdx && j < int64(len(validData)); j++ {
 				if validData[j] {
@@ -954,6 +997,11 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 			}
 			valid := fieldData.ValidData[idx]
 			dstFieldData.ValidData = append(dstFieldData.ValidData, valid)
+		} else if fieldIdx < 0 {
+			if dstFieldData.ValidData == nil {
+				dstFieldData.ValidData = make([]bool, 0)
+			}
+			dstFieldData.ValidData = append(dstFieldData.ValidData, false)
 		}
 		switch fieldType := fieldData.Field.(type) {
 		case *schemapb.FieldData_Scalars:
@@ -1106,7 +1154,7 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 				}
 			}
 			dstVector := dstFieldData.GetVectors()
-			isNullRow := len(fieldData.GetValidData()) > 0 && !fieldData.GetValidData()[idx]
+			isNullRow := fieldIdx < 0 || (len(fieldData.GetValidData()) > 0 && !fieldData.GetValidData()[idx])
 
 			switch srcVector := fieldType.Vectors.Data.(type) {
 			case *schemapb.VectorField_BinaryVector:
@@ -1200,10 +1248,6 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 					appendSize += int64(unsafe.Sizeof(srcVector.Int8Vector[fieldIdx*dim : (fieldIdx+1)*dim]))
 				}
 			case *schemapb.VectorField_VectorArray:
-				// ArrayOfVector uses dense Data (null rows are empty-array placeholders),
-				// so always append Data[fieldIdx] regardless of isNullRow. fieldIdx
-				// equals rowOffset here because NewFieldDataIdxComputer treats
-				// ArrayOfVector as non-vector for indexing purposes.
 				if dstVector.GetVectorArray() == nil {
 					dstVector.Data = &schemapb.VectorField_VectorArray{
 						VectorArray: &schemapb.VectorArray{
@@ -1804,6 +1848,9 @@ func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, upda
 	if len(baseIndices) != len(updateIndices) {
 		return fmt.Errorf("baseIndices and updateIndices length mismatch: %d vs %d", len(baseIndices), len(updateIndices))
 	}
+	if IsCompactNullableVectorFieldData(base) {
+		return updateCompactNullableVectorFieldDataByColumn(base, update, baseIndices, updateIndices)
+	}
 
 	// Handle ValidData
 	if len(update.GetValidData()) > 0 && len(base.GetValidData()) > 0 {
@@ -1975,6 +2022,224 @@ func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, upda
 	}
 
 	return nil
+}
+
+// IsCompactNullableVectorFieldData reports whether field uses compact nullable vector payload.
+func IsCompactNullableVectorFieldData(field *schemapb.FieldData) bool {
+	return len(field.GetValidData()) > 0 && IsSupportedNullableVectorType(field.GetType())
+}
+
+func updateCompactNullableVectorFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, updateIndices []int64) error {
+	if !IsSupportedNullableVectorType(update.GetType()) {
+		return fmt.Errorf("cannot update nullable vector field %s with %s", base.GetType().String(), update.GetType().String())
+	}
+	if update.GetType() != base.GetType() {
+		return fmt.Errorf("cannot update nullable vector field %s with %s", base.GetType().String(), update.GetType().String())
+	}
+
+	baseValidData := base.GetValidData()
+	updateValidData := update.GetValidData()
+	if len(updateValidData) == 0 {
+		return fmt.Errorf("nullable vector field %s missing ValidData", update.GetFieldName())
+	}
+
+	updateByBaseIdx := make(map[int]int, len(baseIndices))
+	for i, baseIdx := range baseIndices {
+		updateIdx := updateIndices[i]
+		if baseIdx < 0 || int(baseIdx) >= len(baseValidData) {
+			return fmt.Errorf("base index %d out of range for nullable vector field %s", baseIdx, base.GetFieldName())
+		}
+		if updateIdx < 0 || int(updateIdx) >= len(updateValidData) {
+			return fmt.Errorf("update index %d out of range for nullable vector field %s", updateIdx, update.GetFieldName())
+		}
+		updateByBaseIdx[int(baseIdx)] = int(updateIdx)
+	}
+
+	basePhysicalIndices, _ := BuildNullableVectorDataIndices(baseValidData)
+	updatePhysicalIndices, _ := BuildNullableVectorDataIndices(updateValidData)
+	newValidData := append([]bool(nil), baseValidData...)
+	for baseIdx, updateIdx := range updateByBaseIdx {
+		newValidData[baseIdx] = updateValidData[updateIdx]
+	}
+
+	baseVector := base.GetVectors()
+	updateVector := update.GetVectors()
+	if baseVector == nil || updateVector == nil {
+		return fmt.Errorf("nullable vector field data is nil")
+	}
+	dim := baseVector.GetDim()
+	if dim == 0 {
+		dim = updateVector.GetDim()
+	}
+	if dim != 0 {
+		baseVector.Dim = dim
+	}
+
+	switch base.GetType() {
+	case schemapb.DataType_BinaryVector:
+		elemSize := dim / 8
+		newData := make([]byte, 0, int64(countValid(newValidData))*elemSize)
+		appendRow := func(vector *schemapb.VectorField, physicalIdx int) error {
+			data := vector.GetBinaryVector()
+			start := int64(physicalIdx) * elemSize
+			end := start + elemSize
+			if start < 0 || end > int64(len(data)) {
+				return fmt.Errorf("binary vector physical index %d out of range", physicalIdx)
+			}
+			newData = append(newData, data[start:end]...)
+			return nil
+		}
+		if err := rebuildCompactNullableVectorData(newValidData, updateByBaseIdx, basePhysicalIndices, updatePhysicalIndices, appendRow, baseVector, updateVector); err != nil {
+			return err
+		}
+		baseVector.Data = &schemapb.VectorField_BinaryVector{BinaryVector: newData}
+	case schemapb.DataType_FloatVector:
+		newData := make([]float32, 0, int64(countValid(newValidData))*dim)
+		appendRow := func(vector *schemapb.VectorField, physicalIdx int) error {
+			data := vector.GetFloatVector().GetData()
+			start := int64(physicalIdx) * dim
+			end := start + dim
+			if start < 0 || end > int64(len(data)) {
+				return fmt.Errorf("float vector physical index %d out of range", physicalIdx)
+			}
+			newData = append(newData, data[start:end]...)
+			return nil
+		}
+		if err := rebuildCompactNullableVectorData(newValidData, updateByBaseIdx, basePhysicalIndices, updatePhysicalIndices, appendRow, baseVector, updateVector); err != nil {
+			return err
+		}
+		baseVector.Data = &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: newData}}
+	case schemapb.DataType_Float16Vector:
+		elemSize := dim * 2
+		newData := make([]byte, 0, int64(countValid(newValidData))*elemSize)
+		appendRow := func(vector *schemapb.VectorField, physicalIdx int) error {
+			data := vector.GetFloat16Vector()
+			start := int64(physicalIdx) * elemSize
+			end := start + elemSize
+			if start < 0 || end > int64(len(data)) {
+				return fmt.Errorf("float16 vector physical index %d out of range", physicalIdx)
+			}
+			newData = append(newData, data[start:end]...)
+			return nil
+		}
+		if err := rebuildCompactNullableVectorData(newValidData, updateByBaseIdx, basePhysicalIndices, updatePhysicalIndices, appendRow, baseVector, updateVector); err != nil {
+			return err
+		}
+		baseVector.Data = &schemapb.VectorField_Float16Vector{Float16Vector: newData}
+	case schemapb.DataType_BFloat16Vector:
+		elemSize := dim * 2
+		newData := make([]byte, 0, int64(countValid(newValidData))*elemSize)
+		appendRow := func(vector *schemapb.VectorField, physicalIdx int) error {
+			data := vector.GetBfloat16Vector()
+			start := int64(physicalIdx) * elemSize
+			end := start + elemSize
+			if start < 0 || end > int64(len(data)) {
+				return fmt.Errorf("bfloat16 vector physical index %d out of range", physicalIdx)
+			}
+			newData = append(newData, data[start:end]...)
+			return nil
+		}
+		if err := rebuildCompactNullableVectorData(newValidData, updateByBaseIdx, basePhysicalIndices, updatePhysicalIndices, appendRow, baseVector, updateVector); err != nil {
+			return err
+		}
+		baseVector.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: newData}
+	case schemapb.DataType_SparseFloatVector:
+		baseSparse := baseVector.GetSparseFloatVector()
+		updateSparse := updateVector.GetSparseFloatVector()
+		if updateSparse == nil {
+			return fmt.Errorf("sparse float vector update data is nil")
+		}
+		baseDim := int64(0)
+		if baseSparse != nil {
+			baseDim = baseSparse.GetDim()
+		}
+		newSparse := &schemapb.SparseFloatArray{
+			Dim:      maxInt64(baseDim, updateSparse.GetDim()),
+			Contents: make([][]byte, 0, countValid(newValidData)),
+		}
+		appendRow := func(vector *schemapb.VectorField, physicalIdx int) error {
+			data := vector.GetSparseFloatVector()
+			if data == nil || physicalIdx < 0 || physicalIdx >= len(data.GetContents()) {
+				return fmt.Errorf("sparse vector physical index %d out of range", physicalIdx)
+			}
+			row := data.GetContents()[physicalIdx]
+			newSparse.Contents = append(newSparse.Contents, row)
+			if rowDim := SparseFloatRowDim(row); rowDim > newSparse.Dim {
+				newSparse.Dim = rowDim
+			}
+			return nil
+		}
+		if err := rebuildCompactNullableVectorData(newValidData, updateByBaseIdx, basePhysicalIndices, updatePhysicalIndices, appendRow, baseVector, updateVector); err != nil {
+			return err
+		}
+		baseVector.Data = &schemapb.VectorField_SparseFloatVector{SparseFloatVector: newSparse}
+		baseVector.Dim = newSparse.GetDim()
+	case schemapb.DataType_Int8Vector:
+		elemSize := dim
+		newData := make([]byte, 0, int64(countValid(newValidData))*elemSize)
+		appendRow := func(vector *schemapb.VectorField, physicalIdx int) error {
+			data := vector.GetInt8Vector()
+			start := int64(physicalIdx) * elemSize
+			end := start + elemSize
+			if start < 0 || end > int64(len(data)) {
+				return fmt.Errorf("int8 vector physical index %d out of range", physicalIdx)
+			}
+			newData = append(newData, data[start:end]...)
+			return nil
+		}
+		if err := rebuildCompactNullableVectorData(newValidData, updateByBaseIdx, basePhysicalIndices, updatePhysicalIndices, appendRow, baseVector, updateVector); err != nil {
+			return err
+		}
+		baseVector.Data = &schemapb.VectorField_Int8Vector{Int8Vector: newData}
+	default:
+		return fmt.Errorf("unsupported nullable vector field type %s", base.GetType().String())
+	}
+
+	base.ValidData = newValidData
+	return nil
+}
+
+func rebuildCompactNullableVectorData(
+	validData []bool,
+	updateByBaseIdx map[int]int,
+	basePhysicalIndices []int,
+	updatePhysicalIndices []int,
+	appendRow func(vector *schemapb.VectorField, physicalIdx int) error,
+	baseVector *schemapb.VectorField,
+	updateVector *schemapb.VectorField,
+) error {
+	for logicalIdx, valid := range validData {
+		if !valid {
+			continue
+		}
+		if updateIdx, ok := updateByBaseIdx[logicalIdx]; ok {
+			if err := appendRow(updateVector, updatePhysicalIndices[updateIdx]); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := appendRow(baseVector, basePhysicalIndices[logicalIdx]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func maxInt64(lhs, rhs int64) int64 {
+	if lhs > rhs {
+		return lhs
+	}
+	return rhs
+}
+
+func countValid(validData []bool) int {
+	validCount := 0
+	for _, valid := range validData {
+		if valid {
+			validCount++
+		}
+	}
+	return validCount
 }
 
 // MergeFieldData appends fields data to dst
@@ -2301,10 +2566,6 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 			schema.GetName(), schema.GetExternalSource(), schema.GetExternalSpec())
 	}
 
-	if len(schema.GetFunctions()) > 0 {
-		return fmt.Errorf("external collection %s does not support functions", schema.GetName())
-	}
-
 	if schema.GetEnableDynamicField() {
 		return fmt.Errorf("external collection %s does not support dynamic field", schema.GetName())
 	}
@@ -2313,16 +2574,26 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 		return fmt.Errorf("external collection %s does not support struct fields", schema.GetName())
 	}
 
+	generatedColumns := externalGeneratedColumnOwners(schema)
+
 	// Pass 1: validate all user fields. No mutation here so a failure at any
 	// field leaves the input schema untouched.
 	externalFieldOwners := make(map[string][]*schemapb.FieldSchema)
 	for _, field := range schema.GetFields() {
-		if isExternalSystemOrVirtualField(field.GetName()) {
+		if IsExternalSystemOrVirtualField(field.GetName()) {
+			continue
+		}
+
+		// Function output fields are computed internally, skip all external-data checks.
+		if isExternalGeneratedField(field, generatedColumns) {
+			if field.GetExternalField() != "" {
+				return fmt.Errorf("function output field '%s' in external collection %s must not have external_field mapping", field.GetName(), schema.GetName())
+			}
 			continue
 		}
 
 		if field.GetIsPrimaryKey() {
-			return fmt.Errorf("external collection %s does not support primary key field %s", schema.GetName(), field.GetName())
+			return fmt.Errorf("external collection %s does not support user-defined primary key field %s", schema.GetName(), field.GetName())
 		}
 		if field.GetIsPartitionKey() {
 			return fmt.Errorf("external collection %s does not support partition key field %s", schema.GetName(), field.GetName())
@@ -2332,11 +2603,6 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 		}
 		if field.GetAutoID() {
 			return fmt.Errorf("external collection %s does not support auto id on field %s", schema.GetName(), field.GetName())
-		}
-
-		helper := CreateFieldSchemaHelper(field)
-		if helper.EnableMatch() {
-			return fmt.Errorf("external collection %s does not support text match on field %s", schema.GetName(), field.GetName())
 		}
 
 		if field.GetExternalField() == "" {
@@ -2349,29 +2615,29 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 		}
 
 		ext := field.GetExternalField()
+		if outputField, ok := generatedColumns[ext]; ok {
+			return fmt.Errorf("external_field %q on field '%s' in external collection %s conflicts with generated function output field '%s' (field id %d)",
+				ext, field.GetName(), schema.GetName(), outputField.GetName(), outputField.GetFieldID())
+		}
 		externalFieldOwners[ext] = append(externalFieldOwners[ext], field)
 	}
 
 	// Each external_field column must back at most one user field. A single
 	// physical column cannot satisfy two distinct type bindings, and even
 	// same-type aliasing has no semantic value here.
-	for ext, owners := range externalFieldOwners {
-		if len(owners) <= 1 {
-			continue
-		}
-		parts := make([]string, 0, len(owners))
-		for _, f := range owners {
-			parts = append(parts, fmt.Sprintf("%s (%s)", f.GetName(), f.GetDataType().String()))
-		}
-		return fmt.Errorf("external_field %q is mapped by multiple fields: %s; each external_field must be referenced by at most one user field",
-			ext, strings.Join(parts, ", "))
+	if err := validateUniqueExternalFieldOwners(externalFieldOwners); err != nil {
+		return err
 	}
 
 	// Pass 2: normalize. All fields passed validation; safe to mutate.
 	// Force nullable for external scalar fields: Parquet columns can contain
 	// nulls, and non-nullable scalars would silently produce incorrect results.
 	for _, field := range schema.GetFields() {
-		if isExternalSystemOrVirtualField(field.GetName()) {
+		if IsExternalSystemOrVirtualField(field.GetName()) {
+			continue
+		}
+		// Function output fields are computed internally.
+		if isExternalGeneratedField(field, generatedColumns) {
 			continue
 		}
 		if IsVectorType(field.GetDataType()) {
@@ -2387,7 +2653,111 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 	return nil
 }
 
-func isExternalSystemOrVirtualField(name string) bool {
+func validateUniqueExternalFieldOwners(externalFieldOwners map[string][]*schemapb.FieldSchema) error {
+	for ext, owners := range externalFieldOwners {
+		if len(owners) <= 1 {
+			continue
+		}
+		parts := make([]string, 0, len(owners))
+		for _, f := range owners {
+			parts = append(parts, fmt.Sprintf("%s (%s)", f.GetName(), f.GetDataType().String()))
+		}
+		return fmt.Errorf("external_field %q is mapped by multiple fields: %s; each external_field must be referenced by at most one user field",
+			ext, strings.Join(parts, ", "))
+	}
+	return nil
+}
+
+func externalGeneratedColumnOwners(schema *schemapb.CollectionSchema) map[string]*schemapb.FieldSchema {
+	fieldsByID := make(map[int64]*schemapb.FieldSchema, len(schema.GetFields()))
+	generatedFields := make(map[int64]*schemapb.FieldSchema)
+	for _, field := range schema.GetFields() {
+		if field.GetFieldID() == 0 {
+			continue
+		}
+		fieldsByID[field.GetFieldID()] = field
+		if field.GetIsFunctionOutput() {
+			generatedFields[field.GetFieldID()] = field
+		}
+	}
+	for _, function := range schema.GetFunctions() {
+		for _, fieldID := range function.GetOutputFieldIds() {
+			if fieldID == 0 {
+				continue
+			}
+			if _, ok := generatedFields[fieldID]; ok {
+				continue
+			}
+			if field, ok := fieldsByID[fieldID]; ok {
+				generatedFields[fieldID] = field
+			}
+		}
+	}
+
+	generatedColumns := make(map[string]*schemapb.FieldSchema, len(generatedFields))
+	for fieldID, field := range generatedFields {
+		generatedColumns[strconv.FormatInt(fieldID, 10)] = field
+	}
+	return generatedColumns
+}
+
+func isExternalGeneratedField(field *schemapb.FieldSchema, generatedColumns map[string]*schemapb.FieldSchema) bool {
+	if field.GetIsFunctionOutput() {
+		return true
+	}
+	if field.GetFieldID() == 0 {
+		return false
+	}
+	return generatedColumns[strconv.FormatInt(field.GetFieldID(), 10)] == field
+}
+
+// ValidateExternalCollectionResolvedSchema checks external-collection
+// constraints after RootCoord has resolved field IDs and function output IDs.
+// At this point generated function outputs can be matched by their field-ID
+// based external column names, so this is the shared post-resolution validation
+// boundary for create, add-field, and alter-schema flows. Keep external user
+// field checks here as well so those flows consistently reject unsupported
+// source field types, duplicate external_field owners, and mappings that
+// collide with generated output columns.
+func ValidateExternalCollectionResolvedSchema(schema *schemapb.CollectionSchema) error {
+	if !IsExternalCollection(schema) {
+		return nil
+	}
+	generatedColumns := externalGeneratedColumnOwners(schema)
+	externalFieldOwners := make(map[string][]*schemapb.FieldSchema)
+	for _, field := range schema.GetFields() {
+		if IsExternalSystemOrVirtualField(field.GetName()) {
+			continue
+		}
+		if isExternalGeneratedField(field, generatedColumns) {
+			if field.GetExternalField() != "" {
+				return fmt.Errorf("function output field '%s' in external collection %s must not have external_field mapping", field.GetName(), schema.GetName())
+			}
+			continue
+		}
+		if !isExternalFieldTypeSupported(field.GetDataType()) {
+			return fmt.Errorf("external collection %s does not support field type %s on field %s",
+				schema.GetName(), field.GetDataType().String(), field.GetName())
+		}
+		ext := field.GetExternalField()
+		if ext == "" {
+			continue
+		}
+		outputField, ok := generatedColumns[ext]
+		if !ok {
+			externalFieldOwners[ext] = append(externalFieldOwners[ext], field)
+			continue
+		}
+		return fmt.Errorf("external_field %q on field '%s' in external collection %s conflicts with generated function output field '%s' (field id %d)",
+			ext, field.GetName(), schema.GetName(), outputField.GetName(), outputField.GetFieldID())
+	}
+	return validateUniqueExternalFieldOwners(externalFieldOwners)
+}
+
+// IsExternalSystemOrVirtualField returns true for names reserved by the
+// external-table pipeline (RowID, Timestamp, VirtualPK) and never present in
+// user-provided external source data.
+func IsExternalSystemOrVirtualField(name string) bool {
 	return name == common.RowIDFieldName ||
 		name == common.TimeStampFieldName ||
 		name == common.VirtualPKFieldName
@@ -2700,6 +3070,15 @@ func GetPK(data *schemapb.IDs, idx int64) interface{} {
 func GetDataIterator(field *schemapb.FieldData) func(int) any {
 	if field.GetValidData() != nil {
 		validData := field.GetValidData()
+		if IsCompactNullableVectorFieldData(field) {
+			idxs, _ := BuildNullableVectorDataIndices(validData)
+			return func(idx int) any {
+				if idxs[idx] == -1 {
+					return nil
+				}
+				return getData(field, idxs[idx])
+			}
+		}
 		dataLen := getScalarDataLen(field)
 		if dataLen == len(validData) {
 			// Full-size format: data array has the same length as ValidData,
@@ -2712,8 +3091,6 @@ func GetDataIterator(field *schemapb.FieldData) func(int) any {
 			}
 		}
 
-		// Compact format: data array only contains valid entries.
-		// Build a mapping from logical index to physical index.
 		idxs := make([]int, len(validData))
 		cnt := 0
 		for i, valid := range validData {

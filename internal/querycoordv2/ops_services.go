@@ -22,6 +22,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -491,7 +493,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 		dstNodeSet.Remove(srcNode)
 
 		// check sealed segment list
-		channels := s.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(srcNode))
+		channels := s.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(srcNode))
 		toBalance := typeutil.NewSet[*meta.DmChannel]()
 		if req.GetTransferAll() {
 			toBalance.Insert(channels...)
@@ -518,6 +520,83 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 		}
 	}
 	return merr.Success(), nil
+}
+
+func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	log := log.Ctx(ctx)
+	log.Info("ClearReadTaskQueue request received",
+		zap.String("taskType", req.GetTaskType()),
+		zap.String("reason", req.GetReason()))
+
+	resp := &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	nodes := s.nodeMgr.GetAll()
+	group := &errgroup.Group{}
+	results := make(chan *internalpb.ClearReadTaskQueueComponentResult, len(nodes))
+	for _, node := range nodes {
+		if node.IsStoppingState() {
+			continue
+		}
+		nodeID := node.ID()
+		group.Go(func() error {
+			nodeResp, err := s.cluster.ClearReadTaskQueue(ctx, nodeID, req)
+			if errors.Is(err, merr.ErrServiceUnimplemented) {
+				return nil
+			}
+			if err != nil {
+				results <- &internalpb.ClearReadTaskQueueComponentResult{
+					Status: merr.Status(err),
+					Role:   typeutil.QueryNodeRole,
+					NodeID: nodeID,
+				}
+				return errors.Wrapf(err, "ClearReadTaskQueue failed, queryNodeID = %d", nodeID)
+			}
+
+			if len(nodeResp.GetResults()) > 0 {
+				for _, result := range nodeResp.GetResults() {
+					results <- result
+				}
+			} else {
+				results <- &internalpb.ClearReadTaskQueueComponentResult{
+					Status:          nodeResp.GetStatus(),
+					Role:            typeutil.QueryNodeRole,
+					NodeID:          nodeID,
+					QueuedCleared:   nodeResp.GetQuerynodeQueuedCleared(),
+					QueuedNqCleared: nodeResp.GetQueuedNqCleared(),
+				}
+			}
+			if !merr.Ok(nodeResp.GetStatus()) {
+				return errors.Wrapf(merr.Error(nodeResp.GetStatus()), "ClearReadTaskQueue failed, queryNodeID = %d", nodeID)
+			}
+			return nil
+		})
+	}
+
+	err := group.Wait()
+	close(results)
+	for result := range results {
+		resp.Results = append(resp.Results, result)
+		if result.GetRole() == typeutil.QueryNodeRole && merr.Ok(result.GetStatus()) {
+			resp.QuerynodeQueuedCleared += result.GetQueuedCleared()
+			resp.QueuedNqCleared += result.GetQueuedNqCleared()
+		}
+	}
+	if err != nil {
+		resp.Status = merr.Status(err)
+	}
+
+	log.Info("cleared querynode read task queues",
+		zap.String("taskType", req.GetTaskType()),
+		zap.String("reason", req.GetReason()),
+		zap.Int("queryNodes", len(resp.GetResults())),
+		zap.Int64("queuedCleared", resp.GetQuerynodeQueuedCleared()),
+		zap.Int64("queuedNQCleared", resp.GetQueuedNqCleared()),
+		zap.Error(err))
+	return resp, nil
 }
 
 func (s *Server) CheckQueryNodeDistribution(ctx context.Context, req *querypb.CheckQueryNodeDistributionRequest) (*commonpb.Status, error) {

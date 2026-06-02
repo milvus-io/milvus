@@ -54,6 +54,10 @@ func (t *QueryStreamTask) IsGpuIndex() bool {
 	return false
 }
 
+func (t *QueryStreamTask) Context() context.Context {
+	return t.ctx
+}
+
 // PreExecute the task, only call once.
 func (t *QueryStreamTask) PreExecute() error {
 	return nil
@@ -87,10 +91,6 @@ func (t *QueryStreamTask) Execute() error {
 
 func (t *QueryStreamTask) Done(err error) {
 	t.notifier <- err
-}
-
-func (t *QueryStreamTask) Canceled() error {
-	return t.ctx.Err()
 }
 
 func (t *QueryStreamTask) Wait() error {

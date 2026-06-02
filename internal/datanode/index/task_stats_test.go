@@ -212,6 +212,29 @@ func (s *TaskStatsSuite) TestBuildIndexParams() {
 		s.Equal(storage.StorageV2, params.StorageVersion)
 		s.NotNil(params.SegmentInsertFiles)
 	})
+
+	s.Run("test external source spec params", func() {
+		req := &workerpb.CreateStatsRequest{
+			TaskID:                    1,
+			CollectionID:              2,
+			PartitionID:               3,
+			TargetSegmentID:           4,
+			TaskVersion:               5,
+			CurrentScalarIndexVersion: int32(1),
+			StorageVersion:            storage.StorageV3,
+			InsertLogs:                []*datapb.FieldBinlog{},
+			StorageConfig:             &indexpb.StorageConfig{RootPath: "/test/path"},
+			Schema: &schemapb.CollectionSchema{
+				ExternalSource: "minio://localhost:9000/a-bucket/external",
+				ExternalSpec:   `{"format":"parquet"}`,
+			},
+		}
+
+		params := buildIndexParams(req, nil, nil, &indexcgopb.StorageConfig{}, nil, "")
+
+		s.Equal(req.GetSchema().GetExternalSource(), params.GetExternalSource())
+		s.Equal(req.GetSchema().GetExternalSpec(), params.GetExternalSpec())
+	})
 }
 
 func genCollectionSchemaWithBM25() *schemapb.CollectionSchema {

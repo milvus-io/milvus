@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
-	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
@@ -124,7 +123,7 @@ func (t *l0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clus
 		return
 	}
 
-	err = cluster.CreateCompaction(nodeID, plan)
+	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID())
 	if err != nil {
 		originNodeID := t.GetTaskProto().GetNodeID()
 		log.Warn("l0CompactionTask failed to notify compaction tasks to DataNode",
@@ -313,7 +312,7 @@ func (t *l0CompactionTask) selectFlushedSegment() ([]*SegmentInfo, []*datapb.Com
 			(info.GetState() == commonpb.SegmentState_Sealed || isFlushState(info.GetState())) &&
 			!info.GetIsImporting() &&
 			info.GetLevel() != datapb.SegmentLevel_L0 &&
-			info.GetStartPosition().GetTimestamp() < taskProto.GetPos().GetTimestamp()
+			segmentEffectiveTs(info.SegmentInfo) < taskProto.GetPos().GetTimestamp()
 	}))
 
 	sealedSegBinlogs := []*datapb.CompactionSegmentBinlogs{}
@@ -333,6 +332,7 @@ func (t *l0CompactionTask) selectFlushedSegment() ([]*SegmentInfo, []*datapb.Com
 			IsSorted:            info.GetIsSorted(),
 			IsSortedByNamespace: info.GetIsSortedByNamespace(),
 			Manifest:            info.GetManifestPath(),
+			CommitTimestamp:     info.GetCommitTimestamp(),
 		})
 	}
 
@@ -374,6 +374,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 			IsSorted:            segInfo.GetIsSorted(),
 			IsSortedByNamespace: segInfo.GetIsSortedByNamespace(),
 			Manifest:            segInfo.GetManifestPath(),
+			CommitTimestamp:     segInfo.GetCommitTimestamp(),
 		})
 		segments = append(segments, segInfo)
 	}
@@ -448,44 +449,6 @@ func (t *l0CompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
 	return t.meta.SaveCompactionTask(context.TODO(), task)
 }
 
-func (t *l0CompactionTask) commitV3ManifestDeltas(ctx context.Context, outputSegs []*datapb.CompactionSegment) error {
-	if t.committedV3Manifests == nil {
-		t.committedV3Manifests = make(map[int64]string)
-	}
-	for _, seg := range outputSegs {
-		if seg.GetManifest() != "" {
-			t.committedV3Manifests[seg.GetSegmentID()] = seg.GetManifest()
-			continue
-		}
-
-		if manifest, ok := t.committedV3Manifests[seg.GetSegmentID()]; ok {
-			seg.Manifest = manifest
-			continue
-		}
-
-		target := t.meta.GetSegment(ctx, seg.GetSegmentID())
-		if target == nil || target.GetManifestPath() == "" {
-			continue
-		}
-
-		entries, err := buildL0V3DeltaLogEntries(seg.GetSegmentID(), seg.GetDeltalogs())
-		if err != nil {
-			return err
-		}
-		if len(entries) == 0 {
-			continue
-		}
-
-		newManifest, err := packed.AddDeltaLogsToManifestOverwrite(target.GetManifestPath(), compaction.CreateStorageConfig(), entries)
-		if err != nil {
-			return err
-		}
-		seg.Manifest = newManifest
-		t.committedV3Manifests[seg.GetSegmentID()] = newManifest
-	}
-	return nil
-}
-
 func buildL0V3DeltaLogEntries(segmentID int64, deltalogs []*datapb.FieldBinlog) ([]packed.DeltaLogEntry, error) {
 	entries := make([]packed.DeltaLogEntry, 0)
 	for _, fieldBinlog := range deltalogs {
@@ -503,38 +466,17 @@ func buildL0V3DeltaLogEntries(segmentID int64, deltalogs []*datapb.FieldBinlog) 
 	return entries, nil
 }
 
-func compressL0CompactionBinlogs(outputSegs []*datapb.CompactionSegment) error {
-	for _, seg := range outputSegs {
-		if seg.GetManifest() == "" {
-			if err := binlog.CompressCompactionBinlogs([]*datapb.CompactionSegment{seg}); err != nil {
-				return err
-			}
-			continue
-		}
-		for _, fieldBinlog := range seg.GetDeltalogs() {
-			for _, binlog := range fieldBinlog.GetBinlogs() {
-				binlog.LogPath = ""
-			}
-		}
-	}
-	return nil
-}
-
 func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegment) error {
-	if err := t.commitV3ManifestDeltas(context.TODO(), outputSegs); err != nil {
-		return err
-	}
-	if err := compressL0CompactionBinlogs(outputSegs); err != nil {
-		return err
-	}
-
 	var operators []UpdateOperator
+	storageConfig := compaction.CreateStorageConfig()
 	for _, seg := range outputSegs {
-		if seg.GetManifest() != "" {
-			operators = append(operators, UpdateManifest(seg.GetSegmentID(), seg.GetManifest()))
-		}
 		if len(seg.GetDeltalogs()) > 0 {
-			operators = append(operators, AddBinlogsOperator(seg.GetSegmentID(), nil, nil, seg.GetDeltalogs(), nil))
+			operators = append(operators, AddL0DeltalogsAndUpdateManifestOperator(
+				seg.GetSegmentID(),
+				seg.GetDeltalogs(),
+				storageConfig,
+				t.committedV3Manifests,
+			))
 		}
 	}
 

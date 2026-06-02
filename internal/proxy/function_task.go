@@ -31,7 +31,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+const externalCollectionFunctionMutationUnsupportedMsg = "external collection does not support altering or dropping functions"
+
+func rejectExternalCollectionFunctionMutation(schema *schemapb.CollectionSchema) error {
+	if typeutil.IsExternalCollection(schema) {
+		return merr.WrapErrParameterInvalidMsg(externalCollectionFunctionMutationUnsupportedMsg)
+	}
+	return nil
+}
 
 type addCollectionFunctionTask struct {
 	baseTask
@@ -188,6 +198,9 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 			zap.Error(err))
 		return err
 	}
+	if err := rejectExternalCollectionFunctionMutation(coll.schema.CollectionSchema); err != nil {
+		return err
+	}
 	funcExist := false
 	newFunctions := []*schemapb.FunctionSchema{}
 	for _, fSchema := range coll.schema.Functions {
@@ -285,6 +298,9 @@ func (t *dropCollectionFunctionTask) PreExecute(ctx context.Context) error {
 			zap.String("dbName", t.GetDbName()),
 			zap.String("collectionName", t.GetCollectionName()),
 			zap.Error(err))
+		return err
+	}
+	if err := rejectExternalCollectionFunctionMutation(coll.schema.CollectionSchema); err != nil {
 		return err
 	}
 

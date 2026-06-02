@@ -55,8 +55,14 @@ type SegmentInfo struct {
 	lastFlushTime time.Time
 	isCompacting  bool
 	// a cache to avoid calculate twice
-	size            atomic.Int64
-	deltaRowcount   atomic.Int64
+	size          atomic.Int64
+	deltaRowcount atomic.Int64
+	// earliestTs caches the minimum TimestampFrom across all binlogs. It is
+	// intentionally NOT copied by Clone()/ShadowClone(): the only path that
+	// transitions commit_timestamp from non-zero to zero is compaction
+	// completion, which also replaces the binlogs on the cloned segment; a
+	// carried-over cache would be stale against the new binlogs. The cache is
+	// recomputed lazily on the first GetEarliestTs() call after clone.
 	earliestTs      atomic.Uint64
 	lastWrittenTime time.Time
 }
@@ -82,6 +88,12 @@ func (s *SegmentInfo) GetResidualSegmentSize() int64 {
 }
 
 func (s *SegmentInfo) GetEarliestTs() uint64 {
+	// For import segments, row timestamps predate the actual commit time.
+	// Use commit_timestamp as the effective data age so compaction priority
+	// and TTL decisions are not distorted by stale row timestamps.
+	if commitTs := s.GetCommitTimestamp(); commitTs != 0 {
+		return commitTs
+	}
 	if s.earliestTs.Load() == 0 {
 		var earliestFromTs uint64 = math.MaxUint64
 		for _, binlogs := range s.GetBinlogs() {
@@ -353,15 +365,17 @@ func (s *SegmentsInfo) SetLevel(segmentID UniqueID, level datapb.SegmentLevel) {
 	}
 }
 
-// Clone deep clone the segment info and return a new instance
+// Clone deep clone the segment info and return a new instance.
+// The size and earliestTs caches are intentionally NOT copied because opts
+// may replace the binlogs (e.g. compaction completion), which would make the
+// cached values stale. See the earliestTs field comment for details.
 func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 	info := proto.Clone(s.SegmentInfo).(*datapb.SegmentInfo)
 	cloned := &SegmentInfo{
-		SegmentInfo:   info,
-		allocations:   s.allocations,
-		lastFlushTime: s.lastFlushTime,
-		isCompacting:  s.isCompacting,
-		// cannot copy size, since binlog may be changed
+		SegmentInfo:     info,
+		allocations:     s.allocations,
+		lastFlushTime:   s.lastFlushTime,
+		isCompacting:    s.isCompacting,
 		lastWrittenTime: s.lastWrittenTime,
 	}
 	for _, opt := range opts {
@@ -611,4 +625,25 @@ func ValidateManifestSegment(info *SegmentInfo) string {
 			info.GetID(), nonEmpty)
 	}
 	return ""
+}
+
+// segmentEffectiveTs returns the start-position timestamp that governs temporal
+// decisions for a segment. For import segments with a non-zero commit_timestamp,
+// commit_timestamp overrides start_position.Timestamp because the data was not
+// "officially present" until the import was committed.
+func segmentEffectiveTs(seg *datapb.SegmentInfo) uint64 {
+	if ts := seg.GetCommitTimestamp(); ts != 0 {
+		return ts
+	}
+	return seg.GetStartPosition().GetTimestamp()
+}
+
+// segmentEffectiveDmlTs returns the DML-position timestamp for temporal decisions.
+// Same override logic as segmentEffectiveTs but for dml_position consumers
+// (GC eligibility, TruncateChannelByTime).
+func segmentEffectiveDmlTs(seg *datapb.SegmentInfo) uint64 {
+	if ts := seg.GetCommitTimestamp(); ts != 0 {
+		return ts
+	}
+	return seg.GetDmlPosition().GetTimestamp()
 }

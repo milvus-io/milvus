@@ -37,6 +37,8 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -95,6 +97,7 @@ type Server struct {
 
 	ctx                context.Context
 	wg                 sync.WaitGroup
+	grpcHTTPWg         sync.WaitGroup
 	proxy              types.ProxyComponent
 	httpListener       net.Listener
 	grpcListener       net.Listener
@@ -183,10 +186,33 @@ func (s *Server) registerHTTPServer() {
 	})
 }
 
+func (s *Server) httpHandler(ginHandler http.Handler) http.Handler {
+	if s.listenerManager == nil || !s.listenerManager.portShareMode {
+		return ginHandler
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+			s.grpcHTTPWg.Add(1)
+			defer s.grpcHTTPWg.Done()
+			s.grpcExternalServer.ServeHTTP(w, r)
+			return
+		}
+		ginHandler.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) serveHTTP(listener net.Listener) error {
+	if err := s.httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, cmux.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
 func (s *Server) startHTTPServer(errChan chan error) {
 	defer s.wg.Done()
 	ginHandler := gin.New()
 	ginHandler.Use(httpserver.MetricsHandlerFunc)
+	ginHandler.Use(httpserver.TraceIDHandlerFunc)
 	ginHandler.Use(accesslog.AccessLogMiddleware)
 	ginHandler.Use(httpserver.LoggerHandlerFunc(), gin.Recovery())
 	ginHandler.Use(httpserver.RequestHandlerFunc)
@@ -200,9 +226,25 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	httpserver.NewHandlersV1(s.proxy).RegisterRoutesToV1(app)
 	appV2 := ginHandler.Group("/v2/vectordb")
 	httpserver.NewHandlersV2(s.proxy).RegisterRoutesToV2(appV2)
-	s.httpServer = &http.Server{Handler: ginHandler, ReadHeaderTimeout: time.Second}
+	http2Server := &http2.Server{}
+	s.httpServer = &http.Server{Handler: h2c.NewHandler(s.httpHandler(ginHandler), http2Server), ReadHeaderTimeout: time.Second}
+	if err := http2.ConfigureServer(s.httpServer, http2Server); err != nil {
+		errChan <- err
+		return
+	}
 	errChan <- nil
-	if err := s.httpServer.Serve(s.listenerManager.HTTPListener()); err != nil && err != cmux.ErrServerClosed {
+	if s.listenerManager.portShareMode {
+		serveErrChan := make(chan error, 2)
+		go func() { serveErrChan <- s.serveHTTP(s.listenerManager.HTTP2Listener()) }()
+		go func() { serveErrChan <- s.serveHTTP(s.listenerManager.HTTPListener()) }()
+		for i := 0; i < 2; i++ {
+			if err := <-serveErrChan; err != nil {
+				log.Ctx(s.ctx).Error("start Proxy http server to listen failed", zap.Error(err))
+				errChan <- err
+				return
+			}
+		}
+	} else if err := s.serveHTTP(s.listenerManager.HTTPListener()); err != nil {
 		log.Ctx(s.ctx).Error("start Proxy http server to listen failed", zap.Error(err))
 		errChan <- err
 		return
@@ -335,6 +377,10 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		zap.Any("enforcement policy", kaep),
 		zap.Any("server parameters", kasp))
 
+	if s.listenerManager.portShareMode {
+		log.Info("Proxy external grpc server is served by shared http2 server")
+		return
+	}
 	if err := s.grpcExternalServer.Serve(s.listenerManager.ExternalGrpcListener()); err != nil && err != cmux.ErrServerClosed {
 		log.Error("failed to serve on Proxy's listener", zap.Error(err))
 		errChan <- err
@@ -573,14 +619,27 @@ func (s *Server) Stop() (err error) {
 	go func() {
 		defer gracefulWg.Done()
 
-		// try to close grpc server firstly, it has the same root listener with cmux server and
-		// http listener that tls has not been enabled.
-		if s.grpcExternalServer != nil {
-			logger.Info("Proxy stop external grpc server")
-			utils.GracefulStopGRPCServer(s.grpcExternalServer)
+		portShareMode := s.listenerManager != nil && s.listenerManager.portShareMode
+		if portShareMode && s.httpServer != nil {
+			logger.Info("Proxy shutdown http server...")
+			ctx, cancel := context.WithTimeout(context.Background(), paramtable.Get().ProxyGrpcServerCfg.GracefulStopTimeout.GetAsDuration(time.Second))
+			if err := s.httpServer.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) && !errors.Is(err, cmux.ErrServerClosed) {
+				logger.Warn("Proxy failed to shutdown http server", zap.Error(err))
+			}
+			cancel()
 		}
 
-		if s.httpServer != nil {
+		if s.grpcExternalServer != nil {
+			logger.Info("Proxy stop external grpc server")
+			if portShareMode {
+				s.grpcHTTPWg.Wait()
+				s.grpcExternalServer.Stop()
+			} else {
+				utils.GracefulStopGRPCServer(s.grpcExternalServer)
+			}
+		}
+
+		if !portShareMode && s.httpServer != nil {
 			logger.Info("Proxy stop http server...")
 			s.httpServer.Close()
 		}
@@ -1169,6 +1228,10 @@ func (s *Server) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegment
 
 func (s *Server) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	return s.proxy.GetQuotaMetrics(ctx, req)
+}
+
+func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return s.proxy.ClearReadTaskQueue(ctx, req)
 }
 
 // AddFileResource add file resource

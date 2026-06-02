@@ -836,8 +836,10 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffNoChangesLegacyFormat) {
     log->set_entries_num(500);
 
     SegmentLoadInfo current_info(proto, schema_);
-    // calculate first diff to set default value fields
     auto diff = current_info.GetLoadDiff();
+    for (const auto& field_id : diff.fields_to_fill_default) {
+        current_info.SetFieldFilledWithDefault(field_id);
+    }
     SegmentLoadInfo new_info(proto, schema_);
     diff = current_info.ComputeDiff(new_info);
 
@@ -912,16 +914,18 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFieldsSkipAlreadyFilled) {
 
     // Verify fields were added to fields_to_fill_default
     EXPECT_FALSE(first_diff.fields_to_fill_default.empty());
-    // Second diff: first_new_info -> same proto (simulates reopen)
-    // first_new_info should now have fields_filled_with_default_ populated
+    for (const auto& field_id : first_diff.fields_to_fill_default) {
+        first_new_info.SetFieldFilledWithDefault(field_id);
+    }
+
     SegmentLoadInfo second_new_info(proto, schema_);
     auto second_diff = first_new_info.ComputeDiff(second_new_info);
 
     // All previously filled fields should be skipped
     EXPECT_TRUE(second_diff.fields_to_fill_default.empty());
 
-    // Verify that second_new_info inherited the filled status
-    // by doing a third diff
+    second_new_info.SetFieldsFilledWithDefault(
+        first_new_info.GetDefaultFilledFieldsForNewInfo(second_new_info));
     SegmentLoadInfo third_new_info(proto, schema_);
     auto third_diff = second_new_info.ComputeDiff(third_new_info);
     EXPECT_TRUE(third_diff.fields_to_fill_default.empty());
@@ -1071,6 +1075,109 @@ TEST_F(SegmentLoadInfoTest, LoadDiffHasChangesWithDefaultFields) {
 
     diff.fields_to_fill_default.push_back(FieldId(102));
     EXPECT_TRUE(diff.HasChanges());
+}
+
+TEST_F(SegmentLoadInfoTest, CopyPreservesDefaultFilledFields) {
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* current_binlog = current_proto.add_binlog_paths();
+    current_binlog->set_fieldid(100);
+    auto* current_log = current_binlog->add_binlogs();
+    current_log->set_log_path("/path/to/pk");
+    current_log->set_entries_num(1000);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    current_info.SetFieldFilledWithDefault(FieldId(101));
+
+    SegmentLoadInfo copied(current_info);
+    EXPECT_TRUE(copied.IsFieldFilledWithDefault(FieldId(101)));
+
+    proto::segcore::SegmentLoadInfo new_proto = current_proto;
+    auto* new_binlog = new_proto.add_binlog_paths();
+    new_binlog->set_fieldid(101);
+    auto* new_log = new_binlog->add_binlogs();
+    new_log->set_log_path("/path/to/field101");
+    new_log->set_entries_num(1000);
+
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = copied.ComputeDiff(new_info);
+
+    bool found_replace = false;
+    for (const auto& [field_ids, binlog] : diff.binlogs_to_replace) {
+        (void)binlog;
+        for (auto field_id : field_ids) {
+            found_replace = found_replace || field_id == FieldId(101);
+        }
+    }
+    EXPECT_TRUE(found_replace);
+}
+
+TEST_F(SegmentLoadInfoTest, MovePreservesRawDataIndexFieldsForDefaultDiff) {
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(100);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/pk");
+    log->set_entries_num(1000);
+
+    auto* index_info = proto.add_index_infos();
+    index_info->set_fieldid(101);
+    index_info->set_indexid(1001);
+    index_info->add_index_file_paths("/path/to/index");
+    auto* index_param = index_info->add_index_params();
+    index_param->set_key("index_type");
+    index_param->set_value(knowhere::IndexEnum::INDEX_FAISS_IDMAP);
+
+    auto assert_field_101_has_data = [](SegmentLoadInfo& info) {
+        auto diff = info.GetLoadDiff();
+        EXPECT_TRUE(diff.indexes_to_load.count(FieldId(101)) > 0);
+        for (const auto& field_id : diff.fields_to_fill_default) {
+            EXPECT_NE(field_id, FieldId(101));
+        }
+    };
+
+    SegmentLoadInfo original(proto, schema_);
+    SegmentLoadInfo moved(std::move(original));
+    assert_field_101_has_data(moved);
+
+    SegmentLoadInfo original_for_assignment(proto, schema_);
+    proto::segcore::SegmentLoadInfo empty_proto;
+    SegmentLoadInfo assigned(empty_proto, schema_);
+    assigned = std::move(original_for_assignment);
+    assert_field_101_has_data(assigned);
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffClearsDefaultFilledWhenDataSourceAppears) {
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* current_binlog = current_proto.add_binlog_paths();
+    current_binlog->set_fieldid(100);
+    auto* current_log = current_binlog->add_binlogs();
+    current_log->set_log_path("/path/to/pk");
+    current_log->set_entries_num(1000);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    current_info.SetFieldFilledWithDefault(FieldId(101));
+
+    proto::segcore::SegmentLoadInfo new_proto = current_proto;
+    auto* field_binlog = new_proto.add_binlog_paths();
+    field_binlog->set_fieldid(101);
+    auto* field_log = field_binlog->add_binlogs();
+    field_log->set_log_path("/path/to/field101");
+    field_log->set_entries_num(1000);
+
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    for (const auto& field_id : diff.fields_to_fill_default) {
+        EXPECT_NE(field_id, FieldId(101));
+    }
+    EXPECT_FALSE(new_info.IsFieldFilledWithDefault(FieldId(101)));
 }
 
 // ==================== Text Index Tests ====================
@@ -1406,6 +1513,28 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffTextIndexCreateForUnindexed) {
     EXPECT_TRUE(diff.text_indexes_to_create.count(FieldId(102)) > 0);
     // Field 103 (no enable_match) should NOT be in text_indexes_to_create
     EXPECT_TRUE(diff.text_indexes_to_create.count(FieldId(103)) == 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffExternalTextIndexCreateForUnindexed) {
+    auto text_schema = CreateSchemaWithTextMatchField();
+    text_schema->set_external_source("s3://external-bucket/table");
+
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+
+    SegmentLoadInfo current_info(current_proto, text_schema);
+    SegmentLoadInfo new_info(new_proto, text_schema);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    // Match internal collection behavior: without persisted text index stats,
+    // load can create a runtime text index from raw field data.
+    EXPECT_TRUE(diff.text_indexes_to_create.count(FieldId(102)) > 0);
+    EXPECT_TRUE(diff.text_indexes_to_load.empty());
 }
 
 TEST_F(SegmentLoadInfoTest, ConvertTextIndexStatsToLoadTextIndexInfo) {
@@ -1967,8 +2096,10 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffBinlogNoReplace) {
     log->set_entries_num(500);
 
     SegmentLoadInfo current_info(proto, schema_);
-    // First GetLoadDiff to initialize default fields
     auto first_diff = current_info.GetLoadDiff();
+    for (const auto& field_id : first_diff.fields_to_fill_default) {
+        current_info.SetFieldFilledWithDefault(field_id);
+    }
 
     SegmentLoadInfo new_info(proto, schema_);
     auto diff = current_info.ComputeDiff(new_info);
@@ -2044,9 +2175,11 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFilledFieldBecomesReplace) {
     log1->set_entries_num(1000);
 
     SegmentLoadInfo current_info(initial_proto, schema_);
-    // GetLoadDiff populates fields_filled_with_default_ for fields 101-110
     auto initial_diff = current_info.GetLoadDiff();
     EXPECT_FALSE(initial_diff.fields_to_fill_default.empty());
+    for (const auto& field_id : initial_diff.fields_to_fill_default) {
+        current_info.SetFieldFilledWithDefault(field_id);
+    }
 
     // Step 2: New LoadInfo adds binlog for field 101 (was default-filled)
     proto::segcore::SegmentLoadInfo new_proto;
@@ -2418,7 +2551,10 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffNoReloadWhenIndexStaysRaw) {
     param->set_value(milvus::index::ASCENDING_SORT);
 
     SegmentLoadInfo current_info(proto, schema_);
-    (void)current_info.GetLoadDiff();
+    auto initial_diff = current_info.GetLoadDiff();
+    for (const auto& field_id : initial_diff.fields_to_fill_default) {
+        current_info.SetFieldFilledWithDefault(field_id);
+    }
     SegmentLoadInfo new_info(proto, schema_);
     auto diff = current_info.ComputeDiff(new_info);
 
@@ -2806,6 +2942,40 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffDropsManifestFieldRemovedFromSchema) {
     EXPECT_TRUE(diff.column_groups_to_lazyreplace.empty());
 }
 
+TEST_F(SegmentLoadInfoTest, SchemaReopenLoadsNewFieldWithBinlog) {
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* current_binlog = current_proto.add_binlog_paths();
+    current_binlog->set_fieldid(100);
+    auto* current_log = current_binlog->add_binlogs();
+    current_log->set_log_path("/path/to/pk");
+    current_log->set_entries_num(1000);
+
+    proto::segcore::SegmentLoadInfo new_proto = current_proto;
+    auto* field_binlog = new_proto.add_binlog_paths();
+    field_binlog->set_fieldid(101);
+    auto* field_log = field_binlog->add_binlogs();
+    field_log->set_log_path("/path/to/field101");
+    field_log->set_entries_num(1000);
+
+    SegmentLoadInfo current_info(current_proto, MakeSchemaWithFieldIds({100}));
+    SegmentLoadInfo new_info(new_proto, MakeSchemaWithFieldIds({100, 101}));
+    auto diff = current_info.ComputeDiff(new_info);
+
+    bool found_load = false;
+    for (const auto& [field_ids, binlog] : diff.binlogs_to_load) {
+        (void)binlog;
+        for (auto field_id : field_ids) {
+            found_load = found_load || field_id == FieldId(101);
+        }
+    }
+    EXPECT_TRUE(found_load);
+    for (auto field_id : diff.fields_to_fill_default) {
+        EXPECT_NE(field_id, FieldId(101));
+    }
+}
+
 TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFieldsUsesNewSchema) {
     proto::segcore::SegmentLoadInfo current_proto;
     current_proto.set_segmentid(100);
@@ -2906,6 +3076,7 @@ TEST_F(SegmentLoadInfoTest,
 
     SegmentLoadInfo current_info(MakeManifestProto("/manifest/v1"), schema_);
     current_info.SetColumnGroupsForTesting(current_cgs);
+    current_info.SetFieldFilledWithDefault(FieldId(101));
     SegmentLoadInfo new_info(MakeManifestProto("/manifest/v2"), schema_);
     new_info.SetColumnGroupsForTesting(new_cgs);
 
@@ -2918,6 +3089,13 @@ TEST_F(SegmentLoadInfoTest,
     EXPECT_TRUE(diff.column_groups_to_replace.empty());
     EXPECT_TRUE(diff.column_groups_to_lazyload.empty());
     EXPECT_TRUE(diff.column_groups_to_lazyreplace.empty());
+
+    std::set<FieldId> default_fields;
+    EXPECT_NO_THROW({
+        default_fields =
+            current_info.GetDefaultFilledFieldsForNewInfo(new_info);
+    });
+    EXPECT_TRUE(default_fields.empty());
 }
 
 TEST_F(SegmentLoadInfoTest,

@@ -18,8 +18,8 @@ expr:
 	| EmptyArray                                                                                            # EmptyArray
 	| EXISTS expr                                                                                           # Exists
 	| expr LIKE expr                                                                                        # Like
-	| expr REGEXMATCH StringLiteral                                                                         # RegexMatch
-	| expr REGEXNOTMATCH StringLiteral                                                                      # RegexNotMatch
+	| expr REGEXMATCH expr                                                                                  # RegexMatch
+	| expr REGEXNOTMATCH expr                                                                               # RegexNotMatch
 	| TEXTMATCH'('Identifier',' expr (',' textMatchOption)? ')'                                             # TextMatch
 	| PHRASEMATCH'('Identifier',' expr (',' expr)? ')'       			                                    # PhraseMatch
 	| RANDOMSAMPLE'(' expr ')'						     						                            # RandomSample

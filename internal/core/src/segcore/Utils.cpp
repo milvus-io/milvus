@@ -66,6 +66,42 @@
 
 namespace milvus::segcore {
 
+namespace {
+
+void
+InitEmptyVectorArrayRow(proto::schema::VectorField* row,
+                        DataType element_type) {
+    switch (element_type) {
+        case DataType::VECTOR_FLOAT: {
+            row->mutable_float_vector();
+            break;
+        }
+        case DataType::VECTOR_BINARY: {
+            row->mutable_binary_vector();
+            break;
+        }
+        case DataType::VECTOR_FLOAT16: {
+            row->mutable_float16_vector();
+            break;
+        }
+        case DataType::VECTOR_BFLOAT16: {
+            row->mutable_bfloat16_vector();
+            break;
+        }
+        case DataType::VECTOR_INT8: {
+            row->mutable_int8_vector();
+            break;
+        }
+        default: {
+            ThrowInfo(DataTypeInvalid,
+                      "unsupported ArrayOfVector element type {}",
+                      element_type);
+        }
+    }
+}
+
+}  // namespace
+
 void
 // Takes a non-const DataArray& because VARCHAR strings are moved (not copied)
 // into the PkType variant vector. Callers must ensure the DataArray is
@@ -490,7 +526,7 @@ CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta) {
             break;
         }
         case DataType::VECTOR_SPARSE_U32_F32: {
-            // does nothing here
+            vector_array->mutable_sparse_float_vector();
             break;
         }
         case DataType::VECTOR_INT8: {
@@ -508,6 +544,7 @@ CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta) {
             for (int i = 0; i < count; i++) {
                 auto* row = obj->mutable_data()->Add();
                 row->set_dim(dim);
+                InitEmptyVectorArrayRow(row, field_meta.get_element_type());
             }
             break;
         }
@@ -773,6 +810,24 @@ CreateVectorDataArrayFrom(const void* data_raw,
                           int64_t count,
                           int64_t valid_count,
                           const FieldMeta& field_meta) {
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY &&
+        field_meta.is_nullable() && valid_data != nullptr) {
+        auto data_array = CreateEmptyVectorDataArray(
+            count, valid_count, valid_data, field_meta);
+        auto dst = data_array->mutable_vectors()
+                       ->mutable_vector_array()
+                       ->mutable_data();
+        auto src = reinterpret_cast<const VectorFieldProto*>(data_raw);
+        auto valid_data_bool = reinterpret_cast<const bool*>(valid_data);
+        int64_t src_offset = 0;
+        for (int64_t i = 0; i < count; ++i) {
+            if (valid_data_bool[i]) {
+                dst->at(i) = src[src_offset++];
+            }
+        }
+        return data_array;
+    }
+
     auto data_array =
         CreateVectorDataArrayFrom(data_raw, valid_count, field_meta);
     if (field_meta.is_nullable() && valid_data != nullptr) {
@@ -795,7 +850,14 @@ CreateDataArrayFrom(const void* data_raw,
             data_raw, valid_data, count, field_meta);
     }
 
-    return CreateVectorDataArrayFrom(data_raw, count, field_meta);
+    auto data_array = CreateVectorDataArrayFrom(data_raw, count, field_meta);
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY &&
+        field_meta.is_nullable() && valid_data != nullptr) {
+        auto obj = data_array->mutable_valid_data();
+        auto valid_data_bool = reinterpret_cast<const bool*>(valid_data);
+        obj->Add(valid_data_bool, valid_data_bool + count);
+    }
+    return data_array;
 }
 
 // TODO remove merge dataArray, instead fill target entity when get data slice
@@ -833,11 +895,25 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
             }
 
             if (!is_valid) {
+                if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+                    auto vector_array = data_array->mutable_vectors();
+                    auto dim = field_meta.get_dim();
+                    vector_array->set_dim(dim);
+                    auto obj = vector_array->mutable_vector_array();
+                    obj->set_dim(dim);
+                    obj->set_element_type(
+                        proto::schema::DataType(field_meta.get_element_type()));
+                    auto* row = obj->mutable_data()->Add();
+                    row->set_dim(dim);
+                    InitEmptyVectorArrayRow(row, field_meta.get_element_type());
+                }
                 continue;
             }
 
             int64_t physical_offset =
-                merge_base.getValidDataOffset(field_meta.get_id());
+                field_meta.get_data_type() == DataType::VECTOR_ARRAY
+                    ? src_offset
+                    : merge_base.getValidDataOffset(field_meta.get_id());
 
             auto vector_array = data_array->mutable_vectors();
             auto dim = 0;
@@ -853,13 +929,13 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
             } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
                 auto data = VEC_FIELD_DATA(src_field_data, float16);
                 auto obj = vector_array->mutable_float16_vector();
-                obj->assign(data + physical_offset * dim * sizeof(float16),
+                obj->append(data + physical_offset * dim * sizeof(float16),
                             dim * sizeof(float16));
             } else if (field_meta.get_data_type() ==
                        DataType::VECTOR_BFLOAT16) {
                 auto data = VEC_FIELD_DATA(src_field_data, bfloat16);
                 auto obj = vector_array->mutable_bfloat16_vector();
-                obj->assign(data + physical_offset * dim * sizeof(bfloat16),
+                obj->append(data + physical_offset * dim * sizeof(bfloat16),
                             dim * sizeof(bfloat16));
             } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
                 AssertInfo(
@@ -868,7 +944,7 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 auto num_bytes = dim / 8;
                 auto data = VEC_FIELD_DATA(src_field_data, binary);
                 auto obj = vector_array->mutable_binary_vector();
-                obj->assign(data + physical_offset * num_bytes, num_bytes);
+                obj->append(data + physical_offset * num_bytes, num_bytes);
             } else if (field_meta.get_data_type() ==
                        DataType::VECTOR_SPARSE_U32_F32) {
                 auto* mutable_src_vec = src_field_data->mutable_vectors()
@@ -884,11 +960,12 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
             } else if (field_meta.get_data_type() == DataType::VECTOR_INT8) {
                 auto data = VEC_FIELD_DATA(src_field_data, int8);
                 auto obj = vector_array->mutable_int8_vector();
-                obj->assign(data + physical_offset * dim * sizeof(int8),
+                obj->append(data + physical_offset * dim * sizeof(int8),
                             dim * sizeof(int8));
             } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
                 auto& data = src_field_data->vectors().vector_array();
                 auto obj = vector_array->mutable_vector_array();
+                obj->set_dim(dim);
                 obj->set_element_type(
                     proto::schema::DataType(field_meta.get_element_type()));
                 *(obj->mutable_data()->Add()) = data.data(physical_offset);

@@ -213,3 +213,17 @@ func TestSimple(t *testing.T) {
 	assert.Equal(t, 1, 1)
 	assert.Equal(t, "test", "test")
 }
+
+func TestIsAutoCommit(t *testing.T) {
+	// default true when key absent
+	assert.True(t, IsAutoCommit(nil))
+	assert.True(t, IsAutoCommit([]*commonpb.KeyValuePair{}))
+
+	// explicit true
+	opts := []*commonpb.KeyValuePair{{Key: AutoCommitKey, Value: "true"}}
+	assert.True(t, IsAutoCommit(opts))
+
+	// explicit false
+	opts = []*commonpb.KeyValuePair{{Key: AutoCommitKey, Value: "false"}}
+	assert.False(t, IsAutoCommit(opts))
+}

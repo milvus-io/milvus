@@ -27,6 +27,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -1021,6 +1022,42 @@ func TestMeta_GetSegmentIndexes(t *testing.T) {
 		assert.True(t, ok)
 		assert.NotNil(t, segIdx)
 	})
+}
+
+func TestMeta_GetAllSegmentIndexes(t *testing.T) {
+	assert.Nil(t, (&indexMeta{}).GetAllSegmentIndexes(segID))
+
+	m := &indexMeta{
+		segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: {
+					CollectionID: collID,
+					FieldID:      fieldID,
+					IndexID:      indexID,
+					IndexName:    indexName,
+					IsDeleted:    true,
+				},
+			},
+		},
+	}
+	segIdxes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdxes.Insert(indexID, &model.SegmentIndex{
+		CollectionID: collID,
+		SegmentID:    segID,
+		IndexID:      indexID,
+		BuildID:      buildID,
+		IndexState:   commonpb.IndexState_Finished,
+	})
+	m.segmentIndexes.Insert(segID, segIdxes)
+
+	assert.Empty(t, m.GetSegmentIndexes(collID, segID))
+	segIndexes := m.GetAllSegmentIndexes(segID)
+	require.Len(t, segIndexes, 1)
+	assert.Equal(t, buildID, segIndexes[0].BuildID)
+	origin, ok := segIdxes.Get(indexID)
+	require.True(t, ok)
+	assert.False(t, origin == segIndexes[0])
 }
 
 func TestMeta_GetFieldIDByIndexID(t *testing.T) {

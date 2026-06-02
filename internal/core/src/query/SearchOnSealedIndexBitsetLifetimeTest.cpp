@@ -259,6 +259,117 @@ TEST(SearchOnSealedIndexBitsetLifetime,
     AssertVectorIteratorUsableAfterSearchReturns(search_result, valid_count);
 }
 
+TEST(SearchOnSealedIndexNullableNoFilter,
+     EmptyBitsetMustNotMaskCompactVectorRows) {
+    constexpr int64_t total_count = 1000;
+    constexpr int64_t topk = 10;
+
+    int64_t valid_count = 0;
+    auto valid_data = MakeValidData(total_count, valid_count);
+    auto vectors = MakeCompactVectors(valid_count, kDim);
+
+    auto schema = std::make_shared<Schema>();
+    auto vector_field = schema->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, kDim, knowhere::metric::COSINE, true);
+    auto pk_field = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_field);
+
+    auto index_base =
+        BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
+    auto* vector_index = dynamic_cast<index::VectorIndex*>(index_base.get());
+    ASSERT_NE(vector_index, nullptr);
+    ASSERT_TRUE(vector_index->GetOffsetMapping().IsEnabled());
+    ASSERT_EQ(vector_index->GetOffsetMapping().GetValidCount(), valid_count);
+
+    segcore::SealedIndexingRecord indexing_record;
+    indexing_record.append_field_indexing(
+        vector_field,
+        knowhere::metric::COSINE,
+        CreateTestCacheIndex("nullable-vector-empty-bitset",
+                             std::move(index_base)));
+
+    SearchInfo search_info;
+    search_info.field_id_ = vector_field;
+    search_info.topk_ = topk;
+    search_info.round_decimal_ = -1;
+    search_info.metric_type_ = knowhere::metric::COSINE;
+    search_info.search_params_ = knowhere::Json{
+        {knowhere::indexparam::NPROBE, "32"},
+    };
+
+    SearchResult search_result;
+    SearchOnSealedIndex(*schema,
+                        indexing_record,
+                        search_info,
+                        vectors.data(),
+                        nullptr,
+                        1,
+                        BitsetView{},
+                        nullptr,
+                        search_result);
+
+    ASSERT_EQ(search_result.seg_offsets_.size(), topk);
+    auto valid_results = std::count_if(
+        search_result.seg_offsets_.begin(),
+        search_result.seg_offsets_.end(),
+        [](int64_t offset) { return offset != INVALID_SEG_OFFSET; });
+    EXPECT_GT(valid_results, 0);
+}
+
+TEST(SearchOnSealedIndexNullableIteratorNoFilter,
+     EmptyBitsetMustNotMaskCompactVectorRows) {
+    constexpr int64_t total_count = 1000;
+    constexpr int64_t batch_size = 10;
+
+    int64_t valid_count = 0;
+    auto valid_data = MakeValidData(total_count, valid_count);
+    auto vectors = MakeCompactVectors(valid_count, kDim);
+
+    auto schema = std::make_shared<Schema>();
+    auto vector_field = schema->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, kDim, knowhere::metric::COSINE, true);
+    auto pk_field = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_field);
+
+    auto index_base =
+        BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
+    segcore::SealedIndexingRecord indexing_record;
+    indexing_record.append_field_indexing(
+        vector_field,
+        knowhere::metric::COSINE,
+        CreateTestCacheIndex("nullable-vector-empty-bitset-iterator",
+                             std::move(index_base)));
+
+    SearchInfo search_info;
+    search_info.field_id_ = vector_field;
+    search_info.topk_ = batch_size;
+    search_info.round_decimal_ = -1;
+    search_info.metric_type_ = knowhere::metric::COSINE;
+    search_info.search_params_ = knowhere::Json{
+        {knowhere::indexparam::NPROBE, "32"},
+    };
+    search_info.iterator_v2_info_ =
+        SearchIteratorV2Info{.batch_size = batch_size};
+
+    SearchResult search_result;
+    SearchOnSealedIndex(*schema,
+                        indexing_record,
+                        search_info,
+                        vectors.data(),
+                        nullptr,
+                        1,
+                        BitsetView{},
+                        nullptr,
+                        search_result);
+
+    ASSERT_EQ(search_result.seg_offsets_.size(), batch_size);
+    auto valid_results = std::count_if(
+        search_result.seg_offsets_.begin(),
+        search_result.seg_offsets_.end(),
+        [](int64_t offset) { return offset != INVALID_SEG_OFFSET; });
+    EXPECT_GT(valid_results, 0);
+}
+
 TEST(SearchOnGrowingBitsetLifetime,
      GroupByIteratorMustNotKeepDanglingTransformedBitset) {
     constexpr int64_t total_count = 512;

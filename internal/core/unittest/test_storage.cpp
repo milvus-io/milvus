@@ -13,12 +13,14 @@
 #include <boost/filesystem/path.hpp>
 #include <gtest/gtest.h>
 #include <chrono>
+#include <cstdlib>
 #include <cstdint>
 #include <iosfwd>
 #include <memory>
 #include <optional>
 #include <string>
 
+#include "aws/core/client/ClientConfiguration.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/Types.h"
@@ -27,19 +29,38 @@
 #include "gtest/gtest.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
+#include "storage/KeyRetriever.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/property_singleton.h"
+#include "storage/minio/MinioChunkManager.h"
 #include "storage/storage_c.h"
 #include "test_utils/Constants.h"
+
+// Test-only subclass that exposes the protected ApplyChecksumConfigOverrides
+// and NeedChecksumOverride helpers so we can assert their behavior directly.
+class TestableMinioChunkManager : public milvus::storage::MinioChunkManager {
+ public:
+    using MinioChunkManager::ApplyChecksumConfigOverrides;
+    using MinioChunkManager::NeedChecksumOverride;
+};
 
 using namespace std;
 using namespace milvus;
 using namespace milvus::storage;
 
 string bucketName = "a-bucket";
+
+void
+FreeErrorStatus(CStatus& status) {
+    if (status.error_msg != nullptr && status.error_msg[0] != '\0') {
+        free(const_cast<char*>(status.error_msg));
+        status.error_msg = nullptr;
+    }
+}
 
 CStorageConfig
 get_azure_storage_config() {
@@ -121,6 +142,50 @@ TEST_F(StorageTest, InitRemoteChunkManagerSingleton) {
 
 TEST_F(StorageTest, CleanRemoteChunkManagerSingleton) {
     CleanRemoteChunkManagerSingleton();
+}
+
+TEST_F(StorageTest, InitArrowReaderConfig) {
+    auto default_cache_options =
+        parquet::default_arrow_reader_properties().cache_options();
+
+    auto status = InitArrowReaderConfig(CArrowReaderConfig{-1, 0});
+    EXPECT_EQ(status.error_code, ConfigInvalid);
+    FreeErrorStatus(status);
+    status = InitArrowReaderConfig(CArrowReaderConfig{0, -1});
+    EXPECT_EQ(status.error_code, ConfigInvalid);
+    FreeErrorStatus(status);
+    status = InitArrowReaderConfig(CArrowReaderConfig{64 * 1024, 32 * 1024});
+    EXPECT_NE(status.error_code, Success);
+    FreeErrorStatus(status);
+
+    status =
+        InitArrowReaderConfig(CArrowReaderConfig{32 * 1024, 4 * 1024 * 1024});
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+
+    auto cache_options = GetArrowReaderProperties().cache_options();
+    EXPECT_EQ(cache_options.hole_size_limit, 32 * 1024);
+    EXPECT_EQ(cache_options.range_size_limit, 4 * 1024 * 1024);
+
+    auto properties = LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    ASSERT_NE(properties, nullptr);
+
+    auto hole_size_limit = milvus_storage::api::GetValue<int64_t>(
+        *properties, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
+    ASSERT_TRUE(hole_size_limit.ok()) << hole_size_limit.status().ToString();
+    EXPECT_EQ(hole_size_limit.ValueOrDie(), 32 * 1024);
+
+    auto range_size_limit = milvus_storage::api::GetValue<int64_t>(
+        *properties, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
+    ASSERT_TRUE(range_size_limit.ok()) << range_size_limit.status().ToString();
+    EXPECT_EQ(range_size_limit.ValueOrDie(), 4 * 1024 * 1024);
+
+    status = InitArrowReaderConfig(CArrowReaderConfig{0, 0});
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    cache_options = GetArrowReaderProperties().cache_options();
+    EXPECT_EQ(cache_options.hole_size_limit,
+              default_cache_options.hole_size_limit);
+    EXPECT_EQ(cache_options.range_size_limit,
+              default_cache_options.range_size_limit);
 }
 
 class StorageUtilTest : public testing::Test {
@@ -327,4 +392,49 @@ TEST_F(StorageUtilTest, NormalizePath) {
     EXPECT_EQ(NormalizePath(boost::filesystem::path("a/b c/d")), "a/b c/d");
     EXPECT_EQ(NormalizePath(boost::filesystem::path("./.")), ".");
     EXPECT_EQ(NormalizePath(boost::filesystem::path("./..")), "..");
+}
+
+TEST(MinioChecksumConfig, OverridesAreWhenRequired) {
+    // Regression guard: AWS SDK C++ 1.11.x defaults the checksum policy to
+    // WHEN_SUPPORTED, which makes the V4 signer switch PutObject uploads to
+    // aws-chunked + STREAMING-UNSIGNED-PAYLOAD-TRAILER. Aliyun OSS rejects
+    // that combination (x-oss-ec=0017-00000804). MinioChunkManager must
+    // override both directions to WHEN_REQUIRED so the SDK only adds
+    // checksums when the operation model demands them.
+
+    // Aws::Client::ClientConfiguration's default ctor reads SDK globals
+    // (logger / http client factory) set up by Aws::InitAPI; without it the
+    // ctor segfaults. Use MinioChunkManager's idempotent init helper so we
+    // share init_count_ with any production code paths in the same binary.
+    TestableMinioChunkManager init_guard;
+    init_guard.InitSDKAPIDefault("info");
+
+    Aws::Client::ClientConfiguration config;
+    // Sanity check: the SDK defaults are WHEN_SUPPORTED for both directions.
+    EXPECT_EQ(config.checksumConfig.requestChecksumCalculation,
+              Aws::Client::RequestChecksumCalculation::WHEN_SUPPORTED);
+    EXPECT_EQ(config.checksumConfig.responseChecksumValidation,
+              Aws::Client::ResponseChecksumValidation::WHEN_SUPPORTED);
+
+    TestableMinioChunkManager::ApplyChecksumConfigOverrides(config);
+
+    EXPECT_EQ(config.checksumConfig.requestChecksumCalculation,
+              Aws::Client::RequestChecksumCalculation::WHEN_REQUIRED);
+    EXPECT_EQ(config.checksumConfig.responseChecksumValidation,
+              Aws::Client::ResponseChecksumValidation::WHEN_REQUIRED);
+}
+
+TEST(MinioChecksumConfig, NeedChecksumOverrideDispatch) {
+    using Mgr = TestableMinioChunkManager;
+
+    // Non-AWS S3-compatible backends need the override.
+    EXPECT_TRUE(Mgr::NeedChecksumOverride("gcp"));
+    EXPECT_TRUE(Mgr::NeedChecksumOverride("aliyun"));
+    EXPECT_TRUE(Mgr::NeedChecksumOverride("tencent"));
+    EXPECT_TRUE(Mgr::NeedChecksumOverride("huawei"));
+
+    // AWS S3 / MinIO accept the default WHEN_SUPPORTED behavior.
+    EXPECT_FALSE(Mgr::NeedChecksumOverride("aws"));
+    EXPECT_FALSE(Mgr::NeedChecksumOverride(""));
+    EXPECT_FALSE(Mgr::NeedChecksumOverride("unknown"));
 }

@@ -60,10 +60,6 @@ func (policy *storageVersionUpgradePolicy) Enable() bool {
 	return paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.GetAsBool()
 }
 
-func (policy *storageVersionUpgradePolicy) TriggerInline(_ context.Context) (map[CompactionTriggerType][]CompactionView, error) {
-	return nil, nil
-}
-
 func (policy *storageVersionUpgradePolicy) targetVersion() int64 {
 	targetVersion := storage.StorageV2
 	if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {

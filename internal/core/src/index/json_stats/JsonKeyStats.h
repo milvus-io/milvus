@@ -208,7 +208,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         }
         auto ca = SemiInlineGet(bson_index_cache_slot_->PinCells(op_ctx, {0}));
         auto index = ca->get_cell_of(0);
-        return PinWrapper<BsonInvertedIndex*>(ca, index);
+        return PinWrapper<BsonInvertedIndex*>(std::move(ca), index);
     }
 
     void

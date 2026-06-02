@@ -42,6 +42,7 @@
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
+#include "index/Meta.h"
 #include "index/TextMatchIndex.h"
 #include "index/Utils.h"
 #include "knowhere/comp/index_param.h"
@@ -56,6 +57,7 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/segment_c.h"
+#include "storage/FileManager.h"
 #include "storage/Util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
@@ -103,6 +105,49 @@ GenTestSchema(std::map<std::string, std::string> params = {},
     }
     return schema;
 }
+
+storage::FileManagerContext
+CreateTextMatchTestFileManagerContext(int64_t build_id) {
+    auto storage_config = get_default_local_storage_config();
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+
+    storage::FieldDataMeta field_meta{1, 2, 3, 101};
+    field_meta.field_schema.set_data_type(proto::schema::DataType::VarChar);
+    storage::IndexMeta index_meta{3, 101, build_id, 10000};
+    return storage::FileManagerContext(
+        field_meta, index_meta, chunk_manager, fs);
+}
+
+std::unique_ptr<index::TextMatchIndex>
+BuildTextMatchIndexForUpload(const storage::FileManagerContext& ctx) {
+    auto index = std::make_unique<index::TextMatchIndex>(
+        ctx, index::TANTIVY_INDEX_LATEST_VERSION, "milvus_tokenizer", "{}", "");
+
+    std::vector<std::string> texts = {
+        "football basketball", "swimming football", "table tennis"};
+    auto field_data =
+        storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
+    field_data->FillFieldData(texts.data(), texts.size());
+
+    index->BuildIndexFromFieldData({field_data}, false);
+    return index;
+}
+
+void
+AssertTextMatchUploadReturnsRelativePaths(
+    const std::vector<index::SerializedIndexFileInfo>& files) {
+    ASSERT_FALSE(files.empty());
+    for (const auto& file : files) {
+        ASSERT_FALSE(file.file_name.empty());
+        ASSERT_EQ(file.file_name.find(TestRemotePath), std::string::npos)
+            << file.file_name;
+        ASSERT_EQ(file.file_name.find(TEXT_LOG_ROOT_PATH), std::string::npos)
+            << file.file_name;
+        ASSERT_GT(file.file_size, 0);
+    }
+}
+
 std::shared_ptr<milvus::plan::FilterBitsNode>
 GetMatchExpr(SchemaPtr schema,
              const std::string& query,
@@ -256,6 +301,29 @@ TEST(TextMatch, Index) {
         ASSERT_FALSE(res4[1]);
         ASSERT_TRUE(res4[2]);
     }
+}
+
+TEST(TextMatch, UploadReturnsRelativeTextLogPaths) {
+    auto ctx = CreateTextMatchTestFileManagerContext(1000);
+    auto index = BuildTextMatchIndexForUpload(ctx);
+
+    auto stats = index->Upload({});
+
+    AssertTextMatchUploadReturnsRelativePaths(
+        stats->GetSerializedIndexFileInfo());
+}
+
+TEST(TextMatch, UploadUnifiedReturnsRelativeTextLogPaths) {
+    auto ctx = CreateTextMatchTestFileManagerContext(1001);
+    auto index = BuildTextMatchIndexForUpload(ctx);
+
+    auto stats = index->UploadUnified({});
+
+    AssertTextMatchUploadReturnsRelativePaths(
+        stats->GetSerializedIndexFileInfo());
+    ASSERT_EQ(stats->GetSerializedIndexFileInfo().size(), 1);
+    ASSERT_NE(stats->GetSerializedIndexFileInfo()[0].file_name.find(".v3"),
+              std::string::npos);
 }
 
 // Regression test: BuildIndexFromFieldData with multiple FieldData batches

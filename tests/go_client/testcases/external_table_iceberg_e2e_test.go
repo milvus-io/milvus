@@ -31,15 +31,16 @@ type icebergTableInfo struct {
 	Dim              int    `json:"dim"`
 }
 
-// toMilvusMinIOURI converts an Iceberg-native URI (s3://bucket/key) to
-// Milvus MinIO URI format (minio://host/bucket/key).
-func toMilvusMinIOURI(icebergURI, host string) string {
+// toMilvusS3URIForMinIO converts an Iceberg-native URI (s3://bucket/key) to
+// Milvus form for a self-hosted S3-compatible endpoint:
+// s3://host/bucket/key.
+func toMilvusS3URIForMinIO(icebergURI, host string) string {
 	u, err := url.Parse(icebergURI)
 	if err != nil || u.Scheme == "" {
 		return icebergURI
 	}
 	// s3://bucket/key -> bucket = u.Host, key = u.Path
-	return fmt.Sprintf("minio://%s/%s%s", host, u.Host, u.Path)
+	return fmt.Sprintf("s3://%s/%s%s", host, u.Host, u.Path)
 }
 
 // TestExternalTableIcebergE2E tests the full Iceberg external table pipeline:
@@ -47,37 +48,37 @@ func toMilvusMinIOURI(icebergURI, host string) string {
 //	Create Iceberg table on MinIO → CreateCollection (format=iceberg-table) →
 //	Refresh (with snapshot_id) → Load → Search → Query → Drop.
 //
-// The externalSource uses minio://host/bucket/path/metadata.json. The scheme
-// carries MinIO routing defaults, so extfs only needs credentials.
+// The externalSource uses s3://host/bucket/path/metadata.json. The scheme is
+// accepted by Iceberg FileIO, while extfs.cloud_provider=minio keeps Milvus in
+// self-hosted S3-compatible mode.
 //
 // Run:
 //
 //	go test -v -run TestExternalTableIcebergE2E -timeout 30m -tags dynamic,test
 func TestExternalTableIcebergE2E(t *testing.T) {
-	if err := checkPythonDeps("python3", "pyarrow", "pyiceberg"); err != nil {
-		t.Skipf("Python deps for Iceberg unavailable, skipping: %v", err)
-	}
-
 	// Derive the default Iceberg MinIO endpoint from MINIO_ADDRESS (shared env var)
 	// so that all external table tests use a single address knob.
 	minioAddr := envOrDefault("MINIO_ADDRESS", "localhost:9000")
-	minioEndpoint := icebergEnvOrDefault("ICEBERG_MINIO_ENDPOINT", "http://"+minioAddr)
-	minioAccessKey := icebergEnvOrDefault("ICEBERG_MINIO_ACCESS_KEY", "minioadmin")
-	minioSecretKey := icebergEnvOrDefault("ICEBERG_MINIO_SECRET_KEY", "minioadmin")
-	bucket := icebergEnvOrDefault("ICEBERG_MINIO_BUCKET", "a-bucket")
-	tablePath := icebergEnvOrDefault("ICEBERG_TABLE_PATH", "iceberg-test/e2e_test_table")
-	numRows := icebergEnvOrDefault("ICEBERG_NUM_ROWS", "1000")
-	dim := icebergEnvOrDefault("ICEBERG_DIM", "128")
+	minioEndpoint := envOrDefault("ICEBERG_MINIO_ENDPOINT", "http://"+minioAddr)
+	minioAccessKey := envOrDefault("ICEBERG_MINIO_ACCESS_KEY", "minioadmin")
+	minioSecretKey := envOrDefault("ICEBERG_MINIO_SECRET_KEY", "minioadmin")
+	bucket := envOrDefault("MINIO_BUCKET", "a-bucket")
+	tablePath := envOrDefault("ICEBERG_TABLE_PATH", "iceberg-test/e2e_test_table")
+	numRows := envOrDefault("ICEBERG_NUM_ROWS", "1000")
+	dim := envOrDefault("ICEBERG_DIM", "128")
 
 	// --- Phase 0: Create Iceberg table on MinIO using Python script ---
 	t.Log("[Phase 0] Creating Iceberg test table on MinIO...")
-	tableInfo := createIcebergTestTable(t, minioEndpoint, minioAccessKey, minioSecretKey, bucket, tablePath, numRows, dim)
+	tableInfo := createIcebergTable(
+		t, externalDataSchemaBasic, minioEndpoint, minioAccessKey,
+		minioSecretKey, bucket, tablePath, numRows, dim, "")
 	t.Logf("[Phase 0] Iceberg table created: metadata=%s, snapshot_id=%d, rows=%d",
 		tableInfo.MetadataLocation, tableInfo.SnapshotID, tableInfo.NumRows)
 
-	// Convert Iceberg-native URI (s3://bucket/key) to Milvus MinIO URI format.
+	// Convert Iceberg-native URI (s3://bucket/key) to Milvus form with the
+	// configured MinIO endpoint as URI host.
 	minioHost := strings.TrimPrefix(strings.TrimPrefix(minioEndpoint, "http://"), "https://")
-	externalSource := toMilvusMinIOURI(tableInfo.MetadataLocation, minioHost)
+	externalSource := toMilvusS3URIForMinIO(tableInfo.MetadataLocation, minioHost)
 
 	// Build ExternalSpec with the minimal extfs needed for MinIO access.
 	type externalSpecJSON struct {
@@ -91,6 +92,9 @@ func TestExternalTableIcebergE2E(t *testing.T) {
 		Extfs: map[string]string{
 			"access_key_id":    minioAccessKey,
 			"access_key_value": minioSecretKey,
+			"cloud_provider":   "minio",
+			"region":           "us-east-1",
+			"use_ssl":          "false",
 		},
 	}
 	specBytes, err := json.Marshal(specObj)
@@ -211,24 +215,20 @@ refreshDone:
 // RefreshExternalCollection fails during sample when the collection schema
 // declares a different type from the external Arrow column type.
 func TestExternalTableIcebergRefreshFailsOnSchemaTypeMismatch(t *testing.T) {
-	if err := checkPythonDeps("python3", "pyarrow", "pyiceberg"); err != nil {
-		t.Skipf("Python deps for Iceberg unavailable, skipping: %v", err)
-	}
-
 	minioAddr := envOrDefault("MINIO_ADDRESS", "localhost:9000")
-	minioEndpoint := icebergEnvOrDefault("ICEBERG_MINIO_ENDPOINT", "http://"+minioAddr)
-	minioAccessKey := icebergEnvOrDefault("ICEBERG_MINIO_ACCESS_KEY", "minioadmin")
-	minioSecretKey := icebergEnvOrDefault("ICEBERG_MINIO_SECRET_KEY", "minioadmin")
-	bucket := icebergEnvOrDefault("ICEBERG_MINIO_BUCKET", "a-bucket")
+	minioEndpoint := envOrDefault("ICEBERG_MINIO_ENDPOINT", "http://"+minioAddr)
+	minioAccessKey := envOrDefault("ICEBERG_MINIO_ACCESS_KEY", "minioadmin")
+	minioSecretKey := envOrDefault("ICEBERG_MINIO_SECRET_KEY", "minioadmin")
+	bucket := envOrDefault("MINIO_BUCKET", "a-bucket")
 	collName := common.GenRandomString("iceberg_schema_mismatch", 6)
 	tablePath := fmt.Sprintf("iceberg-test/%s", collName)
 
-	tableInfo := createIcebergTestTable(
-		t, minioEndpoint, minioAccessKey, minioSecretKey,
-		bucket, tablePath, "16", "4")
+	tableInfo := createIcebergTable(
+		t, externalDataSchemaBasic, minioEndpoint, minioAccessKey,
+		minioSecretKey, bucket, tablePath, "16", "4", "")
 
 	minioHost := strings.TrimPrefix(strings.TrimPrefix(minioEndpoint, "http://"), "https://")
-	externalSource := toMilvusMinIOURI(tableInfo.MetadataLocation, minioHost)
+	externalSource := toMilvusS3URIForMinIO(tableInfo.MetadataLocation, minioHost)
 
 	type externalSpecJSON struct {
 		Format     string            `json:"format"`
@@ -241,6 +241,9 @@ func TestExternalTableIcebergRefreshFailsOnSchemaTypeMismatch(t *testing.T) {
 		Extfs: map[string]string{
 			"access_key_id":    minioAccessKey,
 			"access_key_value": minioSecretKey,
+			"cloud_provider":   "minio",
+			"region":           "us-east-1",
+			"use_ssl":          "false",
 		},
 	}
 	specBytes, err := json.Marshal(specObj)
@@ -299,78 +302,43 @@ func TestExternalTableIcebergRefreshFailsOnSchemaTypeMismatch(t *testing.T) {
 	}
 }
 
-// createIcebergTestTable runs the Python script to create an Iceberg table on MinIO.
-func createIcebergTestTable(t *testing.T, endpoint, accessKey, secretKey, bucket, tablePath, numRows, dim string) icebergTableInfo {
+// createIcebergTable runs the Python script to create an Iceberg table on MinIO.
+func createIcebergTable(t *testing.T, schema, endpoint, accessKey, secretKey, bucket,
+	tablePath, numRows, vecDim, binVecDim string,
+) icebergTableInfo {
 	t.Helper()
 
 	_, thisFile, _, ok := runtime.Caller(0)
 	require.True(t, ok, "failed to get caller info")
-	scriptPath := filepath.Join(filepath.Dir(thisFile), "testdata", "create_iceberg_table.py")
-	infoPath := filepath.Join(t.TempDir(), "iceberg_table_info.json")
-
-	cmd := exec.Command("python3", scriptPath, // #nosec G204
+	scriptPath := filepath.Join(filepath.Dir(thisFile), "generate_iceberg_data.py")
+	infoPath := filepath.Join(t.TempDir(), fmt.Sprintf("iceberg_%s_info.json", schema))
+	args := []string{
+		scriptPath,
+		"--schema", schema,
 		"--endpoint", endpoint,
-		"--access-key", accessKey,
-		"--secret-key", secretKey,
 		"--bucket", bucket,
 		"--table-path", tablePath,
 		"--num-rows", numRows,
-		"--dim", dim,
+		"--vec-dim", vecDim,
 		"--output", infoPath,
-	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	require.NoError(t, err, "failed to create Iceberg test table via Python script")
-
-	data, err := os.ReadFile(infoPath)
-	require.NoError(t, err, "failed to read iceberg_table_info.json")
-
-	var info icebergTableInfo
-	err = json.Unmarshal(data, &info)
-	require.NoError(t, err, "failed to parse iceberg_table_info.json")
-
-	return info
-}
-
-func icebergEnvOrDefault(key, defaultVal string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
 	}
-	return defaultVal
-}
-
-// createIcebergMultiTypeTable runs the Python script to create the 18-column
-// multi-type iceberg table on MinIO.
-func createIcebergMultiTypeTable(t *testing.T, endpoint, accessKey, secretKey, bucket, tablePath string, numRows, vecDim, binVecDim int) icebergTableInfo {
-	t.Helper()
-
-	_, thisFile, _, ok := runtime.Caller(0)
-	require.True(t, ok, "failed to get caller info")
-	scriptPath := filepath.Join(filepath.Dir(thisFile), "testdata", "create_iceberg_multi_type_table.py")
-	infoPath := filepath.Join(t.TempDir(), "iceberg_multi_type_info.json")
-
-	cmd := exec.Command("python3", scriptPath, // #nosec G204
-		"--endpoint", endpoint,
-		"--access-key", accessKey,
-		"--secret-key", secretKey,
-		"--bucket", bucket,
-		"--table-path", tablePath,
-		"--num-rows", fmt.Sprintf("%d", numRows),
-		"--vec-dim", fmt.Sprintf("%d", vecDim),
-		"--bin-vec-dim", fmt.Sprintf("%d", binVecDim),
-		"--output", infoPath,
-	)
+	if binVecDim != "" {
+		args = append(args, "--bin-vec-dim", binVecDim)
+	}
+	cmd := exec.Command("python3", args...) // #nosec G204
+	cmd.Env = append(os.Environ(),
+		"MINIO_ACCESS_KEY="+accessKey,
+		"MINIO_SECRET_KEY="+secretKey)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
-	require.NoError(t, err, "failed to create iceberg multi-type table via Python script")
+	require.NoError(t, err, "failed to create %s iceberg table via Python script", schema)
 
 	data, err := os.ReadFile(infoPath)
-	require.NoError(t, err)
+	require.NoError(t, err, "failed to read %s", infoPath)
 
 	var info icebergTableInfo
-	require.NoError(t, json.Unmarshal(data, &info))
+	require.NoError(t, json.Unmarshal(data, &info), "failed to parse %s", infoPath)
 	return info
 }
 
@@ -381,25 +349,23 @@ func createIcebergMultiTypeTable(t *testing.T, endpoint, accessKey, secretKey, b
 func TestExternalCollectionMultipleDataTypesIceberg(t *testing.T) {
 	t.Parallel()
 
-	if err := checkPythonDeps("python3", "pyarrow", "pyiceberg"); err != nil {
-		t.Skipf("Python deps for Iceberg unavailable, skipping: %v", err)
-	}
-
 	minioAddr := envOrDefault("MINIO_ADDRESS", "localhost:9000")
-	minioEndpoint := icebergEnvOrDefault("ICEBERG_MINIO_ENDPOINT", "http://"+minioAddr)
-	minioAccessKey := icebergEnvOrDefault("ICEBERG_MINIO_ACCESS_KEY", "minioadmin")
-	minioSecretKey := icebergEnvOrDefault("ICEBERG_MINIO_SECRET_KEY", "minioadmin")
-	bucket := icebergEnvOrDefault("ICEBERG_MINIO_BUCKET", "a-bucket")
+	minioEndpoint := envOrDefault("ICEBERG_MINIO_ENDPOINT", "http://"+minioAddr)
+	minioAccessKey := envOrDefault("ICEBERG_MINIO_ACCESS_KEY", "minioadmin")
+	minioSecretKey := envOrDefault("ICEBERG_MINIO_SECRET_KEY", "minioadmin")
+	bucket := envOrDefault("MINIO_BUCKET", "a-bucket")
 
 	collName := common.GenRandomString("ext_multi_iceberg", 6)
 	tablePath := fmt.Sprintf("iceberg-test/%s", collName)
 
 	const numRows = 100
-	tableInfo := createIcebergMultiTypeTable(t, minioEndpoint, minioAccessKey,
-		minioSecretKey, bucket, tablePath, numRows, testVecDim, testBinVecDim)
+	tableInfo := createIcebergTable(
+		t, externalDataSchemaMulti, minioEndpoint, minioAccessKey,
+		minioSecretKey, bucket, tablePath,
+		fmt.Sprintf("%d", numRows), fmt.Sprintf("%d", testVecDim), fmt.Sprintf("%d", testBinVecDim))
 
 	minioHost := strings.TrimPrefix(strings.TrimPrefix(minioEndpoint, "http://"), "https://")
-	externalSource := toMilvusMinIOURI(tableInfo.MetadataLocation, minioHost)
+	externalSource := toMilvusS3URIForMinIO(tableInfo.MetadataLocation, minioHost)
 
 	type externalSpecJSON struct {
 		Format     string            `json:"format"`
@@ -412,6 +378,9 @@ func TestExternalCollectionMultipleDataTypesIceberg(t *testing.T) {
 		Extfs: map[string]string{
 			"access_key_id":    minioAccessKey,
 			"access_key_value": minioSecretKey,
+			"cloud_provider":   "minio",
+			"region":           "us-east-1",
+			"use_ssl":          "false",
 		},
 	}
 	specBytes, err := json.Marshal(specObj)

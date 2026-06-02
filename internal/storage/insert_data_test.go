@@ -489,6 +489,86 @@ func makeFloatVec(dim int, vals ...float32) *schemapb.VectorField {
 	}
 }
 
+func TestNullableVectorAppendRowsRejectsNonCompactData(t *testing.T) {
+	validData := []bool{true, false, true}
+	sparseRows := &SparseFloatVectorFieldData{
+		SparseFloatArray: schemapb.SparseFloatArray{
+			Dim: 8,
+			Contents: [][]byte{
+				typeutil.CreateSparseFloatRow([]uint32{1}, []float32{1.0}),
+				typeutil.CreateSparseFloatRow([]uint32{2}, []float32{2.0}),
+				typeutil.CreateSparseFloatRow([]uint32{3}, []float32{3.0}),
+			},
+		},
+	}
+
+	tests := []struct {
+		name      string
+		fieldData FieldData
+		rows      any
+	}{
+		{
+			name:      "binary vector",
+			fieldData: &BinaryVectorFieldData{Dim: 8, Nullable: true},
+			rows:      []byte{0x01, 0x02, 0x03},
+		},
+		{
+			name:      "float vector",
+			fieldData: &FloatVectorFieldData{Dim: 2, Nullable: true},
+			rows:      []float32{1, 2, 3, 4, 5, 6},
+		},
+		{
+			name:      "float16 vector",
+			fieldData: &Float16VectorFieldData{Dim: 2, Nullable: true},
+			rows:      []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+		},
+		{
+			name:      "bfloat16 vector",
+			fieldData: &BFloat16VectorFieldData{Dim: 2, Nullable: true},
+			rows:      []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+		},
+		{
+			name:      "sparse vector",
+			fieldData: &SparseFloatVectorFieldData{Nullable: true},
+			rows:      sparseRows,
+		},
+		{
+			name:      "int8 vector",
+			fieldData: &Int8VectorFieldData{Dim: 2, Nullable: true},
+			rows:      []int8{1, 2, 3, 4, 5, 6},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.fieldData.AppendRows(tt.rows, validData)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "compact")
+			assert.Equal(t, 0, tt.fieldData.RowNum())
+			assert.Empty(t, nullableVectorValidDataForTest(tt.fieldData))
+		})
+	}
+}
+
+func nullableVectorValidDataForTest(fieldData FieldData) []bool {
+	switch data := fieldData.(type) {
+	case *BinaryVectorFieldData:
+		return data.ValidData
+	case *FloatVectorFieldData:
+		return data.ValidData
+	case *Float16VectorFieldData:
+		return data.ValidData
+	case *BFloat16VectorFieldData:
+		return data.ValidData
+	case *SparseFloatVectorFieldData:
+		return data.ValidData
+	case *Int8VectorFieldData:
+		return data.ValidData
+	default:
+		return nil
+	}
+}
+
 func TestVectorArrayFieldData_NullableAppendAndGetRow(t *testing.T) {
 	fd := &VectorArrayFieldData{
 		Dim:         4,

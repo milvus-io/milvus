@@ -59,14 +59,11 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 		return merr.WrapErrParameterInvalidMsg("For now, exactly one function schema is supported in alter schema task")
 	}
 	functionSchema := funcSchemas[0]
-
-	// Physical backfill is currently only implemented for BM25 functions in the datanode
-	// backfill_compactor. Proxy performs the same check; this is a defense-in-depth guard
-	// for requests that bypass the Proxy (e.g. direct gRPC to RootCoord).
-	if addRequest.GetDoPhysicalBackfill() && functionSchema.GetType() != schemapb.FunctionType_BM25 {
-		return merr.WrapErrParameterInvalidMsg(
-			"physical backfill is currently only supported for BM25 functions, got %s",
-			functionSchema.GetType().String())
+	if err := checkAlterSchemaFunctionAllowed(functionSchema); err != nil {
+		return err
+	}
+	if err := validateAlterSchemaFunctionInputOutput(functionSchema); err != nil {
+		return err
 	}
 
 	if len(fieldInfos) == 0 {
@@ -85,6 +82,15 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 	if err := checkFieldSchema(fieldSchemas); err != nil {
 		return errors.Wrap(err, "failed to check field schema")
 	}
+	newFieldNames := make(map[string]struct{}, len(fieldSchemas))
+	for _, fieldSchema := range fieldSchemas {
+		newFieldNames[fieldSchema.GetName()] = struct{}{}
+	}
+	for _, outputFieldName := range functionSchema.GetOutputFieldNames() {
+		if _, ok := newFieldNames[outputFieldName]; !ok {
+			return merr.WrapErrParameterInvalidMsg("function output field %q must be one of the newly-added fields", outputFieldName)
+		}
+	}
 
 	// 3. check if the fields already exist
 	fieldNameSet := make(map[string]struct{})
@@ -96,6 +102,12 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 			return merr.WrapErrParameterInvalidMsg("field already exists, name: %s", fieldSchema.GetName())
 		}
 		fieldNameSet[fieldSchema.Name] = struct{}{}
+	}
+	outputFieldNames := typeutil.NewSet[string](functionSchema.GetOutputFieldNames()...)
+	for _, fieldSchema := range fieldSchemas {
+		if outputFieldNames.Contain(fieldSchema.GetName()) && fieldSchema.GetNullable() {
+			return merr.WrapErrParameterInvalidMsg("function output field cannot be nullable: function %s, field %s", functionSchema.GetName(), fieldSchema.GetName())
+		}
 	}
 
 	// 4. check if the function already exists
@@ -139,15 +151,12 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 
 	// 6. build new collection schema.
 	schema := coll.ToCollectionSchemaPB()
-	// Version is incremented by 1. No CAS is needed here because Proxy's
-	// checkSchemaVersionConsistency gate blocks new AlterCollectionSchema calls
-	// until the previous backfill reaches 100% consistency, and DDL requests
-	// are serialized through a single DDL queue — so concurrent schema changes
-	// that could produce duplicate version numbers are impossible.
 	schema.Version = coll.SchemaVersion + 1
-	schema.DoPhysicalBackfill = addRequest.GetDoPhysicalBackfill()
 	schema.Fields = append(schema.Fields, fieldSchemas...)
 	schema.Functions = append(schema.Functions, functionSchema)
+	if err := typeutil.ValidateExternalCollectionResolvedSchema(schema); err != nil {
+		return err
+	}
 
 	// 7. get cache expirations.
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
@@ -178,4 +187,26 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 		return err
 	}
 	return nil
+}
+
+func checkAlterSchemaFunctionAllowed(functionSchema *schemapb.FunctionSchema) error {
+	switch functionSchema.GetType() {
+	case schemapb.FunctionType_BM25:
+		return nil
+	default:
+		return merr.WrapErrParameterInvalidMsg("For now, only BM25 function is supported in alter schema task")
+	}
+}
+
+func validateAlterSchemaFunctionInputOutput(functionSchema *schemapb.FunctionSchema) error {
+	switch functionSchema.GetType() {
+	case schemapb.FunctionType_BM25:
+		inputCount := len(functionSchema.GetInputFieldNames())
+		if (inputCount != 1 && inputCount != 2) || len(functionSchema.GetOutputFieldNames()) != 1 {
+			return merr.WrapErrParameterInvalidMsg("BM25 function should have one or two input fields and exactly one output field")
+		}
+		return nil
+	default:
+		return merr.WrapErrParameterInvalidMsg("unsupported function type in alter schema task: %s", functionSchema.GetType().String())
+	}
 }

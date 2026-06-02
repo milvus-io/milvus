@@ -284,18 +284,22 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     }
 
     bool
-    SupportPatternQuery() const override {
-        return std::is_same_v<T, std::string>;
+    ShouldUseOp(proto::plan::OpType op) const override {
+        // Suffix/contains LIKE and regex can be executed correctly over indexed
+        // terms, but for short varchar values they are often slower than raw
+        // scan. Keep only prefix/LIKE Match on the inverted-index path.
+        switch (op) {
+            case proto::plan::OpType::Match:
+            case proto::plan::OpType::PrefixMatch:
+                return SupportPatternMatch() || HasRawData();
+            case proto::plan::OpType::RegexMatch:
+            case proto::plan::OpType::PostfixMatch:
+            case proto::plan::OpType::InnerMatch:
+                return false;
+            default:
+                return true;
+        }
     }
-
-    bool
-    TryUsePatternQuery() const override {
-        // for inverted index, not use pattern query to implement match
-        return false;
-    }
-
-    const TargetBitmap
-    PatternQuery(const std::string& pattern) override;
 
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
@@ -313,6 +317,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
                 const Config& config) override;
 
  protected:
+    const TargetBitmap
+    PatternQuery(const std::string& pattern) override;
+
     void
     finish();
 

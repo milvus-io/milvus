@@ -51,6 +51,122 @@ func TestMixCompactionTaskSuite(t *testing.T) {
 	suite.Run(t, new(MixCompactionTaskStorageV1Suite))
 }
 
+func newMixCompactionStorageV1SuiteForDirectTest(t *testing.T) *MixCompactionTaskStorageV1Suite {
+	s := &MixCompactionTaskStorageV1Suite{}
+	s.SetT(t)
+	s.SetupSuite()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+		s.TearDownTest()
+	})
+	s.SetupTest()
+	return s
+}
+
+func (s *MixCompactionTaskStorageV1Suite) prepareMissingBM25OutputSegments(isSorted bool) {
+	s.SetupBM25()
+	segments := []int64{5, 6, 7}
+	alloc := allocator.NewLocalAllocator(7777777, math.MaxInt64)
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
+	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0, len(segments))
+	for _, segID := range segments {
+		s.initSegBufferWithBM25(segID)
+		kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+		s.Require().NoError(err)
+		removeFieldBinlogForTest(kvs, fBinlogs, 102)
+
+		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
+			left, right := lo.Difference(keys, lo.Keys(kvs))
+			return len(left) == 0 && len(right) == 0
+		})).RunAndReturn(func(ctx context.Context, keys []string) ([][]byte, error) {
+			return downloadValuesForPathsForTest(kvs, keys)
+		}).Once()
+
+		s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
+			CollectionID: 1,
+			SegmentID:    segID,
+			FieldBinlogs: lo.Values(fBinlogs),
+			IsSorted:     isSorted,
+		})
+	}
+}
+
+func TestMixCompactionMaterializesMissingBM25OutputNoDelete(t *testing.T) {
+	s := newMixCompactionStorageV1SuiteForDirectTest(t)
+	s.prepareMissingBM25OutputSegments(false)
+
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.NotNil(result)
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(3, segment.GetNumOfRows())
+	s.EqualValues(3, fieldBinlogEntriesForTest(segment.GetBm25Logs(), 102))
+}
+
+func TestMixCompactionMaterializesMissingFieldWithDeleteFilter(t *testing.T) {
+	s := newMixCompactionStorageV1SuiteForDirectTest(t)
+
+	segmentID := int64(4)
+	alloc := allocator.NewLocalAllocator(888888, math.MaxInt64)
+	s.initMultiRowsSegBuffer(segmentID, 2, 1)
+	kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+	s.Require().NoError(err)
+	removeFieldBinlogForTest(kvs, fBinlogs, StringField)
+
+	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10*time.Second), 0)
+	blob, err := getInt64DeltaBlobs(segmentID, []int64{segmentID}, []uint64{deleteTs})
+	s.Require().NoError(err)
+	deltaPath := "deltalog/missing-field-delete"
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{deltaPath}).
+		Return([][]byte{blob.GetValue()}, nil).Once()
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
+		left, right := lo.Difference(keys, lo.Keys(kvs))
+		return len(left) == 0 && len(right) == 0
+	})).RunAndReturn(func(ctx context.Context, keys []string) ([][]byte, error) {
+		return downloadValuesForPathsForTest(kvs, keys)
+	}).Once()
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{{
+		CollectionID: 1,
+		SegmentID:    segmentID,
+		FieldBinlogs: lo.Values(fBinlogs),
+		Deltalogs: []*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{{LogPath: deltaPath}},
+		}},
+	}}
+
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.NotNil(result)
+	s.Require().Len(result.GetSegments(), 1)
+	segment := result.GetSegments()[0]
+	s.EqualValues(1, segment.GetNumOfRows())
+	s.EqualValues(1, fieldBinlogEntriesForTest(segment.GetInsertLogs(), StringField))
+}
+
+func TestMixCompactionMergeSortMaterializesMissingBM25Output(t *testing.T) {
+	s := newMixCompactionStorageV1SuiteForDirectTest(t)
+	mergeSortKey := paramtable.Get().DataNodeCfg.UseMergeSort.Key
+	paramtable.Get().Save(mergeSortKey, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(mergeSortKey) })
+	s.prepareMissingBM25OutputSegments(true)
+	s.task.compactionParams = compaction.GenParams()
+
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.NotNil(result)
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(3, segment.GetNumOfRows())
+	s.True(segment.GetIsSorted())
+	s.EqualValues(3, fieldBinlogEntriesForTest(segment.GetBm25Logs(), 102))
+}
+
 type MixCompactionTaskStorageV1Suite struct {
 	suite.Suite
 
@@ -450,12 +566,18 @@ func (s *MixCompactionTaskStorageV1Suite) prepareSplitMergeEntityExpired() {
 	s.task.plan.CollectionTtl = int64(collTTL)
 	alloc := allocator.NewLocalAllocator(888888, math.MaxInt64)
 
-	kvs, _, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+	kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
 	s.Require().NoError(err)
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(paths []string) bool {
+		left, right := lo.Difference(paths, lo.Keys(kvs))
+		return len(left) == 0 && len(right) == 0
+	})).RunAndReturn(
 		func(ctx context.Context, paths []string) ([][]byte, error) {
-			s.Require().Equal(len(paths), len(kvs))
-			return lo.Values(kvs), nil
+			res := make([][]byte, 0, len(paths))
+			for _, path := range paths {
+				res = append(res, kvs[path])
+			}
+			return res, nil
 		})
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
 
@@ -463,17 +585,7 @@ func (s *MixCompactionTaskStorageV1Suite) prepareSplitMergeEntityExpired() {
 	s.task.partitionID = PartitionID
 	s.task.maxRows = 1000
 
-	fieldBinlogs := make([]*datapb.FieldBinlog, 0, len(kvs))
-	for k := range kvs {
-		fieldBinlogs = append(fieldBinlogs, &datapb.FieldBinlog{
-			Binlogs: []*datapb.Binlog{
-				{
-					LogPath: k,
-				},
-			},
-		})
-	}
-	s.task.plan.SegmentBinlogs[0].FieldBinlogs = fieldBinlogs
+	s.task.plan.SegmentBinlogs[0].FieldBinlogs = lo.Values(fBinlogs)
 }
 
 func (s *MixCompactionTaskStorageV1Suite) TestSplitMergeEntityExpired() {
@@ -549,30 +661,18 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeNoExpirationLackBinlog() {
 				}
 			}
 
-			insertPaths := lo.Keys(kvs)
-			insertBytes := func() [][]byte {
-				res := make([][]byte, 0, len(insertPaths))
-				for _, path := range insertPaths {
-					res = append(res, kvs[path])
-				}
-				return res
-			}()
-			s.mockBinlogIO.EXPECT().Download(mock.Anything, insertPaths).RunAndReturn(
+			s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(paths []string) bool {
+				left, right := lo.Difference(paths, lo.Keys(kvs))
+				return len(left) == 0 && len(right) == 0
+			})).RunAndReturn(
 				func(ctx context.Context, paths []string) ([][]byte, error) {
-					s.Require().Equal(len(paths), len(kvs))
-					return insertBytes, nil
+					res := make([][]byte, 0, len(paths))
+					for _, path := range paths {
+						res = append(res, kvs[path])
+					}
+					return res, nil
 				})
-			fieldBinlogs := make([]*datapb.FieldBinlog, 0, len(insertPaths))
-			for _, k := range insertPaths {
-				fieldBinlogs = append(fieldBinlogs, &datapb.FieldBinlog{
-					Binlogs: []*datapb.Binlog{
-						{
-							LogPath: k,
-						},
-					},
-				})
-			}
-			s.task.plan.SegmentBinlogs[0].FieldBinlogs = fieldBinlogs
+			s.task.plan.SegmentBinlogs[0].FieldBinlogs = lo.Values(fBinlogs)
 
 			s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
 
@@ -606,7 +706,7 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeNoExpiration() {
 	}
 
 	alloc := allocator.NewLocalAllocator(888888, math.MaxInt64)
-	kvs, _, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+	kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
 	s.Require().NoError(err)
 
 	for _, test := range tests {
@@ -631,30 +731,18 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeNoExpiration() {
 				}
 			}
 
-			insertPaths := lo.Keys(kvs)
-			insertBytes := func() [][]byte {
-				res := make([][]byte, 0, len(insertPaths))
-				for _, path := range insertPaths {
-					res = append(res, kvs[path])
-				}
-				return res
-			}()
-			s.mockBinlogIO.EXPECT().Download(mock.Anything, insertPaths).RunAndReturn(
+			s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(paths []string) bool {
+				left, right := lo.Difference(paths, lo.Keys(kvs))
+				return len(left) == 0 && len(right) == 0
+			})).RunAndReturn(
 				func(ctx context.Context, paths []string) ([][]byte, error) {
-					s.Require().Equal(len(paths), len(kvs))
-					return insertBytes, nil
+					res := make([][]byte, 0, len(paths))
+					for _, path := range paths {
+						res = append(res, kvs[path])
+					}
+					return res, nil
 				})
-			fieldBinlogs := make([]*datapb.FieldBinlog, 0, len(insertPaths))
-			for _, k := range insertPaths {
-				fieldBinlogs = append(fieldBinlogs, &datapb.FieldBinlog{
-					Binlogs: []*datapb.Binlog{
-						{
-							LogPath: k,
-						},
-					},
-				})
-			}
-			s.task.plan.SegmentBinlogs[0].FieldBinlogs = fieldBinlogs
+			s.task.plan.SegmentBinlogs[0].FieldBinlogs = lo.Values(fBinlogs)
 
 			s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
 

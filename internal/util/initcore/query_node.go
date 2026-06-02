@@ -105,6 +105,8 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	// override segcore index slice size
 	cIndexSliceSize := C.int64_t(paramtable.Get().CommonCfg.IndexSliceSize.GetAsInt64())
 	C.SetIndexSliceSize(cIndexSliceSize)
+	cStreamBudgetRatio := C.double(paramtable.Get().CommonCfg.StreamBudgetRatio.GetAsFloat())
+	C.SetStreamBudgetRatio(cStreamBudgetRatio)
 
 	// set up thread pool for different priorities
 	cHighPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsFloat())
@@ -168,13 +170,18 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	enableParquetStatsSkipIndex := paramtable.Get().CommonCfg.ParquetStatsSkipIndex.GetAsBool()
 	C.SetDefaultEnableParquetStatsSkipIndex(C.bool(enableParquetStatsSkipIndex))
 
+	err := InitArrowReaderConfig(paramtable.Get())
+	if err != nil {
+		return err
+	}
+
 	localDataRootPath := pathutil.GetPath(pathutil.LocalChunkPath, nodeID)
 
 	if err := InitLocalChunkManager(localDataRootPath); err != nil {
 		return err
 	}
 
-	err := InitRemoteChunkManager(paramtable.Get())
+	err = InitRemoteChunkManager(paramtable.Get())
 	if err != nil {
 		return err
 	}

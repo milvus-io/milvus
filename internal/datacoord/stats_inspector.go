@@ -158,9 +158,11 @@ func (si *statsInspector) enableBM25() bool {
 	return false
 }
 
-func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
-	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 ||
-		(!segment.GetIsSorted() && !segment.GetIsSortedByNamespace()) {
+func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted bool) bool {
+	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 {
+		return false
+	}
+	if !allowUnsorted && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
 		return false
 	}
 
@@ -205,7 +207,7 @@ func needDoBM25(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 func (si *statsInspector) triggerTextStatsTask() {
 	collections := si.mt.GetCollections()
 	for _, collection := range collections {
-		if collection == nil || collection.IsExternal() {
+		if collection == nil {
 			continue
 		}
 		needTriggerFieldIDs := make([]UniqueID, 0)
@@ -217,8 +219,9 @@ func (si *statsInspector) triggerTextStatsTask() {
 			}
 			needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
 		}
+		allowUnsorted := collection.IsExternal()
 		segments := si.mt.SelectSegments(si.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return (seg.GetIsSorted() || seg.GetIsSortedByNamespace()) && needDoTextIndex(seg, needTriggerFieldIDs)
+			return needDoTextIndex(seg, needTriggerFieldIDs, allowUnsorted)
 		}))
 
 		resources := []*internalpb.FileResourceInfo{}
@@ -340,7 +343,7 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 	if originSegment == nil {
 		return merr.WrapErrSegmentNotFound(originSegmentID)
 	}
-	if si.isExternalCollection(originSegment.GetCollectionID()) {
+	if si.isExternalCollection(originSegment.GetCollectionID()) && subJobType != indexpb.StatsSubJob_TextIndexJob {
 		log.Ctx(si.ctx).Info("skip submit stats task for external collection",
 			zap.Int64("collectionID", originSegment.GetCollectionID()),
 			zap.Int64("segmentID", originSegmentID),

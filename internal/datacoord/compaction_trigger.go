@@ -560,15 +560,7 @@ func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartS
 	// default filter, select segments which could be compacted
 	filters := []SegmentFilter{
 		SegmentFilterFunc(func(segment *SegmentInfo) bool {
-			return isSegmentHealthy(segment) &&
-				isFlushed(segment) &&
-				!segment.isCompacting && // not compacting now
-				!segment.GetIsImporting() && // not importing now
-				segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
-				segment.GetLevel() != datapb.SegmentLevel_L2 && // ignore l2 segment
-				!segment.GetIsInvisible() &&
-				(segment.GetIsSorted() || segment.GetIsSortedByNamespace()) &&
-				!t.meta.isSegmentCompactionProtected(segment.GetID()) // not protected by snapshot
+			return isNormalManualCompactionCandidate(t.meta, segment)
 		}),
 	}
 
@@ -755,7 +747,9 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 	for _, binlogs := range segment.GetBinlogs() {
 		for _, l := range binlogs.GetBinlogs() {
 			// TODO, we should probably estimate expired log entries by total rows in binlog and the ralationship of timeTo, timeFrom and expire time
-			if l.TimestampTo < compactTime.expireTime {
+			// For import segments, row timestamps predate the commit; use commit_timestamp
+			// as the effective "data age" to prevent premature TTL-triggered compaction.
+			if tsoutil.EffectiveTimestamp(l.TimestampTo, segment.GetCommitTimestamp()) < compactTime.expireTime {
 				log.RatedDebug(10, "mark binlog as expired",
 					zap.Int64("segmentID", segment.ID),
 					zap.Int64("binlogID", l.GetLogID()),
@@ -764,7 +758,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 				totalExpiredRows += int(l.GetEntriesNum())
 				totalExpiredSize += l.GetMemorySize()
 			}
-			earliestFromTs = min(earliestFromTs, l.TimestampFrom)
+			earliestFromTs = min(earliestFromTs, tsoutil.EffectiveTimestamp(l.TimestampFrom, segment.GetCommitTimestamp()))
 		}
 	}
 	if t.ShouldCompactExpiry(earliestFromTs, compactTime, segment) {

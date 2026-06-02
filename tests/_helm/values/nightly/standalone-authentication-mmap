@@ -37,6 +37,7 @@ log:
 extraConfigFiles:
   user.yaml: |+
     dataCoord:
+      targetVecIndexVersion: 10
       gc:
         interval: 1800
         missingTolerance: 1800
@@ -51,6 +52,9 @@ extraConfigFiles:
         scalarIndex: true
         growingMmapEnabled: true
     common:
+      storage:
+        # enable storage v3
+        useLoonFFI: true
       security:
         authorizationEnabled: true
 metrics:

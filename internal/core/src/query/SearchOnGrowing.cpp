@@ -181,10 +181,14 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         // step 3: brute force search where small indexing is unavailable
         auto vec_ptr = record.get_data_base(vecfield_id);
         const auto& offset_mapping = vec_ptr->get_offset_mapping();
+        const bool is_element_level_search =
+            data_type == DataType::VECTOR_ARRAY &&
+            info.array_offsets_ != nullptr;
 
         TargetBitmap transformed_bitset;
         BitsetView search_bitset = bitset;
-        if (offset_mapping.IsEnabled()) {
+        if (offset_mapping.IsEnabled() && !is_element_level_search &&
+            !bitset.empty()) {
             transformed_bitset = TransformBitset(bitset, offset_mapping);
         }
 
@@ -203,7 +207,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             search_result.unity_topK_ = info.topk_;
             return;
         }
-        if (offset_mapping.IsEnabled()) {
+        if (offset_mapping.IsEnabled() && !is_element_level_search &&
+            !bitset.empty()) {
             search_bitset =
                 search_result.PinBitset(std::move(transformed_bitset));
         }
@@ -214,9 +219,6 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         // paths share the substitution. Emb-list (multi-search-multi)
         // iterator is rejected by the proxy; the assert below is
         // defense-in-depth.
-        const bool is_element_level_search =
-            data_type == DataType::VECTOR_ARRAY &&
-            info.array_offsets_ != nullptr;
         const auto iter_data_type =
             is_element_level_search ? element_type : data_type;
         const bool use_vector_iterator = milvus::exec::UseVectorIterator(info);

@@ -7,8 +7,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,15 +126,21 @@ func teardown() {
 // managementBaseURL returns the Milvus management API base URL (port 9091)
 // derived from the gRPC addr flag (e.g. http://host:19530 -> http://host:9091).
 func managementBaseURL() string {
-	u, err := url.Parse(*addr)
-	if err != nil {
-		return "http://localhost:9091"
+	host := ""
+	rawAddr := strings.TrimSpace(*addr)
+	if rawAddr != "" {
+		parseAddr := rawAddr
+		if !strings.Contains(rawAddr, "://") {
+			parseAddr = "http://" + rawAddr
+		}
+		if u, err := url.Parse(parseAddr); err == nil {
+			host = u.Hostname()
+		}
 	}
-	host := u.Hostname()
 	if host == "" {
 		host = "localhost"
 	}
-	return fmt.Sprintf("http://%s:9091", host)
+	return fmt.Sprintf("http://%s", net.JoinHostPort(host, "9091"))
 }
 
 // AlterServerConfig changes a Milvus server config via the management HTTP API.
@@ -143,7 +151,8 @@ func AlterServerConfig(key, value string) (string, error) {
 	prev, _ := GetServerConfig(key)
 
 	body, _ := json.Marshal(map[string]string{"key": key, "value": value})
-	resp, err := http.Post(managementBaseURL()+"/management/config/alter",
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	resp, err := httpClient.Post(managementBaseURL()+"/management/config/alter",
 		"application/json", bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("management API unreachable: %w", err)
@@ -159,7 +168,8 @@ func AlterServerConfig(key, value string) (string, error) {
 
 // GetServerConfig reads a config value from the management API.
 func GetServerConfig(key string) (string, error) {
-	resp, err := http.Get(managementBaseURL() + "/management/config/get?key=" + url.QueryEscape(key))
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	resp, err := httpClient.Get(managementBaseURL() + "/management/config/get?keys=" + url.QueryEscape(key))
 	if err != nil {
 		return "", err
 	}
@@ -168,7 +178,23 @@ func GetServerConfig(key string) (string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("get config failed (HTTP %d): %s", resp.StatusCode, string(respBody))
 	}
-	return string(respBody), nil
+	var result struct {
+		Configs []struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+			Error string `json:"error"`
+		} `json:"configs"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("decode config response: %w", err)
+	}
+	if len(result.Configs) == 0 {
+		return "", fmt.Errorf("config %q not found", key)
+	}
+	if result.Configs[0].Error != "" {
+		return "", fmt.Errorf("get config %q failed: %s", key, result.Configs[0].Error)
+	}
+	return result.Configs[0].Value, nil
 }
 
 func RunTests(m *testing.M) int {

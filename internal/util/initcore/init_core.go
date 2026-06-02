@@ -502,6 +502,15 @@ func InitDiskFileWriterConfig(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitDiskFileWriterConfig failed")
 }
 
+func InitArrowReaderConfig(params *paramtable.ComponentParam) error {
+	arrowReaderConfig := C.CArrowReaderConfig{
+		hole_size_limit_bytes:  C.int64_t(params.CommonCfg.ArrowReaderHoleSizeLimitBytes.GetAsInt64()),
+		range_size_limit_bytes: C.int64_t(params.CommonCfg.ArrowReaderRangeSizeLimitBytes.GetAsInt64()),
+	}
+	status := C.InitArrowReaderConfig(arrowReaderConfig)
+	return HandleCStatus(&status, "InitArrowReaderConfig failed")
+}
+
 var coreParamCallbackInitOnce sync.Once
 
 func SetupCoreConfigChangelCallback() {
@@ -512,6 +521,15 @@ func SetupCoreConfigChangelCallback() {
 				return err
 			}
 			UpdateIndexSliceSize(size)
+			return nil
+		})
+
+		paramtable.Get().CommonCfg.StreamBudgetRatio.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			ratio, err := strconv.ParseFloat(newValue, 64)
+			if err != nil {
+				return err
+			}
+			UpdateStreamBudgetRatio(ratio)
 			return nil
 		})
 

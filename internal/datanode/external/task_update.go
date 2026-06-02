@@ -23,7 +23,7 @@ package external
 // - DataCoord pre-allocates a batch of segment IDs (default 1000) via allocator.AllocN()
 // - Pre-allocated ID range is passed to DataNode via RefreshExternalCollectionTaskRequest.PreAllocatedSegmentIds
 // - DataNode extracts the IDRange and uses pre-allocated IDs sequentially for each new segment
-// - Manifest files are written directly to final paths: external/{collectionID}/segments/{realID}/manifest
+// - Manifest files are written directly to final StorageV3 insert_log paths
 //
 // NO TEMPORARY PATHS OR CLEANUP:
 // - All segments use real, pre-allocated IDs (no temporary negative IDs)
@@ -42,24 +42,30 @@ package external
 import (
 	"context"
 	"fmt"
+	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func ensureContext(ctx context.Context) error {
@@ -90,8 +96,7 @@ type RefreshExternalCollectionTask struct {
 
 	// Result after execution — tracked separately for correct response building
 	keptSegmentIDs  []int64               // IDs of current segments that were kept unchanged
-	newSegments     []*datapb.SegmentInfo // newly created segments (from orphan fragments)
-	updatedSegments []*datapb.SegmentInfo // all segments (kept + new), retained for logging counts
+	updatedSegments []*datapb.SegmentInfo // upsert payload: patched current segments plus newly created segments
 
 	// Pre-allocated segment IDs
 	preallocatedIDRange *datapb.IDRange // pre-allocated segment ID range (begin, end)
@@ -147,7 +152,6 @@ func (t *RefreshExternalCollectionTask) Reset() {
 	t.req = nil
 	t.tr = nil
 	t.keptSegmentIDs = nil
-	t.newSegments = nil
 	t.updatedSegments = nil
 }
 
@@ -218,12 +222,11 @@ func (t *RefreshExternalCollectionTask) Execute(ctx context.Context) error {
 	}
 
 	// Compare and organize segments
-	updatedSegments, err := t.organizeSegments(ctx, currentSegmentFragments, newFragments)
+	_, err = t.organizeSegments(ctx, currentSegmentFragments, newFragments)
 	if err != nil {
 		return err
 	}
 
-	t.updatedSegments = updatedSegments
 	return nil
 }
 
@@ -270,7 +273,9 @@ func (t *RefreshExternalCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-// GetUpdatedSegments returns all result segments (kept + new) after execution
+// GetUpdatedSegments returns segments that DataCoord should upsert after execution.
+// This includes patched same-ID current segments and newly created segments, but
+// excludes unchanged kept segments.
 func (t *RefreshExternalCollectionTask) GetUpdatedSegments() []*datapb.SegmentInfo {
 	return t.updatedSegments
 }
@@ -278,11 +283,6 @@ func (t *RefreshExternalCollectionTask) GetUpdatedSegments() []*datapb.SegmentIn
 // GetKeptSegmentIDs returns IDs of current segments that were kept unchanged
 func (t *RefreshExternalCollectionTask) GetKeptSegmentIDs() []int64 {
 	return t.keptSegmentIDs
-}
-
-// GetNewSegments returns only newly created segments (from orphan fragment rebalancing)
-func (t *RefreshExternalCollectionTask) GetNewSegments() []*datapb.SegmentInfo {
-	return t.newSegments
 }
 
 // fragmentKey generates a unique key for a fragment using its FilePath and row range
@@ -294,7 +294,7 @@ func fragmentKey(f packed.Fragment) string {
 
 // buildCurrentSegmentFragments builds segment to fragments mapping from current segments
 func (t *RefreshExternalCollectionTask) buildCurrentSegmentFragments() (packed.SegmentFragments, error) {
-	return packed.BuildCurrentSegmentFragments(t.req.GetCurrentSegments(), t.req.GetStorageConfig())
+	return packed.BuildCurrentSegmentFragments(t.req.GetCurrentSegments(), t.req.GetStorageConfig(), t.columns)
 }
 
 // organizeSegments compares fragments and organizes them into segments
@@ -307,6 +307,8 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 		return nil, err
 	}
 	log := log.Ctx(ctx)
+	t.keptSegmentIDs = nil
+	t.updatedSegments = nil
 
 	// Build new fragment map using composite key (FilePath + StartRow + EndRow)
 	// This is necessary because a single file can be split into multiple fragments
@@ -320,6 +322,16 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 	// Track which fragments are used by kept segments (use composite key)
 	usedFragments := make(map[string]bool)
 	var keptSegments []*datapb.SegmentInfo
+	var patchedSegments []*datapb.SegmentInfo
+
+	var outputColumns []string
+	if t.hasFunctions() {
+		var err error
+		outputColumns, err = functionOutputColumnNames(t.req.GetSchema())
+		if err != nil {
+			return nil, fmt.Errorf("resolve function output columns: %w", err)
+		}
+	}
 
 	// Check each current segment
 	for _, seg := range t.req.GetCurrentSegments() {
@@ -343,22 +355,53 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 			}
 		}
 
-		if allFragmentsExist {
-			// Keep this segment unchanged
-			keptSegments = append(keptSegments, seg)
-			for _, f := range fragments {
-				if err := ensureContext(ctx); err != nil {
-					return nil, err
-				}
-				key := fragmentKey(f)
-				usedFragments[key] = true
-			}
-			log.Debug("Segment kept unchanged",
-				zap.Int64("segmentID", seg.GetID()))
-		} else {
+		if !allFragmentsExist {
 			// Segment invalidated - its remaining fragments become orphans
 			log.Info("Segment invalidated due to removed fragments",
 				zap.Int64("segmentID", seg.GetID()))
+			continue
+		}
+
+		reusableSegment := true
+		if len(outputColumns) > 0 {
+			hasOutputs, err := t.segmentHasFunctionOutputColumns(seg, outputColumns)
+			if err != nil {
+				return nil, err
+			}
+			if !hasOutputs {
+				reusableSegment = false
+				log.Info("Segment invalidated due to missing function output columns",
+					zap.Int64("segmentID", seg.GetID()),
+					zap.String("manifestPath", seg.GetManifestPath()))
+			}
+		}
+
+		if !reusableSegment {
+			continue
+		}
+
+		for _, f := range fragments {
+			if err := ensureContext(ctx); err != nil {
+				return nil, err
+			}
+			key := fragmentKey(f)
+			usedFragments[key] = true
+		}
+		missingColumns := missingExternalColumns(seg, t.req.GetSchema())
+		if len(missingColumns) == 0 {
+			// Keep this segment unchanged
+			keptSegments = append(keptSegments, seg)
+			log.Debug("Segment kept unchanged",
+				zap.Int64("segmentID", seg.GetID()))
+		} else {
+			patchedSegment, err := t.patchSegmentForMissingColumns(ctx, seg, fragments, missingColumns)
+			if err != nil {
+				return nil, err
+			}
+			patchedSegments = append(patchedSegments, patchedSegment)
+			log.Info("Segment patched with missing external columns",
+				zap.Int64("segmentID", seg.GetID()),
+				zap.Strings("missingColumns", missingColumns))
 		}
 	}
 
@@ -381,13 +424,16 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 	}
 
 	// Track kept vs new separately for correct response building
+	keptSegmentIDs := make([]int64, 0, len(keptSegments))
 	for _, seg := range keptSegments {
-		t.keptSegmentIDs = append(t.keptSegmentIDs, seg.GetID())
+		keptSegmentIDs = append(keptSegmentIDs, seg.GetID())
 	}
-	t.newSegments = createdSegments
+	updatedSegments := append(patchedSegments, createdSegments...)
+	t.keptSegmentIDs = keptSegmentIDs
+	t.updatedSegments = updatedSegments
 
-	// Combine kept and new segments
-	result := append(keptSegments, createdSegments...)
+	// Visible result contains unchanged kept segments plus upsert segments.
+	result := append(keptSegments, updatedSegments...)
 
 	log.Info("Segment organization complete",
 		zap.Int("keptSegments", len(keptSegments)),
@@ -395,6 +441,162 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 		zap.Int("totalSegments", len(result)))
 
 	return result, nil
+}
+
+func (t *RefreshExternalCollectionTask) segmentHasFunctionOutputColumns(seg *datapb.SegmentInfo, outputColumns []string) (bool, error) {
+	if len(outputColumns) == 0 {
+		return true, nil
+	}
+	if segmentChildFieldsContainColumns(seg, outputColumns) {
+		return true, nil
+	}
+	if seg.GetManifestPath() == "" {
+		return false, nil
+	}
+	hasColumns, err := packed.ManifestHasColumns(seg.GetManifestPath(), t.req.GetStorageConfig(), outputColumns)
+	if err != nil {
+		return false, fmt.Errorf("check function output columns for segment %d: %w", seg.GetID(), err)
+	}
+	return hasColumns, nil
+}
+
+func segmentChildFieldsContainColumns(seg *datapb.SegmentInfo, columns []string) bool {
+	required := make(map[int64]struct{}, len(columns))
+	for _, column := range columns {
+		fieldID, err := strconv.ParseInt(column, 10, 64)
+		if err != nil {
+			return false
+		}
+		required[fieldID] = struct{}{}
+	}
+
+	seen := make(map[int64]struct{}, len(required))
+	for _, binlog := range seg.GetBinlogs() {
+		for _, fieldID := range binlog.GetChildFields() {
+			if _, ok := required[fieldID]; ok {
+				seen[fieldID] = struct{}{}
+			}
+		}
+	}
+	return len(seen) == len(required)
+}
+
+func functionOutputColumnNames(schema *schemapb.CollectionSchema) ([]string, error) {
+	outputFields, err := functionOutputFields(schema)
+	if err != nil {
+		return nil, err
+	}
+	columns := make([]string, 0, len(outputFields))
+	for _, field := range outputFields {
+		columns = append(columns, strconv.FormatInt(field.GetFieldID(), 10))
+	}
+	return columns, nil
+}
+
+func targetExternalFields(schema *schemapb.CollectionSchema) map[int64]string {
+	result := make(map[int64]string)
+	if schema == nil {
+		return result
+	}
+	for _, field := range schema.GetFields() {
+		if field.GetExternalField() == "" {
+			continue
+		}
+		result[field.GetFieldID()] = field.GetExternalField()
+	}
+	return result
+}
+
+func coveredFieldsFromChildFields(seg *datapb.SegmentInfo) map[int64]struct{} {
+	result := make(map[int64]struct{})
+	for _, fieldBinlog := range seg.GetBinlogs() {
+		childFields := fieldBinlog.GetChildFields()
+		if len(childFields) == 0 && fieldBinlog.GetFieldID() > 0 {
+			result[fieldBinlog.GetFieldID()] = struct{}{}
+			continue
+		}
+		for _, fieldID := range childFields {
+			result[fieldID] = struct{}{}
+		}
+	}
+	return result
+}
+
+func missingExternalColumns(seg *datapb.SegmentInfo, schema *schemapb.CollectionSchema) []string {
+	if schema == nil {
+		return nil
+	}
+	targetFields := targetExternalFields(schema)
+	coveredFields := coveredFieldsFromChildFields(seg)
+	var missingColumns []string
+	for _, field := range schema.GetFields() {
+		externalField, ok := targetFields[field.GetFieldID()]
+		if !ok {
+			continue
+		}
+		if _, ok := coveredFields[field.GetFieldID()]; !ok {
+			missingColumns = append(missingColumns, externalField)
+		}
+	}
+	return missingColumns
+}
+
+func (t *RefreshExternalCollectionTask) patchSegmentForMissingColumns(
+	ctx context.Context,
+	seg *datapb.SegmentInfo,
+	fragments []packed.Fragment,
+	missingColumns []string,
+) (*datapb.SegmentInfo, error) {
+	schema := t.req.GetSchema()
+	newManifestPath, err := packed.AppendSegmentManifestColumns(
+		ctx,
+		seg.GetManifestPath(),
+		t.parsedSpec.Format,
+		missingColumns,
+		fragments,
+		t.req.GetStorageConfig(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to append manifest columns for segment %d: %w", seg.GetID(), err)
+	}
+
+	sampleRows := paramtable.Get().QueryNodeCfg.ExternalCollectionSampleRows.GetAsInt()
+	if int64(sampleRows) > seg.GetNumOfRows() {
+		sampleRows = int(seg.GetNumOfRows())
+	}
+	fieldSizes, err := packed.SampleExternalFieldSizes(
+		newManifestPath,
+		sampleRows,
+		t.req.GetCollectionID(),
+		t.req.GetExternalSource(),
+		t.req.GetExternalSpec(),
+		schema,
+		t.req.GetStorageConfig(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sample external field sizes for segment %d: %w", seg.GetID(), err)
+	}
+	externalAvgBytes := sumFieldSizes(fieldSizes, schema)
+	if externalAvgBytes <= 0 {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			fmt.Sprintf("external field size sample for segment %d produced non-positive average size %d", seg.GetID(), externalAvgBytes))
+	}
+	functionOutputAvgBytes, err := estimateFunctionOutputBytesPerRow(schema)
+	if err != nil {
+		return nil, err
+	}
+	memorySize := (externalAvgBytes + functionOutputAvgBytes) * seg.GetNumOfRows()
+	if memorySize <= 0 {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			fmt.Sprintf("external field size sample for segment %d produced non-positive memory size %d", seg.GetID(), memorySize))
+	}
+
+	patched := proto.Clone(seg).(*datapb.SegmentInfo)
+	patched.ManifestPath = newManifestPath
+	patched.SchemaVersion = schema.GetVersion()
+	patched.StorageVersion = storage.StorageV3
+	patched.Binlogs = buildFakeBinlogs(seg.GetID(), seg.GetNumOfRows(), memorySize, schema)
+	return patched, nil
 }
 
 // balanceFragmentsToSegments organizes fragments into segments with balanced row counts
@@ -529,7 +731,13 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			if err := ctx.Err(); err != nil {
 				return "", err
 			}
-			manifestPath, err := t.createManifestForSegment(ctx, work.segmentID, work.fragments)
+			var manifestPath string
+			var err error
+			if t.hasFunctions() {
+				manifestPath, err = t.createManifestWithFunctions(ctx, work.segmentID, work.fragments)
+			} else {
+				manifestPath, err = t.createManifestForSegment(ctx, work.segmentID, work.fragments)
+			}
 			if err != nil {
 				return "", fmt.Errorf("failed to create manifest for segment %d: %w", work.segmentID, err)
 			}
@@ -584,6 +792,10 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 	sampleRows := paramtable.Get().QueryNodeCfg.ExternalCollectionSampleRows.GetAsInt()
 	segmentAvgBytes := make([]int64, len(works))
 	var fallbackAvg int64
+	functionOutputAvgBytes, err := estimateFunctionOutputBytesPerRow(t.req.GetSchema())
+	if err != nil {
+		return nil, err
+	}
 
 	// firstSampleErr captures the first underlying sampling failure so we
 	// can surface the real root cause (e.g. "Column 'xxx' not found in
@@ -686,10 +898,11 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 	// Phase 4: Build result and mappings (sequential, lightweight)
 	result := make([]*datapb.SegmentInfo, 0, len(works))
 	for i, work := range works {
-		memorySize := segmentAvgBytes[i] * work.rowCount
+		memorySize := (segmentAvgBytes[i] + functionOutputAvgBytes) * work.rowCount
 		seg := &datapb.SegmentInfo{
 			ID:             work.segmentID,
 			CollectionID:   t.req.GetCollectionID(),
+			PartitionID:    t.req.GetPartitionID(),
 			NumOfRows:      work.rowCount,
 			ManifestPath:   manifestPaths[i],
 			StorageVersion: storage.StorageV3,
@@ -712,9 +925,10 @@ func (t *RefreshExternalCollectionTask) createManifestForSegment(
 ) (string, error) {
 	// All segments now use final paths with real IDs (no temporary paths needed)
 	// Pre-allocated IDs ensure we can write directly to final locations
-	basePath := fmt.Sprintf(
-		"external/%d/segments/%d",
+	basePath := segmentInsertLogBasePath(
+		t.req.GetStorageConfig(),
 		t.req.GetCollectionID(),
+		t.req.GetPartitionID(),
 		segmentID,
 	)
 
@@ -725,6 +939,53 @@ func (t *RefreshExternalCollectionTask) createManifestForSegment(
 		t.columns,
 		fragments,
 		t.req.GetStorageConfig(),
+	)
+}
+
+func segmentInsertLogBasePath(
+	storageConfig *indexpb.StorageConfig,
+	collectionID int64,
+	partitionID int64,
+	segmentID int64,
+) string {
+	rootPath := ""
+	if storageConfig != nil {
+		rootPath = storageConfig.GetRootPath()
+	}
+	return path.Join(rootPath, common.SegmentInsertLogPath, metautil.JoinIDPath(collectionID, partitionID, segmentID))
+}
+
+// hasFunctions returns true if the schema defines any functions.
+func (t *RefreshExternalCollectionTask) hasFunctions() bool {
+	return len(t.req.GetSchema().GetFunctions()) > 0
+}
+
+// createManifestWithFunctions builds an input manifest from the segment's
+// fragments, runs schema functions, and appends a function-output column group
+// on top. External input files are referenced, never copied.
+func (t *RefreshExternalCollectionTask) createManifestWithFunctions(
+	ctx context.Context,
+	segmentID int64,
+	fragments []packed.Fragment,
+) (string, error) {
+	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
+	basePath := segmentInsertLogBasePath(
+		t.req.GetStorageConfig(),
+		t.req.GetCollectionID(),
+		t.req.GetPartitionID(),
+		segmentID,
+	)
+
+	return ExecuteFunctionsForSegment(
+		ctx,
+		t.req.GetSchema(),
+		fragments,
+		t.parsedSpec.Format,
+		t.req.GetStorageConfig(),
+		t.req.GetCollectionID(),
+		segmentID,
+		basePath,
+		clusterID,
 	)
 }
 
@@ -754,6 +1015,27 @@ func buildFakeBinlogs(logID, numRows, memorySize int64, schema *schemapb.Collect
 			},
 		},
 	}
+}
+
+// estimateFunctionOutputBytesPerRow computes the per-row memory estimate for
+// fields generated during refresh. These fields are not present in external
+// source samples, so add them explicitly to the fake binlog memory size.
+func estimateFunctionOutputBytesPerRow(schema *schemapb.CollectionSchema) (int64, error) {
+	var total int64
+	outputFields, err := functionOutputFields(schema)
+	if err != nil {
+		return 0, err
+	}
+	for _, field := range outputFields {
+		size, err := typeutil.EstimateSizePerRecord(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{field},
+		})
+		if err != nil {
+			return 0, fmt.Errorf("estimate function output field %s: %w", field.GetName(), err)
+		}
+		total += int64(size)
+	}
+	return total, nil
 }
 
 // sumFieldSizes computes total avgBytesPerRow from per-field sampling results.

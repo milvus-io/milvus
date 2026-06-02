@@ -429,6 +429,17 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.schema.AutoID = false
 	t.schema.DbName = t.GetDbName()
 
+	disableCheck, err := common.IsDisableFuncRuntimeCheck(t.GetProperties()...)
+	if err != nil {
+		return err
+	}
+	if err := validateFunction(t.schema, "", disableCheck); err != nil {
+		return err
+	}
+	if err := normalizeFunctionOutputFields(t.schema); err != nil {
+		return err
+	}
+
 	isExternalCollection := typeutil.IsExternalCollection(t.schema)
 	hasExternalConfig := t.schema.GetExternalSource() != "" || t.schema.GetExternalSpec() != ""
 	if hasExternalConfig && !isExternalCollection {
@@ -437,14 +448,6 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 			t.schema.GetName())
 	}
 	if err := typeutil.NormalizeAndValidateExternalCollectionSchema(t.schema); err != nil {
-		return err
-	}
-
-	disableCheck, err := common.IsDisableFuncRuntimeCheck(t.GetProperties()...)
-	if err != nil {
-		return err
-	}
-	if err := validateFunction(t.schema, "", disableCheck); err != nil {
 		return err
 	}
 
@@ -927,8 +930,19 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 	if _, ok := schemapb.DataType_name[int32(newFieldSchema.GetDataType())]; !ok || newFieldSchema.GetDataType() == schemapb.DataType_None {
 		return merr.WrapErrParameterInvalid("valid field", fmt.Sprintf("field data type: %s is not supported", newFieldSchema.GetDataType()))
 	}
-	if newFieldSchema.GetExternalField() != "" {
+	isExternalCollection := typeutil.IsExternalCollection(schema)
+	if isExternalCollection && newFieldSchema.GetExternalField() == "" {
+		return merr.WrapErrParameterInvalidMsg("add field operation on external collection requires external_field mapping, field name = %s", newFieldSchema.GetName())
+	}
+	if !isExternalCollection && newFieldSchema.GetExternalField() != "" {
 		return merr.WrapErrParameterInvalidMsg("add field operation does not support external field mapping, field name = %s", newFieldSchema.GetName())
+	}
+	if isExternalCollection {
+		schemaWithNewField := proto.Clone(schema).(*schemapb.CollectionSchema)
+		schemaWithNewField.Fields = append(schemaWithNewField.GetFields(), proto.Clone(newFieldSchema).(*schemapb.FieldSchema))
+		if err := typeutil.ValidateExternalCollectionResolvedSchema(schemaWithNewField); err != nil {
+			return merr.WrapErrParameterInvalidMsg("%s", err.Error())
+		}
 	}
 	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName, common.VirtualPKFieldName}, newFieldSchema.GetName()) {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add system field, field name = %s", newFieldSchema.GetName()))
@@ -1057,6 +1071,9 @@ func (t *alterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 	if len(funcSchemas) != 1 || funcSchemas[0] == nil {
 		return merr.WrapErrParameterInvalidMsg("For now, exactly one function schema is required in alter schema task")
 	}
+	if funcSchemas[0].GetType() != schemapb.FunctionType_BM25 {
+		return merr.WrapErrParameterInvalidMsg("For now, only BM25 function is supported in alter schema task")
+	}
 	if len(fieldInfos) == 0 {
 		return merr.WrapErrParameterInvalidMsg("fieldInfos is empty, function output fields are required")
 	}
@@ -1094,21 +1111,10 @@ func (t *alterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	// Physical backfill is currently only implemented for BM25 in the datanode backfill
-	// compactor. Reject unsupported types early so the request never reaches RootCoord
-	// and no segment is left in an unrecoverable stale-schema state.
-	if addRequest.GetDoPhysicalBackfill() && funcSchemas[0].GetType() != schemapb.FunctionType_BM25 {
-		return merr.WrapErrParameterInvalidMsg(
-			"physical backfill is currently only supported for BM25 functions, got %s",
-			funcSchemas[0].GetType().String())
-	}
-
 	// Validate function-field type compatibility (e.g., BM25 requires varchar input,
 	// SparseFloatVector output). Construct a merged schema with old fields + new fields
 	// + new function, then validate only the new function to avoid re-checking existing
 	// functions' runtime providers.
-	// Deep-copy each new field schema so validateFunction's mutations (e.g. clearing
-	// IsFunctionOutput) do not affect the original request objects.
 	mergedSchema := proto.Clone(t.oldSchema).(*schemapb.CollectionSchema)
 	for _, fieldInfo := range fieldInfos {
 		mergedSchema.Fields = append(mergedSchema.Fields, proto.Clone(fieldInfo.GetFieldSchema()).(*schemapb.FieldSchema))

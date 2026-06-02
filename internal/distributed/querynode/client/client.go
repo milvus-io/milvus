@@ -431,6 +431,13 @@ func (c *Client) SyncFileResource(ctx context.Context, req *internalpb.SyncFileR
 	})
 }
 
+func (c *Client) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest, _ ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	req = typeutil.Clone(req)
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*internalpb.ClearReadTaskQueueResponse, error) {
+		return client.ClearReadTaskQueue(ctx, req)
+	})
+}
+
 func (c *Client) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest, _ ...grpc.CallOption) (*querypb.ComputePhraseMatchSlopResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(

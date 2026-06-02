@@ -415,6 +415,280 @@ func TestTimeout(t *testing.T) {
 	}
 }
 
+func TestTimeoutResponseRecorderIsolation(t *testing.T) {
+	realResponse := httptest.NewRecorder()
+	realCtx, _ := gin.CreateTestContext(realResponse)
+	buffer := &bytes.Buffer{}
+	recorder := newTimeoutResponseRecorder(buffer)
+
+	recorder.Header().Set("X-Test", "value")
+	recorder.WriteHeader(http.StatusAccepted)
+	recorder.WriteHeaderNow()
+	recorder.Flush()
+	n, err := recorder.WriteString("body")
+	assert.NoError(t, err)
+	assert.Equal(t, 4, n)
+	assert.Empty(t, realResponse.Body.String())
+	assert.Empty(t, realResponse.Header().Get("X-Test"))
+	assert.Equal(t, http.StatusAccepted, recorder.Status())
+	assert.Equal(t, 4, recorder.Size())
+	assert.True(t, recorder.Written())
+
+	assert.NoError(t, recorder.CommitTo(realCtx.Writer))
+	assert.Equal(t, http.StatusAccepted, realResponse.Code)
+	assert.Equal(t, "value", realResponse.Header().Get("X-Test"))
+	assert.Equal(t, "body", realResponse.Body.String())
+
+	recorder.CloseForTimeout()
+	n, err = recorder.Write([]byte("late"))
+	assert.Error(t, err)
+	assert.Equal(t, 0, n)
+}
+
+func TestTimeoutMiddlewareCommitsBufferedResponsesAndMetadata(t *testing.T) {
+	testCases := []struct {
+		name   string
+		status int
+		code   int32
+		write  func(c *gin.Context, code int32, message string)
+	}{
+		{
+			name:   "return",
+			status: http.StatusCreated,
+			code:   11,
+			write: func(c *gin.Context, code int32, message string) {
+				HTTPReturn(c, http.StatusCreated, gin.H{HTTPReturnCode: code, HTTPReturnMessage: message})
+			},
+		},
+		{
+			name:   "stream",
+			status: http.StatusAccepted,
+			code:   12,
+			write: func(c *gin.Context, code int32, message string) {
+				HTTPReturnStream(c, http.StatusAccepted, gin.H{HTTPReturnCode: code, HTTPReturnMessage: message})
+			},
+		},
+		{
+			name:   "abort",
+			status: http.StatusNonAuthoritativeInfo,
+			code:   13,
+			write: func(c *gin.Context, code int32, message string) {
+				HTTPAbortReturn(c, http.StatusNonAuthoritativeInfo, gin.H{HTTPReturnCode: code, HTTPReturnMessage: message})
+			},
+		},
+	}
+
+	for _, testcase := range testCases {
+		t.Run(testcase.name, func(t *testing.T) {
+			ginHandler := gin.New()
+			originalCtx := make(chan *gin.Context, 1)
+			path := "/middleware/timeout/commit/" + testcase.name
+
+			ginHandler.Use(func(c *gin.Context) {
+				c.Set(ContextUsername, "root")
+				originalCtx <- c
+				c.Next()
+			})
+			ginHandler.POST(path, timeoutMiddleware(func(c *gin.Context) {
+				username, ok := c.Get(ContextUsername)
+				assert.True(t, ok)
+				assert.Equal(t, "root", username)
+				c.Header("X-Test", testcase.name)
+				c.Set(ContextRequest, "request-"+testcase.name)
+				c.Set(ContextResponse, "response-"+testcase.name)
+				c.Set("traceID", "trace-"+testcase.name)
+				testcase.write(c, testcase.code, testcase.name)
+			}))
+
+			req := httptest.NewRequest(http.MethodPost, path, nil)
+			w := httptest.NewRecorder()
+			ginHandler.ServeHTTP(w, req)
+
+			assert.Equal(t, testcase.status, w.Code)
+			assert.Equal(t, testcase.name, w.Header().Get("X-Test"))
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.NoError(t, err)
+			assert.Equal(t, testcase.code, returnBody.Code)
+			assert.Equal(t, testcase.name, returnBody.Message)
+
+			ctx := <-originalCtx
+			value, ok := ctx.Get(HTTPReturnCode)
+			assert.True(t, ok)
+			assert.Equal(t, testcase.code, value)
+			value, ok = ctx.Get(HTTPReturnMessage)
+			assert.True(t, ok)
+			assert.Equal(t, testcase.name, value)
+			value, ok = ctx.Get(ContextRequest)
+			assert.True(t, ok)
+			assert.Equal(t, "request-"+testcase.name, value)
+			value, ok = ctx.Get(ContextResponse)
+			assert.True(t, ok)
+			assert.Equal(t, "response-"+testcase.name, value)
+			value, ok = ctx.Get("traceID")
+			assert.True(t, ok)
+			assert.Equal(t, "trace-"+testcase.name, value)
+		})
+	}
+}
+
+func TestTimeoutMiddlewarePropagatesAbortToOriginalContext(t *testing.T) {
+	ginHandler := gin.New()
+	path := "/middleware/timeout/abort-propagation"
+	nextCalled := false
+
+	ginHandler.POST(path, timeoutMiddleware(func(c *gin.Context) {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: int32(100), HTTPReturnMessage: "aborted"})
+	}), func(c *gin.Context) {
+		nextCalled = true
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: int32(200), HTTPReturnMessage: "next"})
+	})
+
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	w := httptest.NewRecorder()
+	ginHandler.ServeHTTP(w, req)
+
+	assert.False(t, nextCalled)
+	returnBody := &ReturnErrMsg{}
+	err := json.Unmarshal(w.Body.Bytes(), returnBody)
+	assert.NoError(t, err)
+	assert.Equal(t, int32(100), returnBody.Code)
+	assert.Equal(t, "aborted", returnBody.Message)
+}
+
+func TestTimeoutMiddlewareLateHandlerWritesUseCopiedContext(t *testing.T) {
+	paramtable.Get().Save(paramtable.Get().HTTPCfg.RequestTimeoutMs.Key, "10")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().HTTPCfg.RequestTimeoutMs.Key)
+	})
+
+	ginHandler := gin.New()
+	path := "/middleware/timeout/late-write"
+	originalCtx := make(chan *gin.Context, 1)
+	handlerCtx := make(chan *gin.Context, 1)
+	lateWriteDone := make(chan struct{}, 1)
+
+	ginHandler.Use(func(c *gin.Context) {
+		originalCtx <- c
+		c.Next()
+	})
+	ginHandler.POST(path, timeoutMiddleware(func(c *gin.Context) {
+		handlerCtx <- c
+		<-c.Request.Context().Done()
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: int32(12345), HTTPReturnMessage: "late write"})
+		lateWriteDone <- struct{}{}
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	w := httptest.NewRecorder()
+	ginHandler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusRequestTimeout, w.Code)
+	returnBody := &ReturnErrMsg{}
+	err := json.Unmarshal(w.Body.Bytes(), returnBody)
+	assert.NoError(t, err)
+	assert.Equal(t, merr.TimeoutCode, returnBody.Code)
+	assert.Equal(t, "request timeout", returnBody.Message)
+	assert.NotContains(t, w.Body.String(), "late write")
+
+	ctx := <-originalCtx
+	copiedCtx := <-handlerCtx
+	assert.False(t, ctx == copiedCtx)
+	select {
+	case <-lateWriteDone:
+	case <-time.After(time.Second):
+		t.Fatal("late handler write did not finish")
+	}
+
+	value, ok := ctx.Get(HTTPReturnCode)
+	assert.True(t, ok)
+	assert.Equal(t, merr.TimeoutCode, value)
+	value, ok = ctx.Get(HTTPReturnMessage)
+	assert.True(t, ok)
+	assert.Equal(t, "request timeout", value)
+}
+
+func TestRestfulSizeMiddlewarePreservesRequestContextCancel(t *testing.T) {
+	ginHandler := gin.New()
+	app := ginHandler.Group("")
+	path := "/middleware/restful-size/context-cancel"
+
+	requestCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	observed := make(chan error, 1)
+
+	app.POST(path, restfulSizeMiddleware(timeoutMiddleware(func(c *gin.Context) {
+		ctx := c.Request.Context()
+		cancel()
+		select {
+		case <-ctx.Done():
+			observed <- ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+			observed <- errors.New("request context was not canceled")
+		}
+	}), false))
+
+	req := httptest.NewRequest(http.MethodPost, path, nil).WithContext(requestCtx)
+	w := httptest.NewRecorder()
+	ginHandler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, errors.Is(<-observed, context.Canceled))
+}
+
+func TestTimeoutMiddlewarePassesDeadline(t *testing.T) {
+	ginHandler := gin.Default()
+	app := ginHandler.Group("")
+	path := "/middleware/timeout/deadline"
+	app.POST(path, timeoutMiddleware(func(c *gin.Context) {
+		deadline, ok := c.Request.Context().Deadline()
+		assert.True(t, ok)
+		assert.LessOrEqual(t, time.Until(deadline), 3*time.Second)
+		assert.Greater(t, time.Until(deadline), time.Second)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	req.Header.Set(mhttp.HTTPHeaderRequestTimeout, "3")
+	w := httptest.NewRecorder()
+
+	ginHandler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestTimeoutMiddlewareRejectsInvalidRequestTimeout(t *testing.T) {
+	for _, requestTimeout := range []string{"3.5", "abc"} {
+		t.Run(requestTimeout, func(t *testing.T) {
+			ginHandler := gin.New()
+			path := "/middleware/timeout/invalid"
+			called := make(chan struct{}, 1)
+			ginHandler.POST(path, timeoutMiddleware(func(c *gin.Context) {
+				called <- struct{}{}
+				HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil)})
+			}))
+
+			req := httptest.NewRequest(http.MethodPost, path, nil)
+			req.Header.Set(mhttp.HTTPHeaderRequestTimeout, requestTimeout)
+			w := httptest.NewRecorder()
+			ginHandler.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.NoError(t, err)
+			assert.Equal(t, merr.Code(merr.ErrParameterInvalid), returnBody.Code)
+			assert.Contains(t, returnBody.Message, mhttp.HTTPHeaderRequestTimeout)
+			assert.Contains(t, returnBody.Message, requestTimeout)
+
+			select {
+			case <-called:
+				t.Fatal("handler was invoked for invalid Request-Timeout")
+			default:
+			}
+		})
+	}
+}
+
 func TestDocInDocOutCreateCollection(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
@@ -833,7 +1107,21 @@ func TestFlush(t *testing.T) {
 
 	postTestCases := []requestBodyTestCase{}
 	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().Flush(mock.Anything, mock.Anything).Return(&milvuspb.FlushResponse{}, nil).Once()
+	mp.EXPECT().Flush(mock.Anything, mock.Anything).Return(&milvuspb.FlushResponse{
+		Status: merr.Success(),
+		CollSegIDs: map[string]*schemapb.LongArray{
+			"test": {Data: []int64{1}},
+		},
+		CollFlushTs: map[string]uint64{
+			"test": 100,
+		},
+	}, nil).Once()
+	mp.EXPECT().GetFlushState(mock.Anything, mock.MatchedBy(func(req *milvuspb.GetFlushStateRequest) bool {
+		return req.GetCollectionName() == "test" && req.GetFlushTs() == 100 && assert.ObjectsAreEqual([]int64{1}, req.GetSegmentIDs())
+	})).Return(&milvuspb.GetFlushStateResponse{
+		Status:  merr.Success(),
+		Flushed: true,
+	}, nil).Once()
 	mp.EXPECT().Flush(mock.Anything, mock.Anything).Return(
 		&milvuspb.FlushResponse{
 			Status: &commonpb.Status{
@@ -872,6 +1160,54 @@ func TestFlush(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWaitForFlush(t *testing.T) {
+	t.Run("missing flush timestamp", func(t *testing.T) {
+		h := &HandlersV2{proxy: mocks.NewMockProxy(t)}
+		err := h.waitForFlush(context.Background(), "", "test", &milvuspb.FlushResponse{
+			CollSegIDs: map[string]*schemapb.LongArray{
+				"test": {Data: []int64{1}},
+			},
+		})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to get flush timestamp")
+	})
+
+	t.Run("get flush state rpc error", func(t *testing.T) {
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().GetFlushState(mock.Anything, mock.Anything).Return(nil, errors.New("mock rpc")).Once()
+		h := &HandlersV2{proxy: mp}
+		err := h.waitForFlush(context.Background(), "", "test", &milvuspb.FlushResponse{
+			CollSegIDs: map[string]*schemapb.LongArray{
+				"test": {Data: []int64{1}},
+			},
+			CollFlushTs: map[string]uint64{
+				"test": 100,
+			},
+		})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mock rpc")
+	})
+
+	t.Run("context canceled before flush completes", func(t *testing.T) {
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().GetFlushState(mock.Anything, mock.Anything).Return(&milvuspb.GetFlushStateResponse{
+			Status: merr.Success(),
+		}, nil).Once()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		h := &HandlersV2{proxy: mp}
+		err := h.waitForFlush(ctx, "", "test", &milvuspb.FlushResponse{
+			CollSegIDs: map[string]*schemapb.LongArray{
+				"test": {Data: []int64{1}},
+			},
+			CollFlushTs: map[string]uint64{
+				"test": 100,
+			},
+		})
+		assert.ErrorIs(t, err, context.Canceled)
+	})
 }
 
 func TestDatabase(t *testing.T) {
@@ -1272,9 +1608,9 @@ func TestCreateCollection(t *testing.T) {
 
 	postTestCases := []requestBodyTestCase{}
 	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(13)
-	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
-	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
+	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(15)
+	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(8)
+	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(7)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
 	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
 	testEngine := initHTTPServerV2(mp, false)
@@ -1413,11 +1749,53 @@ func TestCreateCollection(t *testing.T) {
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path: path,
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
-		        "fields": [
-		            {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "isPartitionKey": true, "elementTypeParams": {}},
-		            {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
-		        ]
-		    }, "params": {"partitionKeyIsolation": "true"}}`),
+			        "fields": [
+			            {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "isPartitionKey": true, "elementTypeParams": {}},
+			            {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
+			        ]
+			    }, "params": {"partitionKeyIsolation": "true"}}`),
+	})
+	// Struct sub-vector index via collection_create indexParams: the
+	// structName[subName] form is registered in fieldNames so users can
+	// create the sub-vector index alongside top-level indexes in one call.
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+	        "fields": [
+	            {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
+	            {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
+	        ],
+	        "structFields": [{
+	            "fieldName": "my_struct",
+	            "fields": [
+	                {"fieldName": "sub_vec", "dataType": "ArrayOfVector", "elementDataType": "FloatVector", "elementTypeParams": {"dim": 2, "max_capacity": 4}}
+	            ]
+	        }]
+	    }, "indexParams": [
+	        {"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"},
+	        {"fieldName": "my_struct[sub_vec]", "indexName": "sub_vec_idx", "metricType": "L2"}
+	    ]}`),
+	})
+
+	// Struct sub-field qualified name that does not exist in schema is rejected.
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+	        "fields": [
+	            {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
+	            {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
+	        ],
+	        "structFields": [{
+	            "fieldName": "my_struct",
+	            "fields": [
+	                {"fieldName": "sub_vec", "dataType": "ArrayOfVector", "elementDataType": "FloatVector", "elementTypeParams": {"dim": 2, "max_capacity": 4}}
+	            ]
+	        }]
+	    }, "indexParams": [
+	        {"fieldName": "my_struct[nonexistent]", "indexName": "bad", "metricType": "L2"}
+	    ]}`),
+		errMsg:  "missing required parameters, error: `my_struct[nonexistent]` hasn't defined in schema",
+		errCode: 1802,
 	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
@@ -1597,6 +1975,36 @@ func TestCreateCollection(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, int32(0), returnBody.Code)
 	})
+}
+
+func TestCreateCollectionStructArrayDuplicateName(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	testEngine := initHTTPServerV2(mocks.NewMockProxy(t), false)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionCategory, CreateAction), bytes.NewReader([]byte(`{
+		"collectionName": "test",
+		"schema": {
+			"fields": [
+				{"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}}
+			],
+			"structFields": [{
+				"fieldName": "book_id",
+				"fields": [
+					{"fieldName": "sub_int", "dataType": "Array", "elementDataType": "Int32"}
+				]
+			}]
+		}
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	returnBody := &ReturnErrMsg{}
+	err := json.Unmarshal(w.Body.Bytes(), returnBody)
+	assert.Nil(t, err)
+	assert.Equal(t, merr.Code(merr.ErrParameterInvalid), returnBody.Code)
+	assert.Contains(t, returnBody.Message, "duplicated field name: book_id")
 }
 
 func versionalV2(category string, action string) string {
@@ -3467,4 +3875,62 @@ func TestSearchByPK(t *testing.T) {
 	})
 
 	validateTestCases(t, testEngine, queryTestCases, false)
+}
+
+func TestCommitImportJob(t *testing.T) {
+	paramtable.Init()
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().CommitImport(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+	queryTestCases := []requestBodyTestCase{}
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        versionalV2(ImportJobCategory, CommitAction),
+		requestBody: []byte(`{"jobId": "123"}`),
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        versionalV2(ImportJobCategory, CommitAction),
+		requestBody: []byte(`{"jobId": "not-a-number"}`),
+		errCode:     1100, // ErrParameterInvalid
+	})
+	for _, testcase := range queryTestCases {
+		t.Run(testcase.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader(testcase.requestBody))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
+		})
+	}
+}
+
+func TestAbortImportJob(t *testing.T) {
+	paramtable.Init()
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().AbortImport(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+	queryTestCases := []requestBodyTestCase{}
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        versionalV2(ImportJobCategory, AbortAction),
+		requestBody: []byte(`{"jobId": "123"}`),
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        versionalV2(ImportJobCategory, AbortAction),
+		requestBody: []byte(`{"jobId": "not-a-number"}`),
+		errCode:     1100, // ErrParameterInvalid
+	})
+	for _, testcase := range queryTestCases {
+		t.Run(testcase.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader(testcase.requestBody))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
+		})
+	}
 }

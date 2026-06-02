@@ -110,7 +110,10 @@ NewPackedFFIReaderWithManifest(const LoonManifest* loon_manifest,
                                int64_t needed_columns_size,
                                CFFIPackedReader* c_loon_reader,
                                CStorageConfig c_storage_config,
-                               CPluginContext* c_plugin_context);
+                               CPluginContext* c_plugin_context,
+                               int64_t collection_id,
+                               const char* external_source,
+                               const char* external_spec);
 
 /**
  * @brief Gets an ArrowArrayStream from the FFI reader for streaming data access.
