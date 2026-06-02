@@ -37,6 +37,10 @@ func TestRegistry(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.True(t, id.EQ(rmqID(1)))
+
+	id, err = message.UnmarshalMessageID(rmqID(-1).IntoProto())
+	assert.NoError(t, err)
+	assert.True(t, id.EQ(rmqID(-1)))
 }
 
 func TestWAL(t *testing.T) {
