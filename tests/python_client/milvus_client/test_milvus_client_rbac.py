@@ -1,16 +1,14 @@
 import time
+
 import numpy as np
-
 import pytest
-from pymilvus import DataType
-
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_pymilvus import *
-
+from pymilvus import DataType
+from utils.util_log import test_log as log
+from utils.util_pymilvus import *  # noqa: F403
 
 prefix = "client_rbac"
 
@@ -542,8 +540,8 @@ class TestMilvusClientRbacInvalid(TestMilvusClientV2Base):
                              new_password=new_password,
                              check_task=CheckTasks.err_res,
                              check_items={ct.err_code: 1400,
-                                          ct.err_msg: "old password not correct for %s: "
-                                                      "not authenticated" % user_name})
+                                          ct.err_msg: f"old password not correct for {user_name}: "
+                                                      "not authenticated"})
 
     def test_milvus_client_update_password_password_wrong(self, host, port):
         """
@@ -560,8 +558,8 @@ class TestMilvusClientRbacInvalid(TestMilvusClientV2Base):
         self.update_password(client, user_name=user_name, old_password=wrong_password,
                              new_password=new_password, check_task=CheckTasks.err_res,
                              check_items={ct.err_code: 1400,
-                                          ct.err_msg: "old password not correct for %s: "
-                                                      "not authenticated" % user_name})
+                                          ct.err_msg: f"old password not correct for {user_name}: "
+                                                      "not authenticated"})
 
     def test_milvus_client_update_password_new_password_same(self, host, port):
         """
@@ -687,11 +685,11 @@ class TestMilvusClientRbacInvalid(TestMilvusClientV2Base):
         client = self._client()
         role_name = cf.gen_unique_str(role_pre)
         self.create_role(client, role_name=role_name)
-        
+
         error_msg = f"`privilege_group` value {name} is illegal"
         self.create_privilege_group(client, privilege_group=name, check_task=CheckTasks.err_res,
                                     check_items={ct.err_code: 1, ct.err_msg: error_msg})
-        
+
         # cleanup
         self.drop_role(client, role_name=role_name)
 
@@ -705,11 +703,11 @@ class TestMilvusClientRbacInvalid(TestMilvusClientV2Base):
         client = self._client()
         role_name = cf.gen_unique_str(role_pre)
         self.create_role(client, role_name=role_name)
-        
+
         error_msg = f"privilege group name {name} can only contain numbers, letters and underscores: invalid parameter"
         self.create_privilege_group(client, privilege_group=name, check_task=CheckTasks.err_res,
                                     check_items={ct.err_code: 1100, ct.err_msg: error_msg})
-        
+
         # cleanup
         self.drop_role(client, role_name=role_name)
 
@@ -723,11 +721,11 @@ class TestMilvusClientRbacInvalid(TestMilvusClientV2Base):
         client = self._client()
         role_name = cf.gen_unique_str(role_pre)
         self.create_role(client, role_name=role_name)
-        
+
         error_msg = f"`privilege_group` value {name} is illegal"
         self.drop_privilege_group(client, privilege_group=name, check_task=CheckTasks.err_res,
                                   check_items={ct.err_code: 1, ct.err_msg: error_msg})
-        
+
         # cleanup
         self.drop_role(client, role_name=role_name)
 
@@ -741,12 +739,12 @@ class TestMilvusClientRbacInvalid(TestMilvusClientV2Base):
         client = self._client()
         role_name = cf.gen_unique_str(role_pre)
         self.create_role(client, role_name=role_name)
-        
+
         error_msg = f"`privilege_group` value {name} is illegal"
-        self.add_privileges_to_group(client, privilege_group=name, privileges=["Insert"], 
+        self.add_privileges_to_group(client, privilege_group=name, privileges=["Insert"],
                                      check_task=CheckTasks.err_res,
                                      check_items={ct.err_code: 1, ct.err_msg: error_msg})
-        
+
         # cleanup
         self.drop_role(client, role_name=role_name)
 
@@ -760,12 +758,12 @@ class TestMilvusClientRbacInvalid(TestMilvusClientV2Base):
         client = self._client()
         role_name = cf.gen_unique_str(role_pre)
         self.create_role(client, role_name=role_name)
-        
+
         error_msg = f"privilege group name {name} can only contain numbers, letters and underscores: invalid parameter"
-        self.add_privileges_to_group(client, privilege_group=name, privileges=["Insert"], 
+        self.add_privileges_to_group(client, privilege_group=name, privileges=["Insert"],
                                      check_task=CheckTasks.err_res,
                                      check_items={ct.err_code: 1100, ct.err_msg: error_msg})
-        
+
         # cleanup
         self.drop_role(client, role_name=role_name)
 
@@ -778,13 +776,13 @@ class TestMilvusClientRbacInvalid(TestMilvusClientV2Base):
         client = self._client()
         role_name = cf.gen_unique_str(role_pre)
         self.create_role(client, role_name=role_name)
-        
+
         privilege_group_name = "privilege_group_not_exist"
         error_msg = f"there is no privilege group name [{privilege_group_name}] defined in system"
-        self.add_privileges_to_group(client, privilege_group=privilege_group_name, privileges=["Insert"], 
+        self.add_privileges_to_group(client, privilege_group=privilege_group_name, privileges=["Insert"],
                                      check_task=CheckTasks.err_res,
                                      check_items={ct.err_code: 1100, ct.err_msg: error_msg})
-        
+
         # cleanup
         self.drop_role(client, role_name=role_name)
 
@@ -798,12 +796,12 @@ class TestMilvusClientRbacInvalid(TestMilvusClientV2Base):
         client = self._client()
         role_name = cf.gen_unique_str(role_pre)
         self.create_role(client, role_name=role_name)
-        
+
         error_msg = f"`privileges` value {name} is illegal"
-        self.add_privileges_to_group(client, privilege_group="privilege_group_1", privileges=name, 
+        self.add_privileges_to_group(client, privilege_group="privilege_group_1", privileges=name,
                                      check_task=CheckTasks.err_res,
                                      check_items={ct.err_code: 1, ct.err_msg: error_msg})
-        
+
         # cleanup
         self.drop_role(client, role_name=role_name)
 
@@ -817,12 +815,12 @@ class TestMilvusClientRbacInvalid(TestMilvusClientV2Base):
         client = self._client()
         role_name = cf.gen_unique_str(role_pre)
         self.create_role(client, role_name=role_name)
-        
+
         error_msg = f"{name}"
-        self.remove_privileges_from_group(client, privilege_group=name, privileges=["Insert"], 
+        self.remove_privileges_from_group(client, privilege_group=name, privileges=["Insert"],
                                           check_task=CheckTasks.err_res,
                                           check_items={ct.err_code: 1, ct.err_msg: error_msg})
-        
+
         # cleanup
         self.drop_role(client, role_name=role_name)
 
@@ -836,12 +834,12 @@ class TestMilvusClientRbacInvalid(TestMilvusClientV2Base):
         client = self._client()
         role_name = cf.gen_unique_str(role_pre)
         self.create_role(client, role_name=role_name)
-        
+
         error_msg = f"`privileges` value {name} is illegal"
-        self.remove_privileges_from_group(client, privilege_group="privilege_group_1", privileges=name, 
+        self.remove_privileges_from_group(client, privilege_group="privilege_group_1", privileges=name,
                                           check_task=CheckTasks.err_res,
                                           check_items={ct.err_code: 1, ct.err_msg: error_msg})
-        
+
         # cleanup
         self.drop_role(client, role_name=role_name)
 
@@ -1275,18 +1273,18 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         """
         client = self._client()
         role_name = cf.gen_unique_str(role_pre)
-        
+
         # create new role
         self.create_role(client, role_name=role_name)
-        
+
         # add root user to the new role
         self.grant_role(client, user_name=ct.default_user, role_name=role_name)
-        
+
         # verify root user has the role
         user_info, _ = self.describe_user(client, user_name=ct.default_user)
         assert user_info["user_name"] == ct.default_user
         assert role_name in user_info.get("roles", [])
-        
+
         # drop the role
         self.drop_role(client, role_name=role_name)
 
@@ -1299,40 +1297,40 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         client = self._client()
         role_name = cf.gen_unique_str(role_pre)
         collection_name = cf.gen_unique_str(prefix)
-        
+
         # create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        
+
         # create new role
         self.create_role(client, role_name=role_name)
-        
+
         # grant collection privileges to role
         self.grant_privilege(client, role_name, "Collection", "Search", collection_name)
         self.grant_privilege(client, role_name, "Collection", "Insert", collection_name)
-        
+
         # wait for privilege to take effect
         time.sleep(10)
-        
+
         # describe role to get privileges
         role_info, _ = self.describe_role(client, role_name=role_name)
-        
+
         # verify grants
         privileges = role_info.get("privileges", [])
         assert len(privileges) == 2
-        
+
         privilege_names = [priv["privilege"] for priv in privileges]
         assert "Search" in privilege_names
         assert "Insert" in privilege_names
-        
+
         # verify object type and name
         for priv in privileges:
             assert priv["object_type"] == "Collection"
             assert priv["object_name"] == collection_name
-        
+
         # revoke privileges
         for priv in privileges:
             self.revoke_privilege(client, role_name, priv["object_type"], priv["privilege"], priv["object_name"])
-        
+
         # drop role and collection
         self.drop_role(client, role_name=role_name)
         self.drop_collection(client, collection_name)
@@ -1345,40 +1343,40 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         """
         client = self._client()
         role_name = cf.gen_unique_str(role_pre)
-        
+
         # create new role
         self.create_role(client, role_name=role_name)
-        
+
         # grant global privileges to role
         self.grant_privilege(client, role_name, "Global", "CreateCollection", "*")
         self.grant_privilege(client, role_name, "Global", "All", "*")
-        
+
         # wait for privilege to take effect
         time.sleep(10)
-        
+
         # describe role to get privileges
         role_info, _ = self.describe_role(client, role_name=role_name)
-        
+
         # verify grants
         privileges = role_info.get("privileges", [])
         assert len(privileges) == 2
-        
+
         privilege_names = [priv["privilege"] for priv in privileges]
         assert "CreateCollection" in privilege_names
         assert "All" in privilege_names
-        
+
         # verify object type and name
         for priv in privileges:
             assert priv["object_type"] == "Global"
             assert priv["object_name"] == "*"
-        
+
         # revoke privileges
         for priv in privileges:
             self.revoke_privilege(client, role_name, priv["object_type"], priv["privilege"], priv["object_name"])
-        
+
         # wait for revoke to take effect
         time.sleep(10)
-        
+
         # drop role
         self.drop_role(client, role_name=role_name)
 
@@ -1392,7 +1390,7 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         user_name = cf.gen_unique_str(user_pre)
         password = cf.gen_str_by_length(contain_numbers=True)
         collection_name = cf.gen_unique_str(prefix)
-        
+
         # create user
         self.create_user(client, user_name=user_name, password=password)
         # grant admin role to user
@@ -1402,17 +1400,17 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         # create new client with the user credentials
         uri = f"http://{host}:{port}"
         user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
-        
+
         # test admin privileges by performing CRUD operations
         # create collection
         self.create_collection(user_client, collection_name, default_dim, consistency_level="Strong")
-        
+
         # insert data
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         self.insert(user_client, collection_name, rows)
-        
+
         # create index
         index_params, _ = self.prepare_index_params(user_client)
         index_params.add_index(field_name=default_vector_field_name)
@@ -1420,18 +1418,18 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
 
         # load collection
         self.load_collection(user_client, collection_name)
-        
+
         # verify collection has data
         self.flush(user_client, collection_name)
         num_entities, _ = self.get_collection_stats(user_client, collection_name)
         assert num_entities['row_count'] == default_nb
-        
+
         # release collection
         self.release_collection(user_client, collection_name)
-        
+
         # drop collection
         self.drop_collection(user_client, collection_name)
-        
+
         # drop user
         self.drop_user(client, user_name=user_name)
 
@@ -1447,12 +1445,12 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         password = cf.gen_str_by_length(contain_numbers=True)
         collection_name = cf.gen_unique_str(prefix)
         role_name = cf.gen_unique_str(role_pre)
-        
+
         # create user and role
         self.create_user(client, user_name=user_name, password=password)
         self.create_role(client, role_name=role_name)
         self.grant_role(client, user_name=user_name, role_name=role_name)
-        
+
         # handle database parameter
         if with_db:
             db_name = cf.gen_unique_str(prefix)
@@ -1460,24 +1458,24 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
             self.using_database(client, db_name)
         else:
             db_name = "default"
-        
+
         # create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        
+
         # grant collection load privileges to role
         self.grant_privilege(client, role_name, "Collection", "Load", collection_name, db_name=db_name)
         self.grant_privilege(client, role_name, "Collection", "GetLoadingProgress", collection_name, db_name=db_name)
-        
+
         # wait for privilege to take effect
         time.sleep(10)
-        
+
         # create new client with the user credentials
         uri = f"http://{host}:{port}"
         user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
 
         # test load privilege
         self.load_collection(user_client, collection_name)
-        
+
         # cleanup
         self.drop_collection(client, collection_name)
         if with_db:
@@ -1496,12 +1494,12 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         password = cf.gen_str_by_length(contain_numbers=True)
         collection_name = cf.gen_unique_str(prefix)
         role_name = cf.gen_unique_str(role_pre)
-        
+
         # create user and role
         self.create_user(client, user_name=user_name, password=password)
         self.create_role(client, role_name=role_name)
         self.grant_role(client, user_name=user_name, role_name=role_name)
-        
+
         # handle database parameter
         if with_db:
             db_name = cf.gen_unique_str(prefix)
@@ -1509,26 +1507,26 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
             self.using_database(client, db_name)
         else:
             db_name = "default"
-        
+
         # create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        
+
         # load collection
         self.load_collection(client, collection_name)
-        
+
         # grant collection release privilege to role
         self.grant_privilege(client, role_name, "Collection", "Release", collection_name, db_name=db_name)
-        
+
         # wait for privilege to take effect
         time.sleep(10)
-        
+
         # create new client with the user credentials
         uri = f"http://{host}:{port}"
         user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
 
         # test release privilege
         self.release_collection(user_client, collection_name)
-        
+
         # cleanup
         self.drop_collection(client, collection_name)
         if with_db:
@@ -1547,12 +1545,12 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         password = cf.gen_str_by_length(contain_numbers=True)
         collection_name = cf.gen_unique_str(prefix)
         role_name = cf.gen_unique_str(role_pre)
-        
+
         # create user and role
         self.create_user(client, user_name=user_name, password=password)
         self.create_role(client, role_name=role_name)
         self.grant_role(client, user_name=user_name, role_name=role_name)
-        
+
         # handle database parameter
         if with_db:
             db_name = cf.gen_unique_str(prefix)
@@ -1560,16 +1558,16 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
             self.using_database(client, db_name)
         else:
             db_name = "default"
-        
+
         # create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        
+
         # grant collection insert privilege to role
         self.grant_privilege(client, role_name, "Collection", "Insert", collection_name, db_name=db_name)
-        
+
         # wait for privilege to take effect
         time.sleep(10)
-        
+
         # create new client with the user credentials
         uri = f"http://{host}:{port}"
         user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
@@ -1579,7 +1577,7 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         self.insert(user_client, collection_name, rows)
-        
+
         # cleanup
         self.drop_collection(client, collection_name)
         if with_db:
@@ -1598,12 +1596,12 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         password = cf.gen_str_by_length(contain_numbers=True)
         collection_name = cf.gen_unique_str(prefix)
         role_name = cf.gen_unique_str(role_pre)
-        
+
         # create user and role
         self.create_user(client, user_name=user_name, password=password)
         self.create_role(client, role_name=role_name)
         self.grant_role(client, user_name=user_name, role_name=role_name)
-        
+
         # handle database parameter
         if with_db:
             db_name = cf.gen_unique_str(prefix)
@@ -1611,16 +1609,16 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
             self.using_database(client, db_name)
         else:
             db_name = "default"
-        
+
         # create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
 
         # grant collection delete privilege to role
         self.grant_privilege(client, role_name, "Collection", "Delete", collection_name, db_name=db_name)
-        
+
         # wait for privilege to take effect
         time.sleep(10)
-        
+
         # create new client with the user credentials
         uri = f"http://{host}:{port}"
         user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
@@ -1628,7 +1626,7 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         # test delete privilege
         delete_expr = f'{default_primary_key_field_name} == 0'
         self.delete(user_client, collection_name, filter=delete_expr)
-        
+
         # cleanup
         self.drop_collection(client, collection_name)
         if with_db:
@@ -1647,54 +1645,54 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(prefix)
         collection_name_2 = cf.gen_unique_str(prefix)
         role_name = cf.gen_unique_str(role_pre)
-        
+
         # create user
         self.create_user(client, user_name=user_name, password=password)
-        
+
         # create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        
+
         # create index
         index_params, _ = self.prepare_index_params(client)
         index_params.add_index(field_name=default_vector_field_name)
         self.create_index(client, collection_name, index_params)
-        
+
         # create new client with the user credentials
         uri = f"http://{host}:{port}"
         user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
-        
+
         # wait for user to be created
         time.sleep(10)
-        
+
         # test collection permission deny (new user has no privileges)
         self.load_collection(user_client, collection_name, check_task=CheckTasks.check_permission_deny)
         self.release_collection(user_client, collection_name, check_task=CheckTasks.check_permission_deny)
-        
+
         # test insert permission deny
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         self.insert(user_client, collection_name, rows, check_task=CheckTasks.check_permission_deny)
-        
+
         # test delete permission deny
         delete_expr = f'{default_primary_key_field_name} == 0'
         self.delete(user_client, collection_name, filter=delete_expr, check_task=CheckTasks.check_permission_deny)
-        
+
         # test search permission deny
         vectors_to_search = rng.random((1, default_dim))
         self.search(user_client, collection_name, vectors_to_search, check_task=CheckTasks.check_permission_deny)
-        
+
         # test query permission deny
         query_expr = f'{default_primary_key_field_name} in [0, 1]'
         self.query(user_client, collection_name, filter=query_expr, check_task=CheckTasks.check_permission_deny)
-        
+
         # test global permission deny
         self.create_collection(user_client, collection_name_2, default_dim, consistency_level="Strong", check_task=CheckTasks.check_permission_deny)
         self.drop_collection(user_client, collection_name, check_task=CheckTasks.check_permission_deny)
         self.create_user(user_client, user_name=collection_name, password=password, check_task=CheckTasks.check_permission_deny)
         self.create_role(user_client, role_name=role_name, check_task=CheckTasks.check_permission_deny)
         self.drop_user(user_client, user_name=user_name, check_task=CheckTasks.check_permission_deny)
-        
+
         # cleanup
         self.drop_collection(client, collection_name)
         self.drop_user(client, user_name=user_name)
@@ -1709,26 +1707,26 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         client = self._client()
         user_name = cf.gen_unique_str(user_pre)
         password = cf.gen_str_by_length(contain_numbers=True)
-        
+
         # create user
         self.create_user(client, user_name=user_name, password=password)
-        
+
         # grant role to user (add user to role)
         self.grant_role(client, user_name=user_name, role_name=role_name)
-        
+
         # verify user has the role
         user_info, _ = self.describe_user(client, user_name=user_name)
         assert user_info["user_name"] == user_name
         assert role_name in user_info.get("roles", [])
-        
+
         # revoke role from user (remove user from role)
         self.revoke_role(client, user_name=user_name, role_name=role_name)
-        
+
         # verify user no longer has the role
         user_info, _ = self.describe_user(client, user_name=user_name)
         assert user_info["user_name"] == user_name
         assert role_name not in user_info.get("roles", [])
-        
+
         # cleanup
         self.drop_user(client, user_name=user_name)
 
@@ -1740,16 +1738,16 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         expected: fail to drop
         """
         client = self._client()
-        
+
         # verify role exists
         roles, _ = self.list_roles(client)
         assert role_name in roles
-        
+
         # try to drop default role (should fail)
         error_msg = f"the role[{role_name}] is a default role, which can't be dropped"
         self.drop_role(client, role_name=role_name, check_task=CheckTasks.err_res,
                        check_items={ct.err_code: 1401, ct.err_msg: error_msg})
-        
+
         # verify role still exists
         roles, _ = self.list_roles(client)
         assert role_name in roles
@@ -1764,19 +1762,19 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         user_name = cf.gen_unique_str(user_pre)
         password = cf.gen_str_by_length(contain_numbers=True)
         role_name = cf.gen_unique_str(role_pre)
-        
+
         # create user
         self.create_user(client, user_name=user_name, password=password)
-        
+
         # verify role does not exist
         roles, _ = self.list_roles(client)
         assert role_name not in roles
-        
+
         # try to grant non-existent role to user (should fail)
         error_msg = "not found the role, maybe the role isn't existed or internal system error"
         self.grant_role(client, user_name=user_name, role_name=role_name, check_task=CheckTasks.err_res,
                         check_items={ct.err_code: 65535, ct.err_msg: error_msg})
-        
+
         # cleanup
         self.drop_user(client, user_name=user_name)
 
@@ -1790,27 +1788,26 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         user_name = cf.gen_unique_str(user_pre)
         password = cf.gen_str_by_length(contain_numbers=True)
         role_name = cf.gen_unique_str(role_pre)
-        
+
         # create user
         self.create_user(client, user_name=user_name, password=password)
-        
+
         # create role
         self.create_role(client, role_name=role_name)
-        
+
         # verify role does not have the user
         role_info, _ = self.describe_role(client, role_name=role_name)
         role_users = role_info.get("users", [])
         assert user_name not in role_users
-        
+
         # try to revoke user from role (should fail since user is not in the role)
-        error_msg = "not found the role, maybe the role isn't existed or internal system error"
         self.revoke_role(client, user_name=user_name, role_name=role_name)
-        
+
         # verify user is still not in the role
         role_info, _ = self.describe_role(client, role_name=role_name)
         role_users = role_info.get("users", [])
         assert user_name not in role_users
-        
+
         # cleanup
         self.drop_role(client, role_name=role_name)
         self.drop_user(client, user_name=user_name)
@@ -1823,11 +1820,11 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         """
         client = self._client()
         role_name = cf.gen_unique_str(role_pre)
-        
+
         # verify role does not exist
         roles, _ = self.list_roles(client)
         assert role_name not in roles
-        
+
         # try to describe non-existent role (should fail)
         error_msg = "not found the role, maybe the role isn't existed or internal system error"
         self.describe_role(client, role_name=role_name, check_task=CheckTasks.err_res,
