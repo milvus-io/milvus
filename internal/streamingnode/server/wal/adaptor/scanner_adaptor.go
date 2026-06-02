@@ -24,7 +24,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -362,7 +361,7 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 
 		if len(msgs) > 0 {
 			// Push the confirmed messages into pending queue for consuming.
-			if s.logger.LevelEnabled(zap.DebugLevel) {
+			if s.logger.LevelEnabled(mlog.DebugLevel) {
 				for _, m := range msgs {
 					s.logger.Debug(context.TODO(), "push message into pending queue",
 						mlog.Uint64("committedTimeTick", msg.TimeTick()),

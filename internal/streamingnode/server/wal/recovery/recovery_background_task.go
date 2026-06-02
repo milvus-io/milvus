@@ -6,7 +6,6 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -59,7 +58,7 @@ func (rs *recoveryStorageImpl) backgroundTask() {
 		case <-rs.persistNotifier:
 		case <-ticker.C:
 		}
-		if err := rs.persistDirtySnapshot(rs.backgroundTaskNotifier.Context(), zap.DebugLevel); err != nil {
+		if err := rs.persistDirtySnapshot(rs.backgroundTaskNotifier.Context(), mlog.DebugLevel); err != nil {
 			return
 		}
 	}
@@ -71,7 +70,7 @@ func (rs *recoveryStorageImpl) persistDritySnapshotWhenClosing() error {
 	defer cancel()
 
 	for rs.isDirty() {
-		if err := rs.persistDirtySnapshot(ctx, zap.InfoLevel); err != nil {
+		if err := rs.persistDirtySnapshot(ctx, mlog.InfoLevel); err != nil {
 			return err
 		}
 	}

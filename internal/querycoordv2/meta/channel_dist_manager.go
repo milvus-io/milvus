@@ -21,7 +21,6 @@ import (
 	"sync"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
@@ -353,7 +352,7 @@ func (m *ChannelDistManager) GetShardLeader(channelName string, replica *Replica
 			}
 		}
 	}
-	if mlog.LevelEnabled(zap.DebugLevel) {
+	if mlog.LevelEnabled(mlog.DebugLevel) {
 		logger := mlog.With(
 			mlog.String("Scope", "ChannelDistManager"),
 			mlog.String("channelName", channelName),

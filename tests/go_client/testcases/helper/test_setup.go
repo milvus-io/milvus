@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
@@ -75,15 +74,15 @@ func parseLogConfig() {
 	mlog.Info(context.TODO(), "Parser Log Level", mlog.String("logLevel", *logLevel))
 	switch *logLevel {
 	case "debug", "DEBUG", "Debug":
-		mlog.SetLevel(zap.DebugLevel)
+		mlog.SetLevel(mlog.DebugLevel)
 	case "info", "INFO", "Info":
-		mlog.SetLevel(zap.InfoLevel)
+		mlog.SetLevel(mlog.InfoLevel)
 	case "warn", "WARN", "Warn":
-		mlog.SetLevel(zap.WarnLevel)
+		mlog.SetLevel(mlog.WarnLevel)
 	case "error", "ERROR", "Error":
-		mlog.SetLevel(zap.ErrorLevel)
+		mlog.SetLevel(mlog.ErrorLevel)
 	default:
-		mlog.SetLevel(zap.InfoLevel)
+		mlog.SetLevel(mlog.InfoLevel)
 	}
 }
 

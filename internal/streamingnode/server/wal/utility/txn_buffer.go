@@ -3,8 +3,6 @@ package utility
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -184,7 +182,7 @@ func (b *TxnBuffer) clearExpiredTxn(ts uint64) {
 			delete(b.builders, txnID)
 			b.bytes -= builder.EstimateSize()
 			b.metrics.ObserveExpiredTxn()
-			if b.logger.LevelEnabled(zap.DebugLevel) {
+			if b.logger.LevelEnabled(mlog.DebugLevel) {
 				b.logger.Debug(context.TODO(), "the txn is expired, so drop the txn from buffer",
 					mlog.Int64("txnID", int64(txnID)),
 					mlog.Uint64("expiredTimeTick", builder.ExpiredTimeTick()),
