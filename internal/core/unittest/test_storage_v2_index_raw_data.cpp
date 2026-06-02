@@ -116,9 +116,12 @@ TEST_F(StorageV2IndexRawDataTest, TestDiskFileManger) {
     // Write data to storage v2
     auto paths = std::vector<std::string>{path_ + "0/19530.parquet",
                                           path_ + "101/19531.parquet"};
-    for (auto& p : paths) {
-        boost::filesystem::create_directories(
-            boost::filesystem::path(p).parent_path());
+
+    // Create directories for the parquet files
+    for (const auto& path : paths) {
+        auto dir_path = path.substr(0, path.find_last_of('/'));
+        auto status = fs_->CreateDir(dir_path);
+        EXPECT_TRUE(status.ok()) << "Failed to create directory: " << dir_path;
     }
     auto column_groups = std::vector<std::vector<int>>{
         {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}, {15}};
