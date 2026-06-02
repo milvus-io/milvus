@@ -43,7 +43,6 @@
 #include "pb/schema.pb.h"
 #include "prometheus/histogram.h"
 #include "query/PlanImpl.h"
-#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
 #include "segcore/pkVisitor.h"
@@ -129,13 +128,8 @@ ReduceHelper::IsSearchResultRefineEnabled(SearchResult* search_result) const {
         return false;
     }
     auto segment = static_cast<SegmentInterface*>(search_result->segment_);
-    if (auto* chunked_segment =
-            dynamic_cast<ChunkedSegmentSealedImpl*>(segment)) {
-        return chunked_segment->IsIndexRefineEnabled(
-            op_ctx_, plan_->plan_node_->search_info_.field_id_);
-    }
     return segment->IsIndexRefineEnabled(
-        plan_->plan_node_->search_info_.field_id_);
+        op_ctx_, plan_->plan_node_->search_info_.field_id_);
 }
 
 void
@@ -422,24 +416,13 @@ ReduceHelper::RefineOneSegment(SearchResult* search_result,
         auto result_count = static_cast<size_t>(count);
         auto* offsets = &search_result->seg_offsets_[nq_begin];
         new_distances.resize(result_count);
-        bool ok = false;
-        if (auto* chunked_segment =
-                dynamic_cast<ChunkedSegmentSealedImpl*>(segment)) {
-            ok = chunked_segment->CalcDistByIDs(op_ctx_,
-                                                field_id,
-                                                query_dataset,
-                                                offsets,
-                                                count,
-                                                is_cosine,
-                                                new_distances.data());
-        } else {
-            ok = segment->CalcDistByIDs(field_id,
-                                        query_dataset,
-                                        offsets,
-                                        count,
-                                        is_cosine,
-                                        new_distances.data());
-        }
+        bool ok = segment->CalcDistByIDs(op_ctx_,
+                                         field_id,
+                                         query_dataset,
+                                         offsets,
+                                         count,
+                                         is_cosine,
+                                         new_distances.data());
         if (!ok) {
             LOG_WARN(
                 "failed to refine distances by ids, keep approximate "
