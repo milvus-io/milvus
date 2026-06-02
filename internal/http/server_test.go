@@ -31,7 +31,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/http/healthz"
@@ -70,14 +69,14 @@ func (suite *HTTPServerTestSuite) TestGetHTTPAddr() {
 }
 
 func (suite *HTTPServerTestSuite) TestDefaultLogHandler() {
-	mlog.SetLevel(zap.DebugLevel)
-	suite.Equal(zap.DebugLevel, mlog.GetLevel())
+	mlog.SetLevel(mlog.DebugLevel)
+	suite.Equal(mlog.DebugLevel, mlog.GetLevel())
 
 	// replace global logger, log change will not be affected.
 	conf := &mlog.Config{Level: "info", File: mlog.FileLogConfig{}, DisableTimestamp: true}
 	logger, p, _ := mlog.InitLogger(conf)
 	mlog.ReplaceGlobals(logger, p)
-	suite.Equal(zap.InfoLevel, mlog.GetLevel())
+	suite.Equal(mlog.InfoLevel, mlog.GetLevel())
 
 	// change log level through http
 	payload, err := json.Marshal(map[string]any{"level": "error"})
@@ -96,7 +95,7 @@ func (suite *HTTPServerTestSuite) TestDefaultLogHandler() {
 	body, err := io.ReadAll(resp.Body)
 	suite.Require().NoError(err)
 	suite.Equal("{\"level\":\"error\"}\n", string(body))
-	suite.Equal(zap.ErrorLevel, mlog.GetLevel())
+	suite.Equal(mlog.ErrorLevel, mlog.GetLevel())
 }
 
 func (suite *HTTPServerTestSuite) TestHealthzHandler() {

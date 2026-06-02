@@ -6,11 +6,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -237,7 +237,7 @@ func TestPersistDirtySnapshotWithSalvageCheckpoint(t *testing.T) {
 		metrics:                  newRecoveryStorageMetrics(types.PChannelInfo{Name: "test-pchannel"}),
 	}
 
-	err := rs.persistDirtySnapshot(context.Background(), zap.InfoLevel)
+	err := rs.persistDirtySnapshot(context.Background(), mlog.InfoLevel)
 	assert.NoError(t, err)
 	assert.Nil(t, rs.pendingPersistSnapshot)
 }

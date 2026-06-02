@@ -41,35 +41,35 @@ func (l *logger) WithError(err error) plog.Entry {
 }
 
 func (l *logger) Debug(args ...interface{}) {
-	l.logWithLevel(zap.DebugLevel, args...)
+	l.logWithLevel(mlog.DebugLevel, args...)
 }
 
 func (l *logger) Info(args ...interface{}) {
-	l.logWithLevel(zap.InfoLevel, args...)
+	l.logWithLevel(mlog.InfoLevel, args...)
 }
 
 func (l *logger) Warn(args ...interface{}) {
-	l.logWithLevel(zap.WarnLevel, args...)
+	l.logWithLevel(mlog.WarnLevel, args...)
 }
 
 func (l *logger) Error(args ...interface{}) {
-	l.logWithLevel(zap.ErrorLevel, args...)
+	l.logWithLevel(mlog.ErrorLevel, args...)
 }
 
 func (l *logger) Debugf(format string, args ...interface{}) {
-	l.logWithLevel(zap.DebugLevel, format)
+	l.logWithLevel(mlog.DebugLevel, format)
 }
 
 func (l *logger) Infof(format string, args ...interface{}) {
-	l.logWithLevel(zap.InfoLevel, format)
+	l.logWithLevel(mlog.InfoLevel, format)
 }
 
 func (l *logger) Warnf(format string, args ...interface{}) {
-	l.logWithLevel(zap.WarnLevel, format)
+	l.logWithLevel(mlog.WarnLevel, format)
 }
 
 func (l *logger) Errorf(format string, args ...interface{}) {
-	l.logWithLevel(zap.ErrorLevel, format)
+	l.logWithLevel(mlog.ErrorLevel, format)
 }
 
 func (l *logger) logWithLevel(level zapcore.Level, args ...interface{}) {

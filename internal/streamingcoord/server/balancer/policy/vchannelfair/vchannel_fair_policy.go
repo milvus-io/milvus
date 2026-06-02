@@ -6,7 +6,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -98,7 +97,7 @@ func (p *policy) Balance(currentLayout balancer.CurrentLayout) (layout balancer.
 	greatestSnapshot := snapshot.Clone()
 	p.assignChannels(expectedLayout, reassignChannelIDs, &greatestSnapshot)
 	if greatestSnapshot.GlobalUnbalancedScore < snapshot.GlobalUnbalancedScore-p.cfg.RebalanceTolerance {
-		if p.Logger().LevelEnabled(zap.DebugLevel) {
+		if p.Logger().LevelEnabled(mlog.DebugLevel) {
 			p.Logger().Debug(context.TODO(),
 
 				"vchannel fair policy rebalance result found",
@@ -112,7 +111,7 @@ func (p *policy) Balance(currentLayout balancer.CurrentLayout) (layout balancer.
 			ChannelAssignment: greatestSnapshot.Assignments,
 		}, nil
 	}
-	if p.Logger().LevelEnabled(zap.DebugLevel) {
+	if p.Logger().LevelEnabled(mlog.DebugLevel) {
 		p.Logger().Debug(context.TODO(),
 
 			"vchannel fair policy rebalance result ignored with rebalance tolerance",

@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/registry"
@@ -189,7 +188,7 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 	shards := parseShardLeaderList2QueryNode(resp.GetShards())
 
 	// convert shards map to string for logging
-	if mlog.LevelEnabled(zap.DebugLevel) {
+	if mlog.LevelEnabled(mlog.DebugLevel) {
 		shardStr := make([]string, 0, len(shards))
 		for channel, nodes := range shards {
 			nodeStrs := make([]string, 0, len(nodes))

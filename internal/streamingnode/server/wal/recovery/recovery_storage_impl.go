@@ -6,7 +6,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -239,7 +238,7 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *RecoverySnapshot {
 // observeMessage observes a message and update the recovery storage.
 func (r *recoveryStorageImpl) observeMessage(msg message.ImmutableMessage) {
 	if msg.TimeTick() <= r.checkpoint.TimeTick {
-		if r.Logger().LevelEnabled(zap.DebugLevel) {
+		if r.Logger().LevelEnabled(mlog.DebugLevel) {
 			r.Logger().Debug(context.TODO(),
 
 				"skip the message before the checkpoint",
