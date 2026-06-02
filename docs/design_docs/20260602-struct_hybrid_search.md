@@ -107,9 +107,6 @@ otherwise
   -> collapse strategy defaults to max unless element_scope.collapse overrides it
 ```
 
-This means an element-level hybrid request does not need an explicit
-`mode = element`.
-
 Element-level hybrid example:
 
 ```python
