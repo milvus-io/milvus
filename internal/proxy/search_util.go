@@ -122,6 +122,7 @@ type OrderByField struct {
 	FieldID         int64  // Field ID for validation
 	JSONPath        string // JSON Pointer format: "/price" or "/user/age" (empty for non-JSON fields)
 	Ascending       bool   // true for ASC, false for DESC
+	NullsFirst      bool   // true for NULLS FIRST, false for NULLS LAST
 	OutputFieldName string // Field name to request in requery (e.g., "age" for dynamic fields, "metadata" for JSON fields)
 	IsDynamicField  bool   // true if this is a dynamic field (uses $meta extraction at QueryNode)
 }
@@ -134,6 +135,11 @@ type SearchInfo struct {
 	orderByFields   []OrderByField
 	iterativeFilter bool
 }
+
+const (
+	orderByNullsFirst = "nulls_first"
+	orderByNullsLast  = "nulls_last"
+)
 
 // DetermineSearchType classifies the search based on the parsed search info
 // and whether a filter expression is present. The caller supplies hasFilter
@@ -151,7 +157,7 @@ func (s *SearchInfo) DetermineSearchType(hasFilter bool) internalpb.SearchType {
 }
 
 // parseOrderByFields parses the order_by_fields parameter from search params.
-// Format: "field1:asc,field2:desc" or "field1,field2" (default is asc)
+// Format: "field1:asc,field2:desc:nulls_last" or "field1,field2" (default is asc)
 // Supports JSON subfield paths: metadata["price"]:asc, metadata["user"]["score"]:desc
 // Supports dynamic fields: age:desc (maps to $meta["age"])
 // Validates that fields exist in schema and are sortable types.
@@ -179,15 +185,15 @@ func parseOrderByFields(searchParamsPair []*commonpb.KeyValuePair, schema *schem
 			continue
 		}
 
-		// Split field spec and direction, handling brackets in field spec
-		// e.g., "metadata[\"price\"]:asc" -> fieldSpec="metadata[\"price\"]", direction="asc"
-		fieldSpec, direction := splitOrderByFieldAndDirection(pair)
+		fieldSpec, direction, nullOrdering, err := splitOrderByFieldOptions(pair)
+		if err != nil {
+			return nil, err
+		}
 		if fieldSpec == "" {
 			return nil, fmt.Errorf("empty field name in order_by_fields")
 		}
 
-		// Parse direction
-		ascending := true // default is ascending
+		ascending := true
 		if direction != "" {
 			switch strings.ToLower(direction) {
 			case "asc", "ascending":
@@ -196,6 +202,18 @@ func parseOrderByFields(searchParamsPair []*commonpb.KeyValuePair, schema *schem
 				ascending = false
 			default:
 				return nil, fmt.Errorf("invalid order direction '%s' for field '%s', expected 'asc' or 'desc'", direction, fieldSpec)
+			}
+		}
+
+		nullsFirst := !ascending
+		if nullOrdering != "" {
+			switch strings.ToLower(nullOrdering) {
+			case orderByNullsFirst:
+				nullsFirst = true
+			case orderByNullsLast:
+				nullsFirst = false
+			default:
+				return nil, fmt.Errorf("invalid null ordering '%s', expected '%s' or '%s'", nullOrdering, orderByNullsFirst, orderByNullsLast)
 			}
 		}
 
@@ -210,6 +228,7 @@ func parseOrderByFields(searchParamsPair []*commonpb.KeyValuePair, schema *schem
 			FieldID:         fieldID,
 			JSONPath:        jsonPath,
 			Ascending:       ascending,
+			NullsFirst:      nullsFirst,
 			OutputFieldName: outputFieldName,
 			IsDynamicField:  isDynamic,
 		})
@@ -218,21 +237,10 @@ func parseOrderByFields(searchParamsPair []*commonpb.KeyValuePair, schema *schem
 	return orderByFields, nil
 }
 
-// splitOrderByFieldAndDirection splits "fieldSpec:direction" handling brackets in fieldSpec
-// e.g., "metadata[\"price\"]:asc" -> ("metadata[\"price\"]", "asc")
-// e.g., "name:desc" -> ("name", "desc")
-// e.g., "name" -> ("name", "")
-//
-// Limitation: This simple bracket-depth tracking does not handle:
-//   - Brackets inside quoted strings: metadata["key]value"] would incorrectly parse
-//   - Escaped quotes inside strings: metadata["key\"with\"quotes"] may misbehave
-//
-// These edge cases are rare in practice. Field names containing unbalanced brackets
-// or complex escape sequences are not supported.
-func splitOrderByFieldAndDirection(pair string) (fieldSpec, direction string) {
-	// Find the last colon that's not inside brackets
+// splitOrderByFieldOptions splits "fieldSpec[:direction[:nullOrdering]]" handling brackets in fieldSpec.
+func splitOrderByFieldOptions(pair string) (fieldSpec, direction, nullOrdering string, err error) {
 	bracketDepth := 0
-	lastColonIdx := -1
+	colonIdxs := make([]int, 0, 2)
 	for i, ch := range pair {
 		switch ch {
 		case '[':
@@ -241,15 +249,22 @@ func splitOrderByFieldAndDirection(pair string) (fieldSpec, direction string) {
 			bracketDepth--
 		case ':':
 			if bracketDepth == 0 {
-				lastColonIdx = i
+				colonIdxs = append(colonIdxs, i)
+				if len(colonIdxs) > 2 {
+					return "", "", "", fmt.Errorf("too many order_by field options in '%s'", pair)
+				}
 			}
 		}
 	}
 
-	if lastColonIdx == -1 {
-		return strings.TrimSpace(pair), ""
+	switch len(colonIdxs) {
+	case 0:
+		return strings.TrimSpace(pair), "", "", nil
+	case 1:
+		return strings.TrimSpace(pair[:colonIdxs[0]]), strings.TrimSpace(pair[colonIdxs[0]+1:]), "", nil
+	default:
+		return strings.TrimSpace(pair[:colonIdxs[0]]), strings.TrimSpace(pair[colonIdxs[0]+1 : colonIdxs[1]]), strings.TrimSpace(pair[colonIdxs[1]+1:]), nil
 	}
-	return strings.TrimSpace(pair[:lastColonIdx]), strings.TrimSpace(pair[lastColonIdx+1:])
 }
 
 // parseOrderByFieldSpec parses a field specification and returns field name, ID, JSON path, and requery info

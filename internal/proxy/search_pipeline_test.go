@@ -2134,6 +2134,7 @@ func (s *SearchPipelineSuite) TestParseOrderByFields() {
 	s.Len(result, 1)
 	s.Equal("score", result[0].FieldName)
 	s.True(result[0].Ascending)
+	s.False(result[0].NullsFirst)
 
 	// Test single field with explicit asc
 	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: "score:asc"}}
@@ -2142,6 +2143,7 @@ func (s *SearchPipelineSuite) TestParseOrderByFields() {
 	s.Len(result, 1)
 	s.Equal("score", result[0].FieldName)
 	s.True(result[0].Ascending)
+	s.False(result[0].NullsFirst)
 
 	// Test single field descending
 	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: "score:desc"}}
@@ -2150,6 +2152,22 @@ func (s *SearchPipelineSuite) TestParseOrderByFields() {
 	s.Len(result, 1)
 	s.Equal("score", result[0].FieldName)
 	s.False(result[0].Ascending)
+	s.True(result[0].NullsFirst)
+
+	// Test explicit null ordering
+	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: "score:asc:nulls_first"}}
+	result, err = parseOrderByFields(params, schema)
+	s.NoError(err)
+	s.Len(result, 1)
+	s.True(result[0].Ascending)
+	s.True(result[0].NullsFirst)
+
+	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: "score:desc:nulls_last"}}
+	result, err = parseOrderByFields(params, schema)
+	s.NoError(err)
+	s.Len(result, 1)
+	s.False(result[0].Ascending)
+	s.False(result[0].NullsFirst)
 
 	// Test multiple fields
 	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: "score:desc,name:asc,id"}}
@@ -2158,16 +2176,25 @@ func (s *SearchPipelineSuite) TestParseOrderByFields() {
 	s.Len(result, 3)
 	s.Equal("score", result[0].FieldName)
 	s.False(result[0].Ascending)
+	s.True(result[0].NullsFirst)
 	s.Equal("name", result[1].FieldName)
 	s.True(result[1].Ascending)
+	s.False(result[1].NullsFirst)
 	s.Equal("id", result[2].FieldName)
 	s.True(result[2].Ascending)
+	s.False(result[2].NullsFirst)
 
 	// Test invalid direction
 	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: "score:invalid"}}
 	_, err = parseOrderByFields(params, schema)
 	s.Error(err)
 	s.Contains(err.Error(), "invalid order direction")
+
+	// Test invalid null ordering
+	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: "score:asc:nulls_middle"}}
+	_, err = parseOrderByFields(params, schema)
+	s.Error(err)
+	s.Contains(err.Error(), "invalid null ordering 'nulls_middle', expected 'nulls_first' or 'nulls_last'")
 
 	// Test non-existent field
 	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: "nonexistent"}}
@@ -2357,7 +2384,7 @@ func (s *SearchPipelineSuite) TestIsSortableFieldType() {
 func (s *SearchPipelineSuite) TestCompareFieldDataAt() {
 	// Helper to call compareFieldDataAt and assert no error
 	mustCompare := func(field *schemapb.FieldData, i, j int) int {
-		cmp, err := compareFieldDataAt(field, i, j)
+		cmp, err := compareFieldDataAt(field, i, j, true)
 		s.NoError(err)
 		return cmp
 	}
@@ -2431,7 +2458,7 @@ func (s *SearchPipelineSuite) TestCompareFieldDataAt() {
 func (s *SearchPipelineSuite) TestCompareFieldDataAtWithNulls() {
 	// Helper to call compareFieldDataAt and assert no error
 	mustCompare := func(field *schemapb.FieldData, i, j int) int {
-		cmp, err := compareFieldDataAt(field, i, j)
+		cmp, err := compareFieldDataAt(field, i, j, true)
 		s.NoError(err)
 		return cmp
 	}
@@ -2450,9 +2477,16 @@ func (s *SearchPipelineSuite) TestCompareFieldDataAtWithNulls() {
 		ValidData: []bool{true, false, true}, // index 1 is null
 	}
 
-	// null vs non-null: null should be first (return -1)
+	// NULLS FIRST
 	s.Equal(-1, mustCompare(nullableField, 1, 0)) // null < 10
 	s.Equal(1, mustCompare(nullableField, 0, 1))  // 10 > null
+
+	cmp, err := compareFieldDataAt(nullableField, 1, 0, false)
+	s.NoError(err)
+	s.Equal(1, cmp) // NULLS LAST: null > 10
+	cmp, err = compareFieldDataAt(nullableField, 0, 1, false)
+	s.NoError(err)
+	s.Equal(-1, cmp) // NULLS LAST: 10 < null
 
 	// null vs null: equal
 	nullableField2 := &schemapb.FieldData{
@@ -2830,6 +2864,84 @@ func (s *SearchPipelineSuite) TestOrderByOperatorDescending() {
 	s.Equal(expectedIds, sortedResult.Results.Ids.GetIntId().Data)
 }
 
+func (s *SearchPipelineSuite) TestOrderByOperatorNullableScalarNullOrdering() {
+	makeResult := func() *milvuspb.SearchResults {
+		return &milvuspb.SearchResults{
+			Results: &schemapb.SearchResultData{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4}},
+					},
+				},
+				Scores: []float32{0.9, 0.8, 0.7, 0.6},
+				Topks:  []int64{4},
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_Int64,
+						FieldName: "price",
+						ValidData: []bool{true, false, true, false},
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{Data: []int64{30, 10, 40, 20}},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	tests := []struct {
+		name          string
+		orderBy       OrderByField
+		expectedIDs   []int64
+		expectedValid []bool
+	}{
+		{
+			name:          "asc_default_nulls_last",
+			orderBy:       OrderByField{FieldName: "price", Ascending: true, NullsFirst: false},
+			expectedIDs:   []int64{1, 3, 2, 4},
+			expectedValid: []bool{true, true, false, false},
+		},
+		{
+			name:          "desc_default_nulls_first",
+			orderBy:       OrderByField{FieldName: "price", Ascending: false, NullsFirst: true},
+			expectedIDs:   []int64{2, 4, 3, 1},
+			expectedValid: []bool{false, false, true, true},
+		},
+		{
+			name:          "asc_explicit_nulls_first",
+			orderBy:       OrderByField{FieldName: "price", Ascending: true, NullsFirst: true},
+			expectedIDs:   []int64{2, 4, 1, 3},
+			expectedValid: []bool{false, false, true, true},
+		},
+		{
+			name:          "desc_explicit_nulls_last",
+			orderBy:       OrderByField{FieldName: "price", Ascending: false, NullsFirst: false},
+			expectedIDs:   []int64{3, 1, 2, 4},
+			expectedValid: []bool{true, true, false, false},
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			op := &orderByOperator{
+				orderByFields:  []OrderByField{tt.orderBy},
+				groupByFieldId: -1,
+			}
+
+			outputs, err := op.run(context.Background(), s.span, makeResult())
+			s.NoError(err)
+			sortedResult := outputs[0].(*milvuspb.SearchResults)
+
+			s.Equal(tt.expectedIDs, sortedResult.Results.Ids.GetIntId().Data)
+			s.Equal(tt.expectedValid, sortedResult.Results.FieldsData[0].GetValidData())
+		})
+	}
+}
+
 // Test orderByOperator validates missing fields
 func (s *SearchPipelineSuite) TestOrderByOperatorMissingField() {
 	result := &milvuspb.SearchResults{
@@ -3114,12 +3226,12 @@ func (s *SearchPipelineSuite) TestCompareFieldDataAtJSON() {
 
 	// JSON comparison is byte-level, so "2" > "1" (comparing '2' vs '1' in "10")
 	// This tests the documented behavior that JSON sorting is lexicographic
-	cmp, err := compareFieldDataAt(jsonField, 0, 1)
+	cmp, err := compareFieldDataAt(jsonField, 0, 1, true)
 	s.NoError(err)
 	s.Greater(cmp, 0) // {"a": 2} > {"a": 10} in byte comparison because '2' > '1'
 
 	// Different keys
-	cmp, err = compareFieldDataAt(jsonField, 0, 2)
+	cmp, err = compareFieldDataAt(jsonField, 0, 2, true)
 	s.NoError(err)
 	s.Less(cmp, 0) // {"a": ...} < {"b": ...} because 'a' < 'b'
 }
@@ -3164,7 +3276,7 @@ func (s *SearchPipelineSuite) TestReorderFieldDataFloatVector() {
 // Test Double comparison in compareFieldDataAt
 func (s *SearchPipelineSuite) TestCompareFieldDataAtDouble() {
 	mustCompare := func(field *schemapb.FieldData, i, j int) int {
-		cmp, err := compareFieldDataAt(field, i, j)
+		cmp, err := compareFieldDataAt(field, i, j, true)
 		s.NoError(err)
 		return cmp
 	}
@@ -3188,7 +3300,7 @@ func (s *SearchPipelineSuite) TestCompareFieldDataAtDouble() {
 // Test Int32 comparison in compareFieldDataAt
 func (s *SearchPipelineSuite) TestCompareFieldDataAtInt32() {
 	mustCompare := func(field *schemapb.FieldData, i, j int) int {
-		cmp, err := compareFieldDataAt(field, i, j)
+		cmp, err := compareFieldDataAt(field, i, j, true)
 		s.NoError(err)
 		return cmp
 	}
@@ -3271,48 +3383,52 @@ func (s *SearchPipelineSuite) TestCompareJSONValues() {
 	// Number comparison
 	a := extractJSONValue([]byte(`{"v": 10}`), "/v")
 	b := extractJSONValue([]byte(`{"v": 20}`), "/v")
-	s.Equal(-1, compareJSONValues(a, b)) // 10 < 20
-	s.Equal(1, compareJSONValues(b, a))  // 20 > 10
-	s.Equal(0, compareJSONValues(a, a))  // 10 == 10
+	s.Equal(-1, compareJSONValues(a, b, true)) // 10 < 20
+	s.Equal(1, compareJSONValues(b, a, true))  // 20 > 10
+	s.Equal(0, compareJSONValues(a, a, true))  // 10 == 10
 
 	// String comparison
 	a = extractJSONValue([]byte(`{"v": "apple"}`), "/v")
 	b = extractJSONValue([]byte(`{"v": "banana"}`), "/v")
-	s.Equal(-1, compareJSONValues(a, b)) // "apple" < "banana"
-	s.Equal(1, compareJSONValues(b, a))  // "banana" > "apple"
+	s.Equal(-1, compareJSONValues(a, b, true)) // "apple" < "banana"
+	s.Equal(1, compareJSONValues(b, a, true))  // "banana" > "apple"
 
 	// Boolean comparison (false < true)
 	a = extractJSONValue([]byte(`{"v": false}`), "/v")
 	b = extractJSONValue([]byte(`{"v": true}`), "/v")
-	s.Equal(-1, compareJSONValues(a, b)) // false < true
-	s.Equal(1, compareJSONValues(b, a))  // true > false
+	s.Equal(-1, compareJSONValues(a, b, true)) // false < true
+	s.Equal(1, compareJSONValues(b, a, true))  // true > false
 
-	// Non-existent values (nulls first)
+	// Non-existent values
 	a = extractJSONValue([]byte(`{}`), "/v")
 	b = extractJSONValue([]byte(`{"v": 10}`), "/v")
-	s.Equal(-1, compareJSONValues(a, b)) // null < 10
-	s.Equal(1, compareJSONValues(b, a))  // 10 > null
+	s.Equal(-1, compareJSONValues(a, b, true))  // NULLS FIRST: null < 10
+	s.Equal(1, compareJSONValues(b, a, true))   // NULLS FIRST: 10 > null
+	s.Equal(1, compareJSONValues(a, b, false))  // NULLS LAST: null > 10
+	s.Equal(-1, compareJSONValues(b, a, false)) // NULLS LAST: 10 < null
 
 	// Both non-existent
 	a = extractJSONValue([]byte(`{}`), "/v")
 	b = extractJSONValue([]byte(`{}`), "/v")
-	s.Equal(0, compareJSONValues(a, b)) // null == null
+	s.Equal(0, compareJSONValues(a, b, true)) // null == null
 
 	// Explicit JSON null value (type gjson.Null)
 	a = extractJSONValue([]byte(`{"v": null}`), "/v")
 	b = extractJSONValue([]byte(`{"v": 10}`), "/v")
-	s.Equal(-1, compareJSONValues(a, b)) // null < 10
-	s.Equal(1, compareJSONValues(b, a))  // 10 > null
+	s.Equal(-1, compareJSONValues(a, b, true))  // NULLS FIRST: null < 10
+	s.Equal(1, compareJSONValues(b, a, true))   // NULLS FIRST: 10 > null
+	s.Equal(1, compareJSONValues(a, b, false))  // NULLS LAST: null > 10
+	s.Equal(-1, compareJSONValues(b, a, false)) // NULLS LAST: 10 < null
 
 	// Both explicit null
 	a = extractJSONValue([]byte(`{"v": null}`), "/v")
 	b = extractJSONValue([]byte(`{"v": null}`), "/v")
-	s.Equal(0, compareJSONValues(a, b)) // null == null
+	s.Equal(0, compareJSONValues(a, b, true)) // null == null
 
 	// Explicit null vs non-existent (both treated as null)
 	a = extractJSONValue([]byte(`{"v": null}`), "/v")
 	b = extractJSONValue([]byte(`{}`), "/v")
-	s.Equal(0, compareJSONValues(a, b)) // null == null
+	s.Equal(0, compareJSONValues(a, b, true)) // null == null
 }
 
 // Test orderByOperator with JSON subfield path
@@ -3351,7 +3467,7 @@ func (s *SearchPipelineSuite) TestOrderByOperatorWithJSONPath() {
 	// Sort by metadata["price"] ascending
 	op := &orderByOperator{
 		orderByFields: []OrderByField{
-			{FieldName: "metadata", FieldID: 100, JSONPath: "/price", Ascending: true},
+			{FieldName: "metadata", FieldID: 100, JSONPath: "/price", Ascending: true, NullsFirst: false},
 		},
 		groupByFieldId: -1,
 	}
@@ -3400,7 +3516,7 @@ func (s *SearchPipelineSuite) TestOrderByOperatorWithJSONPathDescending() {
 
 	op := &orderByOperator{
 		orderByFields: []OrderByField{
-			{FieldName: "data", FieldID: 100, JSONPath: "/score", Ascending: false},
+			{FieldName: "data", FieldID: 100, JSONPath: "/score", Ascending: false, NullsFirst: true},
 		},
 		groupByFieldId: -1,
 	}
@@ -3416,8 +3532,79 @@ func (s *SearchPipelineSuite) TestOrderByOperatorWithJSONPathDescending() {
 	s.Equal(expectedIds, sortedResult.Results.Ids.GetIntId().Data)
 }
 
-// Test orderByOperator with missing JSON path values (nulls first)
 func (s *SearchPipelineSuite) TestOrderByOperatorWithMissingJSONPath() {
+	makeResult := func() *milvuspb.SearchResults {
+		return &milvuspb.SearchResults{
+			Results: &schemapb.SearchResultData{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5}},
+					},
+				},
+				Scores: []float32{0.9, 0.8, 0.7, 0.6, 0.5},
+				Topks:  []int64{5},
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_JSON,
+						FieldName: "metadata",
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_JsonData{
+									JsonData: &schemapb.JSONArray{Data: [][]byte{
+										[]byte(`{"price": 30}`),
+										[]byte(`{}`),
+										[]byte(`{"price": 10}`),
+										[]byte(`{"other": 99}`),
+										[]byte(`{"price": null}`),
+									}},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	tests := []struct {
+		name        string
+		orderBy     OrderByField
+		expectedIDs []int64
+	}{
+		{
+			name:        "asc_default_nulls_last",
+			orderBy:     OrderByField{FieldName: "metadata", FieldID: 100, JSONPath: "/price", Ascending: true, NullsFirst: false},
+			expectedIDs: []int64{3, 1, 2, 4, 5},
+		},
+		{
+			name:        "desc_default_nulls_first",
+			orderBy:     OrderByField{FieldName: "metadata", FieldID: 100, JSONPath: "/price", Ascending: false, NullsFirst: true},
+			expectedIDs: []int64{2, 4, 5, 1, 3},
+		},
+		{
+			name:        "desc_explicit_nulls_last",
+			orderBy:     OrderByField{FieldName: "metadata", FieldID: 100, JSONPath: "/price", Ascending: false, NullsFirst: false},
+			expectedIDs: []int64{1, 3, 2, 4, 5},
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			op := &orderByOperator{
+				orderByFields:  []OrderByField{tt.orderBy},
+				groupByFieldId: -1,
+			}
+
+			outputs, err := op.run(context.Background(), s.span, makeResult())
+			s.NoError(err)
+			sortedResult := outputs[0].(*milvuspb.SearchResults)
+
+			s.Equal(tt.expectedIDs, sortedResult.Results.Ids.GetIntId().Data)
+		})
+	}
+}
+
+func (s *SearchPipelineSuite) TestOrderByOperatorDynamicJSONNullOrdering() {
 	result := &milvuspb.SearchResults{
 		Results: &schemapb.SearchResultData{
 			Ids: &schemapb.IDs{
@@ -3430,15 +3617,15 @@ func (s *SearchPipelineSuite) TestOrderByOperatorWithMissingJSONPath() {
 			FieldsData: []*schemapb.FieldData{
 				{
 					Type:      schemapb.DataType_JSON,
-					FieldName: "metadata",
+					FieldName: "$meta",
 					Field: &schemapb.FieldData_Scalars{
 						Scalars: &schemapb.ScalarField{
 							Data: &schemapb.ScalarField_JsonData{
 								JsonData: &schemapb.JSONArray{Data: [][]byte{
-									[]byte(`{"price": 30}`),
-									[]byte(`{}`), // missing price - should sort first
-									[]byte(`{"price": 10}`),
-									[]byte(`{"other": 99}`), // missing price - should sort first
+									[]byte(`{"dyn_price": 30}`),
+									[]byte(`{}`),
+									[]byte(`{"dyn_price": 10}`),
+									[]byte(`{"dyn_price": null}`),
 								}},
 							},
 						},
@@ -3450,7 +3637,7 @@ func (s *SearchPipelineSuite) TestOrderByOperatorWithMissingJSONPath() {
 
 	op := &orderByOperator{
 		orderByFields: []OrderByField{
-			{FieldName: "metadata", FieldID: 100, JSONPath: "/price", Ascending: true},
+			{FieldName: "$meta", FieldID: 100, JSONPath: "/dyn_price", Ascending: false, NullsFirst: true, IsDynamicField: true},
 		},
 		groupByFieldId: -1,
 	}
@@ -3459,19 +3646,9 @@ func (s *SearchPipelineSuite) TestOrderByOperatorWithMissingJSONPath() {
 	s.NoError(err)
 	sortedResult := outputs[0].(*milvuspb.SearchResults)
 
-	// Nulls first, then ascending: null, null, 10, 30
-	// IDs with missing price (2, 4) should come first, then 3(10), 1(30)
-	// Note: stable sort preserves relative order of equal elements
-	resultIds := sortedResult.Results.Ids.GetIntId().Data
-	// First two should be the ones with missing price (2 and 4)
-	s.Contains([]int64{2, 4}, resultIds[0])
-	s.Contains([]int64{2, 4}, resultIds[1])
-	// Last two should be 3(10) and 1(30) in that order
-	s.Equal(int64(3), resultIds[2])
-	s.Equal(int64(1), resultIds[3])
+	s.Equal([]int64{2, 4, 1, 3}, sortedResult.Results.Ids.GetIntId().Data)
 }
 
-// Test parseOrderByFields with JSON path syntax
 func (s *SearchPipelineSuite) TestParseOrderByFieldsWithJSONPath() {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
@@ -3490,17 +3667,19 @@ func (s *SearchPipelineSuite) TestParseOrderByFieldsWithJSONPath() {
 	s.Equal(int64(101), result[0].FieldID)
 	s.Equal("/price", result[0].JSONPath)
 	s.True(result[0].Ascending)
+	s.False(result[0].NullsFirst)
 	s.Equal("metadata", result[0].OutputFieldName) // Regular JSON: request whole field
 	s.False(result[0].IsDynamicField)              // Not a dynamic field
 
 	// Test JSON path with descending
-	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: `metadata["rating"]:desc`}}
+	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: `metadata["rating"]:desc:nulls_last`}}
 	result, err = parseOrderByFields(params, schema)
 	s.NoError(err)
 	s.Len(result, 1)
 	s.Equal("metadata", result[0].FieldName)
 	s.Equal("/rating", result[0].JSONPath)
 	s.False(result[0].Ascending)
+	s.False(result[0].NullsFirst)
 	s.Equal("metadata", result[0].OutputFieldName) // Regular JSON: request whole field
 	s.False(result[0].IsDynamicField)
 
@@ -3513,10 +3692,12 @@ func (s *SearchPipelineSuite) TestParseOrderByFieldsWithJSONPath() {
 	s.Equal("score", result[0].FieldName)
 	s.Equal("", result[0].JSONPath)
 	s.False(result[0].Ascending)
+	s.True(result[0].NullsFirst)
 	// Second field: JSON path
 	s.Equal("metadata", result[1].FieldName)
 	s.Equal("/price", result[1].JSONPath)
 	s.True(result[1].Ascending)
+	s.False(result[1].NullsFirst)
 
 	// Test nested JSON path
 	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: `metadata["user"]["age"]:asc`}}
@@ -3547,17 +3728,19 @@ func (s *SearchPipelineSuite) TestParseOrderByFieldsWithDynamicField() {
 	s.Equal(int64(102), result[0].FieldID)
 	s.Equal("/age", result[0].JSONPath)
 	s.True(result[0].Ascending)
+	s.False(result[0].NullsFirst)
 	s.Equal("age", result[0].OutputFieldName) // Dynamic field: use original key for requery
 	s.True(result[0].IsDynamicField)          // Is a dynamic field - QueryNode extracts subfield
 
 	// Test dynamic field with explicit path
-	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: `$meta["category"]:desc`}}
+	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: `$meta["category"]:desc:nulls_last`}}
 	result, err = parseOrderByFields(params, schema)
 	s.NoError(err)
 	s.Len(result, 1)
 	s.Equal("$meta", result[0].FieldName)
 	s.Equal("/category", result[0].JSONPath)
 	s.False(result[0].Ascending)
+	s.False(result[0].NullsFirst)
 	s.Equal(`$meta["category"]`, result[0].OutputFieldName) // Explicit path for requery
 	s.True(result[0].IsDynamicField)
 
@@ -3571,41 +3754,58 @@ func (s *SearchPipelineSuite) TestParseOrderByFieldsWithDynamicField() {
 	s.Equal("$meta", result[0].FieldName)
 	s.Equal("/dyn_meta/price", result[0].JSONPath)
 	s.True(result[0].Ascending)
+	s.False(result[0].NullsFirst)
 	s.Equal("dyn_meta", result[0].OutputFieldName) // Base name only; full path would cause multi-level rejection
 	s.True(result[0].IsDynamicField)
 }
 
-// Test splitOrderByFieldAndDirection helper
-func (s *SearchPipelineSuite) TestSplitOrderByFieldAndDirection() {
+// Test splitOrderByFieldOptions helper
+func (s *SearchPipelineSuite) TestSplitOrderByFieldOptions() {
 	// Simple field
-	field, dir := splitOrderByFieldAndDirection("name:asc")
+	field, dir, nullOrdering, err := splitOrderByFieldOptions("name:asc")
+	s.NoError(err)
 	s.Equal("name", field)
 	s.Equal("asc", dir)
+	s.Equal("", nullOrdering)
 
 	// Field without direction
-	field, dir = splitOrderByFieldAndDirection("name")
+	field, dir, nullOrdering, err = splitOrderByFieldOptions("name")
+	s.NoError(err)
 	s.Equal("name", field)
 	s.Equal("", dir)
+	s.Equal("", nullOrdering)
 
 	// JSON path with direction
-	field, dir = splitOrderByFieldAndDirection(`metadata["price"]:desc`)
+	field, dir, nullOrdering, err = splitOrderByFieldOptions(`metadata["price"]:desc`)
+	s.NoError(err)
 	s.Equal(`metadata["price"]`, field)
 	s.Equal("desc", dir)
+	s.Equal("", nullOrdering)
 
 	// JSON path without direction
-	field, dir = splitOrderByFieldAndDirection(`metadata["price"]`)
+	field, dir, nullOrdering, err = splitOrderByFieldOptions(`metadata["price"]`)
+	s.NoError(err)
 	s.Equal(`metadata["price"]`, field)
 	s.Equal("", dir)
+	s.Equal("", nullOrdering)
 
 	// Nested JSON path with direction
-	field, dir = splitOrderByFieldAndDirection(`data["user"]["age"]:asc`)
+	field, dir, nullOrdering, err = splitOrderByFieldOptions(`data["user"]["age"]:asc`)
+	s.NoError(err)
 	s.Equal(`data["user"]["age"]`, field)
 	s.Equal("asc", dir)
+	s.Equal("", nullOrdering)
 
-	// JSON path with colon in value (edge case - not typical but should handle)
-	field, dir = splitOrderByFieldAndDirection(`metadata["key:with:colons"]:desc`)
+	// JSON path with colon in value and explicit null ordering
+	field, dir, nullOrdering, err = splitOrderByFieldOptions(`metadata["key:with:colons"]:asc:nulls_last`)
+	s.NoError(err)
 	s.Equal(`metadata["key:with:colons"]`, field)
-	s.Equal("desc", dir)
+	s.Equal("asc", dir)
+	s.Equal("nulls_last", nullOrdering)
+
+	_, _, _, err = splitOrderByFieldOptions(`metadata["price"]:asc:nulls_last:extra`)
+	s.Error(err)
+	s.Contains(err.Error(), "too many order_by field options")
 }
 
 // Test jsonPointerToGjsonPath conversion
@@ -3688,7 +3888,7 @@ func (s *SearchPipelineSuite) TestParseOrderByFieldsErrors() {
 // Test compareFieldDataAt for different data types
 func (s *SearchPipelineSuite) TestCompareFieldDataAtAllTypes() {
 	mustCompare := func(field *schemapb.FieldData, i, j int) int {
-		cmp, err := compareFieldDataAt(field, i, j)
+		cmp, err := compareFieldDataAt(field, i, j, true)
 		s.NoError(err)
 		return cmp
 	}
@@ -3758,20 +3958,20 @@ func (s *SearchPipelineSuite) TestCompareFieldDataAtAllTypes() {
 	s.Equal(0, mustCompare(boolField, 0, 2))  // true == true
 
 	// Test out of bounds returns error
-	_, err := compareFieldDataAt(intField, 10, 20)
+	_, err := compareFieldDataAt(intField, 10, 20, true)
 	s.Error(err)
-	_, err = compareFieldDataAt(floatField, 10, 20)
+	_, err = compareFieldDataAt(floatField, 10, 20, true)
 	s.Error(err)
-	_, err = compareFieldDataAt(doubleField, 10, 20)
+	_, err = compareFieldDataAt(doubleField, 10, 20, true)
 	s.Error(err)
-	_, err = compareFieldDataAt(boolField, 10, 20)
+	_, err = compareFieldDataAt(boolField, 10, 20, true)
 	s.Error(err)
 }
 
 // Test compareFieldDataAt with nullable fields (ValidData)
 func (s *SearchPipelineSuite) TestCompareFieldDataAtNullable() {
 	mustCompare := func(field *schemapb.FieldData, i, j int) int {
-		cmp, err := compareFieldDataAt(field, i, j)
+		cmp, err := compareFieldDataAt(field, i, j, true)
 		s.NoError(err)
 		return cmp
 	}
@@ -3790,10 +3990,17 @@ func (s *SearchPipelineSuite) TestCompareFieldDataAtNullable() {
 		ValidData: []bool{true, false, true}, // Index 1 is null
 	}
 
-	// null vs non-null: null should come first (NULLS FIRST)
+	// NULLS FIRST
 	s.Equal(1, mustCompare(nullableField, 0, 1))  // 100 > null
 	s.Equal(-1, mustCompare(nullableField, 1, 0)) // null < 100
 	s.Equal(-1, mustCompare(nullableField, 1, 2)) // null < 300
+
+	cmp, err := compareFieldDataAt(nullableField, 0, 1, false)
+	s.NoError(err)
+	s.Equal(-1, cmp) // NULLS LAST: 100 < null
+	cmp, err = compareFieldDataAt(nullableField, 1, 0, false)
+	s.NoError(err)
+	s.Equal(1, cmp) // NULLS LAST: null > 100
 
 	// Create field where both are null
 	nullableField2 := &schemapb.FieldData{
@@ -3894,18 +4101,18 @@ func (s *SearchPipelineSuite) TestCompareJSONValuesBool() {
 	// Test bool: false < true
 	a := extractJSONValue([]byte(`{"v": false}`), "/v")
 	b := extractJSONValue([]byte(`{"v": true}`), "/v")
-	s.Equal(-1, compareJSONValues(a, b)) // false < true
-	s.Equal(1, compareJSONValues(b, a))  // true > false
+	s.Equal(-1, compareJSONValues(a, b, true)) // false < true
+	s.Equal(1, compareJSONValues(b, a, true))  // true > false
 
 	// Test both true
 	a = extractJSONValue([]byte(`{"v": true}`), "/v")
 	b = extractJSONValue([]byte(`{"v": true}`), "/v")
-	s.Equal(0, compareJSONValues(a, b)) // true == true
+	s.Equal(0, compareJSONValues(a, b, true)) // true == true
 
 	// Test both false
 	a = extractJSONValue([]byte(`{"v": false}`), "/v")
 	b = extractJSONValue([]byte(`{"v": false}`), "/v")
-	s.Equal(0, compareJSONValues(a, b)) // false == false
+	s.Equal(0, compareJSONValues(a, b, true)) // false == false
 }
 
 // Test compareJSONValues with mixed types (fallback to raw comparison)
@@ -3914,7 +4121,7 @@ func (s *SearchPipelineSuite) TestCompareJSONValuesMixedTypes() {
 	// Raw: "10" vs "\"hello\"" - quote char '"' (34) < '1' (49)
 	a := extractJSONValue([]byte(`{"v": 10}`), "/v")
 	b := extractJSONValue([]byte(`{"v": "hello"}`), "/v")
-	cmp := compareJSONValues(a, b)
+	cmp := compareJSONValues(a, b, true)
 	// String (with quotes) should sort before number due to quote ASCII
 	s.Equal(1, cmp) // "10" > "\"hello\"" because '1' > '"'
 }
@@ -4716,37 +4923,45 @@ func (s *SearchPipelineSuite) TestOrderByOperatorVarCharField() {
 	s.Equal(expectedNames, sortedResult.Results.FieldsData[0].GetScalars().GetStringData().Data)
 }
 
-// Test compareNullsFirst helper function
-func (s *SearchPipelineSuite) TestCompareNullsFirst() {
+// Test compareNulls helper function
+func (s *SearchPipelineSuite) TestCompareNulls() {
 	// Empty ValidData - should return (0, false)
-	cmp, handled := compareNullsFirst(nil, 0, 1)
+	cmp, handled := compareNulls(nil, 0, 1, true)
 	s.Equal(0, cmp)
 	s.False(handled)
 
-	cmp, handled = compareNullsFirst([]bool{}, 0, 1)
+	cmp, handled = compareNulls([]bool{}, 0, 1, true)
 	s.Equal(0, cmp)
 	s.False(handled)
 
 	// Both non-null - should return (0, false)
 	validData := []bool{true, true, true}
-	cmp, handled = compareNullsFirst(validData, 0, 1)
+	cmp, handled = compareNulls(validData, 0, 1, true)
 	s.Equal(0, cmp)
 	s.False(handled)
 
 	// First is null, second is not - should return (-1, true) (nulls first)
 	validData = []bool{false, true, true}
-	cmp, handled = compareNullsFirst(validData, 0, 1)
+	cmp, handled = compareNulls(validData, 0, 1, true)
 	s.Equal(-1, cmp)
 	s.True(handled)
 
 	// First is not null, second is null - should return (1, true)
-	cmp, handled = compareNullsFirst(validData, 1, 0)
+	cmp, handled = compareNulls(validData, 1, 0, true)
 	s.Equal(1, cmp)
+	s.True(handled)
+
+	// Nulls last reverses the null/non-null ordering.
+	cmp, handled = compareNulls(validData, 0, 1, false)
+	s.Equal(1, cmp)
+	s.True(handled)
+	cmp, handled = compareNulls(validData, 1, 0, false)
+	s.Equal(-1, cmp)
 	s.True(handled)
 
 	// Both are null - should return (0, true)
 	validData = []bool{false, false, true}
-	cmp, handled = compareNullsFirst(validData, 0, 1)
+	cmp, handled = compareNulls(validData, 0, 1, true)
 	s.Equal(0, cmp)
 	s.True(handled)
 }
@@ -4854,7 +5069,7 @@ func (s *SearchPipelineSuite) TestCompareOrderByFieldNullableJSON() {
 	fieldMap := map[string]*schemapb.FieldData{
 		"metadata": jsonField,
 	}
-	orderBy := OrderByField{FieldName: "metadata", JSONPath: "/score"}
+	orderBy := OrderByField{FieldName: "metadata", JSONPath: "/score", Ascending: true, NullsFirst: true}
 	cache := buildJSONValueCache(fieldMap, []OrderByField{orderBy}, []int{0, 1, 2})
 
 	// null vs non-null: null should come first

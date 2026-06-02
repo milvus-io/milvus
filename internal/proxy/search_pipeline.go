@@ -1712,23 +1712,30 @@ func jsonPointerToGjsonPath(jsonPointer string) string {
 	return strings.Join(gjsonSegments, ".")
 }
 
-// compareJSONValues compares two gjson.Result values
-// Returns -1 if a < b, 0 if a == b, 1 if a > b
-// Null handling: non-existent paths and explicit JSON null are treated as null (NULLS FIRST)
-func compareJSONValues(a, b gjson.Result) int {
-	// Check if values are null (non-existent or explicit JSON null)
-	aIsNull := !a.Exists() || a.Type == gjson.Null
-	bIsNull := !b.Exists() || b.Type == gjson.Null
+// compareJSONValues compares two gjson.Result values.
+// Non-existent paths and explicit JSON null are treated as null.
+func isJSONNull(v gjson.Result) bool {
+	return !v.Exists() || v.Type == gjson.Null
+}
 
-	// Handle null values (NULLS FIRST semantics)
+func compareJSONValues(a, b gjson.Result, nullsFirst bool) int {
+	aIsNull := isJSONNull(a)
+	bIsNull := isJSONNull(b)
+
 	if aIsNull && bIsNull {
 		return 0
 	}
 	if aIsNull {
-		return -1 // nulls first
+		if nullsFirst {
+			return -1
+		}
+		return 1
 	}
 	if bIsNull {
-		return 1
+		if nullsFirst {
+			return 1
+		}
+		return -1
 	}
 
 	// Compare based on type
@@ -1760,45 +1767,59 @@ func compareJSONValues(a, b gjson.Result) int {
 	}
 }
 
-// compareNullsFirst compares two indices for null values using ValidData.
-// Returns (comparison result, true) if at least one value is null.
+// compareNulls compares two indices for null values using ValidData.
 // Returns (0, false) if neither value is null, indicating caller should proceed with value comparison.
-// Implements NULLS FIRST semantics: null values are sorted before non-null values.
-func compareNullsFirst(validData []bool, i, j int) (int, bool) {
+func compareNulls(validData []bool, i, j int, nullsFirst bool) (int, bool) {
 	if len(validData) == 0 {
 		return 0, false
 	}
 	iNull := i < len(validData) && !validData[i]
 	jNull := j < len(validData) && !validData[j]
 	if iNull && jNull {
-		return 0, true // both null, equal
+		return 0, true
 	}
 	if iNull {
-		return -1, true // nulls first
-	}
-	if jNull {
+		if nullsFirst {
+			return -1, true
+		}
 		return 1, true
 	}
-	return 0, false // neither is null, proceed with value comparison
+	if jNull {
+		if nullsFirst {
+			return 1, true
+		}
+		return -1, true
+	}
+	return 0, false
 }
 
-// compareOrderByField compares two values for an order_by field at given indices
-// Handles both regular fields and JSON fields with paths
-// The cache parameter contains pre-extracted JSON values to avoid repeated extraction during sorting
-// Returns an error if indices are out of bounds.
+// compareOrderByField compares two values for an order_by field at given indices.
+// It returns the final order comparison after applying ASC/DESC to non-null values.
 func compareOrderByField(field *schemapb.FieldData, orderBy OrderByField, idxI, idxJ int, cache jsonValueCache) (int, error) {
 	if orderBy.JSONPath != "" && field.GetType() == schemapb.DataType_JSON {
-		if cmp, handled := compareNullsFirst(field.ValidData, idxI, idxJ); handled {
+		if cmp, handled := compareNulls(field.ValidData, idxI, idxJ, orderBy.NullsFirst); handled {
 			return cmp, nil
 		}
-		// JSON subfield comparison using cached values
-		// Use FieldName for cache key (e.g., "$meta" for dynamic fields)
 		valI := cache.getCachedJSONValue(orderBy.FieldName, orderBy.JSONPath, idxI)
 		valJ := cache.getCachedJSONValue(orderBy.FieldName, orderBy.JSONPath, idxJ)
-		return compareJSONValues(valI, valJ), nil
+		cmp := compareJSONValues(valI, valJ, orderBy.NullsFirst)
+		if cmp != 0 && !orderBy.Ascending && !isJSONNull(valI) && !isJSONNull(valJ) {
+			cmp = -cmp
+		}
+		return cmp, nil
 	}
-	// Regular field comparison
-	return compareFieldDataAt(field, idxI, idxJ)
+
+	if cmp, handled := compareNulls(field.ValidData, idxI, idxJ, orderBy.NullsFirst); handled {
+		return cmp, nil
+	}
+	cmp, err := compareFieldDataAt(field, idxI, idxJ, orderBy.NullsFirst)
+	if err != nil {
+		return 0, err
+	}
+	if cmp != 0 && !orderBy.Ascending {
+		cmp = -cmp
+	}
+	return cmp, nil
 }
 
 // sortResultsByOrderByFields sorts indices based on order_by fields for regular search results.
@@ -1835,10 +1856,7 @@ func (op *orderByOperator) sortResultsByOrderByFields(result *milvuspb.SearchRes
 				return false
 			}
 			if cmp != 0 {
-				if orderBy.Ascending {
-					return cmp < 0
-				}
-				return cmp > 0
+				return cmp < 0
 			}
 		}
 		return false
@@ -1924,10 +1942,7 @@ func (op *orderByOperator) sortGroupsByOrderByFields(result *milvuspb.SearchResu
 				return false
 			}
 			if cmp != 0 {
-				if orderBy.Ascending {
-					return cmp < 0
-				}
-				return cmp > 0
+				return cmp < 0
 			}
 		}
 		return false
@@ -1989,8 +2004,8 @@ func isSameGroupByValue(field *schemapb.FieldData, i, j int) bool {
 // because Milvus rejects NaN and Infinity at insert time via proxy validation
 // (see task_insert.go withNANCheck() -> validate_util.go -> typeutil.VerifyFloat).
 // Therefore, NaN values cannot exist in stored data and will never reach this comparison.
-func compareFieldDataAt(field *schemapb.FieldData, i, j int) (int, error) {
-	if cmp, handled := compareNullsFirst(field.ValidData, i, j); handled {
+func compareFieldDataAt(field *schemapb.FieldData, i, j int, nullsFirst bool) (int, error) {
+	if cmp, handled := compareNulls(field.ValidData, i, j, nullsFirst); handled {
 		return cmp, nil
 	}
 
