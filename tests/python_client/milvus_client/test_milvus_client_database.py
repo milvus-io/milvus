@@ -44,6 +44,52 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_create_database_without_connection(self):
+        """
+        target: test create database without connection
+        method: close client then create database
+        expected: raise exception
+        """
+        client = self._client()
+        self.close(client)
+        error = {ct.err_code: 1, ct.err_msg: "should create connection first"}
+        self.create_database(client, cf.gen_unique_str(db_prefix), check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="timeout=0 behavior is unstable in 4AM")
+    @pytest.mark.parametrize(
+        ("timeout", "error_msg"),
+        [
+            ("", "`timeout` value  is illegal"),
+            (-1, "Deadline Exceeded"),
+            (0, "Deadline Exceeded"),
+        ],
+    )
+    def test_milvus_client_list_databases_with_invalid_timeout(self, timeout, error_msg):
+        """
+        target: test list_databases with invalid timeout
+        method: list databases with invalid timeout values
+        expected: raise exception
+        """
+        client = self._client()
+        error = {ct.err_code: 1, ct.err_msg: error_msg}
+        self.list_databases(client, timeout=timeout, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_list_databases_without_connection(self):
+        """
+        target: test list_databases without connection
+        method: close client then list databases
+        expected: raise exception
+        """
+        client = self._client()
+        self.close(client)
+        error = {ct.err_code: 1, ct.err_msg: "should create connection first"}
+        self.list_databases(client, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("db_name", ["12-s", "12 s", "(mn)", "中文", "%$#", "  "])
     def test_milvus_client_create_database_invalid_db_name(self, db_name):
         """
@@ -618,3 +664,117 @@ class TestMilvusClientDatabaseValid(TestMilvusClientV2Base):
         self.drop_database(client, db_name)
         self.use_database(client, "default")
         self.drop_collection(client, collection_name_default_db)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_connect_db(self, host, port):
+        """
+        target: test connect with db
+        method: create db and collection, reconnect with db_name, verify collection visibility
+        expected: reconnect uses the specified db
+        """
+        client = self._client()
+        db_name = cf.gen_unique_str(db_prefix)
+        self.create_database(client, db_name)
+        self.use_database(client, db_name)
+        collection_name = cf.gen_unique_str(prefix)
+        self.create_collection(client, collection_name, default_dim)
+
+        uri = f"http://{host}:{port}"
+        db_client, _ = self.init_milvus_client(uri=uri, token=cf.param_info.param_token, db_name=db_name)
+        collections, _ = self.list_collections(db_client)
+        assert collection_name in collections
+
+        default_client, _ = self.init_milvus_client(uri=uri, token=cf.param_info.param_token)
+        collections_default, _ = self.list_collections(default_client)
+        assert collection_name not in collections_default
+
+        self.drop_collection(client, collection_name)
+        self.use_database(client, ct.default_db)
+        self.drop_database(client, db_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_connect_after_using_db(self, host, port):
+        """
+        target: test connect after using db
+        method: use a custom db, create collection, reconnect without db_name, verify default db is used
+        expected: reconnect without db_name uses default db
+        """
+        client = self._client()
+        db_name = cf.gen_unique_str(db_prefix)
+        self.create_database(client, db_name)
+        self.use_database(client, db_name)
+        collection_name = cf.gen_unique_str(prefix)
+        self.create_collection(client, collection_name, default_dim)
+
+        uri = f"http://{host}:{port}"
+        default_client, _ = self.init_milvus_client(uri=uri, token=cf.param_info.param_token)
+        collections_default, _ = self.list_collections(default_client)
+        assert collection_name not in collections_default
+
+        self.drop_collection(client, collection_name)
+        self.use_database(client, ct.default_db)
+        self.drop_database(client, db_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_search_query_db(self, host, port):
+        """
+        target: test search and query in db
+        method: create db and collection, reconnect with db_name, verify search and query
+        expected: search and query succeed in the specified db
+        """
+        client = self._client()
+        db_name = cf.gen_unique_str(db_prefix)
+        self.create_database(client, db_name)
+        self.use_database(client, db_name)
+        collection_name = cf.gen_unique_str(prefix)
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
+        self.insert(client, collection_name, rows)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+
+        uri = f"http://{host}:{port}"
+        db_client, _ = self.init_milvus_client(uri=uri, token=cf.param_info.param_token, db_name=db_name)
+        vectors_to_search = cf.gen_vectors(1, default_dim)
+        self.search(
+            db_client,
+            collection_name,
+            vectors_to_search,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "pk_name": default_primary_key_field_name,
+                "limit": default_limit,
+            },
+        )
+        self.query(
+            db_client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )
+
+        self.drop_collection(client, collection_name)
+        self.use_database(client, ct.default_db)
+        self.drop_database(client, db_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_search_db(self, host, port):
+        self.test_milvus_client_search_query_db(host, port)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_query_db(self, host, port):
+        self.test_milvus_client_search_query_db(host, port)

@@ -6,99 +6,167 @@ from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from pymilvus import DataType
+from pymilvus import DataType, DefaultConfig
 from utils.util_log import test_log as log
 from utils.util_pymilvus import *  # noqa: F403
 
 prefix = "client_rbac"
 
 
-def _teardown_rbac(test_instance):
-    """Common teardown: drop all non-default users, roles, privilege groups, and databases"""
-    client = test_instance._client()
+class TrackedRbacTestBase(TestMilvusClientV2Base):
+    def setup_method(self, method):
+        super().setup_method(method)
+        self._rbac_users = set()
+        self._rbac_roles = set()
+        self._rbac_privilege_groups = set()
+        self._rbac_databases = set()
+        self._rbac_collections = {}
 
-    # drop users (revoke roles first)
-    users, _ = test_instance.list_users(client)
-    for user in users:
-        if user != ct.default_user:
-            try:
-                user_info, _ = test_instance.describe_user(client, user)
-                if user_info and user_info.get("roles"):
-                    for role in user_info["roles"]:
-                        try:
-                            test_instance.revoke_role(client, user, role)
-                        except Exception:
-                            pass
-                test_instance.drop_user(client, user)
-            except Exception:
-                pass
+    def teardown_method(self, method):
+        log.info(("*" * 35) + " teardown " + ("*" * 35))
+        log.info("[teardown_method] Start teardown RBAC test case %s..." % method.__name__)
+        self._cleanup_rbac_resources()
+        try:
+            res = self.connection_wrap.list_connections()
+            for alias, _ in res[0]:
+                self.connection_wrap.remove_connection(alias)
+            self.connection_wrap.add_connection(
+                default={"host": DefaultConfig.DEFAULT_HOST, "port": DefaultConfig.DEFAULT_PORT}
+            )
+        except Exception as e:
+            log.debug(str(e))
 
-    # collect all dbs for cross-db privilege revocation
-    dbs, _ = test_instance.list_databases(client)
+    @staticmethod
+    def _current_db_name(client):
+        db_name = getattr(getattr(client, "_config", None), "db_name", "")
+        return db_name or ct.default_db
 
-    # drop roles (revoke privileges across all dbs first)
-    roles, _ = test_instance.list_roles(client)
-    for role in roles:
-        if role not in ["admin", "public"]:
-            for db in dbs:
-                try:
-                    role_info, _ = test_instance.describe_role(client, role, db_name=db)
-                    if role_info and role_info.get("privileges"):
-                        for priv in role_info["privileges"]:
-                            try:
-                                test_instance.revoke_privilege(
-                                    client,
-                                    role,
-                                    priv["object_type"],
-                                    priv["privilege"],
-                                    priv["object_name"],
-                                    db_name=priv.get("db_name", ""),
-                                )
-                            except Exception:
-                                try:
-                                    test_instance.revoke_privilege_v2(
-                                        client,
-                                        role,
-                                        priv["privilege"],
-                                        priv.get("object_name", "*"),
-                                        db_name=priv.get("db_name", "*"),
-                                    )
-                                except Exception:
-                                    pass
-                except Exception:
-                    pass
-            try:
-                test_instance.drop_role(client, role)
-            except Exception:
-                pass
+    def _track_collection(self, client, collection_name):
+        db_name = self._current_db_name(client)
+        self._rbac_collections.setdefault(db_name, set()).add(collection_name)
 
-    # drop custom privilege groups
-    try:
-        groups, _ = test_instance.list_privilege_groups(client)
-        for g in groups:
-            if g.get("privilege_group") not in ct.built_in_privilege_groups:
-                try:
-                    test_instance.drop_privilege_group(client, g["privilege_group"])
-                except Exception:
-                    pass
-    except Exception:
-        pass
+    def _untrack_collection(self, client, collection_name):
+        db_name = self._current_db_name(client)
+        collections = self._rbac_collections.get(db_name)
+        if collections and collection_name in collections:
+            collections.discard(collection_name)
+            if not collections:
+                self._rbac_collections.pop(db_name)
+            return
 
-    # drop databases
-    for db in dbs:
-        if db != ct.default_db:
-            try:
-                test_instance.using_database(client, db)
-                colls, _ = test_instance.list_collections(client)
-                for c in colls:
-                    test_instance.drop_collection(client, c)
-                test_instance.using_database(client, "default")
-                test_instance.drop_database(client, db)
-            except Exception:
-                try:
-                    test_instance.using_database(client, "default")
-                except Exception:
-                    pass
+        for tracked_db, tracked_collections in list(self._rbac_collections.items()):
+            if collection_name in tracked_collections:
+                tracked_collections.discard(collection_name)
+                if not tracked_collections:
+                    self._rbac_collections.pop(tracked_db)
+                return
+
+    def _log_cleanup_failure(self, resource_type, resource_name, error):
+        log.warning(f"[rbac_cleanup] failed to drop {resource_type} {resource_name}: {error}")
+
+    def _cleanup_rbac_resources(self):
+        client = self._client()
+        if client is None:
+            return
+
+        for role_name in sorted(self._rbac_roles):
+            res, check = super().drop_role(
+                client, role_name=role_name, force_drop=True, check_task=CheckTasks.check_nothing
+            )
+            if not check:
+                self._log_cleanup_failure("role", role_name, res)
+
+        for user_name in sorted(self._rbac_users):
+            res, check = super().drop_user(client, user_name=user_name, check_task=CheckTasks.check_nothing)
+            if not check:
+                self._log_cleanup_failure("user", user_name, res)
+
+        for privilege_group in sorted(self._rbac_privilege_groups):
+            res, check = super().drop_privilege_group(
+                client, privilege_group=privilege_group, check_task=CheckTasks.check_nothing
+            )
+            if not check:
+                self._log_cleanup_failure("privilege group", privilege_group, res)
+
+        for db_name, collection_names in list(self._rbac_collections.items()):
+            res, check = super().using_database(client, db_name, check_task=CheckTasks.check_nothing)
+            if not check:
+                self._log_cleanup_failure("database", db_name, res)
+                continue
+
+            for collection_name in sorted(collection_names):
+                res, check = super().drop_collection(
+                    client, collection_name, check_task=CheckTasks.check_nothing
+                )
+                if not check:
+                    self._log_cleanup_failure("collection", f"{db_name}.{collection_name}", res)
+
+        super().using_database(client, ct.default_db, check_task=CheckTasks.check_nothing)
+        for db_name in sorted(db for db in self._rbac_databases if db != ct.default_db):
+            res, check = super().drop_database(client, db_name, check_task=CheckTasks.check_nothing)
+            if not check:
+                self._log_cleanup_failure("database", db_name, res)
+
+    def create_user(self, client, user_name, password, *args, **kwargs):
+        res, check = super().create_user(client, user_name, password, *args, **kwargs)
+        if check is True:
+            self._rbac_users.add(user_name)
+        return res, check
+
+    def drop_user(self, client, user_name, *args, **kwargs):
+        res, check = super().drop_user(client, user_name, *args, **kwargs)
+        if check is True:
+            self._rbac_users.discard(user_name)
+        return res, check
+
+    def create_role(self, client, role_name, *args, **kwargs):
+        res, check = super().create_role(client, role_name, *args, **kwargs)
+        if check is True:
+            self._rbac_roles.add(role_name)
+        return res, check
+
+    def drop_role(self, client, role_name, *args, **kwargs):
+        res, check = super().drop_role(client, role_name, *args, **kwargs)
+        if check is True:
+            self._rbac_roles.discard(role_name)
+        return res, check
+
+    def create_privilege_group(self, client, privilege_group, *args, **kwargs):
+        res, check = super().create_privilege_group(client, privilege_group, *args, **kwargs)
+        if check is True:
+            self._rbac_privilege_groups.add(privilege_group)
+        return res, check
+
+    def drop_privilege_group(self, client, privilege_group, *args, **kwargs):
+        res, check = super().drop_privilege_group(client, privilege_group, *args, **kwargs)
+        if check is True:
+            self._rbac_privilege_groups.discard(privilege_group)
+        return res, check
+
+    def create_database(self, client, db_name, *args, **kwargs):
+        res, check = super().create_database(client, db_name, *args, **kwargs)
+        if check is True:
+            self._rbac_databases.add(db_name)
+        return res, check
+
+    def drop_database(self, client, db_name, *args, **kwargs):
+        res, check = super().drop_database(client, db_name, *args, **kwargs)
+        if check is True:
+            self._rbac_databases.discard(db_name)
+            self._rbac_collections.pop(db_name, None)
+        return res, check
+
+    def create_collection(self, client, collection_name, *args, **kwargs):
+        res, check = super().create_collection(client, collection_name, *args, **kwargs)
+        if check is True:
+            self._track_collection(client, collection_name)
+        return res, check
+
+    def drop_collection(self, client, collection_name, *args, **kwargs):
+        res, check = super().drop_collection(client, collection_name, *args, **kwargs)
+        if check is True:
+            self._untrack_collection(client, collection_name)
+        return res, check
 
 
 user_pre = "user"
@@ -119,13 +187,8 @@ default_string_field_name = ct.default_string_field_name
 
 
 @pytest.mark.tags(CaseLabel.RBAC)
-class TestMilvusClientRbacBase(TestMilvusClientV2Base):
+class TestMilvusClientRbacBase(TrackedRbacTestBase):
     """Test case of rbac interface"""
-
-    def teardown_method(self, method):
-        log.info("[teardown_method] Start teardown RBAC test cases ...")
-        _teardown_rbac(self)
-        super().teardown_method(method)
 
     def test_milvus_client_connect_using_token(self, host, port):
         """
@@ -431,13 +494,8 @@ class TestMilvusClientRbacBase(TestMilvusClientV2Base):
 
 
 @pytest.mark.tags(CaseLabel.RBAC)
-class TestMilvusClientRbacInvalid(TestMilvusClientV2Base):
+class TestMilvusClientRbacInvalid(TrackedRbacTestBase):
     """Test case of rbac interface"""
-
-    def teardown_method(self, method):
-        log.info("[teardown_method] Start teardown RBAC invalid test cases ...")
-        _teardown_rbac(self)
-        super().teardown_method(method)
 
     def test_milvus_client_init_token_invalid(self, host, port):
         """
@@ -1298,13 +1356,8 @@ class TestMilvusClientRbacInvalid(TestMilvusClientV2Base):
 
 
 @pytest.mark.tags(CaseLabel.RBAC)
-class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
+class TestMilvusClientRbacAdvance(TrackedRbacTestBase):
     """Test case of rbac interface"""
-
-    def teardown_method(self, method):
-        log.info("[teardown_method] Start teardown RBAC test cases ...")
-        _teardown_rbac(self)
-        super().teardown_method(method)
 
     # NOTE: requires common.security.authorizationEnabled=true
     @pytest.mark.skip("requires specific multi-db RBAC setup")
@@ -1442,7 +1495,8 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         # drop the role
         self.drop_role(client, role_name=role_name)
 
-    def test_milvus_client_list_collection_grants_by_role_and_object(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_milvus_client_list_collection_grants_by_role_and_object(self, host, port, with_db):
         """
         target: test milvus client api list grants by role and object
         method: create a new role, grant role collection privilege, list grants by role and object
@@ -1452,6 +1506,13 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         role_name = cf.gen_unique_str(role_pre)
         collection_name = cf.gen_unique_str(prefix)
 
+        if with_db:
+            db_name = cf.gen_unique_str(prefix)
+            self.create_database(client, db_name)
+            self.using_database(client, db_name)
+        else:
+            db_name = ct.default_db
+
         # create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
 
@@ -1459,14 +1520,14 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         self.create_role(client, role_name=role_name)
 
         # grant collection privileges to role
-        self.grant_privilege(client, role_name, "Collection", "Search", collection_name)
-        self.grant_privilege(client, role_name, "Collection", "Insert", collection_name)
+        self.grant_privilege(client, role_name, "Collection", "Search", collection_name, db_name=db_name)
+        self.grant_privilege(client, role_name, "Collection", "Insert", collection_name, db_name=db_name)
 
         # wait for privilege to take effect
         time.sleep(10)
 
         # describe role to get privileges
-        role_info, _ = self.describe_role(client, role_name=role_name)
+        role_info, _ = self.describe_role(client, role_name=role_name, db_name=db_name)
 
         # verify grants
         privileges = role_info.get("privileges", [])
@@ -1480,14 +1541,30 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         for priv in privileges:
             assert priv["object_type"] == "Collection"
             assert priv["object_name"] == collection_name
+            assert priv.get("db_name") in [db_name, ""]
 
         # revoke privileges
         for priv in privileges:
-            self.revoke_privilege(client, role_name, priv["object_type"], priv["privilege"], priv["object_name"])
+            self.revoke_privilege(
+                client,
+                role_name,
+                priv["object_type"],
+                priv["privilege"],
+                priv["object_name"],
+                db_name=db_name,
+            )
+
+        if with_db:
+            self.using_database(client, ct.default_db)
 
         # drop role and collection
-        self.drop_role(client, role_name=role_name)
+        if with_db:
+            self.using_database(client, db_name)
         self.drop_collection(client, collection_name)
+        self.drop_role(client, role_name=role_name)
+        if with_db:
+            self.using_database(client, ct.default_db)
+            self.drop_database(client, db_name)
 
     def test_milvus_client_list_global_grants_by_role_and_object(self, host, port):
         """
@@ -2032,13 +2109,8 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
 
 
 @pytest.mark.tags(CaseLabel.RBAC)
-class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
+class TestMilvusClientRbacPrivilegeVerify(TrackedRbacTestBase):
     """Test case of rbac privilege verification"""
-
-    def teardown_method(self, method):
-        log.info("[teardown_method] Start teardown RBAC test cases ...")
-        _teardown_rbac(self)
-        super().teardown_method(method)
 
     # ==================== P0 Tests ====================
 
@@ -2142,7 +2214,7 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         time.sleep(10)
 
         uri = f"http://{host}:{port}"
-        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
+        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
 
         rng = np.random.default_rng(seed=19530)
         rows = [
@@ -2208,7 +2280,8 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         # cleanup
         self.drop_collection(client, collection_name)
 
-    def test_milvus_client_verify_grant_collection_search_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_milvus_client_verify_grant_collection_search_privilege(self, host, port, with_db):
         """
         target: test grant Search privilege on collection
         method: root creates + inserts + loads, grant Search, user searches
@@ -2224,6 +2297,13 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.create_role(client, role_name=role_name)
         self.grant_role(client, user_name=user_name, role_name=role_name)
 
+        if with_db:
+            db_name = cf.gen_unique_str(prefix)
+            self.create_database(client, db_name)
+            self.using_database(client, db_name)
+        else:
+            db_name = ct.default_db
+
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         rng = np.random.default_rng(seed=19530)
         rows = [
@@ -2241,19 +2321,25 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
 
-        self.grant_privilege(client, role_name, "Collection", "Search", collection_name)
+        self.grant_privilege(client, role_name, "Collection", "Search", collection_name, db_name=db_name)
         time.sleep(10)
 
         uri = f"http://{host}:{port}"
-        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
+        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
         vectors_to_search = cf.gen_vectors(1, default_dim)
         res, _ = self.search(user_client, collection_name, vectors_to_search)
         assert len(res) > 0
 
         # cleanup
+        if with_db:
+            self.using_database(client, db_name)
         self.drop_collection(client, collection_name)
+        if with_db:
+            self.using_database(client, ct.default_db)
+            self.drop_database(client, db_name)
 
-    def test_milvus_client_verify_grant_collection_query_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_milvus_client_verify_grant_collection_query_privilege(self, host, port, with_db):
         """
         target: test grant Query privilege on collection
         method: root creates + inserts + loads, grant Query, user queries
@@ -2269,6 +2355,13 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.create_role(client, role_name=role_name)
         self.grant_role(client, user_name=user_name, role_name=role_name)
 
+        if with_db:
+            db_name = cf.gen_unique_str(prefix)
+            self.create_database(client, db_name)
+            self.using_database(client, db_name)
+        else:
+            db_name = ct.default_db
+
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         rng = np.random.default_rng(seed=19530)
         rows = [
@@ -2286,17 +2379,22 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
 
-        self.grant_privilege(client, role_name, "Collection", "Query", collection_name)
+        self.grant_privilege(client, role_name, "Collection", "Query", collection_name, db_name=db_name)
         time.sleep(10)
 
         uri = f"http://{host}:{port}"
-        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
+        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
         query_expr = f"{default_primary_key_field_name} in [0, 1, 2]"
         res, _ = self.query(user_client, collection_name, filter=query_expr)
         assert len(res) > 0
 
         # cleanup
+        if with_db:
+            self.using_database(client, db_name)
         self.drop_collection(client, collection_name)
+        if with_db:
+            self.using_database(client, ct.default_db)
+            self.drop_database(client, db_name)
 
     def test_milvus_client_verify_grant_collection_load_privilege(self, host, port):
         """
@@ -2461,7 +2559,8 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
             check_task=CheckTasks.check_permission_deny,
         )
 
-    def test_milvus_client_verify_grant_wildcard_object_name(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_milvus_client_verify_grant_wildcard_object_name(self, host, port, with_db):
         """
         target: test grant Insert with wildcard object name
         method: grant Collection Insert on "*", root creates 2 collections, user inserts both
@@ -2475,7 +2574,13 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.create_user(client, user_name=user_name, password=password)
         self.create_role(client, role_name=role_name)
         self.grant_role(client, user_name=user_name, role_name=role_name)
-        self.grant_privilege(client, role_name, "Collection", "Insert", "*")
+        if with_db:
+            db_name = cf.gen_unique_str(prefix)
+            self.create_database(client, db_name)
+            self.using_database(client, db_name)
+        else:
+            db_name = ct.default_db
+        self.grant_privilege(client, role_name, "Collection", "Insert", "*", db_name=db_name)
         time.sleep(10)
 
         col_a = cf.gen_unique_str(prefix)
@@ -2484,7 +2589,7 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.create_collection(client, col_b, default_dim, consistency_level="Strong")
 
         uri = f"http://{host}:{port}"
-        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
+        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
 
         rng = np.random.default_rng(seed=19530)
         rows = [
@@ -2500,10 +2605,16 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.insert(user_client, col_b, rows)
 
         # cleanup
+        if with_db:
+            self.using_database(client, db_name)
         self.drop_collection(client, col_a)
         self.drop_collection(client, col_b)
+        if with_db:
+            self.using_database(client, ct.default_db)
+            self.drop_database(client, db_name)
 
-    def test_milvus_client_verify_grant_wildcard_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_milvus_client_verify_grant_wildcard_privilege(self, host, port, with_db):
         """
         target: test grant Collection * (all privileges) on specific collection
         method: grant Collection * on col, root inserts + loads, user can insert/search/query
@@ -2518,6 +2629,13 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.create_user(client, user_name=user_name, password=password)
         self.create_role(client, role_name=role_name)
         self.grant_role(client, user_name=user_name, role_name=role_name)
+
+        if with_db:
+            db_name = cf.gen_unique_str(prefix)
+            self.create_database(client, db_name)
+            self.using_database(client, db_name)
+        else:
+            db_name = ct.default_db
 
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         rng = np.random.default_rng(seed=19530)
@@ -2536,11 +2654,11 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
 
-        self.grant_privilege_v2(client, role_name, "CollectionReadWrite", collection_name=collection_name)
+        self.grant_privilege_v2(client, role_name, "CollectionReadWrite", collection_name=collection_name, db_name=db_name)
         time.sleep(10)
 
         uri = f"http://{host}:{port}"
-        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
+        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
 
         # user can insert
         new_rows = [
@@ -2565,11 +2683,17 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         assert len(res) > 0
 
         # cleanup
+        if with_db:
+            self.using_database(client, db_name)
         self.drop_collection(client, collection_name)
+        if with_db:
+            self.using_database(client, ct.default_db)
+            self.drop_database(client, db_name)
 
     # ==================== P1 Tests ====================
 
-    def test_milvus_client_verify_grant_create_index_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_milvus_client_verify_grant_create_index_privilege(self, host, port, with_db):
         """
         target: test grant CreateIndex privilege on collection
         method: root creates collection, grant CreateIndex, user creates index
@@ -2585,21 +2709,34 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.create_role(client, role_name=role_name)
         self.grant_role(client, user_name=user_name, role_name=role_name)
 
+        if with_db:
+            db_name = cf.gen_unique_str(prefix)
+            self.create_database(client, db_name)
+            self.using_database(client, db_name)
+        else:
+            db_name = ct.default_db
+
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
 
-        self.grant_privilege(client, role_name, "Collection", "CreateIndex", collection_name)
+        self.grant_privilege(client, role_name, "Collection", "CreateIndex", collection_name, db_name=db_name)
         time.sleep(10)
 
         uri = f"http://{host}:{port}"
-        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
+        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
         index_params = self.prepare_index_params(user_client)[0]
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
         self.create_index(user_client, collection_name, index_params)
 
         # cleanup
+        if with_db:
+            self.using_database(client, db_name)
         self.drop_collection(client, collection_name)
+        if with_db:
+            self.using_database(client, ct.default_db)
+            self.drop_database(client, db_name)
 
-    def test_milvus_client_verify_grant_drop_index_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_milvus_client_verify_grant_drop_index_privilege(self, host, port, with_db):
         """
         target: test grant DropIndex privilege on collection
         method: root creates collection + index, grant DropIndex, user drops index
@@ -2615,6 +2752,13 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.create_role(client, role_name=role_name)
         self.grant_role(client, user_name=user_name, role_name=role_name)
 
+        if with_db:
+            db_name = cf.gen_unique_str(prefix)
+            self.create_database(client, db_name)
+            self.using_database(client, db_name)
+        else:
+            db_name = ct.default_db
+
         # Use schema mode to avoid auto-load, then manually create index
         schema = self.create_schema(client)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
@@ -2626,18 +2770,24 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         # collection is NOT loaded, so drop_index is allowed
 
         # grant DropIndex + DescribeCollection via v2 API
-        self.grant_privilege_v2(client, role_name, "DropIndex", collection_name=collection_name)
-        self.grant_privilege_v2(client, role_name, "DescribeCollection", collection_name=collection_name)
+        self.grant_privilege_v2(client, role_name, "DropIndex", collection_name=collection_name, db_name=db_name)
+        self.grant_privilege_v2(client, role_name, "DescribeCollection", collection_name=collection_name, db_name=db_name)
         time.sleep(20)
 
         uri = f"http://{host}:{port}"
-        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
+        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
         self.drop_index(user_client, collection_name, default_vector_field_name)
 
         # cleanup
+        if with_db:
+            self.using_database(client, db_name)
         self.drop_collection(client, collection_name)
+        if with_db:
+            self.using_database(client, ct.default_db)
+            self.drop_database(client, db_name)
 
-    def test_milvus_client_verify_grant_compaction_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_milvus_client_verify_grant_compaction_privilege(self, host, port, with_db):
         """
         target: test grant Compaction privilege on collection
         method: root creates collection + inserts, grant Compaction, user compacts
@@ -2653,6 +2803,13 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.create_role(client, role_name=role_name)
         self.grant_role(client, user_name=user_name, role_name=role_name)
 
+        if with_db:
+            db_name = cf.gen_unique_str(prefix)
+            self.create_database(client, db_name)
+            self.using_database(client, db_name)
+        else:
+            db_name = ct.default_db
+
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         rng = np.random.default_rng(seed=19530)
         rows = [
@@ -2666,17 +2823,23 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         ]
         self.insert(client, collection_name, rows)
 
-        self.grant_privilege(client, role_name, "Collection", "Compaction", collection_name)
+        self.grant_privilege(client, role_name, "Collection", "Compaction", collection_name, db_name=db_name)
         time.sleep(10)
 
         uri = f"http://{host}:{port}"
-        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
+        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
         self.compact(user_client, collection_name)
 
         # cleanup
+        if with_db:
+            self.using_database(client, db_name)
         self.drop_collection(client, collection_name)
+        if with_db:
+            self.using_database(client, ct.default_db)
+            self.drop_database(client, db_name)
 
-    def test_milvus_client_verify_grant_flush_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_milvus_client_verify_grant_flush_privilege(self, host, port, with_db):
         """
         target: test grant Flush privilege on collection
         method: root creates collection + inserts, grant Flush, user flushes
@@ -2692,6 +2855,13 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.create_role(client, role_name=role_name)
         self.grant_role(client, user_name=user_name, role_name=role_name)
 
+        if with_db:
+            db_name = cf.gen_unique_str(prefix)
+            self.create_database(client, db_name)
+            self.using_database(client, db_name)
+        else:
+            db_name = ct.default_db
+
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         rng = np.random.default_rng(seed=19530)
         rows = [
@@ -2705,15 +2875,20 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         ]
         self.insert(client, collection_name, rows)
 
-        self.grant_privilege(client, role_name, "Collection", "Flush", collection_name)
+        self.grant_privilege(client, role_name, "Collection", "Flush", collection_name, db_name=db_name)
         time.sleep(10)
 
         uri = f"http://{host}:{port}"
-        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
+        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
         self.flush(user_client, collection_name)
 
         # cleanup
+        if with_db:
+            self.using_database(client, db_name)
         self.drop_collection(client, collection_name)
+        if with_db:
+            self.using_database(client, ct.default_db)
+            self.drop_database(client, db_name)
 
     def test_milvus_client_verify_grant_global_create_collection_privilege(self, host, port):
         """
@@ -3175,13 +3350,8 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
 
 
 @pytest.mark.tags(CaseLabel.RBAC)
-class TestMilvusClientRbacPrivilegeGroup(TestMilvusClientV2Base):
+class TestMilvusClientRbacPrivilegeGroup(TrackedRbacTestBase):
     """Test case of rbac privilege group interface"""
-
-    def teardown_method(self, method):
-        log.info("[teardown_method] Start teardown privilege group test cases ...")
-        _teardown_rbac(self)
-        super().teardown_method(method)
 
     def test_milvus_client_create_large_numbers_privilege_groups(self, host, port):
         """
@@ -3567,13 +3737,8 @@ class TestMilvusClientRbacPrefixIsolation(TestMilvusClientV2Base):
 
 
 @pytest.mark.tags(CaseLabel.RBAC)
-class TestMilvusClientRbacGrantV2(TestMilvusClientV2Base):
+class TestMilvusClientRbacGrantV2(TrackedRbacTestBase):
     """Test case of rbac grant v2 interface"""
-
-    def teardown_method(self, method):
-        log.info("[teardown_method] Start teardown grant v2 test cases ...")
-        _teardown_rbac(self)
-        super().teardown_method(method)
 
     def test_milvus_client_grant_revoke_v2_duplicate_privilege_and_privilege_group(self, host, port):
         """
