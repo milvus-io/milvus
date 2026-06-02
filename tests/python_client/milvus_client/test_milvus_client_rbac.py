@@ -24,7 +24,7 @@ class TrackedRbacTestBase(TestMilvusClientV2Base):
 
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
-        log.info("[teardown_method] Start teardown RBAC test case %s..." % method.__name__)
+        log.info(f"[teardown_method] Start teardown RBAC test case {method.__name__}...")
         self._cleanup_rbac_resources()
         try:
             res = self.connection_wrap.list_connections()
@@ -2214,7 +2214,7 @@ class TestMilvusClientRbacPrivilegeVerify(TrackedRbacTestBase):
         time.sleep(10)
 
         uri = f"http://{host}:{port}"
-        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
+        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
 
         rng = np.random.default_rng(seed=19530)
         rows = [
