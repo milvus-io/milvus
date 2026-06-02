@@ -26,7 +26,21 @@ CachedSearchIterator::CachedSearchIterator(
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Query dataset is nullptr, cannot initialize iterator");
     }
-    nq_ = query_ds->GetRows();
+    auto offsets =
+        query_ds->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
+    if (offsets != nullptr) {
+        nq_ = query_ds->Get<int64_t>(knowhere::meta::NQ);
+        AssertInfo(nq_ > 0, "embedding list query count is missing");
+        auto total_vectors = static_cast<size_t>(query_ds->GetRows());
+        AssertInfo(offsets[nq_] == total_vectors,
+                   "embedding list query offsets are inconsistent with "
+                   "flattened rows: nq={}, terminal_offset={}, rows={}",
+                   nq_,
+                   offsets[nq_],
+                   total_vectors);
+    } else {
+        nq_ = query_ds->GetRows();
+    }
     Init(search_info);
 
     auto search_json = index.PrepareSearchParams(search_info);

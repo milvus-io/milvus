@@ -155,11 +155,14 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         // step 3: brute force search where small indexing is unavailable
         auto vec_ptr = record.get_data_base(vecfield_id);
         const auto& offset_mapping = vec_ptr->get_offset_mapping();
+        const bool is_element_level_search =
+            data_type == DataType::VECTOR_ARRAY &&
+            info.array_offsets_ != nullptr;
         const auto has_offset_mapping = offset_mapping.IsEnabled();
 
         TargetBitmap transformed_bitset;
         BitsetView search_bitset = bitset;
-        if (has_offset_mapping && !bitset.empty()) {
+        if (has_offset_mapping && !is_element_level_search && !bitset.empty()) {
             auto status =
                 offset_mapping.TransformBitset(bitset, transformed_bitset);
             if (status == OffsetMapping::BitsetTransformStatus::AllFiltered) {
@@ -188,8 +191,18 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 search_result.PinBitset(std::move(transformed_bitset));
         }
 
+        // Element-level search (embedding-search-embedding): knowhere sees
+        // a scalar vector type and the per-chunk size must be measured in
+        // elements. Compute this before the iterator_v2 branch so both
+        // paths share the substitution. Emb-list (multi-search-multi)
+        // iterator is rejected by the proxy; the assert below is
+        // defense-in-depth.
+        const auto iter_data_type =
+            is_element_level_search ? element_type : data_type;
+        const bool use_vector_iterator = milvus::exec::UseVectorIterator(info);
+
         if (info.iterator_v2_info_.has_value()) {
-            AssertInfo(data_type != DataType::VECTOR_ARRAY,
+            AssertInfo(iter_data_type != DataType::VECTOR_ARRAY,
                        "vector array(embedding list) is not supported for "
                        "vector iterator");
 
@@ -199,7 +212,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                              info,
                                              index_info,
                                              search_bitset,
-                                             data_type);
+                                             iter_data_type);
             cached_iter.NextBatch(info, search_result);
             FinalizeVectorSearchOffsets(
                 search_result, offset_mapping, info.array_offsets_.get());
@@ -210,9 +223,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         auto max_chunk = upper_div(active_count, vec_size_per_chunk);
         bool element_level_search = data_type == DataType::VECTOR_ARRAY &&
                                     info.array_offsets_ != nullptr;
-        AssertInfo(
-            !element_level_search || !milvus::exec::UseVectorIterator(info),
-            "element-level search is not supported for vector iterator");
+        AssertInfo(!element_level_search || !use_vector_iterator,
+                   "element-level search is not supported for vector iterator");
 
         int64_t cumulative_element_offset = 0;
 
@@ -285,7 +297,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
             auto search_data_type =
                 element_level_search ? element_type : data_type;
-            if (milvus::exec::UseVectorIterator(info)) {
+            if (use_vector_iterator) {
                 AssertInfo(search_data_type != DataType::VECTOR_ARRAY,
                            "vector array(embedding list) is not supported for "
                            "vector iterator");
@@ -314,7 +326,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 final_qr.merge(sub_qr);
             }
         }
-        if (milvus::exec::UseVectorIterator(info)) {
+        if (use_vector_iterator) {
             std::vector<int64_t> chunk_rows(max_chunk, 0);
             for (int i = 1; i < max_chunk; ++i) {
                 chunk_rows[i] = i * vec_size_per_chunk;

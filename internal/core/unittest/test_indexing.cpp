@@ -1046,11 +1046,11 @@ TEST(Indexing, DiskAnnEmbListBuildWithDataset) {
     IndexType index_type = knowhere::IndexEnum::INDEX_DISKANN;
     MetricType metric_type = knowhere::metric::MAX_SIM_L2;
 
-    // Variable-length emb_lists: lengths cycle through 1,2,3,4,5
+    // Variable-length emb_lists with trailing empty lists.
     std::vector<size_t> offsets;
     offsets.push_back(0);
     for (int64_t i = 0; i < num_emb_lists; ++i) {
-        size_t len = (i % 5) + 1;  // 1..5 vectors per emb_list
+        size_t len = i >= num_emb_lists - 2 ? 0 : (i % 5) + 1;
         offsets.push_back(offsets.back() + len);
     }
     int64_t total_vectors = static_cast<int64_t>(offsets.back());
@@ -1068,6 +1068,7 @@ TEST(Indexing, DiskAnnEmbListBuildWithDataset) {
         knowhere::GenDataSet(total_vectors, DIM, xb_data.data());
     xb_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                     const_cast<const size_t*>(offsets.data()));
+    xb_dataset->Set(knowhere::meta::NQ, num_emb_lists);
 
     // Setup file manager context
     int64_t collection_id = 1;
@@ -1142,6 +1143,7 @@ TEST(Indexing, DiskAnnEmbListBuildWithDataset) {
     std::vector<size_t> query_offsets = {0, 3, 5};
     xq_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                     const_cast<const size_t*>(query_offsets.data()));
+    xq_dataset->Set(knowhere::meta::NQ, int64_t{2});
 
     milvus::SearchInfo search_info;
     search_info.topk_ = K;

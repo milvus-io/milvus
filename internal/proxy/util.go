@@ -636,6 +636,9 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 	// valid max capacity for array per row parameters
 	// if max_capacity not specified, return error
 	if field.DataType == schemapb.DataType_Array {
+		if err := validateElementType(field.GetElementType()); err != nil {
+			return err
+		}
 		if err = validateMaxCapacityPerRow(schema.Name, field); err != nil {
 			return err
 		}

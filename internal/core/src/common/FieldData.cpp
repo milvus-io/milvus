@@ -120,8 +120,8 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
     if (element_count == 0) {
         return;
     }
-    if (!IsVectorDataType(data_type_)) {
-        null_count_ = array->null_count();
+    if (!(nullable_ && IsVectorDataType(data_type_))) {
+        null_count_ += array->null_count();
     }
     switch (data_type_) {
         case DataType::BOOL: {
@@ -366,7 +366,9 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                        "Element type not set for VECTOR_ARRAY");
 
             auto values_array = list_array->values();
-            std::vector<VectorArray> values(element_count);
+            std::vector<VectorArray> values;
+            values.reserve(nullable_ ? element_count - list_array->null_count()
+                                     : element_count);
 
             switch (element_type) {
                 case DataType::VECTOR_FLOAT:
@@ -387,13 +389,19 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                         milvus::vector_bytes_per_element(element_type, dim);
 
                     for (size_t index = 0; index < element_count; ++index) {
+                        if (nullable_ && list_array->IsNull(index)) {
+                            continue;
+                        }
                         int64_t start_offset = list_array->value_offset(index);
                         int64_t end_offset =
                             list_array->value_offset(index + 1);
                         int64_t num_vectors = end_offset - start_offset;
 
                         auto data_size = num_vectors * bytes_per_vec;
-                        auto data_ptr = std::make_unique<uint8_t[]>(data_size);
+                        auto data_ptr =
+                            data_size > 0
+                                ? std::make_unique<uint8_t[]>(data_size)
+                                : nullptr;
 
                         for (int64_t i = 0; i < num_vectors; i++) {
                             const uint8_t* binary_data =
@@ -402,7 +410,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                             std::memcpy(dest, binary_data, bytes_per_vec);
                         }
 
-                        values[index] = VectorArray(
+                        values.emplace_back(
                             static_cast<const void*>(data_ptr.get()),
                             num_vectors,
                             dim,
@@ -414,6 +422,12 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                     ThrowInfo(DataTypeInvalid,
                               "Unsupported element type {} in VectorArray",
                               GetDataTypeName(element_type));
+            }
+            if (nullable_) {
+                return FillFieldData(values.data(),
+                                     list_array->null_bitmap_data(),
+                                     element_count,
+                                     list_array->offset());
             }
             return FillFieldData(values.data(), element_count);
         }

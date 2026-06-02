@@ -67,6 +67,7 @@ SearchOnSealedIndex(const Schema& schema,
         auto num_vectors = query_offsets[num_queries];
         dataset = knowhere::GenDataSet(num_vectors, dim, query_data);
         dataset->Set(knowhere::meta::EMB_LIST_OFFSET, query_offsets);
+        dataset->Set(knowhere::meta::NQ, num_queries);
     }
 
     dataset->SetIsSparse(is_sparse);
@@ -76,10 +77,11 @@ SearchOnSealedIndex(const Schema& schema,
         dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
 
     const auto& offset_mapping = vec_index->GetOffsetMapping();
+    const bool is_element_level_search = search_info.array_offsets_ != nullptr;
     TargetBitmap transformed_bitset;
     BitsetView search_bitset = bitset;
     const auto has_offset_mapping = offset_mapping.IsEnabled();
-    if (has_offset_mapping) {
+    if (has_offset_mapping && !is_element_level_search) {
         if (offset_mapping.GetValidCount() == 0) {
             FillEmptySearchResult(search_result, num_queries, topK);
             return;
@@ -176,27 +178,44 @@ SearchOnSealedColumn(const Schema& schema,
 
     // Check for nullable vector field with all null values - must be done before creating iterators
     const auto& offset_mapping = column->GetOffsetMapping();
+    // Element-level VECTOR_ARRAY search has already expanded the row bitset
+    // to element IDs. OffsetMapping is row-level, so only use it for row-level
+    // vector searches.
+    bool is_element_level_search =
+        field.get_data_type() == DataType::VECTOR_ARRAY &&
+        search_info.array_offsets_ != nullptr;
     TargetBitmap transformed_bitset;
     BitsetView search_bitview = bitview;
     const auto has_offset_mapping = offset_mapping.IsEnabled();
     if (has_offset_mapping) {
-        if (offset_mapping.GetValidCount() == 0) {
-            // All vectors are null, return empty result
-            FillEmptySearchResult(result, num_queries, search_info.topk_);
-            return;
-        }
-        if (!bitview.empty()) {
-            auto status =
-                offset_mapping.TransformBitset(bitview, transformed_bitset);
-            if (status == OffsetMapping::BitsetTransformStatus::AllFiltered) {
+        if (!is_element_level_search) {
+            if (offset_mapping.GetValidCount() == 0) {
+                // All vectors are null, return empty result
                 FillEmptySearchResult(result, num_queries, search_info.topk_);
                 return;
             }
-            search_bitview =
-                status == OffsetMapping::BitsetTransformStatus::NoFilter
-                    ? BitsetView{}
-                    : result.PinBitset(std::move(transformed_bitset));
+            if (!bitview.empty()) {
+                auto status =
+                    offset_mapping.TransformBitset(bitview, transformed_bitset);
+                if (status ==
+                    OffsetMapping::BitsetTransformStatus::AllFiltered) {
+                    FillEmptySearchResult(
+                        result, num_queries, search_info.topk_);
+                    return;
+                }
+                search_bitview =
+                    status == OffsetMapping::BitsetTransformStatus::NoFilter
+                        ? BitsetView{}
+                        : result.PinBitset(std::move(transformed_bitset));
+            }
         }
+    }
+
+    // For element-level search (embedding-search-embedding), the underlying
+    // knowhere search is keyed by the scalar element type rather than
+    // VECTOR_ARRAY, and per-chunk sizes must be counted in elements.
+    if (is_element_level_search) {
+        data_type = element_type;
     }
 
     if (search_info.iterator_v2_info_.has_value()) {
@@ -225,11 +244,6 @@ SearchOnSealedColumn(const Schema& schema,
                              search_info.metric_type_,
                              search_info.round_decimal_);
 
-    bool is_element_level_search = data_type == DataType::VECTOR_ARRAY &&
-                                   search_info.array_offsets_ != nullptr;
-    if (is_element_level_search) {
-        data_type = element_type;
-    }
     AssertInfo(!is_element_level_search ||
                    !milvus::exec::UseVectorIterator(search_info),
                "element-level search is not supported for vector iterator");

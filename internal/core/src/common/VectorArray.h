@@ -37,15 +37,17 @@ class VectorArray : public milvus::VectorTrait {
                 int64_t dim,
                 DataType element_type)
         : dim_(dim), length_(num_vectors), element_type_(element_type) {
-        assert(data != nullptr);
-        assert(num_vectors > 0);
+        assert(data != nullptr || num_vectors == 0);
+        assert(num_vectors >= 0);
         assert(dim > 0);
 
         size_ =
             num_vectors * milvus::vector_bytes_per_element(element_type, dim);
 
-        data_ = std::make_unique<char[]>(size_);
-        std::memcpy(data_.get(), data, size_);
+        if (size_ > 0) {
+            data_ = std::make_unique<char[]>(size_);
+            std::memcpy(data_.get(), data, size_);
+        }
     }
 
     // One row of VectorFieldProto
@@ -224,25 +226,43 @@ class VectorArray : public milvus::VectorTrait {
         vector_field.set_dim(dim_);
         switch (element_type_) {
             case DataType::VECTOR_FLOAT: {
-                auto data = reinterpret_cast<const float*>(data_.get());
-                vector_field.mutable_float_vector()->mutable_data()->Add(
-                    data, data + length_ * dim_);
+                auto* obj = vector_field.mutable_float_vector();
+                if (length_ > 0) {
+                    auto data = reinterpret_cast<const float*>(data_.get());
+                    obj->mutable_data()->Add(data, data + length_ * dim_);
+                }
                 break;
             }
             case DataType::VECTOR_BINARY: {
-                vector_field.set_binary_vector(data_.get(), size_);
+                if (size_ > 0) {
+                    vector_field.set_binary_vector(data_.get(), size_);
+                } else {
+                    vector_field.mutable_binary_vector();
+                }
                 break;
             }
             case DataType::VECTOR_FLOAT16: {
-                vector_field.set_float16_vector(data_.get(), size_);
+                if (size_ > 0) {
+                    vector_field.set_float16_vector(data_.get(), size_);
+                } else {
+                    vector_field.mutable_float16_vector();
+                }
                 break;
             }
             case DataType::VECTOR_BFLOAT16: {
-                vector_field.set_bfloat16_vector(data_.get(), size_);
+                if (size_ > 0) {
+                    vector_field.set_bfloat16_vector(data_.get(), size_);
+                } else {
+                    vector_field.mutable_bfloat16_vector();
+                }
                 break;
             }
             case DataType::VECTOR_INT8: {
-                vector_field.set_int8_vector(data_.get(), size_);
+                if (size_ > 0) {
+                    vector_field.set_int8_vector(data_.get(), size_);
+                } else {
+                    vector_field.mutable_int8_vector();
+                }
                 break;
             }
             default: {
@@ -317,8 +337,11 @@ class VectorArray : public milvus::VectorTrait {
     VectorArray(
         char* data, int len, int dim, size_t size, DataType element_type)
         : size_(size), length_(len), dim_(dim), element_type_(element_type) {
-        data_ = std::make_unique<char[]>(size);
-        std::copy(data, data + size, data_.get());
+        if (size > 0) {
+            assert(data != nullptr);
+            data_ = std::make_unique<char[]>(size);
+            std::copy(data, data + size, data_.get());
+        }
     }
 
     int64_t dim_ = 0;

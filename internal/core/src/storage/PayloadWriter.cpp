@@ -41,16 +41,18 @@ PayloadWriter::PayloadWriter(const DataType column_type, int dim, bool nullable)
 // create payload writer for VectorArray with element_type
 PayloadWriter::PayloadWriter(const DataType column_type,
                              int dim,
-                             DataType element_type)
-    // VECTOR_ARRAY is not nullable
-    : column_type_(column_type), nullable_(false), element_type_(element_type) {
+                             DataType element_type,
+                             bool nullable)
+    : column_type_(column_type),
+      nullable_(nullable),
+      element_type_(element_type) {
     AssertInfo(column_type == DataType::VECTOR_ARRAY,
                "This constructor is only for VECTOR_ARRAY");
     AssertInfo(element_type != DataType::NONE,
                "element_type must be specified for VECTOR_ARRAY");
     dimension_ = dim;
-    builder_ = CreateArrowBuilder(column_type, element_type, dim);
-    schema_ = CreateArrowSchema(column_type, dim, element_type);
+    builder_ = CreateArrowBuilder(column_type, element_type, dim, nullable_);
+    schema_ = CreateArrowSchema(column_type, dim, element_type, nullable_);
 }
 
 void

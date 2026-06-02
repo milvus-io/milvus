@@ -106,6 +106,7 @@ PrepareBFDataSet(const dataset::SearchDataset& query_ds,
         // ditto
         query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                            query_ds.query_offsets);
+        query_dataset->Set(knowhere::meta::NQ, query_ds.num_queries);
 
         query_dataset->SetRows(query_ds.query_offsets[query_ds.num_queries]);
     }

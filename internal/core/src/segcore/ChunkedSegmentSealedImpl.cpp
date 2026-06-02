@@ -171,10 +171,10 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
         info.field_id,
         id_);
 
-    const bool keep_nullable_vector_field_data =
-        field_meta.is_nullable() &&
-        IsVectorDataType(field_meta.get_data_type());
-    if (request.has_raw_data && !keep_nullable_vector_field_data &&
+    const bool keep_vector_field_data =
+        field_meta.is_nullable() ||
+        field_meta.get_data_type() == DataType::VECTOR_ARRAY;
+    if (request.has_raw_data && !keep_vector_field_data &&
         get_bit(field_data_ready_bitset_, field_id)) {
         drop_field_data_locked(field_id);
     }
@@ -1017,6 +1017,8 @@ ChunkedSegmentSealedImpl::get_vector(milvus::OpContext* op_ctx,
                                      int64_t count) const {
     auto& field_meta = schema_->operator[](field_id);
     AssertInfo(field_meta.is_vector(), "vector field is not vector type");
+    AssertInfo(field_meta.get_data_type() != DataType::VECTOR_ARRAY,
+               "VECTOR_ARRAY raw data must be read from field data");
 
     if (!get_bit(index_ready_bitset_, field_id) &&
         !get_bit(binlog_index_bitset_, field_id)) {
@@ -1085,6 +1087,16 @@ void
 ChunkedSegmentSealedImpl::drop_field_data_locked(const FieldId field_id) {
     // NOTE: mutex_ must be already held by caller
     if (get_bit(field_data_ready_bitset_, field_id)) {
+        if (schema_->operator[](field_id).get_data_type() ==
+            DataType::VECTOR_ARRAY) {
+            LOG_INFO(
+                "Skip dropping VECTOR_ARRAY field data for field {} in "
+                "segment {} because 2.6 indexes cannot reconstruct embedding "
+                "list rows",
+                field_id.get(),
+                id_);
+            return;
+        }
         // Check if the field is in a multi-field column group.
         // If so, skip dropping because it shares storage with other fields.
         auto column = get_column(field_id);
@@ -2433,6 +2445,9 @@ ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
     std::shared_lock lck(mutex_);
     auto fieldID = FieldId(field_id);
     const auto& field_meta = schema_->operator[](fieldID);
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        return get_bit(field_data_ready_bitset_, fieldID);
+    }
     if (IsVectorDataType(field_meta.get_data_type())) {
         if (get_bit(index_ready_bitset_, fieldID)) {
             AssertInfo(vector_indexings_.is_ready(fieldID),
