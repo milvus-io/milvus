@@ -215,10 +215,6 @@ class TestRestfulStructArrayNullable(TestBase):
         assert "profile" not in {field["name"] for field in rsp["data"]["fields"]}
         assert rsp["data"]["structFields"] == []
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="REST v2 fields/add accepts Array<Struct> without sub-fields and creates an unusable field",
-    )
     def test_rest_v2_add_array_struct_field_rejected(self):
         """
         target: test REST v2 dynamic add rejects Array<Struct> field shape

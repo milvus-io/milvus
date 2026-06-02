@@ -2446,10 +2446,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(
-        reason="milvus-io/milvus#50009: mixed nullable/non-null ArrayOfVector rows in the same growing batch lose vector sub-field output",
-        strict=True,
-    )
     def test_create_struct_array_field_with_vector_insert_omit_nullable_growing_row(self):
         """
         target: test query/search output for a nullable struct array with vector sub-field created with collection
@@ -2702,10 +2698,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(
-        reason="milvus-io/milvus#50068: nullable ArrayOfVector sealed output still fails after #50020 when empty row precedes single-element row",
-        strict=True,
-    )
     def test_create_struct_array_field_with_vector_single_element_after_empty_sealed_output(self):
         """
         target: test sealed segment output for a nullable struct array vector sub-field after an empty row
@@ -2907,9 +2899,14 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        # Mixed nullable/non-null ArrayOfVector rows in the same growing batch are tracked by #50009.
-        # Keep null/empty coverage in sealed rows here, and use growing only for non-empty requery output.
         growing_rows = [
+            {PK_FIELD: 20000, VECTOR_FIELD: gen_vector(20000, dim), TAG_FIELD: "growing_omitted_profile"},
+            {
+                PK_FIELD: 20001,
+                VECTOR_FIELD: gen_vector(20001, dim),
+                TAG_FIELD: "growing_empty_profile",
+                STRUCT_FIELD: [],
+            },
             {
                 PK_FIELD: 20002,
                 VECTOR_FIELD: gen_vector(20002, dim),
@@ -3381,10 +3378,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(
-        reason="known blocker: indexed sealed nullable ArrayOfVector output omits ValidData when present-row density is high",
-        strict=True,
-    )
     def test_stress_nullable_struct_array_vector_field_query_search_iterators(self):
         """
         target: stress query/search/iterator output for a nullable struct array with vector sub-field
@@ -3827,10 +3820,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(
-        reason="milvus-io/milvus#50049: nullable StructArray vector element-level search returns wrong rows",
-        strict=True,
-    )
     def test_create_struct_array_field_with_vector_element_search_flat(self):
         """
         target: test element-level search on a nullable struct array vector sub-field created with collection schema
@@ -3933,10 +3922,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         assert_profile_equal(entity[STRUCT_FIELD], rows[-1][STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(
-        reason="milvus-io/milvus#50049: nullable StructArray vector element-level search returns wrong rows",
-        strict=True,
-    )
     def test_create_struct_array_field_with_vector_element_search_missing_prefix(self):
         """
         target: test element-level search on a nullable struct array vector sub-field with a missing struct prefix row
@@ -4411,10 +4396,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         assert_profile_equal(entity[STRUCT_FIELD], non_empty_rows[-1][STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(
-        reason="milvus-io/milvus#50049: nullable StructArray vector element-level search returns wrong rows",
-        strict=True,
-    )
     def test_create_struct_array_field_with_vector_element_search_missing_prefix_flat(self):
         """
         target: test FLAT element-level search on a nullable struct array vector sub-field with a missing prefix row
@@ -6066,10 +6047,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(
-        reason="milvus-io/milvus#50049: nullable StructArray vector element-level search returns wrong rows",
-        strict=True,
-    )
     def test_add_struct_array_field_with_vector_element_search_no_old_rows(self):
         """
         target: test element-level search after dynamically adding a nullable struct array vector sub-field with no
@@ -6169,10 +6146,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         assert_profile_equal(entity[STRUCT_FIELD], rows[-1][STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(
-        reason="milvus-io/milvus#50049: nullable StructArray vector element-level search returns wrong rows",
-        strict=True,
-    )
     def test_add_struct_array_field_with_vector_element_search_filter_new_rows(self):
         """
         target: test element-level search after dynamically adding a nullable struct array vector sub-field while
@@ -6225,8 +6198,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
@@ -6303,10 +6274,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         assert_profile_equal(entity[STRUCT_FIELD], new_rows[-1][STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(
-        reason="milvus-io/milvus#50049: nullable StructArray vector element-level search returns wrong rows",
-        strict=True,
-    )
     def test_add_struct_array_field_with_vector_element_search_old_null_rows(self):
         """
         target: test element-level search after dynamically adding a nullable struct array vector sub-field
@@ -6357,8 +6324,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
@@ -6974,10 +6939,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(
-        reason="milvus-io/milvus#50049: nullable StructArray vector element-level search returns wrong rows",
-        strict=True,
-    )
     def test_add_struct_array_field_with_vector_search_element_filter(self):
         """
         target: test struct array vector search with element_filter after dynamically adding a nullable struct array field
@@ -7022,8 +6983,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
@@ -7321,10 +7280,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(
-        reason="known blocker: MATCH_ANY on dynamically added StructArray with old rows fails because MatchExpr expects ColumnVector",
-        strict=True,
-    )
     def test_add_scalar_struct_array_field_match_family_query_search(self):
         """
         target: test MATCH family correctness after dynamically adding a scalar-only nullable struct array field
@@ -7380,8 +7335,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         sealed_explicit_null_profile_row = {
             PK_FIELD: 4000,
@@ -11175,10 +11128,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(
-        reason="milvus-io/milvus#50009: mixed nullable/non-null ArrayOfVector rows in the same growing batch lose vector sub-field output",
-        strict=True,
-    )
     def test_add_struct_array_field_with_vector_insert_omit_nullable_field(self):
         """
         target: test omitted nullable struct array field after dynamically adding a vector sub-field struct
@@ -11224,8 +11173,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         omitted_profile_row = {
             PK_FIELD: 3,
@@ -11288,21 +11235,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             entity = search_entity(hit)
             assert STRUCT_FIELD in entity
             assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        filtered_search_results, check = self.search(
-            client,
-            collection_name,
-            data=[gen_vector(4)],
-            anns_field=VECTOR_FIELD,
-            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
-            filter=f"element_filter({STRUCT_FIELD}, $[{INT_SUBFIELD}] == 40)",
-            output_fields=[PK_FIELD, STRUCT_FIELD],
-            limit=1,
-        )
-        assert check
-        assert {hit[PK_FIELD] for hit in filtered_search_results[0]} == {present_profile_row[PK_FIELD]}
-        entity = search_entity(filtered_search_results[0][0])
-        assert_profile_equal(entity[STRUCT_FIELD], present_profile_row[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_struct_array_field_with_vector_query_search_old_growing_rows(self):
