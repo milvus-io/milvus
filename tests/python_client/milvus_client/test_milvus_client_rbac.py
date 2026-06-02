@@ -95,9 +95,7 @@ class TrackedRbacTestBase(TestMilvusClientV2Base):
                 continue
 
             for collection_name in sorted(collection_names):
-                res, check = super().drop_collection(
-                    client, collection_name, check_task=CheckTasks.check_nothing
-                )
+                res, check = super().drop_collection(client, collection_name, check_task=CheckTasks.check_nothing)
                 if not check:
                     self._log_cleanup_failure("collection", f"{db_name}.{collection_name}", res)
 
@@ -2654,7 +2652,9 @@ class TestMilvusClientRbacPrivilegeVerify(TrackedRbacTestBase):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
 
-        self.grant_privilege_v2(client, role_name, "CollectionReadWrite", collection_name=collection_name, db_name=db_name)
+        self.grant_privilege_v2(
+            client, role_name, "CollectionReadWrite", collection_name=collection_name, db_name=db_name
+        )
         time.sleep(10)
 
         uri = f"http://{host}:{port}"
@@ -2771,7 +2771,9 @@ class TestMilvusClientRbacPrivilegeVerify(TrackedRbacTestBase):
 
         # grant DropIndex + DescribeCollection via v2 API
         self.grant_privilege_v2(client, role_name, "DropIndex", collection_name=collection_name, db_name=db_name)
-        self.grant_privilege_v2(client, role_name, "DescribeCollection", collection_name=collection_name, db_name=db_name)
+        self.grant_privilege_v2(
+            client, role_name, "DescribeCollection", collection_name=collection_name, db_name=db_name
+        )
         time.sleep(20)
 
         uri = f"http://{host}:{port}"

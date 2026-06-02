@@ -88,7 +88,6 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         self.list_databases(client, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("db_name", ["12-s", "12 s", "(mn)", "中文", "%$#", "  "])
     def test_milvus_client_create_database_invalid_db_name(self, db_name):
