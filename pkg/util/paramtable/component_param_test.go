@@ -309,6 +309,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 72, Params.MaxPasswordLength.GetAsInt())
 		params.Save("proxy.maxPasswordLength", "-10")
 		assert.Equal(t, 72, Params.MaxPasswordLength.GetAsInt())
+
+		t.Run("test enableRoutingTable", func(t *testing.T) {
+			assert.True(t, Params.EnableRoutingTable.GetAsBool()) // default on
+		})
 	})
 
 	// t.Run("test proxyConfig panic", func(t *testing.T) {
