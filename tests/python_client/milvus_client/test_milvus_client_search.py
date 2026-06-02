@@ -321,8 +321,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         for null_expr_op in null_expr_ops:
             null_expr = not_exist_field_name + " " + null_expr_op
             error = {ct.err_code: 1100,
-                    ct.err_msg: f"failed to create query plan: cannot parse expression: "
-                                f"{null_expr}, error: field {not_exist_field_name} not exist: invalid parameter"}
+                    ct.err_msg: f"field {not_exist_field_name} not exist"}
             self.search(client, collection_name, vectors_to_search,
                         filter=null_expr,
                         check_task=CheckTasks.err_res, check_items=error)
@@ -2032,7 +2031,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     filter=expr,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 1100,
-                                 "err_msg": "error: two column comparison with JSON type is not supported"})
+                                 "err_msg": "two column comparison with JSON type is not supported"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_ef_less_than_limit(self):
@@ -3240,7 +3239,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                     search_params=search_params, limit=default_limit)
         not_supported_hints = "not_supported_hints"
         error = {ct.err_code: 0,
-                 ct.err_msg: f"Create Plan by expr failed:  => hints: {not_supported_hints} not supported"}
+                 ct.err_msg: f"hints: {not_supported_hints} not supported"}
         search_params = {'hints': not_supported_hints,
                          'params': cf.get_search_params_params('IVF_FLAT')}
         self.search(client, collection_name, data=[search_vector], filter='id >= 10',

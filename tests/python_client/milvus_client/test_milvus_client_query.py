@@ -5037,7 +5037,7 @@ class TestQueryStringPrimaryShared(TestMilvusClientV2Base):
         expression = 'float like "0%"'
         error = {
             ct.err_code: 65535,
-            ct.err_msg: f"cannot parse expression: {expression}, error: like operation on non-string or no-json field is unsupported",
+            ct.err_msg: "like operation on non-string or no-json field is unsupported",
         }
         self.query(
             client,
@@ -5086,8 +5086,7 @@ class TestQueryStringPrimaryShared(TestMilvusClientV2Base):
         expression = "varchar == int64"
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}, "
-            f"error: comparisons between VarChar and Int64 are not supported: invalid parameter",
+            ct.err_msg: "comparisons between VarChar and Int64 are not supported",
         }
         self.query(
             client,

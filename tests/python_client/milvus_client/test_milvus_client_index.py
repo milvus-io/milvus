@@ -1007,7 +1007,11 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
                                index_type=supported_double_scalar_index,
                                params={"json_cast_type": "Double", "json_path": invalid_json_path})
         # 3. create index
-        error = {ct.err_code: 65535, ct.err_msg: f"cannot parse identifier: {invalid_json_path}"}
+        if invalid_json_path == '/':
+            json_path_err_msg = "mismatched input '/'"
+        else:
+            json_path_err_msg = f"cannot parse identifier: {invalid_json_path}"
+        error = {ct.err_code: 65535, ct.err_msg: json_path_err_msg}
         self.create_index(client, collection_name, index_params,
                           check_task=CheckTasks.err_res, check_items=error)
 
