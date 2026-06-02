@@ -149,3 +149,10 @@ func TestRouteInsert_EmptyChannels(t *testing.T) {
 	assert.Nil(t, m)
 	assert.Empty(t, h)
 }
+
+func TestCompareRoutingVersion(t *testing.T) {
+	assert.Equal(t, RoutingProcess, CompareRoutingVersion(1, 1, true))               // equal -> process
+	assert.Equal(t, RoutingProcess, CompareRoutingVersion(2, 1, true))               // proxy newer -> process
+	assert.Equal(t, RoutingProcessAndReplyLatest, CompareRoutingVersion(1, 2, true)) // proxy older, shard NORMAL
+	assert.Equal(t, RoutingStale, CompareRoutingVersion(1, 2, false))                // proxy older, shard not NORMAL
+}
