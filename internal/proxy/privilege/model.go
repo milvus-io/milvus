@@ -1,7 +1,7 @@
 package privilege
 
 import (
-	"log"
+	"context"
 	"strings"
 	"sync"
 
@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -44,7 +45,7 @@ var (
 func GetPolicyModel(modelString string) model.Model {
 	m, err := model.NewModelFromString(modelString)
 	if err != nil {
-		log.Panic("NewModelFromString fail", zap.String("model", ModelStr), zap.Error(err))
+		mlog.Panic(context.TODO(), "NewModelFromString fail", zap.String("model", ModelStr), zap.Error(err))
 	}
 	return m
 }
@@ -75,7 +76,7 @@ func GetEnforcer() *casbin.SyncedEnforcer {
 	initOnce.Do(func() {
 		e, err := casbin.NewSyncedEnforcer()
 		if err != nil {
-			log.Panic("failed to create casbin enforcer", zap.Error(err))
+			mlog.Panic(context.TODO(), "failed to create casbin enforcer", zap.Error(err))
 		}
 		casbinModel := GetPolicyModel(ModelStr)
 		adapter := NewMetaCacheCasbinAdapter(func() PrivilegeCache { return GetPrivilegeCache() })

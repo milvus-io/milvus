@@ -2032,7 +2032,7 @@ func isPartitionLoaded(ctx context.Context, mc types.MixCoordClient, collID int6
 	return true, nil
 }
 
-func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, inInsert bool) error {
+func checkFieldsDataBySchema(ctx context.Context, allFields []*schemapb.FieldSchema, schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, inInsert bool) error {
 	primaryKeyNum := 0
 	autoGenFieldNum := 0
 
@@ -2051,7 +2051,7 @@ func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb
 
 	for _, fieldSchema := range allFields {
 		if fieldSchema.AutoID && !fieldSchema.IsPrimaryKey {
-			mlog.Warn(context.TODO(), "not primary key field, but set autoID true", zap.String("field", fieldSchema.GetName()))
+			mlog.Warn(ctx, "not primary key field, but set autoID true", zap.String("field", fieldSchema.GetName()))
 			return merr.WrapErrParameterInvalidMsg("only primary key could be with AutoID enabled")
 		}
 
@@ -2074,7 +2074,7 @@ func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb
 			}
 
 			if fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
-				mlog.Warn(context.TODO(), "no corresponding fieldData pass in", zap.String("fieldSchema", fieldSchema.GetName()))
+				mlog.Warn(ctx, "no corresponding fieldData pass in", zap.String("fieldSchema", fieldSchema.GetName()))
 				return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
 			}
 			// when use default_value or has set Nullable
@@ -2438,20 +2438,20 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 	return nil
 }
 
-func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, error) {
+func checkPrimaryFieldData(ctx context.Context, allFields []*schemapb.FieldSchema, schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, error) {
 	rowNums := uint32(insertMsg.NRows())
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
 	if insertMsg.NRows() <= 0 {
 		return nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
 	}
 
-	if err := checkFieldsDataBySchema(allFields, schema, insertMsg, true); err != nil {
+	if err := checkFieldsDataBySchema(ctx, allFields, schema, insertMsg, true); err != nil {
 		return nil, err
 	}
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
-		mlog.Error(context.TODO(), "get primary field schema failed", zap.Any("schema", schema), zap.Error(err))
+		mlog.Error(ctx, "get primary field schema failed", zap.Any("schema", schema), zap.Error(err))
 		return nil, err
 	}
 	if primaryFieldSchema.GetNullable() {
@@ -2467,7 +2467,7 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 	if !primaryFieldSchema.AutoID || skipAutoIDCheck {
 		primaryFieldData, err = typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), primaryFieldSchema)
 		if err != nil {
-			mlog.Info(context.TODO(), "get primary field data failed", zap.Error(err))
+			mlog.Info(ctx, "get primary field data failed", zap.Error(err))
 			return nil, err
 		}
 	} else {
@@ -2478,7 +2478,7 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 		// if autoID == true, currently support autoID for int64 and varchar PrimaryField
 		primaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
 		if err != nil {
-			mlog.Info(context.TODO(), "generate primary field data failed when autoID == true", zap.Error(err))
+			mlog.Info(ctx, "generate primary field data failed when autoID == true", zap.Error(err))
 			return nil, err
 		}
 		// if autoID == true, set the primary field data
@@ -2489,7 +2489,7 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 	// parse primaryFieldData to result.IDs, and as returned primary keys
 	ids, err := parsePrimaryFieldData2IDs(primaryFieldData)
 	if err != nil {
-		mlog.Warn(context.TODO(), "parse primary field data to IDs failed", zap.Error(err))
+		mlog.Warn(ctx, "parse primary field data to IDs failed", zap.Error(err))
 		return nil, err
 	}
 
@@ -2572,20 +2572,20 @@ func checkInputUtf8Compatiable(allFields []*schemapb.FieldSchema, insertMsg *msg
 	return nil
 }
 
-func checkUpsertPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, *schemapb.IDs, error) {
+func checkUpsertPrimaryFieldData(ctx context.Context, allFields []*schemapb.FieldSchema, schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, *schemapb.IDs, error) {
 	rowNums := uint32(insertMsg.NRows())
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
 	if insertMsg.NRows() <= 0 {
 		return nil, nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
 	}
 
-	if err := checkFieldsDataBySchema(allFields, schema, insertMsg, false); err != nil {
+	if err := checkFieldsDataBySchema(ctx, allFields, schema, insertMsg, false); err != nil {
 		return nil, nil, err
 	}
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
-		mlog.Error(context.TODO(), "get primary field schema failed", zap.Any("schema", schema), zap.Error(err))
+		mlog.Error(ctx, "get primary field schema failed", zap.Any("schema", schema), zap.Error(err))
 		return nil, nil, err
 	}
 	if primaryFieldSchema.GetNullable() {
