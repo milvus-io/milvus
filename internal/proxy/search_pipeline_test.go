@@ -586,6 +586,139 @@ func (s *SearchPipelineSuite) TestElementBestCollapseOp_UsesMetricDirection() {
 	s.Equal([]float32{0.2, 0.5}, result.GetScores())
 }
 
+func (s *SearchPipelineSuite) TestElementBestCollapseOp_UsesConfiguredCollapseStrategies() {
+	makeInput := func() *milvuspb.SearchResults {
+		return &milvuspb.SearchResults{
+			Status: merr.Success(),
+			Results: &schemapb.SearchResultData{
+				NumQueries: 1,
+				TopK:       6,
+				Topks:      []int64{6},
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{Data: []int64{1, 1, 1, 2, 2, 3}},
+					},
+				},
+				Scores:         []float32{0.9, 0.6, 0.3, 0.5, 0.1, 0.55},
+				Distances:      []float32{0.9, 0.6, 0.3, 0.5, 0.1, 0.55},
+				ElementIndices: &schemapb.LongArray{Data: []int64{0, 1, 2, 0, 1, 0}},
+			},
+		}
+	}
+
+	tests := []struct {
+		name           string
+		config         elementCollapseConfig
+		expectedIDs    []int64
+		expectedScores []float32
+		expectedDists  []float32
+	}{
+		{
+			name:           "sum",
+			config:         elementCollapseConfig{Strategy: elementCollapseSum},
+			expectedIDs:    []int64{1, 2, 3},
+			expectedScores: []float32{1.8, 0.6, 0.55},
+			expectedDists:  []float32{0.9, 0.5, 0.55},
+		},
+		{
+			name:           "avg",
+			config:         elementCollapseConfig{Strategy: elementCollapseAvg},
+			expectedIDs:    []int64{1, 3, 2},
+			expectedScores: []float32{0.6, 0.55, 0.3},
+			expectedDists:  []float32{0.9, 0.55, 0.5},
+		},
+		{
+			name:           "topk_sum",
+			config:         elementCollapseConfig{Strategy: elementCollapseTopKSum, TopK: 2},
+			expectedIDs:    []int64{1, 2, 3},
+			expectedScores: []float32{1.5, 0.6, 0.55},
+			expectedDists:  []float32{0.9, 0.5, 0.55},
+		},
+		{
+			name:           "topk_avg",
+			config:         elementCollapseConfig{Strategy: elementCollapseTopKAvg, TopK: 2},
+			expectedIDs:    []int64{1, 3, 2},
+			expectedScores: []float32{0.75, 0.55, 0.3},
+			expectedDists:  []float32{0.9, 0.55, 0.5},
+		},
+	}
+
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			op := &elementBestCollapseOperator{configs: []elementCollapseConfig{test.config}}
+			out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{makeInput()}, []string{"IP"})
+			s.Require().NoError(err)
+
+			result := out[0].([]*milvuspb.SearchResults)[0].GetResults()
+			s.Nil(result.GetElementIndices())
+			s.Equal(test.expectedIDs, result.GetIds().GetIntId().GetData())
+			s.InDeltaSlice(test.expectedScores, result.GetScores(), 0.00001)
+			s.InDeltaSlice(test.expectedDists, result.GetDistances(), 0.00001)
+		})
+	}
+}
+
+func (s *SearchPipelineSuite) TestElementLevelHybridPrepareAndRestoreKeys() {
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{10, 10, 20}},
+				},
+			},
+			Scores:         []float32{0.8, 0.9, 0.7},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0, 2, 1}},
+		},
+	}
+
+	prepared, err := prepareElementLevelHybridResult(input)
+	s.Require().NoError(err)
+	preparedIDs := prepared.GetResults().GetIds().GetStrId().GetData()
+	s.Require().Len(preparedIDs, 3)
+
+	rankResult := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       2,
+			Topks:      []int64{2},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{
+					StrId: &schemapb.StringArray{Data: []string{preparedIDs[1], preparedIDs[2]}},
+				},
+			},
+			Scores: []float32{0.99, 0.88},
+		},
+	}
+
+	restored, err := restoreElementLevelHybridRankResult(rankResult)
+	s.Require().NoError(err)
+	s.Equal([]int64{10, 20}, restored.GetResults().GetIds().GetIntId().GetData())
+	s.Equal([]int64{2, 1}, restored.GetResults().GetElementIndices().GetData())
+	s.Equal([]float32{0.99, 0.88}, restored.GetResults().GetScores())
+
+	_, err = prepareElementLevelHybridResult(&milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       1,
+			Topks:      []int64{1},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{10}},
+				},
+			},
+			Scores: []float32{0.8},
+		},
+	})
+	s.Require().Error(err)
+	s.Contains(err.Error(), "missing element_indices")
+}
+
 func (s *SearchPipelineSuite) TestElementBestCollapseOp_RejectsEmptyMetricForElementLevelResult() {
 	input := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -702,6 +835,64 @@ func (s *SearchPipelineSuite) TestHybridAssembleOp_MixedFieldsDataLayoutErrors()
 	// trace the upstream invariant violation.
 	s.Contains(err.Error(), "FieldsData",
 		"error message must mention FieldsData inconsistency")
+}
+
+func (s *SearchPipelineSuite) TestHybridAssembleOp_ElementLevelHybridUsesElementKey() {
+	reduced := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{
+					StrId: &schemapb.StringArray{Data: []string{
+						makeHybridElementKey(int64(10), 0),
+						makeHybridElementKey(int64(10), 2),
+						makeHybridElementKey(int64(20), 1),
+					}},
+				},
+			},
+			Scores: []float32{0.8, 0.9, 0.7},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "value",
+					FieldId:   101,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{100, 200, 300}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	rankResult := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       2,
+			Topks:      []int64{2},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{10, 20}},
+				},
+			},
+			Scores:         []float32{0.99, 0.88},
+			ElementIndices: &schemapb.LongArray{Data: []int64{2, 1}},
+		},
+	}
+
+	op := &hybridAssembleOperator{collectionID: 12345, elementLevelHybrid: true}
+	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{reduced}, rankResult)
+	s.Require().NoError(err)
+
+	result := out[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]int64{10, 20}, result.GetIds().GetIntId().GetData())
+	s.Equal([]int64{2, 1}, result.GetElementIndices().GetData())
+	s.Equal([]float32{0.99, 0.88}, result.GetScores())
+	s.Equal([]int64{200, 300}, result.GetFieldsData()[0].GetScalars().GetLongData().GetData())
 }
 
 func (s *SearchPipelineSuite) TestRequeryOp() {

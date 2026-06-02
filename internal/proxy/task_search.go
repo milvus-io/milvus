@@ -121,6 +121,9 @@ type searchTask struct {
 
 	// Old SDK sent only singular group_by_field; output must downgrade plural→singular.
 	legacyGroupByWire bool
+
+	hybridSubSearchInfos []hybridSubSearchInfo
+	hybridElementLevel   bool
 }
 
 func (t *searchTask) CanSkipAllocTimestamp() bool {
@@ -537,6 +540,8 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 
 	t.SubReqs = make([]*internalpb.SubSearchRequest, len(t.request.GetSubReqs()))
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
+	t.hybridSubSearchInfos = make([]hybridSubSearchInfo, len(t.request.GetSubReqs()))
+	t.hybridElementLevel = false
 	queryFieldIDs := []int64{}
 	for index, subReq := range t.request.GetSubReqs() {
 		// For hybrid search, order_by_fields comes from main search params, not sub-search params
@@ -545,13 +550,29 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			return err
 		}
 
-		// Hybrid search supports plain top-K on ArrayOfVector fields, including
-		// EmbList row-level search. This path does not yet use the per-sub-request
-		// placeholder type to distinguish EmbList from element-level search for
-		// advanced features, so reject range search / iterator / group by on
-		// ArrayOfVector here.
+		convertedPlaceholder, placeholderType, err := t.convertPlaceholderIfNeeded(subReq.GetPlaceholderGroup(), queryInfo.GetQueryFieldId())
+		if err != nil {
+			return err
+		}
+
+		subSearchInfo := classifyHybridSubSearch(t.schema.CollectionSchema, queryInfo.GetQueryFieldId(), placeholderType)
+		collapseConfig, elementScopeProvided, sanitizedSearchParams, err := parseAndRemoveElementScope(queryInfo.GetSearchParams())
+		if err != nil {
+			return err
+		}
+		if elementScopeProvided {
+			if subSearchInfo.Kind != hybridSubSearchStructElement {
+				return merr.WrapErrParameterInvalidMsg("%s is only supported for element-level search on struct array vector sub-fields", elementScopeKey)
+			}
+			queryInfo.SearchParams = sanitizedSearchParams
+			subSearchInfo.ElementScopeProvided = true
+			subSearchInfo.Collapse = collapseConfig
+		}
+
+		// Hybrid search supports plain top-K on ArrayOfVector fields. Embedding-list
+		// search remains row-level and keeps the same hybrid restrictions as before.
 		annsField := typeutil.GetField(t.schema.CollectionSchema, queryInfo.GetQueryFieldId())
-		if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
+		if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector && subSearchInfo.Kind == hybridSubSearchStructEmbList {
 			if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
 				return merr.WrapErrParameterInvalid("", "",
 					"range search is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
@@ -565,6 +586,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 					"search iterator is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
 			}
 		}
+		t.hybridSubSearchInfos[index] = subSearchInfo
 
 		ignoreGrowing := t.IgnoreGrowing
 		if !ignoreGrowing {
@@ -644,16 +666,22 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		if typeutil.IsFieldSparseFloatVector(t.schema.CollectionSchema, internalSubReq.FieldId) {
 			metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.HybridSearchLabel, strconv.FormatInt(internalSubReq.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(internalSubReq.PlaceholderGroup, int(internalSubReq.GetNq()))))
 		}
-		// Convert placeholder group vector type if needed (e.g., fp32 -> fp16/bf16)
-		internalSubReq.PlaceholderGroup, _, err = t.convertPlaceholderIfNeeded(subReq.GetPlaceholderGroup(), internalSubReq.FieldId)
-		if err != nil {
-			return err
-		}
+		internalSubReq.PlaceholderGroup = convertedPlaceholder
 		t.SubReqs[index] = internalSubReq
 		t.queryInfos[index] = queryInfo
 		log.Debug("proxy init search request",
 			zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 			zap.Stringer("plan", plan)) // may be very large if large term passed.
+	}
+
+	t.hybridElementLevel = inferElementLevelHybrid(t.hybridSubSearchInfos)
+	for index, info := range t.hybridSubSearchInfos {
+		if t.hybridElementLevel && info.ElementScopeProvided {
+			return merr.WrapErrParameterInvalidMsg("%s is not allowed for same-struct element-level hybrid search", elementScopeKey)
+		}
+		if !t.hybridElementLevel && info.Kind == hybridSubSearchStructElement && !info.ElementScopeProvided {
+			t.hybridSubSearchInfos[index].Collapse = defaultElementCollapseConfig()
+		}
 	}
 
 	if embedding.HasNonBM25AndMinHashFunctions(t.schema.Functions, queryFieldIDs) {
