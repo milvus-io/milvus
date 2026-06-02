@@ -167,6 +167,9 @@ message InsertMessageHeader {
     repeated PartitionSegmentAssignment partitions = 2;
     // optional so consumers can distinguish omitted (legacy producer) from explicit value.
     optional int32 schema_version                  = 3;
+    // routing table version the producer used when routing this message;
+    // optional so consumers distinguish omitted (legacy producer, value 0) from explicit.
+    optional int64 routing_version                 = 4;
 }
 
 // PartitionSegmentAssignment is the segment assignment of a partition.
