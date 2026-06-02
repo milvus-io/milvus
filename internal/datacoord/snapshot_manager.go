@@ -640,7 +640,7 @@ func (sm *snapshotManager) RestoreSnapshot(
 	// ========================================================================
 	phase0Lock, err := startRestoreLock(ctx, sourceCollectionID, snapshotName, targetDbName, targetCollectionName)
 	if err != nil {
-		return 0, merr.WrapErrServiceInternalErr(err, "failed to acquire restore lock")
+		return 0, merr.Wrap(err, "failed to acquire restore lock")
 	}
 
 	// Pin the source snapshot while holding the phase-0 lock. The pin is the
@@ -730,7 +730,7 @@ func (sm *snapshotManager) RestoreSnapshot(
 		if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
 			log.Error("rollback failed", zap.Error(rollbackErr))
 		}
-		return 0, merr.WrapErrServiceInternalErr(err, "failed to allocate job ID")
+		return 0, merr.Wrap(err, "failed to allocate job ID")
 	}
 	log.Info("pre-allocated job ID for restore", zap.Int64("jobID", jobID))
 
@@ -785,7 +785,7 @@ func (sm *snapshotManager) RestoreSnapshot(
 		if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
 			log.Error("rollback failed", zap.Error(rollbackErr))
 		}
-		err = merr.WrapErrServiceInternalErr(bcErr, "failed to broadcast restore message")
+		err = merr.Wrap(bcErr, "failed to broadcast restore message")
 		return 0, err
 	}
 
@@ -879,7 +879,7 @@ func (sm *snapshotManager) RestoreIndexes(
 		// Allocate new index ID
 		indexID, err := sm.allocator.AllocID(ctx)
 		if err != nil {
-			return merr.WrapErrServiceInternalErr(err, "failed to allocate index ID")
+			return merr.Wrap(err, "failed to allocate index ID")
 		}
 
 		// Build index model from snapshot data
@@ -910,7 +910,7 @@ func (sm *snapshotManager) RestoreIndexes(
 		// (each broadcaster can only be used once due to resource key lock consumption)
 		b, err := startBroadcaster(ctx, collectionID, snapshotName)
 		if err != nil {
-			return merr.WrapErrServiceInternalErr(err, "failed to start broadcaster for index %s", indexInfo.GetIndexName())
+			return merr.Wrapf(err, "failed to start broadcaster for index %s", indexInfo.GetIndexName())
 		}
 
 		// Broadcast CreateIndex message directly to DDL WAL
@@ -930,7 +930,7 @@ func (sm *snapshotManager) RestoreIndexes(
 		)
 		b.Close()
 		if err != nil {
-			return merr.WrapErrServiceInternalErr(err, "failed to broadcast create index %s", indexInfo.GetIndexName())
+			return merr.Wrapf(err, "failed to broadcast create index %s", indexInfo.GetIndexName())
 		}
 
 		log.Ctx(ctx).Info("index restored via DDL WAL broadcast",

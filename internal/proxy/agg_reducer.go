@@ -52,7 +52,7 @@ func (reducer *MilvusAggReducer) Reduce(results []*internalpb.RetrieveResults) (
 			countFieldData := reducedFieldDatas[indices[1]]
 			avgFieldData, err := agg.ComputeAvgFromSumAndCount(sumFieldData, countFieldData)
 			if err != nil {
-				return nil, merr.WrapErrParameterInvalidMsg("failed to compute avg for field %s: %v", reducer.outputMap.NameAt(i), err)
+				return nil, merr.Wrapf(err, "failed to compute avg for field %s", reducer.outputMap.NameAt(i))
 			}
 			avgFieldData.FieldName = reducer.outputMap.NameAt(i)
 			reOrganizedFieldDatas[i] = avgFieldData

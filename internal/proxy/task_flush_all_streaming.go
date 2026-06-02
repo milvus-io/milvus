@@ -34,7 +34,7 @@ func (t *flushAllTask) Execute(ctx context.Context) error {
 		Base: commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_Flush)),
 	})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
-		return merr.WrapErrParameterInvalidMsg("failed to call flush all to data coordinator: %s", err.Error())
+		return merr.Wrap(err, "failed to call flush all to data coordinator")
 	}
 	t.result = &milvuspb.FlushAllResponse{
 		Status:       merr.Success(),

@@ -628,7 +628,7 @@ func (cit *createIndexTask) getIndexedFieldAndFunction(ctx context.Context) erro
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, cit.req.GetDbName(), cit.req.GetCollectionName())
 	if err != nil {
 		log.Ctx(ctx).Error("failed to get collection schema", zap.Error(err))
-		return merr.WrapErrParameterInvalidMsg("failed to get collection schema: %s", err)
+		return merr.Wrap(err, "failed to get collection schema")
 	}
 
 	field, err := schema.schemaHelper.GetFieldFromNameDefaultJSON(cit.req.GetFieldName())
@@ -1000,7 +1000,7 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, dit.GetDbName(), dit.GetCollectionName())
 	if err != nil {
 		log.Ctx(ctx).Error("failed to get collection schema", zap.Error(err))
-		return merr.WrapErrParameterInvalidMsg("failed to get collection schema: %s", err)
+		return merr.Wrap(err, "failed to get collection schema")
 	}
 
 	resp, err := dit.mixCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{CollectionID: dit.collectionID, IndexName: dit.IndexName, Timestamp: dit.Timestamp})
@@ -1140,7 +1140,7 @@ func (dit *getIndexStatisticsTask) Execute(ctx context.Context) error {
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, dit.GetDbName(), dit.GetCollectionName())
 	if err != nil {
 		log.Ctx(ctx).Error("failed to get collection schema", zap.String("collection_name", dit.GetCollectionName()), zap.Error(err))
-		return merr.WrapErrParameterInvalidMsg("failed to get collection schema: %s", dit.GetCollectionName())
+		return merr.Wrap(err, "failed to get collection schema")
 	}
 	schemaHelper := schema.schemaHelper
 

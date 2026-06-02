@@ -233,12 +233,12 @@ func collectSegmentFiles(
 
 		basePath, _, err := packed.UnmarshalManifestPath(manifestPath)
 		if err != nil {
-			return nil, merr.WrapErrParameterInvalidMsg("failed to unmarshal manifest path %q for segment %d: %w", manifestPath, source.GetSegmentId(), err)
+			return nil, merr.Wrapf(err, "failed to unmarshal manifest path %q for segment %d", manifestPath, source.GetSegmentId())
 		}
 
 		allFiles, listErr := listAllFiles(ctx, cm, basePath)
 		if listErr != nil {
-			return nil, merr.WrapErrParameterInvalidMsg("failed to list files from manifest base path %q for segment %d: %w", basePath, source.GetSegmentId(), listErr)
+			return nil, merr.Wrapf(listErr, "failed to list files from manifest base path %q for segment %d", basePath, source.GetSegmentId())
 		}
 
 		// Empty file list is OK for V3 — segment may have only deltas and no insert binlogs
@@ -319,7 +319,7 @@ func generateMappingsFromFiles(
 			}
 
 			if err != nil {
-				return merr.WrapErrParameterInvalidMsg("failed to generate target path for %s file %s: %w", fileType, srcPath, err)
+				return merr.Wrapf(err, "failed to generate target path for %s file %s", fileType, srcPath)
 			}
 			mappings[srcPath] = dstPath
 		}
@@ -400,7 +400,7 @@ func CopySegmentAndIndexFiles(
 			fields = append(fields, logFields...)
 			fields = append(fields, zap.String("src", src), zap.String("dst", dst), zap.Error(err))
 			log.Warn("failed to copy file", fields...)
-			return nil, copiedFiles, merr.WrapErrParameterInvalidMsg("failed to copy file from %s to %s: %w", src, dst, err)
+			return nil, copiedFiles, merr.Wrapf(err, "failed to copy file from %s to %s", src, dst)
 		}
 		copiedFiles = append(copiedFiles, dst)
 	}
@@ -418,7 +418,7 @@ func CopySegmentAndIndexFiles(
 			if _, exists := mappings[srcPath]; !exists {
 				dstPath, pathErr := generateTargetPath(srcPath, source, target)
 				if pathErr != nil {
-					return nil, copiedFiles, merr.WrapErrParameterInvalidMsg("failed to generate target path for pb insert binlog %s: %w", srcPath, pathErr)
+					return nil, copiedFiles, merr.Wrapf(pathErr, "failed to generate target path for pb insert binlog %s", srcPath)
 				}
 				mappings[srcPath] = dstPath
 			}

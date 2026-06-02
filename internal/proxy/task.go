@@ -3178,7 +3178,7 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		zap.Int32("priority", int32(request.GetPriority())))
 	t.result, err = t.mixCoord.LoadCollection(ctx, request)
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
-		return merr.WrapErrParameterInvalidMsg("call query coordinator LoadCollection: %s", err)
+		return merr.Wrap(err, "call query coordinator LoadCollection")
 	}
 	return nil
 }

@@ -313,7 +313,7 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 	// Allocate IDs
 	start, end, err := st.allocator.AllocN(binlogNum + int64(len(collInfo.Schema.GetFunctions())) + 1)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "failed to allocate log IDs")
+		return nil, merr.Wrap(err, "failed to allocate log IDs")
 	}
 
 	// Create the request

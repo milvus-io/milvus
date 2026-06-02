@@ -567,7 +567,7 @@ func (t *createCollectionTask) assignChannels(ctx context.Context) error {
 		Num:          int(t.Req.GetShardsNum()),
 	})
 	if err != nil {
-		return merr.WrapErrServiceInternalErr(err, "failed to allocate vchannels for collection %d (shards=%d)",
+		return merr.Wrapf(err, "failed to allocate vchannels for collection %d (shards=%d)",
 			t.header.GetCollectionId(), t.Req.GetShardsNum())
 	}
 

@@ -137,7 +137,7 @@ func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, flu
 		for _, channel := range coll.VChannelNames {
 			sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, channel, toFlushSegments)
 			if err != nil {
-				return nil, merr.WrapErrServiceInternalErr(err, "failed to flush collection %d", collectionID)
+				return nil, merr.Wrapf(err, "failed to flush collection %d", collectionID)
 			}
 			for _, sealedSegmentID := range sealedSegmentIDs {
 				sealedSegmentsIDDict[sealedSegmentID] = true

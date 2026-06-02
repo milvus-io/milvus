@@ -2519,10 +2519,10 @@ func (c *Core) SelectUser(ctx context.Context, in *milvuspb.SelectUserRequest) (
 
 func (c *Core) isValidRole(ctx context.Context, entity *milvuspb.RoleEntity) error {
 	if entity == nil {
-		return merr.WrapErrServiceInternalMsg("the role entity is nil")
+		return merr.WrapErrParameterInvalidMsg("the role entity is nil")
 	}
 	if entity.Name == "" {
-		return merr.WrapErrServiceInternalMsg("the name in the role entity is empty")
+		return merr.WrapErrParameterInvalidMsg("the name in the role entity is empty")
 	}
 	if _, err := c.meta.SelectRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.Name}, false); err != nil {
 		log.Warn("fail to select the role", zap.String("role_name", entity.Name), zap.Error(err))
@@ -2533,10 +2533,10 @@ func (c *Core) isValidRole(ctx context.Context, entity *milvuspb.RoleEntity) err
 
 func (c *Core) isValidObject(entity *milvuspb.ObjectEntity) error {
 	if entity == nil {
-		return merr.WrapErrServiceInternalMsg("the object entity is nil")
+		return merr.WrapErrParameterInvalidMsg("the object entity is nil")
 	}
 	if _, ok := commonpb.ObjectType_value[entity.Name]; !ok {
-		return merr.WrapErrServiceInternalMsg("not found the object type[name: %s], supported the object types: %v", entity.Name, lo.Keys(commonpb.ObjectType_value))
+		return merr.WrapErrParameterInvalidMsg("not found the object type[name: %s], supported the object types: %v", entity.Name, lo.Keys(commonpb.ObjectType_value))
 	}
 	return nil
 }
@@ -2550,16 +2550,16 @@ func (c *Core) isValidPrivilege(ctx context.Context, privilegeName string, objec
 		return err
 	}
 	if customPrivGroup {
-		return merr.WrapErrServiceInternalMsg("can not operate the custom privilege group [%s]", privilegeName)
+		return merr.WrapErrParameterInvalidMsg("can not operate the custom privilege group [%s]", privilegeName)
 	}
 	if lo.Contains(Params.RbacConfig.GetDefaultPrivilegeGroupNames(), privilegeName) {
-		return merr.WrapErrServiceInternalMsg("can not operate the built-in privilege group [%s]", privilegeName)
+		return merr.WrapErrParameterInvalidMsg("can not operate the built-in privilege group [%s]", privilegeName)
 	}
 	// check object privileges for built-in privileges
 	if util.IsPrivilegeNameDefined(privilegeName) {
 		privileges, ok := util.ObjectPrivileges[object]
 		if !ok {
-			return merr.WrapErrServiceInternalMsg("not found the object type[name: %s], supported the object types: %v", object, lo.Keys(commonpb.ObjectType_value))
+			return merr.WrapErrParameterInvalidMsg("not found the object type[name: %s], supported the object types: %v", object, lo.Keys(commonpb.ObjectType_value))
 		}
 		for _, privilege := range privileges {
 			if privilege == privilegeName {
@@ -2567,7 +2567,7 @@ func (c *Core) isValidPrivilege(ctx context.Context, privilegeName string, objec
 			}
 		}
 	}
-	return merr.WrapErrServiceInternalMsg("not found the privilege name[%s] in object[%s]", privilegeName, object)
+	return merr.WrapErrParameterInvalidMsg("not found the privilege name[%s] in object[%s]", privilegeName, object)
 }
 
 func (c *Core) isValidPrivilegeV2(ctx context.Context, privilegeName string) error {
@@ -2584,7 +2584,7 @@ func (c *Core) isValidPrivilegeV2(ctx context.Context, privilegeName string) err
 	if util.IsPrivilegeNameDefined(privilegeName) {
 		return nil
 	}
-	return merr.WrapErrServiceInternalMsg("not found the privilege name[%s]", privilegeName)
+	return merr.WrapErrParameterInvalidMsg("not found the privilege name[%s]", privilegeName)
 }
 
 // OperatePrivilege operate the privilege, including grant and revoke
@@ -2620,24 +2620,24 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 func (c *Core) operatePrivilegeCommonCheck(ctx context.Context, in *milvuspb.OperatePrivilegeRequest) error {
 	if in.Type != milvuspb.OperatePrivilegeType_Grant && in.Type != milvuspb.OperatePrivilegeType_Revoke {
 		errMsg := fmt.Sprintf("invalid operate privilege type, current type: %s, valid value: [%s, %s]", in.Type, milvuspb.OperatePrivilegeType_Grant, milvuspb.OperatePrivilegeType_Revoke)
-		return merr.WrapErrServiceInternalMsg(errMsg)
+		return merr.WrapErrParameterInvalidMsg(errMsg)
 	}
 	if in.Entity == nil {
 		errMsg := "the grant entity in the request is nil"
-		return merr.WrapErrServiceInternalMsg(errMsg)
+		return merr.WrapErrParameterInvalidMsg(errMsg)
 	}
 	if err := c.isValidObject(in.Entity.Object); err != nil {
-		return merr.WrapErrServiceInternalMsg("the object entity in the request is nil or invalid")
+		return merr.WrapErrParameterInvalidMsg("the object entity in the request is nil or invalid")
 	}
 	if err := c.isValidRole(ctx, in.Entity.Role); err != nil {
 		return err
 	}
 	entity := in.Entity.Grantor
 	if entity == nil {
-		return merr.WrapErrServiceInternalMsg("the grantor entity is nil")
+		return merr.WrapErrParameterInvalidMsg("the grantor entity is nil")
 	}
 	if entity.User == nil || entity.User.Name == "" {
-		return merr.WrapErrServiceInternalMsg("the user entity in the grantor entity is nil or empty")
+		return merr.WrapErrParameterInvalidMsg("the user entity in the grantor entity is nil or empty")
 	}
 	if _, err := c.meta.SelectUser(ctx, util.DefaultTenant, &milvuspb.UserEntity{Name: entity.User.Name}, false); err != nil {
 		log.Ctx(ctx).Warn("fail to select the user", zap.String("username", entity.User.Name), zap.Error(err))
@@ -2702,7 +2702,7 @@ func (c *Core) getMetastorePrivilegeName(ctx context.Context, privName string) (
 	if customGroup {
 		return util.PrivilegeGroupNameForMetastore(privName), nil
 	}
-	return "", merr.WrapErrServiceInternalMsg("not found the privilege name [%s] from metastore", privName)
+	return "", merr.WrapErrParameterInvalidMsg("not found the privilege name [%s] from metastore", privName)
 }
 
 // SelectGrant select grant
@@ -2726,7 +2726,7 @@ func (c *Core) SelectGrant(ctx context.Context, in *milvuspb.SelectGrantRequest)
 		errMsg := "the grant entity in the request is nil"
 		ctxLog.Warn(errMsg)
 		return &milvuspb.SelectGrantResponse{
-			Status: merr.StatusWithErrorCode(merr.WrapErrServiceInternalMsg(errMsg), commonpb.ErrorCode_SelectGrantFailure),
+			Status: merr.StatusWithErrorCode(merr.WrapErrParameterInvalidMsg(errMsg), commonpb.ErrorCode_SelectGrantFailure),
 		}, nil
 	}
 	if err := c.isValidRole(ctx, in.Entity.Role); err != nil {

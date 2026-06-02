@@ -76,7 +76,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 		}
 		resp, err := t.mixCoord.Flush(ctx, flushReq)
 		if err = merr.CheckRPCCall(resp, err); err != nil {
-			return merr.WrapErrParameterInvalidMsg("failed to call flush to data coordinator: %s", err.Error())
+			return merr.Wrap(err, "failed to call flush to data coordinator")
 		}
 
 		// Remove the flushed segments from onFlushSegmentIDs
