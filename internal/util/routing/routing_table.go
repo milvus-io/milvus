@@ -114,6 +114,33 @@ func (t *RoutingTable) RouteInsert(pks *schemapb.IDs) (map[string][]int, []uint3
 	return out, hashValues
 }
 
+// RoutingDecision is the outcome of comparing a request's routing version
+// against the shard's current routing version.
+type RoutingDecision int
+
+const (
+	// RoutingProcess: handle normally.
+	RoutingProcess RoutingDecision = iota
+	// RoutingProcessAndReplyLatest: handle, and tell the proxy a newer version exists.
+	RoutingProcessAndReplyLatest
+	// RoutingStale: the request targets an out-of-date shard; forward/reject (P0 stub, unreachable).
+	RoutingStale
+)
+
+// CompareRoutingVersion implements the streamingnode-side version-compare skeleton.
+// In P0 callers pass msgVersion == currentVersion == CompatVersion and
+// shardNormal == true, so the result is always RoutingProcess.
+func CompareRoutingVersion(msgVersion, currentVersion int64, shardNormal bool) RoutingDecision {
+	switch {
+	case msgVersion >= currentVersion:
+		return RoutingProcess
+	case shardNormal:
+		return RoutingProcessAndReplyLatest
+	default:
+		return RoutingStale
+	}
+}
+
 // HashPKs maps each primary key in pks to a shard index (0-based position in
 // the channel list). The result is bit-for-bit identical to
 // typeutil.HashPK2Channels(pks, channelNames) for both int64 and varchar PKs;
