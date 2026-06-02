@@ -16,6 +16,8 @@
 
 #include <gtest/gtest.h>
 
+#include <folly/CancellationToken.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -257,6 +259,57 @@ TEST(SearchOnSealedIndexBitsetLifetime,
                         search_result);
 
     AssertVectorIteratorUsableAfterSearchReturns(search_result, valid_count);
+}
+
+TEST(SearchOnSealedIndexCancellation, PinVectorIndexUsesCallerOpContext) {
+    constexpr int64_t total_count = 1000;
+    constexpr int64_t topk = 10;
+
+    int64_t valid_count = 0;
+    auto valid_data = MakeValidData(total_count, valid_count);
+    auto vectors = MakeCompactVectors(valid_count, kDim);
+
+    auto schema = std::make_shared<Schema>();
+    auto vector_field = schema->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, kDim, knowhere::metric::COSINE, true);
+    auto pk_field = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_field);
+
+    auto index_base =
+        BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
+
+    milvus::OpContext* observed_ctx = nullptr;
+    segcore::SealedIndexingRecord indexing_record;
+    indexing_record.append_field_indexing(
+        vector_field,
+        knowhere::metric::COSINE,
+        CreateTestCacheIndex("cancellable-search-on-sealed-index",
+                             std::move(index_base),
+                             &observed_ctx));
+
+    SearchInfo search_info;
+    search_info.field_id_ = vector_field;
+    search_info.topk_ = topk;
+    search_info.round_decimal_ = -1;
+    search_info.metric_type_ = knowhere::metric::COSINE;
+    search_info.search_params_ = knowhere::Json{
+        {knowhere::indexparam::NPROBE, "32"},
+    };
+
+    folly::CancellationSource source;
+    milvus::OpContext op_context(source.getToken());
+    SearchResult search_result;
+    SearchOnSealedIndex(*schema,
+                        indexing_record,
+                        search_info,
+                        vectors.data(),
+                        nullptr,
+                        1,
+                        BitsetView{},
+                        &op_context,
+                        search_result);
+
+    EXPECT_EQ(observed_ctx, &op_context);
 }
 
 TEST(SearchOnSealedIndexNullableNoFilter,
