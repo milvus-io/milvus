@@ -1163,6 +1163,38 @@ func (kc *Catalog) ListCredentialsWithPasswd(ctx context.Context) (map[string]st
 	return users, nil
 }
 
+func (kc *Catalog) listCredentials(ctx context.Context) ([]*model.Credential, error) {
+	keys, values, err := kc.Txn.LoadWithPrefix(ctx, CredentialPrefix+"/")
+	if err != nil {
+		log.Ctx(ctx).Error("list all credentials fail", zap.String("prefix", CredentialPrefix), zap.Error(err))
+		return nil, err
+	}
+
+	credentials := make([]*model.Credential, 0, len(keys))
+	prefix := CredentialPrefix + "/"
+	for i := range keys {
+		prefixPos := strings.Index(keys[i], prefix)
+		if prefixPos < 0 {
+			log.Ctx(ctx).Warn("invalid credential key", zap.String("path", keys[i]), zap.String("prefix", prefix))
+			continue
+		}
+		username := keys[i][prefixPos+len(prefix):]
+		if len(username) == 0 || strings.Contains(username, "/") {
+			log.Ctx(ctx).Warn("invalid credential key", zap.String("path", keys[i]), zap.String("prefix", prefix))
+			continue
+		}
+		credentialInfo := &internalpb.CredentialInfo{}
+		if err := json.Unmarshal([]byte(values[i]), credentialInfo); err != nil {
+			log.Ctx(ctx).Error("credential unmarshal fail", zap.String("key", keys[i]), zap.Error(err))
+			return nil, err
+		}
+		credentialInfo.Username = username
+		credentials = append(credentials, model.UnmarshalCredentialModel(credentialInfo))
+	}
+
+	return credentials, nil
+}
+
 func (kc *Catalog) remove(ctx context.Context, k string) error {
 	var err error
 	if _, err = kc.Txn.Load(ctx, k); err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
@@ -1303,20 +1335,17 @@ func (kc *Catalog) getRolesByUsername(ctx context.Context, tenant string, userna
 	return roles, nil
 }
 
-// getUserResult gets the user result by username.
-func (kc *Catalog) getUserResult(ctx context.Context, tenant string, username string, includeRoleInfo bool) (*milvuspb.UserResult, error) {
-	result := &milvuspb.UserResult{User: &milvuspb.UserEntity{Name: username}}
-	credential, err := kc.GetCredential(ctx, username)
-	if err != nil {
-		log.Ctx(ctx).Warn("fail to get credential by the username", zap.Error(err))
-		return result, err
+// getUserResult gets the user result from a loaded credential.
+func (kc *Catalog) getUserResult(ctx context.Context, tenant string, credential *model.Credential, includeRoleInfo bool) (*milvuspb.UserResult, error) {
+	result := &milvuspb.UserResult{
+		User:        &milvuspb.UserEntity{Name: credential.Username},
+		Description: credential.Description,
 	}
-	result.Description = credential.Description
 
 	if !includeRoleInfo {
 		return result, nil
 	}
-	roleNames, err := kc.getRolesByUsername(ctx, tenant, username)
+	roleNames, err := kc.getRolesByUsername(ctx, tenant, credential.Username)
 	if err != nil {
 		log.Ctx(ctx).Warn("fail to get roles by the username", zap.Error(err))
 		return result, err
@@ -1331,40 +1360,33 @@ func (kc *Catalog) getUserResult(ctx context.Context, tenant string, username st
 
 func (kc *Catalog) ListUser(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
 	var (
-		usernames []string
-		err       error
-		results   []*milvuspb.UserResult
+		credentials []*model.Credential
+		err         error
 	)
 
-	appendUserResult := func(username string) error {
-		result, err := kc.getUserResult(ctx, tenant, username, includeRoleInfo)
-		if err != nil {
-			return err
-		}
-		results = append(results, result)
-		return nil
-	}
-
 	if entity == nil {
-		usernames, err = kc.ListCredentials(ctx)
-		if err != nil {
-			return results, err
-		}
-	} else {
-		if funcutil.IsEmptyString(entity.Name) {
-			return results, errors.New("username in the user entity is empty")
-		}
-		_, err = kc.GetCredential(ctx, entity.Name)
-		if err != nil {
-			return results, err
-		}
-		usernames = append(usernames, entity.Name)
-	}
-	for _, username := range usernames {
-		err = appendUserResult(username)
+		credentials, err = kc.listCredentials(ctx)
 		if err != nil {
 			return nil, err
 		}
+	} else {
+		if funcutil.IsEmptyString(entity.Name) {
+			return nil, errors.New("username in the user entity is empty")
+		}
+		credential, err := kc.GetCredential(ctx, entity.Name)
+		if err != nil {
+			return nil, err
+		}
+		credentials = []*model.Credential{credential}
+	}
+
+	results := make([]*milvuspb.UserResult, 0, len(credentials))
+	for _, credential := range credentials {
+		result, err := kc.getUserResult(ctx, tenant, credential, includeRoleInfo)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
 	}
 	return results, nil
 }
@@ -1995,14 +2017,20 @@ func (kc *Catalog) ListUserRole(ctx context.Context, tenant string) ([]string, e
 }
 
 func (kc *Catalog) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error) {
-	users, err := kc.ListUser(ctx, tenant, nil, true)
+	credentials, err := kc.listCredentials(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	credentials, err := kc.ListCredentialsWithPasswd(ctx)
-	if err != nil {
-		return nil, err
+	users := make([]*milvuspb.UserResult, 0, len(credentials))
+	credentialPasswords := make(map[string]string, len(credentials))
+	for _, credential := range credentials {
+		credentialPasswords[credential.Username] = credential.EncryptedPassword
+		user, err := kc.getUserResult(ctx, tenant, credential, true)
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, user)
 	}
 
 	userInfos := lo.FilterMap(users, func(entity *milvuspb.UserResult, _ int) (*milvuspb.UserInfo, bool) {
@@ -2012,7 +2040,7 @@ func (kc *Catalog) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBA
 		}
 		return &milvuspb.UserInfo{
 			User:     userName,
-			Password: credentials[userName],
+			Password: credentialPasswords[userName],
 			Roles:    entity.GetRoles(),
 		}, true
 	})

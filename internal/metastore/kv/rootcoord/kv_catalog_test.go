@@ -1615,12 +1615,12 @@ func TestGetUserResultIncludesDescriptionWithoutRoleInfo(t *testing.T) {
 
 	kvmock := mocks.NewTxnKV(t)
 	c := NewCatalog(kvmock).(*Catalog)
-	credentialKey := fmt.Sprintf("%s/%s", CredentialPrefix, username)
-	credentialValue, err := json.Marshal(&internalpb.CredentialInfo{Description: &description})
-	require.NoError(t, err)
-	kvmock.EXPECT().Load(mock.Anything, credentialKey).Return(string(credentialValue), nil)
+	credential := &model.Credential{
+		Username:    username,
+		Description: description,
+	}
 
-	result, err := c.getUserResult(ctx, tenant, username, false)
+	result, err := c.getUserResult(ctx, tenant, credential, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, username, result.GetUser().GetName())
@@ -1628,7 +1628,7 @@ func TestGetUserResultIncludesDescriptionWithoutRoleInfo(t *testing.T) {
 	assert.Empty(t, result.GetRoles())
 }
 
-func TestGetUserResultReturnsCredentialLoadError(t *testing.T) {
+func TestListUserReturnsCredentialLoadError(t *testing.T) {
 	ctx := context.TODO()
 	tenant := util.DefaultTenant
 	username := "user-with-credential-load-error"
@@ -1639,12 +1639,99 @@ func TestGetUserResultReturnsCredentialLoadError(t *testing.T) {
 	c := NewCatalog(kvmock).(*Catalog)
 	kvmock.EXPECT().Load(mock.Anything, credentialKey).Return("", expectedErr)
 
-	result, err := c.getUserResult(ctx, tenant, username, false)
+	results, err := c.ListUser(ctx, tenant, &milvuspb.UserEntity{Name: username}, false)
 
 	require.ErrorIs(t, err, expectedErr)
-	assert.Equal(t, username, result.GetUser().GetName())
-	assert.Empty(t, result.GetDescription())
-	assert.Empty(t, result.GetRoles())
+	assert.Empty(t, results)
+}
+
+func TestListUserSingleUserReusesLoadedCredentialDescription(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	username := "user-with-description"
+	description := "single user description"
+	credentialKey := fmt.Sprintf("%s/%s", CredentialPrefix, username)
+	credentialValue, err := json.Marshal(&internalpb.CredentialInfo{Description: &description})
+	require.NoError(t, err)
+
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock).(*Catalog)
+	kvmock.EXPECT().Load(mock.Anything, credentialKey).Return(string(credentialValue), nil).Once()
+
+	results, err := c.ListUser(ctx, tenant, &milvuspb.UserEntity{Name: username}, false)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, username, results[0].GetUser().GetName())
+	assert.Equal(t, description, results[0].GetDescription())
+	assert.Empty(t, results[0].GetRoles())
+}
+
+func TestListUserAllUsersReusesLoadedCredentialDescriptions(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	user1Description := "first user"
+	user2Description := "second user"
+	ghostDescription := "ghost user"
+	user1Credential, err := json.Marshal(&internalpb.CredentialInfo{Description: &user1Description})
+	require.NoError(t, err)
+	user2Credential, err := json.Marshal(&internalpb.CredentialInfo{Description: &user2Description})
+	require.NoError(t, err)
+	ghostCredential, err := json.Marshal(&internalpb.CredentialInfo{Description: &ghostDescription})
+	require.NoError(t, err)
+
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock).(*Catalog)
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, CredentialPrefix+"/").Return(
+		[]string{
+			fmt.Sprintf("%s/%s", CredentialPrefix, "user1"),
+			fmt.Sprintf("%s/%s", CredentialPrefix, "user2"),
+			fmt.Sprintf("%s/%s/%s", CredentialPrefix, UserSubPrefix, "ghost"),
+		},
+		[]string{string(user1Credential), string(user2Credential), string(ghostCredential)},
+		nil,
+	)
+
+	results, err := c.ListUser(ctx, tenant, nil, false)
+
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	assert.Equal(t, "user1", results[0].GetUser().GetName())
+	assert.Equal(t, user1Description, results[0].GetDescription())
+	assert.Empty(t, results[0].GetRoles())
+	assert.Equal(t, "user2", results[1].GetUser().GetName())
+	assert.Equal(t, user2Description, results[1].GetDescription())
+	assert.Empty(t, results[1].GetRoles())
+}
+
+func TestBackupRBACReusesLoadedCredentials(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	username := "user-with-password"
+	password := "encrypted-password"
+	credentialValue, err := json.Marshal(&internalpb.CredentialInfo{EncryptedPassword: password})
+	require.NoError(t, err)
+
+	var credentialPrefixLoads int
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock).(*Catalog)
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, key string) ([]string, []string, error) {
+			if key == CredentialPrefix+"/" {
+				credentialPrefixLoads++
+				return []string{fmt.Sprintf("%s/%s", CredentialPrefix, username)}, []string{string(credentialValue)}, nil
+			}
+			return nil, nil, nil
+		})
+
+	backup, err := c.BackupRBAC(ctx, tenant)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, credentialPrefixLoads)
+	require.Len(t, backup.GetUsers(), 1)
+	assert.Equal(t, username, backup.GetUsers()[0].GetUser())
+	assert.Equal(t, password, backup.GetUsers()[0].GetPassword())
+	assert.Empty(t, backup.GetUsers()[0].GetRoles())
 }
 
 func TestRBAC_Credential(t *testing.T) {
@@ -2213,7 +2300,7 @@ func TestRBAC_Role(t *testing.T) {
 			func(ctx context.Context, key string) []string {
 				if loadCredentialPrefixReturn.Load() {
 					return []string{
-						fmt.Sprintf("%s/%s/%s", CredentialPrefix, UserSubPrefix, "user1"),
+						fmt.Sprintf("%s/%s", CredentialPrefix, "user1"),
 					}
 				}
 				return nil
@@ -2238,21 +2325,19 @@ func TestRBAC_Role(t *testing.T) {
 				description string
 				isValid     bool
 
-				user            string
+				credential      *model.Credential
 				includeRoleInfo bool
 			}{
-				{"valid user1 not include RoleInfo", true, "user1", false},
-				{"valid user1 include RoleInfo", true, "user1", true},
-				{"invalid user not include RoleInfo", false, invalidUser, false},
-				{"invalid user include RoleInfo", false, invalidUser, true},
-				{"invalid role user include RoleInfo", false, invalidRoleUser, true},
+				{"valid user1 not include RoleInfo", true, &model.Credential{Username: "user1"}, false},
+				{"valid user1 include RoleInfo", true, &model.Credential{Username: "user1"}, true},
+				{"invalid role user include RoleInfo", false, &model.Credential{Username: invalidRoleUser}, true},
 			}
 
 			for _, test := range tests {
 				t.Run(test.description, func(t *testing.T) {
-					res, err := c.getUserResult(ctx, tenant, test.user, test.includeRoleInfo)
+					res, err := c.getUserResult(ctx, tenant, test.credential, test.includeRoleInfo)
 
-					assert.Equal(t, test.user, res.GetUser().GetName())
+					assert.Equal(t, test.credential.Username, res.GetUser().GetName())
 
 					if test.isValid {
 						assert.NoError(t, err)
