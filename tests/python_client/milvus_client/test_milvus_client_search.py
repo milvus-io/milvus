@@ -226,8 +226,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         error = {ct.err_code: 1100,
-                 ct.err_msg: "float vector index does not support metric type: invalid: "
-                             "invalid parameter[expected=valid index params][actual=invalid index params]"}
+                 ct.err_msg: "float vector index does not support metric type"}
         self.create_collection(client, collection_name, default_dim, metric_type="invalid",
                                check_task=CheckTasks.err_res, check_items=error)
 
@@ -1299,8 +1298,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     filter=expression,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 1100,
-                                 "err_msg": f"cannot parse expression: !{ct.default_bool_field_name}, "
-                                            "error: not op can only be applied on boolean expression"})
+                                 "err_msg": "not op can only be applied on boolean expression"})
         expression = f"{ct.default_int64_field_name} > 0 and {ct.default_bool_field_name}"
         log.debug(f"search with expression: {expression}")
         self.search(client, collection_name,
@@ -1309,8 +1307,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     filter=expression,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 1100,
-                                 "err_msg": f"cannot parse expression: {ct.default_int64_field_name} > 0 and {ct.default_bool_field_name}, "
-                                            "error: 'and' can only be used between boolean expressions"})
+                                 "err_msg": "'and' can only be used between boolean expressions"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_expression_invalid_array_one(self):

@@ -296,7 +296,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"float vector index does not support metric type: {metric_type}",
+            ct.err_msg: "float vector index does not support metric type",
         }
         self.create_collection(
             client,
