@@ -459,7 +459,12 @@ func (t *mixCompactionTask) createTextIndex(ctx context.Context,
 		segmentID:        segment.GetSegmentID(),
 		taskID:           t.GetPlanID(),
 		storageVersion:   segment.GetStorageVersion(),
-		insertBinlogs:    segment.GetInsertLogs(),
+		// Pass the output segment's own freshly-written manifest. Under StorageV2
+		// MultiSegmentWriter sets CompactionSegment.Manifest, and BuildTextIndex
+		// consumes it (config[SEGMENT_MANIFEST_KEY] + loon FFI properties), so it
+		// must be forwarded rather than left empty.
+		manifest:      segment.GetManifest(),
+		insertBinlogs: segment.GetInsertLogs(),
 	})
 }
 
