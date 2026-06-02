@@ -52,25 +52,16 @@ linters:
         no-zap-outside-mlog:
           files:
             - "$all"
+            - "!pkg/mlog/*.go"
+            - "!pkg/mlog/**/*.go"
+            - "!**/pkg/mlog/*.go"
             - "!**/pkg/mlog/**/*.go"
             # Existing zap usages are tracked as migration baseline. Do not add new zap usages outside pkg/mlog.
-            - "!**/cmd/roles/roles.go"
-            - "!**/internal/datanode/compactor/segment_writer_bench_test.go"
             - "!**/internal/proxy/accesslog/global.go"
-            - "!**/internal/querynodev2/segments/cgo_util.go"
             - "!**/internal/streamingnode/server/wal/interceptors/shard/shard_interceptor_test.go"
-            - "!**/internal/streamingnode/server/wal/recovery/recovery_background_task.go"
             - "!**/internal/util/cgo/logging/logging.go"
-            - "!**/internal/util/cgo/logging/logging_test.go"
             - "!**/internal/util/hookutil/hook.go"
-            - "!**/pkg/mocks/streaming/util/mock_message/*.go"
-            - "!**/pkg/streaming/util/message/*.go"
-            - "!**/pkg/streaming/walimpls/impls/pulsar/pulsarlog/logger.go"
-            - "!**/pkg/util/logutil/logutil.go"
-            - "!**/pkg/util/logutil/logutil_test.go"
-            - "!**/pkg/util/replicateutil/util.go"
             - "!**/pkg/util/replicateutil/util_test.go"
-            - "!**/pkg/util/timerecord/time_recorder.go"
           deny:
             - pkg: go.uber.org/zap
               desc: not allowed outside pkg/mlog, use github.com/milvus-io/milvus/pkg/v3/mlog

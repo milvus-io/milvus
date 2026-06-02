@@ -6,7 +6,6 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/samber/lo"
-	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -79,7 +78,7 @@ func (rs *recoveryStorageImpl) persistDritySnapshotWhenClosing() error {
 }
 
 // persistDirtySnapshot persists the dirty snapshot to the catalog.
-func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl zapcore.Level) (err error) {
+func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlog.Level) (err error) {
 	if rs.pendingPersistSnapshot == nil {
 		// if there's no dirty snapshot, generate a new one.
 		rs.pendingPersistSnapshot = rs.consumeDirtySnapshot()

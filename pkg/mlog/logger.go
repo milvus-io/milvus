@@ -211,8 +211,8 @@ func (l *Logger) WithLazy(fields ...Field) *Logger {
 	}
 }
 
-// WithOptions creates a new Logger with zap options applied.
-func (l *Logger) WithOptions(opts ...zap.Option) *Logger {
+// WithOptions creates a new Logger with options applied.
+func (l *Logger) WithOptions(opts ...Option) *Logger {
 	if len(opts) == 0 {
 		return l
 	}

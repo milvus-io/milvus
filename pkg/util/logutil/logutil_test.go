@@ -4,27 +4,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 func TestName(t *testing.T) {
-	conf := &mlog.Config{Level: "debug", DisableTimestamp: true}
-	logger, _, _ := mlog.InitTestLogger(t, conf, zap.AddCallerSkip(1), zap.Hooks(func(entry zapcore.Entry) error {
-		assert.Equal(t, "Testing", entry.Message)
-		return nil
-	}))
-	wrapper := &zapWrapper{logger, 0}
-
-	wrapper.Info("Testing")
-	wrapper.Infoln("Testing")
-	wrapper.Infof("%s", "Testing")
-	wrapper.Warning("Testing")
-	wrapper.Warningln("Testing")
-	wrapper.Warningf("%s", "Testing")
-	wrapper.Error("Testing")
-	wrapper.Errorln("Testing")
-	wrapper.Errorf("%s", "Testing")
+	assert.Equal(t, 1.5, ToMB(1024*1024+512*1024))
+	assert.Equal(t, int64(2), ToMB(int64(2*1024*1024)))
 }

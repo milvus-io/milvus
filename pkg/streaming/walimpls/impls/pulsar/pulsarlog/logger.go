@@ -4,8 +4,6 @@ import (
 	"context"
 
 	plog "github.com/apache/pulsar-client-go/pulsar/log"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
@@ -72,14 +70,14 @@ func (l *logger) Errorf(format string, args ...interface{}) {
 	l.logWithLevel(mlog.ErrorLevel, format)
 }
 
-func (l *logger) logWithLevel(level zapcore.Level, args ...interface{}) {
+func (l *logger) logWithLevel(level mlog.Level, args ...interface{}) {
 	if len(args) == 0 {
 		return
 	}
 	if msg, ok := args[0].(string); ok {
-		l.inner.WithOptions(zap.AddCallerSkip(2)).Log(context.TODO(), level, msg)
+		l.inner.WithOptions(mlog.AddCallerSkip(2)).Log(context.TODO(), level, msg)
 	} else {
-		l.inner.WithOptions(zap.AddCallerSkip(2)).Log(context.TODO(), level, "unknown log message type")
+		l.inner.WithOptions(mlog.AddCallerSkip(2)).Log(context.TODO(), level, "unknown log message type")
 	}
 }
 

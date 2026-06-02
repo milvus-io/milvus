@@ -32,7 +32,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/samber/lo"
-	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/cmd/components"
@@ -307,7 +306,7 @@ func (mr *MilvusRoles) setupLogger() {
 		if strings.EqualFold(v, "trace") {
 			v = "debug"
 		}
-		logLevel, err := zapcore.ParseLevel(v)
+		logLevel, err := mlog.ParseLevel(v)
 		if err != nil {
 			mlog.Warn(context.TODO(), "failed to parse log level", mlog.Err(err))
 			return
