@@ -2912,7 +2912,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
                 VECTOR_FIELD: gen_vector(20002, dim),
                 TAG_FIELD: "growing_present_profile",
                 STRUCT_FIELD: gen_typed_profile(20002, vector_type, dim),
-            }
+            },
         ]
         res, check = self.insert(client, collection_name, growing_rows)
         assert check
