@@ -2759,7 +2759,7 @@ func ValidateExternalCollectionResolvedSchema(schema *schemapb.CollectionSchema)
 			continue
 		}
 		if !isExternalFieldTypeSupported(field.GetDataType()) {
-			return fmt.Errorf("external collection %s does not support field type %s on field %s",
+			return merr.WrapErrParameterInvalidMsg("external collection %s does not support field type %s on field %s",
 				schema.GetName(), field.GetDataType().String(), field.GetName())
 		}
 		ext := field.GetExternalField()

@@ -229,14 +229,14 @@ func applyExternalCollectionSegmentUpdate(
 	for _, segID := range keptSegmentIDs {
 		segment := mt.segments.GetSegment(segID)
 		if segment == nil {
-			return fmt.Errorf("kept segment %d not found", segID)
+			return merr.WrapErrServiceInternalMsg("kept segment %d not found", segID)
 		}
 		if segment.GetCollectionID() != collectionID {
-			return fmt.Errorf("collection mismatch for kept segment %d: existing %d, want %d",
+			return merr.WrapErrServiceInternalMsg("collection mismatch for kept segment %d: existing %d, want %d",
 				segID, segment.GetCollectionID(), collectionID)
 		}
 		if segment.GetState() == commonpb.SegmentState_Dropped {
-			return fmt.Errorf("cannot keep dropped segment %d", segID)
+			return merr.WrapErrServiceInternalMsg("cannot keep dropped segment %d", segID)
 		}
 		keptSegmentMap[segID] = true
 	}
@@ -251,10 +251,10 @@ func applyExternalCollectionSegmentUpdate(
 			return err
 		}
 		if keptSegmentMap[seg.GetID()] {
-			return fmt.Errorf("segment %d cannot be both kept and updated", seg.GetID())
+			return merr.WrapErrServiceInternalMsg("segment %d cannot be both kept and updated", seg.GetID())
 		}
 		if _, ok := upsertSegmentMap[seg.GetID()]; ok {
-			return fmt.Errorf("duplicate updated segment %d", seg.GetID())
+			return merr.WrapErrServiceInternalMsg("duplicate updated segment %d", seg.GetID())
 		}
 		upsertSegmentMap[seg.GetID()] = seg
 		validUpdatedSegments = append(validUpdatedSegments, seg)
@@ -478,14 +478,14 @@ func applyExternalCollectionSegmentUpdate(
 
 func validateExternalRefreshUpdatedSegment(incoming *datapb.SegmentInfo, collectionID int64) error {
 	if incoming.GetCollectionID() != 0 && incoming.GetCollectionID() != collectionID {
-		return fmt.Errorf("collection mismatch for segment %d: got %d, want %d",
+		return merr.WrapErrServiceInternalMsg("collection mismatch for segment %d: got %d, want %d",
 			incoming.GetID(), incoming.GetCollectionID(), collectionID)
 	}
 	if incoming.GetManifestPath() == "" {
-		return fmt.Errorf("updated segment %d has empty manifest path", incoming.GetID())
+		return merr.WrapErrServiceInternalMsg("updated segment %d has empty manifest path", incoming.GetID())
 	}
 	if len(incoming.GetBinlogs()) == 0 {
-		return fmt.Errorf("updated segment %d has empty fake binlogs", incoming.GetID())
+		return merr.WrapErrServiceInternalMsg("updated segment %d has empty fake binlogs", incoming.GetID())
 	}
 	return nil
 }
@@ -514,36 +514,36 @@ func validateExternalRefreshNewSegment(incoming *datapb.SegmentInfo) error {
 
 func validateExternalRefreshPatch(oldSeg *SegmentInfo, incoming *datapb.SegmentInfo, collectionID int64) error {
 	if oldSeg == nil {
-		return fmt.Errorf("existing segment is nil")
+		return merr.WrapErrServiceInternalMsg("existing segment is nil")
 	}
 	if oldSeg.GetCollectionID() != collectionID {
-		return fmt.Errorf("collection mismatch for segment %d: existing %d, want %d",
+		return merr.WrapErrServiceInternalMsg("collection mismatch for segment %d: existing %d, want %d",
 			oldSeg.GetID(), oldSeg.GetCollectionID(), collectionID)
 	}
 	if oldSeg.GetState() == commonpb.SegmentState_Dropped {
-		return fmt.Errorf("cannot patch dropped segment %d", oldSeg.GetID())
+		return merr.WrapErrServiceInternalMsg("cannot patch dropped segment %d", oldSeg.GetID())
 	}
 	if incoming.GetCollectionID() != 0 && incoming.GetCollectionID() != collectionID {
-		return fmt.Errorf("collection mismatch for segment %d: got %d, want %d",
+		return merr.WrapErrServiceInternalMsg("collection mismatch for segment %d: got %d, want %d",
 			incoming.GetID(), incoming.GetCollectionID(), collectionID)
 	}
 	if incoming.GetNumOfRows() != oldSeg.GetNumOfRows() {
-		return fmt.Errorf("row count changed for segment %d: got %d, want %d",
+		return merr.WrapErrServiceInternalMsg("row count changed for segment %d: got %d, want %d",
 			incoming.GetID(), incoming.GetNumOfRows(), oldSeg.GetNumOfRows())
 	}
 	if incoming.GetStorageVersion() != 0 && incoming.GetStorageVersion() != oldSeg.GetStorageVersion() {
-		return fmt.Errorf("storage version changed for segment %d: got %d, want %d",
+		return merr.WrapErrServiceInternalMsg("storage version changed for segment %d: got %d, want %d",
 			incoming.GetID(), incoming.GetStorageVersion(), oldSeg.GetStorageVersion())
 	}
 	if incoming.GetSchemaVersion() < oldSeg.GetSchemaVersion() {
-		return fmt.Errorf("schema version rollback for segment %d: got %d, want >= %d",
+		return merr.WrapErrServiceInternalMsg("schema version rollback for segment %d: got %d, want >= %d",
 			incoming.GetID(), incoming.GetSchemaVersion(), oldSeg.GetSchemaVersion())
 	}
 	if incoming.GetManifestPath() == "" {
-		return fmt.Errorf("patched segment %d has empty manifest path", incoming.GetID())
+		return merr.WrapErrServiceInternalMsg("patched segment %d has empty manifest path", incoming.GetID())
 	}
 	if len(incoming.GetBinlogs()) == 0 {
-		return fmt.Errorf("patched segment %d has empty fake binlogs", incoming.GetID())
+		return merr.WrapErrServiceInternalMsg("patched segment %d has empty fake binlogs", incoming.GetID())
 	}
 	if err := validateExternalRefreshBinlogRowCount(incoming, oldSeg.GetNumOfRows()); err != nil {
 		return err
@@ -554,14 +554,14 @@ func validateExternalRefreshPatch(oldSeg *SegmentInfo, incoming *datapb.SegmentI
 func validateExternalRefreshBinlogRowCount(segment *datapb.SegmentInfo, expectedRows int64) error {
 	binlogRows := segmentutil.CalcRowCountFromBinLog(segment)
 	if binlogRows == -1 {
-		return fmt.Errorf("invalid binlog row count for segment %d", segment.GetID())
+		return merr.WrapErrServiceInternalMsg("invalid binlog row count for segment %d", segment.GetID())
 	}
 	if expectedRows > 0 && binlogRows != expectedRows {
-		return fmt.Errorf("binlog row count mismatch for segment %d: got %d, want %d",
+		return merr.WrapErrServiceInternalMsg("binlog row count mismatch for segment %d: got %d, want %d",
 			segment.GetID(), binlogRows, expectedRows)
 	}
 	if binlogRows > 0 && binlogRows != segment.GetNumOfRows() {
-		return fmt.Errorf("binlog row count mismatch for segment %d: got %d, segment rows %d",
+		return merr.WrapErrServiceInternalMsg("binlog row count mismatch for segment %d: got %d, segment rows %d",
 			segment.GetID(), binlogRows, segment.GetNumOfRows())
 	}
 	return nil
