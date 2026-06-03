@@ -192,7 +192,8 @@ func NewZilliClient(modelDeploymentID string, clusterID string, dbName string, i
 	}
 	conn, err := mgr.GetConn(clientConf)
 	if err != nil {
-		return nil, merr.WrapErrFunctionFailed(err, "connect model serving failed")
+		// failing to connect to the model serving backend is transient
+		return nil, merr.WrapErrServiceUnavailable(err.Error(), "connect model serving failed")
 	}
 	return &ZillizClient{
 		modelDeploymentID: modelDeploymentID,

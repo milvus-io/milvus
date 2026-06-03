@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
@@ -311,17 +312,25 @@ func PostRequest[T Response](req any, url string, headers map[string]string, tim
 func send(req *http.Request) ([]byte, error) {
 	resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL is constructed from configured model endpoints, not user input
 	if err != nil {
-		return nil, merr.WrapErrFunctionFailed(err, "call service failed")
+		// transport failure (connection refused / timeout / DNS) is transient
+		return nil, merr.WrapErrServiceUnavailable(err.Error(), "call service failed")
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, merr.WrapErrFunctionFailed(err, "call service failed, read response failed")
+		// interrupted while reading the response body is transient
+		return nil, merr.WrapErrServiceUnavailable(err.Error(), "call service failed, read response failed")
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, merr.WrapErrFunctionFailedMsg("call service failed, errs:[%s, %s]", resp.Status, body)
+		msg := fmt.Sprintf("call service failed, errs:[%s, %s]", resp.Status, body)
+		// 429 / 5xx are transient and retryable; other 4xx are caused by the
+		// request/config (bad key, bad input) and are permanent.
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
+			return nil, merr.WrapErrServiceUnavailable(msg)
+		}
+		return nil, merr.WrapErrFunctionFailedMsg("%s", msg)
 	}
 	return body, nil
 }
