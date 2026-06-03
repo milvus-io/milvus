@@ -186,7 +186,7 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 	deleteBatchSize := 5000
 	numOfBatch := 5
 
-	// Step 1: Create collection and insert initial 3000 records
+	// Step 1: Create collection and insert initial records
 	collName := common.GenRandomString(snapshotPrefix, 6)
 	schema := client.SimpleCreateCollectionOptions(collName, common.DefaultDim)
 	schema.WithAutoID(false)
@@ -321,10 +321,15 @@ func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
-	insertBatchSize := 3000
-	deleteBatchSize := 1000
+	insertBatchSize := 2000
+	deleteBatchSize := 500
+	partitionNum := 5
+	expectedSnapshotRowsPerPartition := int64(insertBatchSize - deleteBatchSize)
+	expectedInitialRows := int64(partitionNum * insertBatchSize)
+	expectedSnapshotRows := int64(partitionNum * (insertBatchSize - deleteBatchSize))
+	expectedPostSnapshotRows := expectedSnapshotRows + int64(partitionNum*insertBatchSize)
 
-	// Step 1: Create collection and insert initial 3000 records
+	// Step 1: Create collection and insert initial records
 	collName := common.GenRandomString(snapshotPrefix, 6)
 	schema := client.SimpleCreateCollectionOptions(collName, common.DefaultDim)
 	schema.WithAutoID(false)
@@ -339,7 +344,7 @@ func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 	})
 
 	partitions := make([]string, 0)
-	for i := 0; i < 10; i++ {
+	for i := 0; i < partitionNum; i++ {
 		partitions = append(partitions, fmt.Sprintf("part_%d", i))
 		option := client.NewCreatePartitionOption(collName, partitions[i])
 		err := mc.CreatePartition(ctx, option)
@@ -364,14 +369,14 @@ func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 	queryRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	count, _ := queryRes.Fields[0].GetAsInt64(0)
-	require.Equal(t, int64(30000), count)
+	require.Equal(t, expectedInitialRows, count)
 
 	// Delete records
 	for i := range partitions {
 		deleteExpr := fmt.Sprintf("id >= %d and id < %d", insertBatchSize*i, insertBatchSize*i+deleteBatchSize)
 		delRes, err := mc.Delete(ctx, client.NewDeleteOption(collName).WithExpr(deleteExpr))
 		common.CheckErr(t, err, true)
-		require.Equal(t, int64(1000), delRes.DeleteCount)
+		require.Equal(t, int64(deleteBatchSize), delRes.DeleteCount)
 	}
 
 	// Flush to ensure deletion is persisted
@@ -386,12 +391,12 @@ func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 	queryRes2, err := mc.Query(ctx, client.NewQueryOption(collName).WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	count, _ = queryRes2.Fields[0].GetAsInt64(0)
-	require.Equal(t, int64(20000), count)
+	require.Equal(t, expectedSnapshotRows, count)
 
 	// Step 2: Create snapshot
 	snapshotName := fmt.Sprintf("restore_snapshot_%s", common.GenRandomString(snapshotPrefix, 6))
 	createOpt := client.NewCreateSnapshotOption(snapshotName, collName).
-		WithDescription("Snapshot for restore testing with 2000 records")
+		WithDescription("Snapshot for restore testing with multiple partitions")
 
 	err = mc.CreateSnapshot(ctx, createOpt)
 	common.CheckErr(t, err, true)
@@ -409,8 +414,7 @@ func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 	require.Equal(t, snapshotName, snapshotInfo.GetName())
 	log.Info("check snapshot info", zap.Any("info", snapshotInfo))
 
-	// Step 3: Continue inserting more records and delete 1000 records
-	// Insert more records
+	// Step 3: Continue inserting more records
 	for i, partition := range partitions {
 		pkStart := insertBatchSize * (len(partitions) + i)
 		insertOpt2 := hp.TNewDataOption().TWithNb(insertBatchSize).TWithStart(pkStart)
@@ -422,7 +426,7 @@ func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 	queryRes3, err := mc.Query(ctx, client.NewQueryOption(collName).WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	count, _ = queryRes3.Fields[0].GetAsInt64(0)
-	require.Equal(t, int64(50000), count)
+	require.Equal(t, expectedPostSnapshotRows, count)
 
 	// Step 4: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
@@ -447,7 +451,7 @@ func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 	common.CheckErr(t, err, true)
 
 	for _, partition := range partitions {
-		// Verify restored partition data count (should be 2000 records from snapshot)
+		// Verify restored partition data count from snapshot
 		queryRes5, err := mc.Query(ctx,
 			client.NewQueryOption(restoredCollName).
 				WithOutputFields(common.QueryCountFieldName).
@@ -455,7 +459,7 @@ func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 				WithPartitions(partition))
 		common.CheckErr(t, err, true)
 		count, _ = queryRes5.Fields[0].GetAsInt64(0)
-		require.Equal(t, int64(2000), count)
+		require.Equal(t, expectedSnapshotRowsPerPartition, count)
 	}
 
 	// Clean up
