@@ -189,7 +189,7 @@ func (s *schemaInfo) IsPartitionKeyCollection() bool {
 
 func (s *schemaInfo) GetPkField() (*schemapb.FieldSchema, error) {
 	if s.pkField == nil {
-		return nil, merr.WrapErrServiceInternal("pk field not found")
+		return nil, merr.WrapErrFieldNotFound("pk field")
 	}
 	return s.pkField, nil
 }

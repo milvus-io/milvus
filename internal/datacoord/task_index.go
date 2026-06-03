@@ -270,7 +270,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	}
 
 	if field == nil {
-		return nil, merr.WrapErrServiceInternalMsg("field not found with ID %d", fieldID)
+		return nil, merr.WrapErrFieldNotFound(fieldID)
 	}
 
 	// Extract dim only for vector types to avoid unnecessary warnings

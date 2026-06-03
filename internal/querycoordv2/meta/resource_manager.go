@@ -1103,7 +1103,7 @@ func (rm *ResourceManager) unassignNode(ctx context.Context, node int64) (string
 		return rg.GetName(), nil
 	}
 
-	return "", merr.WrapErrServiceInternalMsg("node %d not found in any resource group", node)
+	return "", merr.WrapErrNodeNotFound(node, "not found in any resource group")
 }
 
 // validateResourceGroupConfig validate resource group config.

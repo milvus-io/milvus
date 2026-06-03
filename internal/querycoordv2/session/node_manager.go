@@ -78,7 +78,7 @@ func (m *NodeManager) IsStoppingNode(nodeID int64) (bool, error) {
 
 	node := m.nodes[nodeID]
 	if node == nil {
-		return false, merr.WrapErrServiceInternalMsg("nodeID[%d] isn't existed", nodeID)
+		return false, merr.WrapErrNodeNotFound(nodeID)
 	}
 	return node.IsStoppingState(), nil
 }
