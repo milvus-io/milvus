@@ -263,7 +263,7 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 
 	err := pw.writer.Write(r)
 	if err != nil {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("write record batch error: %s", err.Error()))
+		return merr.WrapErrStorage(err, "write record batch error")
 	}
 	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	return nil
@@ -287,7 +287,7 @@ func (pw *PackedBinlogRecordWriter) initWriters(r Record) error {
 		}
 		pw.writer, err = NewPackedRecordWriter(pw.storageConfig.GetBucketName(), paths, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext)
 		if err != nil {
-			return merr.WrapErrServiceInternal(fmt.Sprintf("can not new packed record writer %s", err.Error()))
+			return merr.WrapErrStorage(err, "can not new packed record writer")
 		}
 	}
 	return nil
@@ -420,7 +420,7 @@ func (pw *PackedManifestRecordWriter) Write(r Record) error {
 
 	err := pw.writer.Write(r)
 	if err != nil {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("write record batch error: %s", err.Error()))
+		return merr.WrapErrStorage(err, "write record batch error")
 	}
 	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	return nil
@@ -439,7 +439,7 @@ func (pw *PackedManifestRecordWriter) initWriters(r Record) error {
 		pw.basePath = path.Join(pw.storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
 		pw.writer, err = NewPackedRecordBatchWriter(pw.basePath, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext, writerFormat, schemaBasedFormats)
 		if err != nil {
-			return merr.WrapErrServiceInternal(fmt.Sprintf("can not new packed record writer %s", err.Error()))
+			return merr.WrapErrStorage(err, "can not new packed record writer")
 		}
 	}
 	return nil
@@ -640,7 +640,7 @@ func (pw *PackedTextManifestRecordWriter) Write(r Record) error {
 
 	err := pw.writer.Write(r)
 	if err != nil {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("write record batch error: %s", err.Error()))
+		return merr.WrapErrStorage(err, "write record batch error")
 	}
 	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	return nil
@@ -659,7 +659,7 @@ func (pw *PackedTextManifestRecordWriter) initWriters(r Record) error {
 		pw.basePath = path.Join(pw.storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
 		pw.writer, err = NewPackedTextBatchWriter(pw.storageConfig.GetBucketName(), pw.basePath, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.textColumnConfigs, writerFormat, schemaBasedFormats)
 		if err != nil {
-			return merr.WrapErrServiceInternal(fmt.Sprintf("can not new packed text writer %s", err.Error()))
+			return merr.WrapErrStorage(err, "can not new packed text writer")
 		}
 	}
 	return nil
