@@ -253,6 +253,102 @@ func TestRbacAlterRoleDescription(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
 }
 
+func TestRbacAlterRoleDescriptionErrors(t *testing.T) {
+	ctx := context.TODO()
+
+	t.Run("check empty role name", func(t *testing.T) {
+		mockCata := mocks.NewRootCoordCatalog(t)
+		mockMt := &MetaTable{catalog: mockCata}
+
+		err := mockMt.CheckIfAlterRole(ctx, &milvuspb.AlterRoleRequest{
+			RoleName:    "",
+			Description: "description",
+		})
+		assert.ErrorIs(t, err, errEmptyRoleName)
+	})
+
+	t.Run("check list role error", func(t *testing.T) {
+		targetErr := errors.New("mock list role error")
+		roleName := "role_check_list_error"
+		mockCata := mocks.NewRootCoordCatalog(t)
+		mockCata.EXPECT().ListRole(
+			mock.Anything,
+			util.DefaultTenant,
+			mock.MatchedBy(func(entity *milvuspb.RoleEntity) bool {
+				return entity.GetName() == roleName
+			}),
+			false,
+		).Return(nil, targetErr)
+		mockMt := &MetaTable{catalog: mockCata}
+
+		err := mockMt.CheckIfAlterRole(ctx, &milvuspb.AlterRoleRequest{
+			RoleName:    roleName,
+			Description: "description",
+		})
+		assert.ErrorIs(t, err, targetErr)
+	})
+
+	t.Run("alter empty role name", func(t *testing.T) {
+		mockCata := mocks.NewRootCoordCatalog(t)
+		mockMt := &MetaTable{catalog: mockCata}
+
+		err := mockMt.AlterRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{
+			Name:        "",
+			Description: "description",
+		})
+		assert.ErrorIs(t, err, errEmptyRoleName)
+	})
+
+	t.Run("alter list role error", func(t *testing.T) {
+		targetErr := errors.New("mock list role error")
+		roleName := "role_alter_list_error"
+		mockCata := mocks.NewRootCoordCatalog(t)
+		mockCata.EXPECT().ListRole(
+			mock.Anything,
+			util.DefaultTenant,
+			mock.MatchedBy(func(entity *milvuspb.RoleEntity) bool {
+				return entity.GetName() == roleName
+			}),
+			false,
+		).Return(nil, targetErr)
+		mockMt := &MetaTable{catalog: mockCata}
+
+		err := mockMt.AlterRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "description",
+		})
+		assert.ErrorIs(t, err, targetErr)
+	})
+
+	t.Run("alter catalog error", func(t *testing.T) {
+		targetErr := errors.New("mock alter role error")
+		roleName := "role_alter_catalog_error"
+		mockCata := mocks.NewRootCoordCatalog(t)
+		mockCata.EXPECT().ListRole(
+			mock.Anything,
+			util.DefaultTenant,
+			mock.MatchedBy(func(entity *milvuspb.RoleEntity) bool {
+				return entity.GetName() == roleName
+			}),
+			false,
+		).Return([]*milvuspb.RoleResult{{Role: &milvuspb.RoleEntity{Name: roleName}}}, nil)
+		mockCata.EXPECT().AlterRole(
+			mock.Anything,
+			util.DefaultTenant,
+			mock.MatchedBy(func(entity *milvuspb.RoleEntity) bool {
+				return entity.GetName() == roleName && entity.GetDescription() == "description"
+			}),
+		).Return(targetErr)
+		mockMt := &MetaTable{catalog: mockCata}
+
+		err := mockMt.AlterRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "description",
+		})
+		assert.ErrorIs(t, err, targetErr)
+	})
+}
+
 func TestRbacCreateRoleToleratesMalformedStoredRoleValue(t *testing.T) {
 	ctx := context.TODO()
 	mt := generateMetaTable(t)
