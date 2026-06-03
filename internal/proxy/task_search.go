@@ -744,7 +744,7 @@ func (t *searchTask) fillResult() {
 func (t *searchTask) getBM25SearchTexts(placeholder []byte) ([]string, error) {
 	pb := &commonpb.PlaceholderGroup{}
 	if err := proto.Unmarshal(placeholder, pb); err != nil {
-		return nil, merr.WrapErrServiceInternal("failed to unmarshal BM25 search placeholder group", err.Error())
+		return nil, merr.WrapErrParameterInvalidMsg("failed to unmarshal BM25 search placeholder group: %v", err)
 	}
 
 	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
