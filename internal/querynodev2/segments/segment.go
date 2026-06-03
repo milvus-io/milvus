@@ -1119,7 +1119,8 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	delete(indexParams, common.MmapEnabledKey)
 
 	// some build params also exist in indexParams, which are useless during loading process
-	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexParams["index_type"]) {
+	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexParams["index_type"]) ||
+		vecindexmgr.GetVecIndexMgrInstance().IsAISAQ(indexParams["index_type"]) {
 		if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows()); err != nil {
 			return err
 		}
