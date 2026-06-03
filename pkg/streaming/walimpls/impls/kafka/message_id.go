@@ -19,7 +19,7 @@ func UnmarshalMessageID(data string) (message.MessageID, error) {
 }
 
 func unmarshalMessageID(data string) (kafkaID, error) {
-	v, err := message.DecodeUint64(data)
+	v, err := message.DecodeInt64(data)
 	if err != nil {
 		return 0, errors.Wrapf(message.ErrInvalidMessageID, "decode kafkaID fail with err: %s, id: %s", err.Error(), data)
 	}
