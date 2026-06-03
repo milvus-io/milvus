@@ -174,19 +174,19 @@ Across `internal/{datacoord,rootcoord,querycoordv2}` there are 28
 | Background-only (never enter an RPC handler) | 5 (`errFull`, `errNoSuchElement`, `errNodeNotEnough`, `errDisposed`, `errTypeNotFound`) | compaction queue / resource observer / session lifecycle / checker registry | ✅ compliant |
 | Cross-package idempotency via `(ignored bool, err error)` signature | 1 (resource group create/drop) | meta layer returns `ignored=true`; querycoordv2 RPC handler translates to `merr.Success()` — no sentinel crosses package | ✅ compliant (refactored from exported `ErrResourceGroupOperationIgnored` in this branch) |
 | Dead code (function with 0 callers) | 3 (`errNilResponse`, `errNilStatusResponse`, `errUnknownResponseType` — all only used by `VerifyResponse` in `datacoord/util.go`) | safe to delete | 🪦 cleanup candidate |
-| **Violation**: escapes RPC handler with no catch | **3** (`errEmptyUsername`, `errEmptyRoleName`, `errEmptyPrivilegeGroupName`) | wrapped only by cockroachdb `errors.Wrap`, no `errors.Is` catch; client gets `Code=1 Unexpected, Reason="failed to check if add credential: username is empty"` | ❌ to fix |
-| **Semantic miscategorization**: caught and wrapped but with the wrong typed merr code | 1 (`errTypeNotFound` in `ops_services.go:83,97`) | wrapped as `WrapErrServiceInternal` (code 5) but is really an invalid `CheckerID` from the client → should be `WrapErrParameterInvalidMsg` (code 1100) | ⚠️ to fix |
+| ~~**Violation**: escapes RPC handler with no catch~~ (resolved) | 3 (`errEmptyUsername`, `errEmptyRoleName`, `errEmptyPrivilegeGroupName`) | origin sites in `meta_table.go` now emit `WrapErrParameterInvalidMsg` directly; the bare sentinels are gone | ✅ resolved |
+| ~~**Semantic miscategorization**: caught and wrapped with the wrong typed merr code~~ (resolved) | 1 (`errTypeNotFound` in `ops_services.go:87,101`) | invalid `CheckerID` from the client now wrapped as `WrapErrParameterInvalidMsg` (code 1100), was `WrapErrServiceInternal` (code 5) | ✅ resolved |
 
-### Suggested cleanup (not done in this PR)
+### Cleanup status
 
-1. Change `errEmptyUsername` / `errEmptyRoleName` / `errEmptyPrivilegeGroupName`
-   at the origin sites in `internal/rootcoord/meta_table.go` to
-   `merr.WrapErrParameterInvalidMsg("username is empty")` etc. These are
-   client-validation failures, so they belong in the wire layer, not the
-   internal-sentinel layer.
-2. Wrap `errTypeNotFound` at the catcher in `internal/querycoordv2/ops_services.go:83,97`
-   with `merr.WrapErrParameterInvalidMsg("unknown checker type: %d", req.CheckerID)`.
-3. Delete `VerifyResponse` and its three dead-code sentinels
+1. ✅ Done — `errEmptyUsername` / `errEmptyRoleName` / `errEmptyPrivilegeGroupName`
+   at the origin sites in `internal/rootcoord/meta_table.go` now emit
+   `merr.WrapErrParameterInvalidMsg("username is empty")` etc. directly; the bare
+   sentinels no longer exist.
+2. ✅ Done — `errTypeNotFound` at the catcher in
+   `internal/querycoordv2/ops_services.go:87,101` is now wrapped as
+   `merr.WrapErrParameterInvalidMsg("invalid checker type %d: %v", req.CheckerID, err)`.
+3. Not done — delete `VerifyResponse` and its three dead-code sentinels
    (`errNilResponse`, `errNilStatusResponse`, `errUnknownResponseType`).
 
 ## Future linter ideas

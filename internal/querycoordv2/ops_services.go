@@ -84,7 +84,7 @@ func (s *Server) ActivateChecker(ctx context.Context, req *querypb.ActivateCheck
 	}
 	if err := s.checkerController.Activate(utils.CheckerType(req.CheckerID)); err != nil {
 		log.Warn("failed to activate checker", zap.Error(err))
-		return merr.Status(merr.WrapErrServiceInternal(err.Error())), nil
+		return merr.Status(merr.WrapErrParameterInvalidMsg("invalid checker type %d: %v", req.CheckerID, err)), nil
 	}
 	return merr.Success(), nil
 }
@@ -98,7 +98,7 @@ func (s *Server) DeactivateChecker(ctx context.Context, req *querypb.DeactivateC
 	}
 	if err := s.checkerController.Deactivate(utils.CheckerType(req.CheckerID)); err != nil {
 		log.Warn("failed to deactivate checker", zap.Error(err))
-		return merr.Status(merr.WrapErrServiceInternal(err.Error())), nil
+		return merr.Status(merr.WrapErrParameterInvalidMsg("invalid checker type %d: %v", req.CheckerID, err)), nil
 	}
 	return merr.Success(), nil
 }
