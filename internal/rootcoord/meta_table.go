@@ -1936,8 +1936,10 @@ func (mt *MetaTable) CheckIfOperateUserRole(ctx context.Context, req *milvuspb.O
 	}
 	if req.Type != milvuspb.OperateUserRoleType_RemoveUserFromRole {
 		if _, err := mt.catalog.ListUser(ctx, util.DefaultTenant, &milvuspb.UserEntity{Name: req.Username}, false); err != nil {
-			errMsg := "not found the user, maybe the user isn't existed or internal system error"
-			return merr.WrapErrServiceInternalMsg(errMsg)
+			if errors.Is(err, merr.ErrIoKeyNotFound) {
+				return merr.WrapErrParameterInvalidMsg("user %q not found", req.GetUsername())
+			}
+			return merr.Wrap(err, "failed to check user existence")
 		}
 	}
 	return nil

@@ -721,7 +721,10 @@ func (kv *etcdKV) getEtcdMeta(ctx context.Context, key string, opts ...clientv3.
 	} else {
 		metrics.MetaOpCounter.WithLabelValues(metrics.MetaGetLabel, metrics.FailLabel).Inc()
 	}
-	return resp, err
+	// translate the raw etcd/grpc transport error into a typed merr at this
+	// boundary so callers never receive an untyped error (key-not-found is
+	// classified by the callers via resp.Count).
+	return resp, merr.WrapErrIoFailed(key, err)
 }
 
 func (kv *etcdKV) putEtcdMeta(ctx context.Context, key, val string, opts ...clientv3.OpOption) (*clientv3.PutResponse, error) {
@@ -740,7 +743,7 @@ func (kv *etcdKV) putEtcdMeta(ctx context.Context, key, val string, opts ...clie
 		metrics.MetaOpCounter.WithLabelValues(metrics.MetaPutLabel, metrics.FailLabel).Inc()
 	}
 
-	return resp, err
+	return resp, merr.WrapErrIoFailed(key, err)
 }
 
 func (kv *etcdKV) removeEtcdMeta(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.DeleteResponse, error) {
@@ -759,7 +762,7 @@ func (kv *etcdKV) removeEtcdMeta(ctx context.Context, key string, opts ...client
 		metrics.MetaOpCounter.WithLabelValues(metrics.MetaRemoveLabel, metrics.FailLabel).Inc()
 	}
 
-	return resp, err
+	return resp, merr.WrapErrIoFailed(key, err)
 }
 
 func (kv *etcdKV) getTxnWithCmp(ctx context.Context, cmp ...clientv3.Cmp) clientv3.Txn {
@@ -799,5 +802,8 @@ func (kv *etcdKV) executeTxn(txn clientv3.Txn, ops ...clientv3.Op) (*clientv3.Tx
 		metrics.MetaOpCounter.WithLabelValues(metrics.MetaTxnLabel, metrics.FailLabel).Inc()
 	}
 
+	if err != nil {
+		err = merr.WrapErrIoFailedReason("execute etcd txn failed", err.Error())
+	}
 	return resp, err
 }
