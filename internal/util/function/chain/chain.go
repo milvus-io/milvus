@@ -195,7 +195,7 @@ func (fc *FuncChain) ExecuteWithContext(ctx context.Context, inputs ...*DataFram
 			var err error
 			result, err = mergeOp.ExecuteMulti(funcCtx, inputs)
 			if err != nil {
-				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("%s failed: %v", mergeOp.Name(), err))
+				return nil, merr.Wrapf(err, "%s failed", mergeOp.Name())
 			}
 			startIdx = 1
 		} else {
@@ -226,7 +226,7 @@ func (fc *FuncChain) ExecuteWithContext(ctx context.Context, inputs ...*DataFram
 		newResult, err := op.Execute(funcCtx, result)
 		if err != nil {
 			fc.releaseIfOwned(result, inputs)
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("%s failed: %v", op.Name(), err))
+			return nil, merr.Wrapf(err, "%s failed", op.Name())
 		}
 
 		// Release intermediate results (but not the original inputs)

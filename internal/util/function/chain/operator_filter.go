@@ -82,7 +82,7 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 	// Execute FunctionExpr to get boolean result
 	outputs, err := o.function.Execute(ctx, inputs)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("filter_op: function execution failed: %v", err))
+		return nil, merr.WrapErrFunctionFailed(err, "filter_op: function execution failed")
 	}
 
 	// Validate output at runtime (especially important for dynamic output types)
@@ -143,7 +143,7 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 
 			filtered, err := filterArray(ctx.Pool(), dataChunk, filterChunks[chunkIdx])
 			if err != nil {
-				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("filter_op: column %s: %v", colName, err))
+				return nil, merr.WrapErrFunctionFailed(err, "filter_op: column %s", colName)
 			}
 			collector.Set(colName, chunkIdx, filtered)
 		}

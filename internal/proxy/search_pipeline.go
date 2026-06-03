@@ -1168,7 +1168,7 @@ func buildChainFromMeta(
 	case *legacyRerankMeta:
 		return chain.BuildRerankChainWithLegacy(collSchema, m.legacyParams, metrics, searchParams, alloc)
 	default:
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("rerank operator: unsupported rerankMeta type %T", meta))
+		return nil, merr.WrapErrFunctionFailedMsg("rerank operator: unsupported rerankMeta type %T", meta)
 	}
 }
 
@@ -1255,7 +1255,7 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 		for _, df := range dataframes {
 			df.Release()
 		}
-		return nil, merr.WrapErrServiceInternal("rerank operator: rerankMeta is nil, cannot build rerank chain")
+		return nil, merr.WrapErrFunctionFailedMsg("rerank operator: rerankMeta is nil, cannot build rerank chain")
 	}
 	searchParams.ModelExtraInfo = &models.ModelExtraInfo{
 		ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),

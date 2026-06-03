@@ -192,7 +192,7 @@ func (op *MergeOp) ExecuteMulti(ctx *types.FuncContext, inputs []*DataFrame) (*D
 	numChunks := inputs[0].NumChunks()
 	for i, df := range inputs {
 		if df.NumChunks() != numChunks {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: input[%d] has %d chunks, expected %d", i, df.NumChunks(), numChunks))
+			return nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] has %d chunks, expected %d", i, df.NumChunks(), numChunks)
 		}
 	}
 
@@ -324,7 +324,7 @@ func (op *MergeOp) collectRRFScores(inputs []*DataFrame, chunkIdx int) (map[any]
 	for inputIdx, df := range inputs {
 		idCol := df.Column(types.IDFieldName)
 		if idCol == nil {
-			return nil, nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: input[%d] missing %s column", inputIdx, types.IDFieldName))
+			return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] missing %s column", inputIdx, types.IDFieldName)
 		}
 
 		idChunk := idCol.Chunk(chunkIdx)
@@ -449,7 +449,7 @@ func (op *MergeOp) collectCombinedScores(inputs []*DataFrame, chunkIdx int, merg
 		idCol := df.Column(types.IDFieldName)
 		scoreCol := df.Column(types.ScoreFieldName)
 		if idCol == nil || scoreCol == nil {
-			return nil, nil, nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: input[%d] missing ID or score column", inputIdx))
+			return nil, nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] missing ID or score column", inputIdx)
 		}
 
 		idChunk := idCol.Chunk(chunkIdx)
@@ -727,7 +727,7 @@ func (op *MergeOp) buildResultArrays(ctx *types.FuncContext, ids []any, scores [
 	case string:
 		return op.buildStringResults(ctx, ids, scores)
 	default:
-		return nil, nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: unsupported ID type %T", ids[0]))
+		return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: unsupported ID type %T", ids[0])
 	}
 }
 
