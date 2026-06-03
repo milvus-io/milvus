@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <folly/futures/Future.h>
 #include <memory>
 #include <string>
 
@@ -70,13 +71,20 @@ class PhyMvccNode : public Operator {
     PrefetchAsync(const std::shared_ptr<folly::CPUThreadPoolExecutor>
                       prefetch_pool) override {
         auto self = std::static_pointer_cast<PhyMvccNode>(shared_from_this());
-        folly::via(prefetch_pool.get(), [self]() {
+        prefetch_future_ = folly::via(prefetch_pool.get(), [self]() {
             self->segment_->prefetch_chunks(
                 self->operator_context_->get_exec_context()
                     ->get_query_context()
                     ->get_op_context(),
                 TimestampFieldID);
         });
+    }
+
+    void
+    WaitPrefetch() {
+        if (prefetch_future_.valid()) {
+            std::move(prefetch_future_).wait();
+        }
     }
 
  private:
@@ -86,6 +94,7 @@ class PhyMvccNode : public Operator {
     bool is_finished_{false};
     bool is_source_node_{false};
     milvus::Timestamp collection_ttl_timestamp_;
+    folly::Future<folly::Unit> prefetch_future_;
 };
 
 }  // namespace exec

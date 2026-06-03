@@ -3,7 +3,7 @@ package datacoord
 import (
 	"sync/atomic"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // CacheUpdateFunc modifies a cached value in place.

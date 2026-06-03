@@ -74,6 +74,7 @@ PhyMvccNode::GetOutput() {
     }
 
     tracer::AddEvent(fmt::format("input_rows: {}", active_count_));
+    WaitPrefetch();
 
     // Visibility filtering disabled globally: skip all filtering.
     if (!segcore::SegcoreConfig::default_config()
