@@ -11,7 +11,7 @@ import (
 
 func CntOfInternalResult(res *internalpb.RetrieveResults) (int64, error) {
 	if len(res.GetFieldsData()) != 1 {
-		return 0, merr.WrapErrParameterInvalidMsg("internal count result should only have one column")
+		return 0, merr.WrapErrDataIntegrityMsg("internal count result should only have one column")
 	}
 
 	f := res.GetFieldsData()[0]
@@ -20,7 +20,7 @@ func CntOfInternalResult(res *internalpb.RetrieveResults) (int64, error) {
 
 func CntOfSegCoreResult(res *segcorepb.RetrieveResults) (int64, error) {
 	if len(res.GetFieldsData()) != 1 {
-		return 0, merr.WrapErrParameterInvalidMsg("segcore count result should only have one column")
+		return 0, merr.WrapErrDataIntegrityMsg("segcore count result should only have one column")
 	}
 
 	f := res.GetFieldsData()[0]
@@ -30,14 +30,14 @@ func CntOfSegCoreResult(res *segcorepb.RetrieveResults) (int64, error) {
 func CntOfFieldData(f *schemapb.FieldData) (int64, error) {
 	scalars := f.GetScalars()
 	if scalars == nil {
-		return 0, merr.WrapErrParameterInvalidMsg("count result should be scalar")
+		return 0, merr.WrapErrDataIntegrityMsg("count result should be scalar")
 	}
 	data := scalars.GetLongData()
 	if data == nil {
-		return 0, merr.WrapErrParameterInvalidMsg("count result should be int64 data")
+		return 0, merr.WrapErrDataIntegrityMsg("count result should be int64 data")
 	}
 	if len(data.GetData()) != 1 {
-		return 0, merr.WrapErrParameterInvalidMsg("count result shoud only have one row")
+		return 0, merr.WrapErrDataIntegrityMsg("count result shoud only have one row")
 	}
 	return data.GetData()[0], nil
 }
@@ -84,7 +84,7 @@ func WrapCntToQueryResults(cnt int64) *milvuspb.QueryResults {
 
 func CntOfQueryResults(res *milvuspb.QueryResults) (int64, error) {
 	if len(res.GetFieldsData()) != 1 {
-		return 0, merr.WrapErrParameterInvalidMsg("milvus count result should only have one column")
+		return 0, merr.WrapErrDataIntegrityMsg("milvus count result should only have one column")
 	}
 
 	f := res.GetFieldsData()[0]

@@ -478,7 +478,7 @@ func (node *DataNode) queryIndexTask(ctx context.Context, req *workerpb.QueryJob
 	log.Debug("query index jobs result success", zap.Any("results", results))
 	if len(results) == 0 {
 		return &workerpb.QueryJobsV2Response{
-			Status: merr.Status(merr.WrapErrParameterInvalidMsg("tasks '%v' not found", req.GetTaskIDs())),
+			Status: merr.Status(merr.WrapErrServiceInternalMsg("tasks '%v' not found", req.GetTaskIDs())),
 		}, nil
 	}
 	return &workerpb.QueryJobsV2Response{
@@ -507,7 +507,7 @@ func (node *DataNode) queryStatsTask(ctx context.Context, req *workerpb.QueryJob
 	log.Debug("query stats job result success", zap.Any("results", results))
 	if len(results) == 0 {
 		return &workerpb.QueryJobsV2Response{
-			Status: merr.Status(merr.WrapErrParameterInvalidMsg("tasks '%v' not found", req.GetTaskIDs())),
+			Status: merr.Status(merr.WrapErrServiceInternalMsg("tasks '%v' not found", req.GetTaskIDs())),
 		}, nil
 	}
 	return &workerpb.QueryJobsV2Response{
@@ -541,7 +541,7 @@ func (node *DataNode) queryAnalyzeTask(ctx context.Context, req *workerpb.QueryJ
 	log.Debug("query analyze jobs result success", zap.Any("results", results))
 	if len(results) == 0 {
 		return &workerpb.QueryJobsV2Response{
-			Status: merr.Status(merr.WrapErrParameterInvalidMsg("tasks '%v' not found", req.GetTaskIDs())),
+			Status: merr.Status(merr.WrapErrServiceInternalMsg("tasks '%v' not found", req.GetTaskIDs())),
 		}, nil
 	}
 	return &workerpb.QueryJobsV2Response{

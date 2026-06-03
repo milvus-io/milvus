@@ -586,7 +586,7 @@ func extractMultipleDynamicFieldTexts(jsonDataBytes [][]byte, fieldNames []strin
 		}
 
 		if !gjson.ValidBytes(jsonBytes) {
-			return nil, merr.WrapErrServiceInternalMsg("failed to unmarshal JSON at index %d: invalid JSON", i)
+			return nil, merr.WrapErrDataIntegrityMsg("failed to unmarshal JSON at index %d: invalid JSON", i)
 		}
 
 		for _, fieldName := range fieldNames {

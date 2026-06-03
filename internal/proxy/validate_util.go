@@ -958,7 +958,7 @@ func (v *validateUtil) checkGeometryFieldData(field *schemapb.FieldData, fieldSc
 		wkbArray[index], err = common.ConvertWKTToWKB(wktdata)
 		if err != nil {
 			log.Warn("insert invalid Geometry data!! Transform to wkb failed, has errors", zap.Error(err))
-			return merr.WrapErrIoFailedReason(err.Error())
+			return merr.WrapErrParameterInvalidMsg("invalid Geometry data, transform to wkb failed: %s", err.Error())
 		}
 	}
 	// replace the field data with wkb data array

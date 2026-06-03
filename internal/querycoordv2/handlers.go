@@ -320,7 +320,7 @@ func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRe
 		}
 		return string(bs), nil
 	}
-	return "", merr.WrapErrServiceInternalMsg("invalid param value in=[%s], it should be qc or qn", in)
+	return "", merr.WrapErrParameterInvalidMsg("invalid param value in=[%s], it should be qc or qn", in)
 }
 
 // TODO(dragondriver): add more detail metrics

@@ -364,7 +364,7 @@ func (c *Core) SetTiKVClient(client *txnkv.Client) {
 func (c *Core) SetSession(session sessionutil.SessionInterface) error {
 	c.session = session
 	if c.session == nil {
-		return merr.WrapErrServiceInternalMsg("session is nil, the etcd client connection may have failed")
+		return merr.WrapErrServiceNotReadyMsg("session is nil, the etcd client connection may have failed")
 	}
 	return nil
 }

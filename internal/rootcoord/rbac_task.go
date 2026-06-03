@@ -66,7 +66,7 @@ func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, entity *m
 			opType = int32(typeutil.CacheRevokePrivilege)
 		default:
 			log.Ctx(ctx).Warn("invalid operate type for the OperatePrivilege api", zap.Any("operate_type", operateType))
-			return merr.WrapErrServiceInternalMsg("invalid operate type for the OperatePrivilege api")
+			return merr.WrapErrParameterInvalidMsg("invalid operate type for the OperatePrivilege api")
 		}
 		grants := []*milvuspb.GrantEntity{entity}
 
@@ -148,7 +148,7 @@ func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *
 				newPrivs, _ := lo.Difference(v, in.Privileges)
 				newGroups[k] = newPrivs
 			default:
-				return merr.WrapErrServiceInternalMsg("invalid operate type")
+				return merr.WrapErrParameterInvalidMsg("invalid operate type")
 			}
 		}
 

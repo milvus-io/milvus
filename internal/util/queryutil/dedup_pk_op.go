@@ -216,7 +216,7 @@ func (op *ConcatAndCheckPKOperator) Run(ctx context.Context, span trace.Span, in
 		for j := int64(0); j < int64(idCount); j++ {
 			pk := typeutil.GetPK(r.GetIds(), j)
 			if _, exists := seenPKs[pk]; exists {
-				return nil, merr.WrapErrParameterInvalidMsg("duplicate PK %v found across shards, possible data integrity issue", pk)
+				return nil, merr.WrapErrDataIntegrityMsg("duplicate PK %v found across shards", pk)
 			}
 			seenPKs[pk] = struct{}{}
 			selectedRows = append(selectedRows, rowRef{resultIdx: i, rowIdx: j})

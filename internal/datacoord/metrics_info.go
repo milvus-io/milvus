@@ -136,7 +136,7 @@ func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRe
 		}
 		return string(bs), nil
 	}
-	return "", merr.WrapErrServiceInternalMsg("invalid param value in=[%s], it should be dc or dn", in)
+	return "", merr.WrapErrParameterInvalidMsg("invalid param value in=[%s], it should be dc or dn", in)
 }
 
 func (s *Server) getDistJSON(ctx context.Context, req *milvuspb.GetMetricsRequest) string {

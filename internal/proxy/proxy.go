@@ -165,7 +165,7 @@ func (node *Proxy) Register() error {
 func (node *Proxy) initSession() error {
 	node.session = sessionutil.NewSession(node.ctx)
 	if node.session == nil {
-		return merr.WrapErrParameterInvalidMsg("new session failed, maybe etcd cannot be connected")
+		return merr.WrapErrServiceNotReadyMsg("new session failed, maybe etcd cannot be connected")
 	}
 	node.session.Init(typeutil.ProxyRole, node.address, false)
 	sessionutil.SaveServerInfo(typeutil.ProxyRole, node.session.ServerID)

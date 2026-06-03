@@ -123,7 +123,7 @@ func (op *ReduceByPKOperator) mergeByPK(results []*internalpb.RetrieveResults, h
 			seenPKs[pk] = struct{}{}
 			selectedRows = append(selectedRows, rowRef{resultIdx: sel, rowIdx: cursors[sel]})
 		} else {
-			return nil, merr.WrapErrParameterInvalidMsg("duplicate PK %v found across shards, possible data integrity issue", pk)
+			return nil, merr.WrapErrDataIntegrityMsg("duplicate PK %v found across shards", pk)
 		}
 		cursors[sel]++
 	}

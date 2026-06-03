@@ -2864,7 +2864,7 @@ func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstr
 						zap.ByteString("data", rowData),
 						zap.Error(err),
 					)
-					return merr.WrapErrIoFailedReason(err.Error())
+					return merr.WrapErrParameterInvalidMsg("invalid dynamic field data, only json map is supported: %s", err.Error())
 				}
 				if _, ok := jsonData[common.MetaFieldName]; ok {
 					return merr.WrapErrParameterInvalidMsg("cannot set json key to: %s", common.MetaFieldName)
