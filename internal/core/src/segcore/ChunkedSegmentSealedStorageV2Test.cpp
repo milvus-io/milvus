@@ -471,14 +471,8 @@ TEST_P(TestChunkSegmentStorageV2,
                                              query::PlanOptions(),
                                              query_config);
     auto plan_fragment = plan::PlanFragment(plan);
-    auto row =
+    auto final =
         query::ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
-    ASSERT_NE(row, nullptr);
-    ASSERT_EQ(row->childrens().size(), 1);
-    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(row->childrens()[0]);
-    ASSERT_NE(col_vec, nullptr);
-    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
-    BitsetType final(view);
     final.flip();
     ASSERT_EQ(RowCount() - threshold.int64_val(), final.count());
 }
