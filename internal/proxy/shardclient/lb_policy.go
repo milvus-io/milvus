@@ -423,7 +423,7 @@ func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload Collecti
 			PreferredNodeID: preferredNodeID(workload, channel),
 		})
 	}
-	return merr.WrapErrParameterInvalidMsg("no acitvate sheard leader exist for collection: %s", workload.CollectionName)
+	return merr.WrapErrCollectionNotLoaded(workload.CollectionID)
 }
 
 func (lb *LBPolicyImpl) UpdateCostMetrics(node int64, cost *internalpb.CostAggregation) {

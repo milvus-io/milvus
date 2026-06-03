@@ -1732,7 +1732,7 @@ func (mt *MetaTable) CheckIfAddCredential(ctx context.Context, credInfo *interna
 	if len(usernames) >= maxUserNum {
 		errMsg := "unable to add user because the number of users has reached the limit"
 		log.Ctx(ctx).Error(errMsg, zap.Int("maxUserNum", maxUserNum))
-		return merr.WrapErrServiceInternalMsg(errMsg)
+		return merr.WrapErrServiceQuotaExceeded(errMsg)
 	}
 	return nil
 }
@@ -1863,7 +1863,7 @@ func (mt *MetaTable) CheckIfCreateRole(ctx context.Context, in *milvuspb.CreateR
 	if len(results) >= Params.ProxyCfg.MaxRoleNum.GetAsInt() {
 		errMsg := "unable to create role because the number of roles has reached the limit"
 		log.Ctx(ctx).Warn(errMsg, zap.Int("max_role_num", Params.ProxyCfg.MaxRoleNum.GetAsInt()))
-		return merr.WrapErrServiceInternalMsg(errMsg)
+		return merr.WrapErrServiceQuotaExceeded(errMsg)
 	}
 	return nil
 }
@@ -1905,7 +1905,7 @@ func (mt *MetaTable) CheckIfDropRole(ctx context.Context, in *milvuspb.DropRoleR
 	}
 	if len(grantEntities) != 0 {
 		errMsg := "fail to drop the role that it has privileges. Use REVOKE API to revoke privileges"
-		return merr.WrapErrServiceInternalMsg(errMsg)
+		return merr.WrapErrParameterInvalidMsg(errMsg)
 	}
 	return nil
 }
@@ -1920,10 +1920,10 @@ func (mt *MetaTable) DropRole(ctx context.Context, tenant string, roleName strin
 
 func (mt *MetaTable) CheckIfOperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest) error {
 	if funcutil.IsEmptyString(req.GetUsername()) {
-		return merr.WrapErrServiceInternalMsg("username in the user entity is empty")
+		return merr.WrapErrParameterInvalidMsg("username in the user entity is empty")
 	}
 	if funcutil.IsEmptyString(req.GetRoleName()) {
-		return merr.WrapErrServiceInternalMsg("role name in the role entity is empty")
+		return merr.WrapErrParameterInvalidMsg("role name in the role entity is empty")
 	}
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()
@@ -1974,25 +1974,25 @@ func (mt *MetaTable) SelectUser(ctx context.Context, tenant string, entity *milv
 // OperatePrivilege grant or revoke privilege by setting the operateType param
 func (mt *MetaTable) OperatePrivilege(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
 	if funcutil.IsEmptyString(entity.ObjectName) {
-		return merr.WrapErrServiceInternalMsg("the object name in the grant entity is empty")
+		return merr.WrapErrParameterInvalidMsg("the object name in the grant entity is empty")
 	}
 	if entity.Object == nil || funcutil.IsEmptyString(entity.Object.Name) {
-		return merr.WrapErrServiceInternalMsg("the object entity in the grant entity is invalid")
+		return merr.WrapErrParameterInvalidMsg("the object entity in the grant entity is invalid")
 	}
 	if entity.Role == nil || funcutil.IsEmptyString(entity.Role.Name) {
-		return merr.WrapErrServiceInternalMsg("the role entity in the grant entity is invalid")
+		return merr.WrapErrParameterInvalidMsg("the role entity in the grant entity is invalid")
 	}
 	if entity.Grantor == nil {
-		return merr.WrapErrServiceInternalMsg("the grantor in the grant entity is empty")
+		return merr.WrapErrParameterInvalidMsg("the grantor in the grant entity is empty")
 	}
 	if entity.Grantor.Privilege == nil || funcutil.IsEmptyString(entity.Grantor.Privilege.Name) {
-		return merr.WrapErrServiceInternalMsg("the privilege name in the grant entity is empty")
+		return merr.WrapErrParameterInvalidMsg("the privilege name in the grant entity is empty")
 	}
 	if entity.Grantor.User == nil || funcutil.IsEmptyString(entity.Grantor.User.Name) {
-		return merr.WrapErrServiceInternalMsg("the grantor name in the grant entity is empty")
+		return merr.WrapErrParameterInvalidMsg("the grantor name in the grant entity is empty")
 	}
 	if !funcutil.IsRevoke(operateType) && !funcutil.IsGrant(operateType) {
-		return merr.WrapErrServiceInternalMsg("the operate type in the grant entity is invalid")
+		return merr.WrapErrParameterInvalidMsg("the operate type in the grant entity is invalid")
 	}
 	if entity.DbName == "" {
 		entity.DbName = util.DefaultDBName
@@ -2010,11 +2010,11 @@ func (mt *MetaTable) OperatePrivilege(ctx context.Context, tenant string, entity
 func (mt *MetaTable) SelectGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
 	var entities []*milvuspb.GrantEntity
 	if entity == nil {
-		return entities, merr.WrapErrServiceInternalMsg("the grant entity is nil")
+		return entities, merr.WrapErrParameterInvalidMsg("the grant entity is nil")
 	}
 
 	if entity.Role == nil || funcutil.IsEmptyString(entity.Role.Name) {
-		return entities, merr.WrapErrServiceInternalMsg("the role entity in the grant entity is invalid")
+		return entities, merr.WrapErrParameterInvalidMsg("the role entity in the grant entity is invalid")
 	}
 	if entity.DbName == "" {
 		entity.DbName = util.DefaultDBName
@@ -2028,7 +2028,7 @@ func (mt *MetaTable) SelectGrant(ctx context.Context, tenant string, entity *mil
 
 func (mt *MetaTable) DropGrant(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error {
 	if role == nil || funcutil.IsEmptyString(role.Name) {
-		return merr.WrapErrServiceInternalMsg("the role entity is invalid when dropping the grant")
+		return merr.WrapErrParameterInvalidMsg("the role entity is invalid when dropping the grant")
 	}
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
@@ -2301,7 +2301,7 @@ func (mt *MetaTable) OperatePrivilegeGroup(ctx context.Context, groupName string
 		}
 	default:
 		log.Ctx(ctx).Warn("unsupported operate type", zap.Any("operate_type", operateType))
-		return merr.WrapErrServiceInternalMsg("unsupported operate type: %v", operateType)
+		return merr.WrapErrParameterInvalidMsg("unsupported operate type: %v", operateType)
 	}
 
 	mergedPrivs := lo.Map(lo.Keys(privSet), func(priv string, _ int) *milvuspb.PrivilegeEntity {
@@ -2316,7 +2316,7 @@ func (mt *MetaTable) OperatePrivilegeGroup(ctx context.Context, groupName string
 
 func (mt *MetaTable) GetPrivilegeGroupRoles(ctx context.Context, groupName string) ([]*milvuspb.RoleEntity, error) {
 	if funcutil.IsEmptyString(groupName) {
-		return nil, merr.WrapErrServiceInternalMsg("the privilege group name is empty")
+		return nil, merr.WrapErrParameterInvalidMsg("the privilege group name is empty")
 	}
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()
