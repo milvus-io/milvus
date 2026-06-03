@@ -329,7 +329,7 @@ func (indexCodec *IndexCodec) Deserialize(blobs []*Blob) ([]*Blob, map[string]st
 		IndexID   UniqueID
 	}{}
 	if err := json.Unmarshal(file.Value, &info); err != nil {
-		return nil, nil, "", InvalidUniqueID, merr.WrapErrServiceInternalMsg("json unmarshal error: %s", err.Error())
+		return nil, nil, "", InvalidUniqueID, merr.WrapErrSerializationFailed(err, "json unmarshal error")
 	}
 
 	return blobs, info.Params, info.IndexName, info.IndexID, nil

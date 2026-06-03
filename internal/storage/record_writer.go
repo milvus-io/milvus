@@ -152,8 +152,7 @@ func NewPackedRecordWriter(
 	}
 	writer, err := packed.NewPackedWriter(paths, arrowSchema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(
-			fmt.Sprintf("can not new packed record writer %s", err.Error()))
+		return nil, merr.WrapErrStorage(err, "can not new packed record writer")
 	}
 	columnGroupUncompressed := make(map[typeutil.UniqueID]uint64)
 	columnGroupCompressed := make(map[typeutil.UniqueID]uint64)
@@ -344,8 +343,7 @@ func newPackedRecordBatchWriter(
 	}
 	writer, err := packed.NewFFIPackedWriter(basePath, arrowSchema, columnGroups, storageConfig, storagePluginContext, extraProperties)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(
-			fmt.Sprintf("can not new packed record writer %s", err.Error()))
+		return nil, merr.WrapErrStorage(err, "can not new packed record writer")
 	}
 	columnGroupUncompressed := make(map[typeutil.UniqueID]uint64)
 	columnGroupCompressed := make(map[typeutil.UniqueID]uint64)
@@ -379,8 +377,7 @@ func NewPackedSerializeWriter(bucketName string, paths []string, schema *schemap
 ) (*SerializeWriterImpl[*Value], error) {
 	packedRecordWriter, err := NewPackedRecordWriter(bucketName, paths, schema, bufferSize, multiPartUploadSize, columnGroups, nil, nil)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(
-			fmt.Sprintf("can not new packed record writer %s", err.Error()))
+		return nil, merr.Wrap(err, "can not new packed record writer")
 	}
 	return NewSerializeRecordWriter(packedRecordWriter, func(v []*Value) (Record, error) {
 		return ValueSerializer(v, schema)
@@ -546,8 +543,7 @@ func NewPackedTextBatchWriter(
 
 	writer, err := packed.NewFFISegmentWriter(arrowSchema, config, storageConfig)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(
-			fmt.Sprintf("can not new segment writer %s", err.Error()))
+		return nil, merr.WrapErrStorage(err, "can not new segment writer")
 	}
 
 	columnGroupUncompressed := make(map[typeutil.UniqueID]uint64)

@@ -181,7 +181,7 @@ func (dl *DeleteLog) Parse(val string) error {
 			}
 			dl.Pk = &VarCharPrimaryKey{Value: pkRes.String()}
 		default:
-			return merr.WrapErrServiceInternalMsg("invalid delete log: unsupported pkType %d in %s", dl.PkType, val)
+			return merr.WrapErrDataIntegrityMsg("invalid delete log: unsupported pkType %d in %s", dl.PkType, val)
 		}
 		return nil
 	}
@@ -190,7 +190,7 @@ func (dl *DeleteLog) Parse(val string) error {
 	// compatible with fmt.Sprintf("%d,%d", pk, ts)
 	splits := strings.Split(val, ",")
 	if len(splits) != 2 {
-		return merr.WrapErrServiceInternalMsg("the format of delta log is incorrect, %v can not be split", val)
+		return merr.WrapErrDataIntegrityMsg("the format of delta log is incorrect, %v can not be split", val)
 	}
 	pk, err := strconv.ParseInt(splits[0], 10, 64)
 	if err != nil {
@@ -224,7 +224,7 @@ func (dl *DeleteLog) UnmarshalJSON(data []byte) error {
 	case schemapb.DataType_VarChar:
 		dl.Pk = &VarCharPrimaryKey{}
 	default:
-		return merr.WrapErrServiceInternalMsg("unsupported primary key type: %v", schemapb.DataType(dl.PkType))
+		return merr.WrapErrDataIntegrityMsg("unsupported primary key type: %v", schemapb.DataType(dl.PkType))
 	}
 
 	if err = json.Unmarshal(*messageMap["pk"], dl.Pk); err != nil {

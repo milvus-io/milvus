@@ -42,7 +42,7 @@ type BinlogReader struct {
 // NextEventReader iters all events reader to read the binlog file.
 func (reader *BinlogReader) NextEventReader() (*EventReader, error) {
 	if reader.isClose {
-		return nil, merr.WrapErrServiceInternalMsg("bin log reader is closed")
+		return nil, merr.WrapErrStorageMsg("bin log reader is closed")
 	}
 	if reader.buffer.Len() <= 0 {
 		return nil, nil

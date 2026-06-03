@@ -1370,7 +1370,7 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.Coll
 					rowData := fieldData.GetRow(j)
 					err := typeEntry.serialize(fBuilder, rowData, elementType)
 					if err != nil {
-						return merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s: %v", field.DataType.String(), err))
+						return merr.Wrapf(err, "serialize error on type %s", field.DataType.String())
 					}
 				}
 			}
@@ -1378,7 +1378,7 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.Coll
 			for j := 0; j < fieldData.RowNum(); j++ {
 				err := typeEntry.serialize(fBuilder, fieldData.GetRow(j), elementType)
 				if err != nil {
-					return merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s: %v", field.DataType.String(), err))
+					return merr.Wrapf(err, "serialize error on type %s", field.DataType.String())
 				}
 			}
 		}
