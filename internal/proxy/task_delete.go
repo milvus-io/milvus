@@ -313,11 +313,11 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	if err := validateTextStorageV3Enabled(dr.schema.CollectionSchema); err != nil {
 		return ErrWithLog(log, "TEXT field requires StorageV3", err)
 	}
-	if namespacePartitionModeEnabled(dr.schema.CollectionSchema) {
-		partitionName, _, err := resolveNamespacePartitionName(dr.schema.CollectionSchema, dr.req.Namespace, dr.req.GetPartitionName())
-		if err != nil {
-			return err
-		}
+	partitionName, namespaceAsPartition, err := resolveNamespacePartitionName(dr.schema.CollectionSchema, dr.req.Namespace, dr.req.GetPartitionName())
+	if err != nil {
+		return err
+	}
+	if namespaceAsPartition {
 		dr.req.PartitionName = partitionName
 	}
 
