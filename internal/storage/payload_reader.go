@@ -38,7 +38,7 @@ var _ PayloadReaderInterface = (*PayloadReader)(nil)
 
 func NewPayloadReader(colType schemapb.DataType, buf []byte, nullable bool) (*PayloadReader, error) {
 	if len(buf) == 0 {
-		return nil, merr.WrapErrServiceInternalMsg("create Payload reader failed, buffer is empty")
+		return nil, merr.WrapErrDataIntegrityMsg("create Payload reader failed, buffer is empty")
 	}
 	parquetReader, err := file.NewParquetReader(bytes.NewReader(buf))
 	if err != nil {
@@ -64,23 +64,23 @@ func NewPayloadReader(colType schemapb.DataType, buf []byte, nullable bool) (*Pa
 		}
 
 		if arrowSchema.NumFields() != 1 {
-			return nil, merr.WrapErrServiceInternalMsg("VectorArray should have exactly 1 field, got %d", arrowSchema.NumFields())
+			return nil, merr.WrapErrDataIntegrityMsg("VectorArray should have exactly 1 field, got %d", arrowSchema.NumFields())
 		}
 
 		field := arrowSchema.Field(0)
 		if !field.HasMetadata() {
-			return nil, merr.WrapErrServiceInternalMsg("VectorArray field is missing metadata")
+			return nil, merr.WrapErrDataIntegrityMsg("VectorArray field is missing metadata")
 		}
 
 		metadata := field.Metadata
 
 		elementTypeStr, ok := metadata.GetValue("elementType")
 		if !ok {
-			return nil, merr.WrapErrServiceInternalMsg("VectorArray metadata missing required 'elementType' field")
+			return nil, merr.WrapErrDataIntegrityMsg("VectorArray metadata missing required 'elementType' field")
 		}
 		elementTypeInt, err := strconv.ParseInt(elementTypeStr, 10, 32)
 		if err != nil {
-			return nil, merr.WrapErrServiceInternalMsg("invalid elementType in VectorArray metadata: %s", elementTypeStr)
+			return nil, merr.WrapErrDataIntegrityMsg("invalid elementType in VectorArray metadata: %s", elementTypeStr)
 		}
 
 		elementType := schemapb.DataType(elementTypeInt)
@@ -93,19 +93,19 @@ func NewPayloadReader(colType schemapb.DataType, buf []byte, nullable bool) (*Pa
 			schemapb.DataType_SparseFloatVector:
 			reader.elementType = elementType
 		default:
-			return nil, merr.WrapErrServiceInternalMsg("invalid vector type for VectorArray: %s", elementType.String())
+			return nil, merr.WrapErrDataIntegrityMsg("invalid vector type for VectorArray: %s", elementType.String())
 		}
 
 		dimStr, ok := metadata.GetValue("dim")
 		if !ok {
-			return nil, merr.WrapErrServiceInternalMsg("VectorArray metadata missing required 'dim' field")
+			return nil, merr.WrapErrDataIntegrityMsg("VectorArray metadata missing required 'dim' field")
 		}
 		dimVal, err := strconv.ParseInt(dimStr, 10, 64)
 		if err != nil {
-			return nil, merr.WrapErrServiceInternalMsg("invalid dim in VectorArray metadata: %s", dimStr)
+			return nil, merr.WrapErrDataIntegrityMsg("invalid dim in VectorArray metadata: %s", dimStr)
 		}
 		if dimVal <= 0 {
-			return nil, merr.WrapErrServiceInternalMsg("VectorArray dim must be positive, got %d", dimVal)
+			return nil, merr.WrapErrDataIntegrityMsg("VectorArray dim must be positive, got %d", dimVal)
 		}
 		reader.dim = dimVal
 	}
@@ -609,7 +609,7 @@ func readVectorArrayFromListArray(r *PayloadReader) ([]*schemapb.VectorField, er
 	defer table.Release()
 
 	if table.NumCols() != 1 {
-		return nil, merr.WrapErrServiceInternalMsg("expected 1 column, got %d", table.NumCols())
+		return nil, merr.WrapErrDataIntegrityMsg("expected 1 column, got %d", table.NumCols())
 	}
 
 	column := table.Column(0)
@@ -624,7 +624,7 @@ func readVectorArrayFromListArray(r *PayloadReader) ([]*schemapb.VectorField, er
 	for _, chunk := range column.Data().Chunks() {
 		listArray, ok := chunk.(*array.List)
 		if !ok {
-			return nil, merr.WrapErrServiceInternalMsg("expected ListArray, got %T", chunk)
+			return nil, merr.WrapErrDataIntegrityMsg("expected ListArray, got %T", chunk)
 		}
 
 		for i := 0; i < listArray.Len(); i++ {
@@ -634,7 +634,7 @@ func readVectorArrayFromListArray(r *PayloadReader) ([]*schemapb.VectorField, er
 			}
 			vectorField, _ := value.(*schemapb.VectorField)
 			if vectorField == nil {
-				return nil, merr.WrapErrServiceInternalMsg("null value in VectorArray")
+				return nil, merr.WrapErrDataIntegrityMsg("null value in VectorArray")
 			}
 			result = append(result, vectorField)
 		}
@@ -670,7 +670,7 @@ func readByteAndConvert[T any](r *PayloadReader, convert func(parquet.ByteArray)
 	}
 
 	if valuesRead != r.numRows {
-		return nil, merr.WrapErrServiceInternalMsg("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
+		return nil, merr.WrapErrDataIntegrityMsg("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
 	}
 
 	ret := make([]T, r.numRows)
@@ -698,7 +698,7 @@ func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, []bool, int, 
 		}
 
 		if arrowSchema.NumFields() != 1 {
-			return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("expected 1 field, got %d", arrowSchema.NumFields())
+			return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expected 1 field, got %d", arrowSchema.NumFields())
 		}
 
 		field := arrowSchema.Field(0)
@@ -706,17 +706,17 @@ func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, []bool, int, 
 
 		if field.Type.ID() == arrow.BINARY {
 			if !field.HasMetadata() {
-				return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("nullable binary vector field is missing metadata")
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("nullable binary vector field is missing metadata")
 			}
 			metadata := field.Metadata
 			dimStr, ok := metadata.GetValue("dim")
 			if !ok {
-				return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("nullable binary vector metadata missing required 'dim' field")
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("nullable binary vector metadata missing required 'dim' field")
 			}
 			var err error
 			dim, err = strconv.Atoi(dimStr)
 			if err != nil {
-				return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("invalid dim value in metadata: %v", err)
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("invalid dim value in metadata: %v", err)
 			}
 			dim = dim / 8
 		} else {
@@ -734,7 +734,7 @@ func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, []bool, int, 
 		defer table.Release()
 
 		if table.NumCols() != 1 {
-			return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("expected 1 column, got %d", table.NumCols())
+			return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expected 1 column, got %d", table.NumCols())
 		}
 
 		column := table.Column(0)
@@ -759,7 +759,7 @@ func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, []bool, int, 
 	}
 
 	if valuesRead != r.numRows {
-		return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
+		return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
 	}
 
 	ret := make([]byte, int64(dim)*r.numRows)
@@ -786,7 +786,7 @@ func (r *PayloadReader) GetFloat16VectorFromPayload() ([]byte, int, []bool, int,
 		}
 
 		if arrowSchema.NumFields() != 1 {
-			return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("expected 1 field, got %d", arrowSchema.NumFields())
+			return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expected 1 field, got %d", arrowSchema.NumFields())
 		}
 
 		field := arrowSchema.Field(0)
@@ -794,17 +794,17 @@ func (r *PayloadReader) GetFloat16VectorFromPayload() ([]byte, int, []bool, int,
 
 		if field.Type.ID() == arrow.BINARY {
 			if !field.HasMetadata() {
-				return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("nullable float16 vector field is missing metadata")
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("nullable float16 vector field is missing metadata")
 			}
 			metadata := field.Metadata
 			dimStr, ok := metadata.GetValue("dim")
 			if !ok {
-				return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("nullable float16 vector metadata missing required 'dim' field")
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("nullable float16 vector metadata missing required 'dim' field")
 			}
 			var err error
 			dim, err = strconv.Atoi(dimStr)
 			if err != nil {
-				return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("invalid dim value in metadata: %v", err)
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("invalid dim value in metadata: %v", err)
 			}
 		} else {
 			col, err := r.reader.RowGroup(0).Column(0)
@@ -821,7 +821,7 @@ func (r *PayloadReader) GetFloat16VectorFromPayload() ([]byte, int, []bool, int,
 		defer table.Release()
 
 		if table.NumCols() != 1 {
-			return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("expected 1 column, got %d", table.NumCols())
+			return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expected 1 column, got %d", table.NumCols())
 		}
 
 		column := table.Column(0)
@@ -847,7 +847,7 @@ func (r *PayloadReader) GetFloat16VectorFromPayload() ([]byte, int, []bool, int,
 	}
 
 	if valuesRead != r.numRows {
-		return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
+		return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
 	}
 
 	ret := make([]byte, int64(dim*2)*r.numRows)
@@ -874,7 +874,7 @@ func (r *PayloadReader) GetBFloat16VectorFromPayload() ([]byte, int, []bool, int
 		}
 
 		if arrowSchema.NumFields() != 1 {
-			return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("expected 1 field, got %d", arrowSchema.NumFields())
+			return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expected 1 field, got %d", arrowSchema.NumFields())
 		}
 
 		field := arrowSchema.Field(0)
@@ -882,17 +882,17 @@ func (r *PayloadReader) GetBFloat16VectorFromPayload() ([]byte, int, []bool, int
 
 		if field.Type.ID() == arrow.BINARY {
 			if !field.HasMetadata() {
-				return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("nullable bfloat16 vector field is missing metadata")
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("nullable bfloat16 vector field is missing metadata")
 			}
 			metadata := field.Metadata
 			dimStr, ok := metadata.GetValue("dim")
 			if !ok {
-				return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("nullable bfloat16 vector metadata missing required 'dim' field")
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("nullable bfloat16 vector metadata missing required 'dim' field")
 			}
 			var err error
 			dim, err = strconv.Atoi(dimStr)
 			if err != nil {
-				return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("invalid dim value in metadata: %v", err)
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("invalid dim value in metadata: %v", err)
 			}
 		} else {
 			col, err := r.reader.RowGroup(0).Column(0)
@@ -909,7 +909,7 @@ func (r *PayloadReader) GetBFloat16VectorFromPayload() ([]byte, int, []bool, int
 		defer table.Release()
 
 		if table.NumCols() != 1 {
-			return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("expected 1 column, got %d", table.NumCols())
+			return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expected 1 column, got %d", table.NumCols())
 		}
 
 		column := table.Column(0)
@@ -935,7 +935,7 @@ func (r *PayloadReader) GetBFloat16VectorFromPayload() ([]byte, int, []bool, int
 	}
 
 	if valuesRead != r.numRows {
-		return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
+		return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
 	}
 
 	ret := make([]byte, int64(dim*2)*r.numRows)
@@ -962,7 +962,7 @@ func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, []bool, int
 		}
 
 		if arrowSchema.NumFields() != 1 {
-			return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("expected 1 field, got %d", arrowSchema.NumFields())
+			return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expected 1 field, got %d", arrowSchema.NumFields())
 		}
 
 		field := arrowSchema.Field(0)
@@ -970,17 +970,17 @@ func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, []bool, int
 
 		if field.Type.ID() == arrow.BINARY {
 			if !field.HasMetadata() {
-				return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("nullable float vector field is missing metadata")
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("nullable float vector field is missing metadata")
 			}
 			metadata := field.Metadata
 			dimStr, ok := metadata.GetValue("dim")
 			if !ok {
-				return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("nullable float vector metadata missing required 'dim' field")
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("nullable float vector metadata missing required 'dim' field")
 			}
 			var err error
 			dim, err = strconv.Atoi(dimStr)
 			if err != nil {
-				return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("invalid dim value in metadata: %v", err)
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("invalid dim value in metadata: %v", err)
 			}
 		} else {
 			col, err := r.reader.RowGroup(0).Column(0)
@@ -997,7 +997,7 @@ func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, []bool, int
 		defer table.Release()
 
 		if table.NumCols() != 1 {
-			return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("expected 1 column, got %d", table.NumCols())
+			return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expected 1 column, got %d", table.NumCols())
 		}
 
 		column := table.Column(0)
@@ -1023,7 +1023,7 @@ func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, []bool, int
 	}
 
 	if valuesRead != r.numRows {
-		return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
+		return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
 	}
 
 	ret := make([]float32, int64(dim)*r.numRows)
@@ -1055,7 +1055,7 @@ func (r *PayloadReader) GetSparseFloatVectorFromPayload() (*SparseFloatVectorFie
 		defer table.Release()
 
 		if table.NumCols() != 1 {
-			return nil, -1, nil, merr.WrapErrServiceInternalMsg("expected 1 column, got %d", table.NumCols())
+			return nil, -1, nil, merr.WrapErrDataIntegrityMsg("expected 1 column, got %d", table.NumCols())
 		}
 
 		column := table.Column(0)
@@ -1063,7 +1063,7 @@ func (r *PayloadReader) GetSparseFloatVectorFromPayload() (*SparseFloatVectorFie
 		for _, chunk := range column.Data().Chunks() {
 			binaryArray, ok := chunk.(*array.Binary)
 			if !ok {
-				return nil, -1, nil, merr.WrapErrServiceInternalMsg("expected Binary array, got %T", chunk)
+				return nil, -1, nil, merr.WrapErrDataIntegrityMsg("expected Binary array, got %T", chunk)
 			}
 
 			for i := 0; i < binaryArray.Len(); i++ {
@@ -1071,7 +1071,7 @@ func (r *PayloadReader) GetSparseFloatVectorFromPayload() (*SparseFloatVectorFie
 				if validData[offset+i] {
 					value := binaryArray.Value(i)
 					if len(value)%8 != 0 {
-						return nil, -1, nil, merr.WrapErrServiceInternalMsg("invalid bytesData length")
+						return nil, -1, nil, merr.WrapErrDataIntegrityMsg("invalid bytesData length")
 					}
 					fieldData.Contents = append(fieldData.Contents, append([]byte{}, value...))
 					rowDim := typeutil.SparseFloatRowDim(value)
@@ -1092,14 +1092,14 @@ func (r *PayloadReader) GetSparseFloatVectorFromPayload() (*SparseFloatVectorFie
 		return nil, -1, nil, err
 	}
 	if valuesRead != r.numRows {
-		return nil, -1, nil, merr.WrapErrServiceInternalMsg("expect %d binary, but got = %d", r.numRows, valuesRead)
+		return nil, -1, nil, merr.WrapErrDataIntegrityMsg("expect %d binary, but got = %d", r.numRows, valuesRead)
 	}
 
 	fieldData := &SparseFloatVectorFieldData{}
 
 	for _, value := range values {
 		if len(value)%8 != 0 {
-			return nil, -1, nil, merr.WrapErrServiceInternalMsg("invalid bytesData length")
+			return nil, -1, nil, merr.WrapErrDataIntegrityMsg("invalid bytesData length")
 		}
 
 		fieldData.Contents = append(fieldData.Contents, value)
@@ -1129,7 +1129,7 @@ func (r *PayloadReader) GetInt8VectorFromPayload() ([]int8, int, []bool, int, er
 		}
 
 		if arrowSchema.NumFields() != 1 {
-			return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("expected 1 field, got %d", arrowSchema.NumFields())
+			return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expected 1 field, got %d", arrowSchema.NumFields())
 		}
 
 		field := arrowSchema.Field(0)
@@ -1137,17 +1137,17 @@ func (r *PayloadReader) GetInt8VectorFromPayload() ([]int8, int, []bool, int, er
 
 		if field.Type.ID() == arrow.BINARY {
 			if !field.HasMetadata() {
-				return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("nullable int8 vector field is missing metadata")
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("nullable int8 vector field is missing metadata")
 			}
 			metadata := field.Metadata
 			dimStr, ok := metadata.GetValue("dim")
 			if !ok {
-				return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("nullable int8 vector metadata missing required 'dim' field")
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("nullable int8 vector metadata missing required 'dim' field")
 			}
 			var err error
 			dim, err = strconv.Atoi(dimStr)
 			if err != nil {
-				return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("invalid dim value in metadata: %v", err)
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("invalid dim value in metadata: %v", err)
 			}
 		} else {
 			col, err := r.reader.RowGroup(0).Column(0)
@@ -1164,7 +1164,7 @@ func (r *PayloadReader) GetInt8VectorFromPayload() ([]int8, int, []bool, int, er
 		defer table.Release()
 
 		if table.NumCols() != 1 {
-			return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("expected 1 column, got %d", table.NumCols())
+			return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expected 1 column, got %d", table.NumCols())
 		}
 
 		column := table.Column(0)
@@ -1190,7 +1190,7 @@ func (r *PayloadReader) GetInt8VectorFromPayload() ([]int8, int, []bool, int, er
 	}
 
 	if valuesRead != r.numRows {
-		return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
+		return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
 	}
 
 	ret := make([]int8, int64(dim)*r.numRows)
@@ -1219,7 +1219,7 @@ func ReadDataFromAllRowGroups[T any, E interface {
 
 	for i := 0; i < reader.NumRowGroups(); i++ {
 		if columnIdx >= reader.RowGroup(i).NumColumns() {
-			return -1, merr.WrapErrServiceInternalMsg("try to fetch %d-th column of reader but row group has only %d column(s)", columnIdx, reader.RowGroup(i).NumColumns())
+			return -1, merr.WrapErrDataIntegrityMsg("try to fetch %d-th column of reader but row group has only %d column(s)", columnIdx, reader.RowGroup(i).NumColumns())
 		}
 		column, err := reader.RowGroup(i).Column(columnIdx)
 		if err != nil {
@@ -1228,7 +1228,7 @@ func ReadDataFromAllRowGroups[T any, E interface {
 
 		cReader, ok := column.(E)
 		if !ok {
-			return -1, merr.WrapErrServiceInternalMsg("expect type %T, but got %T", *new(E), column)
+			return -1, merr.WrapErrDataIntegrityMsg("expect type %T, but got %T", *new(E), column)
 		}
 
 		_, valuesRead, err := cReader.ReadBatch(numRows, values[offset:], nil, nil)
@@ -1271,7 +1271,7 @@ func (s *DataSet[T, E]) nextGroup() error {
 
 	cReader, ok := column.(E)
 	if !ok {
-		return merr.WrapErrServiceInternalMsg("expect type %T, but got %T", *new(E), column)
+		return merr.WrapErrDataIntegrityMsg("expect type %T, but got %T", *new(E), column)
 	}
 	s.groupID++
 	s.cReader = cReader
