@@ -269,7 +269,7 @@ func (l *RotateWriter) openFileExistingOrNew() error {
 		return l.openNewFile()
 	}
 	if err != nil {
-		return merr.WrapErrParameterInvalidMsg("file to get log file info: %s", err)
+		return merr.WrapErrIoFailed(filename, err)
 	}
 
 	file, err := os.OpenFile(filename, os.O_APPEND|os.O_WRONLY, 0o644)
@@ -285,7 +285,7 @@ func (l *RotateWriter) openFileExistingOrNew() error {
 func (l *RotateWriter) openNewFile() error {
 	err := os.MkdirAll(l.dir(), 0o744)
 	if err != nil {
-		return merr.WrapErrParameterInvalidMsg("make directories for new log file filed: %s", err)
+		return merr.WrapErrIoFailed(l.dir(), err)
 	}
 
 	name := l.filename()
@@ -295,7 +295,7 @@ func (l *RotateWriter) openNewFile() error {
 		mode = info.Mode()
 		newName := l.newBackupName()
 		if err := os.Rename(name, newName); err != nil {
-			return merr.WrapErrParameterInvalidMsg("can't rename log file: %s", err)
+			return merr.WrapErrIoFailed(name, err)
 		}
 		log.Info("seal old log to: " + newName)
 		if l.handler != nil {
@@ -310,7 +310,7 @@ func (l *RotateWriter) openNewFile() error {
 
 	f, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
-		return merr.WrapErrParameterInvalidMsg("can't open new logfile: %s", err)
+		return merr.WrapErrIoFailed(name, err)
 	}
 	l.file = f
 	l.size = 0
@@ -428,7 +428,7 @@ func (l *RotateWriter) newBackupName() string {
 func (l *RotateWriter) oldLogFiles() ([]logInfo, error) {
 	files, err := os.ReadDir(l.dir())
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("can't read log file directory: %s", err)
+		return nil, merr.WrapErrIoFailed(l.dir(), err)
 	}
 
 	logFiles := []logInfo{}

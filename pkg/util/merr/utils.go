@@ -1221,7 +1221,7 @@ func WrapErrParameterInvalid[T any](expected, actual T, msg ...string) error {
 	return err
 }
 
-// WrapErrParameterInvalidErr wraps an existing error 'err' with ErrParameterInvalid (Code 1005).
+// WrapErrParameterInvalidErr wraps an existing error 'err' with ErrParameterInvalid (Code 1100).
 // This is used when an underlying error (e.g., from parsing, validation utility, or dependency)
 // causes a parameter check to fail, and you need to provide extra context
 // in 'format' and 'args'.

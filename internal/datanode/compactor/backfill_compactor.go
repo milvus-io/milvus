@@ -400,7 +400,7 @@ func (t *backfillCompactionTask) setupWriter(outputField *schemapb.FieldSchema, 
 		// so the transaction reads the existing manifest and merges new columns in.
 		basePath, existingVersion, err := packed.UnmarshalManifestPath(existingManifest)
 		if err != nil {
-			return nil, merr.WrapErrServiceInternal("failed to parse existing manifest for V3 backfill", err.Error())
+			return nil, merr.Wrap(err, "failed to parse existing manifest for V3 backfill")
 		}
 		ffiWriter, err := packed.NewFFIPackedWriter(basePath, arrowSchema, newColumnGroups, t.compactionParams.StorageConfig, pluginContext)
 		if err != nil {
@@ -485,7 +485,7 @@ func (t *backfillCompactionTask) updateStats(stats *storage.BM25Stats, collectio
 		statsRelPath := fmt.Sprintf("_stats/bm25.%d/%d", outputFieldID, statsID)
 		absStatsPath := path.Join(basePath, statsRelPath)
 		if err := cli.Write(t.ctx, absStatsPath, bytes); err != nil {
-			return nil, "", 0, merr.WrapErrServiceInternal("failed to write V3 BM25 stats", err.Error())
+			return nil, "", 0, merr.Wrap(err, "failed to write V3 BM25 stats")
 		}
 		writerResult.v3Stats = append(writerResult.v3Stats, packed.StatEntry{
 			Key:   fmt.Sprintf("bm25.%d", outputFieldID),
@@ -802,7 +802,7 @@ func (t *backfillCompactionTask) runBm25Function(ctx context.Context, functionRu
 		newManifest, err := packed.AddStatsToManifest(
 			manifestPath, t.compactionParams.StorageConfig, writerResult.v3Stats)
 		if err != nil {
-			return nil, merr.WrapErrServiceInternal("failed to add BM25 stats to V3 manifest", err.Error())
+			return nil, merr.Wrap(err, "failed to add BM25 stats to V3 manifest")
 		}
 		log.Info("backfill V3 bm25 stats added to manifest",
 			zap.String("oldManifest", manifestPath),

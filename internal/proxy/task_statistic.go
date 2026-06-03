@@ -318,11 +318,11 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName stri
 	// TODO: Consider to check if partition loaded from cache to save rpc.
 	info, err := globalMetaCache.GetCollectionInfo(ctx, dbName, collectionName, collectionID)
 	if err != nil {
-		return nil, nil, merr.WrapErrParameterInvalidMsg("GetCollectionInfo failed, dbName = %s, collectionName = %s,collectionID = %d, err = %s", dbName, collectionName, collectionID, err)
+		return nil, nil, merr.Wrapf(err, "GetCollectionInfo failed, dbName = %s, collectionName = %s, collectionID = %d", dbName, collectionName, collectionID)
 	}
 	partitionInfos, err := globalMetaCache.GetPartitions(ctx, dbName, collectionName)
 	if err != nil {
-		return nil, nil, merr.WrapErrParameterInvalidMsg("GetPartitions failed, dbName = %s, collectionName = %s,collectionID = %d, err = %s", dbName, collectionName, collectionID, err)
+		return nil, nil, merr.Wrapf(err, "GetPartitions failed, dbName = %s, collectionName = %s, collectionID = %d", dbName, collectionName, collectionID)
 	}
 
 	// If request to search partitions
@@ -336,10 +336,10 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName stri
 			PartitionIDs: searchPartitionIDs,
 		})
 		if err != nil {
-			return nil, nil, merr.WrapErrParameterInvalidMsg("showPartitions failed, collection = %d, partitionIDs = %v, err = %s", collectionID, searchPartitionIDs, err)
+			return nil, nil, merr.Wrapf(err, "showPartitions failed, collection = %d, partitionIDs = %v", collectionID, searchPartitionIDs)
 		}
 		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			return nil, nil, merr.WrapErrParameterInvalidMsg("showPartitions failed, collection = %d, partitionIDs = %v, reason = %s", collectionID, searchPartitionIDs, resp.GetStatus().GetReason())
+			return nil, nil, merr.Wrapf(merr.Error(resp.GetStatus()), "showPartitions failed, collection = %d, partitionIDs = %v", collectionID, searchPartitionIDs)
 		}
 
 		for i, percentage := range resp.GetInMemoryPercentages() {
