@@ -11,8 +11,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	// "github.com/twpayne/go-geom/encoding/wkb"
-	// "github.com/twpayne/go-geom/encoding/wkt"
 
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"

@@ -405,18 +405,18 @@ func TestStackAndSkipFields(t *testing.T) {
 
 // Test propagated string field produces flat output
 func TestPropagatedStringFlatOutput(t *testing.T) {
-	f := propagatedStringField("collection_name", "test_value")
+	f := propagatedStringField("collectionName", "test_value")
 	assert.Equal(t, zapcore.StringType, f.Type)
-	assert.Equal(t, "collection_name", f.Key)
+	assert.Equal(t, "collectionName", f.Key)
 	assert.Equal(t, "test_value", f.String)
 	assert.IsType(t, propagatedMarker{}, f.Interface)
 }
 
 // Test propagated int64 field produces flat output
 func TestPropagatedInt64FlatOutput(t *testing.T) {
-	f := propagatedInt64Field("collection_id", 12345)
+	f := propagatedInt64Field("collectionID", 12345)
 	assert.Equal(t, zapcore.Int64Type, f.Type)
-	assert.Equal(t, "collection_id", f.Key)
+	assert.Equal(t, "collectionID", f.Key)
 	assert.Equal(t, int64(12345), f.Integer)
 	assert.IsType(t, propagatedMarker{}, f.Interface)
 }
@@ -545,55 +545,52 @@ func TestFieldHelperFunctions(t *testing.T) {
 }
 
 func TestWellKnownKeysFormat(t *testing.T) {
-	// All well-known keys should be lowercase with underscores for readability
-	// and gRPC metadata compatibility
-	assert.Equal(t, "node_id", keyNodeID)
+	// All well-known keys should use camelCase in logs.
+	assert.Equal(t, "nodeID", keyNodeID)
 	assert.Equal(t, "module", keyModule)
-	assert.Equal(t, "trace_id", keyTraceID)
-	assert.Equal(t, "span_id", keySpanID)
-	assert.Equal(t, "db_id", keyDbID)
-	assert.Equal(t, "db_name", keyDbName)
-	assert.Equal(t, "collection_id", keyCollectionID)
-	assert.Equal(t, "collection_name", keyCollectionName)
-	assert.Equal(t, "partition_id", keyPartitionID)
-	assert.Equal(t, "partition_name", keyPartitionName)
-	assert.Equal(t, "segment_id", keySegmentID)
-	assert.Equal(t, "index_id", keyIndexID)
-	assert.Equal(t, "field_id", keyFieldID)
-	assert.Equal(t, "task_id", keyTaskID)
-	assert.Equal(t, "broadcast_id", keyBroadcastID)
-	assert.Equal(t, "job_id", keyJobID)
-	assert.Equal(t, "build_id", keyBuildID)
+	assert.Equal(t, "traceID", keyTraceID)
+	assert.Equal(t, "spanID", keySpanID)
+	assert.Equal(t, "dbID", keyDbID)
+	assert.Equal(t, "dbName", keyDbName)
+	assert.Equal(t, "collectionID", keyCollectionID)
+	assert.Equal(t, "collectionName", keyCollectionName)
+	assert.Equal(t, "partitionID", keyPartitionID)
+	assert.Equal(t, "partitionName", keyPartitionName)
+	assert.Equal(t, "segmentID", keySegmentID)
+	assert.Equal(t, "indexID", keyIndexID)
+	assert.Equal(t, "fieldID", keyFieldID)
+	assert.Equal(t, "taskID", keyTaskID)
+	assert.Equal(t, "broadcastID", keyBroadcastID)
+	assert.Equal(t, "jobID", keyJobID)
+	assert.Equal(t, "buildID", keyBuildID)
 	assert.Equal(t, "vchannel", keyVChannel)
 	assert.Equal(t, "pchannel", keyPChannel)
-	assert.Equal(t, "message_id", keyMessageID)
+	assert.Equal(t, "messageID", keyMessageID)
 	assert.Equal(t, "message", keyMessage)
 }
 
-func TestPropagatedStringConvertsKeyToLowercase(t *testing.T) {
-	// Keys with mixed case should be converted to lowercase
+func TestPropagatedStringPreservesLogKey(t *testing.T) {
 	f := propagatedStringField("CollectionName", "my_collection")
-	assert.Equal(t, "collectionname", f.Key, "key should be lowercase")
+	assert.Equal(t, "CollectionName", f.Key)
 	assert.Equal(t, "my_collection", getPropagatedValue(&f))
 }
 
-func TestPropagatedInt64ConvertsKeyToLowercase(t *testing.T) {
-	// Keys with mixed case should be converted to lowercase
+func TestPropagatedInt64PreservesLogKey(t *testing.T) {
 	f := propagatedInt64Field("CollectionId", 12345)
-	assert.Equal(t, "collectionid", f.Key, "key should be lowercase")
+	assert.Equal(t, "CollectionId", f.Key)
 	assert.Equal(t, "12345", getPropagatedValue(&f))
 }
 
-func TestPropagatedStringAlreadyLowercaseKey(t *testing.T) {
-	// Already lowercase keys should remain unchanged
-	f := propagatedStringField("collectionname", "my_collection")
-	assert.Equal(t, "collectionname", f.Key)
+func TestRestoreWellKnownLogKey(t *testing.T) {
+	assert.Equal(t, keyCollectionName, restoreWellKnownLogKey("collectionname"))
+	assert.Equal(t, keyCollectionID, restoreWellKnownLogKey("collectionid"))
+	assert.Equal(t, keyTraceID, restoreWellKnownLogKey("traceid"))
+	assert.Equal(t, "customfield", restoreWellKnownLogKey("customfield"))
 }
 
-func TestPropagatedInt64AlreadyLowercaseKey(t *testing.T) {
-	// Already lowercase keys should remain unchanged
-	f := propagatedInt64Field("collectionid", 12345)
-	assert.Equal(t, "collectionid", f.Key)
+func TestPropagatedStringAlreadyLowercaseKey(t *testing.T) {
+	f := propagatedStringField("collectionname", "my_collection")
+	assert.Equal(t, "collectionname", f.Key)
 }
 
 // Test OptPropagated on int64 FieldXXX functions
