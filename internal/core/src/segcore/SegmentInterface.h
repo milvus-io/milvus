@@ -22,6 +22,7 @@
 #include <memory>
 #include <optional>
 #include <shared_mutex>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -67,6 +68,10 @@
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
 
+namespace arrow {
+class RecordBatch;
+}  // namespace arrow
+
 namespace milvus::segcore {
 
 using namespace milvus::cachinglayer;
@@ -75,6 +80,85 @@ struct SegmentStats {
     // we stat the memory size used by the segment,
     // including the insert data and delete data.
     std::atomic<size_t> mem_size{};
+};
+
+using Projection = std::vector<FieldId>;
+using RowIdBatch = std::vector<int64_t>;
+
+struct PrunePredicate {
+};
+
+class CandidateSelection {
+ public:
+    enum class Kind {
+        All,
+        RowRange,
+    };
+
+    static CandidateSelection
+    All(int64_t row_count) {
+        return CandidateSelection(Kind::All, 0, row_count);
+    }
+
+    static CandidateSelection
+    RowRange(int64_t row_begin, int64_t row_count) {
+        return CandidateSelection(Kind::RowRange, row_begin, row_count);
+    }
+
+    Kind
+    kind() const {
+        return kind_;
+    }
+
+    int64_t
+    row_begin() const {
+        return row_begin_;
+    }
+
+    int64_t
+    row_count() const {
+        return row_count_;
+    }
+
+    int64_t
+    row_end() const {
+        return row_begin_ + row_count_;
+    }
+
+    bool
+    empty() const {
+        return row_count_ == 0;
+    }
+
+ private:
+    CandidateSelection(Kind kind, int64_t row_begin, int64_t row_count)
+        : kind_(kind), row_begin_(row_begin), row_count_(row_count) {
+        if (row_begin < 0 || row_count < 0) {
+            throw std::invalid_argument(
+                "CandidateSelection requires non-negative row range");
+        }
+    }
+
+    Kind kind_;
+    int64_t row_begin_;
+    int64_t row_count_;
+};
+
+struct ArrowBatchView {
+    int64_t row_begin;
+    int64_t row_count;
+    PinWrapper<std::shared_ptr<arrow::RecordBatch>> batch;
+};
+
+class ArrowBatchIterator {
+ public:
+    virtual ~ArrowBatchIterator() = default;
+
+    virtual bool
+    HasNext() const = 0;
+
+    virtual ArrowBatchView
+    Next() = 0;
 };
 
 // common interface of SegmentSealed and SegmentGrowing used by C API
@@ -524,6 +608,27 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual DataType
     GetFieldDataType(FieldId fieldId) const = 0;
+
+    virtual bool
+    CanUseArrowBatchIterator(const Projection&) const {
+        return false;
+    }
+
+    virtual CandidateSelection
+    Prune(const PrunePredicate&, CandidateSelection input) const {
+        return input;
+    }
+
+    virtual std::unique_ptr<ArrowBatchIterator>
+    Iterate(milvus::OpContext*, Projection, CandidateSelection) const {
+        ThrowInfo(NotImplemented,
+                  "segment does not support Arrow batch iteration");
+    }
+
+    virtual std::unique_ptr<ArrowBatchIterator>
+    Take(milvus::OpContext*, Projection, RowIdBatch) const {
+        ThrowInfo(NotImplemented, "segment does not support Arrow row take");
+    }
 
     PinWrapper<index::TextMatchIndex*>
     GetTextIndex(milvus::OpContext* op_ctx, FieldId field_id) const override;

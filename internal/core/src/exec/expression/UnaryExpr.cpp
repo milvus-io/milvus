@@ -16,6 +16,8 @@
 
 #include "UnaryExpr.h"
 
+#include <arrow/array.h>
+
 #include <simdjson.h>
 #include <algorithm>
 #include <cstdint>
@@ -59,6 +61,46 @@ namespace milvus {
 class SkipIndex;
 
 namespace exec {
+
+namespace {
+
+void
+ApplyArrowValidityBitmap(const arrow::Array& array,
+                         int size,
+                         size_t processed_cursor,
+                         const TargetBitmap& bitmap_input,
+                         TargetBitmapView res,
+                         TargetBitmapView valid_res) {
+    if (size <= 0 || array.null_count() == 0) {
+        return;
+    }
+
+    auto* validity_data = array.null_bitmap_data();
+    AssertInfo(validity_data != nullptr,
+               "Arrow array reports {} nulls but has no validity bitmap",
+               array.null_count());
+
+    const auto row_count = static_cast<size_t>(size);
+    TargetBitmapView validity(const_cast<uint8_t*>(validity_data),
+                              static_cast<size_t>(array.offset()),
+                              row_count);
+    if (bitmap_input.empty()) {
+        res.inplace_and(validity, row_count);
+        valid_res.inplace_and(validity, row_count);
+        return;
+    }
+
+    TargetBitmap invalid_active(row_count, false);
+    auto invalid_active_view = invalid_active.view();
+    invalid_active_view |= bitmap_input.view(processed_cursor, row_count);
+    invalid_active_view -= validity;
+
+    res.inplace_sub(invalid_active_view, row_count);
+    valid_res.inplace_sub(invalid_active_view, row_count);
+}
+
+}  // namespace
+
 template <typename T>
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
@@ -1606,6 +1648,73 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
     return nullptr;
 }
 
+template <typename T, typename FUNC, typename... ValTypes>
+std::optional<int64_t>
+PhyUnaryRangeFilterExpr::ProcessArrowDataChunks(
+    FUNC arrow_func,
+    std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+    TargetBitmapView res,
+    TargetBitmapView valid_res,
+    const ValTypes&... values) {
+    if constexpr (!std::is_same_v<T, int64_t>) {
+        return std::nullopt;
+    } else {
+        if (has_offset_input_ || expr_->column_.element_level_ ||
+            exec_path_ != ExprExecPath::RawData ||
+            (field_type_ != DataType::INT64 &&
+             field_type_ != DataType::TIMESTAMPTZ) ||
+            !segment_->CanUseArrowBatchIterator({field_id_})) {
+            return std::nullopt;
+        }
+
+        (void)skip_func;
+        int64_t processed_size = 0;
+        const auto row_begin =
+            segment_->num_rows_until_chunk(field_id_, current_data_chunk_) +
+            current_data_chunk_pos_;
+        const auto selection_count =
+            std::min<int64_t>(batch_size_, active_count_ - row_begin);
+        auto selection = segment_->Prune(
+            segcore::PrunePredicate{},
+            segcore::CandidateSelection::RowRange(row_begin, selection_count));
+        auto iterator = segment_->Iterate(op_ctx_, {field_id_}, selection);
+
+        while (iterator->HasNext()) {
+            auto view = iterator->Next();
+            auto size =
+                std::min(view.row_count, selection_count - processed_size);
+            if (size == 0) {
+                continue;
+            }
+
+            arrow_func(view,
+                       size,
+                       res + processed_size,
+                       valid_res + processed_size,
+                       values...);
+
+            processed_size += size;
+            if (processed_size >= selection_count) {
+                break;
+            }
+        }
+        const auto next_row = row_begin + processed_size;
+        if (processed_size >= selection_count && processed_size > 0) {
+            if (next_row < active_count_) {
+                auto [next_chunk, next_pos] =
+                    segment_->get_chunk_by_offset(field_id_, next_row);
+                current_data_chunk_ = next_chunk;
+                current_data_chunk_pos_ = next_pos;
+            } else if (num_data_chunk_ > 0) {
+                current_data_chunk_ = num_data_chunk_ - 1;
+                current_data_chunk_pos_ =
+                    segment_->chunk_size(field_id_, current_data_chunk_);
+            }
+        }
+        return processed_size;
+    }
+}
+
 template <typename T>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
@@ -1817,6 +1926,106 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         processed_cursor += size;
     };
 
+    auto execute_arrow_batch = [expr_type,
+                                &processed_cursor,
+                                &bitmap_input,
+                                regex_matcher_ptr,
+                                volnitsky_ptr](
+                                   const segcore::ArrowBatchView& view,
+                                   const int size,
+                                   TargetBitmapView res,
+                                   TargetBitmapView valid_res,
+                                   IndexInnerType val) {
+        if constexpr (!std::is_same_v<T, int64_t>) {
+            (void)view;
+            (void)size;
+            (void)res;
+            (void)valid_res;
+            (void)val;
+            return;
+        } else {
+            auto array = std::static_pointer_cast<arrow::Int64Array>(
+                view.batch.get()->column(0));
+            AssertInfo(array->length() >= size,
+                       "Arrow unary batch has {} rows, expected at least {}",
+                       array->length(),
+                       size);
+            const T* data = array->raw_values();
+            switch (expr_type) {
+                case proto::plan::GreaterThan: {
+                    UnaryElementFunc<T, proto::plan::GreaterThan> func;
+                    func(data, size, val, res, bitmap_input, processed_cursor);
+                    break;
+                }
+                case proto::plan::GreaterEqual: {
+                    UnaryElementFunc<T, proto::plan::GreaterEqual> func;
+                    func(data, size, val, res, bitmap_input, processed_cursor);
+                    break;
+                }
+                case proto::plan::LessThan: {
+                    UnaryElementFunc<T, proto::plan::LessThan> func;
+                    func(data, size, val, res, bitmap_input, processed_cursor);
+                    break;
+                }
+                case proto::plan::LessEqual: {
+                    UnaryElementFunc<T, proto::plan::LessEqual> func;
+                    func(data, size, val, res, bitmap_input, processed_cursor);
+                    break;
+                }
+                case proto::plan::Equal: {
+                    UnaryElementFunc<T, proto::plan::Equal> func;
+                    func(data, size, val, res, bitmap_input, processed_cursor);
+                    break;
+                }
+                case proto::plan::NotEqual: {
+                    UnaryElementFunc<T, proto::plan::NotEqual> func;
+                    func(data, size, val, res, bitmap_input, processed_cursor);
+                    break;
+                }
+                case proto::plan::PrefixMatch: {
+                    UnaryElementFunc<T, proto::plan::PrefixMatch> func;
+                    func(data, size, val, res, bitmap_input, processed_cursor);
+                    break;
+                }
+                case proto::plan::PostfixMatch: {
+                    UnaryElementFunc<T, proto::plan::PostfixMatch> func;
+                    func(data, size, val, res, bitmap_input, processed_cursor);
+                    break;
+                }
+                case proto::plan::InnerMatch: {
+                    UnaryElementFunc<T, proto::plan::InnerMatch> func;
+                    func(data, size, val, res, bitmap_input, processed_cursor);
+                    break;
+                }
+                case proto::plan::Match: {
+                    UnaryElementFunc<T, proto::plan::Match> func;
+                    func(data, size, val, res, bitmap_input, processed_cursor);
+                    break;
+                }
+                case proto::plan::RegexMatch: {
+                    UnaryElementFuncForRegexMatch<T> func;
+                    func.matcher = regex_matcher_ptr;
+                    func.searcher = volnitsky_ptr;
+                    func(data, size, val, res, bitmap_input, processed_cursor);
+                    break;
+                }
+                default:
+                    ThrowInfo(
+                        OpTypeInvalid,
+                        fmt::format(
+                            "unsupported operator type for unary expr: {}",
+                            expr_type));
+            }
+            ApplyArrowValidityBitmap(*array,
+                                     size,
+                                     processed_cursor,
+                                     bitmap_input,
+                                     res,
+                                     valid_res);
+            processed_cursor += size;
+        }
+    };
+
     auto skip_index_func = [expr_type, val](const SkipIndex& skip_index,
                                             FieldId field_id,
                                             int64_t chunk_id) {
@@ -1825,7 +2034,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     };
 
     int64_t processed_size;
-    if (has_offset_input_) {
+    if (auto arrow_processed = ProcessArrowDataChunks<T>(
+            execute_arrow_batch, skip_index_func, res, valid_res, val)) {
+        processed_size = *arrow_processed;
+    } else if (has_offset_input_) {
         if (expr_->column_.element_level_) {
             // For element-level filtering with offset input
             processed_size = ProcessElementLevelByOffsets<T>(

@@ -138,6 +138,16 @@ PhyFilterBitsNode::GetOutput() {
     std::chrono::high_resolution_clock::time_point scalar_start =
         std::chrono::high_resolution_clock::now();
 
+    auto observe_scalar_latency = [&]() {
+        std::chrono::high_resolution_clock::time_point scalar_end =
+            std::chrono::high_resolution_clock::now();
+        double scalar_cost =
+            std::chrono::duration<double, std::micro>(scalar_end - scalar_start)
+                .count();
+        milvus::monitor::internal_core_search_latency_scalar.Observe(
+            scalar_cost / 1000);
+    };
+
     EvalCtx eval_ctx(operator_context_->get_exec_context());
 
     TargetBitmap bitset;
@@ -183,13 +193,7 @@ PhyFilterBitsNode::GetOutput() {
         std::vector<VectorPtr> col_res;
         col_res.push_back(std::move(results_[0]));
 
-        std::chrono::high_resolution_clock::time_point scalar_end =
-            std::chrono::high_resolution_clock::now();
-        double scalar_cost =
-            std::chrono::duration<double, std::micro>(scalar_end - scalar_start)
-                .count();
-        milvus::monitor::internal_core_search_latency_scalar.Observe(
-            scalar_cost / 1000);
+        observe_scalar_latency();
 
         return std::make_shared<RowVector>(col_res);
     }
@@ -245,13 +249,7 @@ PhyFilterBitsNode::GetOutput() {
     std::vector<VectorPtr> col_res;
     col_res.push_back(std::make_shared<ColumnVector>(std::move(bitset),
                                                      std::move(valid_bitset)));
-    std::chrono::high_resolution_clock::time_point scalar_end =
-        std::chrono::high_resolution_clock::now();
-    double scalar_cost =
-        std::chrono::duration<double, std::micro>(scalar_end - scalar_start)
-            .count();
-    milvus::monitor::internal_core_search_latency_scalar.Observe(scalar_cost /
-                                                                 1000);
+    observe_scalar_latency();
 
     return std::make_shared<RowVector>(col_res);
 }

@@ -1087,6 +1087,16 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     VectorPtr
     ExecRangeVisitorImplForData(EvalCtx& context);
 
+    template <typename T, typename FUNC, typename... ValTypes>
+    std::optional<int64_t>
+    ProcessArrowDataChunks(FUNC func,
+                           std::function<bool(const milvus::SkipIndex&,
+                                              FieldId,
+                                              int)> skip_func,
+                           TargetBitmapView res,
+                           TargetBitmapView valid_res,
+                           const ValTypes&... values);
+
     template <typename ExprValueType>
     VectorPtr
     ExecRangeVisitorImplJson(EvalCtx& context);
