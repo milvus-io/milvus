@@ -179,7 +179,7 @@ func NewFilterOpFromRepr(repr *OperatorRepr) (Operator, error) {
 	}
 	fn, err := FunctionFromRepr(repr.Function)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("filter function: %v", err))
+		return nil, merr.WrapErrParameterInvalidMsg("filter function: %v", err)
 	}
 	if len(repr.Inputs) == 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("filter_op: inputs is required")

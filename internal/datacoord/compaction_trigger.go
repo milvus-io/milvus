@@ -588,7 +588,7 @@ func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartS
 	segments := t.meta.SelectSegments(context.TODO(), filters...)
 	// some criterion not met or conflicted
 	if len(signal.segmentIDs) > 0 && len(segments) != len(signal.segmentIDs) {
-		return nil, merr.WrapErrServiceInternal("not all segment ids provided could be compacted")
+		return nil, merr.WrapErrParameterInvalidMsg("not all segment ids provided could be compacted")
 	}
 
 	type category struct {

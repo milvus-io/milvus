@@ -484,7 +484,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 	partitions, err = utils.GetPartitions(ctx, ex.targetMgr, task.collectionID)
 	if err != nil {
 		log.Warn("failed to get partitions", zap.Error(err))
-		return merr.WrapErrServiceInternal(fmt.Sprintf("failed to get partitions for collection=%d", task.CollectionID()))
+		return merr.Wrapf(err, "failed to get partitions for collection=%d", task.CollectionID())
 	}
 
 	version := ex.targetMgr.GetCollectionTargetVersion(ctx, task.CollectionID(), meta.NextTargetFirst)

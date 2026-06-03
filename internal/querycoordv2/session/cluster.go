@@ -35,12 +35,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-var ErrNodeNotFound = merr.WrapErrServiceInternalMsg("node not found")
-
-func WrapErrNodeNotFound(nodeID int64) error {
-	return merr.Wrapf(ErrNodeNotFound, "node %v", nodeID)
-}
-
 type Cluster interface {
 	WatchDmChannels(ctx context.Context, nodeID int64, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error)
 	UnsubDmChannel(ctx context.Context, nodeID int64, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error)
@@ -367,7 +361,7 @@ func (c *QueryCluster) ComputePhraseMatchSlop(ctx context.Context, nodeID int64,
 func (c *QueryCluster) send(ctx context.Context, nodeID int64, fn func(cli types.QueryNodeClient)) error {
 	node := c.nodeManager.Get(nodeID)
 	if node == nil {
-		return WrapErrNodeNotFound(nodeID)
+		return merr.WrapErrNodeNotFound(nodeID)
 	}
 
 	cli, err := c.getOrCreate(ctx, node)

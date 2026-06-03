@@ -33,7 +33,7 @@ import (
 
 func (c *Core) broadcastDropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) error {
 	if in.GetPartitionName() == Params.CommonCfg.DefaultPartitionName.GetValue() {
-		return merr.WrapErrServiceInternalMsg("default partition cannot be deleted")
+		return merr.WrapErrParameterInvalidMsg("default partition cannot be deleted")
 	}
 
 	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, in.GetDbName(), in.GetCollectionName())
