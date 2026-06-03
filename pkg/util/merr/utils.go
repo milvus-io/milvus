@@ -418,12 +418,20 @@ func WrapErrServiceNotReady(role string, sessionID int64, state string, msg ...s
 	return err
 }
 
+func WrapErrServiceNotReadyMsg(fmt string, args ...any) error {
+	return errors.Wrapf(ErrServiceNotReady, fmt, args...)
+}
+
 func WrapErrServiceUnavailable(reason string, msg ...string) error {
 	err := wrapFieldsWithDesc(ErrServiceUnavailable, reason)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
 	return err
+}
+
+func WrapErrServiceUnavailableMsg(fmt string, args ...any) error {
+	return errors.Wrapf(ErrServiceUnavailable, fmt, args...)
 }
 
 func WrapErrServiceMemoryLimitExceeded(predict, limit float32, msg ...string) error {
@@ -502,6 +510,10 @@ func WrapErrServiceQuotaExceeded(reason string, msg ...string) error {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
 	return err
+}
+
+func WrapErrServiceQuotaExceededMsg(fmt string, args ...any) error {
+	return errors.Wrapf(ErrServiceQuotaExceeded, fmt, args...)
 }
 
 func WrapErrServiceUnimplemented(grpcErr error) error {
@@ -1144,6 +1156,10 @@ func WrapErrIoFailedReason(reason string, msg ...string) error {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
 	return err
+}
+
+func WrapErrIoFailedMsg(fmt string, args ...any) error {
+	return errors.Wrapf(ErrIoFailed, fmt, args...)
 }
 
 func WrapErrIoUnexpectEOF(key string, err error) error {

@@ -18,7 +18,6 @@ package job
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/samber/lo"
@@ -75,8 +74,8 @@ func WaitCollectionReleased(ctx context.Context, dist *meta.DistributionManager,
 
 		// If release is not in progress for a while, return error
 		if time.Since(lastChangeTime) > waitCollectionReleasedTimeout {
-			return merr.WrapErrServiceUnavailable(fmt.Sprintf("wait collection released timeout, collection=%d, channels=%d, segments=%d",
-				collection, currentChannelCount, currentSegmentCount))
+			return merr.WrapErrServiceUnavailableMsg("wait collection released timeout, collection=%d, channels=%d, segments=%d",
+				collection, currentChannelCount, currentSegmentCount)
 		}
 
 		log.Ctx(ctx).Info("waitting for release...",
@@ -113,7 +112,7 @@ func WaitCurrentTargetUpdated(ctx context.Context, targetObserver *observers.Tar
 	case <-ctx.Done():
 		return merr.Wrapf(ctx.Err(), "context error while waiting for current target updated, collection=%d", collection)
 	case <-time.After(waitCollectionReleasedTimeout):
-		return merr.WrapErrServiceUnavailable(fmt.Sprintf("wait current target updated timeout, collection=%d", collection))
+		return merr.WrapErrServiceUnavailableMsg("wait current target updated timeout, collection=%d", collection)
 	}
 }
 
@@ -139,6 +138,6 @@ func WaitUpdatePartition(ctx context.Context, targetObserver *observers.TargetOb
 	case <-ctx.Done():
 		return merr.Wrapf(ctx.Err(), "context error while waiting for current target updated, collection=%d", collection)
 	case <-time.After(waitCollectionReleasedTimeout):
-		return merr.WrapErrServiceUnavailable(fmt.Sprintf("wait current target updated timeout, collection=%d", collection))
+		return merr.WrapErrServiceUnavailableMsg("wait current target updated timeout, collection=%d", collection)
 	}
 }

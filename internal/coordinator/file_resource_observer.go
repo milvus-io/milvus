@@ -18,7 +18,6 @@ package coordinator
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -178,7 +177,7 @@ func (m *FileResourceObserver) CheckAllQnReady() error {
 	var err error
 	m.distribution.Range(func(nodeID int64, node *NodeInfo) bool {
 		if node.NodeType == QueryNode && node.Version < version {
-			err = merr.WrapErrServiceUnavailable(fmt.Sprintf("node-%d", nodeID), "file resource not synced")
+			err = merr.WrapErrServiceUnavailableMsg("file resource not synced, node-%d", nodeID)
 			return false
 		}
 		return true

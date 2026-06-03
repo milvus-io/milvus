@@ -526,7 +526,7 @@ func (s *Session) registerService() error {
 			return err
 		}
 		if txnResp != nil && !txnResp.Succeeded {
-			return merr.WrapErrServiceUnavailable(fmt.Sprintf("CompareAndSwap failed for session key %s: compare is false", s.ServerName))
+			return merr.WrapErrServiceUnavailableMsg("CompareAndSwap failed for session key %s: compare is false", s.ServerName)
 		}
 		if !s.enableActiveStandBy {
 			s.registeredRevision.Store(txnResp.Header.GetRevision())
