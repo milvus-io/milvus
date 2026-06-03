@@ -305,6 +305,9 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	if err := validateTextStorageV3Enabled(dr.schema.CollectionSchema); err != nil {
 		return ErrWithLog(log, "TEXT field requires StorageV3", err)
 	}
+	if err = common.CheckNamespace(dr.schema.CollectionSchema, dr.req.Namespace); err != nil {
+		return err
+	}
 
 	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, dr.req.GetDbName(), collName, dr.collectionID)
 	if err != nil {
@@ -328,7 +331,19 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	dr.plan.Namespace = dr.req.Namespace
 	// Set partitionIDs, could be empty if no partition name specified and no partition key
 	partName := dr.req.GetPartitionName()
-	if dr.schema.IsPartitionKeyCollection() {
+	if dr.req.Namespace != nil {
+		if len(partName) > 0 {
+			return errors.New("not support manually specifying the partition names if namespace is used")
+		}
+		hashedPartitionNames, err := assignNamespacePartitionKey(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), dr.req.Namespace)
+		if err != nil {
+			return err
+		}
+		dr.partitionIDs, err = getPartitionIDs(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
+		if err != nil {
+			return err
+		}
+	} else if dr.schema.IsPartitionKeyCollection() {
 		if len(partName) > 0 {
 			return errors.New("not support manually specifying the partition names if partition key mode is used")
 		}

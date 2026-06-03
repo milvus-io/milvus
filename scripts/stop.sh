@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 # Licensed to the LF AI & Data foundation under one
 # or more contributor license agreements. See the NOTICE file
 # distributed with this work for additional information
@@ -14,12 +16,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-echo "Stopping milvus..."
-PROCESS=$(ps -e | grep milvus | grep -v grep | awk '{print $1}')
-if [ -z "$PROCESS" ]; then
-  echo "No milvus process"
-  exit 0
-fi
-kill -15 $PROCESS
-echo "Milvus stopped"
+function filter_milvus_process() {
+  awk '
+    {
+      pid = $1
+      $1 = ""
+      sub(/^[[:space:]]+/, "", $0)
+      # Match Milvus commands, not tools/editors that mention the repo name.
+      if ($0 ~ /^([^[:space:]]*\/)?milvus[[:space:]]+run[[:space:]]/) {
+        print pid
+      }
+    }'
+}
 
+function get_milvus_process() {
+  ps -e -o pid= -o args= | filter_milvus_process
+}
+
+function main() {
+  echo "Stopping milvus..."
+  PROCESS=$(get_milvus_process)
+  if [ -z "$PROCESS" ]; then
+    echo "No milvus process"
+    exit 0
+  fi
+  kill -15 $PROCESS
+  echo "Milvus stopped"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
