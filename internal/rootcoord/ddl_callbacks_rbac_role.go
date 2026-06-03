@@ -134,7 +134,7 @@ func (c *Core) broadcastOperateUserRole(ctx context.Context, in *milvuspb.Operat
 			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 			MustBuildBroadcast()
 	default:
-		return merr.WrapErrServiceInternalMsg("invalid operate user role type")
+		return merr.WrapErrParameterInvalidMsg("invalid operate user role type")
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

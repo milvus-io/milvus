@@ -85,7 +85,7 @@ func (n *nameDb) listCollections(dbName string) map[string]UniqueID {
 func (n *nameDb) listCollectionID(dbName string) ([]typeutil.UniqueID, error) {
 	name2ID, ok := n.db2Name2ID[dbName]
 	if !ok {
-		return nil, merr.WrapErrServiceInternalMsg("database not exist: %s", dbName)
+		return nil, merr.WrapErrDatabaseNotFound(dbName)
 	}
 	return maps.Values(name2ID), nil
 }

@@ -17,8 +17,6 @@
 package compactor
 
 import (
-	"fmt"
-
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
@@ -576,7 +574,7 @@ func missingNonMaterializedSchemaFields(schema *schemapb.CollectionSchema, exist
 func stringInputsFromRecord(rec storage.Record, fieldID int64) ([]string, error) {
 	col := rec.Column(fieldID)
 	if col == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("input field %d not found in record", fieldID))
+		return nil, merr.WrapErrFunctionFailedMsg("input field %d not found in record", fieldID)
 	}
 	inputs := make([]string, rec.Len())
 	switch values := col.(type) {
@@ -587,9 +585,9 @@ func stringInputsFromRecord(rec storage.Record, fieldID int64) ([]string, error)
 			}
 		}
 	case *array.Binary:
-		return nil, merr.WrapErrServiceInternal("cannot materialize bm25 from text binary values without lob decoding")
+		return nil, merr.WrapErrFunctionFailedMsg("cannot materialize bm25 from text binary values without lob decoding")
 	default:
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("input field %d data type must be varchar or text for bm25 function materialization, got %T", fieldID, col))
+		return nil, merr.WrapErrFunctionFailedMsg("input field %d data type must be varchar or text for bm25 function materialization, got %T", fieldID, col)
 	}
 	return inputs, nil
 }

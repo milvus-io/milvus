@@ -78,7 +78,7 @@ func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.Opera
 			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 			MustBuildBroadcast()
 	default:
-		return merr.WrapErrServiceInternalMsg("invalid operate privilege type")
+		return merr.WrapErrParameterInvalidMsg("invalid operate privilege type")
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -153,7 +153,7 @@ func (c *Core) broadcastOperatePrivilegeGroup(ctx context.Context, in *milvuspb.
 			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 			MustBuildBroadcast()
 	default:
-		return merr.WrapErrServiceInternalMsg("invalid operate privilege group type")
+		return merr.WrapErrParameterInvalidMsg("invalid operate privilege group type")
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
