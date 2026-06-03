@@ -412,7 +412,7 @@ func (mt *MetaTable) CheckIfDatabaseCreatable(ctx context.Context, req *milvuspb
 
 	if _, ok := mt.dbName2Meta[dbName]; ok || mt.aliases.exist(dbName) || mt.names.exist(dbName) {
 		// TODO: idempotency check here.
-		return merr.WrapErrServiceInternalMsg("database already exist: %s", dbName)
+		return merr.WrapErrParameterInvalidMsg("database already exist: %s", dbName)
 	}
 
 	cfgMaxDatabaseNum := Params.RootCoordCfg.MaxDatabaseNum.GetAsInt()
@@ -466,7 +466,7 @@ func (mt *MetaTable) CheckIfDatabaseDroppable(ctx context.Context, req *milvuspb
 	defer mt.ddLock.RUnlock()
 
 	if dbName == util.DefaultDBName {
-		return merr.WrapErrServiceInternalMsg("can not drop default database")
+		return merr.WrapErrParameterInvalidMsg("can not drop default database")
 	}
 
 	if _, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp); err != nil {
@@ -479,7 +479,7 @@ func (mt *MetaTable) CheckIfDatabaseDroppable(ctx context.Context, req *milvuspb
 		return err
 	}
 	if len(colls) > 0 {
-		return merr.WrapErrServiceInternalMsg("database:%s not empty, must drop all collections before drop database", dbName)
+		return merr.WrapErrParameterInvalidMsg("database:%s not empty, must drop all collections before drop database", dbName)
 	}
 	return nil
 }
@@ -1186,27 +1186,27 @@ func (mt *MetaTable) CheckIfCollectionRenamable(ctx context.Context, dbName stri
 	// get target db
 	targetDB, ok := mt.dbName2Meta[newDBName]
 	if !ok {
-		return merr.WrapErrServiceInternalMsg("target database:%s not found", newDBName)
+		return merr.WrapErrDatabaseNotFound(newDBName)
 	}
 
 	// old collection should not be an alias
 	_, ok = mt.aliases.get(dbName, oldName)
 	if ok {
 		log.Warn("unsupported use a alias to rename collection")
-		return merr.WrapErrServiceInternalMsg("unsupported use an alias to rename collection, alias:%s", oldName)
+		return merr.WrapErrParameterInvalidMsg("unsupported use an alias to rename collection, alias:%s", oldName)
 	}
 
 	_, ok = mt.aliases.get(newDBName, newName)
 	if ok {
 		log.Warn("cannot rename collection to an existing alias")
-		return merr.WrapErrServiceInternalMsg("cannot rename collection to an existing alias: %s", newName)
+		return merr.WrapErrAsInputError(merr.WrapErrAliasCollectionNameConflict(newDBName, newName))
 	}
 
 	// check new collection already exists
 	coll, err := mt.getCollectionByNameInternal(ctx, newDBName, newName, typeutil.MaxTimestamp, false)
 	if coll != nil {
 		log.Warn("duplicated new collection name, already taken by another collection or alias.")
-		return merr.WrapErrServiceInternalMsg("duplicated new collection name %s:%s with other collection name or alias", newDBName, newName)
+		return merr.WrapErrParameterInvalidMsg("duplicated new collection name %s:%s with other collection name or alias", newDBName, newName)
 	}
 	if err != nil && !errors.Is(err, merr.ErrCollectionNotFound) {
 		log.Warn("fail to check if new collection name is already taken", zap.Error(err))
@@ -1223,7 +1223,7 @@ func (mt *MetaTable) CheckIfCollectionRenamable(ctx context.Context, dbName stri
 	// unsupported rename collection while the collection has aliases
 	aliases := mt.listAliasesByID(oldColl.CollectionID)
 	if len(aliases) > 0 && oldColl.DBID != targetDB.ID {
-		return merr.WrapErrServiceInternalMsg("fail to rename db name, must drop all aliases of this collection before rename")
+		return merr.WrapErrParameterInvalidMsg("fail to rename db name, must drop all aliases of this collection before rename")
 	}
 	return nil
 }

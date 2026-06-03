@@ -629,7 +629,7 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 func (t *createCollectionTask) validateIfCollectionExists(ctx context.Context) error {
 	// Check if the collection name duplicates an alias.
 	if _, err := t.meta.DescribeAlias(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp); err == nil {
-		err2 := merr.WrapErrAliasCollectionNameConflict(t.Req.GetDbName(), t.Req.GetCollectionName(), "please choose a unique name")
+		err2 := merr.WrapErrAsInputError(merr.WrapErrAliasCollectionNameConflict(t.Req.GetDbName(), t.Req.GetCollectionName(), "please choose a unique name"))
 		log.Ctx(ctx).Warn("create collection failed", zap.String("database", t.Req.GetDbName()), zap.Error(err2))
 		return err2
 	}
