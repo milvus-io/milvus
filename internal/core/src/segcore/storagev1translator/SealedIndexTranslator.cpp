@@ -17,7 +17,7 @@
 #include "nlohmann/json.hpp"
 #include "segcore/Types.h"
 #include "segcore/Utils.h"
-#include "storage/ChunkStreamUtils.h"
+#include "storage/EntryStreamUtils.h"
 
 namespace milvus::segcore::storagev1translator {
 
@@ -79,9 +79,9 @@ SealedIndexTranslator::SealedIndexTranslator(
             .value_or(1);
     if (scalar_version >= 3 && !IsVectorDataType(index_load_info_.field_type)) {
         auto upper_bound = milvus::cachinglayer::ResourceUsage{
-            static_cast<int64_t>(milvus::storage::TransientMemoryBudget::
-                                     GetScalarIndexChunkBudget()
-                                         .CapacityBytes()),
+            static_cast<int64_t>(
+                milvus::storage::TransientMemoryBudget::GetEntryStreamBudget()
+                    .CapacityBytes()),
             std::numeric_limits<int64_t>::max()};
         meta_.loading_overhead = milvus::cachinglayer::LoadingOverheadConfig{
             upper_bound, "ScalarIndexV3TransientMemoryBudget"};

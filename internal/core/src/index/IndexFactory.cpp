@@ -58,7 +58,7 @@
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
 #include "pb/schema.pb.h"
-#include "storage/ChunkStreamUtils.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/Types.h"
 
 namespace milvus::index {
@@ -75,7 +75,7 @@ ScalarIndexStreamMemoryOverhead(uint64_t index_size_in_bytes,
         return index_size_in_bytes;
     }
     auto budget_bytes =
-        milvus::storage::TransientMemoryBudget::GetScalarIndexChunkBudget()
+        milvus::storage::TransientMemoryBudget::GetEntryStreamBudget()
             .CapacityBytes();
     return std::min<uint64_t>(index_size_in_bytes, budget_bytes);
 }
