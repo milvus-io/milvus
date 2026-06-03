@@ -474,7 +474,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
                       true,
                       plan_options),
           expr_(expr) {
-        DetermineExecPath();
+        // DetermineExecPath();
     }
 
     void

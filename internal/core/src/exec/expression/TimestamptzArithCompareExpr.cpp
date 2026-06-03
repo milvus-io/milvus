@@ -27,6 +27,7 @@ PhyTimestamptzArithCompareExpr::ToString() const {
 
 void
 PhyTimestamptzArithCompareExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    WaitPrefetch();
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     result = ExecCompareVisitorImpl<int64_t>(input);
