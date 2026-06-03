@@ -6473,6 +6473,24 @@ func TestSearchTask_SearchRequeryPolicy(t *testing.T) {
 		assert.False(t, task.needRequery, "only pk output should not trigger requery under outputvector policy")
 	})
 
+	t.Run("search_aggregation_with_iterator_should_fail", func(t *testing.T) {
+		const titleFieldID int64 = 102
+		groupFieldIDs := []int64{titleFieldID}
+		task := buildTask([]string{"title"})
+		task.Nq = 1
+		task.OutputFieldsId = []int64{titleFieldID}
+		task.GroupByFieldIds = groupFieldIDs
+		task.request.SearchParams = append(task.request.SearchParams, &commonpb.KeyValuePair{Key: IteratorField, Value: "True"})
+		aggCtx, err := search_agg.NewContext(1, []search_agg.LevelContext{{OwnFieldIDs: groupFieldIDs, Size: 1}}, groupFieldIDs, nil)
+		require.NoError(t, err)
+		task.aggCtx = aggCtx
+
+		err = task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "search iterator is not supported with search_aggregation")
+	})
+
 	t.Run("search_aggregation_forces_no_requery", func(t *testing.T) {
 		Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "Always")
 		defer Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "OutputVector")

@@ -799,8 +799,13 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 
 	t.isIterator = isIterator
 	t.Offset = offset
-	if t.aggCtx != nil && t.Offset > 0 {
-		return merr.WrapErrParameterInvalidMsg("offset is not supported with search_aggregation")
+	if t.aggCtx != nil {
+		if t.isIterator {
+			return merr.WrapErrParameterInvalidMsg("search iterator is not supported with search_aggregation")
+		}
+		if t.Offset > 0 {
+			return merr.WrapErrParameterInvalidMsg("offset is not supported with search_aggregation")
+		}
 	}
 	t.FieldId = queryInfo.GetQueryFieldId()
 
