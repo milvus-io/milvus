@@ -2109,6 +2109,136 @@ func (s *SearchPipelineSuite) TestHybridSearchWithRequeryAndRerankByDataPipe() {
 	s.Equal(int64(2*2*10), results.GetResults().AllSearchCount)
 }
 
+func (s *SearchPipelineSuite) TestHybridSearchWithRequeryAndRerankByDataPipe_ElementLevelRequeryUsesPKs() {
+	task := getHybridSearchTask("test_collection", [][]string{
+		{"1"},
+		{"2"},
+	}, []string{"intField"})
+	task.hybridElementLevel = true
+
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{10, 10, 20}},
+				},
+			},
+			Scores:         []float32{0.8, 0.9, 0.7},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0, 2, 1}},
+			AllSearchCount: 3,
+		},
+	}
+	pkField := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: "int64",
+		FieldId:   100,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{Data: []int64{10, 20}},
+				},
+			},
+		},
+	}
+	intField := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: "intField",
+		FieldId:   101,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{Data: []int64{100, 200}},
+				},
+			},
+		},
+	}
+
+	originalReduceFactory := opFactory[hybridSearchReduceOp]
+	originalRequeryFactory := opFactory[requeryOp]
+	originalRerankFactory := opFactory[rerankOp]
+	defer func() {
+		opFactory[hybridSearchReduceOp] = originalReduceFactory
+		opFactory[requeryOp] = originalRequeryFactory
+		opFactory[rerankOp] = originalRerankFactory
+	}()
+
+	opFactory[hybridSearchReduceOp] = func(_ *searchTask, _ map[string]any) (operator, error) {
+		return searchPipelineTestOperator(func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+			return []any{[]*milvuspb.SearchResults{input}, []string{"IP"}}, nil
+		}), nil
+	}
+
+	requeryCalled := false
+	opFactory[requeryOp] = func(_ *searchTask, _ map[string]any) (operator, error) {
+		return searchPipelineTestOperator(func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+			requeryCalled = true
+
+			ids, ok := inputs[0].(*schemapb.IDs)
+			s.Require().True(ok)
+			s.ElementsMatch([]int64{10, 20}, ids.GetIntId().GetData())
+			s.Nil(ids.GetStrId())
+
+			storageCost := inputs[1].(segcore.StorageCost)
+			return []any{[]*schemapb.FieldData{intField, pkField}, storageCost}, nil
+		}), nil
+	}
+
+	rerankCalled := false
+	opFactory[rerankOp] = func(_ *searchTask, _ map[string]any) (operator, error) {
+		return searchPipelineTestOperator(func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+			rerankCalled = true
+
+			rankData, ok := inputs[0].([]*milvuspb.SearchResults)
+			s.Require().True(ok)
+			s.Require().Len(rankData, 1)
+			data := rankData[0].GetResults()
+			s.Equal([]string{
+				makeHybridElementKey(int64(10), 0),
+				makeHybridElementKey(int64(10), 2),
+				makeHybridElementKey(int64(20), 1),
+			}, data.GetIds().GetStrId().GetData())
+			s.Equal([]int64{100, 100, 200}, data.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+
+			return []any{&milvuspb.SearchResults{
+				Status: merr.Success(),
+				Results: &schemapb.SearchResultData{
+					NumQueries: 1,
+					TopK:       2,
+					Topks:      []int64{2},
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_StrId{
+							StrId: &schemapb.StringArray{Data: []string{
+								makeHybridElementKey(int64(10), 2),
+								makeHybridElementKey(int64(20), 1),
+							}},
+						},
+					},
+					Scores: []float32{0.99, 0.88},
+				},
+			}}, nil
+		}), nil
+	}
+
+	pipeline, err := newPipeline(hybridSearchWithRequeryAndRerankByFieldDataPipe, task)
+	s.Require().NoError(err)
+	s.Require().NoError(pipeline.AddNodes(task, endNode))
+
+	results, _, err := pipeline.Run(context.Background(), s.span, nil, segcore.StorageCost{})
+	s.Require().NoError(err)
+	s.True(requeryCalled)
+	s.True(rerankCalled)
+
+	result := results.GetResults()
+	s.Equal([]int64{10, 20}, result.GetIds().GetIntId().GetData())
+	s.Equal([]int64{2, 1}, result.GetElementIndices().GetData())
+	s.Equal([]float32{0.99, 0.88}, result.GetScores())
+	s.Equal([]int64{100, 200}, result.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+}
+
 func (s *SearchPipelineSuite) TestHybridSearchWithRequeryPipe() {
 	task := getHybridSearchTask("test_collection", [][]string{
 		{"1", "2"},

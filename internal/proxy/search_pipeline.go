@@ -519,6 +519,8 @@ func collapseElementLevelResult(result *milvuspb.SearchResults, largerScoreIsBet
 		for i, hit := range hits {
 			typeutil.AppendIDs(output.Ids, data.GetIds(), int(hit.rowIdx))
 			output.Scores = append(output.Scores, hit.aggregate)
+			// For aggregate collapse strategies, Score is the row aggregate while
+			// Distance/Recall keep the representative best element's values.
 			if len(data.GetDistances()) > 0 {
 				output.Distances = append(output.Distances, data.GetDistances()[hit.rowIdx])
 			}
@@ -665,21 +667,42 @@ func newElementKeyRestoreOperator(t *searchTask, _ map[string]any) (operator, er
 }
 
 func (op *elementKeyRestoreOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
-	if len(inputs) < 2 {
+	if len(inputs) < 1 {
 		return nil, merr.WrapErrServiceInternal("element key restore: missing inputs")
 	}
-	rankResult, ok := inputs[1].(*milvuspb.SearchResults)
-	if !ok {
-		return nil, merr.WrapErrParameterInvalidMsg("element key restore: inputs[1] must be *SearchResults, got %T", inputs[1])
+
+	target := inputs[len(inputs)-1]
+	if !op.enabled {
+		return []any{target}, nil
 	}
-	if !op.enabled || rankResult == nil || rankResult.GetResults() == nil {
-		return []any{rankResult}, nil
+
+	switch v := target.(type) {
+	case *milvuspb.SearchResults:
+		if v == nil || v.GetResults() == nil {
+			return []any{v}, nil
+		}
+		restored, err := restoreElementLevelHybridRankResult(v)
+		if err != nil {
+			return nil, err
+		}
+		return []any{restored}, nil
+	case []*milvuspb.SearchResults:
+		restored := make([]*milvuspb.SearchResults, len(v))
+		for i, result := range v {
+			if result == nil || result.GetResults() == nil {
+				restored[i] = result
+				continue
+			}
+			var err error
+			restored[i], err = restoreElementLevelHybridRankResult(result)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return []any{restored}, nil
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("element key restore: input must be *SearchResults or []*SearchResults, got %T", target)
 	}
-	restored, err := restoreElementLevelHybridRankResult(rankResult)
-	if err != nil {
-		return nil, err
-	}
-	return []any{restored}, nil
 }
 
 func restoreElementLevelHybridRankResult(rankResult *milvuspb.SearchResults) (*milvuspb.SearchResults, error) {
@@ -3168,8 +3191,14 @@ var hybridSearchWithRequeryAndRerankByFieldDataPipe = &pipelineDef{
 			opName:  elementBestCollapseOp,
 		},
 		{
-			name:    "merge_ids",
+			name:    "restore_element_keys_for_requery",
 			inputs:  []string{"collapsed"},
+			outputs: []string{"requery_data"},
+			opName:  elementKeyRestoreOp,
+		},
+		{
+			name:    "merge_ids",
+			inputs:  []string{"requery_data"},
 			outputs: []string{"ids"},
 			opName:  lambdaOp,
 			params: map[string]any{
@@ -3184,7 +3213,7 @@ var hybridSearchWithRequeryAndRerankByFieldDataPipe = &pipelineDef{
 		},
 		{
 			name:    "parse_ids",
-			inputs:  []string{"collapsed"},
+			inputs:  []string{"requery_data"},
 			outputs: []string{"id_list"},
 			opName:  lambdaOp,
 			params: map[string]any{
