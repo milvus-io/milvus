@@ -125,17 +125,17 @@ func (data *descriptorEventData) FinishExtra() error {
 	// keep all binlog file records the original size
 	sizeStored, ok := data.Extras[originalSizeKey]
 	if !ok {
-		return merr.WrapErrServiceInternalMsg("%v not in extra", originalSizeKey)
+		return merr.WrapErrDataIntegrityMsg("%v not in extra", originalSizeKey)
 	}
 	// if we store a large int directly, golang will use scientific notation, we then will get a float value.
 	// so it's better to store the original size in string format.
 	sizeStr, ok := sizeStored.(string)
 	if !ok {
-		return merr.WrapErrServiceInternalMsg("value of %v must in string format", originalSizeKey)
+		return merr.WrapErrDataIntegrityMsg("value of %v must in string format", originalSizeKey)
 	}
 	_, err = strconv.Atoi(sizeStr)
 	if err != nil {
-		return merr.WrapErrServiceInternalMsg("value of %v must be able to be converted into int format", originalSizeKey)
+		return merr.WrapErrDataIntegrityMsg("value of %v must be able to be converted into int format", originalSizeKey)
 	}
 
 	nullableStore, existed := data.Extras[nullableKey]

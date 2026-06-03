@@ -164,7 +164,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 	err error,
 ) {
 	if len(blobs) == 0 {
-		return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, merr.WrapErrServiceInternalMsg("blobs is empty")
+		return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, merr.WrapErrDataIntegrityMsg("blobs is empty")
 	}
 	indexParams = make(map[string]string)
 	datas = make([]*Blob, 0)
@@ -250,7 +250,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 
 				// make sure there is one string
 				if len(content) != 1 {
-					err := merr.WrapErrServiceInternalMsg("failed to parse index event because content length is not one %d", len(content))
+					err := merr.WrapErrDataIntegrityMsg("failed to parse index event because content length is not one %d", len(content))
 					eventReader.Close()
 					binlogReader.Close()
 					return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err
@@ -321,7 +321,7 @@ func (indexCodec *IndexCodec) Deserialize(blobs []*Blob) ([]*Blob, map[string]st
 		break
 	}
 	if file == nil {
-		return nil, nil, "", InvalidUniqueID, merr.WrapErrServiceInternalMsg("can not find params blob")
+		return nil, nil, "", InvalidUniqueID, merr.WrapErrDataIntegrityMsg("can not find params blob")
 	}
 	info := struct {
 		Params    map[string]string

@@ -165,19 +165,19 @@ func (dl *DeleteLog) Parse(val string) error {
 		pkRes := result.Get("pk")
 		pkTypeRes := result.Get("pkType")
 		if !tsRes.Exists() || !pkRes.Exists() || !pkTypeRes.Exists() {
-			return merr.WrapErrServiceInternalMsg("invalid delete log json: missing required fields in %s", val)
+			return merr.WrapErrDataIntegrityMsg("invalid delete log json: missing required fields in %s", val)
 		}
 		dl.Ts = tsRes.Uint()
 		dl.PkType = pkTypeRes.Int()
 		switch dl.PkType {
 		case int64(schemapb.DataType_Int64):
 			if pkRes.Type != gjson.Number {
-				return merr.WrapErrServiceInternalMsg("invalid delete log: pkType is Int64 but pk is not a number in %s", val)
+				return merr.WrapErrDataIntegrityMsg("invalid delete log: pkType is Int64 but pk is not a number in %s", val)
 			}
 			dl.Pk = &Int64PrimaryKey{Value: pkRes.Int()}
 		case int64(schemapb.DataType_VarChar):
 			if pkRes.Type != gjson.String {
-				return merr.WrapErrServiceInternalMsg("invalid delete log: pkType is VarChar but pk is not a string in %s", val)
+				return merr.WrapErrDataIntegrityMsg("invalid delete log: pkType is VarChar but pk is not a string in %s", val)
 			}
 			dl.Pk = &VarCharPrimaryKey{Value: pkRes.String()}
 		default:
