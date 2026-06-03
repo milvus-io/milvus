@@ -16,7 +16,6 @@ include_directories(
     ${KNOWHERE_INCLUDE_DIR}
     ${SIMDJSON_INCLUDE_DIR}
     ${TANTIVY_INCLUDE_DIR}
-    ${MILVUS_COMMON_INCLUDE_DIR}
     ${MILVUS_STORAGE_INCLUDE_DIR}
 )
 
@@ -134,7 +133,6 @@ target_link_libraries(all_tests
         milvus_conan_deps
         knowhere
         milvus-storage
-        milvus-common
         )
 
 # Link plan parser library using full path and set RPATH
@@ -182,7 +180,7 @@ endif()
 install(TARGETS bitset_test DESTINATION unittest)
 
 add_executable(test_json_uint64 ${CMAKE_HOME_DIRECTORY}/src/exec/expression/ExprJsonUint64Test.cpp)
-target_link_libraries(test_json_uint64 GTest::gtest GTest::gtest_main milvus_core milvus_conan_deps knowhere milvus-storage milvus-common)
+target_link_libraries(test_json_uint64 GTest::gtest GTest::gtest_main milvus_core milvus_conan_deps knowhere milvus-storage)
 target_link_options(test_json_uint64 PRIVATE "-L${PLANPARSER_LIB_DIR}")
 target_link_libraries(test_json_uint64 milvus-planparser-cpp)
 set_target_properties(test_json_uint64 PROPERTIES BUILD_RPATH "${PLANPARSER_LIB_DIR}" INSTALL_RPATH "${PLANPARSER_LIB_DIR}")

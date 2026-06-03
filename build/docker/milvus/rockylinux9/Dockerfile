@@ -14,12 +14,10 @@ FROM rockylinux/rockylinux:9
 ARG TARGETARCH
 ARG MILVUS_ASAN_LIB
 
-# Enable CRB repo for openblas-devel
 RUN dnf install -y dnf-plugins-core && \
     dnf config-manager --set-enabled crb && \
-    dnf install -y wget libgomp libaio libatomic openblas-devel tzdata && \
-    rm -rf /var/cache/dnf/* && \
-    for f in /usr/include/openblas/*.h; do ln -sf "$f" /usr/include/$(basename "$f"); done
+    dnf install -y wget libgomp libaio libatomic tzdata && \
+    rm -rf /var/cache/dnf/*
 
 # Add Tini
 RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \

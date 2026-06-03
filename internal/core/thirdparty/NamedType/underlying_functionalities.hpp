@@ -285,9 +285,9 @@ struct Comparable : crtp<T, Comparable>
         return !(self < other) && !(other.get() < self.underlying().get());
     }
 #endif
-    FLUENT_NODISCARD constexpr bool operator!=(T const& other) const
+    FLUENT_NODISCARD friend constexpr bool operator!=(Comparable<T> const& self, T const& other)
     {
-        return !(*this == other);
+        return !(self == other);
     }
 };
 

@@ -21,22 +21,7 @@ $ export GO111MODULE=on
 $ go get github.com/golang/protobuf/protoc-gen-go@v1.3.2
 ```
 
-Install OpenBlas library
-
-install using apt
-
-```shell
-sudo apt install -y libopenblas-dev
-```
-
-or build from source code
-
-```shell
-$ wget https://github.com/xianyi/OpenBLAS/archive/v0.3.9.tar.gz && \
-$ tar zxvf v0.3.9.tar.gz && cd OpenBLAS-0.3.9 && \
-$ make TARGET=CORE2 DYNAMIC_ARCH=1 DYNAMIC_OLDER=1 USE_THREAD=0 USE_OPENMP=0 FC=gfortran CC=gcc COMMON_OPT="-O3 -g -fPIC" FCOMMON_OPT="-O3 -g -fPIC -frecursive" NMAX="NUM_THREADS=128" LIBPREFIX="libopenblas" INTERFACE64=0 NO_STATIC=1 && \
-$ make PREFIX=/usr install
-```
+OpenBLAS is managed by Conan for C++ core builds. Install the compiler toolchain and Fortran runtime needed by Conan, then run the normal third-party build step.
 
 ## Compile
 

@@ -51,6 +51,8 @@ using MultipleChunkDataAccessor = std::function<const data_access_type()>;
 namespace detail {
 template <typename T>
 struct ValueExtractor : public boost::static_visitor<T> {
+    ValueExtractor() = default;
+
     T
     operator()(const T& val) const {
         return val;
@@ -64,6 +66,8 @@ struct ValueExtractor : public boost::static_visitor<T> {
 
 template <>
 struct ValueExtractor<std::string> : public boost::static_visitor<std::string> {
+    ValueExtractor() = default;
+
     std::string
     operator()(const std::string& s) const {
         return s;
