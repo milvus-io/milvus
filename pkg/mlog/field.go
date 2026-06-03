@@ -3,7 +3,6 @@ package mlog
 import (
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -141,10 +140,11 @@ type propagatedMarker struct{}
 
 // propagatedStringField creates a string field that will be propagated via RPC.
 // The field is logged as a flat string and transmitted in gRPC metadata.
-// The key is automatically converted to lowercase for gRPC metadata compatibility.
+// gRPC metadata lowercases the wire key during propagation; extraction restores
+// well-known lowercase keys back to their canonical log key.
 func propagatedStringField(key string, val string) Field {
 	return Field{
-		Key:       strings.ToLower(key),
+		Key:       key,
 		Type:      zapcore.StringType,
 		String:    val,
 		Interface: propagatedMarker{},
@@ -153,10 +153,11 @@ func propagatedStringField(key string, val string) Field {
 
 // propagatedInt64Field creates an int64 field that will be propagated via RPC.
 // The field is logged as a flat int64 and transmitted in gRPC metadata.
-// The key is automatically converted to lowercase for gRPC metadata compatibility.
+// gRPC metadata lowercases the wire key during propagation; extraction restores
+// well-known lowercase keys back to their canonical log key.
 func propagatedInt64Field(key string, val int64) Field {
 	return Field{
-		Key:       strings.ToLower(key),
+		Key:       key,
 		Type:      zapcore.Int64Type,
 		Integer:   val,
 		Interface: propagatedMarker{},

@@ -69,7 +69,7 @@ func extractPropagated(ctx context.Context, extraFields ...Field) context.Contex
 			}
 			rest := key[len(MetadataPrefix):] // after "mlog-"
 			if len(rest) >= 2 && rest[1] == '-' {
-				fieldKey := rest[2:]
+				fieldKey := restoreWellKnownLogKey(rest[2:])
 				switch rest[0] {
 				case 'i':
 					if v, err := strconv.ParseInt(vals[0], 10, 64); err == nil {
@@ -82,7 +82,7 @@ func extractPropagated(ctx context.Context, extraFields ...Field) context.Contex
 				}
 			}
 			// Legacy format without type tag — treat as string
-			fields = append(fields, propagatedStringField(rest, vals[0]))
+			fields = append(fields, propagatedStringField(restoreWellKnownLogKey(rest), vals[0]))
 		}
 	}
 

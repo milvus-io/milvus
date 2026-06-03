@@ -72,25 +72,25 @@ type logContext struct {
 
 ### 3. Well-Known Keys
 
-Predefined standard field names (lowercase with underscores, gRPC metadata compatible).
+Predefined standard field names (camelCase in logs; gRPC metadata lowercases keys during propagation).
 Keys are unexported; use `FieldXxx()` constructors instead of raw key strings:
 
 | Key | FieldXxx Constructor |
 |-----|---------------------|
-| `node_id` | `FieldNodeID(val)` |
+| `nodeID` | `FieldNodeID(val)` |
 | `module` | `FieldModule(val)` |
-| `trace_id` | `FieldTraceID(val)` |
-| `span_id` | `FieldSpanID(val)` |
-| `db_id` | `FieldDbID(val, opts...)` |
-| `db_name` | `FieldDbName(val, opts...)` |
-| `collection_id` | `FieldCollectionID(val, opts...)` |
-| `collection_name` | `FieldCollectionName(val, opts...)` |
-| `partition_id` | `FieldPartitionID(val, opts...)` |
-| `partition_name` | `FieldPartitionName(val, opts...)` |
-| `segment_id` | `FieldSegmentID(val, opts...)` |
+| `traceID` | `FieldTraceID(val)` |
+| `spanID` | `FieldSpanID(val)` |
+| `dbID` | `FieldDbID(val, opts...)` |
+| `dbName` | `FieldDbName(val, opts...)` |
+| `collectionID` | `FieldCollectionID(val, opts...)` |
+| `collectionName` | `FieldCollectionName(val, opts...)` |
+| `partitionID` | `FieldPartitionID(val, opts...)` |
+| `partitionName` | `FieldPartitionName(val, opts...)` |
+| `segmentID` | `FieldSegmentID(val, opts...)` |
 | `vchannel` | `FieldVChannel(val, opts...)` |
 | `pchannel` | `FieldPChannel(val, opts...)` |
-| `message_id` | `FieldMessageID(val)` |
+| `messageID` | `FieldMessageID(val)` |
 | `message` | `FieldMessage(val)` |
 
 ## Usage Guide
@@ -129,7 +129,7 @@ func (qn *QueryNode) Search(ctx context.Context, req *SearchRequest) {
     // ctx carries request-level fields (traceID, collectionID, etc.)
     // Automatically merges component fields + ctx fields when logging
     qn.logger.Info(ctx, "search started", mlog.Int64("nq", req.NQ))
-    // Output: {"module":"querynode", "node_id":123, "trace_id":"xxx", "nq":10, ...}
+    // Output: {"module":"querynode", "nodeID":123, "traceID":"xxx", "nq":10, ...}
 }
 ```
 
@@ -195,7 +195,7 @@ ctx = mlog.WithFields(ctx,
 
 // Get propagated fields (for manual propagation scenarios)
 props := mlog.GetPropagated(ctx)
-// props = map[string]string{"collection_name": "my_collection", "collection_id": "12345"}
+// props = map[string]string{"collectionName": "my_collection", "collectionID": "12345"}
 ```
 
 ### gRPC Interceptors
@@ -342,7 +342,7 @@ ctx = mlog.WithFields(ctx,
 mlog.FieldCollectionName(name)
 
 // Not recommended: Hard-coded key strings
-mlog.String("collection_name", name)
+mlog.String("collectionName", name)
 ```
 
 ### 5. Specify Module Name in Server Interceptors
@@ -464,8 +464,8 @@ mlog.Info(ctx, "segment loaded",
 
 // Equivalent raw key usage (not recommended — keys are unexported)
 mlog.Info(ctx, "segment loaded",
-    mlog.Int64("collection_id", 12345),
-    mlog.Int64("segment_id", 67890),
+    mlog.Int64("collectionID", 12345),
+    mlog.Int64("segmentID", 67890),
 )
 ```
 

@@ -6,31 +6,64 @@ import (
 )
 
 // Well-known field keys for consistent logging across Milvus components.
-// All keys use lowercase with underscores for readability and gRPC metadata compatibility.
+// All keys use camelCase in logs. gRPC metadata propagation lowercases these
+// keys on the wire and restores them through wellKnownLowerKeyToLogKey.
 const (
-	keyNodeID         = "node_id"
+	keyNodeID         = "nodeID"
 	keyModule         = "module"
 	keyComponent      = "component"
-	keyTraceID        = "trace_id"
-	keySpanID         = "span_id"
-	keyDbID           = "db_id"
-	keyDbName         = "db_name"
-	keyCollectionID   = "collection_id"
-	keyCollectionName = "collection_name"
-	keyPartitionID    = "partition_id"
-	keyPartitionName  = "partition_name"
-	keySegmentID      = "segment_id"
-	keyIndexID        = "index_id"
-	keyFieldID        = "field_id"
-	keyTaskID         = "task_id"
-	keyBroadcastID    = "broadcast_id"
-	keyJobID          = "job_id"
-	keyBuildID        = "build_id"
+	keyTraceID        = "traceID"
+	keySpanID         = "spanID"
+	keyDbID           = "dbID"
+	keyDbName         = "dbName"
+	keyCollectionID   = "collectionID"
+	keyCollectionName = "collectionName"
+	keyPartitionID    = "partitionID"
+	keyPartitionName  = "partitionName"
+	keySegmentID      = "segmentID"
+	keyIndexID        = "indexID"
+	keyFieldID        = "fieldID"
+	keyTaskID         = "taskID"
+	keyBroadcastID    = "broadcastID"
+	keyJobID          = "jobID"
+	keyBuildID        = "buildID"
 	keyVChannel       = "vchannel"
 	keyPChannel       = "pchannel"
-	keyMessageID      = "message_id"
+	keyMessageID      = "messageID"
 	keyMessage        = "message"
 )
+
+var wellKnownLowerKeyToLogKey = map[string]string{
+	"nodeid":         keyNodeID,
+	"module":         keyModule,
+	"component":      keyComponent,
+	"traceid":        keyTraceID,
+	"spanid":         keySpanID,
+	"dbid":           keyDbID,
+	"dbname":         keyDbName,
+	"collectionid":   keyCollectionID,
+	"collectionname": keyCollectionName,
+	"partitionid":    keyPartitionID,
+	"partitionname":  keyPartitionName,
+	"segmentid":      keySegmentID,
+	"indexid":        keyIndexID,
+	"fieldid":        keyFieldID,
+	"taskid":         keyTaskID,
+	"broadcastid":    keyBroadcastID,
+	"jobid":          keyJobID,
+	"buildid":        keyBuildID,
+	"vchannel":       keyVChannel,
+	"pchannel":       keyPChannel,
+	"messageid":      keyMessageID,
+	"message":        keyMessage,
+}
+
+func restoreWellKnownLogKey(key string) string {
+	if logKey, ok := wellKnownLowerKeyToLogKey[key]; ok {
+		return logKey
+	}
+	return key
+}
 
 const (
 	FieldNameModule    = keyModule
