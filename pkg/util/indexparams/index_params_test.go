@@ -304,6 +304,7 @@ func TestDiskIndexParams(t *testing.T) {
 
 		indexParams, err = UpdateDiskIndexBuildParams(&params, indexParams)
 		assert.NoError(t, err)
+		assert.True(t, len(indexParams) == 7)
 	})
 
 	t.Run("set disk index build params", func(t *testing.T) {
