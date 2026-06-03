@@ -1868,7 +1868,7 @@ class TestCollectionAddField(TestBase):
         )
         assert rsp["code"] == 0, rsp
 
-        rsp = client.add_field(name, field_params)
+        rsp = client.add_struct_field(name, field_params)
         logger.info(f"add struct array field response ({schema_variant}): {rsp}")
         assert rsp["code"] == 0, rsp
 

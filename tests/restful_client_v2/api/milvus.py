@@ -560,6 +560,20 @@ class CollectionClient(Requests):
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()    
 
+    def add_struct_field(self, collection_name, field_params, db_name="default"):
+        """Add struct field"""
+        url = f"{self.endpoint}/v2/vectordb/collections/struct_fields/add"
+        payload = {
+            "collectionName": collection_name,
+            "schema": field_params
+        }
+        if self.db_name is not None:
+            payload["dbName"] = self.db_name
+        if db_name != "default":
+            payload["dbName"] = db_name
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
     def flush(self, collection_name, db_name="default"):
         """Flush collection"""
         url = f"{self.endpoint}/v2/vectordb/collections/flush"

@@ -3652,7 +3652,7 @@ func (s *AddCollectionFieldSuite) TestAddCollectionStructFieldNormal() {
 				return embParams[common.DimKey] == "8" && embParams[common.MaxCapacityKey] == "16"
 			})).Return(merr.Success(), nil).Once()
 
-			req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionFieldCategory, AddAction), bytes.NewReader(tc.requestBody))
+			req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionStructFieldCategory, AddAction), bytes.NewReader(tc.requestBody))
 			w := httptest.NewRecorder()
 			s.testEngine.ServeHTTP(w, req)
 			s.Equal(http.StatusOK, w.Code)
@@ -3662,6 +3662,28 @@ func (s *AddCollectionFieldSuite) TestAddCollectionStructFieldNormal() {
 			s.Equal(int32(0), returnBody.Code)
 		})
 	}
+}
+
+func (s *AddCollectionFieldSuite) TestAddCollectionFieldRejectsStructArray() {
+	requestBody := []byte(`{"collectionName": "book", "schema": {
+		"fieldName": "clips",
+		"dataType": "ArrayOfStruct",
+		"nullable": true,
+		"typeParams": {"max_capacity": 16},
+		"fields": [
+			{"fieldName": "tag", "dataType": "Array", "elementDataType": "VarChar", "elementTypeParams": {"max_length": 64}}
+		]
+	}}`)
+
+	req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionFieldCategory, AddAction), bytes.NewReader(requestBody))
+	w := httptest.NewRecorder()
+	s.testEngine.ServeHTTP(w, req)
+	s.Equal(http.StatusOK, w.Code)
+	returnBody := &ReturnErrMsg{}
+	err := json.Unmarshal(w.Body.Bytes(), returnBody)
+	s.NoError(err)
+	s.Equal(merr.Code(merr.ErrParameterInvalid), returnBody.Code)
+	s.Contains(returnBody.Message, "/v2/vectordb/collections/struct_fields/add")
 }
 
 func (s *AddCollectionFieldSuite) TestAddCollectionFieldFail() {
