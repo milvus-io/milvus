@@ -634,7 +634,7 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 
 	db, err := mt.getDatabaseByIDInternal(ctx, coll.DBID, typeutil.MaxTimestamp)
 	if err != nil {
-		return merr.WrapErrServiceInternalMsg("dbID not found for collection:%d", collectionID)
+		return merr.Wrapf(err, "dbID not found for collection:%d", collectionID)
 	}
 
 	pn := coll.GetPartitionNum(true)

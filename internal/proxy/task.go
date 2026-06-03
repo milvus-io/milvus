@@ -1886,16 +1886,19 @@ func (t *showCollectionsTask) Execute(ctx context.Context) error {
 		}
 
 		if resp == nil {
-			return merr.WrapErrParameterInvalidMsg("failed to show collections")
+			return merr.WrapErrServiceInternalMsg("failed to show collections")
 		}
 
 		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			// update collectionID to collection name, and return new error info to sdk
-			newErrorReason := resp.GetStatus().GetReason()
+			// while preserving the downstream typed code (rebuild via merr.Error).
+			status := resp.GetStatus()
+			newErrorReason := status.GetReason()
 			for _, collectionID := range collectionIDs {
 				newErrorReason = ReplaceID2Name(newErrorReason, collectionID, IDs2Names[collectionID])
 			}
-			return merr.WrapErrParameterInvalidMsg("%s", newErrorReason)
+			status.Reason = newErrorReason
+			return merr.Error(status)
 		}
 
 		t.result = &milvuspb.ShowCollectionsResponse{

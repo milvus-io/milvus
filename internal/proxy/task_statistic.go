@@ -361,10 +361,10 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName stri
 		CollectionID: info.collID,
 	})
 	if err != nil {
-		return nil, nil, merr.WrapErrParameterInvalidMsg("showPartitions failed, collection = %d, partitionIDs = %v, err = %s", collectionID, searchPartitionIDs, err)
+		return nil, nil, merr.Wrapf(err, "showPartitions failed, collection = %d, partitionIDs = %v", collectionID, searchPartitionIDs)
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return nil, nil, merr.WrapErrParameterInvalidMsg("showPartitions failed, collection = %d, partitionIDs = %v, reason = %s", collectionID, searchPartitionIDs, resp.GetStatus().GetReason())
+		return nil, nil, merr.Wrapf(merr.Error(resp.GetStatus()), "showPartitions failed, collection = %d, partitionIDs = %v", collectionID, searchPartitionIDs)
 	}
 
 	loadedMap := make(map[UniqueID]bool)
@@ -389,7 +389,7 @@ func decodeGetStatisticsResults(results []*internalpb.GetStatisticsResponse) ([]
 	ret := make([]map[string]string, len(results))
 	for i, result := range results {
 		if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			return nil, merr.WrapErrParameterInvalidMsg("fail to decode result, reason=%s", result.GetStatus().GetReason())
+			return nil, merr.Wrap(merr.Error(result.GetStatus()), "fail to decode statistics result")
 		}
 		ret[i] = funcutil.KeyValuePair2Map(result.GetStats())
 	}
@@ -747,7 +747,7 @@ func (g *getPartitionStatisticsTask) Execute(ctx context.Context) error {
 
 	result, _ := g.mixCoord.GetPartitionStatistics(ctx, req)
 	if result == nil {
-		return merr.WrapErrParameterInvalidMsg("get partition statistics resp is nil")
+		return merr.WrapErrServiceInternalMsg("get partition statistics resp is nil")
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return merr.Error(result.GetStatus())
