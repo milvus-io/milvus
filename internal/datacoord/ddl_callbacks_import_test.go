@@ -185,7 +185,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterRetur
 	err := server.validateImportRequest(ctx, files, options)
 
 	s.Error(err)
-	s.True(errors.Is(err, merr.ErrImportFailed))
+	s.True(errors.Is(err, merr.ErrOperationNotSupported))
 	s.Contains(err.Error(), "replicating cluster")
 }
 
