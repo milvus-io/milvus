@@ -305,6 +305,10 @@ func FillAiSAQIndexParams(params *paramtable.ComponentParam, indexParams map[str
 		}
 		pqCodeBudgetGBRatio = fmt.Sprintf("%f", extraParams.PQCodeBudgetGBRatio)
 		searchCacheBudgetGBRatio = fmt.Sprintf("%f", extraParams.SearchCacheBudgetGBRatio)
+		pqCacheSize, ok = indexParams[PQCacheSizeKey]
+		if !ok {
+			return errors.New("index param pq_cache_size not exist")
+		}
 	} else {
 		var ok bool
 		diskPQCodeBudgetGBRatio, ok = indexParams[DiskPQCodeBudgetRatioKey]
