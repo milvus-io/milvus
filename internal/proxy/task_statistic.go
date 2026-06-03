@@ -196,7 +196,7 @@ func (g *getStatisticsTask) PostExecute(ctx context.Context) error {
 	select {
 	case <-g.TraceCtx().Done():
 		log.Ctx(ctx).Debug("wait to finish timeout!")
-		return nil
+		return merr.Wrapf(g.TraceCtx().Err(), "GetStatistics wait to finish timeout, msgID=%d", g.ID())
 	default:
 		log.Ctx(ctx).Debug("all get statistics are finished or canceled")
 		g.resultBuf.Range(func(res *internalpb.GetStatisticsResponse) bool {

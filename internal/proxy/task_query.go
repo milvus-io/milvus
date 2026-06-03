@@ -949,7 +949,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	select {
 	case <-t.TraceCtx().Done():
 		log.Warn("proxy", zap.Int64("Query: wait to finish failed, timeout!, msgID:", t.ID()))
-		return nil
+		return merr.Wrapf(t.TraceCtx().Err(), "Query wait to finish timeout, msgID=%d", t.ID())
 	default:
 		log.Debug("all queries are finished or canceled")
 		t.resultBuf.Range(func(res *internalpb.RetrieveResults) bool {
