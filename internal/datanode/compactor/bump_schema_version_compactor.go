@@ -731,7 +731,7 @@ func (t *bumpSchemaVersionCompactionTask) addV3Stats(prefix string, fieldID int6
 	statsRelPath := fmt.Sprintf("_stats/%s.%d/%d", prefix, fieldID, statsID)
 	absStatsPath := path.Join(writerResult.basePath, statsRelPath)
 	if err := packed.WriteFile(t.compactionParams.StorageConfig, absStatsPath, bytes); err != nil {
-		return merr.WrapErrServiceInternal("failed to write V3 stats", err.Error())
+		return merr.Wrap(err, "failed to write V3 stats")
 	}
 	writerResult.v3Stats = append(writerResult.v3Stats, packed.FieldBinlogStatEntry(prefix, fieldID, &datapb.FieldBinlog{
 		FieldID: fieldID,
@@ -996,7 +996,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 		},
 	)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal("failed to commit schema bump V3 manifest", err.Error())
+		return nil, merr.Wrap(err, "failed to commit schema bump V3 manifest")
 	}
 	log.Info("[schema-bump-partial-writer] writer output and bm25 stats committed",
 		zap.String("manifestPath", manifestPath),
