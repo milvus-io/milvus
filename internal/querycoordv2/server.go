@@ -161,7 +161,7 @@ func (s *Server) Register() error {
 func (s *Server) SetSession(session sessionutil.SessionInterface) error {
 	s.session = session
 	if s.session == nil {
-		return merr.WrapErrServiceInternalMsg("session is nil, the etcd client connection may have failed")
+		return merr.WrapErrServiceNotReadyMsg("session is nil, the etcd client connection may have failed")
 	}
 	return nil
 }

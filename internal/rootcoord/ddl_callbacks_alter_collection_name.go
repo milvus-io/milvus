@@ -119,7 +119,7 @@ func (c *Core) validateEncryption(ctx context.Context, oldDBName string, newDBNa
 
 	// Check if either database has encryption enabled
 	if hookutil.IsDBEncrypted(originalDB.Properties) || hookutil.IsDBEncrypted(targetDB.Properties) {
-		return merr.WrapErrServiceInternalMsg("deny to change collection databases due to at least one database enabled encryption, original DB: %s, target DB: %s", oldDBName, newDBName)
+		return merr.WrapErrOperationNotSupportedMsg("deny to change collection databases due to at least one database enabled encryption, original DB: %s, target DB: %s", oldDBName, newDBName)
 	}
 
 	return nil

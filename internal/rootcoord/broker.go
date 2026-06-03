@@ -82,7 +82,7 @@ func (b *ServerBroker) ReleaseCollection(ctx context.Context, collectionID Uniqu
 	}
 
 	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
-		return merr.WrapErrServiceInternalMsg("failed to release collection, code: %s, reason: %s", resp.GetErrorCode(), resp.GetReason())
+		return merr.Error(resp)
 	}
 
 	log.Ctx(ctx).Info("done to release collection", zap.Int64("collection", collectionID))
@@ -105,7 +105,7 @@ func (b *ServerBroker) ReleasePartitions(ctx context.Context, collectionID Uniqu
 	}
 
 	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
-		return merr.WrapErrServiceInternalMsg("release partition failed, reason: %s", resp.GetReason())
+		return merr.Error(resp)
 	}
 
 	log.Info("release partitions done")
@@ -125,7 +125,7 @@ func (b *ServerBroker) SyncNewCreatedPartition(ctx context.Context, collectionID
 	}
 
 	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
-		return merr.WrapErrServiceInternalMsg("sync new partition failed, reason: %s", resp.GetReason())
+		return merr.Error(resp)
 	}
 
 	log.Info("sync new partition done")
@@ -180,7 +180,7 @@ func (b *ServerBroker) WatchChannels(ctx context.Context, info *watchInfo) error
 	}
 
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return merr.WrapErrServiceInternalMsg("failed to watch channels, code: %s, reason: %s", resp.GetStatus().GetErrorCode(), resp.GetStatus().GetReason())
+		return merr.Error(resp.GetStatus())
 	}
 
 	log.Ctx(ctx).Info("done to watch channels", zap.Uint64("ts", info.ts), zap.Int64("collection", info.collectionID), zap.Strings("vChannels", info.vChannels))
@@ -209,7 +209,7 @@ func (b *ServerBroker) DropCollectionIndex(ctx context.Context, collID UniqueID,
 		return err
 	}
 	if rsp.ErrorCode != commonpb.ErrorCode_Success {
-		return merr.WrapErrServiceInternalMsg("%s", rsp.Reason)
+		return merr.Error(rsp)
 	}
 
 	log.Ctx(ctx).Info("done to drop collection index", zap.Int64("collection", collID), zap.Int64s("partitions", partIDs))

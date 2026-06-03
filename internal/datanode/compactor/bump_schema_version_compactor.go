@@ -666,7 +666,7 @@ func (t *bumpSchemaVersionCompactionTask) setupWriter(outputFields []*schemapb.F
 
 	basePath, existingVersion, err := packed.UnmarshalManifestPath(segment.GetManifest())
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal("failed to parse existing manifest for schema bump", err.Error())
+		return nil, merr.WrapErrDataIntegrityMsg("failed to parse existing manifest for schema bump: %s", err.Error())
 	}
 	writerResult, err := t.newV3WriterResult(outputSchema, newColumnGroups, segment, collectionID, basePath, existingVersion)
 	if err != nil {
@@ -788,7 +788,7 @@ func (t *bumpSchemaVersionCompactionTask) preserveDeltaLogsV3(segment *datapb.Co
 
 	basePath, _, err := packed.UnmarshalManifestPath(manifestPath)
 	if err != nil {
-		return "", merr.WrapErrServiceInternal("failed to parse new V3 manifest for delta preservation", err.Error())
+		return "", merr.WrapErrDataIntegrityMsg("failed to parse new V3 manifest for delta preservation: %s", err.Error())
 	}
 
 	deltaEntries := make([]packed.DeltaLogEntry, 0, len(deltaPaths))

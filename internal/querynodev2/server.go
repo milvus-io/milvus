@@ -176,7 +176,7 @@ func (node *QueryNode) initSession() error {
 			common.MaximumScalarIndexEngineVersion),
 		sessionutil.WithIndexNonEncoding())
 	if node.session == nil {
-		return merr.WrapErrServiceInternalMsg("session is nil, the etcd client connection may have failed")
+		return merr.WrapErrServiceNotReadyMsg("session is nil, the etcd client connection may have failed")
 	}
 	node.session.Init(typeutil.QueryNodeRole, node.address, false)
 	sessionutil.SaveServerInfo(typeutil.QueryNodeRole, node.session.ServerID)

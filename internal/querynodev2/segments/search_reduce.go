@@ -312,7 +312,7 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 		}
 	}
 	if err := writeGroupByOutput(ret, acceptedRows, searchResultData, info); err != nil {
-		return ret, merr.WrapErrServiceInternal("failed to construct group by output", err.Error())
+		return ret, merr.Wrap(err, "failed to construct group by output")
 	}
 	if float64(filteredCount) >= 0.3*float64(groupBound) {
 		log.Warn("GroupBy reduce filtered too many results, "+

@@ -140,7 +140,7 @@ func reduceSearchResultDataWithGroupBy(
 
 	singleFieldGroupBy := len(groupByFieldIDs) == 1
 	if err := reduce.ValidateGroupByFieldsPresent(subSearchResultData, groupByFieldIDs, singleFieldGroupBy); err != nil {
-		return ret, merr.WrapErrServiceInternal("failed to construct group by field data builder", err.Error())
+		return ret, merr.Wrap(err, "failed to construct group by field data builder")
 	}
 	if hitNum == 0 {
 		ret.Results.Topks = make([]int64, nq)
@@ -176,7 +176,7 @@ func reduceSearchResultDataWithGroupBy(
 	}
 
 	if err := reduce.WriteGroupByFieldValues(ret.Results, acceptedRows, subSearchResultData, groupByFieldIDs); err != nil {
-		return ret, merr.WrapErrServiceInternal("failed to construct group by field data builder", err.Error())
+		return ret, merr.Wrap(err, "failed to construct group by field data builder")
 	}
 
 	if !metric.PositivelyRelated(metricType) {
@@ -567,7 +567,7 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 	}
 
 	if err := reduce.WriteGroupByFieldValues(ret.Results, acceptedRows, subSearchResultData, groupByFieldIDs); err != nil {
-		return ret, merr.WrapErrServiceInternal("failed to write group by field values", err.Error())
+		return ret, merr.Wrap(err, "failed to write group by field values")
 	}
 	ret.Results.TopK = topK // realTopK is the topK of the nq-th query
 	if !metric.PositivelyRelated(metricType) {
