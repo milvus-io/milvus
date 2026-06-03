@@ -223,6 +223,7 @@ func (s *Schema) ReadProto(p *schemapb.CollectionSchema) *Schema {
 // original (scalar or vector) type.
 func structArrayFieldFromProto(p *schemapb.StructArrayFieldSchema) *Field {
 	structSchema := NewStructSchema()
+	typeParams := KvPairsMap(p.GetTypeParams())
 	for _, sf := range p.GetFields() {
 		field := NewField().ReadProto(sf)
 		// unwrap Array/ArrayOfVector wrapper added by ProtoMessage()
@@ -230,6 +231,11 @@ func structArrayFieldFromProto(p *schemapb.StructArrayFieldSchema) *Field {
 		case schemapb.DataType_Array, schemapb.DataType_ArrayOfVector:
 			field.DataType = FieldType(sf.GetElementType())
 			field.ElementType = 0
+		}
+		if _, ok := typeParams[TypeParamMaxCapacity]; !ok {
+			if maxCapacity, has := field.TypeParams[TypeParamMaxCapacity]; has {
+				typeParams[TypeParamMaxCapacity] = maxCapacity
+			}
 		}
 		structSchema.WithField(field)
 	}
@@ -239,7 +245,7 @@ func structArrayFieldFromProto(p *schemapb.StructArrayFieldSchema) *Field {
 		Description:  p.GetDescription(),
 		DataType:     FieldTypeArray,
 		ElementType:  FieldTypeStruct,
-		TypeParams:   KvPairsMap(p.GetTypeParams()),
+		TypeParams:   typeParams,
 		Nullable:     p.GetNullable(),
 		StructSchema: structSchema,
 	}
