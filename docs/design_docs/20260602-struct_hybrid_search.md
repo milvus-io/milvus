@@ -275,6 +275,9 @@ rerank.
    is omitted, use `max`.
 6. If inferred candidate scope is element-level, reject `element_scope.collapse`
    because no row-level collapse is performed.
+7. Hybrid search supports only plain top-K for struct-array vector sub-searches.
+   Element-level and embedding-list sub-searches reject group-by, range search,
+   and search iterator.
 
 ## Result Semantics
 

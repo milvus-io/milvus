@@ -6227,9 +6227,8 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 	})
 }
 
-// TestSearchTask_ArrayOfVectorHybridSearch verifies the embedding-list side of
-// ArrayOfVector hybrid validation. Element-level struct hybrid behavior is
-// covered separately by TestSearchTask_StructHybridElementScopeValidation.
+// TestSearchTask_ArrayOfVectorHybridSearch verifies ArrayOfVector hybrid
+// validation. Hybrid struct sub-searches only support plain top-K here.
 func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
@@ -6315,6 +6314,10 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 		return buildHybridTaskWithMetric(annsField, metric.MaxSimL2, commonpb.PlaceholderType_EmbListFloatVector, rangeRadius, withIterator, groupByField)
 	}
 
+	buildElementHybridTask := func(annsField string, rangeRadius string, withIterator bool, groupByField string) *searchTask {
+		return buildHybridTaskWithMetric(annsField, metric.L2, commonpb.PlaceholderType_FloatVector, rangeRadius, withIterator, groupByField)
+	}
+
 	t.Run("hybrid with ArrayOfVector EmbList metric plain topK should succeed", func(t *testing.T) {
 		qt := buildHybridTaskWithMetric("emb_vec", metric.MaxSimCosine, commonpb.PlaceholderType_EmbListFloatVector, "", false, "")
 		err := qt.initAdvancedSearchRequest(ctx)
@@ -6326,7 +6329,7 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 		err := qt.initAdvancedSearchRequest(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "range search is not supported for vector array (embedding list) fields in hybrid search")
+		assert.Contains(t, err.Error(), "range search is not supported for vector array (embedding-list) fields in hybrid search")
 	})
 
 	t.Run("hybrid with ArrayOfVector iterator should fail", func(t *testing.T) {
@@ -6334,7 +6337,7 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 		err := qt.initAdvancedSearchRequest(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "search iterator is not supported for vector array (embedding list) fields in hybrid search")
+		assert.Contains(t, err.Error(), "search iterator is not supported for vector array (embedding-list) fields in hybrid search")
 	})
 
 	t.Run("hybrid with ArrayOfVector group by should fail", func(t *testing.T) {
@@ -6342,7 +6345,57 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 		err := qt.initAdvancedSearchRequest(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "group by search is not supported for vector array (embedding list) fields in hybrid search")
+		assert.Contains(t, err.Error(), "group by search is not supported for vector array (embedding-list) fields in hybrid search")
+	})
+
+	t.Run("hybrid with element-level ArrayOfVector plain topK should succeed", func(t *testing.T) {
+		qt := buildElementHybridTask("emb_vec", "", false, "")
+		err := qt.initAdvancedSearchRequest(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("hybrid with element-level ArrayOfVector range search should fail", func(t *testing.T) {
+		qt := buildElementHybridTask("emb_vec", "0.2", false, "")
+		err := qt.initAdvancedSearchRequest(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "range search is not supported for vector array (element-level) fields in hybrid search")
+	})
+
+	t.Run("hybrid with element-level ArrayOfVector iterator should fail", func(t *testing.T) {
+		qt := buildElementHybridTask("emb_vec", "", true, "")
+		err := qt.initAdvancedSearchRequest(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "search iterator is not supported for vector array (element-level) fields in hybrid search")
+	})
+
+	t.Run("hybrid with element-level ArrayOfVector group by should fail", func(t *testing.T) {
+		qt := buildElementHybridTask("emb_vec", "", false, "pk")
+		err := qt.initAdvancedSearchRequest(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "group by search is not supported for vector array (element-level) fields in hybrid search")
+	})
+
+	t.Run("hybrid with normal vector advanced controls should succeed", func(t *testing.T) {
+		tests := []struct {
+			name         string
+			rangeRadius  string
+			withIterator bool
+			groupByField string
+		}{
+			{name: "range", rangeRadius: "0.2"},
+			{name: "iterator", withIterator: true},
+			{name: "group by", groupByField: "scalar_field"},
+		}
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				qt := buildElementHybridTask("regular_vec", test.rangeRadius, test.withIterator, test.groupByField)
+				err := qt.initAdvancedSearchRequest(ctx)
+				assert.NoError(t, err)
+			})
+		}
 	})
 }
 

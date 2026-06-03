@@ -570,21 +570,29 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			subSearchInfo.Collapse = collapseConfig
 		}
 
-		// Hybrid search supports plain top-K on ArrayOfVector fields. Embedding-list
-		// search remains row-level and keeps the same hybrid restrictions as before.
+		// Hybrid search only supports plain top-K on ArrayOfVector fields. Both
+		// element-level and embedding-list searches reject advanced controls here.
 		annsField := typeutil.GetField(t.schema.CollectionSchema, queryInfo.GetQueryFieldId())
-		if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector && subSearchInfo.Kind == hybridSubSearchStructEmbList {
-			if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
-				return merr.WrapErrParameterInvalid("", "",
-					"range search is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
-			}
-			if t.rankParams.GetGroupByFieldId() > 0 {
-				return merr.WrapErrParameterInvalid("", "",
-					"group by search is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
-			}
-			if subIsIterator {
-				return merr.WrapErrParameterInvalid("", "",
-					"search iterator is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
+		if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
+			isStructElementSubSearch := subSearchInfo.Kind == hybridSubSearchStructElement
+			isStructEmbListSubSearch := subSearchInfo.Kind == hybridSubSearchStructEmbList
+			if isStructElementSubSearch || isStructEmbListSubSearch {
+				searchKind := "element-level"
+				if isStructEmbListSubSearch {
+					searchKind = "embedding-list"
+				}
+				if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
+					return merr.WrapErrParameterInvalid("", "",
+						"range search is not supported for vector array ("+searchKind+") fields in hybrid search, fieldName:"+annsField.GetName())
+				}
+				if t.rankParams.GetGroupByFieldId() > 0 || len(t.rankParams.GetGroupByFieldIds()) > 0 {
+					return merr.WrapErrParameterInvalid("", "",
+						"group by search is not supported for vector array ("+searchKind+") fields in hybrid search, fieldName:"+annsField.GetName())
+				}
+				if subIsIterator {
+					return merr.WrapErrParameterInvalid("", "",
+						"search iterator is not supported for vector array ("+searchKind+") fields in hybrid search, fieldName:"+annsField.GetName())
+				}
 			}
 		}
 		t.hybridSubSearchInfos[index] = subSearchInfo
