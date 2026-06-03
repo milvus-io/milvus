@@ -772,10 +772,25 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
 
     setup_data_pointers();
 
-    // Load persisted idx_to_offsets and valid_bitset if available,
+    auto load_valid_bitset = [&]() {
+        valid_bitset_ = TargetBitmap(total_num_rows_, false);
+        auto bitset_entry = reader.ReadEntry("valid_bitset");
+        auto bitset_bytes = valid_bitset_.size_in_bytes();
+        AssertInfo(bitset_entry.data.size() >= bitset_bytes,
+                   "invalid valid_bitset size: expected at least {}, got {}",
+                   bitset_bytes,
+                   bitset_entry.data.size());
+        memcpy(reinterpret_cast<uint8_t*>(valid_bitset_.data()),
+               bitset_entry.data.data(),
+               bitset_bytes);
+    };
+
+    // Load persisted idx_to_offsets and valid_bitset if both are available,
     // otherwise recompute (backward compat with older V3 files).
-    if (reader.HasEntry("idx_to_offsets") && is_mmap_) {
-        // mmap path: stream idx_to_offsets + valid_bitset to disk, then mmap
+    if (reader.HasEntry("idx_to_offsets") && reader.HasEntry("valid_bitset") &&
+        is_mmap_) {
+        // mmap path: stream idx_to_offsets to disk, then mmap it. valid_bitset
+        // stays heap-resident for query masking, matching StringIndexSort.
         mmap_meta_filepath_ =
             (disk_file_manager_ != nullptr
                  ? disk_file_manager_->GetLocalIndexObjectPrefix()
@@ -785,7 +800,6 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
             std::filesystem::path(mmap_meta_filepath_).parent_path());
 
         size_t offsets_bytes = reader.GetEntrySize("idx_to_offsets");
-        size_t bitset_bytes = reader.GetEntrySize("valid_bitset");
 
         {
             auto fw = storage::FileWriter(
@@ -795,13 +809,10 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
             reader.ReadEntryStream(
                 "idx_to_offsets",
                 [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
-            reader.ReadEntryStream(
-                "valid_bitset",
-                [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
             fw.Finish();
         }
 
-        mmap_meta_size_ = offsets_bytes + bitset_bytes;
+        mmap_meta_size_ = offsets_bytes;
         auto meta_file = File::Open(mmap_meta_filepath_, O_RDONLY);
         mmap_meta_data_ = static_cast<char*>(mmap(NULL,
                                                   mmap_meta_size_,
@@ -821,11 +832,9 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
         idx_to_offsets_ptr_ = reinterpret_cast<const int32_t*>(mmap_meta_data_);
         idx_to_offsets_size_ = offsets_bytes / sizeof(int32_t);
 
-        valid_bitset_ = TargetBitmap(total_num_rows_, false);
-        memcpy(reinterpret_cast<uint8_t*>(valid_bitset_.data()),
-               mmap_meta_data_ + offsets_bytes,
-               bitset_bytes);
-    } else if (reader.HasEntry("idx_to_offsets")) {
+        load_valid_bitset();
+    } else if (reader.HasEntry("idx_to_offsets") &&
+               reader.HasEntry("valid_bitset")) {
         // memory path: stream into vector
         idx_to_offsets_.resize(total_num_rows_);
         size_t wo = 0;
@@ -839,11 +848,7 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
         idx_to_offsets_ptr_ = idx_to_offsets_.data();
         idx_to_offsets_size_ = idx_to_offsets_.size();
 
-        valid_bitset_ = TargetBitmap(total_num_rows_, false);
-        auto bitset_entry = reader.ReadEntry("valid_bitset");
-        memcpy(reinterpret_cast<uint8_t*>(valid_bitset_.data()),
-               bitset_entry.data.data(),
-               bitset_entry.data.size());
+        load_valid_bitset();
     } else {
         // Backward compat: recompute from index_data
         idx_to_offsets_.resize(total_num_rows_);

@@ -279,7 +279,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
     char* mmap_data_ = nullptr;
     std::string mmap_filepath_;
 
-    // for mmap: idx_to_offsets + valid_bitset
+    // for mmap: idx_to_offsets
     char* mmap_meta_data_ = nullptr;
     int64_t mmap_meta_size_ = 0;
     std::string mmap_meta_filepath_;
