@@ -196,7 +196,7 @@ InterimSealedIndexTranslator::get_cells(
 
     bool first_build = true;
     for (int i = 0; i < num_chunk; ++i) {
-        auto pw = vec_data_->GetChunk(nullptr, i);
+        auto pw = vec_data_->GetChunk(ctx, i);
         auto chunk = pw.get();
 
         int64_t actual_row_count =

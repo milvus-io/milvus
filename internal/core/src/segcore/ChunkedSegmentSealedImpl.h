@@ -187,10 +187,33 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                   const int64_t* seg_offsets,
                   size_t count,
                   bool is_cosine,
+                  float* distances) const override {
+        return CalcDistByIDs(nullptr,
+                             field_id,
+                             query_dataset,
+                             seg_offsets,
+                             count,
+                             is_cosine,
+                             distances);
+    }
+
+    bool
+    CalcDistByIDs(milvus::OpContext* op_ctx,
+                  FieldId field_id,
+                  const knowhere::DataSetPtr& query_dataset,
+                  const int64_t* seg_offsets,
+                  size_t count,
+                  bool is_cosine,
                   float* distances) const override;
 
     bool
-    IsIndexRefineEnabled(FieldId field_id) const override;
+    IsIndexRefineEnabled(FieldId field_id) const override {
+        return IsIndexRefineEnabled(nullptr, field_id);
+    }
+
+    bool
+    IsIndexRefineEnabled(milvus::OpContext* op_ctx,
+                         FieldId field_id) const override;
 
     DataType
     GetFieldDataType(FieldId fieldId) const override;

@@ -182,7 +182,7 @@ PhyTermFilterExpr::CanSkipSegment() {
         bool res = false;
         for (int i = 0; i < num_data_chunk_; ++i) {
             if (!skip_index.CanSkipBinaryRange<T>(
-                    field_id_, i, min, max, true, true)) {
+                    op_ctx_, field_id_, i, min, max, true, true)) {
                 return false;
             } else {
                 res = true;
@@ -1153,13 +1153,14 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
     };
 
     auto skip_index_func =
-        [&cached_elements = cached_skip_elements_](
+        [op_ctx = op_ctx_, &cached_elements = cached_skip_elements_](
             const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
             auto* elements = std::any_cast<std::vector<T>>(&cached_elements);
             if (elements == nullptr) {
                 return false;
             }
-            return skip_index.CanSkipInQuery<T>(field_id, chunk_id, *elements);
+            return skip_index.CanSkipInQuery<T>(
+                op_ctx, field_id, chunk_id, *elements);
         };
 
     int64_t processed_size;

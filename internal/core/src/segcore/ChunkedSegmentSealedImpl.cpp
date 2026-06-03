@@ -1553,7 +1553,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
             "finish_searching_vector_temperate_binlog_index");
     } else if (get_bit(index_ready_bitset_, field_id)) {
         if (search_info.global_refine_enable_ &&
-            IsIndexRefineEnabled(field_id)) {
+            IsIndexRefineEnabled(op_context, field_id)) {
             search_info.topk_ = GetEffectiveSearchTopk(search_info);
         }
         AssertInfo(vector_indexings_.is_ready(field_id),
@@ -3013,7 +3013,7 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id,
                     return iter;
                 });
             auto accessor =
-                SemiInlineGet(field_index_iter->second->PinCells(nullptr, {0}));
+                SemiInlineGet(field_index_iter->second->PinCells(op_ctx, {0}));
             auto ptr = accessor->get_cell_of(0);
             AssertInfo(ptr->HasRawData(),
                        "text raw data not found, trying to create text index "
@@ -3817,6 +3817,7 @@ ChunkedSegmentSealedImpl::IndexHasRawData(FieldId field_id) const {
 
 bool
 ChunkedSegmentSealedImpl::CalcDistByIDs(
+    milvus::OpContext* op_ctx,
     FieldId field_id,
     const knowhere::DataSetPtr& query_dataset,
     const int64_t* seg_offsets,
@@ -3828,7 +3829,7 @@ ChunkedSegmentSealedImpl::CalcDistByIDs(
     }
     auto field_indexing = vector_indexings_.get_field_indexing(field_id);
     auto accessor =
-        SemiInlineGet(field_indexing->indexing_->PinCells(nullptr, {0}));
+        SemiInlineGet(field_indexing->indexing_->PinCells(op_ctx, {0}));
     auto vec_index =
         dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
     if (vec_index == nullptr) {
@@ -3852,7 +3853,7 @@ ChunkedSegmentSealedImpl::CalcDistByIDs(
         labels = physical_offsets.data();
     }
     auto res = vec_index->CalcDistByIDs(
-        query_dataset, BitsetView(), labels, count, is_cosine, nullptr);
+        query_dataset, BitsetView(), labels, count, is_cosine, op_ctx);
     if (!res.has_value()) {
         return false;
     }
@@ -3865,13 +3866,14 @@ ChunkedSegmentSealedImpl::CalcDistByIDs(
 }
 
 bool
-ChunkedSegmentSealedImpl::IsIndexRefineEnabled(FieldId field_id) const {
+ChunkedSegmentSealedImpl::IsIndexRefineEnabled(milvus::OpContext* op_ctx,
+                                               FieldId field_id) const {
     if (!vector_indexings_.is_ready(field_id)) {
         return false;
     }
     auto field_indexing = vector_indexings_.get_field_indexing(field_id);
     auto accessor =
-        SemiInlineGet(field_indexing->indexing_->PinCells(nullptr, {0}));
+        SemiInlineGet(field_indexing->indexing_->PinCells(op_ctx, {0}));
     auto vec_index =
         dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
     return vec_index != nullptr && vec_index->IsIndexRefineEnabled();
