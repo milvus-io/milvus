@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -49,7 +50,7 @@ type CompactionPlanHandlerSuite struct {
 	suite.Suite
 
 	mockMeta    *MockCompactionMeta
-	mockAlloc   *allocator.MockAllocator
+	mockAlloc   allocator.Allocator
 	handler     *compactionInspector
 	mockHandler *NMockHandler
 }
@@ -57,7 +58,9 @@ type CompactionPlanHandlerSuite struct {
 func (s *CompactionPlanHandlerSuite) SetupTest() {
 	s.mockMeta = NewMockCompactionMeta(s.T())
 	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
-	s.mockAlloc = allocator.NewMockAllocator(s.T())
+	mockAlloc := allocator.NewMockAllocator(s.T())
+	mockAlloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(1000), nil).Maybe()
+	s.mockAlloc = mockAlloc
 	mockScheduler := task.NewMockGlobalScheduler(s.T())
 	s.handler = newCompactionInspector(s.mockMeta, s.mockAlloc, nil, mockScheduler, mockScheduler, newMockVersionManager())
 	s.mockHandler = NewNMockHandler(s.T())
@@ -590,6 +593,8 @@ func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 	s.NoError(err)
 	t := handler.getCompactionTask(1)
 	s.NotNil(t)
+	s.Equal(uint64(1000), t.GetTaskProto().GetCreateTs())
+	s.Equal(t.GetTaskProto().GetStartTime(), tsoutil.PhysicalTime(t.GetTaskProto().GetCreateTs()).Unix())
 	task.PlanID = 2
 	err = s.handler.enqueueCompaction(task)
 	s.NoError(err)

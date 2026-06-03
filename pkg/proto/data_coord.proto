@@ -463,6 +463,10 @@ message SegmentInfo {
   // type rewrites row timestamps — stale rows always need commit_ts protection
   // until TTL naturally expires using max(row_ts, commit_ts).
   uint64 commit_timestamp = 36;
+
+  // create_ts records the planning/create timestamp for replacement segment metadata.
+  // Legacy segments keep the zero value, which means unknown.
+  uint64 create_ts = 37;
 }
 
 message SegmentStartPosition {
@@ -1367,6 +1371,38 @@ enum CompactionTaskState {
   statistic = 10;
 }
 
+enum CompactionReasonState {
+  REASON_STATE_UNKNOWN = 0;
+  REASON_STATE_ACTIVE = 1;
+  REASON_STATE_INACTIVE = 2;
+  REASON_STATE_DONE = 3;
+  REASON_STATE_DROPPED = 4;
+}
+
+enum CompactionReasonType {
+  REASON_INTENT_UNKNOWN = 0;
+  REASON_INTENT_REWRITE = 1;
+}
+
+message CompactionReasonScope {
+  int64 collectionID = 1;
+  int64 partitionID = 2;
+  string channel = 3;
+  repeated int64 segmentIDs = 4;
+}
+
+message CompactionReasonRecord {
+  int64 reasonID = 1;
+  CompactionReasonScope scope = 2;
+  CompactionReasonType reason_type = 3;
+  map<string, string> properties = 4;
+  uint64 expectedTS = 5;
+  int32 tail_limit = 6;
+  CompactionReasonState state = 7;
+  uint64 createdAtTS = 8;
+  uint64 droppedAtTS = 9;
+}
+
 message CompactionTask{
   int64 planID = 1;
   int64 triggerID = 2;
@@ -1397,6 +1433,7 @@ message CompactionTask{
   repeated int64 tmpSegments = 27;
   IDRange pre_allocated_segmentIDs = 28;
   repeated schema.FunctionSchema diff_functions = 29;
+  uint64 create_ts = 30;
 }
 
 message PartitionStatsInfo {

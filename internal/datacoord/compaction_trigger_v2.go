@@ -51,6 +51,7 @@ const (
 	TriggerTypeForceMerge
 	TriggerTypeStorageVersionUpgrade
 	TriggerTypeBumpSchemaVersion
+	TriggerTypeReasonRewrite
 )
 
 type TickerType int8
@@ -61,13 +62,14 @@ const (
 	SingleTicker
 	BumpSchemaVersionTicker
 	StorageVersionTicker
+	ReasonRecordTicker
 )
 
 func (t CompactionTriggerType) GetCompactionType() datapb.CompactionType {
 	switch t {
 	case TriggerTypeLevelZeroViewChange, TriggerTypeLevelZeroViewIDLE, TriggerTypeLevelZeroViewManual:
 		return datapb.CompactionType_Level0DeleteCompaction
-	case TriggerTypeSegmentSizeViewChange, TriggerTypeSingle, TriggerTypeForceMerge:
+	case TriggerTypeSegmentSizeViewChange, TriggerTypeSingle, TriggerTypeForceMerge, TriggerTypeReasonRewrite:
 		return datapb.CompactionType_MixCompaction
 	case TriggerTypeClustering:
 		return datapb.CompactionType_ClusteringCompaction
@@ -104,6 +106,8 @@ func (t CompactionTriggerType) String() string {
 		return "StorageVersionUpgrade"
 	case TriggerTypeBumpSchemaVersion:
 		return "BumpSchemaVersion"
+	case TriggerTypeReasonRewrite:
+		return "ReasonRewrite"
 	default:
 		return ""
 	}
@@ -147,6 +151,7 @@ type CompactionTriggerManager struct {
 	forceMergePolicy            *forceMergeCompactionPolicy
 	upgradeStorageVersionPolicy *storageVersionUpgradePolicy
 	bumpSchemaVersionPolicy     *bumpSchemaVersionPolicy
+	reasonPolicy                *compactionReasonPolicy
 
 	cancel  context.CancelFunc
 	closeWg sync.WaitGroup
@@ -171,6 +176,9 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, ins
 	m.forceMergePolicy = newForceMergeCompactionPolicy(meta, m.allocator, m.handler)
 	m.upgradeStorageVersionPolicy = newStorageVersionUpgradePolicy(meta, m.allocator, m.handler, versionManager)
 	m.bumpSchemaVersionPolicy = newBumpSchemaVersionPolicy(meta, m.allocator, m.handler)
+	if Params.DataCoordCfg.EnableCompactionReasonRecord.GetAsBool() {
+		m.reasonPolicy = newCompactionReasonPolicy(meta)
+	}
 
 	// Initialize policies map for ticker handling
 	m.policies[L0Ticker] = m.l0Policy
@@ -178,6 +186,9 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, ins
 	m.policies[SingleTicker] = m.singlePolicy
 	m.policies[BumpSchemaVersionTicker] = m.bumpSchemaVersionPolicy
 	m.policies[StorageVersionTicker] = m.upgradeStorageVersionPolicy
+	if m.reasonPolicy != nil {
+		m.policies[ReasonRecordTicker] = m.reasonPolicy
+	}
 	return m
 }
 
@@ -226,6 +237,8 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 	defer storageVersionTicker.Stop()
 	bumpSchemaVersionTicker := time.NewTicker(Params.DataCoordCfg.BumpSchemaVersionCompactionTriggerInterval.GetAsDuration(time.Second))
 	defer bumpSchemaVersionTicker.Stop()
+	reasonRecordTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
+	defer reasonRecordTicker.Stop()
 	log.Info("Compaction trigger manager start")
 	for {
 		select {
@@ -242,6 +255,10 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 			m.handleTicker(ctx, StorageVersionTicker)
 		case <-bumpSchemaVersionTicker.C:
 			m.handleTicker(ctx, BumpSchemaVersionTicker)
+		case <-reasonRecordTicker.C:
+			if _, exists := m.policies[ReasonRecordTicker]; exists {
+				m.handleTicker(ctx, ReasonRecordTicker)
+			}
 		case segID := <-getStatsTaskChSingleton():
 			log.Info("receive new segment to trigger sort compaction", zap.Int64("segmentID", segID))
 			view := m.singlePolicy.triggerSegmentSortCompaction(ctx, segID)
@@ -367,7 +384,7 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 					m.SubmitL0ViewToScheduler(ctx, outView)
 				case TriggerTypeClustering:
 					m.SubmitClusteringViewToScheduler(ctx, outView)
-				case TriggerTypeSingle, TriggerTypeSort, TriggerTypeStorageVersionUpgrade:
+				case TriggerTypeSingle, TriggerTypeSort, TriggerTypeStorageVersionUpgrade, TriggerTypeReasonRewrite:
 					m.SubmitSingleViewToScheduler(ctx, outView, eventType)
 				case TriggerTypeForceMerge:
 					m.SubmitForceMergeViewToScheduler(ctx, outView)

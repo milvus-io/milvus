@@ -517,6 +517,53 @@ func (_c *DataCoordCatalog_DropChannelCheckpoint_Call) RunAndReturn(run func(con
 	return _c
 }
 
+// DropCompactionReasonRecord provides a mock function with given fields: ctx, record
+func (_m *DataCoordCatalog) DropCompactionReasonRecord(ctx context.Context, record *datapb.CompactionReasonRecord) error {
+	ret := _m.Called(ctx, record)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropCompactionReasonRecord")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionReasonRecord) error); ok {
+		r0 = rf(ctx, record)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_DropCompactionReasonRecord_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropCompactionReasonRecord'
+type DataCoordCatalog_DropCompactionReasonRecord_Call struct {
+	*mock.Call
+}
+
+// DropCompactionReasonRecord is a helper method to define mock.On call
+//   - ctx context.Context
+//   - record *datapb.CompactionReasonRecord
+func (_e *DataCoordCatalog_Expecter) DropCompactionReasonRecord(ctx interface{}, record interface{}) *DataCoordCatalog_DropCompactionReasonRecord_Call {
+	return &DataCoordCatalog_DropCompactionReasonRecord_Call{Call: _e.mock.On("DropCompactionReasonRecord", ctx, record)}
+}
+
+func (_c *DataCoordCatalog_DropCompactionReasonRecord_Call) Run(run func(ctx context.Context, record *datapb.CompactionReasonRecord)) *DataCoordCatalog_DropCompactionReasonRecord_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.CompactionReasonRecord))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropCompactionReasonRecord_Call) Return(_a0 error) *DataCoordCatalog_DropCompactionReasonRecord_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropCompactionReasonRecord_Call) RunAndReturn(run func(context.Context, *datapb.CompactionReasonRecord) error) *DataCoordCatalog_DropCompactionReasonRecord_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropCompactionTask provides a mock function with given fields: ctx, task
 func (_m *DataCoordCatalog) DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
 	ret := _m.Called(ctx, task)
@@ -1448,6 +1495,64 @@ func (_c *DataCoordCatalog_ListChannelCheckpoint_Call) Return(_a0 map[string]*ms
 }
 
 func (_c *DataCoordCatalog_ListChannelCheckpoint_Call) RunAndReturn(run func(context.Context) (map[string]*msgpb.MsgPosition, error)) *DataCoordCatalog_ListChannelCheckpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListCompactionReasonRecords provides a mock function with given fields: ctx
+func (_m *DataCoordCatalog) ListCompactionReasonRecords(ctx context.Context) ([]*datapb.CompactionReasonRecord, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListCompactionReasonRecords")
+	}
+
+	var r0 []*datapb.CompactionReasonRecord
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*datapb.CompactionReasonRecord, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) []*datapb.CompactionReasonRecord); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*datapb.CompactionReasonRecord)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoordCatalog_ListCompactionReasonRecords_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListCompactionReasonRecords'
+type DataCoordCatalog_ListCompactionReasonRecords_Call struct {
+	*mock.Call
+}
+
+// ListCompactionReasonRecords is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *DataCoordCatalog_Expecter) ListCompactionReasonRecords(ctx interface{}) *DataCoordCatalog_ListCompactionReasonRecords_Call {
+	return &DataCoordCatalog_ListCompactionReasonRecords_Call{Call: _e.mock.On("ListCompactionReasonRecords", ctx)}
+}
+
+func (_c *DataCoordCatalog_ListCompactionReasonRecords_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_ListCompactionReasonRecords_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListCompactionReasonRecords_Call) Return(_a0 []*datapb.CompactionReasonRecord, _a1 error) *DataCoordCatalog_ListCompactionReasonRecords_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListCompactionReasonRecords_Call) RunAndReturn(run func(context.Context) ([]*datapb.CompactionReasonRecord, error)) *DataCoordCatalog_ListCompactionReasonRecords_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2615,6 +2720,53 @@ func (_c *DataCoordCatalog_SaveChannelCheckpoints_Call) RunAndReturn(run func(co
 	return _c
 }
 
+// SaveCompactionReasonRecord provides a mock function with given fields: ctx, record
+func (_m *DataCoordCatalog) SaveCompactionReasonRecord(ctx context.Context, record *datapb.CompactionReasonRecord) error {
+	ret := _m.Called(ctx, record)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveCompactionReasonRecord")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionReasonRecord) error); ok {
+		r0 = rf(ctx, record)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_SaveCompactionReasonRecord_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveCompactionReasonRecord'
+type DataCoordCatalog_SaveCompactionReasonRecord_Call struct {
+	*mock.Call
+}
+
+// SaveCompactionReasonRecord is a helper method to define mock.On call
+//   - ctx context.Context
+//   - record *datapb.CompactionReasonRecord
+func (_e *DataCoordCatalog_Expecter) SaveCompactionReasonRecord(ctx interface{}, record interface{}) *DataCoordCatalog_SaveCompactionReasonRecord_Call {
+	return &DataCoordCatalog_SaveCompactionReasonRecord_Call{Call: _e.mock.On("SaveCompactionReasonRecord", ctx, record)}
+}
+
+func (_c *DataCoordCatalog_SaveCompactionReasonRecord_Call) Run(run func(ctx context.Context, record *datapb.CompactionReasonRecord)) *DataCoordCatalog_SaveCompactionReasonRecord_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.CompactionReasonRecord))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveCompactionReasonRecord_Call) Return(_a0 error) *DataCoordCatalog_SaveCompactionReasonRecord_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveCompactionReasonRecord_Call) RunAndReturn(run func(context.Context, *datapb.CompactionReasonRecord) error) *DataCoordCatalog_SaveCompactionReasonRecord_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SaveCompactionTask provides a mock function with given fields: ctx, task
 func (_m *DataCoordCatalog) SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
 	ret := _m.Called(ctx, task)
@@ -3367,6 +3519,55 @@ func (_c *DataCoordCatalog_ShouldDropChannel_Call) Return(_a0 bool) *DataCoordCa
 }
 
 func (_c *DataCoordCatalog_ShouldDropChannel_Call) RunAndReturn(run func(context.Context, string) bool) *DataCoordCatalog_ShouldDropChannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateCompactionReasonRecordState provides a mock function with given fields: ctx, reasonID, state, droppedAtTS
+func (_m *DataCoordCatalog) UpdateCompactionReasonRecordState(ctx context.Context, reasonID int64, state datapb.CompactionReasonState, droppedAtTS uint64) error {
+	ret := _m.Called(ctx, reasonID, state, droppedAtTS)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateCompactionReasonRecordState")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, datapb.CompactionReasonState, uint64) error); ok {
+		r0 = rf(ctx, reasonID, state, droppedAtTS)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_UpdateCompactionReasonRecordState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateCompactionReasonRecordState'
+type DataCoordCatalog_UpdateCompactionReasonRecordState_Call struct {
+	*mock.Call
+}
+
+// UpdateCompactionReasonRecordState is a helper method to define mock.On call
+//   - ctx context.Context
+//   - reasonID int64
+//   - state datapb.CompactionReasonState
+//   - droppedAtTS uint64
+func (_e *DataCoordCatalog_Expecter) UpdateCompactionReasonRecordState(ctx interface{}, reasonID interface{}, state interface{}, droppedAtTS interface{}) *DataCoordCatalog_UpdateCompactionReasonRecordState_Call {
+	return &DataCoordCatalog_UpdateCompactionReasonRecordState_Call{Call: _e.mock.On("UpdateCompactionReasonRecordState", ctx, reasonID, state, droppedAtTS)}
+}
+
+func (_c *DataCoordCatalog_UpdateCompactionReasonRecordState_Call) Run(run func(ctx context.Context, reasonID int64, state datapb.CompactionReasonState, droppedAtTS uint64)) *DataCoordCatalog_UpdateCompactionReasonRecordState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(datapb.CompactionReasonState), args[3].(uint64))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_UpdateCompactionReasonRecordState_Call) Return(_a0 error) *DataCoordCatalog_UpdateCompactionReasonRecordState_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_UpdateCompactionReasonRecordState_Call) RunAndReturn(run func(context.Context, int64, datapb.CompactionReasonState, uint64) error) *DataCoordCatalog_UpdateCompactionReasonRecordState_Call {
 	_c.Call.Return(run)
 	return _c
 }

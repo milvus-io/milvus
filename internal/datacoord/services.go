@@ -1297,6 +1297,22 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
+	if Params.DataCoordCfg.EnableCompactionReasonRecord.GetAsBool() &&
+		!req.GetMajorCompaction() &&
+		!req.GetL0Compaction() &&
+		req.GetTargetSize() == 0 {
+		reasonID, err := s.saveManualRewriteCompactionReason(ctx, req)
+		if err != nil {
+			log.Error("failed to record manual rewrite compaction reason", zap.Error(err))
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+		resp.CompactionID = reasonID
+		resp.CompactionPlanCount = 0
+		log.Info("success to record manual rewrite compaction reason", zap.Int64("compactionID", reasonID))
+		return resp, nil
+	}
+
 	var id int64
 	var err error
 	if req.GetMajorCompaction() || req.GetL0Compaction() || req.GetTargetSize() != 0 {
@@ -1328,6 +1344,37 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 	log.Info("success to trigger manual compaction", zap.Bool("isL0Compaction", req.GetL0Compaction()),
 		zap.Bool("isMajorCompaction", req.GetMajorCompaction()), zap.Int64("targetSize", req.GetTargetSize()), zap.Int64("compactionID", id), zap.Int("taskNum", taskCnt))
 	return resp, nil
+}
+
+func (s *Server) saveManualRewriteCompactionReason(ctx context.Context, req *milvuspb.ManualCompactionRequest) (int64, error) {
+	reasonMeta := s.meta.GetCompactionReasonMeta()
+	if reasonMeta == nil {
+		return 0, merr.WrapErrServiceInternal("compaction reason meta is not initialized")
+	}
+
+	reasonID, createdAtTS, err := allocCompactionReasonIdentity(ctx, s.allocator)
+	if err != nil {
+		return 0, err
+	}
+
+	record := &datapb.CompactionReasonRecord{
+		ReasonID: reasonID,
+		Scope: &datapb.CompactionReasonScope{
+			CollectionID: req.GetCollectionID(),
+			PartitionID:  req.GetPartitionId(),
+			Channel:      req.GetChannel(),
+			SegmentIDs:   append([]int64(nil), req.GetSegmentIds()...),
+		},
+		ReasonType:  datapb.CompactionReasonType_REASON_INTENT_REWRITE,
+		ExpectedTS:  createdAtTS,
+		TailLimit:   0,
+		State:       datapb.CompactionReasonState_REASON_STATE_ACTIVE,
+		CreatedAtTS: createdAtTS,
+	}
+	if err := reasonMeta.SaveCompactionReasonRecord(ctx, record); err != nil {
+		return 0, err
+	}
+	return reasonID, nil
 }
 
 // GetCompactionState gets the state of a compaction

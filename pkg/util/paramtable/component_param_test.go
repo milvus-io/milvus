@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -928,6 +929,24 @@ func TestComponentParam(t *testing.T) {
 		params.Save("common.enableVectorClusteringKey", "true")
 		assert.Equal(t, true, Params.EnableVectorClusteringKey.GetAsBool())
 	})
+}
+
+func TestDataCoordCompactionReasonRecordConfig(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true))
+	var params ComponentParam
+	params.Init(base)
+
+	cfg := &params.DataCoordCfg
+	assert.Equal(t, "dataCoord.compaction.reasonRecord.enabled", cfg.EnableCompactionReasonRecord.Key)
+	assert.Equal(t, "false", cfg.EnableCompactionReasonRecord.DefaultValue)
+	assert.False(t, cfg.EnableCompactionReasonRecord.GetAsBool())
+
+	base.Save(cfg.EnableCompactionReasonRecord.Key, "true")
+	assert.True(t, cfg.EnableCompactionReasonRecord.GetAsBool())
+
+	field, ok := reflect.TypeOf(dataCoordConfig{}).FieldByName("EnableCompactionReasonRecord")
+	assert.True(t, ok)
+	assert.Equal(t, "true", field.Tag.Get("refreshable"))
 }
 
 func TestForbiddenItem(t *testing.T) {

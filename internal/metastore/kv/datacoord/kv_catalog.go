@@ -950,6 +950,65 @@ func (kc *Catalog) DropCompactionTask(ctx context.Context, task *datapb.Compacti
 	return kc.MetaKv.Remove(ctx, key)
 }
 
+func (kc *Catalog) ListCompactionReasonRecords(ctx context.Context) ([]*datapb.CompactionReasonRecord, error) {
+	records := make([]*datapb.CompactionReasonRecord, 0)
+
+	applyFn := func(key []byte, value []byte) error {
+		record := &datapb.CompactionReasonRecord{}
+		if err := proto.Unmarshal(value, record); err != nil {
+			return err
+		}
+		records = append(records, record)
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(ctx, CompactionReasonRecordPrefix+"/", kc.paginationSize, applyFn)
+	if err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func (kc *Catalog) SaveCompactionReasonRecord(ctx context.Context, record *datapb.CompactionReasonRecord) error {
+	if record == nil {
+		return nil
+	}
+	cloned := proto.Clone(record).(*datapb.CompactionReasonRecord)
+	key, value, err := buildCompactionReasonRecordKV(cloned)
+	if err != nil {
+		return err
+	}
+	return kc.SaveByBatch(ctx, map[string]string{key: value})
+}
+
+func (kc *Catalog) UpdateCompactionReasonRecordState(ctx context.Context, reasonID int64, state datapb.CompactionReasonState, droppedAtTS uint64) error {
+	key := buildCompactionReasonRecordPath(reasonID)
+	value, err := kc.MetaKv.Load(ctx, key)
+	if err != nil {
+		return err
+	}
+
+	record := &datapb.CompactionReasonRecord{}
+	if err := proto.Unmarshal([]byte(value), record); err != nil {
+		return err
+	}
+	record.State = state
+	if state == datapb.CompactionReasonState_REASON_STATE_DROPPED {
+		record.DroppedAtTS = droppedAtTS
+	} else {
+		record.DroppedAtTS = 0
+	}
+	return kc.SaveCompactionReasonRecord(ctx, record)
+}
+
+func (kc *Catalog) DropCompactionReasonRecord(ctx context.Context, record *datapb.CompactionReasonRecord) error {
+	if record == nil {
+		return nil
+	}
+	key := buildCompactionReasonRecordPath(record.GetReasonID())
+	return kc.MetaKv.Remove(ctx, key)
+}
+
 func (kc *Catalog) ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error) {
 	tasks := make([]*indexpb.AnalyzeTask, 0)
 
