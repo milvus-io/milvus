@@ -380,7 +380,7 @@ func toMB[T constraints.Integer | constraints.Float](mem T) T {
 // otherwise returns ErrServiceNotReady wrapped with current state
 func CheckHealthy(stateCode commonpb.StateCode) error {
 	if stateCode != commonpb.StateCode_Healthy {
-		return ErrServiceNotReady
+		return Wrapf(ErrServiceNotReady, "state code: %s", stateCode.String())
 	}
 	return nil
 }
