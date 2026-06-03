@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <cstdint>
 #include <map>
 #include <string>
 #include <utility>
@@ -254,7 +255,11 @@ static const auto kIndexLoadTestValues = ::testing::Values(
         {2UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, 0UL, false}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "BITMAP"}, {"mmap", "true"}, {"field_type", "array"}},
-        {0UL, 2UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, false}),
+        {1UL * 1024 * 1024 * 1024,
+         2UL * 1024 * 1024 * 1024,
+         0UL,
+         1UL * 1024 * 1024 * 1024,
+         false}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "HYBRID"}, {"mmap", "true"}, {"field_type", "string"}},
         {2UL * 1024 * 1024 * 1024,
@@ -371,6 +376,52 @@ TEST(IndexLoadTest, ScalarSortMmapEstimateIncludesValidBitset) {
     ASSERT_EQ(request.final_disk_cost, kIndexSize);
     ASSERT_EQ(request.max_memory_cost,
               kValidBitsetBytes + stream_memory_overhead);
+    ASSERT_EQ(request.max_disk_cost, kIndexSize);
+    ASSERT_TRUE(request.has_raw_data);
+}
+
+TEST(IndexLoadTest, MarisaMmapEstimateReservesLegacyCsrFallback) {
+    constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;
+    constexpr int64_t kNumRows = 1025;
+    constexpr uint64_t kLegacyCsrResidentBytes =
+        (2 * static_cast<uint64_t>(kNumRows) + 1) * sizeof(uint32_t);
+    constexpr uint64_t kLegacyCsrPeakBytes =
+        (3 * static_cast<uint64_t>(kNumRows) + 1) * sizeof(uint32_t);
+
+    milvus::segcore::LoadIndexInfo loadIndexInfo;
+    loadIndexInfo.collection_id = 1;
+    loadIndexInfo.partition_id = 2;
+    loadIndexInfo.segment_id = 3;
+    loadIndexInfo.field_id = 4;
+    loadIndexInfo.field_type = milvus::DataType::STRING;
+    loadIndexInfo.element_type = milvus::DataType::NONE;
+    loadIndexInfo.enable_mmap = true;
+    loadIndexInfo.index_id = 5;
+    loadIndexInfo.index_build_id = 6;
+    loadIndexInfo.index_version = 1;
+    loadIndexInfo.index_params = {
+        {"index_type", "TRIE"},
+        {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"},
+    };
+    loadIndexInfo.index_files = {"/tmp/index/1"};
+    loadIndexInfo.index = nullptr;
+    loadIndexInfo.cache_index = nullptr;
+    loadIndexInfo.uri = "";
+    loadIndexInfo.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    loadIndexInfo.index_size = kIndexSize;
+    loadIndexInfo.num_rows = kNumRows;
+
+    auto request = EstimateLoadIndexResource(&loadIndexInfo);
+    auto stream_memory_overhead = std::min<uint64_t>(
+        kIndexSize,
+        milvus::storage::TransientMemoryBudget::GetEntryStreamBudget()
+            .CapacityBytes());
+
+    ASSERT_EQ(request.final_memory_cost, kLegacyCsrResidentBytes);
+    ASSERT_EQ(request.final_disk_cost, kIndexSize);
+    ASSERT_EQ(request.max_memory_cost,
+              kLegacyCsrPeakBytes + stream_memory_overhead);
     ASSERT_EQ(request.max_disk_cost, kIndexSize);
     ASSERT_TRUE(request.has_raw_data);
 }

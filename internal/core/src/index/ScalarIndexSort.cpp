@@ -784,6 +784,15 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                bitset_entry.data.data(),
                bitset_bytes);
     };
+    auto get_idx_to_offsets_bytes = [&]() {
+        auto offsets_bytes = reader.GetEntrySize("idx_to_offsets");
+        auto expected_offsets_bytes = total_num_rows_ * sizeof(int32_t);
+        AssertInfo(offsets_bytes == expected_offsets_bytes,
+                   "invalid idx_to_offsets size: expected {}, got {}",
+                   expected_offsets_bytes,
+                   offsets_bytes);
+        return offsets_bytes;
+    };
 
     // Load persisted idx_to_offsets and valid_bitset if both are available,
     // otherwise recompute (backward compat with older V3 files).
@@ -799,7 +808,7 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
         std::filesystem::create_directories(
             std::filesystem::path(mmap_meta_filepath_).parent_path());
 
-        size_t offsets_bytes = reader.GetEntrySize("idx_to_offsets");
+        auto offsets_bytes = get_idx_to_offsets_bytes();
 
         {
             auto fw = storage::FileWriter(
@@ -836,6 +845,7 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
     } else if (reader.HasEntry("idx_to_offsets") &&
                reader.HasEntry("valid_bitset")) {
         // memory path: stream into vector
+        auto offsets_bytes = get_idx_to_offsets_bytes();
         idx_to_offsets_.resize(total_num_rows_);
         size_t wo = 0;
         reader.ReadEntryStream(
@@ -845,6 +855,11 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                        len);
                 wo += len;
             });
+        AssertInfo(wo == offsets_bytes,
+                   "idx_to_offsets stream read size mismatch: got {}, "
+                   "expected {}",
+                   wo,
+                   offsets_bytes);
         idx_to_offsets_ptr_ = idx_to_offsets_.data();
         idx_to_offsets_size_ = idx_to_offsets_.size();
 

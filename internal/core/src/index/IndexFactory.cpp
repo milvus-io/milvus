@@ -18,6 +18,8 @@
 
 #include <assert.h>
 #include <algorithm>
+#include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -86,6 +88,25 @@ BitsetBytes(int64_t num_rows) {
         return 0;
     }
     return (static_cast<uint64_t>(num_rows) + 7) / 8;
+}
+
+uint64_t
+MarisaLegacyCsrBytes(int64_t num_rows, uint64_t arrays_per_row) {
+    if (num_rows <= 0) {
+        return 0;
+    }
+
+    auto rows = static_cast<uint64_t>(num_rows);
+    auto max_rows =
+        (std::numeric_limits<uint64_t>::max() / sizeof(uint32_t) - 1) /
+        arrays_per_row;
+    if (rows > max_rows) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+
+    // Fallback CSR has csr_offsets_ <= num_rows and csr_index_ <= num_rows + 1.
+    // During rebuild, fill_offsets also holds a temporary write_pos copy.
+    return (arrays_per_row * rows + 1) * sizeof(uint32_t);
 }
 
 }  // namespace
@@ -435,10 +456,16 @@ IndexFactory::ScalarIndexLoadResource(
     } else if (index_type == milvus::index::MARISA_TRIE ||
                index_type == milvus::index::MARISA_TRIE_UPPER) {
         if (mmap_enable) {
-            // V3 streaming: trie streamed to disk + mmap, str_ids in memory
-            request.final_memory_cost = 0;
+            // V3 streaming: trie, str_ids, and persisted CSR are mmap'd.
+            // Old V3 files do not have CSR entries, so LoadEntries rebuilds
+            // CSR into heap vectors. Estimate a conservative legacy upper
+            // bound because resource estimation cannot inspect entries here.
+            auto legacy_csr_resident_bytes = MarisaLegacyCsrBytes(num_rows, 2);
+            auto legacy_csr_peak_bytes = MarisaLegacyCsrBytes(num_rows, 3);
+            request.final_memory_cost = legacy_csr_resident_bytes;
             request.final_disk_cost = index_size_in_bytes;
-            request.max_memory_cost = stream_memory_overhead;
+            request.max_memory_cost =
+                legacy_csr_peak_bytes + stream_memory_overhead;
             request.max_disk_cost = index_size_in_bytes;
         } else {
             // V3 streaming: trie via temp file + read, str_ids pre-allocated
