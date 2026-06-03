@@ -2172,7 +2172,8 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
         """
         target: test alter function with invalid endpoint
         method: create collection with valid function, alter to use invalid endpoint
-        expected: error indicating endpoint unreachable (code=2400)
+        expected: error indicating endpoint unreachable (code=2, ServiceUnavailable:
+                  a transport/connect failure to the model backend is retryable)
         """
         self._connect()
         dim = 768
@@ -2213,7 +2214,9 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
             assert False, "Expected exception for invalid endpoint"
         except Exception as e:
             log.info(f"Expected error: {e}")
-            assert e.code == 2400
+            # transport/connect failure to the model backend is now classified as
+            # ServiceUnavailable (2, retryable) rather than FunctionFailed (2400)
+            assert e.code == 2
             assert "invalid_endpoint_12345" in str(e).lower()
 
     # ==================== drop_collection_function negative tests ====================
