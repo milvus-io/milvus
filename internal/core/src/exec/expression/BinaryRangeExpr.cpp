@@ -364,10 +364,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
 
     size_t processed_cursor = 0;
     auto execute_sub_batch =
-        [lower_inclusive,
-         upper_inclusive,
-         &processed_cursor,
-         &bitmap_input]<FilterType filter_type = FilterType::sequential>(
+        [ lower_inclusive, upper_inclusive, &processed_cursor, &
+          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -376,69 +374,69 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
             TargetBitmapView valid_res,
             HighPrecisionType val1,
             HighPrecisionType val2) {
-            // If data is nullptr, this chunk was skipped by SkipIndex.
-            // We only need to update processed_cursor for bitmap_input indexing.
-            if (data == nullptr) {
-                processed_cursor += size;
-                return;
-            }
-            if (lower_inclusive && upper_inclusive) {
-                BinaryRangeElementFunc<T, true, true, filter_type> func;
-                func(val1,
-                     val2,
-                     data,
-                     size,
-                     res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
-            } else if (lower_inclusive && !upper_inclusive) {
-                BinaryRangeElementFunc<T, true, false, filter_type> func;
-                func(val1,
-                     val2,
-                     data,
-                     size,
-                     res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
-            } else if (!lower_inclusive && upper_inclusive) {
-                BinaryRangeElementFunc<T, false, true, filter_type> func;
-                func(val1,
-                     val2,
-                     data,
-                     size,
-                     res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
-            } else {
-                BinaryRangeElementFunc<T, false, false, filter_type> func;
-                func(val1,
-                     val2,
-                     data,
-                     size,
-                     res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
-            }
-            // there is a batch operation in BinaryRangeElementFunc,
-            // so not divide data again for the reason that it may reduce performance if the null distribution is scattered
-            // but to mask res with valid_data after the batch operation.
-            if (valid_data != nullptr) {
-                for (int i = 0; i < size; i++) {
-                    auto offset = i;
-                    if constexpr (filter_type == FilterType::random) {
-                        offset = (offsets) ? offsets[i] : i;
-                    }
-                    if (!valid_data[offset]) {
-                        res[i] = valid_res[i] = false;
-                    }
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
+        if (lower_inclusive && upper_inclusive) {
+            BinaryRangeElementFunc<T, true, true, filter_type> func;
+            func(val1,
+                 val2,
+                 data,
+                 size,
+                 res,
+                 bitmap_input,
+                 processed_cursor,
+                 offsets);
+        } else if (lower_inclusive && !upper_inclusive) {
+            BinaryRangeElementFunc<T, true, false, filter_type> func;
+            func(val1,
+                 val2,
+                 data,
+                 size,
+                 res,
+                 bitmap_input,
+                 processed_cursor,
+                 offsets);
+        } else if (!lower_inclusive && upper_inclusive) {
+            BinaryRangeElementFunc<T, false, true, filter_type> func;
+            func(val1,
+                 val2,
+                 data,
+                 size,
+                 res,
+                 bitmap_input,
+                 processed_cursor,
+                 offsets);
+        } else {
+            BinaryRangeElementFunc<T, false, false, filter_type> func;
+            func(val1,
+                 val2,
+                 data,
+                 size,
+                 res,
+                 bitmap_input,
+                 processed_cursor,
+                 offsets);
+        }
+        // there is a batch operation in BinaryRangeElementFunc,
+        // so not divide data again for the reason that it may reduce performance if the null distribution is scattered
+        // but to mask res with valid_data after the batch operation.
+        if (valid_data != nullptr) {
+            for (int i = 0; i < size; i++) {
+                auto offset = i;
+                if constexpr (filter_type == FilterType::random) {
+                    offset = (offsets) ? offsets[i] : i;
+                }
+                if (!valid_data[offset]) {
+                    res[i] = valid_res[i] = false;
                 }
             }
-            processed_cursor += size;
-        };
+        }
+        processed_cursor += size;
+    };
 
     auto skip_index_func =
         [val1, val2, lower_inclusive, upper_inclusive](
@@ -536,20 +534,22 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
     size_t processed_cursor = 0;
-    auto execute_sub_batch = [lower_inclusive,
-                              upper_inclusive,
-                              pointer,
-                              &bitmap_input,
-                              &processed_cursor]<FilterType filter_type =
-                                                     FilterType::sequential>(
-                                 const milvus::Json* data,
-                                 const bool* valid_data,
-                                 const int32_t* offsets,
-                                 const int size,
-                                 TargetBitmapView res,
-                                 TargetBitmapView valid_res,
-                                 ValueType val1,
-                                 ValueType val2) {
+    auto execute_sub_batch =
+        [
+            lower_inclusive,
+            upper_inclusive,
+            pointer,
+            &bitmap_input,
+            &processed_cursor
+        ]<FilterType filter_type = FilterType::sequential>(
+            const milvus::Json* data,
+            const bool* valid_data,
+            const int32_t* offsets,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView valid_res,
+            ValueType val1,
+            ValueType val2) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -856,20 +856,18 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
     }
 
     size_t processed_cursor = 0;
-    auto execute_sub_batch = [lower_inclusive,
-                              upper_inclusive,
-                              &processed_cursor,
-                              &bitmap_input]<FilterType filter_type =
-                                                 FilterType::sequential>(
-                                 const milvus::ArrayView* data,
-                                 const bool* valid_data,
-                                 const int32_t* offsets,
-                                 const int size,
-                                 TargetBitmapView res,
-                                 TargetBitmapView valid_res,
-                                 ValueType val1,
-                                 ValueType val2,
-                                 int index) {
+    auto execute_sub_batch =
+        [ lower_inclusive, upper_inclusive, &processed_cursor, &
+          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+            const milvus::ArrayView* data,
+            const bool* valid_data,
+            const int32_t* offsets,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView valid_res,
+            ValueType val1,
+            ValueType val2,
+            int index) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
