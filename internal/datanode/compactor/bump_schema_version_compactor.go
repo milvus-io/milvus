@@ -545,7 +545,7 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		}
 		manifestPath, err = packed.AddStatsToManifest(manifestPath, t.compactionParams.StorageConfig, statEntries)
 		if err != nil {
-			return nil, merr.WrapErrServiceInternal("failed to add writer stats to schema bump full rewrite manifest", err.Error())
+			return nil, merr.Wrap(err, "failed to add writer stats to schema bump full rewrite manifest")
 		}
 	}
 	sortedInsertLogs := storage.SortFieldBinlogs(insertLogs)
@@ -772,7 +772,7 @@ func (t *bumpSchemaVersionCompactionTask) buildMergedLogsV3(segment *datapb.Comp
 func (t *bumpSchemaVersionCompactionTask) preserveDeltaLogsV3(segment *datapb.CompactionSegmentBinlogs, manifestPath string) (string, error) {
 	deltaPaths, err := packed.GetDeltaLogPathsFromManifest(segment.GetManifest(), t.compactionParams.StorageConfig)
 	if err != nil {
-		return "", merr.WrapErrServiceInternal("failed to read V3 delta logs from existing manifest", err.Error())
+		return "", merr.Wrap(err, "failed to read V3 delta logs from existing manifest")
 	}
 	if len(deltaPaths) == 0 {
 		return manifestPath, nil
@@ -796,7 +796,7 @@ func (t *bumpSchemaVersionCompactionTask) preserveDeltaLogsV3(segment *datapb.Co
 		newDeltaPath := metautil.BuildDeltaLogPathV3(basePath, deltaSummaries[i].GetLogID())
 		if newDeltaPath != deltaPath {
 			if err := t.chunkManager.Copy(t.ctx, deltaPath, newDeltaPath); err != nil {
-				return "", merr.WrapErrServiceInternal("failed to copy V3 delta log for schema bump full rewrite", err.Error())
+				return "", merr.Wrap(err, "failed to copy V3 delta log for schema bump full rewrite")
 			}
 		}
 		deltaEntries = append(deltaEntries, packed.DeltaLogEntry{
@@ -806,7 +806,7 @@ func (t *bumpSchemaVersionCompactionTask) preserveDeltaLogsV3(segment *datapb.Co
 	}
 	newManifest, err := packed.AddDeltaLogsToManifest(manifestPath, t.compactionParams.StorageConfig, deltaEntries)
 	if err != nil {
-		return "", merr.WrapErrServiceInternal("failed to preserve V3 delta logs in full rewrite manifest", err.Error())
+		return "", merr.Wrap(err, "failed to preserve V3 delta logs in full rewrite manifest")
 	}
 	return newManifest, nil
 }
