@@ -38,15 +38,12 @@ func Code(err error) int32 {
 		return 0
 	}
 
-	// Walk the chain looking for a milvus marker (either milvusError directly,
-	// or our wrappedMilvusError whose sentinel.Cause is hidden so that the
-	// inner error stays reachable via errors.Is). Stop at the first match.
+	// Walk the chain for the first milvusError (a sentinel, a wrapFields value,
+	// or a relabeling milvusError-with-inner). Stopping at the first match means
+	// a relabel reports its own code, not the inner's.
 	for cur := err; cur != nil; cur = errors.Unwrap(cur) {
-		switch v := cur.(type) {
-		case milvusError:
-			return v.code()
-		case *wrappedMilvusError:
-			return v.code()
+		if me, ok := cur.(milvusError); ok {
+			return me.code()
 		}
 	}
 
@@ -329,29 +326,42 @@ func IsHealthyOrStopping(stateCode commonpb.StateCode) error {
 	return CheckHealthy(stateCode)
 }
 
+// errorTypeMarker overrides the broad classification (Input/System) of the
+// error it wraps, no matter how deep the milvus sentinel sits in the chain.
+// GetErrorType finds it via the ErrorClassifier interface, so the mark works on
+// bare milvusError values, *Msg (errors.Wrapf) results, and further-wrapped
+// errors alike. It keeps the underlying error reachable via Unwrap, so Code /
+// IsRetryableErr / errors.Is are unaffected.
+type errorTypeMarker struct {
+	error
+	etype ErrorType
+}
+
+func (m errorTypeMarker) Unwrap() error           { return m.error }
+func (m errorTypeMarker) GetErrorType() ErrorType { return m.etype }
+
 func WrapErrAsInputError(err error) error {
-	if merr, ok := err.(milvusError); ok {
-		WithErrorType(InputError)(&merr)
-		return merr
+	if err == nil {
+		return nil
 	}
-	return err
+	return errorTypeMarker{error: err, etype: InputError}
 }
 
 func WrapErrAsSysError(err error) error {
-	if merr, ok := err.(milvusError); ok {
-		WithErrorType(SystemError)(&merr)
-		return merr
+	if err == nil {
+		return nil
 	}
-	return err
+	return errorTypeMarker{error: err, etype: SystemError}
 }
 
 func WrapErrAsInputErrorWhen(err error, targets ...milvusError) error {
-	if merr, ok := err.(milvusError); ok {
-		for _, target := range targets {
-			if target.errCode == merr.errCode {
-				WithErrorType(InputError)(&merr)
-				return merr
-			}
+	if err == nil {
+		return nil
+	}
+	code := Code(err)
+	for _, target := range targets {
+		if target.errCode == code {
+			return errorTypeMarker{error: err, etype: InputError}
 		}
 	}
 	return err
@@ -362,9 +372,12 @@ func WrapErrCollectionReplicateMode(operation string) error {
 }
 
 func GetErrorType(err error) ErrorType {
-	var me milvusError
-	if errors.As(err, &me) {
-		return me.errType
+	// Find the outermost classifier in the chain: an explicit errorTypeMarker
+	// (from WrapErrAsInputError/SysError) takes precedence over the underlying
+	// milvusError's baked-in errType, so the mark works through any wrapping.
+	var ec ErrorClassifier
+	if errors.As(err, &ec) {
+		return ec.GetErrorType()
 	}
 
 	return SystemError
@@ -446,11 +459,7 @@ func WrapErrServiceInternalErr(err error, format string, args ...any) error {
 	if err == nil {
 		return WrapErrServiceInternalMsg(format, args...)
 	}
-	return &wrappedMilvusError{
-		msg:      fmt.Sprintf(format, args...),
-		inner:    err,
-		sentinel: ErrServiceInternal,
-	}
+	return wrapInner(ErrServiceInternal, fmt.Sprintf(format, args...), err)
 }
 
 func WrapErrServiceInternalMsg(fmt string, args ...any) error {
@@ -1035,11 +1044,7 @@ func WrapErrSerializationFailed(err error, format string, args ...any) error {
 	if err == nil {
 		return WrapErrSerializationFailedMsg(format, args...)
 	}
-	return &wrappedMilvusError{
-		msg:      fmt.Sprintf(format, args...),
-		inner:    err,
-		sentinel: ErrSerializationFailed,
-	}
+	return wrapInner(ErrSerializationFailed, fmt.Sprintf(format, args...), err)
 }
 
 // WrapErrDataIntegrityMsg creates a new ErrDataIntegrity (code 1009) with a
@@ -1060,11 +1065,7 @@ func WrapErrDataIntegrity(err error, format string, args ...any) error {
 	if err == nil {
 		return WrapErrDataIntegrityMsg(format, args...)
 	}
-	return &wrappedMilvusError{
-		msg:      fmt.Sprintf(format, args...),
-		inner:    err,
-		sentinel: ErrDataIntegrity,
-	}
+	return wrapInner(ErrDataIntegrity, fmt.Sprintf(format, args...), err)
 }
 
 // WrapErrStorageMsg creates a new ErrStorage (code 1008) with a detail message.
@@ -1091,11 +1092,7 @@ func WrapErrStorage(err error, format string, args ...any) error {
 	if err == nil {
 		return WrapErrStorageMsg(format, args...)
 	}
-	return &wrappedMilvusError{
-		msg:      fmt.Sprintf(format, args...),
-		inner:    err,
-		sentinel: ErrStorage,
-	}
+	return wrapInner(ErrStorage, fmt.Sprintf(format, args...), err)
 }
 
 // WrapErrFunctionFailedMsg creates a new ErrFunctionFailed (code 2400) with a
@@ -1122,11 +1119,7 @@ func WrapErrFunctionFailed(err error, format string, args ...any) error {
 	if err == nil {
 		return WrapErrFunctionFailedMsg(format, args...)
 	}
-	return &wrappedMilvusError{
-		msg:      fmt.Sprintf(format, args...),
-		inner:    err,
-		sentinel: ErrFunctionFailed,
-	}
+	return wrapInner(ErrFunctionFailed, fmt.Sprintf(format, args...), err)
 }
 
 // IO related
@@ -1229,11 +1222,7 @@ func WrapErrParameterInvalidErr(err error, format string, args ...any) error {
 	if err == nil {
 		return WrapErrParameterInvalidMsg(format, args...)
 	}
-	return &wrappedMilvusError{
-		msg:      fmt.Sprintf(format, args...),
-		inner:    err,
-		sentinel: ErrParameterInvalid,
-	}
+	return wrapInner(ErrParameterInvalid, fmt.Sprintf(format, args...), err)
 }
 
 func WrapErrParameterInvalidRange[T any](lower, upper, actual T, msg ...string) error {
@@ -1306,7 +1295,7 @@ func WrapErrMqInternal(err error, msg ...string) error {
 	if len(msg) > 0 {
 		ctx = strings.Join(msg, "->") + ": " + ctx
 	}
-	return &wrappedMilvusError{msg: ctx, inner: err, sentinel: ErrMqInternal}
+	return wrapInner(ErrMqInternal, ctx, err)
 }
 
 // WrapErrMqInternalMsg creates a new ErrMqInternal (code 1302) with a detail
@@ -1461,11 +1450,7 @@ func WrapErrQueryPlan(err error, format string, args ...any) error {
 	if err == nil {
 		return WrapErrQueryPlanMsg(format, args...)
 	}
-	return &wrappedMilvusError{
-		msg:      fmt.Sprintf(format, args...),
-		inner:    err,
-		sentinel: ErrQueryPlan,
-	}
+	return wrapInner(ErrQueryPlan, fmt.Sprintf(format, args...), err)
 }
 
 func WrapErrKMSKeyRevoked(dbID int64, reason string) error {
@@ -1567,22 +1552,14 @@ func WrapErrBuildCompactionRequestFail(err error) error {
 	if err == nil {
 		return ErrBuildCompactionRequestFail
 	}
-	return &wrappedMilvusError{
-		msg:      ErrBuildCompactionRequestFail.msg,
-		inner:    err,
-		sentinel: ErrBuildCompactionRequestFail,
-	}
+	return wrapInner(ErrBuildCompactionRequestFail, ErrBuildCompactionRequestFail.msg, err)
 }
 
 func WrapErrGetCompactionPlanResultFail(err error) error {
 	if err == nil {
 		return ErrGetCompactionPlanResultFail
 	}
-	return &wrappedMilvusError{
-		msg:      ErrGetCompactionPlanResultFail.msg,
-		inner:    err,
-		sentinel: ErrGetCompactionPlanResultFail,
-	}
+	return wrapInner(ErrGetCompactionPlanResultFail, ErrGetCompactionPlanResultFail.msg, err)
 }
 
 func WrapErrCompactionResult(msg ...string) error {
@@ -1656,9 +1633,5 @@ func WrapErrOperationNotSupported(err error, format string, args ...any) error {
 	if err == nil {
 		return WrapErrOperationNotSupportedMsg(format, args...)
 	}
-	return &wrappedMilvusError{
-		msg:      fmt.Sprintf(format, args...),
-		inner:    err,
-		sentinel: ErrOperationNotSupported,
-	}
+	return wrapInner(ErrOperationNotSupported, fmt.Sprintf(format, args...), err)
 }

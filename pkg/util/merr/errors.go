@@ -323,6 +323,11 @@ type milvusError struct {
 	retriable bool
 	errCode   int32
 	errType   ErrorType
+	// inner is an optional underlying error. When set, this milvusError relabels
+	// the chain with its own errCode/errType/retriable (so Code/IsRetryableErr
+	// report this sentinel, not the inner) while keeping the inner reachable via
+	// Unwrap so errors.Is(result, inner) still holds. Replaces wrappedMilvusError.
+	inner error
 }
 
 func newMilvusError(msg string, code int32, retriable bool, options ...errorOption) milvusError {
@@ -344,11 +349,21 @@ func (e milvusError) code() int32 {
 }
 
 func (e milvusError) Error() string {
+	if e.inner != nil {
+		return e.msg + ": " + e.inner.Error()
+	}
 	return e.msg
 }
 
 func (e milvusError) Detail() string {
 	return e.detail
+}
+
+// Unwrap exposes the optional inner error so errors.Is(result, inner) holds.
+// Returns nil for plain sentinels / wrapFields values, leaving their behavior
+// unchanged.
+func (e milvusError) Unwrap() error {
+	return e.inner
 }
 
 func (e milvusError) Is(err error) bool {
@@ -365,61 +380,15 @@ func (e milvusError) GetErrorType() ErrorType {
 	return e.errType
 }
 
-// wrappedMilvusError wraps an underlying error with a milvus sentinel and a
-// contextual message, while preserving the inner error chain. Designed so
-// all of the following work on the result, under both stdlib and cockroachdb
-// errors.Is semantics:
-//
-//   - errors.Is(result, sentinel)      → true   (matched via Is)
-//   - errors.Is(result, originalInner) → true   (inner reachable via Unwrap)
-//   - merr.Code(result)                → sentinel's errCode
-//
-// Cause is intentionally NOT overridden: cockroachdb's errors.Is walks the
-// Cause chain first, so returning the sentinel from Cause would hide the
-// inner error. Instead, merr.Code special-cases this type.
-type wrappedMilvusError struct {
-	msg      string
-	inner    error
-	sentinel milvusError
-}
-
-func (w *wrappedMilvusError) Error() string { return w.msg + ": " + w.inner.Error() }
-
-// Unwrap exposes the original error so errors.Is(w, originalInner) works
-// under both stdlib and cockroachdb chain walkers.
-func (w *wrappedMilvusError) Unwrap() error { return w.inner }
-
-// Is matches any milvus sentinel by delegating to the wrapped sentinel.
-func (w *wrappedMilvusError) Is(target error) bool {
-	return errors.Is(w.sentinel, target)
-}
-
-// As resolves errors.As(w, *milvusError) to the sentinel so the package-level
-// classification helpers (GetErrorType / IsRetryableErr / Status's
-// is_input_error) — which walk via errors.As(err, &milvusError) — observe the
-// sentinel's errType and retriable, consistent with merr.Code returning the
-// sentinel's code. Without this, errors.As (which does not consult Is) skips the
-// sentinel because it is deliberately kept out of the Unwrap chain (Unwrap
-// returns inner so errors.Is(w, inner) still matches), and the InputError /
-// retriable classification carried by the sentinel would be silently lost.
-func (w *wrappedMilvusError) As(target any) bool {
-	if p, ok := target.(*milvusError); ok {
-		*p = w.sentinel
-		return true
-	}
-	return false
-}
-
-// code lets merr.Code retrieve the milvus error code without needing to
-// resolve the cause chain (which has been redirected to the inner error).
-func (w *wrappedMilvusError) code() int32 {
-	return w.sentinel.errCode
-}
-
-// GetErrorType lets ErrorClassifier consumers (proxy metrics, retry policy)
-// see the same classification as the sentinel.
-func (w *wrappedMilvusError) GetErrorType() ErrorType {
-	return w.sentinel.errType
+// wrapInner builds a relabeling milvusError from a sentinel: it copies the
+// sentinel's code/errType/retriable, attaches a contextual message, and keeps
+// the inner error reachable via Unwrap. This is the unified replacement for
+// wrappedMilvusError used by the WrapErrXxxErr factories.
+func wrapInner(sentinel milvusError, msg string, inner error) milvusError {
+	sentinel.msg = msg
+	sentinel.detail = msg
+	sentinel.inner = inner
+	return sentinel
 }
 
 type multiErrors struct {
