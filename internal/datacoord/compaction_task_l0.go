@@ -467,17 +467,23 @@ func buildL0V3DeltaLogEntries(segmentID int64, deltalogs []*datapb.FieldBinlog) 
 
 func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegment) error {
 	mutations := map[int64][]SegmentOperator{}
+	storageConfig := compaction.CreateStorageConfig()
 	for _, seg := range outputSegs {
-		deltalogs := seg.GetDeltalogs() // capture
-		manifest := seg.GetManifest()   // capture
-		mutations[seg.GetSegmentID()] = []SegmentOperator{func(s *SegmentInfo) (BinlogIncrement, bool) {
-			if manifest != "" {
+		if len(seg.GetDeltalogs()) > 0 {
+			mergeSegmentMutations(mutations, AddL0DeltalogsAndUpdateManifestOperator(
+				seg.GetSegmentID(),
+				seg.GetDeltalogs(),
+				storageConfig,
+				t.committedV3Manifests,
+			))
+			continue
+		}
+		if manifest := seg.GetManifest(); manifest != "" {
+			mutations[seg.GetSegmentID()] = append(mutations[seg.GetSegmentID()], func(s *SegmentInfo) (BinlogIncrement, bool) {
 				s.ManifestPath = manifest
 				return BinlogIncrement{}, true
-			}
-			s.Deltalogs = mergeFieldBinlogs(s.GetDeltalogs(), deltalogs)
-			return BinlogIncrement{Deltalogs: s.Deltalogs}, true
-		}}
+			})
+		}
 	}
 
 	for _, segID := range t.GetTaskProto().InputSegments {

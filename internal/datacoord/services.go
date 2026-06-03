@@ -3057,18 +3057,20 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	commitTs := req.GetCommitTimestamp()
 	err := s.importMeta.HandleCommitVchannel(ctx, jobID, vchannel, func() error {
 		// Only access s.meta (segment meta) here, NOT s.importMeta.
-		// Set CommitTimestamp and clear isImporting in a single call per segment.
-		ops := make([]UpdateOperator, 0, len(segIDs)*2)
+		// Batch all segment updates into a single UpdateSegmentsInfo call (one etcd write).
+		mutations := make(map[int64][]SegmentOperator, len(segIDs))
 		for _, segID := range segIDs {
-			ops = append(ops,
-				UpdateCommitTimestamp(segID, commitTs),
-				UpdateIsImporting(segID, false),
-			)
+			segmentID := segID
+			mergeSegmentMutations(mutations, UpdateCommitTimestamp(segmentID, commitTs))
+			mutations[segmentID] = append(mutations[segmentID], func(seg *SegmentInfo) (BinlogIncrement, bool) {
+				seg.IsImporting = false
+				return BinlogIncrement{}, true
+			})
 		}
-		if len(ops) == 0 {
+		if len(mutations) == 0 {
 			return nil
 		}
-		return s.meta.UpdateSegmentsInfo(ctx, ops...)
+		return s.meta.UpdateSegmentsInfo(ctx, mutations)
 	})
 	if err != nil {
 		return merr.Status(err), nil
