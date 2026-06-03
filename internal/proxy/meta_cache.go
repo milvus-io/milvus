@@ -1209,7 +1209,7 @@ func (m *MetaCache) AllocID(ctx context.Context) (int64, error) {
 		}
 		if resp.GetStatus().GetCode() != 0 {
 			log.Warn("Refreshing ID cache from rootcoord failed", zap.String("failed detail", resp.GetStatus().GetDetail()))
-			return 0, merr.WrapErrServiceInternal(resp.GetStatus().GetDetail())
+			return 0, merr.Error(resp.GetStatus())
 		}
 		m.IDStart, m.IDCount = resp.GetID(), int64(resp.GetCount())
 		m.IDIndex = 0

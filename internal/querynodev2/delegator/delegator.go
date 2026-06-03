@@ -956,7 +956,7 @@ func executeSubTasks[T any, R interface {
 			} else {
 				result, err = execute(ctx, task.req, task.worker)
 				if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-					err = merr.WrapErrServiceInternalMsg("worker(%d) query failed: %s", task.targetID, result.GetStatus().GetReason())
+					err = merr.Wrapf(merr.Error(result.GetStatus()), "worker(%d) query failed", task.targetID)
 				}
 			}
 

@@ -266,7 +266,7 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, collectio
 	}
 
 	if resp.ErrorCode != commonpb.ErrorCode_Success {
-		return merr.WrapErrServiceInternalMsg(resp.Reason)
+		return merr.Error(resp)
 	}
 	log.Ctx(ctx).Info("done to broadcast request to alter collection",
 		zap.String("collectionName", colMeta.Name), zap.Int64("collectionID", dcReq.GetCollectionID()),

@@ -66,7 +66,7 @@ func (ta *timestampAllocator) alloc(ctx context.Context, count uint32) ([]Timest
 		return nil, merr.Wrap(err, "syncTimestamp Failed")
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return nil, merr.WrapErrServiceInternalMsg("syncTimeStamp Failed:%s", resp.GetStatus().GetReason())
+		return nil, merr.Error(resp.GetStatus())
 	}
 	if resp == nil {
 		return nil, merr.WrapErrServiceInternalMsg("empty AllocTimestampResponse")
