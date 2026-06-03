@@ -427,9 +427,8 @@ TEST_P(TestChunkSegmentStorageV2, TestColumnExprWithScalarIndexRawData) {
                                      query_config);
     exec::ExecContext exec_context(&query_context);
 
-    std::vector<expr::TypedExprPtr> exprs{
-        std::make_shared<expr::ColumnExpr>(expr::ColumnInfo(
-            fields.at("int64"), milvus::DataType::INT64))};
+    std::vector<expr::TypedExprPtr> exprs{std::make_shared<expr::ColumnExpr>(
+        expr::ColumnInfo(fields.at("int64"), milvus::DataType::INT64))};
     exec::ExprSet expr_set(exprs, &exec_context);
     exec::EvalCtx eval_context(&exec_context);
 
@@ -441,8 +440,7 @@ TEST_P(TestChunkSegmentStorageV2, TestColumnExprWithScalarIndexRawData) {
 
         auto column = std::dynamic_pointer_cast<ColumnVector>(results[0]);
         ASSERT_NE(column, nullptr);
-        auto expected_batch_size =
-            std::min<int64_t>(4096, RowCount() - offset);
+        auto expected_batch_size = std::min<int64_t>(4096, RowCount() - offset);
         ASSERT_EQ(expected_batch_size, column->size());
 
         auto values = column->RawAsValues<int64_t>();
@@ -466,12 +464,12 @@ TEST_P(TestChunkSegmentStorageV2,
         proto::plan::OpType::GreaterEqual,
         threshold);
     auto right_field = GetParam() ? fields.at("int64") : fields.at("pk");
-    auto compare_expr = std::make_shared<expr::CompareExpr>(
-        fields.at("int64"),
-        right_field,
-        milvus::DataType::INT64,
-        milvus::DataType::INT64,
-        proto::plan::OpType::Equal);
+    auto compare_expr =
+        std::make_shared<expr::CompareExpr>(fields.at("int64"),
+                                            right_field,
+                                            milvus::DataType::INT64,
+                                            milvus::DataType::INT64,
+                                            proto::plan::OpType::Equal);
     auto conjunct_expr = std::make_shared<expr::LogicalBinaryExpr>(
         expr::LogicalBinaryExpr::OpType::And, range_expr, compare_expr);
     auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
@@ -480,15 +478,15 @@ TEST_P(TestChunkSegmentStorageV2,
     auto query_config = std::make_shared<exec::QueryConfig>(
         std::unordered_map<std::string, std::string>{
             {exec::QueryConfig::kExprEvalBatchSize, "6000"}});
-    auto query_context = std::make_shared<exec::QueryContext>(
-        DEAFULT_QUERY_ID,
-        segment.get(),
-        RowCount(),
-        MAX_TIMESTAMP,
-        0,
-        0,
-        query::PlanOptions(),
-        query_config);
+    auto query_context =
+        std::make_shared<exec::QueryContext>(DEAFULT_QUERY_ID,
+                                             segment.get(),
+                                             RowCount(),
+                                             MAX_TIMESTAMP,
+                                             0,
+                                             0,
+                                             query::PlanOptions(),
+                                             query_config);
     auto plan_fragment = plan::PlanFragment(plan);
     auto row =
         query::ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
