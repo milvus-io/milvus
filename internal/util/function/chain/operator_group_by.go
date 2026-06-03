@@ -462,7 +462,7 @@ func NewGroupByOpFromRepr(repr *OperatorRepr) (Operator, error) {
 
 	groupSize, err := getInt64Param(repr.Params, "group_size")
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("group_by_op: %v", err))
+		return nil, merr.Wrap(err, "group_by_op")
 	}
 	if groupSize <= 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("group_by_op: group_size must be positive")
@@ -470,7 +470,7 @@ func NewGroupByOpFromRepr(repr *OperatorRepr) (Operator, error) {
 
 	limit, err := getInt64Param(repr.Params, "limit")
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("group_by_op: %v", err))
+		return nil, merr.Wrap(err, "group_by_op")
 	}
 	if limit <= 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("group_by_op: limit must be positive")
@@ -480,7 +480,7 @@ func NewGroupByOpFromRepr(repr *OperatorRepr) (Operator, error) {
 	if _, ok := repr.Params["offset"]; ok {
 		offset, err = getInt64Param(repr.Params, "offset")
 		if err != nil {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("group_by_op: %v", err))
+			return nil, merr.Wrap(err, "group_by_op")
 		}
 		if offset < 0 {
 			return nil, merr.WrapErrParameterInvalidMsg("group_by_op: offset must be non-negative")
@@ -491,7 +491,7 @@ func NewGroupByOpFromRepr(repr *OperatorRepr) (Operator, error) {
 	if scorerStr, ok := repr.Params["scorer"].(string); ok {
 		scorer = GroupScorer(scorerStr)
 		if err := ValidateGroupScorer(scorer); err != nil {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("group_by_op: %v", err))
+			return nil, merr.Wrap(err, "group_by_op")
 		}
 	}
 
