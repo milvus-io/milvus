@@ -1440,7 +1440,7 @@ func (t *searchTask) collectSearchResults(ctx context.Context) ([]*internalpb.Se
 	select {
 	case <-t.TraceCtx().Done():
 		log.Ctx(ctx).Warn("search task wait to finish timeout!")
-		return nil, merr.WrapErrServiceInternalMsg("search task wait to finish timeout, msgID=%d", t.ID())
+		return nil, merr.Wrapf(t.TraceCtx().Err(), "search task wait to finish timeout, msgID=%d", t.ID())
 	default:
 		toReduceResults := make([]*internalpb.SearchResults, 0)
 		log.Ctx(ctx).Debug("all searches are finished or canceled")
