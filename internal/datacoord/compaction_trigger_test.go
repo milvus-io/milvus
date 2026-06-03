@@ -2052,7 +2052,7 @@ func TestCompactionTriggerKeepsMixedSchemaVersionSegments(t *testing.T) {
 	schema := newTestSchema()
 	schema.Version = 5
 	mt := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		indexMeta:   newSegmentIndexMeta(nil),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
@@ -2078,7 +2078,7 @@ func TestCompactionTriggerKeepsMixedSchemaVersionSegments(t *testing.T) {
 			MaxRowNum:     100,
 			SchemaVersion: item.schemaVersion,
 			Binlogs:       []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{EntriesNum: 10, MemorySize: 1}}}},
-		}})
+		}}, 0)
 	}
 
 	inspector := &spyCompactionInspector{t: t, spyChan: make(chan *datapb.CompactionPlan, 1), meta: mt}

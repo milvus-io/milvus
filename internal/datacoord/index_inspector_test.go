@@ -506,12 +506,26 @@ func TestIndexInspector_FunctionOutputBinlogGate(t *testing.T) {
 		m.indexMeta.indexes[collID] = map[UniqueID]*model.Index{
 			5: {CollectionID: collID, FieldID: 102, IndexID: 5, IndexName: "bm25_idx"},
 		}
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				CollectionID: collID,
+				State:        commonpb.SegmentState_Flushed,
+				IsSorted:     true,
+				Binlogs: []*datapb.FieldBinlog{
+					{FieldID: 0, ChildFields: []int64{100, 101, 102}},
+				},
+			},
+		}
 		m.segments.SetSegment(segment.GetID(), segment, 0)
+
+		alloc.EXPECT().AllocID(mock.Anything).Return(int64(12346), nil).Once()
+		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
+		scheduler.EXPECT().Enqueue(mock.Anything).Return().Once()
 
 		err := inspector.createIndexesForSegment(ctx, segment)
 		assert.NoError(t, err)
-		// Index should NOT have been created — field 102 data is missing
-		assert.True(t, m.indexMeta.IsUnIndexedSegment(collID, segment.GetID()))
+		assert.Contains(t, m.indexMeta.GetSegmentIndexes(collID, segment.GetID()), UniqueID(5))
 	})
 
 	t.Run("return error when field binlogs present but segment schema version still behind", func(t *testing.T) {
@@ -582,7 +596,7 @@ func TestIndexInspector_FunctionOutputBinlogGate(t *testing.T) {
 				},
 			},
 		}
-		m.segments.SetSegment(segment.GetID(), segment)
+		m.segments.SetSegment(segment.GetID(), segment, 0)
 
 		err := inspector.createIndexesForSegment(ctx, segment)
 		assert.NoError(t, err)
@@ -604,7 +618,7 @@ func TestIndexInspector_FunctionOutputBinlogGate(t *testing.T) {
 				},
 			},
 		}
-		m.segments.SetSegment(segment.GetID(), segment)
+		m.segments.SetSegment(segment.GetID(), segment, 0)
 
 		alloc.EXPECT().AllocID(mock.Anything).Return(int64(12347), nil).Once()
 		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
@@ -631,7 +645,7 @@ func TestIndexInspector_FunctionOutputBinlogGate(t *testing.T) {
 				},
 			},
 		}
-		m.segments.SetSegment(segment.GetID(), segment)
+		m.segments.SetSegment(segment.GetID(), segment, 0)
 
 		alloc.EXPECT().AllocID(mock.Anything).Return(int64(12348), nil).Once()
 		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()

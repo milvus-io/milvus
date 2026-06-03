@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -1932,8 +1933,8 @@ func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 		return m.completeClusterCompactionMutation(ctx, t, result)
 	case datapb.CompactionType_SortCompaction:
 		return m.completeSortCompactionMutation(ctx, t, result)
-	case datapb.CompactionType_BackfillCompaction:
-		return m.completeBackfillCompactionMutation(t, result)
+	case datapb.CompactionType_BumpSchemaVersionCompaction:
+		return m.completeBumpSchemaVersionCompactionMutation(t, result)
 	}
 	return nil, nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
 }
@@ -2330,6 +2331,19 @@ func (p *updateSegmentPack) prepareSegmentMetricUpdates() {
 
 func isFlushState(state commonpb.SegmentState) bool {
 	return state == commonpb.SegmentState_Flushing || state == commonpb.SegmentState_Flushed
+}
+
+func updateSegStateAndPrepareMetrics(segToUpdate *SegmentInfo, targetState commonpb.SegmentState, metricMutation *segMetricMutation) {
+	log.Ctx(context.TODO()).Debug("updating segment state and updating metrics",
+		zap.Int64("segmentID", segToUpdate.GetID()),
+		zap.String("old state", segToUpdate.GetState().String()),
+		zap.String("new state", targetState.String()),
+		zap.Int64("# of rows", segToUpdate.GetNumOfRows()))
+	metricMutation.append(segToUpdate.GetState(), targetState, segToUpdate.GetLevel(), segToUpdate.GetIsSorted(), segToUpdate.GetStorageVersion(), segToUpdate.GetNumOfRows())
+	segToUpdate.State = targetState
+	if targetState == commonpb.SegmentState_Dropped {
+		segToUpdate.DroppedAt = uint64(time.Now().UnixNano())
+	}
 }
 
 func (m *meta) ListCollections() []int64 {
@@ -2756,8 +2770,8 @@ func (m *meta) completeBumpSchemaVersionReplacementMutation(
 		return nil, nil, err
 	}
 
-	m.segments.SetSegment(dropped.GetID(), dropped)
-	m.segments.SetSegment(newSegment.GetID(), newSegment)
+	m.segments.SetSegment(dropped.GetID(), dropped, math.MaxInt64)
+	m.segments.SetSegment(newSegment.GetID(), newSegment, math.MaxInt64)
 	mlog.Info(m.ctx, "meta update: alter in memory meta after schema bump full rewrite replacement - complete")
 	return []*SegmentInfo{newSegment}, metricMutation, nil
 }

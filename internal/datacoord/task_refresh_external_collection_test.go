@@ -1482,7 +1482,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_DelaysSegmentUpdateUnti
 
 	mt := &meta{
 		catalog:     catalog,
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: newTestCollections(100),
 	}
 
@@ -1497,7 +1497,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_DelaysSegmentUpdateUnti
 	defer mockQuery.UnPatch()
 
 	updateCalls := 0
-	mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(func(_ *meta, _ context.Context, _ ...UpdateOperator) error {
+	mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(func(_ *meta, _ context.Context, _ map[int64][]SegmentOperator, _ ...*datapb.SegmentInfo) error {
 		updateCalls++
 		return nil
 	}).Build()
@@ -1518,7 +1518,7 @@ func TestApplyExternalCollectionSegmentUpdate_UpsertExistingSegment(t *testing.T
 	segmentID := int64(10)
 	mt := &meta{
 		collections: newTestCollections(collectionID),
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		catalog:     &stubCatalog{},
 	}
 	oldSeg := &datapb.SegmentInfo{
@@ -1544,7 +1544,7 @@ func TestApplyExternalCollectionSegmentUpdate_UpsertExistingSegment(t *testing.T
 			}},
 		}},
 	}
-	mt.segments.SetSegment(segmentID, NewSegmentInfo(oldSeg))
+	mt.segments.SetSegment(segmentID, NewSegmentInfo(oldSeg), 0)
 
 	patched := proto.Clone(oldSeg).(*datapb.SegmentInfo)
 	patched.ManifestPath = `{"base_path":"old","ver":2}`
@@ -1588,7 +1588,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectPatchRowCountChange(t *testi
 	segmentID := int64(10)
 	mt := &meta{
 		collections: newTestCollections(collectionID),
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		catalog:     &stubCatalog{},
 	}
 	oldSeg := &datapb.SegmentInfo{
@@ -1611,7 +1611,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectPatchRowCountChange(t *testi
 			}},
 		}},
 	}
-	mt.segments.SetSegment(segmentID, NewSegmentInfo(oldSeg))
+	mt.segments.SetSegment(segmentID, NewSegmentInfo(oldSeg), 0)
 
 	patched := proto.Clone(oldSeg).(*datapb.SegmentInfo)
 	patched.NumOfRows = 101
@@ -1634,7 +1634,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectDroppedSegmentPatch(t *testi
 	segmentID := int64(10)
 	mt := &meta{
 		collections: newTestCollections(collectionID),
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		catalog:     &stubCatalog{},
 	}
 	oldSeg := &datapb.SegmentInfo{
@@ -1658,7 +1658,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectDroppedSegmentPatch(t *testi
 			}},
 		}},
 	}
-	mt.segments.SetSegment(segmentID, NewSegmentInfo(oldSeg))
+	mt.segments.SetSegment(segmentID, NewSegmentInfo(oldSeg), 0)
 
 	patched := proto.Clone(oldSeg).(*datapb.SegmentInfo)
 	patched.ManifestPath = `{"base_path":"old","ver":2}`
@@ -1681,7 +1681,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectNewSegmentCollectionMismatch
 	collectionID := int64(100)
 	mt := &meta{
 		collections: newTestCollections(collectionID),
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		catalog:     &stubCatalog{},
 	}
 
@@ -1718,7 +1718,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectNewSegmentEmptyManifest(t *t
 	collectionID := int64(100)
 	mt := &meta{
 		collections: newTestCollections(collectionID),
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		catalog:     &stubCatalog{},
 	}
 	seg := newTestExternalRefreshSegment(10, collectionID, 100)
@@ -1742,7 +1742,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectSegmentIDFromOtherCollection
 	segmentID := int64(10)
 	mt := &meta{
 		collections: newTestCollections(collectionID),
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		catalog:     &stubCatalog{},
 	}
 	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
@@ -1764,7 +1764,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectSegmentIDFromOtherCollection
 				LogSize:    1000,
 			}},
 		}},
-	}))
+	}), 0)
 	incoming := newTestExternalRefreshSegment(segmentID, collectionID, 100)
 
 	err := applyExternalCollectionSegmentUpdate(
@@ -1787,7 +1787,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectInvalidKeptSegment(t *testin
 	collectionID := int64(100)
 	mt := &meta{
 		collections: newTestCollections(collectionID),
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		catalog:     &stubCatalog{},
 	}
 	mt.segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
@@ -1795,7 +1795,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectInvalidKeptSegment(t *testin
 		CollectionID: collectionID,
 		State:        commonpb.SegmentState_Flushed,
 		NumOfRows:    100,
-	}))
+	}), 0)
 
 	err := applyExternalCollectionSegmentUpdate(
 		ctx,
@@ -1814,7 +1814,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectKeptSegmentFromOtherCollecti
 	collectionID := int64(100)
 	mt := &meta{
 		collections: newTestCollections(collectionID),
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		catalog:     &stubCatalog{},
 	}
 	mt.segments.SetSegment(10, NewSegmentInfo(&datapb.SegmentInfo{
@@ -1822,7 +1822,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectKeptSegmentFromOtherCollecti
 		CollectionID: collectionID + 1,
 		State:        commonpb.SegmentState_Flushed,
 		NumOfRows:    100,
-	}))
+	}), 0)
 
 	err := applyExternalCollectionSegmentUpdate(
 		ctx,
@@ -1841,7 +1841,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectDroppedKeptSegment(t *testin
 	collectionID := int64(100)
 	mt := &meta{
 		collections: newTestCollections(collectionID),
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		catalog:     &stubCatalog{},
 	}
 	mt.segments.SetSegment(10, NewSegmentInfo(&datapb.SegmentInfo{
@@ -1849,7 +1849,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectDroppedKeptSegment(t *testin
 		CollectionID: collectionID,
 		State:        commonpb.SegmentState_Dropped,
 		NumOfRows:    100,
-	}))
+	}), 0)
 
 	err := applyExternalCollectionSegmentUpdate(
 		ctx,
@@ -1868,7 +1868,7 @@ func TestApplyExternalCollectionSegmentUpdate_NormalizeNewSegmentCollection(t *t
 	collectionID := int64(100)
 	mt := &meta{
 		collections: newTestCollections(collectionID),
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		catalog:     &stubCatalog{},
 	}
 	seg := newTestExternalRefreshSegment(10, 0, 100)
@@ -1899,14 +1899,14 @@ func TestApplyExternalCollectionSegmentUpdate_RejectPatchBinlogRowCountMismatch(
 	segmentID := int64(10)
 	mt := &meta{
 		collections: newTestCollections(collectionID),
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		catalog:     &stubCatalog{},
 	}
 	oldSeg := newTestExternalRefreshSegment(segmentID, collectionID, 100)
 	oldSeg.State = commonpb.SegmentState_Flushed
 	oldSeg.PartitionID = 1
 	oldSeg.InsertChannel = "by-dev-rootcoord-dml_0_v1"
-	mt.segments.SetSegment(segmentID, NewSegmentInfo(oldSeg))
+	mt.segments.SetSegment(segmentID, NewSegmentInfo(oldSeg), 0)
 
 	patched := proto.Clone(oldSeg).(*datapb.SegmentInfo)
 	patched.ManifestPath = `{"base_path":"old","ver":2}`
@@ -1929,7 +1929,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectNewBinlogRowCountMismatch(t 
 	collectionID := int64(100)
 	mt := &meta{
 		collections: newTestCollections(collectionID),
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		catalog:     &stubCatalog{},
 	}
 	seg := newTestExternalRefreshSegment(10, collectionID, 100)
@@ -1953,14 +1953,14 @@ func TestApplyExternalCollectionSegmentUpdate_RejectPatchEmptyNestedBinlogs(t *t
 	segmentID := int64(10)
 	mt := &meta{
 		collections: newTestCollections(collectionID),
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		catalog:     &stubCatalog{},
 	}
 	oldSeg := newTestExternalRefreshSegment(segmentID, collectionID, 100)
 	oldSeg.State = commonpb.SegmentState_Flushed
 	oldSeg.PartitionID = 1
 	oldSeg.InsertChannel = "by-dev-rootcoord-dml_0_v1"
-	mt.segments.SetSegment(segmentID, NewSegmentInfo(oldSeg))
+	mt.segments.SetSegment(segmentID, NewSegmentInfo(oldSeg), 0)
 
 	patched := proto.Clone(oldSeg).(*datapb.SegmentInfo)
 	patched.ManifestPath = `{"base_path":"old","ver":2}`
@@ -1983,7 +1983,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectNewEmptyNestedBinlogs(t *tes
 	collectionID := int64(100)
 	mt := &meta{
 		collections: newTestCollections(collectionID),
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		catalog:     &stubCatalog{},
 	}
 	seg := newTestExternalRefreshSegment(10, collectionID, 100)
