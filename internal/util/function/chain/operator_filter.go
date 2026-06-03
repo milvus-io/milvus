@@ -92,7 +92,7 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 				out.Release()
 			}
 		}
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("filter_op: function must return exactly 1 output, got %d", len(outputs)))
+		return nil, merr.WrapErrFunctionFailedMsg("filter_op: function must return exactly 1 output, got %d", len(outputs))
 	}
 
 	filterCol := outputs[0]
@@ -100,7 +100,7 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 
 	// Validate the output is boolean type
 	if filterCol.DataType().ID() != arrow.BOOL {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("filter_op: function must return boolean type, got %s", filterCol.DataType().Name()))
+		return nil, merr.WrapErrFunctionFailedMsg("filter_op: function must return boolean type, got %s", filterCol.DataType().Name())
 	}
 
 	// Create builder for result DataFrame
@@ -113,7 +113,7 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 	for chunkIdx := range input.NumChunks() {
 		boolChunk, ok := filterCol.Chunk(chunkIdx).(*array.Boolean)
 		if !ok {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("filter_op: chunk %d is not a boolean array", chunkIdx))
+			return nil, merr.WrapErrFunctionFailedMsg("filter_op: chunk %d is not a boolean array", chunkIdx)
 		}
 		filterChunks[chunkIdx] = boolChunk
 

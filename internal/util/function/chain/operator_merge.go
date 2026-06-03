@@ -363,13 +363,13 @@ func (op *MergeOp) collectWeightedScores(inputs []*DataFrame, chunkIdx int) (map
 		idCol := df.Column(types.IDFieldName)
 		scoreCol := df.Column(types.ScoreFieldName)
 		if idCol == nil || scoreCol == nil {
-			return nil, nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: input[%d] missing ID or score column", inputIdx))
+			return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] missing ID or score column", inputIdx)
 		}
 
 		idChunk := idCol.Chunk(chunkIdx)
 		scoreChunk, ok := scoreCol.Chunk(chunkIdx).(*array.Float32)
 		if !ok {
-			return nil, nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: input[%d] score column chunk %d is not Float32", inputIdx, chunkIdx))
+			return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] score column chunk %d is not Float32", inputIdx, chunkIdx)
 		}
 
 		weight := float32(op.weights[inputIdx])
@@ -455,7 +455,7 @@ func (op *MergeOp) collectCombinedScores(inputs []*DataFrame, chunkIdx int, merg
 		idChunk := idCol.Chunk(chunkIdx)
 		scoreChunk, ok := scoreCol.Chunk(chunkIdx).(*array.Float32)
 		if !ok {
-			return nil, nil, nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: input[%d] score column chunk %d is not Float32", inputIdx, chunkIdx))
+			return nil, nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] score column chunk %d is not Float32", inputIdx, chunkIdx)
 		}
 
 		normFunc := op.scoreNormFunc(inputIdx)
@@ -740,7 +740,7 @@ func (op *MergeOp) buildInt64Results(ctx *types.FuncContext, ids []any, scores [
 	for i, id := range ids {
 		v, ok := id.(int64)
 		if !ok {
-			return nil, nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: expected int64 ID at index %d, got %T", i, id))
+			return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: expected int64 ID at index %d, got %T", i, id)
 		}
 		idBuilder.Append(v)
 		scoreBuilder.Append(scores[i])
@@ -758,7 +758,7 @@ func (op *MergeOp) buildStringResults(ctx *types.FuncContext, ids []any, scores 
 	for i, id := range ids {
 		v, ok := id.(string)
 		if !ok {
-			return nil, nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: expected string ID at index %d, got %T", i, id))
+			return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: expected string ID at index %d, got %T", i, id)
 		}
 		idBuilder.Append(v)
 		scoreBuilder.Append(scores[i])
