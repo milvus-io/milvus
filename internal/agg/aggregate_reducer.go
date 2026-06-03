@@ -2,7 +2,6 @@ package agg
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
@@ -443,9 +442,9 @@ func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*Aggregati
 				}
 			}
 			if totalGroupCount > maxGroupByGroups {
-				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("GROUP BY produced too many groups (%d). "+
+				return nil, merr.WrapErrParameterInvalidMsg("GROUP BY produced too many groups (%d). "+
 					"Add filters or increase common.groupBy.maxGroups (current: %d)",
-					totalGroupCount, maxGroupByGroups))
+					totalGroupCount, maxGroupByGroups)
 			}
 			// Don't guarantee specific groups to be returned before milvus support order by
 		}
