@@ -393,7 +393,6 @@ func NewSegment(ctx context.Context,
 	)
 
 	var csegment segcore.CSegment
-	logger.Info("[xxx]submit create segment", zap.Any("pool running", GetDynamicPool().Running()), zap.Any("pool capacity", GetDynamicPool().Cap()))
 	if _, err := GetDynamicPool().Submit(func() (any, error) {
 		var err error
 		csegment, err = segcore.CreateCSegment(&segcore.CreateCSegmentRequest{
@@ -408,7 +407,6 @@ func NewSegment(ctx context.Context,
 		logger.Warn("create segment failed", zap.Error(err))
 		return nil, err
 	}
-	logger.Info("[xxx] create segment done")
 
 	segment := &LocalSegment{
 		baseSegment:        base,

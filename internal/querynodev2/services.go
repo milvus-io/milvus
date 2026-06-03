@@ -443,10 +443,6 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		zap.Int64("dstNodeID", req.GetDstNodeID()),
 	)
 
-	log.Info("[xxx] received load segments request",
-		zap.Int64("version", req.GetVersion()),
-		zap.Bool("needTransfer", req.GetNeedTransfer()),
-		zap.String("loadScope", req.GetLoadScope().String()))
 	// check node healthy
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return merr.Status(err), nil

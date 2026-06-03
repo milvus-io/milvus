@@ -412,19 +412,14 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 }
 
 func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, req AllocNewGrowingSegmentRequest) (*SegmentInfo, error) {
-	totalStart := time.Now()
-
-	var estimateDur time.Duration
 	var maxNumOfRows int
 	if !req.IsCreatedByStreaming {
-		estimateStart := time.Now()
 		var err error
 		maxNumOfRows, err = s.estimateMaxNumOfRows(req.CollectionID)
 		if err != nil {
 			log.Error("failed to open new segment while estimateMaxNumOfRows", zap.Error(err))
 			return nil, err
 		}
-		estimateDur = time.Since(estimateStart)
 	}
 
 	var manifestPath string
@@ -450,30 +445,14 @@ func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, r
 		SchemaVersion:        req.SchemaVersion,
 	}
 	segment := NewSegmentInfo(segmentInfo)
-	addSegmentStart := time.Now()
 	if err := s.meta.AddSegment(ctx, segment); err != nil {
 		log.Error("failed to add segment to DataCoord", zap.Error(err))
 		return nil, err
 	}
-	addSegmentDur := time.Since(addSegmentStart)
 
-	afterCreateStart := time.Now()
 	growing, _ := s.channel2Growing.GetOrInsert(req.ChannelName, typeutil.NewConcurrentSet[int64]())
 	growing.Insert(req.SegmentID)
 	err := s.helper.afterCreateSegment(segmentInfo)
-	afterCreateDur := time.Since(afterCreateStart)
-
-	log.Info("openNewSegmentWithGivenSegmentID timing",
-		zap.Int64("CollectionID", segmentInfo.CollectionID),
-		zap.Int64("SegmentID", segmentInfo.ID),
-		zap.String("Channel", segmentInfo.InsertChannel),
-		zap.Bool("IsCreatedByStreaming", segmentInfo.IsCreatedByStreaming),
-		zap.Int32("SchemaVersion", segmentInfo.SchemaVersion),
-		zap.Duration("estimateRows", estimateDur),
-		zap.Duration("addSegment", addSegmentDur),
-		zap.Duration("afterCreate", afterCreateDur),
-		zap.Duration("total", time.Since(totalStart)),
-	)
 
 	return segment, err
 }

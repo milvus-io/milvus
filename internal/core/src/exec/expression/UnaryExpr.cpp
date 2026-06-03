@@ -2260,13 +2260,6 @@ PhyUnaryRangeFilterExpr::PrefetchRawData() {
         chunks_may_hit.push_back(i);
     }
 
-    LOG_INFO(
-        "[sss] unary expr PrefetchRawData, partition: {}, segment: {}, field: "
-        "{}, chunks_may_hit: {}",
-        segment_->get_partition_id(),
-        segment_->get_segment_id(),
-        field_id_.get(),
-        chunks_may_hit.size());
     segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
 }
 

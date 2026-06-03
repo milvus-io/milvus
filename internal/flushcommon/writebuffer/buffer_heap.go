@@ -3,7 +3,7 @@ package writebuffer
 import (
 	"container/heap"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // bufferHeapItem represents an item in the buffer heap

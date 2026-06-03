@@ -293,17 +293,12 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		task.SetShardLeaderID(view.Node)
 	}
 
-	startTs := time.Now()
-	log.Info("[xxx] load segments...")
 	status, err := ex.cluster.LoadSegments(task.Context(), view.Node, req)
 	err = merr.CheckRPCCall(status, err)
 	if err != nil {
 		log.Warn("failed to load segment", zap.Error(err))
 		return err
 	}
-
-	elapsed := time.Since(startTs)
-	log.Info("[xxx] load segments done", zap.Duration("elapsed", elapsed))
 
 	return nil
 }

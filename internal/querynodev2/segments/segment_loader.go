@@ -253,13 +253,9 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	infos := loader.prepare(ctx, segmentType, segments...)
 	defer loader.unregister(infos...)
 
-	// continue to wait other task done
-	log.Info("[xxx] start loading...", zap.Int("segmentNum", len(segments)), zap.Int("afterFilter", len(infos)), zap.Any("segments", lo.Map(segments, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })))
-
 	var err error
 	var requestResourceResult requestResourceResult
 
-	t1 := time.Now()
 	// Check memory & storage limit
 	// no need to check resource for lazy load here
 	requestResourceResult, err = loader.requestResource(ctx, infos...)
@@ -267,7 +263,6 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		log.Warn("request resource failed", zap.Error(err))
 		return nil, err
 	}
-	t2 := time.Now()
 	defer loader.freeRequestResource(requestResourceResult)
 
 	newSegments := typeutil.NewConcurrentMap[int64, Segment]()
@@ -328,7 +323,6 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		newSegments.Insert(loadInfo.GetSegmentID(), segment)
 	}
 
-	t3 := time.Now()
 	loadSegmentFunc := func(idx int) (err error) {
 		loadInfo := infos[idx]
 		partitionID := loadInfo.PartitionID
@@ -421,16 +415,13 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		return nil, err
 	}
 
-	t4 := time.Now()
 	// Wait for all segments loaded
 	segmentIDs := lo.Map(segments, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })
 	if err := loader.waitSegmentLoadDone(ctx, segmentType, segmentIDs, version); err != nil {
 		log.Warn("failed to wait the filtered out segments load done", zap.Error(err))
 		return nil, err
 	}
-	t5 := time.Now()
 
-	log.Info("[xxx] all segment load done", zap.Duration("requestResourceTime", t2.Sub(t1)), zap.Duration("loadSegmentTime", t3.Sub(t2)), zap.Duration("loadSegmentFuncTime", t4.Sub(t3)), zap.Duration("waitSegmentLoadDoneTime", t5.Sub(t4)), zap.Any("segments", lo.Map(segments, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })))
 	var result []Segment
 	loaded.Range(func(_ int64, s Segment) bool {
 		result = append(result, s)
@@ -1038,22 +1029,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		stateLockGuard.Done(err)
 	}()
 
-	collection := segment.GetCollection()
-	indexedFieldInfos, _, textIndexes, unindexedTextFields, jsonKeyStats, _, _ := separateLoadInfoV2(loadInfo, collection.Schema())
-
-	log := log.Ctx(ctx).With(zap.Int64("segmentID", segment.ID()))
-	tr := timerecord.NewTimeRecorder("segmentLoader.loadSealedSegment")
-	log.Info("[xxx] Start loading fields...",
-		zap.Int("indexedFields count", len(indexedFieldInfos)),
-		zap.Int64s("indexed text fields", lo.Keys(textIndexes)),
-		zap.Int64s("unindexed text fields", lo.Keys(unindexedTextFields)),
-		zap.Int64s("indexed json key fields", lo.Keys(jsonKeyStats)),
-		zap.Any("running pool size", GetLoadPool().Running()),
-		zap.Any("pool size", GetLoadPool().Cap()),
-	)
-
 	_, err = GetLoadPool().Submit(func() (any, error) {
-		log.Info("[xxx] start loading segment in pool")
 		if err = segment.Load(ctx); err != nil {
 			return struct{}{}, errors.Wrap(err, "At Load")
 		}
@@ -1080,10 +1056,6 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	if err := loader.patchEntryNumber(ctx, segment, loadInfo); err != nil {
 		return err
 	}
-	patchEntryNumberSpan := tr.RecordSpan()
-	log.Info("[xxx] Finish loading segment",
-		zap.Duration("patchEntryNumberSpan", patchEntryNumberSpan),
-	)
 	return nil
 }
 
@@ -1102,11 +1074,6 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 		zap.Int64("segmentID", segment.ID()),
 	)
 
-	log.Info("[xxx] start loading segment files",
-		zap.Int64("rowNum", loadInfo.GetNumOfRows()),
-		zap.String("segmentType", segment.Type().String()),
-		zap.Int32("priority", int32(loadInfo.GetPriority())))
-
 	collection := loader.manager.Collection.Get(segment.Collection())
 	if collection == nil {
 		err := merr.WrapErrCollectionNotFound(segment.Collection())
@@ -1115,7 +1082,6 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	}
 	pkField := GetPkField(collection.Schema())
 
-	log.Info("[xxx] start loading sealed segment")
 	if segment.Type() == SegmentTypeSealed {
 		if err := loader.loadSealedSegment(ctx, loadInfo, segment); err != nil {
 			return err

@@ -82,35 +82,14 @@ class PhyVectorSearchNode : public Operator {
                       prefetch_pool) override {
         auto self =
             std::static_pointer_cast<PhyVectorSearchNode>(shared_from_this());
-        LOG_INFO(
-            "[sss] vector search node PrefetchAsync enqueue, partition: {}, "
-            "segment: {}, "
-            "field: {}",
-            self->segment_->get_partition_id(),
-            self->segment_->get_segment_id(),
-            self->search_info_.field_id_.get());
         prefetch_future_ = folly::via(prefetch_pool.get(), [self]() {
             auto* op_ctx = self->query_context_->get_op_context();
             if (op_ctx != nullptr &&
                 op_ctx->cancellation_token.isCancellationRequested()) {
                 return;
             }
-            LOG_INFO(
-                "[sss] vector search node PrefetchAsync start, partition: {}, "
-                "segment: {}, "
-                "field: {}",
-                self->segment_->get_partition_id(),
-                self->segment_->get_segment_id(),
-                self->search_info_.field_id_.get());
             self->segment_->prefetch_vector(op_ctx,
                                             self->search_info_.field_id_);
-            LOG_INFO(
-                "[sss] vector search node PrefetchAsync end, partition: {}, "
-                "segment: {}, "
-                "field: {}",
-                self->segment_->get_partition_id(),
-                self->segment_->get_segment_id(),
-                self->search_info_.field_id_.get());
         });
     }
 

@@ -2235,38 +2235,15 @@ class SegmentExpr : public Expr {
     PrefetchAsync(const std::shared_ptr<folly::CPUThreadPoolExecutor>
                       prefetch_pool) override {
         auto self = std::static_pointer_cast<SegmentExpr>(shared_from_this());
-        LOG_INFO(
-            "[sss] segment expr PrefetchAsync enqueue, partition: {}, "
-            "segment: {}, "
-            "field: {}",
-            self->segment_->get_partition_id(),
-            self->segment_->get_segment_id(),
-            self->field_id_.get());
         prefetch_future_ = folly::via(prefetch_pool.get(), [self]() {
             if (self->op_ctx_ != nullptr &&
                 self->op_ctx_->cancellation_token.isCancellationRequested()) {
                 return;
             }
-            LOG_INFO(
-                "[sss] segment expr PrefetchAsync start, partition: {}, "
-                "segment: {}, "
-                "field: {}",
-                self->segment_->get_partition_id(),
-                self->segment_->get_segment_id(),
-                self->field_id_.get());
             self->DetermineExecPath();
             if (self->exec_path_ == ExprExecPath::RawData) {
                 self->PrefetchRawData(self->field_id_);
             }
-            LOG_INFO(
-                "[sss] segment expr PrefetchAsync end, partition: {}, "
-                "segment: {}, "
-                "field: {}, "
-                "exec_path: {}",
-                self->segment_->get_partition_id(),
-                self->segment_->get_segment_id(),
-                self->field_id_.get(),
-                static_cast<int>(self->exec_path_));
         });
     }
 
