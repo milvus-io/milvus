@@ -2448,7 +2448,7 @@ func (c *Core) SelectRole(ctx context.Context, in *milvuspb.SelectRoleRequest) (
 			errMsg := "fail to select the role to check the role name"
 			ctxLog.Warn(errMsg, zap.Error(err))
 			return &milvuspb.SelectRoleResponse{
-				Status: merr.StatusWithErrorCode(merr.WrapErrServiceInternalMsg(errMsg), commonpb.ErrorCode_SelectRoleFailure),
+				Status: merr.StatusWithErrorCode(merr.Wrap(err, errMsg), commonpb.ErrorCode_SelectRoleFailure),
 			}, nil
 		}
 	}
@@ -2457,7 +2457,7 @@ func (c *Core) SelectRole(ctx context.Context, in *milvuspb.SelectRoleRequest) (
 		errMsg := "fail to select the role"
 		ctxLog.Warn(errMsg, zap.Error(err))
 		return &milvuspb.SelectRoleResponse{
-			Status: merr.StatusWithErrorCode(merr.WrapErrServiceInternalMsg(errMsg), commonpb.ErrorCode_SelectRoleFailure),
+			Status: merr.StatusWithErrorCode(merr.Wrap(err, errMsg), commonpb.ErrorCode_SelectRoleFailure),
 		}, nil
 	}
 
@@ -2495,7 +2495,7 @@ func (c *Core) SelectUser(ctx context.Context, in *milvuspb.SelectUserRequest) (
 			errMsg := "fail to select the user to check the username"
 			ctxLog.Warn(errMsg, zap.Any("in", in), zap.Error(err))
 			return &milvuspb.SelectUserResponse{
-				Status: merr.StatusWithErrorCode(merr.WrapErrServiceInternalMsg(errMsg), commonpb.ErrorCode_SelectUserFailure),
+				Status: merr.StatusWithErrorCode(merr.Wrap(err, errMsg), commonpb.ErrorCode_SelectUserFailure),
 			}, nil
 		}
 	}
@@ -2504,7 +2504,7 @@ func (c *Core) SelectUser(ctx context.Context, in *milvuspb.SelectUserRequest) (
 		errMsg := "fail to select the user"
 		ctxLog.Warn(errMsg, zap.Error(err))
 		return &milvuspb.SelectUserResponse{
-			Status: merr.StatusWithErrorCode(merr.WrapErrServiceInternalMsg(errMsg), commonpb.ErrorCode_SelectUserFailure),
+			Status: merr.StatusWithErrorCode(merr.Wrap(err, errMsg), commonpb.ErrorCode_SelectUserFailure),
 		}, nil
 	}
 
@@ -2526,7 +2526,7 @@ func (c *Core) isValidRole(ctx context.Context, entity *milvuspb.RoleEntity) err
 	}
 	if _, err := c.meta.SelectRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.Name}, false); err != nil {
 		log.Warn("fail to select the role", zap.String("role_name", entity.Name), zap.Error(err))
-		return merr.WrapErrServiceInternalMsg("not found the role, maybe the role isn't existed or internal system error")
+		return merr.Wrap(err, "fail to validate role")
 	}
 	return nil
 }
@@ -2641,7 +2641,7 @@ func (c *Core) operatePrivilegeCommonCheck(ctx context.Context, in *milvuspb.Ope
 	}
 	if _, err := c.meta.SelectUser(ctx, util.DefaultTenant, &milvuspb.UserEntity{Name: entity.User.Name}, false); err != nil {
 		log.Ctx(ctx).Warn("fail to select the user", zap.String("username", entity.User.Name), zap.Error(err))
-		return merr.WrapErrServiceInternalMsg("not found the user, maybe the user isn't existed or internal system error")
+		return merr.Wrap(err, "fail to validate grantor user")
 	}
 	if entity.Privilege == nil {
 		return merr.WrapErrServiceInternalMsg("the privilege entity in the grantor entity is nil")
@@ -2755,7 +2755,7 @@ func (c *Core) SelectGrant(ctx context.Context, in *milvuspb.SelectGrantRequest)
 		errMsg := "fail to select the grant"
 		ctxLog.Warn(errMsg, zap.Error(err))
 		return &milvuspb.SelectGrantResponse{
-			Status: merr.StatusWithErrorCode(merr.WrapErrServiceInternalMsg(errMsg), commonpb.ErrorCode_SelectGrantFailure),
+			Status: merr.StatusWithErrorCode(merr.Wrap(err, errMsg), commonpb.ErrorCode_SelectGrantFailure),
 		}, nil
 	}
 
@@ -2793,7 +2793,7 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 	if err != nil {
 		ctxLog.Error("fail to get privilege groups", zap.Error(err))
 		return &internalpb.ListPolicyResponse{
-			Status: merr.StatusWithErrorCode(merr.WrapErrServiceInternalMsg("fail to get privilege groups: %s", err.Error()), commonpb.ErrorCode_ListPolicyFailure),
+			Status: merr.StatusWithErrorCode(merr.Wrap(err, "fail to get privilege groups"), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
 	groups := lo.SliceToMap(allGroups, func(group *milvuspb.PrivilegeGroupInfo) (string, []*milvuspb.PrivilegeEntity) {
@@ -2803,7 +2803,7 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 	if err != nil {
 		ctxLog.Error("fail to expand privilege groups", zap.Error(err))
 		return &internalpb.ListPolicyResponse{
-			Status: merr.StatusWithErrorCode(merr.WrapErrServiceInternalMsg("fail to expand privilege groups: %s", err.Error()), commonpb.ErrorCode_ListPolicyFailure),
+			Status: merr.StatusWithErrorCode(merr.Wrap(err, "fail to expand privilege groups"), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
 	expandPolicies := lo.Map(expandGrants, func(r *milvuspb.GrantEntity, _ int) string {
@@ -2814,7 +2814,7 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 	if err != nil {
 		ctxLog.Error("fail to list user-role", zap.Any("in", in), zap.Error(err))
 		return &internalpb.ListPolicyResponse{
-			Status: merr.StatusWithErrorCode(merr.WrapErrServiceInternalMsg("fail to list user-role: %s", err.Error()), commonpb.ErrorCode_ListPolicyFailure),
+			Status: merr.StatusWithErrorCode(merr.Wrap(err, "fail to list user-role"), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
 
