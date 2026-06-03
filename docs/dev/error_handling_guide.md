@@ -3,8 +3,11 @@
 How to produce and return errors in Milvus server code — the day-to-day how-to.
 For the underlying rules, the sentinel naming convention, and the enforcement
 roadmap, see [error_sentinel_convention.md](./error_sentinel_convention.md). For
-the numeric code table, see
-[appendix_d_error_code.md](../developer_guides/appendix_d_error_code.md).
+the canonical numeric code list, see the sentinel definitions in
+[`pkg/util/merr/errors.go`](../../pkg/util/merr/errors.go). (The
+[appendix_d_error_code.md](../developer_guides/appendix_d_error_code.md)
+appendix predates merr and lists the **deprecated** `commonpb.ErrorCode` enum,
+not the merr codes.)
 
 ## TL;DR
 
@@ -116,8 +119,8 @@ return merr.WrapErrParameterInvalidMsg("nq (%d) exceeds the limit (%d)", nq, max
 return merr.WrapErrCollectionNotFound(collectionName)
 ```
 
-Pick the sentinel whose **code** matches the failure's meaning (see the
-[code table](../developer_guides/appendix_d_error_code.md)). This is the common
+Pick the sentinel whose **code** matches the failure's meaning (see the sentinel
+definitions in [`pkg/util/merr/errors.go`](../../pkg/util/merr/errors.go)). This is the common
 case: most of the time you only need to attach a message to a well-chosen code,
 and the framework does the rest.
 
@@ -138,7 +141,9 @@ context and **preserves** the inner error's code and its `errors.Is` chain.
 `merr.WrapErrXxxErr`) just to add context. Those build a
 `wrappedMilvusError{sentinel: ErrServiceInternal}` whose `code()` returns the
 **outer** sentinel's code — they **overwrite** the inner typed code with
-ServiceInternal (5) and hide the `errors.Is` chain. `WrapErrXxxErr` is *only* for
+ServiceInternal (5) and force it non-retriable (`As()` resolves to the outer
+sentinel). The `errors.Is` chain itself survives via `Unwrap()`, but the typed
+code and retriability are masked. `WrapErrXxxErr` is *only* for
 when you **deliberately** want to relabel the inner error to a new code (e.g.
 collapse a noisy internal failure into one ServiceInternal for the client).
 

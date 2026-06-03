@@ -50,18 +50,38 @@ because no customer sees the resulting `Code=1 Unexpected`.
 
 ### What breaks the invariant
 
-The sentinel chain survives `return err` and `errors.Wrap(err, "...")`
-(cockroachdb thin wrap, preserves `Unwrap()`). It is **destroyed** by:
+The `errors.Is` chain survives `return err`, `errors.Wrap(err, "...")` /
+`merr.Wrap(err, "...")` (cockroachdb thin wrap), **and**
+`merr.WrapErrServiceInternalErr(err, "...")` — `wrappedMilvusError.Unwrap()`
+returns `w.inner`, so `errors.Is(outer, innerSentinel)` stays true through any
+of them. It is **destroyed** only by:
 
-- `merr.WrapErrServiceInternalErr(err, "...")` and any other
-  `merr.WrapErrXxxErr` — these wrap the cause in a
-  `*wrappedMilvusError{sentinel: ErrServiceInternal}` whose `Unwrap()` hides
-  the cause, so `errors.Is(outer, sentinelX)` returns false. (See also
-  [feedback rule](#related-rules) on `merr.Wrap` vs `merr.WrapErr*Err`.)
+- Putting the cause in a format argument instead of the chain:
+  `merr.WrapErrXxxMsg("...: %s", err)`, or the `%w` mistake (`WrapErr*Msg`
+  formats with `fmt.Sprintf`, which does **not** honor `%w` and renders
+  `%!w(...)`). The inner error reaches the message text but is unreachable via
+  `Unwrap()`, so `errors.Is(outer, innerSentinel)` returns false.
 - Any custom wrapper that doesn't implement `Unwrap()`.
 
-So the rule "use `merr.Wrap` to add context to an existing err, never
-`merr.WrapErr*Err`" is what keeps the sentinel chain intact end-to-end.
+Do **not** confuse this with the separate code/retriability rule.
+`merr.Wrap(err, ...)` and `merr.WrapErrXxxErr(err, ...)` both keep `errors.Is`
+intact, but they differ in what the result reports at the boundary:
+
+- `merr.Wrap(err, ...)` preserves the inner's `Code()` and `IsRetryable` — the
+  chain still resolves to the inner's `*milvusError`.
+- `merr.WrapErrXxxErr(err, ...)` reports the **outer** sentinel's code and
+  retriability: `As()` resolves to `ErrServiceInternal` (Code 5,
+  non-retriable), **masking** the inner's classification.
+
+So there are two distinct rules, often conflated:
+
+1. To keep `errors.Is` working: never stuff the cause into a format string;
+   pass it as the error argument.
+2. To add context **without changing the classification** (preserve the inner
+   code + retriability): use `merr.Wrap`, not `merr.WrapErr*Err`. Reserve
+   `merr.WrapErrXxxErr` for when you intend to *assert* a new classification
+   (e.g. this genuinely is a service-internal error). (See also
+   [feedback rule](#related-rules) on `merr.Wrap` vs `merr.WrapErr*Err`.)
 
 ## Naming convention
 
@@ -289,8 +309,8 @@ would catch the symptom (sentinel escape) as a side effect.
 
 - `feedback_merr_wrap_rule` (this repo's collaboration memory): "Add context
   to an existing err with `merr.Wrap` / `merr.Wrapf`, never with
-  `merr.WrapErr*Err` — the latter masks the inner typed code and breaks
-  `errors.Is`."
+  `merr.WrapErr*Err` — the latter masks the inner typed code and
+  retriability (the `errors.Is` chain itself is preserved via `Unwrap()`)."
 - `project_errstd_autogen_defects`: three systematic defects in the
   auto-generated `errors.Wrap → merr` conversion in this branch series;
   defects #2 and #3 are direct consequences of violating the rules in

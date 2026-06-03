@@ -1,5 +1,14 @@
 ## Appendix D. Error Code
 
+> **⚠️ Deprecated.** This appendix documents the legacy `commonpb.ErrorCode`
+> enum (Milvus 2.0-era), which is no longer the source of truth for error codes.
+> Current error codes are the `merr` sentinel codes (e.g. `ParameterInvalid`
+> = 1100, `ServiceInternal` = 5, `FunctionFailed` = 2400) carried in
+> `commonpb.Status.Code`. The canonical list is the sentinel definitions in
+> [`pkg/util/merr/errors.go`](../../pkg/util/merr/errors.go); see also
+> [error_handling_guide.md](../dev/error_handling_guide.md) and
+> [error_sentinel_convention.md](../dev/error_sentinel_convention.md).
+
 **ErrorCode**
 
 ```protobuf
