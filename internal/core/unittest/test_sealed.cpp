@@ -519,6 +519,9 @@ TEST(Sealed, SegmentInterfaceIsIndexRefineEnabledPropagatesOpContext) {
                        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
     auto database = knowhere::GenDataSet(N, dim, vec_col.data());
     indexing->BuildWithDataset(database, build_conf);
+    auto expected_refine_enabled =
+        dynamic_cast<index::VectorIndex*>(indexing.get())
+            ->IsIndexRefineEnabled();
 
     milvus::OpContext* observed_ctx = nullptr;
     LoadIndexInfo load_info;
@@ -537,7 +540,8 @@ TEST(Sealed, SegmentInterfaceIsIndexRefineEnabledPropagatesOpContext) {
     folly::CancellationSource source;
     milvus::OpContext op_context(source.getToken());
 
-    EXPECT_TRUE(segment_interface->IsIndexRefineEnabled(&op_context, fake_id));
+    EXPECT_EQ(segment_interface->IsIndexRefineEnabled(&op_context, fake_id),
+              expected_refine_enabled);
     EXPECT_EQ(observed_ctx, &op_context);
 }
 
