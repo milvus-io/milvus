@@ -16,6 +16,9 @@
 
 #include "UnaryExpr.h"
 
+#include <folly/executors/CPUThreadPoolExecutor.h>
+#include <folly/futures/Future-inl.h>
+#include <folly/futures/Future.h>
 #include <simdjson.h>
 #include <algorithm>
 #include <chrono>
@@ -26,6 +29,7 @@
 #include <optional>
 #include <cctype>
 #include <set>
+#include <string_view>
 #include <unordered_set>
 #include <variant>
 
@@ -176,6 +180,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArrayForIndex<proto::plan::Array>(
 
 void
 PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    WaitPrefetch();
     tracer::AutoSpan span(
         "PhyUnaryRangeFilterExpr::Eval", tracer::GetRootSpan(), true);
     span.GetSpan()->SetAttribute("data_type",
@@ -2174,6 +2179,74 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch(EvalCtx& context) {
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(batch_candidates),
                                           std::move(valid_result));
+}
+
+void
+PhyUnaryRangeFilterExpr::PrefetchRawData() {
+    auto datatype = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        datatype = expr_->column_.element_type_;
+    }
+
+    switch (datatype) {
+        case DataType::BOOL:
+            PrefetchRawData<bool>();
+            break;
+        case DataType::INT8:
+            PrefetchRawData<int8_t>();
+            break;
+        case DataType::INT16:
+            PrefetchRawData<int16_t>();
+            break;
+        case DataType::INT32:
+            PrefetchRawData<int32_t>();
+            break;
+        case DataType::INT64:
+            PrefetchRawData<int64_t>();
+            break;
+        case DataType::TIMESTAMPTZ:
+            PrefetchRawData<int64_t>();
+            break;
+        case DataType::FLOAT:
+            PrefetchRawData<float>();
+            break;
+        case DataType::DOUBLE:
+            PrefetchRawData<double>();
+            break;
+        case DataType::VARCHAR:
+            if (segment_->type() == SegmentType::Growing &&
+                !storage::MmapManager::GetInstance()
+                     .GetMmapConfig()
+                     .growing_enable_mmap) {
+                PrefetchRawData<std::string>();
+            } else {
+                PrefetchRawData<std::string_view>();
+            }
+            break;
+        default:
+            SegmentExpr::PrefetchRawData(expr_->column_.field_id_);
+            break;
+    }
+}
+
+template <typename T>
+void
+PhyUnaryRangeFilterExpr::PrefetchRawData() {
+    using U =
+        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
+    auto op_type = expr_->op_type_;
+    auto& skip_index = segment_->GetSkipIndex();
+    U val = GetValueFromProto<U>(expr_->val_);
+
+    std::vector<int64_t> chunks_may_hit;
+    for (size_t i = 0; i < num_data_chunk_; i++) {
+        if (skip_index.CanSkipUnaryRange<U>(field_id_, i, op_type, val)) {
+            continue;
+        }
+        chunks_may_hit.push_back(i);
+    }
+
+    segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
 }
 
 }  // namespace exec

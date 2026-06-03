@@ -18,6 +18,9 @@
 
 #include <cstdint>
 #include <limits>
+#include <string>
+#include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -48,6 +51,7 @@ namespace exec {
 
 void
 PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    WaitPrefetch();
     tracer::AutoSpan span(
         "PhyBinaryRangeFilterExpr::Eval", tracer::GetRootSpan(), true);
     span.GetSpan()->SetAttribute("data_type",
@@ -1034,5 +1038,81 @@ PhyBinaryRangeFilterExpr::DetermineExecPath() {
     }
 }
 
+void
+PhyBinaryRangeFilterExpr::PrefetchRawData() {
+    auto datatype = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        datatype = expr_->column_.element_type_;
+    }
+
+    switch (datatype) {
+        case DataType::BOOL:
+            PrefetchRawData<bool>();
+            break;
+        case DataType::INT8:
+            PrefetchRawData<int8_t>();
+            break;
+        case DataType::INT16:
+            PrefetchRawData<int16_t>();
+            break;
+        case DataType::INT32:
+            PrefetchRawData<int32_t>();
+            break;
+        case DataType::INT64:
+            PrefetchRawData<int64_t>();
+            break;
+        case DataType::TIMESTAMPTZ:
+            PrefetchRawData<int64_t>();
+            break;
+        case DataType::FLOAT:
+            PrefetchRawData<float>();
+            break;
+        case DataType::DOUBLE:
+            PrefetchRawData<double>();
+            break;
+        case DataType::VARCHAR:
+            if (segment_->type() == SegmentType::Growing &&
+                !storage::MmapManager::GetInstance()
+                     .GetMmapConfig()
+                     .growing_enable_mmap) {
+                PrefetchRawData<std::string>();
+            } else {
+                PrefetchRawData<std::string_view>();
+            }
+            break;
+        default:
+            SegmentExpr::PrefetchRawData(expr_->column_.field_id_);
+            break;
+    }
+}
+
+template <typename T>
+void
+PhyBinaryRangeFilterExpr::PrefetchRawData() {
+    using U =
+        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
+    using H =
+        std::conditional_t<std::is_integral_v<U> && !std::is_same_v<bool, T>,
+                           int64_t,
+                           U>;
+    H lower_val = GetValueWithCastNumber<H>(expr_->lower_val_);
+    H upper_val = GetValueWithCastNumber<H>(expr_->upper_val_);
+    auto& skip_index = segment_->GetSkipIndex();
+
+    std::vector<int64_t> chunks_may_hit;
+    for (size_t i = 0; i < num_data_chunk_; ++i) {
+        auto skip = skip_index.CanSkipBinaryRange(field_id_,
+                                                  i,
+                                                  lower_val,
+                                                  upper_val,
+                                                  expr_->lower_inclusive_,
+                                                  expr_->upper_inclusive_);
+        if (!skip) {
+            chunks_may_hit.push_back(i);
+        }
+    }
+
+    segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
+}
 }  // namespace exec
 }  // namespace milvus
