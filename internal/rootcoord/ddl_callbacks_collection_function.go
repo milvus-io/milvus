@@ -122,7 +122,7 @@ func alterFunctionGenNewCollection(ctx context.Context, fSchema *schemapb.Functi
 	for _, name := range fSchema.InputFieldNames {
 		field, exists := fieldMapping[name]
 		if !exists {
-			err := merr.WrapErrServiceInternalMsg("function's input field %s not exists", name)
+			err := merr.WrapErrParameterInvalidMsg("function's input field %s not exists", name)
 			log.Ctx(ctx).Error("Incorrect function configuration:", zap.Error(err))
 			return err
 		}
@@ -131,12 +131,12 @@ func alterFunctionGenNewCollection(ctx context.Context, fSchema *schemapb.Functi
 	for _, name := range fSchema.OutputFieldNames {
 		field, exists := fieldMapping[name]
 		if !exists {
-			err := merr.WrapErrServiceInternalMsg("function's output field %s not exists", name)
+			err := merr.WrapErrParameterInvalidMsg("function's output field %s not exists", name)
 			log.Ctx(ctx).Error("Incorrect function configuration:", zap.Error(err))
 			return err
 		}
 		if field.IsFunctionOutput {
-			err := merr.WrapErrServiceInternalMsg("function's output field %s is already of other functions", name)
+			err := merr.WrapErrParameterInvalidMsg("function's output field %s is already of other functions", name)
 			log.Ctx(ctx).Error("Incorrect function configuration: ", zap.Error(err))
 			return err
 		}
@@ -256,7 +256,7 @@ func (c *Core) broadcastAlterCollectionForAddFunction(ctx context.Context, req *
 	for _, name := range fSchema.InputFieldNames {
 		field, exists := fieldMapping[name]
 		if !exists {
-			err := merr.WrapErrServiceInternalMsg("function's input field %s not exists", name)
+			err := merr.WrapErrParameterInvalidMsg("function's input field %s not exists", name)
 			log.Ctx(ctx).Error("Incorrect function configuration:", zap.Error(err))
 			return err
 		}
@@ -265,12 +265,12 @@ func (c *Core) broadcastAlterCollectionForAddFunction(ctx context.Context, req *
 	for _, name := range fSchema.OutputFieldNames {
 		field, exists := fieldMapping[name]
 		if !exists {
-			err := merr.WrapErrServiceInternalMsg("function's output field %s not exists", name)
+			err := merr.WrapErrParameterInvalidMsg("function's output field %s not exists", name)
 			log.Ctx(ctx).Error("Incorrect function configuration:", zap.Error(err))
 			return err
 		}
 		if field.IsFunctionOutput {
-			err := merr.WrapErrServiceInternalMsg("function's output field %s is already of other functions", name)
+			err := merr.WrapErrParameterInvalidMsg("function's output field %s is already of other functions", name)
 			log.Ctx(ctx).Error("Incorrect function configuration: ", zap.Error(err))
 			return err
 		}
