@@ -630,6 +630,27 @@ func BenchmarkGroupByPartitionChannel(b *testing.B) {
 }
 
 func TestCalculateTargetSizeCount_QueryNodeParallelism(t *testing.T) {
+	t.Run("fractional target count rounds up", func(t *testing.T) {
+		view := &ForceMergeSegmentView{
+			label: &CompactionGroupLabel{
+				CollectionID: 1,
+				PartitionID:  1,
+				Channel:      "ch1",
+			},
+			segments: []*SegmentView{
+				{ID: 1, Size: 150 * 1024 * 1024},
+			},
+			triggerID:     1,
+			configMaxSize: 100 * 1024 * 1024,
+			topology:      &CollectionTopology{},
+		}
+
+		maxSafeSize, targetCount := view.calculateTargetSizeCount()
+
+		assert.Equal(t, int64(2), targetCount)
+		assert.Equal(t, float64(100*1024*1024), maxSafeSize)
+	})
+
 	t.Run("single QueryNode - no adjustment", func(t *testing.T) {
 		topology := &CollectionTopology{
 			QueryNodeMemory: map[int64]uint64{1: 8 * 1024 * 1024 * 1024},

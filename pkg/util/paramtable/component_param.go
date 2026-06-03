@@ -4987,12 +4987,13 @@ type dataCoordConfig struct {
 	DVForceAllIndexReady           ParamItem `refreshable:"true"`
 
 	// compaction
-	EnableCompaction                       ParamItem `refreshable:"false"`
-	EnableAutoCompaction                   ParamItem `refreshable:"true"`
-	IndexBasedCompaction                   ParamItem `refreshable:"true"`
-	CompactionTaskPrioritizer              ParamItem `refreshable:"true"`
-	CompactionTaskQueueCapacity            ParamItem `refreshable:"false"`
-	CompactionPreAllocateIDExpansionFactor ParamItem `refreshable:"false"`
+	EnableCompaction                              ParamItem `refreshable:"false"`
+	EnableAutoCompaction                          ParamItem `refreshable:"true"`
+	IndexBasedCompaction                          ParamItem `refreshable:"true"`
+	CompactionTaskPrioritizer                     ParamItem `refreshable:"true"`
+	CompactionTaskQueueCapacity                   ParamItem `refreshable:"false"`
+	CompactionPreAllocateIDExpansionFactor        ParamItem `refreshable:"false"`
+	CompactionPreAllocateSegmentIDExpansionFactor ParamItem `refreshable:"false"`
 
 	CompactionRPCTimeout                       ParamItem `refreshable:"true"`
 	CompactionMaxParallelTasks                 ParamItem `refreshable:"true"`
@@ -5381,9 +5382,17 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		Key:          "dataCoord.compaction.preAllocateIDExpansionFactor",
 		Version:      "2.5.8",
 		DefaultValue: "10000",
-		Doc:          `The expansion factor for pre-allocating IDs during compaction.`,
+		Doc:          `The expansion factor for pre-allocating log IDs during compaction.`,
 	}
 	p.CompactionPreAllocateIDExpansionFactor.Init(base.mgr)
+
+	p.CompactionPreAllocateSegmentIDExpansionFactor = ParamItem{
+		Key:          "dataCoord.compaction.preAllocateSegmentIDExpansionFactor",
+		Version:      "2.6.0",
+		DefaultValue: "10",
+		Doc:          `The expansion factor for pre-allocating result segment IDs during compaction.`,
+	}
+	p.CompactionPreAllocateSegmentIDExpansionFactor.Init(base.mgr)
 
 	p.CompactionRPCTimeout = ParamItem{
 		Key:          "dataCoord.compaction.rpcTimeout",

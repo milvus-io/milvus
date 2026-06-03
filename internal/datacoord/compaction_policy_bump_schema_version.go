@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -168,6 +169,17 @@ func (v *BumpSchemaVersionView) GetGroupLabel() *CompactionGroupLabel {
 
 func (v *BumpSchemaVersionView) GetSegmentsView() []*SegmentView {
 	return v.segments
+}
+
+func (v *BumpSchemaVersionView) GetTotalSize() float64 {
+	if v == nil {
+		return 0
+	}
+	return sumSegmentSize(v.segments)
+}
+
+func (v *BumpSchemaVersionView) GetCollectionTTL() time.Duration {
+	return 0
 }
 
 func (v *BumpSchemaVersionView) Append(segments ...*SegmentView) {

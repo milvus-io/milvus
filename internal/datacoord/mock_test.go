@@ -129,7 +129,9 @@ func newMock0Allocator(t *testing.T) *allocator.MockAllocator {
 	mock0Allocator := allocator.NewMockAllocator(t)
 	mock0Allocator.EXPECT().AllocID(mock.Anything).Return(100, nil).Maybe()
 	mock0Allocator.EXPECT().AllocTimestamp(mock.Anything).Return(1000, nil).Maybe()
-	mock0Allocator.EXPECT().AllocN(mock.Anything).Return(100, 200, nil).Maybe()
+	mock0Allocator.EXPECT().AllocN(mock.Anything).RunAndReturn(func(i int64) (int64, int64, error) {
+		return 100, 100 + i, nil
+	}).Maybe()
 	return mock0Allocator
 }
 
