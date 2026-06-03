@@ -2380,7 +2380,7 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 	if err := c.broadcastDropRole(ctx, in); err != nil {
 		ctxLog.Warn("fail to drop role", zap.Error(err))
 		if errors.Is(err, errRoleNotExists) {
-			return merr.StatusWithErrorCode(merr.WrapErrServiceInternalMsg("not found the role, maybe the role isn't existed or internal system error"), commonpb.ErrorCode_DropRoleFailure), nil
+			return merr.StatusWithErrorCode(merr.WrapErrParameterInvalidMsg("not found the role, maybe the role isn't existed or internal system error"), commonpb.ErrorCode_DropRoleFailure), nil
 		}
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_DropRoleFailure), nil
 	}
@@ -2412,7 +2412,7 @@ func (c *Core) OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRole
 	if err := c.broadcastOperateUserRole(ctx, in); err != nil {
 		ctxLog.Warn("fail to operate the user and role", zap.Error(err))
 		if errors.Is(err, errRoleNotExists) {
-			return merr.StatusWithErrorCode(merr.WrapErrServiceInternalMsg("not found the role, maybe the role isn't existed or internal system error"), commonpb.ErrorCode_OperateUserRoleFailure), nil
+			return merr.StatusWithErrorCode(merr.WrapErrParameterInvalidMsg("not found the role, maybe the role isn't existed or internal system error"), commonpb.ErrorCode_OperateUserRoleFailure), nil
 		}
 		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperateUserRoleFailure), nil
 	}
@@ -2644,7 +2644,7 @@ func (c *Core) operatePrivilegeCommonCheck(ctx context.Context, in *milvuspb.Ope
 		return merr.Wrap(err, "fail to validate grantor user")
 	}
 	if entity.Privilege == nil {
-		return merr.WrapErrServiceInternalMsg("the privilege entity in the grantor entity is nil")
+		return merr.WrapErrParameterInvalidMsg("the privilege entity in the grantor entity is nil")
 	}
 	return nil
 }
@@ -2681,7 +2681,7 @@ func (c *Core) validatePrivilegeGroupParams(ctx context.Context, entity string, 
 		}
 		return nil
 	default:
-		return merr.WrapErrServiceInternalMsg("not found the privilege level")
+		return merr.WrapErrParameterInvalidMsg("not found the privilege level")
 	}
 }
 
