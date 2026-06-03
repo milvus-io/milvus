@@ -2050,7 +2050,7 @@ func checkVectorIndexExist(ctx context.Context, dbName, collectionName string, c
 		IndexName:    "",
 	})
 	if err = merr.CheckRPCCall(indexResponse, err); err != nil && !errors.Is(err, merr.ErrIndexNotFound) {
-		return "", merr.WrapErrServiceInternal("describe index failed", err.Error())
+		return "", merr.Wrap(err, "describe index failed")
 	}
 	for _, index := range indexResponse.IndexInfos {
 		for _, field := range collSchema.Fields {
