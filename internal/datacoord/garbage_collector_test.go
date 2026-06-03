@@ -896,7 +896,7 @@ func TestGarbageCollector_recycleUnusedIndexFilesV0_TreatsMatchingV1CollectionID
 	segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
 
 	meta := &meta{
-		segments: NewSegmentsInfo(),
+		segments: NewCachedSegmentsInfo(),
 		indexMeta: &indexMeta{
 			catalog:          catalog,
 			segmentIndexes:   segIndexes,
@@ -948,7 +948,7 @@ func TestGarbageCollector_recycleUnusedIndexFilesV0_OnlyWalksLegacyPrefix(t *tes
 	segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
 
 	meta := &meta{
-		segments: NewSegmentsInfo(),
+		segments: NewCachedSegmentsInfo(),
 		indexMeta: &indexMeta{
 			catalog:          catalog,
 			segmentIndexes:   segIndexes,
@@ -1011,7 +1011,7 @@ func TestGarbageCollector_recycleUnusedIndexFilesV0_IgnoresV1MetadataUnderSepara
 	segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
 
 	meta := &meta{
-		segments: NewSegmentsInfo(),
+		segments: NewCachedSegmentsInfo(),
 		indexMeta: &indexMeta{
 			catalog:          catalog,
 			segmentIndexes:   segIndexes,
@@ -1059,7 +1059,7 @@ func TestGarbageCollector_recycleUnusedIndexFilesV1(t *testing.T) {
 		segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
 
 		meta := &meta{
-			segments: NewSegmentsInfo(),
+			segments: NewCachedSegmentsInfo(),
 			indexMeta: &indexMeta{
 				catalog:          catalog,
 				segmentIndexes:   segIndexes,
@@ -1107,7 +1107,7 @@ func TestGarbageCollector_recycleUnusedIndexFilesV1(t *testing.T) {
 		segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
 
 		meta := &meta{
-			segments: NewSegmentsInfo(),
+			segments: NewCachedSegmentsInfo(),
 			indexMeta: &indexMeta{
 				catalog:          catalog,
 				segmentIndexes:   segIndexes,
@@ -1146,7 +1146,7 @@ func TestGarbageCollector_recycleUnusedIndexFilesV1(t *testing.T) {
 		segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
 
 		meta := &meta{
-			segments: NewSegmentsInfo(),
+			segments: NewCachedSegmentsInfo(),
 			indexMeta: &indexMeta{
 				catalog:          catalog,
 				segmentIndexes:   segIndexes,
@@ -1186,7 +1186,7 @@ func TestGarbageCollector_recycleUnusedIndexFilesV1(t *testing.T) {
 		segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
 
 		meta := &meta{
-			segments: NewSegmentsInfo(),
+			segments: NewCachedSegmentsInfo(),
 			indexMeta: &indexMeta{
 				catalog:          catalog,
 				segmentIndexes:   segIndexes,

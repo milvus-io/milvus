@@ -275,7 +275,7 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 			alloc: nil,
 			meta: &meta{
 				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-				segments:    NewSegmentsInfo(),
+				segments:    NewCachedSegmentsInfo(),
 			},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
@@ -318,7 +318,7 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 			meta: &meta{
 				catalog:     segCatalog,
 				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-				segments:    NewSegmentsInfo(),
+				segments:    NewCachedSegmentsInfo(),
 			},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
@@ -334,7 +334,7 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 				NumOfRows: 100,
 				MaxRowNum: 100,
 			},
-		})
+		}, 0)
 		task.meta.segments.SetSegment(6, &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:        6,
@@ -342,7 +342,7 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 				NumOfRows: 50,
 				MaxRowNum: 50,
 			},
-		})
+		}, 0)
 
 		cluster := session.NewMockCluster(t)
 		cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(nil, errors.New("mock err"))

@@ -3098,14 +3098,21 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	err := s.importMeta.HandleCommitVchannel(ctx, jobID, vchannel, func() error {
 		// Only access s.meta (segment meta) here, NOT s.importMeta.
 		// Batch all segment updates into a single UpdateSegmentsInfo call (one etcd write).
-		ops := make([]UpdateOperator, 0, len(segIDs))
+		mutations := make(map[int64][]SegmentOperator, len(segIDs))
 		for _, segID := range segIDs {
-			ops = append(ops, UpdateIsImporting(segID, false))
+			segmentID := segID
+			mutations[segmentID] = []SegmentOperator{func(seg *SegmentInfo) (BinlogIncrement, bool) {
+				if seg.GetIsImporting() == false {
+					return BinlogIncrement{}, false
+				}
+				seg.IsImporting = false
+				return BinlogIncrement{}, true
+			}}
 		}
-		if len(ops) == 0 {
+		if len(mutations) == 0 {
 			return nil
 		}
-		return s.meta.UpdateSegmentsInfo(ctx, ops...)
+		return s.meta.UpdateSegmentsInfo(ctx, mutations)
 	})
 	if err != nil {
 		return merr.Status(err), nil

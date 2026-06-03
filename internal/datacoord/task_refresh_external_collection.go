@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -371,16 +372,13 @@ func applyExternalCollectionSegmentUpdate(
 			zap.Int64("numRows", numRows))
 	}
 
-	if err := t.mt.UpdateSegmentsInfo(ctx, mutations, updatedSegments...); err != nil {
+	if err := mt.UpdateSegmentsInfo(ctx, mutations, normalizedUpdatedSegments...); err != nil {
 		log.Warn("failed to update segments atomically", zap.Error(err))
 		return err
 	}
-	if patchErr != nil {
-		return patchErr
-	}
 
 	log.Info("external collection segments updated successfully",
-		zap.Int("updatedSegments", len(updatedSegments)),
+		zap.Int("updatedSegments", len(normalizedUpdatedSegments)),
 		zap.Int("keptSegments", len(keptSegmentIDs)))
 
 	return nil

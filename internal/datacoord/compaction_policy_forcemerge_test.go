@@ -408,7 +408,7 @@ func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_AlignsTargetS
 		newSegment(13, datapb.SegmentLevel_L2, true, false, false),
 		newSegment(14, datapb.SegmentLevel_L1, true, false, true),
 	} {
-		meta.segments.SetSegment(segment.GetID(), segment)
+		meta.segments.SetSegment(segment.GetID(), segment, 0)
 	}
 
 	coll := &collectionInfo{

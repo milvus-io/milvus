@@ -18,13 +18,18 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -166,6 +171,145 @@ func UpdateManifestVersion(segmentID int64, manifestVersion int64) SegmentOperat
 		}
 		segment.ManifestPath = packed.MarshalManifestPath(basePath, manifestVersion)
 		return BinlogIncrement{}, true
+	}
+}
+
+func updateManifestPathIfNewer(segment *SegmentInfo, manifestPath string) error {
+	if manifestPath == "" || segment.GetManifestPath() == manifestPath {
+		return nil
+	}
+
+	currentBase, currentVersion, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
+	if err != nil {
+		return err
+	}
+	incomingBase, incomingVersion, err := packed.UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return err
+	}
+	if currentBase != incomingBase {
+		return merr.WrapErrServiceInternal(fmt.Sprintf("manifest base path mismatch for segment %d: current %s, incoming %s", segment.GetID(), currentBase, incomingBase))
+	}
+	if incomingVersion > currentVersion {
+		segment.ManifestPath = manifestPath
+	}
+	return nil
+}
+
+func clearBinlogPaths(fieldBinlogs []*datapb.FieldBinlog) {
+	for _, fieldBinlog := range fieldBinlogs {
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			binlog.LogPath = ""
+		}
+	}
+}
+
+func mergeSegmentMutations(dst map[int64][]SegmentOperator, src map[int64][]SegmentOperator) {
+	for segmentID, operators := range src {
+		dst[segmentID] = append(dst[segmentID], operators...)
+	}
+}
+
+func AddL0DeltalogsAndUpdateManifestOperator(
+	segmentID int64,
+	deltalogs []*datapb.FieldBinlog,
+	storageConfig *indexpb.StorageConfig,
+	committedV3Manifests map[int64]string,
+) map[int64][]SegmentOperator {
+	return map[int64][]SegmentOperator{
+		segmentID: {func(segment *SegmentInfo) (BinlogIncrement, bool) {
+			if len(deltalogs) == 0 {
+				return BinlogIncrement{}, false
+			}
+
+			if segment.GetManifestPath() == "" {
+				if err := binlog.CompressFieldBinlogs(deltalogs); err != nil {
+					log.Ctx(context.TODO()).Warn("meta update: compress L0 deltalog failed", zap.Int64("segmentID", segmentID), zap.Error(err))
+					return BinlogIncrement{}, false
+				}
+			} else {
+				manifestPath := ""
+				if committedV3Manifests != nil {
+					manifestPath = committedV3Manifests[segmentID]
+				}
+				if manifestPath == "" {
+					entries, err := buildL0V3DeltaLogEntries(segmentID, deltalogs)
+					if err != nil {
+						log.Ctx(context.TODO()).Warn("meta update: build L0 V3 delta entries failed", zap.Int64("segmentID", segmentID), zap.Error(err))
+						return BinlogIncrement{}, false
+					}
+					if len(entries) == 0 {
+						return BinlogIncrement{}, false
+					}
+					manifestPath, err = packed.AddDeltaLogsToManifestOverwrite(segment.GetManifestPath(), storageConfig, entries)
+					if err != nil {
+						log.Ctx(context.TODO()).Warn("meta update: commit L0 V3 delta manifest failed", zap.Int64("segmentID", segmentID), zap.Error(err))
+						return BinlogIncrement{}, false
+					}
+					if committedV3Manifests != nil {
+						committedV3Manifests[segmentID] = manifestPath
+					}
+				}
+				if err := updateManifestPathIfNewer(segment, manifestPath); err != nil {
+					log.Ctx(context.TODO()).Warn("meta update: update L0 V3 manifest failed", zap.Int64("segmentID", segmentID), zap.Error(err))
+					return BinlogIncrement{}, false
+				}
+				clearBinlogPaths(deltalogs)
+			}
+
+			segment.Deltalogs = mergeFieldBinlogs(segment.GetDeltalogs(), deltalogs)
+			segment.deltaRowcount.Store(-1)
+			return BinlogIncrement{Deltalogs: segment.Deltalogs}, true
+		}},
+	}
+}
+
+// ResetImportingSegmentRows clears NumOfRows and MaxRowNum on importing
+// segments. It returns the mutation map consumed by meta.UpdateSegmentsInfo.
+func ResetImportingSegmentRows(segmentIDs ...int64) map[int64][]SegmentOperator {
+	mutations := make(map[int64][]SegmentOperator, len(segmentIDs))
+	for _, segmentID := range segmentIDs {
+		segID := segmentID
+		mutations[segID] = []SegmentOperator{func(segment *SegmentInfo) (BinlogIncrement, bool) {
+			if segment.GetState() != commonpb.SegmentState_Importing {
+				log.Ctx(context.TODO()).Warn("meta update: reset importing segment rows skipped - segment not in Importing state",
+					zap.Int64("segmentID", segID),
+					zap.String("state", segment.GetState().String()))
+				return BinlogIncrement{}, false
+			}
+			segment.NumOfRows = 0
+			segment.MaxRowNum = 0
+			return BinlogIncrement{}, true
+		}}
+	}
+	return mutations
+}
+
+// UpdateCommitTimestamp sets the commit_timestamp on an import/CDC segment.
+// It returns the mutation map consumed by meta.UpdateSegmentsInfo.
+func UpdateCommitTimestamp(segmentID int64, ts uint64) map[int64][]SegmentOperator {
+	return map[int64][]SegmentOperator{
+		segmentID: {func(segment *SegmentInfo) (BinlogIncrement, bool) {
+			if ts != 0 {
+				var maxTsTo uint64
+				for _, fieldBinlogs := range segment.GetBinlogs() {
+					for _, l := range fieldBinlogs.GetBinlogs() {
+						if l.GetTimestampTo() > maxTsTo {
+							maxTsTo = l.GetTimestampTo()
+						}
+					}
+				}
+				if ts < maxTsTo {
+					log.Ctx(context.TODO()).Error("meta update: update commit timestamp rejected - commit_ts < max(binlog.TimestampTo)",
+						zap.Int64("segmentID", segmentID),
+						zap.Uint64("commitTs", ts),
+						zap.Uint64("maxBinlogTimestampTo", maxTsTo))
+					return BinlogIncrement{}, false
+				}
+			}
+			segment.CommitTimestamp = ts
+			return BinlogIncrement{}, true
+		}},
 	}
 }
 
