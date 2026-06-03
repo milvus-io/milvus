@@ -4374,6 +4374,7 @@ func TestStructArrayFieldSchemaGetProtoTypeParams(t *testing.T) {
 	proto, err := (&StructArrayFieldSchema{
 		FieldName:   "my_struct",
 		Description: "with params",
+		Nullable:    true,
 		TypeParams: map[string]interface{}{
 			common.MaxCapacityKey: 8,
 		},
@@ -4384,9 +4385,14 @@ func TestStructArrayFieldSchemaGetProtoTypeParams(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "my_struct", proto.GetName())
 	assert.Equal(t, "with params", proto.GetDescription())
+	assert.True(t, proto.GetNullable())
 	require.Len(t, proto.GetTypeParams(), 1)
 	assert.Equal(t, common.MaxCapacityKey, proto.GetTypeParams()[0].GetKey())
 	assert.Equal(t, "8", proto.GetTypeParams()[0].GetValue())
+	subParams := proto.GetFields()[0].GetTypeParams()
+	require.Len(t, subParams, 1)
+	assert.Equal(t, common.MaxCapacityKey, subParams[0].GetKey())
+	assert.Equal(t, "8", subParams[0].GetValue())
 
 	_, err = (&StructArrayFieldSchema{
 		FieldName: "bad_params",

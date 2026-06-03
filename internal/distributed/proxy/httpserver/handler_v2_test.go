@@ -3588,6 +3588,82 @@ func (s *AddCollectionFieldSuite) TestAddCollectionFieldNormal() {
 	validateRequestBodyTestCases(s.T(), s.testEngine, addFieldTestCases, false)
 }
 
+func (s *AddCollectionFieldSuite) TestAddCollectionStructFieldNormal() {
+	testCases := []struct {
+		name        string
+		requestBody []byte
+	}{
+		{
+			name: "array_with_struct_element",
+			requestBody: []byte(`{"collectionName": "book", "schema": {
+				"fieldName": "clips",
+				"description": "clip metadata",
+				"dataType": "Array",
+				"elementDataType": "Struct",
+				"nullable": true,
+				"elementTypeParams": {"max_capacity": 16},
+				"fields": [
+					{"fieldName": "tag", "dataType": "Array", "elementDataType": "VarChar", "elementTypeParams": {"max_length": 64}},
+					{"fieldName": "emb", "dataType": "ArrayOfVector", "elementDataType": "FloatVector", "elementTypeParams": {"dim": 8}}
+				]
+			}}`),
+		},
+		{
+			name: "array_of_struct",
+			requestBody: []byte(`{"collectionName": "book", "schema": {
+				"fieldName": "clips",
+				"dataType": "ArrayOfStruct",
+				"nullable": true,
+				"typeParams": {"max_capacity": 16},
+				"fields": [
+					{"fieldName": "tag", "dataType": "Array", "elementDataType": "VarChar", "elementTypeParams": {"max_length": 64}},
+					{"fieldName": "emb", "dataType": "ArrayOfVector", "elementDataType": "FloatVector", "elementTypeParams": {"dim": 8}}
+				]
+			}}`),
+		},
+	}
+
+	for _, tc := range testCases {
+		s.Run(tc.name, func() {
+			s.mp.EXPECT().AddCollectionStructField(mock.Anything, mock.MatchedBy(func(req *milvuspb.AddCollectionStructFieldRequest) bool {
+				if req.GetCollectionName() != "book" {
+					return false
+				}
+				structSchema := req.GetStructArrayFieldSchema()
+				if structSchema.GetName() != "clips" || !structSchema.GetNullable() || len(structSchema.GetFields()) != 2 {
+					return false
+				}
+				if kvPairsToMap(structSchema.GetTypeParams())[common.MaxCapacityKey] != "16" {
+					return false
+				}
+				tag := structSchema.GetFields()[0]
+				tagParams := kvPairsToMap(tag.GetTypeParams())
+				if tag.GetName() != "tag" || tag.GetDataType() != schemapb.DataType_Array || tag.GetElementType() != schemapb.DataType_VarChar {
+					return false
+				}
+				if tagParams[common.MaxLengthKey] != "64" || tagParams[common.MaxCapacityKey] != "16" {
+					return false
+				}
+				emb := structSchema.GetFields()[1]
+				embParams := kvPairsToMap(emb.GetTypeParams())
+				if emb.GetName() != "emb" || emb.GetDataType() != schemapb.DataType_ArrayOfVector || emb.GetElementType() != schemapb.DataType_FloatVector {
+					return false
+				}
+				return embParams[common.DimKey] == "8" && embParams[common.MaxCapacityKey] == "16"
+			})).Return(merr.Success(), nil).Once()
+
+			req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionFieldCategory, AddAction), bytes.NewReader(tc.requestBody))
+			w := httptest.NewRecorder()
+			s.testEngine.ServeHTTP(w, req)
+			s.Equal(http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			s.NoError(err)
+			s.Equal(int32(0), returnBody.Code)
+		})
+	}
+}
+
 func (s *AddCollectionFieldSuite) TestAddCollectionFieldFail() {
 	s.Run("bad_request", func() {
 		addFieldTestCases := []requestBodyTestCase{
@@ -3648,6 +3724,14 @@ func (s *AddCollectionFieldSuite) TestAddCollectionFieldFail() {
 
 func TestAddCollectionFieldSuite(t *testing.T) {
 	suite.Run(t, new(AddCollectionFieldSuite))
+}
+
+func kvPairsToMap(kvs []*commonpb.KeyValuePair) map[string]string {
+	ret := make(map[string]string, len(kvs))
+	for _, kv := range kvs {
+		ret[kv.GetKey()] = kv.GetValue()
+	}
+	return ret
 }
 
 func TestCollectionFunctionSuite(t *testing.T) {

@@ -154,6 +154,7 @@ func (s *Schema) ProtoMessage() *schemapb.CollectionSchema {
 			Name:        field.Name,
 			Description: field.Description,
 			TypeParams:  MapKvPairs(field.TypeParams),
+			Nullable:    field.Nullable,
 		}
 		// max_capacity declared on the parent struct field must be carried onto each sub-field's
 		// type params — the server validates it per sub-field on insert.
@@ -239,6 +240,7 @@ func structArrayFieldFromProto(p *schemapb.StructArrayFieldSchema) *Field {
 		DataType:     FieldTypeArray,
 		ElementType:  FieldTypeStruct,
 		TypeParams:   KvPairsMap(p.GetTypeParams()),
+		Nullable:     p.GetNullable(),
 		StructSchema: structSchema,
 	}
 }

@@ -211,3 +211,18 @@ func (c *Client) AddCollectionField(ctx context.Context, opt AddCollectionFieldO
 	})
 	return err
 }
+
+// AddCollectionStructField adds a struct array field to a collection.
+func (c *Client) AddCollectionStructField(ctx context.Context, opt AddCollectionStructFieldOption, callOpts ...grpc.CallOption) error {
+	if err := opt.Validate(); err != nil {
+		return err
+	}
+
+	req := opt.Request()
+
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.AddCollectionStructField(ctx, req, callOpts...)
+		return merr.CheckRPCCall(resp, err)
+	})
+	return err
+}
