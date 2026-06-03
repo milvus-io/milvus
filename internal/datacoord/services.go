@@ -1925,12 +1925,12 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	jobID := in.GetJobID()
 	if jobID == 0 {
 		if s.allocator == nil {
-			resp.Status = merr.Status(merr.WrapErrImportFailed("allocator not initialized"))
+			resp.Status = merr.Status(merr.WrapErrServiceUnavailable("allocator not initialized"))
 			return resp, nil
 		}
 		jobID, _, err = s.allocator.AllocN(1)
 		if err != nil {
-			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("failed to allocate job ID: %v", err)))
+			resp.Status = merr.Status(merr.Wrap(err, "failed to allocate job ID"))
 			return resp, nil
 		}
 	}
@@ -1950,7 +1950,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	)
 	if err != nil {
 		log.Warn("failed to broadcast import message", zap.Error(err))
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("failed to broadcast import: %v", err)))
+		resp.Status = merr.Status(merr.Wrap(err, "failed to broadcast import"))
 		return resp, nil
 	}
 
@@ -2000,7 +2000,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	// Allocate file ids.
 	idStart, _, err := s.allocator.AllocN(int64(len(files)) + 1)
 	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("alloc id failed: %v", err)))
+		resp.Status = merr.Status(merr.Wrap(err, "alloc id failed"))
 		return resp, nil
 	}
 	files = lo.Map(files, func(importFile *internalpb.ImportFile, i int) *internalpb.ImportFile {
@@ -2013,7 +2013,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 		return resp, nil
 	}
 	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("get collection failed: %v", err)))
+		resp.Status = merr.Status(merr.Wrap(err, "get collection failed"))
 		return resp, nil
 	}
 	if importCollectionInfo == nil {
@@ -2048,7 +2048,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	}
 	err = s.importMeta.AddJob(ctx, job)
 	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("add import job failed: %v", err)))
+		resp.Status = merr.Status(merr.Wrap(err, "add import job failed"))
 		return resp, nil
 	}
 
@@ -2075,7 +2075,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	}
 	jobID, err := strconv.ParseInt(in.GetJobID(), 10, 64)
 	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("parse job id failed: %v", err)))
+		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("parse job id failed: %v", err))
 		return resp, nil
 	}
 

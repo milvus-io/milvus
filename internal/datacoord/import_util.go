@@ -790,7 +790,7 @@ func ListBinlogImportRequestFiles(ctx context.Context, cm storage.ChunkManager,
 	}
 	err := conc.AwaitAll(futures...)
 	if err != nil {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("list binlogs failed, err=%s", err))
+		return nil, merr.WrapErrServiceUnavailable(fmt.Sprintf("list binlogs failed, err=%s", err))
 	}
 
 	resFiles = lo.Filter(resFiles, func(file *internalpb.ImportFile, _ int) bool {

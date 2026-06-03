@@ -52,7 +52,7 @@ type reader struct {
 func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, path string, bufferSize int, sep rune, nullkey string) (*reader, error) {
 	cmReader, err := cm.Reader(ctx, path)
 	if err != nil {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("read csv file failed, path=%s, err=%s", path, err.Error()))
+		return nil, merr.Wrapf(err, "read csv file failed, path=%s", path)
 	}
 	retryableReader := common.NewRetryableReaderWithReopen(ctx, path, cmReader, common.NewChunkManagerReopenReaderFunc(cm), cm.Size)
 	count, err := common.EstimateReadCountPerBatch(bufferSize, schema)
