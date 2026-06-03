@@ -254,11 +254,12 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	defer loader.unregister(infos...)
 
 	// continue to wait other task done
-	log.Info("start loading...", zap.Int("segmentNum", len(segments)), zap.Int("afterFilter", len(infos)))
+	log.Info("[xxx] start loading...", zap.Int("segmentNum", len(segments)), zap.Int("afterFilter", len(infos)), zap.Any("segments", lo.Map(segments, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })))
 
 	var err error
 	var requestResourceResult requestResourceResult
 
+	t1 := time.Now()
 	// Check memory & storage limit
 	// no need to check resource for lazy load here
 	requestResourceResult, err = loader.requestResource(ctx, infos...)
@@ -266,6 +267,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		log.Warn("request resource failed", zap.Error(err))
 		return nil, err
 	}
+	t2 := time.Now()
 	defer loader.freeRequestResource(requestResourceResult)
 
 	newSegments := typeutil.NewConcurrentMap[int64, Segment]()
@@ -326,6 +328,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		newSegments.Insert(loadInfo.GetSegmentID(), segment)
 	}
 
+	t3 := time.Now()
 	loadSegmentFunc := func(idx int) (err error) {
 		loadInfo := infos[idx]
 		partitionID := loadInfo.PartitionID
@@ -346,24 +349,46 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		tr := timerecord.NewTimeRecorder("loadDurationPerSegment")
 		logger.Info("load segment...")
 
+		loadSegmentStart := time.Now()
+		var loadSegmentDataDuration time.Duration
+		var loadDeltalogsDuration time.Duration
+		var pkCandidateDuration time.Duration
+		var managerPutDuration time.Duration
+		var localMapDuration time.Duration
+		var notifyDuration time.Duration
+		externalCollection := typeutil.IsExternalCollection(collection.Schema())
+		bloomFilterEnabled := paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool()
+		pkCandidateExisted := segment.PkCandidateExist()
+
 		// L0 segment has no index or data to be load.
 		if loadInfo.GetLevel() != datapb.SegmentLevel_L0 {
 			// lazy load segment do not load segment at first time.
+			loadSegmentDataStart := time.Now()
 			if err = loader.LoadSegment(ctx, segment, loadInfo); err != nil {
 				return errors.Wrap(err, "At LoadSegment")
 			}
+			loadSegmentDataDuration = time.Since(loadSegmentDataStart)
+			logger.Info("[xxx] load segment data done",
+				zap.Duration("loadSegmentDataDuration", loadSegmentDataDuration),
+				zap.Duration("elapsed", time.Since(loadSegmentStart)))
 		}
 		// Skip delta logs for external collections (they are read-only, no deletions)
-		if !typeutil.IsExternalCollection(collection.Schema()) {
+		if !externalCollection {
+			loadDeltalogsStart := time.Now()
 			if err = loader.loadDeltalogs(ctx, segment, loadInfo); err != nil {
 				return errors.Wrap(err, "At LoadDeltaLogs")
 			}
+			loadDeltalogsDuration = time.Since(loadDeltalogsStart)
+			logger.Info("[xxx] load deltalogs done",
+				zap.Duration("loadDeltalogsDuration", loadDeltalogsDuration),
+				zap.Duration("elapsed", time.Since(loadSegmentStart)))
 		}
 
-		if !segment.PkCandidateExist() {
+		if !pkCandidateExisted {
+			pkCandidateStart := time.Now()
 			log.Debug("loading PK candidate for segment", zap.Int64("segmentID", segment.ID()))
 			// For external collections, use ExternalSegmentCandidate instead of BloomFilterSet
-			if typeutil.IsExternalCollection(collection.Schema()) {
+			if externalCollection {
 				candidate := pkoracle.NewExternalSegmentCandidate(
 					loadInfo.GetSegmentID(),
 					loadInfo.GetPartitionID(),
@@ -381,23 +406,45 @@ func (loader *segmentLoader) Load(ctx context.Context,
 						zap.Int64("segmentID2", collidingID),
 						zap.Int64("truncatedID", loadInfo.GetSegmentID()&0xFFFFFFFF))
 				}
-			} else if paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() {
+			} else if bloomFilterEnabled {
 				bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type())
 				if err != nil {
 					return errors.Wrap(err, "At LoadBloomFilter")
 				}
 				segment.SetPKCandidate(bfs)
-				// Charge bloom filter resource
-				bfs.Charge()
 			}
+			pkCandidateDuration = time.Since(pkCandidateStart)
+			logger.Info("[xxx] prepare pk candidate done",
+				zap.Duration("pkCandidateDuration", pkCandidateDuration),
+				zap.Bool("externalCollection", externalCollection),
+				zap.Bool("bloomFilterEnabled", bloomFilterEnabled),
+				zap.Duration("elapsed", time.Since(loadSegmentStart)))
 		}
 
 		if segment.Level() != datapb.SegmentLevel_L0 {
+			managerPutStart := time.Now()
 			loader.manager.Segment.Put(ctx, segmentType, segment)
+			managerPutDuration = time.Since(managerPutStart)
 		}
+		localMapStart := time.Now()
 		newSegments.GetAndRemove(segmentID)
 		loaded.Insert(segmentID, segment)
+		localMapDuration = time.Since(localMapStart)
+		notifyStart := time.Now()
 		loader.notifyLoadFinish(loadInfo)
+		notifyDuration = time.Since(notifyStart)
+
+		logger.Info("[xxx] loadSegmentFunc breakdown",
+			zap.Duration("loadSegmentDataDuration", loadSegmentDataDuration),
+			zap.Duration("loadDeltalogsDuration", loadDeltalogsDuration),
+			zap.Duration("pkCandidateDuration", pkCandidateDuration),
+			zap.Duration("managerPutDuration", managerPutDuration),
+			zap.Duration("localMapDuration", localMapDuration),
+			zap.Duration("notifyDuration", notifyDuration),
+			zap.Duration("totalDuration", time.Since(loadSegmentStart)),
+			zap.Bool("externalCollection", externalCollection),
+			zap.Bool("bloomFilterEnabled", bloomFilterEnabled),
+			zap.Bool("pkCandidateExisted", pkCandidateExisted))
 
 		metrics.QueryNodeLoadSegmentLatency.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return nil
@@ -407,7 +454,9 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	// Make sure we can always benefit from concurrency, and not spawn too many idle goroutines
 	log.Info("start to load segments in parallel",
 		zap.Int("segmentNum", len(infos)),
-		zap.Int("concurrencyLevel", requestResourceResult.ConcurrencyLevel))
+		zap.Int("concurrencyLevel", requestResourceResult.ConcurrencyLevel),
+		zap.Any("segments", lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })),
+	)
 
 	err = funcutil.ProcessFuncParallel(len(infos),
 		requestResourceResult.ConcurrencyLevel, loadSegmentFunc, "loadSegmentFunc")
@@ -416,14 +465,16 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		return nil, err
 	}
 
+	t4 := time.Now()
 	// Wait for all segments loaded
 	segmentIDs := lo.Map(segments, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })
 	if err := loader.waitSegmentLoadDone(ctx, segmentType, segmentIDs, version); err != nil {
 		log.Warn("failed to wait the filtered out segments load done", zap.Error(err))
 		return nil, err
 	}
+	t5 := time.Now()
 
-	log.Info("all segment load done")
+	log.Info("[xxx] all segment load done", zap.Duration("requestResourceTime", t2.Sub(t1)), zap.Duration("loadSegmentTime", t3.Sub(t2)), zap.Duration("loadSegmentFuncTime", t4.Sub(t3)), zap.Duration("waitSegmentLoadDoneTime", t5.Sub(t4)), zap.Any("segments", lo.Map(segments, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })))
 	var result []Segment
 	loaded.Range(func(_ int64, s Segment) bool {
 		result = append(result, s)
@@ -627,12 +678,13 @@ func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, colle
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("segmentIDs", loadInfo.GetSegmentID()))
+	startTs := time.Now()
 
 	partitionID := loadInfo.PartitionID
 	segmentID := loadInfo.SegmentID
-	bfs := pkoracle.NewBloomFilterSet(segmentID, partitionID, segtype)
 
 	if !paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() {
+		bfs := pkoracle.NewBloomFilterSet(segmentID, partitionID, segtype)
 		log.Info("skip loading bloom filter for remote segment because bloom filter is disabled")
 		return bfs, nil
 	}
@@ -653,26 +705,40 @@ func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, colle
 	// NOTE: This is a defensive guard. Normal external collection load path uses
 	// ExternalSegmentCandidate directly and should not reach here.
 	if typeutil.IsExternalCollection(collection.Schema()) {
+		bfs := pkoracle.NewBloomFilterSet(segmentID, partitionID, segtype)
 		log.Debug("external collection: returning empty bloom filter set (defensive path)")
 		return bfs, nil
 	}
 
-	log.Info("loading bloom filter for remote...")
-	pkStatsBinlogs, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BloomFilterPaths(pkField.GetFieldID())
-	if err != nil {
-		return nil, err
-	}
-	err = loader.loadBloomFilter(ctx, segmentID, bfs, pkStatsBinlogs)
-	if err != nil {
-		log.Warn("load remote segment bloom filter failed",
-			zap.Int64("partitionID", partitionID),
-			zap.Int64("segmentID", segmentID),
-			zap.Error(err),
-		)
-		return nil, err
-	}
+	lazyCtx := context.WithoutCancel(ctx)
+	pkFieldID := pkField.GetFieldID()
+	return pkoracle.NewLazyBloomFilterSet(segmentID, partitionID, segtype, func(bfs *pkoracle.BloomFilterSet) error {
+		log.Info("loading bloom filter for remote...")
+		resolveStart := time.Now()
+		pkStatsBinlogs, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BloomFilterPaths(pkFieldID)
+		if err != nil {
+			return err
+		}
+		resolveDuration := time.Since(resolveStart)
 
-	return bfs, nil
+		loadStart := time.Now()
+		err = loader.loadBloomFilter(lazyCtx, segmentID, bfs, pkStatsBinlogs)
+		loadDuration := time.Since(loadStart)
+		if err != nil {
+			log.Warn("load remote segment bloom filter failed",
+				zap.Int64("partitionID", partitionID),
+				zap.Int64("segmentID", segmentID),
+				zap.Error(err),
+			)
+			return err
+		}
+		log.Info("[xxx] lazy load single bloom filter set done",
+			zap.Int("pathNum", len(pkStatsBinlogs)),
+			zap.Duration("resolvePathsDuration", resolveDuration),
+			zap.Duration("loadBloomFilterDuration", loadDuration),
+			zap.Duration("totalDuration", time.Since(startTs)))
+		return nil
+	}), nil
 }
 
 func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
@@ -682,25 +748,12 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 			return info.GetSegmentID()
 		})),
 	)
+	startTs := time.Now()
 
 	segmentNum := len(infos)
 	if segmentNum == 0 {
 		log.Info("no segment to load")
 		return nil, nil
-	}
-
-	// Phase 1: always create metadata-only stubs (segmentID / partitionID / type).
-	// This gives callers valid candidates even when BF data is not loaded,
-	// so partition filtering and type-based delete-scope logic never need nil guards.
-	bfSets := make([]*pkoracle.BloomFilterSet, segmentNum)
-	for i, info := range infos {
-		bfSets[i] = pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
-	}
-
-	// Phase 2: load BF stats into the stubs (skip when disabled or external collection).
-	if !paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() {
-		log.Info("bloom filter disabled: returning metadata-only stubs")
-		return bfSets, nil
 	}
 
 	collection := loader.manager.Collection.Get(collectionID)
@@ -712,75 +765,58 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 	pkField := GetPkField(collection.Schema())
 	pkFieldID := pkField.GetFieldID()
 
-	// External collections use ExternalSegmentCandidate for PK checking and have no stats logs.
+	bfSets := make([]*pkoracle.BloomFilterSet, segmentNum)
+	for i, info := range infos {
+		bfSets[i] = pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
+	}
+
+	if !paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() {
+		log.Info("bloom filter disabled: returning metadata-only stubs")
+		return bfSets, nil
+	}
+
 	if typeutil.IsExternalCollection(collection.Schema()) {
 		return bfSets, nil
 	}
 
-	// Calculate total memory size needed for bloom filters (PK stats)
-	var totalMemorySize int64
-	for _, info := range infos {
-		memSize, _ := packed.NewStatsResolverFromLoadInfo(info).BloomFilterMemorySize(pkFieldID)
-		totalMemorySize += memSize
-	}
+	lazyCtx := context.WithoutCancel(ctx)
+	for i, info := range infos {
+		info := info
+		segmentID := info.GetSegmentID()
+		partitionID := info.GetPartitionID()
+		bfSets[i] = pkoracle.NewLazyBloomFilterSet(segmentID, partitionID, commonpb.SegmentState_Sealed, func(bfs *pkoracle.BloomFilterSet) error {
+			loadStart := time.Now()
+			resolveStart := time.Now()
+			pkStatsBinlogs, err := packed.NewStatsResolverFromLoadInfo(info).BloomFilterPaths(pkFieldID)
+			if err != nil {
+				return err
+			}
+			resolveDuration := time.Since(resolveStart)
 
-	// Reserve memory resource if tiered eviction is enabled
-	if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() && totalMemorySize > 0 {
-		if ok := C.TryReserveLoadingResourceWithTimeout(C.CResourceUsage{
-			// double loading memory size for bloom filters to avoid OOM during loading
-			memory_bytes: C.int64_t(totalMemorySize * 2),
-			disk_bytes:   C.int64_t(0),
-		}, 1000); !ok {
-			return nil, fmt.Errorf("failed to reserve loading resource for bloom filters, totalMemorySize = %v MB",
-				logutil.ToMB(float64(totalMemorySize)))
-		}
-		log.Info("reserved loading resource for bloom filters", zap.Float64("totalMemorySizeMB", logutil.ToMB(float64(totalMemorySize))))
-	}
-
-	defer func() {
-		if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() && totalMemorySize > 0 {
-			C.ReleaseLoadingResource(C.CResourceUsage{
-				memory_bytes: C.int64_t(totalMemorySize * 2),
-				disk_bytes:   C.int64_t(0),
-			})
-			log.Info("released loading resource for bloom filters", zap.Float64("totalMemorySizeMB", logutil.ToMB(float64(totalMemorySize))))
-		}
-	}()
-
-	log.Info("start loading remote...", zap.Int("segmentNum", segmentNum))
-
-	loadRemoteFunc := func(idx int) error {
-		loadInfo := infos[idx]
-		bfs := bfSets[idx]
-
-		log.Info("loading bloom filter for remote...")
-		pkStatsBinlogs, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BloomFilterPaths(pkFieldID)
-		if err != nil {
-			return err
-		}
-		err = loader.loadBloomFilter(ctx, bfs.ID(), bfs, pkStatsBinlogs)
-		if err != nil {
-			log.Warn("load remote segment bloom filter failed",
-				zap.Int64("partitionID", bfs.Partition()),
+			readStart := time.Now()
+			err = loader.loadBloomFilter(lazyCtx, bfs.ID(), bfs, pkStatsBinlogs)
+			readDuration := time.Since(readStart)
+			if err != nil {
+				log.Warn("load remote segment bloom filter failed",
+					zap.Int64("partitionID", bfs.Partition()),
+					zap.Int64("segmentID", bfs.ID()),
+					zap.Error(err),
+				)
+				return err
+			}
+			log.Info("[xxx] lazy load bloom filter set segment done",
 				zap.Int64("segmentID", bfs.ID()),
-				zap.Error(err),
-			)
-			return err
-		}
-		return nil
+				zap.Int("pathNum", len(pkStatsBinlogs)),
+				zap.Duration("resolvePathsDuration", resolveDuration),
+				zap.Duration("loadBloomFilterDuration", readDuration),
+				zap.Duration("totalDuration", time.Since(loadStart)))
+			return nil
+		})
 	}
 
-	err := funcutil.ProcessFuncParallel(segmentNum, segmentNum, loadRemoteFunc, "loadRemoteFunc")
-	if err != nil {
-		// no partial success here
-		log.Warn("failed to load remote segment", zap.Error(err))
-		return nil, err
-	}
-
-	// Charge loaded resource for bloom filters
-	for _, bfs := range bfSets {
-		bfs.Charge()
-	}
+	log.Info("[xxx] create lazy bloom filter set done",
+		zap.Int("segmentNum", segmentNum),
+		zap.Duration("totalDuration", time.Since(startTs)))
 
 	return bfSets, nil
 }
@@ -1036,13 +1072,17 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 
 	log := log.Ctx(ctx).With(zap.Int64("segmentID", segment.ID()))
 	tr := timerecord.NewTimeRecorder("segmentLoader.loadSealedSegment")
-	log.Info("Start loading fields...",
+	log.Info("[xxx] Start loading fields...",
 		zap.Int("indexedFields count", len(indexedFieldInfos)),
 		zap.Int64s("indexed text fields", lo.Keys(textIndexes)),
 		zap.Int64s("unindexed text fields", lo.Keys(unindexedTextFields)),
 		zap.Int64s("indexed json key fields", lo.Keys(jsonKeyStats)),
+		zap.Any("running pool size", GetLoadPool().Running()),
+		zap.Any("pool size", GetLoadPool().Cap()),
 	)
+
 	_, err = GetLoadPool().Submit(func() (any, error) {
+		log.Info("[xxx] start loading segment in pool")
 		if err = segment.Load(ctx); err != nil {
 			return struct{}{}, errors.Wrap(err, "At Load")
 		}
@@ -1070,7 +1110,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		return err
 	}
 	patchEntryNumberSpan := tr.RecordSpan()
-	log.Info("Finish loading segment",
+	log.Info("[xxx] Finish loading segment",
 		zap.Duration("patchEntryNumberSpan", patchEntryNumberSpan),
 	)
 	return nil
@@ -1091,7 +1131,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 		zap.Int64("segmentID", segment.ID()),
 	)
 
-	log.Info("start loading segment files",
+	log.Info("[xxx] start loading segment files",
 		zap.Int64("rowNum", loadInfo.GetNumOfRows()),
 		zap.String("segmentType", segment.Type().String()),
 		zap.Int32("priority", int32(loadInfo.GetPriority())))
@@ -1104,6 +1144,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	}
 	pkField := GetPkField(collection.Schema())
 
+	log.Info("[xxx] start loading sealed segment")
 	if segment.Type() == SegmentTypeSealed {
 		if err := loader.loadSealedSegment(ctx, loadInfo, segment); err != nil {
 			return err
@@ -1324,6 +1365,7 @@ func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int6
 // loadDeltalogs performs the internal actions of `LoadDeltaLogs`
 // this function does not perform resource check and is meant be used among other load APIs.
 func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo) error {
+	startTs := time.Now()
 	deltaLogs := loadInfo.GetDeltalogs()
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("LoadDeltalogs-%d", segment.ID()))
 	defer sp.End()
@@ -1333,6 +1375,7 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 	)
 	log.Info("loading delta...")
 
+	rowNumsStart := time.Now()
 	var rowNums int64
 	valid := func(binlog *datapb.Binlog, _ int) bool {
 		// the segment has applied the delta logs, skip it
@@ -1347,7 +1390,9 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 			return binlog.GetEntriesNum()
 		})
 	}
+	rowNumsDuration := time.Since(rowNumsStart)
 
+	setupStart := time.Now()
 	collection := loader.manager.Collection.Get(segment.Collection())
 
 	helper, _ := typeutil.CreateSchemaHelper(collection.Schema())
@@ -1356,6 +1401,7 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 	if err != nil {
 		return err
 	}
+	setupDuration := time.Since(setupStart)
 
 	readDeltaRecords := func(reader storage.RecordReader) error {
 		defer reader.Close()
@@ -1387,6 +1433,7 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 	}
 
 	// Collect delta paths and reader options based on storage version.
+	collectPathsStart := time.Now()
 	var paths []string
 	var opts []storage.RwOption
 	if manifestPath := loadInfo.GetManifestPath(); manifestPath != "" {
@@ -1414,8 +1461,11 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 			}),
 		}
 	}
+	collectPathsDuration := time.Since(collectPathsStart)
 
+	var readDuration time.Duration
 	if len(paths) > 0 {
+		readStart := time.Now()
 		reader, err := storage.NewDeltalogReader(pkField.DataType, paths, opts...)
 		if err != nil {
 			return err
@@ -1423,14 +1473,26 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		if err := readDeltaRecords(reader); err != nil {
 			return err
 		}
+		readDuration = time.Since(readStart)
 	}
 
+	loadDeltaDataStart := time.Now()
 	err = segment.LoadDeltaData(ctx, deltaData)
 	if err != nil {
 		return err
 	}
+	loadDeltaDataDuration := time.Since(loadDeltaDataStart)
 
-	log.Info("load delta logs done", zap.Int64("deleteCount", deltaData.DeleteRowCount()))
+	log.Info("[xxx] load delta logs done",
+		zap.Int64("deleteCount", deltaData.DeleteRowCount()),
+		zap.Int64("rowNums", rowNums),
+		zap.Int("pathNum", len(paths)),
+		zap.Duration("rowNumsDuration", rowNumsDuration),
+		zap.Duration("setupDuration", setupDuration),
+		zap.Duration("collectPathsDuration", collectPathsDuration),
+		zap.Duration("readDuration", readDuration),
+		zap.Duration("loadDeltaDataDuration", loadDeltaDataDuration),
+		zap.Duration("totalDuration", time.Since(startTs)))
 	return nil
 }
 

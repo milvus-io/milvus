@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
@@ -22,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -62,6 +64,9 @@ func NewSearchTask(ctx context.Context,
 	req *querypb.SearchRequest,
 	serverID int64,
 ) *SearchTask {
+	if requestID := req.GetReq().GetBase().GetMsgID(); requestID != 0 {
+		ctx = contextutil.WithRequestID(ctx, strconv.FormatInt(requestID, 10))
+	}
 	ctx, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "schedule")
 	return &SearchTask{
 		ctx:              ctx,
@@ -119,6 +124,25 @@ func (t *SearchTask) PreExecute() error {
 		username).
 		Observe(inQueueDurationMS)
 
+	log.Ctx(t.ctx).Info("[sss][www] qn scheduler task start",
+		zap.Duration("queueDuration", inQueueDuration),
+		zap.Int64("collectionID", t.collection.ID()),
+		zap.String("scope", t.req.GetScope().String()),
+		zap.Int("segmentNum", len(t.req.GetSegmentIDs())),
+		zap.Int64("nq", t.req.GetReq().GetNq()),
+		zap.Int64("topK", t.req.GetReq().GetTopk()))
+
+	log.Ctx(t.ctx).Info("[sss] search task pre execute",
+		zap.Duration("queueDuration", inQueueDuration),
+		zap.Int64("collectionID", t.collection.ID()),
+		zap.String("scope", t.req.GetScope().String()),
+		zap.Int("segmentNum", len(t.req.GetSegmentIDs())),
+		zap.Int64s("segmentIDs", t.req.GetSegmentIDs()),
+		zap.Int64("nq", t.nq),
+		zap.Int64("topK", t.topk),
+		zap.Int("mergedTaskNum", len(t.others)+1),
+		zap.Bool("filterOnly", t.req.GetFilterOnly()))
+
 	// Execute merged task's PreExecute.
 	for _, subTask := range t.others {
 		err := subTask.PreExecute()
@@ -135,6 +159,15 @@ func (t *SearchTask) Execute() error {
 		zap.Int64("collectionID", t.collection.ID()),
 		zap.String("shard", t.req.GetDmlChannels()[0]),
 	)
+	executeStart := time.Now()
+	log.Info("[sss] search task execute start",
+		zap.String("scope", t.req.GetScope().String()),
+		zap.Int("segmentNum", len(t.req.GetSegmentIDs())),
+		zap.Int64s("segmentIDs", t.req.GetSegmentIDs()),
+		zap.Int64("nq", t.nq),
+		zap.Int64("topK", t.topk),
+		zap.Int("mergedTaskNum", len(t.others)+1),
+		zap.Bool("filterOnly", t.req.GetFilterOnly()))
 
 	if t.scheduleSpan != nil {
 		t.scheduleSpan.End()
@@ -157,6 +190,11 @@ func (t *SearchTask) Execute() error {
 		results          []*segments.SearchResult
 		searchedSegments []segments.Segment
 	)
+	stageStart := time.Now()
+	log.Info("[sss] search task segment search start",
+		zap.String("scope", req.GetScope().String()),
+		zap.Int("segmentNum", len(req.GetSegmentIDs())),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()))
 	if req.GetScope() == querypb.DataScope_Historical {
 		results, searchedSegments, err = segments.SearchHistorical(
 			t.ctx,
@@ -178,8 +216,16 @@ func (t *SearchTask) Execute() error {
 	}
 	defer t.segmentManager.Segment.Unpin(searchedSegments)
 	if err != nil {
+		log.Warn("[sss] search task segment search failed",
+			zap.Duration("duration", time.Since(stageStart)),
+			zap.Int("searchedSegmentNum", len(searchedSegments)),
+			zap.Error(err))
 		return err
 	}
+	log.Info("[sss] search task segment search done",
+		zap.Duration("duration", time.Since(stageStart)),
+		zap.Int("searchedSegmentNum", len(searchedSegments)),
+		zap.Int("resultNum", len(results)))
 	defer segments.DeleteSearchResults(results)
 
 	// In filter-only mode, extract filter results and return early
@@ -214,7 +260,6 @@ func (t *SearchTask) Execute() error {
 				},
 			}
 		}
-		log.Debug("filter-only search completed", zap.Int("segments", len(segmentIDs)))
 		return nil
 	}
 
@@ -254,6 +299,10 @@ func (t *SearchTask) Execute() error {
 	}, 0)
 
 	tr.RecordSpan()
+	stageStart = time.Now()
+	log.Info("[sss] search task reduce start",
+		zap.Int("resultNum", len(results)),
+		zap.Int("searchedSegmentNum", len(searchedSegments)))
 	blobs, err := segcore.ReduceSearchResultsAndFillData(
 		t.ctx,
 		searchReq.Plan(),
@@ -267,6 +316,10 @@ func (t *SearchTask) Execute() error {
 		log.Warn("failed to reduce search results", zap.Error(err))
 		return err
 	}
+	log.Info("[sss] search task reduce done",
+		zap.Duration("duration", time.Since(stageStart)),
+		zap.Int("resultNum", len(results)),
+		zap.Int("mergedTaskNum", len(t.others)+1))
 	allTasks := append([]*SearchTask{t}, t.others...)
 	refs, err := resource.NewSharedPinnedRefs(
 		blobs,
@@ -350,6 +403,9 @@ func (t *SearchTask) Execute() error {
 		}
 	}
 
+	log.Info("[sss] search task execute done",
+		zap.Duration("duration", time.Since(executeStart)),
+		zap.Bool("zeroCopy", zeroCopy))
 	return nil
 }
 

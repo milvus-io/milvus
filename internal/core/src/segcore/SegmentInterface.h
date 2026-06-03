@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <shared_mutex>
 #include <string>
@@ -195,6 +196,9 @@ class SegmentInterface {
     virtual int64_t
     get_segment_id() const = 0;
 
+    virtual int64_t
+    get_partition_id() const = 0;
+
     virtual SegmentType
     type() const = 0;
 
@@ -317,6 +321,16 @@ class SegmentInternalInterface : public SegmentInterface {
         // do nothing
     }
 
+    // Convenience: prefetch all chunks of a field. Default impl enumerates
+    // [0, num_chunk(field_id)) and forwards to the typed overload.
+    virtual void
+    prefetch_chunks(milvus::OpContext* op_ctx, FieldId field_id) const {
+    }
+
+    virtual void
+    prefetch_vector(milvus::OpContext* op_ctx, FieldId field_id) const {
+    }
+
     template <typename T>
     PinWrapper<Span<T>>
     chunk_data(milvus::OpContext* op_ctx,
@@ -413,6 +427,11 @@ class SegmentInternalInterface : public SegmentInterface {
 
     // Bring in base class Search overloads to avoid name hiding
     using SegmentInterface::Search;
+
+    int64_t
+    get_partition_id() const override {
+        return load_info_.partitionid();
+    }
 
     std::unique_ptr<SearchResult>
     Search(const query::Plan* Plan,

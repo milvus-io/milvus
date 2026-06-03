@@ -18,6 +18,7 @@ package segments
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -26,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
@@ -76,6 +78,17 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 		}
 	}
 
+	fanoutStart := time.Now()
+	logger := log.Ctx(ctx).With(
+		zap.String("segmentType", segType.String()),
+		zap.Int("segmentNum", len(segments)),
+		zap.Int64("fieldID", searchReq.SearchFieldID()),
+		zap.Int64("nq", searchReq.GetNumOfQuery()),
+		zap.Bool("filterOnly", searchReq.FilterOnly()),
+		zap.Int("withoutIndexNum", len(segmentsWithoutIndex)),
+		zap.Int64s("segmentsWithoutIndex", segmentsWithoutIndex))
+	logger.Info("[sss] search segments fanout start")
+
 	var err error
 	if len(segments) == 1 {
 		// Single segment fast path: skip errgroup/goroutine overhead
@@ -93,6 +106,9 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 	}
 
 	if err != nil {
+		logger.Warn("[sss] search segments fanout failed",
+			zap.Duration("duration", time.Since(fanoutStart)),
+			zap.Error(err))
 		// Collect non-nil results for cleanup
 		validResults := make([]*SearchResult, 0, len(segments))
 		for _, r := range searchResults {
@@ -108,6 +124,10 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 		log.Ctx(ctx).Debug("search growing/sealed segments without indexes", zap.Int64s("segmentIDs", segmentsWithoutIndex))
 	}
 
+	logger.Info("[sss] search segments fanout done",
+		zap.Duration("duration", time.Since(fanoutStart)),
+		zap.Int("resultNum", len(searchResults)))
+
 	return searchResults, nil
 }
 
@@ -120,11 +140,39 @@ func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRe
 		return nil, nil, ctx.Err()
 	}
 
+	totalStart := time.Now()
+	logger := log.Ctx(ctx).With(
+		zap.Int64("collectionID", collID),
+		zap.Int64s("partitionIDs", partIDs),
+		zap.Int64s("segmentIDs", segIDs),
+		zap.String("scope", querypb.DataScope_Historical.String()))
+	logger.Info("[sss] search validate start")
+	validateStart := time.Now()
 	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
+		logger.Warn("[sss] search validate failed",
+			zap.Duration("duration", time.Since(validateStart)),
+			zap.Error(err))
 		return nil, nil, err
 	}
+	logger.Info("[sss] search validate done",
+		zap.Duration("duration", time.Since(validateStart)),
+		zap.Int("validatedSegmentNum", len(segments)))
+	searchStart := time.Now()
 	searchResults, err := searchSegments(ctx, manager, segments, SegmentTypeSealed, searchReq)
+	if err != nil {
+		logger.Warn("[sss] search historical failed",
+			zap.Duration("searchDuration", time.Since(searchStart)),
+			zap.Duration("totalDuration", time.Since(totalStart)),
+			zap.Int("validatedSegmentNum", len(segments)),
+			zap.Error(err))
+		return searchResults, segments, err
+	}
+	logger.Info("[sss] search historical done",
+		zap.Duration("searchDuration", time.Since(searchStart)),
+		zap.Duration("totalDuration", time.Since(totalStart)),
+		zap.Int("validatedSegmentNum", len(segments)),
+		zap.Int("resultNum", len(searchResults)))
 	return searchResults, segments, err
 }
 
@@ -135,10 +183,38 @@ func SearchStreaming(ctx context.Context, manager *Manager, searchReq *SearchReq
 		return nil, nil, ctx.Err()
 	}
 
+	totalStart := time.Now()
+	logger := log.Ctx(ctx).With(
+		zap.Int64("collectionID", collID),
+		zap.Int64s("partitionIDs", partIDs),
+		zap.Int64s("segmentIDs", segIDs),
+		zap.String("scope", querypb.DataScope_Streaming.String()))
+	logger.Info("[sss] search validate start")
+	validateStart := time.Now()
 	segments, err := validateOnStream(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
+		logger.Warn("[sss] search validate failed",
+			zap.Duration("duration", time.Since(validateStart)),
+			zap.Error(err))
 		return nil, nil, err
 	}
+	logger.Info("[sss] search validate done",
+		zap.Duration("duration", time.Since(validateStart)),
+		zap.Int("validatedSegmentNum", len(segments)))
+	searchStart := time.Now()
 	searchResults, err := searchSegments(ctx, manager, segments, SegmentTypeGrowing, searchReq)
+	if err != nil {
+		logger.Warn("[sss] search streaming failed",
+			zap.Duration("searchDuration", time.Since(searchStart)),
+			zap.Duration("totalDuration", time.Since(totalStart)),
+			zap.Int("validatedSegmentNum", len(segments)),
+			zap.Error(err))
+		return searchResults, segments, err
+	}
+	logger.Info("[sss] search streaming done",
+		zap.Duration("searchDuration", time.Since(searchStart)),
+		zap.Duration("totalDuration", time.Since(totalStart)),
+		zap.Int("validatedSegmentNum", len(segments)),
+		zap.Int("resultNum", len(searchResults)))
 	return searchResults, segments, err
 }

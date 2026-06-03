@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "common/RequestTrace.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "exec/QueryContext.h"
@@ -30,6 +31,7 @@
 #include "exec/expression/ExprCache.h"
 #include "expr/ITypeExpr.h"
 #include "fmt/core.h"
+#include "log/Log.h"
 #include "monitor/Monitor.h"
 #include "plan/PlanNode.h"
 #include "prometheus/histogram.h"

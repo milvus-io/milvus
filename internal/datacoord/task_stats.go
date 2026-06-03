@@ -29,6 +29,7 @@ import (
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -406,7 +407,16 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 		if st.GetSubJobType() == indexpb.StatsSubJob_Sort {
 			segID = st.GetTargetSegmentID()
 		}
-		if updateErr := st.meta.UpdateSegmentsInfo(ctx, UpdateManifest(segID, manifest)); updateErr != nil {
+		mutations := map[int64][]MutateFunc{
+			segID: {func(seg *datapb.SegmentInfo) bool {
+				if manifest == "" || seg.ManifestPath == manifest {
+					return false
+				}
+				seg.ManifestPath = manifest
+				return true
+			}},
+		}
+		if updateErr := st.meta.UpdateSegmentsInfo(ctx, mutations); updateErr != nil {
 			log.Ctx(ctx).Warn("failed to update manifest after stats task",
 				zap.Int64("taskID", st.GetTaskID()),
 				zap.Int64("segmentID", segID),

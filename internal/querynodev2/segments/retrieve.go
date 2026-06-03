@@ -19,6 +19,7 @@ package segments
 import (
 	"context"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -46,12 +47,22 @@ type RetrieveSegmentResult struct {
 func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, req *querypb.QueryRequest) ([]RetrieveSegmentResult, error) {
 	resultCh := make(chan RetrieveSegmentResult, len(segments))
 
-	plan.SetIgnoreNonPk(shouldEnableIgnoreNonPk(req, len(segments), plan.ShouldIgnoreNonPk()))
+	ignoreNonPk := shouldEnableIgnoreNonPk(req, len(segments), plan.ShouldIgnoreNonPk())
+	plan.SetIgnoreNonPk(ignoreNonPk)
 
 	label := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
 		label = metrics.GrowingSegmentLabel
 	}
+
+	fanoutStart := time.Now()
+	logger := log.Ctx(ctx).With(
+		zap.String("segmentType", segType.String()),
+		zap.Int("segmentNum", len(segments)),
+		zap.String("queryLabel", contextutil.GetQueryLabel(ctx)),
+		zap.Bool("ignoreNonPk", ignoreNonPk),
+		zap.Int64("limit", req.GetReq().GetLimit()))
+	logger.Info("[sss] retrieve segments fanout start")
 
 	retriever := func(ctx context.Context, s Segment) error {
 		tr := timerecord.NewTimeRecorder("retrieveOnSegments")
@@ -92,6 +103,9 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 	err := doOnSegments(ctx, mgr, segments, retriever)
 	close(resultCh)
 	if err != nil {
+		logger.Warn("[sss] retrieve segments fanout failed",
+			zap.Duration("duration", time.Since(fanoutStart)),
+			zap.Error(err))
 		return nil, err
 	}
 
@@ -99,6 +113,9 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 	for r := range resultCh {
 		results = append(results, r)
 	}
+	logger.Info("[sss] retrieve segments fanout done",
+		zap.Duration("duration", time.Since(fanoutStart)),
+		zap.Int("resultNum", len(results)))
 	return results, nil
 }
 
@@ -178,9 +195,17 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 
 	segIDs := req.GetSegmentIDs()
 	collID := req.Req.GetCollectionID()
-	log := log.Ctx(ctx)
-	log.Debug("retrieve on segments", zap.Int64s("segmentIDs", segIDs), zap.Int64("collectionID", collID))
+	logger := log.Ctx(ctx).With(
+		zap.Int64("collectionID", collID),
+		zap.Int64s("partitionIDs", req.GetReq().GetPartitionIDs()),
+		zap.Int64s("segmentIDs", segIDs),
+		zap.String("scope", req.GetScope().String()),
+		zap.String("queryLabel", contextutil.GetQueryLabel(ctx)))
+	logger.Debug("retrieve on segments")
 
+	totalStart := time.Now()
+	validateStart := time.Now()
+	logger.Info("[sss] retrieve validate start")
 	if req.GetScope() == querypb.DataScope_Historical {
 		SegType = SegmentTypeSealed
 		retrieveSegments, err = validateOnHistorical(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs)
@@ -190,10 +215,30 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 	}
 
 	if err != nil {
+		logger.Warn("[sss] retrieve validate failed",
+			zap.Duration("duration", time.Since(validateStart)),
+			zap.Error(err))
 		return nil, retrieveSegments, err
 	}
+	logger.Info("[sss] retrieve validate done",
+		zap.Duration("duration", time.Since(validateStart)),
+		zap.Int("validatedSegmentNum", len(retrieveSegments)))
 
+	retrieveStart := time.Now()
 	result, err := retrieveOnSegments(ctx, manager, retrieveSegments, SegType, plan, req)
+	if err != nil {
+		logger.Warn("[sss] retrieve failed",
+			zap.Duration("retrieveDuration", time.Since(retrieveStart)),
+			zap.Duration("totalDuration", time.Since(totalStart)),
+			zap.Int("validatedSegmentNum", len(retrieveSegments)),
+			zap.Error(err))
+		return result, retrieveSegments, err
+	}
+	logger.Info("[sss] retrieve done",
+		zap.Duration("retrieveDuration", time.Since(retrieveStart)),
+		zap.Duration("totalDuration", time.Since(totalStart)),
+		zap.Int("validatedSegmentNum", len(retrieveSegments)),
+		zap.Int("resultNum", len(result)))
 	return result, retrieveSegments, err
 }
 

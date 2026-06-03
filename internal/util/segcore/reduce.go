@@ -109,6 +109,7 @@ func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, place
 	cSliceTopKSPtr := (*C.int64_t)(&sliceTopKs[0])
 	cNumSlices := C.int64_t(len(sliceNQs))
 	traceCtx := ParseCTraceContext(ctx)
+	defer traceCtx.Close()
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(plan)
 	defer runtime.KeepAlive(searchResults)

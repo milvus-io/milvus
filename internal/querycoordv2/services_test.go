@@ -19,6 +19,7 @@ package querycoordv2
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"testing"
 	"time"
@@ -60,6 +61,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -1434,6 +1436,61 @@ func (suite *ServiceSuite) TestLoadBalanceWithNoDstNode() {
 	resp, err := server.LoadBalance(ctx, req)
 	suite.NoError(err)
 	suite.Equal(resp.GetCode(), merr.Code(merr.ErrServiceNotReady))
+}
+
+func (suite *ServiceSuite) TestLoadBalanceWithNoDstNodeUseSQN() {
+	suite.loadAll()
+	ctx := context.Background()
+	server := suite.server
+
+	oldValue, existed := os.LookupEnv(streamingutil.MilvusStreamingServiceEnabled)
+	suite.Require().NoError(os.Setenv(streamingutil.MilvusStreamingServiceEnabled, "1"))
+	suite.Require().NoError(paramtable.Get().Save(paramtable.Get().QueryCoordCfg.EnableSQNServeSegments.Key, "true"))
+	defer func() {
+		suite.NoError(paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.EnableSQNServeSegments.Key))
+		if existed {
+			suite.NoError(os.Setenv(streamingutil.MilvusStreamingServiceEnabled, oldValue))
+		} else {
+			suite.NoError(os.Unsetenv(streamingutil.MilvusStreamingServiceEnabled))
+		}
+	}()
+
+	collection := suite.collections[0]
+	replica := suite.meta.ReplicaManager.GetByCollection(ctx, collection)[0]
+	mutableReplica := replica.CopyForWrite()
+	mutableReplica.AddRWSQNode(10001)
+	suite.meta.ReplicaManager.Put(ctx, mutableReplica.IntoReplica())
+
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   10001,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.meta.ResourceManager.HandleNodeUp(ctx, 10001)
+
+	srcNode := replica.GetRWNodes()[0]
+	suite.updateCollectionStatus(ctx, collection, querypb.LoadStatus_Loaded)
+	suite.updateSegmentDist(collection, srcNode)
+
+	suite.taskScheduler.ExpectedCalls = nil
+	suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.taskScheduler.EXPECT().Add(mock.Anything).Run(func(balanceTask task.Task) {
+		actions := balanceTask.Actions()
+		suite.Len(actions, 2)
+		growAction, reduceAction := actions[0], actions[1]
+		suite.EqualValues(10001, growAction.Node())
+		suite.Equal(srcNode, reduceAction.Node())
+		balanceTask.Cancel(nil)
+	}).Return(nil)
+
+	resp, err := server.LoadBalance(ctx, &querypb.LoadBalanceRequest{
+		CollectionID:     collection,
+		SourceNodeIDs:    []int64{srcNode},
+		SealedSegmentIDs: suite.getAllSegments(collection),
+	})
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
 }
 
 func (suite *ServiceSuite) TestLoadBalanceWithEmptySegmentList() {

@@ -1,11 +1,3 @@
-- name: pulsar volume
-  docker_volume:
-    name: pulsar_conf
-
-- name: pulsar volume
-  docker_volume:
-    name: pulsar_data
-
 - name: "pulsar"
   docker_container:
     name: pulsar
@@ -19,8 +11,5 @@
       # maxMessageSize is missing from standalone.conf, must use PULSAR_PREFIX_ to get it configured
       PULSAR_PREFIX_maxMessageSize: "104857600"
       PULSAR_GC: -XX:+UseG1GC
-    volumes:
-      - pulsar_conf:/pulsar/conf
-      - pulsar_data:/pulsar/data
     command: bash -c '/pulsar/bin/apply-config-from-env.py /pulsar/conf/standalone.conf; exec bin/pulsar standalone --no-functions-worker'
     network_mode: "{{dependencies_network}}" #Use the network which defined as variable in Inventory.

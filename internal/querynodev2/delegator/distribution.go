@@ -18,6 +18,7 @@ package delegator
 
 import (
 	"sync"
+	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
@@ -389,7 +390,13 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 		return
 	}
 
+	lockStart := time.Now()
 	d.mut.Lock()
+	lockDur := time.Since(lockStart)
+	if lockDur > 100*time.Millisecond {
+		segmentIDs := lo.Map(entries, func(e SegmentEntry, _ int) int64 { return e.SegmentID })
+		log.Warn("AddDistributions lock slow", zap.Duration("lockDur", lockDur), zap.Int64s("segmentIDs", segmentIDs))
+	}
 	for _, entry := range entries {
 		oldEntry, ok := d.sealedSegments[entry.SegmentID]
 		if ok && oldEntry.Version >= entry.Version {
@@ -417,6 +424,11 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 		d.sealedSegments[entry.SegmentID] = entry
 	}
 	d.mut.Unlock()
+	t1 := time.Now()
+	if t1.Sub(lockStart) > 100*time.Millisecond {
+		segmentIDs := lo.Map(entries, func(e SegmentEntry, _ int) int64 { return e.SegmentID })
+		log.Warn("AddDistributions notifySnapshotUpdate slow", zap.Duration("lockDur", t1.Sub(lockStart)), zap.Int64s("segmentIDs", segmentIDs))
+	}
 
 	d.notifySnapshotUpdate()
 	refundCandidates(toRefund)
@@ -477,7 +489,7 @@ func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions 
 	d.mut.Lock()
 	defer d.mut.Unlock()
 
-	oldValue := d.queryView.version
+	// oldValue := d.queryView.version
 	d.queryView = &channelQueryView{
 		growingSegments:       typeutil.NewUniqueSet(action.GetGrowingInTarget()...),
 		sealedSegmentRowCount: action.GetSealedSegmentRowCount(),
@@ -532,17 +544,6 @@ func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions 
 		d.idfOracle.LazyRemoveGrowings(action.GetTargetVersion(), redundantGrowings...)
 	}
 	d.updateServiceable("SyncTargetVersion")
-
-	log.Info("Update channel query view",
-		zap.String("channel", d.channelName),
-		zap.Int64s("partitions", partitions),
-		zap.Int64("oldVersion", oldValue),
-		zap.Int64("newVersion", action.GetTargetVersion()),
-		zap.Bool("serviceable", d.queryView.Serviceable()),
-		zap.Float64("loadedRatio", d.queryView.GetLoadedRatio()),
-		zap.Int("growingSegmentNum", len(action.GetGrowingInTarget())),
-		zap.Int("sealedSegmentNum", len(action.GetSealedInTarget())),
-	)
 }
 
 // GetQueryView returns the current query view.

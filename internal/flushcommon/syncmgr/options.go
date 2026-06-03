@@ -10,7 +10,9 @@ import (
 )
 
 func NewSyncTask() *SyncTask {
-	return new(SyncTask)
+	return &SyncTask{
+		taskID: syncTaskIDCounter.Add(1),
+	}
 }
 
 func (t *SyncTask) WithSyncPack(pack *SyncPack) *SyncTask {

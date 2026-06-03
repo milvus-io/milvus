@@ -443,7 +443,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		zap.Int64("dstNodeID", req.GetDstNodeID()),
 	)
 
-	log.Info("received load segments request",
+	log.Info("[xxx] received load segments request",
 		zap.Int64("version", req.GetVersion()),
 		zap.Bool("needTransfer", req.GetNeedTransfer()),
 		zap.String("loadScope", req.GetLoadScope().String()))
@@ -503,12 +503,15 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Success(), nil
 	}
 
+	t1 := time.Now()
 	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
 		node.composeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
 	if err != nil {
 		log.Warn("failed to ref collection", zap.Error(err))
 		return merr.Status(err), nil
 	}
+	t2 := time.Now()
+	log.Info("PutOrRef time", zap.Duration("time", t2.Sub(t1)))
 	defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
 
 	switch req.GetLoadScope() {
@@ -725,14 +728,36 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmen
 	}, nil
 }
 
+func sssSearchLogFields(ctx context.Context, req *querypb.SearchRequest) []zap.Field {
+	searchReq := req.GetReq()
+	return []zap.Field{
+		zap.Int64("requestID", searchReq.GetBase().GetMsgID()),
+		zap.Stringer("traceID", trace.SpanFromContext(ctx).SpanContext().TraceID()),
+		zap.Int64("collectionID", searchReq.GetCollectionID()),
+		zap.Int64s("partitionIDs", searchReq.GetPartitionIDs()),
+	}
+}
+
+func withSearchRequestID(ctx context.Context, req *querypb.SearchRequest) context.Context {
+	requestID := req.GetReq().GetBase().GetMsgID()
+	if requestID == 0 {
+		return ctx
+	}
+	return contextutil.WithRequestID(ctx, strconv.FormatInt(requestID, 10))
+}
+
 // SearchSegments performs search on segments.
 // If req.FilterOnly is true, only executes filter and returns valid count per segment (Stage 1 of two-stage search).
 // If req.FilterOnly is false, performs normal vector search and returns search results.
 func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
+	ctx = withSearchRequestID(ctx, req)
+	baseLog := log.Ctx(ctx).With(sssSearchLogFields(ctx, req)...)
+	baseLog.Info("[sss] search segment")
+	defer func() {
+		baseLog.Info("[sss] search segment done")
+	}()
 	channel := req.GetDmlChannels()[0]
-	log := log.Ctx(ctx).With(
-		zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
-		zap.Int64("collectionID", req.Req.GetCollectionID()),
+	log := baseLog.With(
 		zap.String("channel", channel),
 		zap.String("scope", req.GetScope().String()),
 	)
@@ -780,13 +805,30 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 
 	task := tasks.NewSearchTask(searchCtx, collection, node.manager, req, node.serverID)
 
+	log.Info("[sss] search task enqueue",
+		zap.Int("segmentNum", len(req.GetSegmentIDs())),
+		zap.Int64("nq", req.GetReq().GetNq()),
+		zap.Int64("topK", req.GetReq().GetTopk()),
+		zap.Int64("waitingTaskTotal", node.scheduler.GetWaitingTaskTotal()),
+		zap.Int64("waitingTaskTotalNQ", node.scheduler.GetWaitingTaskTotalNQ()))
+	addStart := time.Now()
 	if err := node.scheduler.Add(task); err != nil {
 		log.Warn("failed to search channel", zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
+	log.Info("[sss] search task add done",
+		zap.Duration("addDuration", time.Since(addStart)),
+		zap.Int64("waitingTaskTotal", node.scheduler.GetWaitingTaskTotal()),
+		zap.Int64("waitingTaskTotalNQ", node.scheduler.GetWaitingTaskTotalNQ()))
 
+	waitStart := time.Now()
 	err := task.Wait()
+	log.Info("[sss] search task wait done",
+		zap.Duration("waitDuration", time.Since(waitStart)),
+		zap.Duration("totalDuration", tr.ElapseSpan()),
+		zap.Int64("waitingTaskTotal", node.scheduler.GetWaitingTaskTotal()),
+		zap.Int64("waitingTaskTotalNQ", node.scheduler.GetWaitingTaskTotalNQ()))
 	if err != nil {
 		log.Warn("failed to search segments", zap.Error(err))
 		resp.Status = merr.Status(err)
@@ -811,8 +853,13 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 
 // Search performs replica search tasks.
 func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
+	ctx = withSearchRequestID(ctx, req)
+	baseLog := log.Ctx(ctx).With(sssSearchLogFields(ctx, req)...)
+	baseLog.Info("[sss] search request")
+	defer func() {
+		baseLog.Info("[sss] search request done")
+	}()
+	log := baseLog.With(
 		zap.Strings("channels", req.GetDmlChannels()),
 		zap.Int64("nq", req.GetReq().GetNq()),
 	)
@@ -926,12 +973,27 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	}()
 	// Send task to scheduler and wait until it finished.
 	task := tasks.NewQueryTask(queryCtx, collection, node.manager, req)
+	log.Info("[sss] query task enqueue",
+		zap.Int("segmentNum", len(req.GetSegmentIDs())),
+		zap.Int64("waitingTaskTotal", node.scheduler.GetWaitingTaskTotal()),
+		zap.Int64("waitingTaskTotalNQ", node.scheduler.GetWaitingTaskTotalNQ()))
+	addStart := time.Now()
 	if err := node.scheduler.Add(task); err != nil {
 		log.Warn("failed to add query task into scheduler", zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
+	log.Info("[sss] query task add done",
+		zap.Duration("addDuration", time.Since(addStart)),
+		zap.Int64("waitingTaskTotal", node.scheduler.GetWaitingTaskTotal()),
+		zap.Int64("waitingTaskTotalNQ", node.scheduler.GetWaitingTaskTotalNQ()))
+	waitStart := time.Now()
 	err := task.Wait()
+	log.Info("[sss] query task wait done",
+		zap.Duration("waitDuration", time.Since(waitStart)),
+		zap.Duration("totalDuration", tr.ElapseSpan()),
+		zap.Int64("waitingTaskTotal", node.scheduler.GetWaitingTaskTotal()),
+		zap.Int64("waitingTaskTotalNQ", node.scheduler.GetWaitingTaskTotalNQ()))
 	if err != nil {
 		log.Warn("failed to query channel", zap.Error(err))
 		resp.Status = merr.Status(err)
@@ -1372,11 +1434,11 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				continue
 			}
 
-			log.Info("sync action",
-				zap.Int64("TargetVersion", action.GetTargetVersion()),
-				zap.Time("checkPoint", tsoutil.PhysicalTime(action.GetCheckpoint().GetTimestamp())),
-				zap.Time("deleteCP", tsoutil.PhysicalTime(action.GetDeleteCP().GetTimestamp())),
-				zap.Int64s("partitions", req.GetLoadMeta().GetPartitionIDs()))
+			// log.Info("sync action",
+			// 	zap.Int64("TargetVersion", action.GetTargetVersion()),
+			// 	zap.Time("checkPoint", tsoutil.PhysicalTime(action.GetCheckpoint().GetTimestamp())),
+			// 	zap.Time("deleteCP", tsoutil.PhysicalTime(action.GetDeleteCP().GetTimestamp())),
+			// 	zap.Int64s("partitions", req.GetLoadMeta().GetPartitionIDs()))
 			droppedInfos := lo.SliceToMap(action.GetDroppedInTarget(), func(id int64) (int64, uint64) {
 				if action.GetCheckpoint() == nil {
 					return id, typeutil.MaxTimestamp

@@ -67,6 +67,8 @@ type WriteBuffer interface {
 	EvictBuffer(policies ...SyncPolicy)
 	// HasTextFields returns true if the collection on this channel has TEXT fields.
 	HasTextFields() bool
+	// EvictOldestBuffers evicts the N oldest buffers to sync manager.
+	EvictOldestBuffers(num int)
 	// Close is the method to close and sink current buffer data.
 	Close(ctx context.Context, drop bool)
 }
@@ -132,6 +134,13 @@ type writeBufferBase struct {
 	mut     sync.RWMutex
 	buffers map[int64]*segmentBuffer // segmentID => segmentBuffer
 
+	// Heap for tracking minimum MinTimestamp across all buffers.
+	// Enables O(1) check for stale buffers and checkpoint.
+	bufferHeap *BufferTimestampHeap
+
+	// Set of buffer IDs that are full. Avoids O(N) iteration in GetFullBufferPolicy.
+	fullBuffers map[int64]struct{}
+
 	syncPolicies   []SyncPolicy
 	syncCheckpoint *checkpointCandidates
 	syncMgr        syncmgr.SyncManager
@@ -151,10 +160,6 @@ type writeBufferBase struct {
 }
 
 func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr syncmgr.SyncManager, option *writeBufferOption) (*writeBufferBase, error) {
-	flushTs := atomic.NewUint64(nonFlushTS)
-	flushTsPolicy := GetFlushTsPolicy(flushTs, metacache)
-	option.syncPolicies = append(option.syncPolicies, flushTsPolicy)
-
 	schema := metacache.GetSchema(0)
 	estSize, err := typeutil.EstimateSizePerRecord(schema)
 	if err != nil {
@@ -170,6 +175,25 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		}
 	}
 
+	// Create heap and fullBuffers first so we can use them in policies
+	flushTs := atomic.NewUint64(nonFlushTS)
+	bufferHeap := NewBufferTimestampHeap()
+	fullBuffers := make(map[int64]struct{})
+
+	// Add policies with trackers
+	staleDuration := paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)
+	option.syncPolicies = append(option.syncPolicies,
+		GetFullBufferPolicyWithTracker(func() []int64 {
+			result := make([]int64, 0, len(fullBuffers))
+			for id := range fullBuffers {
+				result = append(result, id)
+			}
+			return result
+		}),
+		GetSyncStaleBufferPolicyWithHeap(staleDuration, bufferHeap),
+		GetFlushTsPolicyWithHeap(flushTs, metacache, bufferHeap),
+	)
+
 	wb := &writeBufferBase{
 		channelName:          channel,
 		collectionID:         metacache.Collection(),
@@ -178,6 +202,8 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		metaWriter:           option.metaWriter,
 		allocator:            option.idAllocator,
 		buffers:              make(map[int64]*segmentBuffer),
+		bufferHeap:           bufferHeap,
+		fullBuffers:          fullBuffers,
 		metaCache:            metacache,
 		syncCheckpoint:       newCheckpointCandiates(),
 		syncPolicies:         option.syncPolicies,
@@ -276,21 +302,27 @@ func (wb *writeBufferBase) EvictBuffer(policies ...SyncPolicy) {
 	}
 }
 
+func (wb *writeBufferBase) EvictOldestBuffers(num int) {
+	wb.EvictBuffer(GetOldestBufferPolicyWithHeap(num, wb.bufferHeap))
+}
+
 func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
 	log := wb.cpRatedLogger
 	wb.mut.RLock()
 	defer wb.mut.RUnlock()
 
-	candidates := lo.MapToSlice(wb.buffers, func(_ int64, buf *segmentBuffer) *checkpointCandidate {
-		return &checkpointCandidate{buf.segmentID, buf.EarliestPosition(), "segment buffer"}
-	})
-	candidates = lo.Filter(candidates, func(candidate *checkpointCandidate, _ int) bool {
-		return candidate.position != nil
-	})
+	// Use heap to find the buffer with minimum timestamp in O(1)
+	var bufferCandidate *checkpointCandidate
+	if minSegID, _, ok := wb.bufferHeap.PeekMin(); ok {
+		if buf, exists := wb.buffers[minSegID]; exists {
+			if pos := buf.EarliestPosition(); pos != nil {
+				bufferCandidate = &checkpointCandidate{minSegID, pos, "segment buffer"}
+			}
+		}
+	}
 
-	checkpoint := wb.syncCheckpoint.GetEarliestWithDefault(lo.MinBy(candidates, func(a, b *checkpointCandidate) bool {
-		return a.position.GetTimestamp() < b.position.GetTimestamp()
-	}))
+	// Merge with syncCheckpoint
+	checkpoint := wb.syncCheckpoint.GetEarliestWithDefault(bufferCandidate)
 
 	if checkpoint == nil {
 		// all buffer are empty
@@ -405,10 +437,9 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 // getSegmentsToSync applies all policies to get segments list to sync.
 // **NOTE** shall be invoked within mutex protection
 func (wb *writeBufferBase) getSegmentsToSync(ts typeutil.Timestamp, policies ...SyncPolicy) []int64 {
-	buffers := lo.Values(wb.buffers)
 	segments := typeutil.NewSet[int64]()
 	for _, policy := range policies {
-		result := policy.SelectSegments(buffers, ts)
+		result := policy.SelectSegments(ts)
 		if len(result) > 0 {
 			log.Info("SyncPolicy selects segments", zap.Int64s("segmentIDs", result), zap.String("reason", policy.Reason()))
 			segments.Insert(result...)
@@ -428,9 +459,23 @@ func (wb *writeBufferBase) getOrCreateBuffer(segmentID int64, timetick uint64) *
 			panic(err)
 		}
 		wb.buffers[segmentID] = buffer
+		// Add to heap with initial MaxUint64 timestamp (empty buffer)
+		wb.bufferHeap.Update(segmentID, buffer.MinTimestamp())
 	}
 
 	return buffer
+}
+
+// updateBufferMinTimestamp updates heap and full buffer set after data is buffered.
+// Must be called after any operation that might change buffer's MinTimestamp or size.
+func (wb *writeBufferBase) updateBufferMinTimestamp(segmentID int64) {
+	if buf, ok := wb.buffers[segmentID]; ok {
+		wb.bufferHeap.Update(segmentID, buf.MinTimestamp())
+		// Track full buffers
+		if buf.IsFull() {
+			wb.fullBuffers[segmentID] = struct{}{}
+		}
+	}
 }
 
 func (wb *writeBufferBase) yieldBuffer(segmentID int64) ([]*storage.InsertData, map[int64]*storage.BM25Stats, *storage.DeleteData, *schemapb.CollectionSchema, *TimeRange, *msgpb.MsgPosition) {
@@ -441,6 +486,9 @@ func (wb *writeBufferBase) yieldBuffer(segmentID int64) ([]*storage.InsertData, 
 
 	// remove buffer and move it to sync manager
 	delete(wb.buffers, segmentID)
+	// Remove from heap and full set when buffer is removed
+	wb.bufferHeap.Remove(segmentID)
+	delete(wb.fullBuffers, segmentID)
 	start := buffer.EarliestPosition()
 	timeRange := buffer.GetTimeRange()
 	insert, bm25, delta, schema := buffer.Yield()
@@ -562,6 +610,14 @@ func (id *InsertData) batchPkExists(pks []storage.PrimaryKey, tss []uint64, hits
 }
 
 func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID int64, startPos *msgpb.MsgPosition, schemaVersion int32) {
+	wb.mut.Lock()
+	defer wb.mut.Unlock()
+	wb.createNewGrowingSegment(partitionID, segmentID, startPos, schemaVersion)
+}
+
+// createNewGrowingSegment is the internal implementation without locking.
+// Caller must hold wb.mut.
+func (wb *writeBufferBase) createNewGrowingSegment(partitionID int64, segmentID int64, startPos *msgpb.MsgPosition, schemaVersion int32) {
 	_, ok := wb.metaCache.GetSegmentByID(segmentID)
 	// new segment
 	if !ok {
@@ -586,10 +642,26 @@ func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID 
 			ManifestPath:   manifestPath,
 			SchemaVersion:  schemaVersion,
 		}
+		actions := []metacache.SegmentAction{metacache.SetStartPosRecorded(false)}
+		// When startPos is provided (from CreateSegment message in streaming mode),
+		// mark the segment as needing AllocSegment at DataCoord during the first SyncTask.
+		if startPos != nil {
+			actions = append(actions, metacache.SetNeedAllocAtCoord(true))
+		}
 		wb.metaCache.AddSegment(segmentInfo, func(_ *datapb.SegmentInfo) pkoracle.PkStat {
 			return pkoracle.NewBloomFilterSetWithBatchSize(wb.getEstBatchSize())
-		}, metacache.NewBM25StatsFactory, metacache.SetStartPosRecorded(false))
-		log.Info("add growing segment", zap.Int64("segmentID", segmentID), zap.String("channel", wb.channelName), zap.Int64("storage version", storageVersion))
+		}, metacache.NewBM25StatsFactory, actions...)
+		log.Info("add growing segment", zap.Int64("segmentID", segmentID), zap.String("channel", wb.channelName), zap.Int64("storage version", storageVersion),
+			zap.Bool("needAllocAtCoord", startPos != nil))
+
+		// When startPos is provided (e.g., from CreateSegment message), create an empty buffer entry
+		// to anchor the checkpoint at this position. This prevents the checkpoint from advancing past
+		// the CreateSegment message, ensuring it will be replayed on crash recovery.
+		if startPos != nil {
+			segBuf := wb.getOrCreateBuffer(segmentID, startPos.GetTimestamp())
+			segBuf.insertBuffer.startPos = startPos
+			wb.bufferHeap.Update(segmentID, startPos.GetTimestamp())
+		}
 	}
 }
 
@@ -597,6 +669,8 @@ func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID 
 func (wb *writeBufferBase) bufferDelete(segmentID int64, pks []storage.PrimaryKey, tss []typeutil.Timestamp, startPos, endPos *msgpb.MsgPosition) {
 	segBuf := wb.getOrCreateBuffer(segmentID, tss[0])
 	bufSize := segBuf.deltaBuffer.Buffer(pks, tss, startPos, endPos)
+	// Update heap after buffering (MinTimestamp may have changed)
+	wb.updateBufferMinTimestamp(segmentID)
 	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(paramtable.GetStringNodeID(), fmt.Sprint(wb.collectionID)).Add(float64(bufSize))
 }
 

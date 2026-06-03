@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <folly/CancellationToken.h>
+#include <chrono>
 #include <exception>
 #include <memory>
 #include <optional>
@@ -20,9 +21,10 @@
 #include "common/OpContext.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
-#include "common/Tracer.h"
+#include "common/RequestTrace.h"
 #include "futures/Executor.h"
 #include "futures/Future.h"
+#include "log/Log.h"
 #include "monitor/scope_metric.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
@@ -132,6 +134,7 @@ AsyncReduceSearchResultsAndFillData(CTraceContext c_trace,
     // any exception becomes a failed CFuture instead of escaping across the
     // C ABI. Input arrays are kept alive by the Go caller via
     // runtime.KeepAlive until BlockAndLeakyGet returns.
+    const auto submit_time = std::chrono::steady_clock::now();
     auto future =
         milvus::futures::Future<milvus::segcore::SearchResultDataBlobs>::async(
             milvus::futures::getSearchCPUExecutor(),
@@ -143,7 +146,17 @@ AsyncReduceSearchResultsAndFillData(CTraceContext c_trace,
              num_segments,
              slice_nqs,
              slice_topKs,
-             num_slices](folly::CancellationToken cancel_token) {
+             num_slices,
+             submit_time](folly::CancellationToken cancel_token) {
+                const auto executor_start = std::chrono::steady_clock::now();
+                const auto executor_queue_duration_us =
+                    std::chrono::duration_cast<std::chrono::microseconds>(
+                        executor_start - submit_time)
+                        .count();
+                LOG_INFO(
+                    "[sss] reduce task start, "
+                    "executorQueueDurationUs: {}",
+                    executor_queue_duration_us);
                 auto plan = static_cast<milvus::query::Plan*>(c_plan);
                 auto placeholder_group =
                     static_cast<const milvus::query::PlaceholderGroup*>(

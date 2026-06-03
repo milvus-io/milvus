@@ -26,6 +26,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -142,19 +143,6 @@ func (job *LoadCollectionJob) Execute() error {
 		fieldIDs = append(fieldIDs, loadField.GetFieldId())
 	}
 	replicaNumber := int32(len(replicas))
-	partitions := lo.Map(req.GetPartitionIds(), func(partID int64, _ int) *meta.Partition {
-		return &meta.Partition{
-			PartitionLoadInfo: &querypb.PartitionLoadInfo{
-				CollectionID:  req.GetCollectionId(),
-				PartitionID:   partID,
-				ReplicaNumber: replicaNumber,
-				Status:        querypb.LoadStatus_Loading,
-				FieldIndexID:  fieldIndexIDs,
-			},
-			CreatedAt: time.Now(),
-		}
-	})
-
 	ctx, sp := otel.Tracer(typeutil.QueryCoordRole).Start(job.ctx, "LoadCollection", trace.WithNewRoot())
 	collection := &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
@@ -172,7 +160,17 @@ func (job *LoadCollectionJob) Execute() error {
 		Schema:    collInfo.GetSchema(),
 	}
 	incomingPartitions := typeutil.NewSet(req.GetPartitionIds()...)
-	currentPartitions := job.meta.GetPartitionsByCollection(job.ctx, req.GetCollectionId())
+	currentPartitions := job.meta.CollectionManager.GetPartitionsByCollection(job.ctx, req.GetCollectionId())
+	currentPartitionMap := lo.SliceToMap(currentPartitions, func(partition *meta.Partition) (int64, *meta.Partition) {
+		return partition.GetPartitionID(), partition
+	})
+	partitions, newPartitionCount := buildPartitionsToPersist(
+		req.GetCollectionId(),
+		req.GetPartitionIds(),
+		currentPartitionMap,
+		replicaNumber,
+		fieldIndexIDs,
+	)
 	toReleasePartitions := make([]int64, 0)
 	for _, partition := range currentPartitions {
 		if !incomingPartitions.Contain(partition.GetPartitionID()) {
@@ -181,22 +179,24 @@ func (job *LoadCollectionJob) Execute() error {
 	}
 	if len(toReleasePartitions) > 0 {
 		job.targetObserver.ReleasePartition(req.GetCollectionId(), toReleasePartitions...)
-		if err := job.meta.RemovePartition(job.ctx, req.GetCollectionId(), toReleasePartitions...); err != nil {
+		if err := job.meta.CollectionManager.RemovePartition(job.ctx, req.GetCollectionId(), toReleasePartitions...); err != nil {
 			return errors.Wrap(err, "failed to remove partitions")
 		}
 	}
 
-	if err = job.meta.PutCollection(job.ctx, collection, partitions...); err != nil {
+	if err = job.meta.CollectionManager.PutCollection(job.ctx, collection, partitions...); err != nil {
 		msg := "failed to store collection and partitions"
 		log.Warn(msg, zap.Error(err))
 		return errors.Wrap(err, msg)
 	}
 	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Start load collection %d", collection.CollectionID)))
-	metrics.QueryCoordNumPartitions.WithLabelValues().Add(float64(len(partitions)))
+	metrics.QueryCoordNumPartitions.WithLabelValues().Add(float64(newPartitionCount))
 
 	log.Info("put collection and partitions done",
 		zap.Int64("collectionID", req.GetCollectionId()),
 		zap.Int64s("partitions", req.GetPartitionIds()),
+		zap.Int("persistedPartitions", len(partitions)),
+		zap.Int("newPartitions", newPartitionCount),
 		zap.Int64s("toReleasePartitions", toReleasePartitions),
 	)
 
@@ -259,4 +259,42 @@ func getLocalReplicaConfig(ctx context.Context, m *meta.Meta, collectionID int64
 		Expected: ExpectedLoadConfig{ExpectedReplicaNumber: expectedReplicaNumber},
 	}
 	return req.generateReplicas(ctx)
+}
+
+func buildPartitionsToPersist(
+	collectionID int64,
+	partitionIDs []int64,
+	currentPartitions map[int64]*meta.Partition,
+	replicaNumber int32,
+	fieldIndexIDs map[int64]int64,
+) ([]*meta.Partition, int) {
+	partitions := make([]*meta.Partition, 0, len(partitionIDs))
+	newPartitionCount := 0
+
+	for _, partitionID := range partitionIDs {
+		current, ok := currentPartitions[partitionID]
+		if !ok {
+			newPartitionCount++
+			partitions = append(partitions, &meta.Partition{
+				PartitionLoadInfo: &querypb.PartitionLoadInfo{
+					CollectionID:  collectionID,
+					PartitionID:   partitionID,
+					ReplicaNumber: replicaNumber,
+					Status:        querypb.LoadStatus_Loading,
+					FieldIndexID:  fieldIndexIDs,
+				},
+				CreatedAt: time.Now(),
+			})
+			continue
+		}
+
+		updated := current.Clone()
+		updated.ReplicaNumber = replicaNumber
+		updated.FieldIndexID = fieldIndexIDs
+		if !proto.Equal(current.PartitionLoadInfo, updated.PartitionLoadInfo) {
+			partitions = append(partitions, updated)
+		}
+	}
+
+	return partitions, newPartitionCount
 }

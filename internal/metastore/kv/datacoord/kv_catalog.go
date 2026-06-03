@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -290,6 +291,8 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 	if len(segments) == 0 {
 		return nil
 	}
+
+	start := time.Now()
 	kvs := make(map[string]string)
 	for _, segment := range segments {
 		// we don't persist binlog fields, but instead store binlogs as independent kvs
@@ -315,8 +318,10 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 		}
 		kvs[k] = v
 	}
+	buildSegmentKvsDur := time.Since(start)
 
 	var removals []string
+	stageStart := time.Now()
 	for _, b := range binlogs {
 		segment := b.Segment
 
@@ -343,8 +348,12 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 					fid))
 		}
 	}
+	buildBinlogKvsDur := time.Since(stageStart)
 
-	if err := kc.SaveByBatch(ctx, kvs); err != nil {
+	stageStart = time.Now()
+	err := kc.SaveByBatch(ctx, kvs)
+	saveByBatchDur := time.Since(stageStart)
+	if err != nil {
 		return err
 	}
 	// Explicit removal is required: AlterSegments persists binlogs as
@@ -358,6 +367,15 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 			return err
 		}
 	}
+	log.Ctx(ctx).Info("[AlterSegments] done",
+		zap.Duration("total", time.Since(start)),
+		zap.Duration("buildSegmentKvs", buildSegmentKvsDur),
+		zap.Duration("buildBinlogKvs", buildBinlogKvsDur),
+		zap.Duration("saveByBatch", saveByBatchDur),
+		zap.Int("kvCount", len(kvs)),
+		zap.Int("segmentCount", len(segments)),
+		zap.Int("binlogIncrementCount", len(binlogs)),
+	)
 	return nil
 }
 

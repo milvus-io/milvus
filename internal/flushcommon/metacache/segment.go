@@ -17,14 +17,11 @@
 package metacache
 
 import (
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -49,6 +46,11 @@ type SegmentInfo struct {
 	bm25logs         []*datapb.FieldBinlog
 	currentSplit     []storagecommon.ColumnGroup
 	manifestPath     string
+
+	// needAllocAtCoord indicates that this segment was created by streaming mode
+	// and has not yet been registered at DataCoord via AllocSegment.
+	// The first SyncTask for this segment should call AllocSegment before SaveBinlogPaths.
+	needAllocAtCoord bool
 }
 
 func (s *SegmentInfo) SegmentID() int64 {
@@ -76,6 +78,10 @@ func (s *SegmentInfo) FlushedRows() int64 {
 
 func (s *SegmentInfo) StartPosition() *msgpb.MsgPosition {
 	return s.startPosition
+}
+
+func (s *SegmentInfo) StartPosRecorded() bool {
+	return s.startPosRecorded
 }
 
 func (s *SegmentInfo) Checkpoint() *msgpb.MsgPosition {
@@ -134,6 +140,10 @@ func (s *SegmentInfo) ManifestPath() string {
 	return s.manifestPath
 }
 
+func (s *SegmentInfo) NeedAllocAtCoord() bool {
+	return s.needAllocAtCoord
+}
+
 func (s *SegmentInfo) Clone() *SegmentInfo {
 	return &SegmentInfo{
 		segmentID:        s.segmentID,
@@ -156,6 +166,7 @@ func (s *SegmentInfo) Clone() *SegmentInfo {
 		bm25logs:         s.bm25logs,
 		currentSplit:     s.currentSplit,
 		manifestPath:     s.manifestPath,
+		needAllocAtCoord: s.needAllocAtCoord,
 	}
 }
 
@@ -175,7 +186,7 @@ func NewSegmentInfo(info *datapb.SegmentInfo, bfs pkoracle.PkStat, bm25Stats *Se
 				Fields:  group.GetChildFields(),
 			})
 		}
-		log.Info("recover split info", zap.Int64("segmentID", info.GetID()), zap.Stringers("columnGroup", currentSplit))
+		// log.Info("recover split info", zap.Int64("segmentID", info.GetID()), zap.Stringers("columnGroup", currentSplit))
 	}
 	return &SegmentInfo{
 		segmentID:        info.GetID(),

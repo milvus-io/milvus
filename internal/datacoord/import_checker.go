@@ -455,8 +455,14 @@ func (c *importChecker) unsetSegmentImporting(originSegmentIDs, statsSegmentIDs 
 	})
 
 	for _, segmentID := range isImportingSegments {
-		op := UpdateIsImporting(segmentID, false)
-		err := c.meta.UpdateSegmentsInfo(c.ctx, op)
+		segID := segmentID
+		mutations := map[int64][]MutateFunc{
+			segID: {func(seg *datapb.SegmentInfo) bool {
+				seg.IsImporting = false
+				return true
+			}},
+		}
+		err := c.meta.UpdateSegmentsInfo(c.ctx, mutations)
 		if err != nil {
 			log.Warn("update import segment failed", zap.Error(err))
 			return true

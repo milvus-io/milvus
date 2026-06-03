@@ -1,19 +1,17 @@
 package cgo
 
 import (
-	"math"
 	"runtime"
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
-	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var caller *cgoCaller
 
 func initCaller(nodeID string) {
-	chSize := int64(math.Ceil(float64(hardware.GetCPUNum()) * paramtable.Get().QueryNodeCfg.CGOPoolSizeRatio.GetAsFloat()))
+	chSize := paramtable.Get().QueryNodeCfg.MaxReadConcurrency.GetAsInt() * int(paramtable.Get().QueryNodeCfg.CGOPoolSizeRatio.GetAsFloat())
 	if chSize <= 0 {
 		chSize = 1
 	}

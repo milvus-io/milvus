@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"math"
+	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
@@ -79,24 +80,45 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 	size int64,
 	err error,
 ) {
+	start := time.Now()
 	if inserts, manifest, err = bw.writeInserts(ctx, pack); err != nil {
 		log.Error("failed to write insert data", zap.Error(err))
 		return
 	}
+	writeInsertsDur := time.Since(start)
+
+	stageStart := time.Now()
 	if stats, err = bw.writeStats(ctx, pack); err != nil {
 		log.Error("failed to process stats blob", zap.Error(err))
 		return
 	}
+	writeStatsDur := time.Since(stageStart)
+
+	stageStart = time.Now()
 	if deltas, err = bw.writeDelta(ctx, pack); err != nil {
 		log.Error("failed to process delta blob", zap.Error(err))
 		return
 	}
+	writeDeltaDur := time.Since(stageStart)
+
+	stageStart = time.Now()
 	if bm25Stats, err = bw.writeBM25Stasts(ctx, pack); err != nil {
 		log.Error("failed to process bm25 stats blob", zap.Error(err))
 		return
 	}
+	writeBM25Dur := time.Since(stageStart)
 
 	size = bw.sizeWritten
+
+	log.Info("[BulkPackWriterV2] writeData stages",
+		zap.Int64("segmentID", pack.segmentID),
+		zap.Duration("writeInserts", writeInsertsDur),
+		zap.Duration("writeStats", writeStatsDur),
+		zap.Duration("writeDelta", writeDeltaDur),
+		zap.Duration("writeBM25", writeBM25Dur),
+		zap.Duration("total", time.Since(start)),
+		zap.Int64("size", size),
+	)
 
 	return
 }
@@ -202,14 +224,21 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 
 	var err error
 	doWrite := func(w storage.RecordWriter) error {
+		t0 := time.Now()
 		if err = w.Write(rec); err != nil {
 			if closeErr := w.Close(); closeErr != nil {
 				log.Error("failed to close writer after write failed", zap.Error(closeErr))
 			}
 			return err
 		}
+		writeDur := time.Since(t0)
+		log.Info("[BulkPackWriterV2] write duration", zap.Duration("writeDur", writeDur))
 		// close first the get stats & output
-		return w.Close()
+		t1 := time.Now()
+		err = w.Close()
+		closeDur := time.Since(t1)
+		log.Info("[BulkPackWriterV2] close duration", zap.Duration("closeDur", closeDur))
+		return err
 	}
 
 	var manifestPath string

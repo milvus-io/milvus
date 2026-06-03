@@ -166,6 +166,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return id_;
     }
 
+    int64_t
+    get_partition_id() const override {
+        auto load_info = std::atomic_load(&segment_load_info_);
+        return load_info == nullptr ? -1 : load_info->GetPartitionID();
+    }
+
     bool
     HasRawData(int64_t field_id) const override;
 
@@ -445,6 +451,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     prefetch_chunks(milvus::OpContext* op_ctx,
                     FieldId field_id,
                     const std::vector<int64_t>& chunk_ids) const override;
+
+    void
+    prefetch_chunks(milvus::OpContext* op_ctx, FieldId field_id) const override;
+
+    void
+    prefetch_vector(milvus::OpContext* op_ctx, FieldId field_id) const override;
 
  protected:
     // blob and row_count

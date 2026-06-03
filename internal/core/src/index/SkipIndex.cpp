@@ -12,9 +12,11 @@
 #include "SkipIndex.h"
 
 #include <any>
+#include <chrono>
 
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
+#include "common/RequestTrace.h"
 
 namespace milvus {
 
@@ -41,6 +43,7 @@ std::vector<std::pair<milvus::cachinglayer::cid_t,
 FieldChunkMetricsTranslator::get_cells(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
+    const auto t1 = std::chrono::high_resolution_clock::now();
     std::vector<std::pair<milvus::cachinglayer::cid_t,
                           std::unique_ptr<index::FieldChunkMetrics>>>
         cells;
@@ -49,7 +52,16 @@ FieldChunkMetricsTranslator::get_cells(
         auto pw = column_->GetChunk(nullptr, chunk_id);
         auto chunk_metrics = builder_.Build(data_type_, pw.get());
         cells.emplace_back(chunk_id, std::move(chunk_metrics));
-    }
+   }
+
+    const auto d = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::high_resolution_clock::now() - t1)
+                       .count();
+    LOG_INFO("[sss] field chunk metrics trans get cells, traceID: {}, key: {}, "
+             "duration: {}",
+             milvus::tracer::GetRequestTraceID(ctx),
+             key_,
+             d);
     return cells;
 }
 

@@ -832,7 +832,7 @@ func (s *CompactionPlanHandlerSuite) TestCleanClusteringCompaction() {
 		nil, s.mockMeta, s.mockHandler, nil)
 	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).Return(nil)
 	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return().Once()
-	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything).Return(nil)
 	s.mockMeta.EXPECT().CleanPartitionStatsInfo(mock.Anything, mock.Anything).Return(nil)
 	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 
@@ -904,7 +904,7 @@ func (s *CompactionPlanHandlerSuite) TestCleanClusteringCompactionCommitFail() {
 	s.Equal(1, len(s.handler.cleaningTasks))
 
 	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return().Once()
-	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything).Return(nil)
 	s.mockMeta.EXPECT().CleanPartitionStatsInfo(mock.Anything, mock.Anything).Return(nil)
 	s.handler.cleanFailedTasks()
 	s.Equal(0, len(s.handler.cleaningTasks))
@@ -933,7 +933,7 @@ func (s *CompactionPlanHandlerSuite) TestKeepClean() {
 		task := test.task
 		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).Return(nil)
 		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return()
-		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything).Return(nil)
 		s.mockMeta.EXPECT().CleanPartitionStatsInfo(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 
