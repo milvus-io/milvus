@@ -636,7 +636,8 @@ func TestValidateRestoreSnapshotResources_IndexNotFound(t *testing.T) {
 	err := server.validateRestoreSnapshotResources(ctx, 100, buildBaseSnapshotData())
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "index vec_idx for field 100 does not exist")
+	assert.Contains(t, err.Error(), "index for field 100 does not exist")
+	assert.Contains(t, err.Error(), "vec_idx")
 }
 
 func TestValidateRestoreSnapshotResources_IndexFieldMismatch(t *testing.T) {
@@ -656,7 +657,8 @@ func TestValidateRestoreSnapshotResources_IndexFieldMismatch(t *testing.T) {
 	err := server.validateRestoreSnapshotResources(ctx, 100, buildBaseSnapshotData())
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "index vec_idx for field 100 does not exist")
+	assert.Contains(t, err.Error(), "index for field 100 does not exist")
+	assert.Contains(t, err.Error(), "vec_idx")
 }
 
 func TestValidateRestoreSnapshotResources_Success(t *testing.T) {

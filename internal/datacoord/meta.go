@@ -840,7 +840,7 @@ func (m *meta) SetState(ctx context.Context, segmentID UniqueID, targetState com
 		if targetState == commonpb.SegmentState_Dropped {
 			return nil
 		}
-		return merr.WrapErrServiceInternalMsg("segment is not exist with ID = %d", segmentID)
+		return merr.WrapErrSegmentNotFound(segmentID)
 	}
 	// Persist segment updates first.
 	clonedSegment := curSegInfo.Clone()
@@ -2100,7 +2100,7 @@ func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 	if curSegInfo == nil {
 		// TODO: Error handling.
 		log.Ctx(m.ctx).Error("meta update: add allocation failed - segment not found", zap.Int64("segmentID", segmentID))
-		return merr.WrapErrServiceInternalMsg("meta update: add allocation failed - segment not found")
+		return merr.WrapErrSegmentNotFound(segmentID, "meta update: add allocation failed")
 	}
 	// As we use global segment lastExpire to guarantee data correctness after restart
 	// there is no need to persist allocation to meta store, only update allocation in-memory meta.

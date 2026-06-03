@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 
 	"go.uber.org/zap"
 
@@ -192,8 +193,7 @@ func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectio
 	// Check all snapshot partitions exist
 	for partName := range snapshotData.Collection.GetPartitions() {
 		if !existingPartitions[partName] {
-			return merr.WrapErrServiceInternalMsg("partition %s does not exist in collection %d",
-				partName, collectionID)
+			return merr.WrapErrPartitionNotFound(partName, fmt.Sprintf("partition does not exist in collection %d", collectionID))
 		}
 	}
 	log.Info("partitions validated", zap.Int("count", len(existingPartitions)))
@@ -211,8 +211,7 @@ func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectio
 			}
 		}
 		if !indexFound {
-			return merr.WrapErrServiceInternalMsg("index %s for field %d does not exist in collection %d",
-				indexInfo.GetIndexName(), indexInfo.GetFieldID(), collectionID)
+			return merr.WrapErrIndexNotFound(indexInfo.GetIndexName(), fmt.Sprintf("index for field %d does not exist in collection %d", indexInfo.GetFieldID(), collectionID))
 		}
 	}
 	log.Info("indexes validated", zap.Int("count", len(snapshotData.Indexes)))

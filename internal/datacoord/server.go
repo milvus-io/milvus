@@ -1116,7 +1116,7 @@ func (s *Server) CleanMeta() error {
 	err2 := s.watchClient.RemoveWithPrefix(s.ctx, "")
 	if err2 != nil {
 		if err != nil {
-			err = merr.WrapErrServiceInternalErr(err, "failed to clean meta (watchdata cleanup error: %v)", err2)
+			err = merr.Wrapf(err, "failed to clean meta (watchdata cleanup error: %v)", err2)
 		} else {
 			err = err2
 		}

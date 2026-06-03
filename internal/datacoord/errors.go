@@ -22,6 +22,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // errors for VerifyResponse
@@ -36,7 +37,7 @@ func msgDataCoordIsUnhealthy(coordID UniqueID) string {
 }
 
 func errDataCoordIsUnhealthy(coordID UniqueID) error {
-	return merr.WrapErrServiceInternalMsg(msgDataCoordIsUnhealthy(coordID))
+	return merr.WrapErrServiceNotReady(typeutil.DataCoordRole, coordID, "not ready")
 }
 
 func msgSegmentNotFound(segID UniqueID) string {
