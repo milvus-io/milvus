@@ -86,15 +86,19 @@ StringIndexMarisa::ComputeByteSize() {
     total += trie_.io_size();
 
     // str_ids
-    if (str_ids_mmap_data_ != nullptr) {
+    if (str_ids_mmap_data_ != nullptr && str_ids_mmap_data_ != MAP_FAILED) {
         total += str_ids_mmap_size_;
     } else {
         total += str_ids_.capacity() * sizeof(int64_t);
     }
 
     // CSR index + offsets
-    total += csr_index_.capacity() * sizeof(uint32_t);
-    total += csr_offsets_.capacity() * sizeof(uint32_t);
+    if (csr_mmap_data_ != nullptr && csr_mmap_data_ != MAP_FAILED) {
+        total += csr_mmap_size_;
+    } else {
+        total += csr_index_.capacity() * sizeof(uint32_t);
+        total += csr_offsets_.capacity() * sizeof(uint32_t);
+    }
 
     cached_byte_size_ = total;
 }
@@ -108,12 +112,20 @@ StringIndexMarisa::CalculateTotalSize() const {
     // which approximates the memory usage
     size += trie_.io_size();
 
-    // Size of str_ids_ vector (main data structure)
-    size += str_ids_.size() * sizeof(int64_t);
+    // Size of str_ids (vector owner or mmap region)
+    if (str_ids_mmap_data_ != nullptr && str_ids_mmap_data_ != MAP_FAILED) {
+        size += str_ids_mmap_size_;
+    } else {
+        size += str_ids_.size() * sizeof(int64_t);
+    }
 
     // CSR index + offsets
-    size += csr_index_.size() * sizeof(uint32_t);
-    size += csr_offsets_.size() * sizeof(uint32_t);
+    if (csr_mmap_data_ != nullptr && csr_mmap_data_ != MAP_FAILED) {
+        size += csr_mmap_size_;
+    } else {
+        size += csr_index_.size() * sizeof(uint32_t);
+        size += csr_offsets_.size() * sizeof(uint32_t);
+    }
 
     return size;
 }
@@ -274,8 +286,9 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     }
 
     if (config.contains(MMAP_FILE_PATH)) {
+        auto trie_file_raii = std::make_unique<MmapFileRAII>(file_name);
         trie_.mmap(file_name.c_str());
-        mmap_file_raii_ = std::make_unique<MmapFileRAII>(file_name);
+        mmap_file_raii_ = std::move(trie_file_raii);
     } else {
         auto file = File::Open(file_name, O_RDONLY);
         trie_.read(file.Descriptor());
@@ -854,8 +867,9 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
     }
 
     if (config.contains(MMAP_FILE_PATH)) {
+        auto trie_file_raii = std::make_unique<MmapFileRAII>(file_name);
         trie_.mmap(file_name.c_str());
-        mmap_file_raii_ = std::make_unique<MmapFileRAII>(file_name);
+        mmap_file_raii_ = std::move(trie_file_raii);
     } else {
         auto file = File::Open(file_name, O_RDONLY);
         trie_.read(file.Descriptor());
@@ -880,6 +894,7 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                 [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
             fw.Finish();
         }
+        auto str_ids_file_raii = std::make_unique<MmapFileRAII>(str_ids_path);
         auto str_ids_file = File::Open(str_ids_path, O_RDONLY);
         auto* mapped = mmap(NULL,
                             str_ids_bytes,
@@ -887,13 +902,16 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                             MAP_PRIVATE,
                             str_ids_file.Descriptor(),
                             0);
-        AssertInfo(mapped != MAP_FAILED,
-                   "failed to mmap str_ids: {}",
-                   strerror(errno));
+        if (mapped == MAP_FAILED) {
+            str_ids_file.Close();
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "failed to mmap str_ids: {}",
+                      strerror(errno));
+        }
         str_ids_file.Close();
         str_ids_mmap_data_ = static_cast<char*>(mapped);
         str_ids_mmap_size_ = str_ids_bytes;
-        str_ids_mmap_raii_ = std::make_unique<MmapFileRAII>(str_ids_path);
+        str_ids_mmap_raii_ = std::move(str_ids_file_raii);
         str_ids_ptr_ = reinterpret_cast<const int64_t*>(str_ids_mmap_data_);
         str_ids_size_ = str_ids_bytes / sizeof(int64_t);
     } else {
@@ -943,6 +961,7 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                 fw.Finish();
             }
 
+            auto csr_file_raii = std::make_unique<MmapFileRAII>(csr_path);
             csr_mmap_size_ = idx_bytes + off_bytes;
             auto csr_file = File::Open(csr_path, O_RDONLY);
             auto* mapped = mmap(NULL,
@@ -951,12 +970,15 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                                 MAP_PRIVATE,
                                 csr_file.Descriptor(),
                                 0);
-            AssertInfo(mapped != MAP_FAILED,
-                       "failed to mmap CSR: {}",
-                       strerror(errno));
+            if (mapped == MAP_FAILED) {
+                csr_file.Close();
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "failed to mmap CSR: {}",
+                          strerror(errno));
+            }
             csr_file.Close();
             csr_mmap_data_ = static_cast<char*>(mapped);
-            csr_mmap_raii_ = std::make_unique<MmapFileRAII>(csr_path);
+            csr_mmap_raii_ = std::move(csr_file_raii);
 
             csr_index_ptr_ = reinterpret_cast<const uint32_t*>(csr_mmap_data_);
             csr_offsets_ptr_ =

@@ -73,7 +73,8 @@ class IndexFactory {
         IndexVersion index_version,
         uint64_t index_size_in_bytes,
         const std::map<std::string, std::string>& index_params,
-        bool mmap_enable);
+        bool mmap_enable,
+        int64_t num_rows);
 
     IndexBasePtr
     CreateIndex(const CreateIndexInfo& create_index_info,

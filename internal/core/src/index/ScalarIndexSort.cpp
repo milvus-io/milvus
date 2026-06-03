@@ -809,9 +809,13 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                                                   MAP_PRIVATE,
                                                   meta_file.Descriptor(),
                                                   0));
-        AssertInfo(mmap_meta_data_ != MAP_FAILED,
-                   "failed to mmap meta: {}",
-                   strerror(errno));
+        if (mmap_meta_data_ == MAP_FAILED) {
+            meta_file.Close();
+            remove(mmap_meta_filepath_.c_str());
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "failed to mmap meta: {}",
+                      strerror(errno));
+        }
         meta_file.Close();
 
         idx_to_offsets_ptr_ = reinterpret_cast<const int32_t*>(mmap_meta_data_);

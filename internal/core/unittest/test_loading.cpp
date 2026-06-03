@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <map>
 #include <string>
 #include <utility>
@@ -20,9 +21,11 @@
 #include "common/resource_c.h"
 #include "gtest/gtest.h"
 #include "index/Index.h"
+#include "index/Meta.h"
 #include "knowhere/version.h"
 #include "segcore/Types.h"
 #include "segcore/load_index_c.h"
+#include "storage/EntryStreamUtils.h"
 
 using Param =
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>;
@@ -190,22 +193,30 @@ static const auto kIndexLoadTestValues = ::testing::Values(
         {{"index_type", "STL_SORT"},
          {"mmap", "false"},
          {"field_type", "string"}},
-        {1UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, 0UL, true}),
+        {2UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, 0UL, true}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "STL_SORT"},
          {"mmap", "true"},
          {"field_type", "string"}},
-        {0UL, 1UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, true}),
+        {1UL * 1024 * 1024 * 1024,
+         1UL * 1024 * 1024 * 1024,
+         0UL,
+         1UL * 1024 * 1024 * 1024,
+         true}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "TRIE"}, {"mmap", "false"}, {"field_type", "string"}},
-        {1UL * 1024 * 1024 * 1024,
+        {2UL * 1024 * 1024 * 1024,
          1UL * 1024 * 1024 * 1024,
          1UL * 1024 * 1024 * 1024,
          0UL,
          true}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "TRIE"}, {"mmap", "true"}, {"field_type", "string"}},
-        {0UL, 1UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, true}),
+        {1UL * 1024 * 1024 * 1024,
+         1UL * 1024 * 1024 * 1024,
+         0UL,
+         1UL * 1024 * 1024 * 1024,
+         true}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "INVERTED"},
          {"mmap", "false"},
@@ -311,6 +322,7 @@ TEST_P(IndexLoadTest, ResourceEstimate) {
     loadIndexInfo.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
     loadIndexInfo.index_size = 1024 * 1024 * 1024;  // 1G index size
+    loadIndexInfo.num_rows = 0;
 
     LoadResourceRequest request = EstimateLoadIndexResource(&loadIndexInfo);
     ASSERT_EQ(request.has_raw_data, expected.has_raw_data);
@@ -318,6 +330,49 @@ TEST_P(IndexLoadTest, ResourceEstimate) {
     ASSERT_EQ(request.final_disk_cost, expected.final_disk_cost);
     ASSERT_EQ(request.max_memory_cost, expected.max_memory_cost);
     ASSERT_EQ(request.max_disk_cost, expected.max_disk_cost);
+}
+
+TEST(IndexLoadTest, ScalarSortMmapEstimateIncludesValidBitset) {
+    constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;
+    constexpr int64_t kNumRows = 1025;
+    constexpr uint64_t kValidBitsetBytes = (kNumRows + 7) / 8;
+
+    milvus::segcore::LoadIndexInfo loadIndexInfo;
+    loadIndexInfo.collection_id = 1;
+    loadIndexInfo.partition_id = 2;
+    loadIndexInfo.segment_id = 3;
+    loadIndexInfo.field_id = 4;
+    loadIndexInfo.field_type = milvus::DataType::STRING;
+    loadIndexInfo.element_type = milvus::DataType::NONE;
+    loadIndexInfo.enable_mmap = true;
+    loadIndexInfo.index_id = 5;
+    loadIndexInfo.index_build_id = 6;
+    loadIndexInfo.index_version = 1;
+    loadIndexInfo.index_params = {
+        {"index_type", "STL_SORT"},
+        {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"},
+    };
+    loadIndexInfo.index_files = {"/tmp/index/1"};
+    loadIndexInfo.index = nullptr;
+    loadIndexInfo.cache_index = nullptr;
+    loadIndexInfo.uri = "";
+    loadIndexInfo.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    loadIndexInfo.index_size = kIndexSize;
+    loadIndexInfo.num_rows = kNumRows;
+
+    auto request = EstimateLoadIndexResource(&loadIndexInfo);
+    auto stream_memory_overhead = std::min<uint64_t>(
+        kIndexSize,
+        milvus::storage::TransientMemoryBudget::GetEntryStreamBudget()
+            .CapacityBytes());
+
+    ASSERT_EQ(request.final_memory_cost, kValidBitsetBytes);
+    ASSERT_EQ(request.final_disk_cost, kIndexSize);
+    ASSERT_EQ(request.max_memory_cost,
+              kValidBitsetBytes + stream_memory_overhead);
+    ASSERT_EQ(request.max_disk_cost, kIndexSize);
+    ASSERT_TRUE(request.has_raw_data);
 }
 
 // Test that warmup policy is kept in index_params and passed to Knowhere

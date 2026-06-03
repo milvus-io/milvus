@@ -80,6 +80,14 @@ ScalarIndexStreamMemoryOverhead(uint64_t index_size_in_bytes,
     return std::min<uint64_t>(index_size_in_bytes, budget_bytes);
 }
 
+uint64_t
+BitsetBytes(int64_t num_rows) {
+    if (num_rows <= 0) {
+        return 0;
+    }
+    return (static_cast<uint64_t>(num_rows) + 7) / 8;
+}
+
 }  // namespace
 
 template <typename T>
@@ -172,7 +180,8 @@ IndexFactory::IndexLoadResource(
                                        index_version,
                                        index_size_in_bytes,
                                        index_params,
-                                       mmap_enable);
+                                       mmap_enable,
+                                       num_rows);
     }
 }
 
@@ -386,7 +395,8 @@ IndexFactory::ScalarIndexLoadResource(
     IndexVersion index_version,
     uint64_t index_size_in_bytes,
     const std::map<std::string, std::string>& index_params,
-    bool mmap_enable) {
+    bool mmap_enable,
+    int64_t num_rows) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
     auto index_type_it = index_params.find("index_type");
@@ -406,10 +416,12 @@ IndexFactory::ScalarIndexLoadResource(
 
     if (index_type == milvus::index::ASCENDING_SORT) {
         if (mmap_enable) {
-            // V3 streaming: chunks streamed to disk + mmap, no resident memory
-            request.final_memory_cost = 0;
+            // V3 streaming: chunks streamed to disk + mmap. The index data is
+            // not heap-resident, but valid_bitset stays in memory.
+            auto resident_bytes = BitsetBytes(num_rows);
+            request.final_memory_cost = resident_bytes;
             request.final_disk_cost = index_size_in_bytes;
-            request.max_memory_cost = stream_memory_overhead;
+            request.max_memory_cost = resident_bytes + stream_memory_overhead;
             request.max_disk_cost = index_size_in_bytes;
         } else {
             // V3 streaming: pre-allocate target, stream into it
