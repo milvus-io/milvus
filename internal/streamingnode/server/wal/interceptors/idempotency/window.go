@@ -1,0 +1,292 @@
+package idempotency
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+)
+
+type IdempotencyKey string
+
+type BeginDecision int
+
+const (
+	BeginDecisionOwner BeginDecision = iota
+	BeginDecisionWait
+	BeginDecisionDuplicate
+)
+
+type WindowConfig struct {
+	Enabled      bool
+	WindowTTL    time.Duration
+	MinEntries   int
+	MaxEntries   int
+	MaxKeyLength int
+	Now          func() time.Time
+}
+
+type Window struct {
+	mu sync.Mutex
+
+	entries  map[IdempotencyKey]*streamingpb.WindowEntry
+	inflight map[IdempotencyKey]*PendingEntry
+
+	commitOrder          []IdempotencyKey
+	evictedWatermarkTT   uint64
+	snapshotCheckpointTT uint64
+
+	minEntries int
+	maxEntries int
+	windowTTL  time.Duration
+	now        func() time.Time
+}
+
+type PendingEntry struct {
+	Key       IdempotencyKey
+	State     EntryState
+	StartedAt time.Time
+	// done is closed exactly once by the owner (Complete/Fail). It carries no
+	// value: the result is published into result before done is closed, so any
+	// number of waiters can read it after observing the close. A buffered
+	// single-value channel would only deliver to the first reader and hand the
+	// rest the zero value, breaking concurrent duplicate requests.
+	done   chan struct{}
+	result PendingResult
+}
+
+type EntryState int
+
+const (
+	EntryStateAdding EntryState = iota
+)
+
+type BeginResult struct {
+	Decision BeginDecision
+	Pending  *PendingEntry
+	Entry    *streamingpb.WindowEntry
+	Err      error
+}
+
+type CommitResult struct {
+	CommitTimeTick         uint64
+	MessageID              *commonpb.MessageID
+	LastConfirmedMessageID *commonpb.MessageID
+	IdempotentResult       *messagespb.IdempotentInsertResult
+}
+
+type PendingResult struct {
+	Entry *streamingpb.WindowEntry
+	Err   error
+}
+
+func NewWindow(config WindowConfig) *Window {
+	now := config.Now
+	if now == nil {
+		now = time.Now
+	}
+	return &Window{
+		entries:    make(map[IdempotencyKey]*streamingpb.WindowEntry),
+		inflight:   make(map[IdempotencyKey]*PendingEntry),
+		minEntries: config.MinEntries,
+		maxEntries: config.MaxEntries,
+		windowTTL:  config.WindowTTL,
+		now:        now,
+	}
+}
+
+func NewWindowFromSnapshot(config WindowConfig, snapshot *streamingpb.WindowSnapshot) *Window {
+	window := NewWindow(config)
+	if snapshot == nil {
+		return window
+	}
+	window.snapshotCheckpointTT = snapshot.GetSnapshotCheckpointTimetick()
+	window.evictedWatermarkTT = snapshot.GetEvictedWatermarkTimetick()
+	for _, snapshotEntry := range snapshot.GetEntries() {
+		if snapshotEntry == nil {
+			continue
+		}
+		key := IdempotencyKey(snapshotEntry.GetKey())
+		window.entries[key] = snapshotEntry
+		window.commitOrder = append(window.commitOrder, key)
+	}
+	window.refreshEvictedWatermarkLocked()
+	return window
+}
+
+func (w *Window) Begin(key IdempotencyKey, msg message.MutableMessage) BeginResult {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if entry, ok := w.entries[key]; ok {
+		observeWindowDuplicate(msg)
+		return BeginResult{Decision: BeginDecisionDuplicate, Entry: entry}
+	}
+
+	if pending, ok := w.inflight[key]; ok {
+		return BeginResult{Decision: BeginDecisionWait, Pending: pending}
+	}
+
+	pending := &PendingEntry{
+		Key:       key,
+		State:     EntryStateAdding,
+		StartedAt: w.now(),
+		done:      make(chan struct{}),
+	}
+	w.inflight[key] = pending
+	observeWindowInflight(msg, len(w.inflight))
+	return BeginResult{Decision: BeginDecisionOwner, Pending: pending}
+}
+
+func (w *Window) Complete(pending *PendingEntry, result CommitResult, msg message.MutableMessage) (bool, int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	current, ok := w.inflight[pending.Key]
+	if !ok || current != pending {
+		return false, 0
+	}
+
+	entry := &streamingpb.WindowEntry{
+		Key:                    string(pending.Key),
+		CommitTimetick:         result.CommitTimeTick,
+		MessageId:              result.MessageID,
+		LastConfirmedMessageId: result.LastConfirmedMessageID,
+		IdempotentResult:       result.IdempotentResult,
+	}
+	delete(w.inflight, pending.Key)
+	w.entries[pending.Key] = entry
+	w.commitOrder = append(w.commitOrder, pending.Key)
+	evicted := 0
+	if w.windowTTL > 0 {
+		evicted = w.evictLocked(tsoutil.ComposeTSByTimeWithLogical(w.now().Add(-w.windowTTL), 0))
+	} else if w.maxEntries > 0 {
+		evicted = w.evictLocked(0)
+	}
+	w.refreshEvictedWatermarkLocked()
+	observeWindowEviction(msg, evicted)
+	observeWindowEntries(msg, len(w.entries))
+	observeWindowInflight(msg, len(w.inflight))
+
+	pending.result = PendingResult{Entry: entry}
+	close(pending.done)
+	return true, evicted
+}
+
+func (w *Window) Fail(pending *PendingEntry, err error, msg message.MutableMessage) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	current, ok := w.inflight[pending.Key]
+	if !ok || current != pending {
+		return false
+	}
+	delete(w.inflight, pending.Key)
+	observeWindowInflight(msg, len(w.inflight))
+	pending.result = PendingResult{Err: err}
+	close(pending.done)
+	return true
+}
+
+func (p *PendingEntry) Wait(ctx context.Context, msg message.MutableMessage) PendingResult {
+	select {
+	case <-p.done:
+		// The close of p.done happens-after the owner published p.result, so
+		// every waiter observes the same committed result here.
+		if p.result.Err == nil {
+			observeWindowDuplicate(msg)
+		}
+		return p.result
+	case <-ctx.Done():
+		return PendingResult{Err: ctx.Err()}
+	}
+}
+
+func (w *Window) Evict(evictBeforeTT uint64, msg message.MutableMessage) int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	evicted := w.evictLocked(evictBeforeTT)
+	w.refreshEvictedWatermarkLocked()
+	observeWindowEviction(msg, evicted)
+	observeWindowEntries(msg, len(w.entries))
+	return evicted
+}
+
+func (w *Window) evictLocked(evictBeforeTT uint64) int {
+	evicted := 0
+	for len(w.entries) > w.minEntries && len(w.commitOrder) > 0 {
+		key := w.commitOrder[0]
+		w.commitOrder = w.commitOrder[1:]
+		entry, ok := w.entries[key]
+		if !ok {
+			continue
+		}
+		if entry.GetCommitTimetick() >= evictBeforeTT {
+			w.commitOrder = append([]IdempotencyKey{key}, w.commitOrder...)
+			break
+		}
+		delete(w.entries, key)
+		evicted++
+	}
+
+	for w.maxEntries > 0 && len(w.entries) > w.maxEntries && len(w.commitOrder) > 0 {
+		key := w.commitOrder[0]
+		w.commitOrder = w.commitOrder[1:]
+		if _, ok := w.entries[key]; ok {
+			delete(w.entries, key)
+			evicted++
+		}
+	}
+	return evicted
+}
+
+func (w *Window) Len() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return len(w.entries)
+}
+
+func (w *Window) InflightLen() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return len(w.inflight)
+}
+
+func (w *Window) EvictedWatermarkTT() uint64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.evictedWatermarkTT
+}
+
+func (w *Window) SnapshotCheckpointTT() uint64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.snapshotCheckpointTT
+}
+
+func (w *Window) SetSnapshotCheckpointTT(tt uint64) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.snapshotCheckpointTT = tt
+	w.refreshEvictedWatermarkLocked()
+}
+
+func (w *Window) refreshEvictedWatermarkLocked() {
+	for len(w.commitOrder) > 0 {
+		key := w.commitOrder[0]
+		entry, ok := w.entries[key]
+		if !ok {
+			w.commitOrder = w.commitOrder[1:]
+			continue
+		}
+		// The watermark is inclusive: it points to the oldest retained entry, not a strict evicted lower bound.
+		w.evictedWatermarkTT = entry.GetCommitTimetick()
+		return
+	}
+	w.evictedWatermarkTT = w.snapshotCheckpointTT
+}

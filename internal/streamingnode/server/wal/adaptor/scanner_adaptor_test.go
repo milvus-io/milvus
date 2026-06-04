@@ -2,14 +2,18 @@ package adaptor
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/mock_wab"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/timetick/mock_inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -17,8 +21,10 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/mock_walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -114,4 +120,77 @@ func TestPauseConsumption(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("wait until start consumption timeout")
 	}
+}
+
+func TestScannerAdaptorObservesPhysicalDedupDropFromPushResult(t *testing.T) {
+	paramtable.Init()
+	pchannel := types.PChannelInfo{Name: "scanner-dedup-pchannel"}
+	scanMetrics := metricsutil.NewScanMetrics(pchannel)
+	defer scanMetrics.Close()
+	scannerMetrics := scanMetrics.NewScannerMetrics()
+
+	scanner := &scannerAdaptorImpl{
+		logger:          mlog.With(),
+		reorderBuffer:   utility.NewReOrderBuffer(),
+		pendingQueue:    utility.NewPendingQueue(),
+		txnBuffer:       utility.NewTxnBuffer(mlog.With(), scannerMetrics),
+		readRateCounter: utility.NewAverageRateCounter(time.Second),
+		metrics:         scannerMetrics,
+	}
+
+	counter := metrics.WALIdempotencyReaderDedupDropTotal.WithLabelValues(
+		paramtable.GetStringNodeID(),
+		pchannel.Name,
+		metrics.WALScannerModelCatchup,
+	)
+	before := testutil.ToFloat64(counter)
+
+	scanner.handleUpstream(newScannerAdaptorTestMessage(t, 1, 10, "v1", message.MessageTypeInsert))
+	scanner.handleUpstream(newScannerAdaptorTestMessage(t, 2, 10, "v1", message.MessageTypeInsert))
+
+	require.Equal(t, before+1, testutil.ToFloat64(counter))
+}
+
+func newScannerAdaptorTestMessage(t *testing.T, id int64, timetick uint64, vchannel string, msgType message.MessageType) *mock_message.MockImmutableMessage {
+	msg := mock_message.NewMockImmutableMessage(t)
+	msg.EXPECT().EstimateSize().Return(1).Maybe()
+	msg.EXPECT().MessageID().Return(scannerAdaptorTestMessageID(id)).Maybe()
+	msg.EXPECT().TimeTick().Return(timetick).Maybe()
+	msg.EXPECT().MessageType().Return(msgType).Maybe()
+	msg.EXPECT().VChannel().Return(vchannel).Maybe()
+	msg.EXPECT().IsPersisted().Return(false).Maybe()
+	return msg
+}
+
+type scannerAdaptorTestMessageID int64
+
+func (id scannerAdaptorTestMessageID) WALName() message.WALName {
+	return message.WALNameTest
+}
+
+func (id scannerAdaptorTestMessageID) LT(other message.MessageID) bool {
+	return id < other.(scannerAdaptorTestMessageID)
+}
+
+func (id scannerAdaptorTestMessageID) LTE(other message.MessageID) bool {
+	return id <= other.(scannerAdaptorTestMessageID)
+}
+
+func (id scannerAdaptorTestMessageID) EQ(other message.MessageID) bool {
+	return id == other.(scannerAdaptorTestMessageID)
+}
+
+func (id scannerAdaptorTestMessageID) Marshal() string {
+	return strconv.FormatInt(int64(id), 10)
+}
+
+func (id scannerAdaptorTestMessageID) IntoProto() *commonpb.MessageID {
+	return &commonpb.MessageID{
+		Id:      id.Marshal(),
+		WALName: commonpb.WALName(id.WALName()),
+	}
+}
+
+func (id scannerAdaptorTestMessageID) String() string {
+	return id.Marshal()
 }
