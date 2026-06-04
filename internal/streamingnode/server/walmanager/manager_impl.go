@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate"
@@ -25,16 +26,19 @@ var errWALManagerClosed = status.NewOnShutdownError("wal manager is closed")
 func OpenManager() (Manager, error) {
 	resource.Resource().Logger().Info(context.TODO(), "open wal manager with dynamic opener")
 	// Create dynamic opener directly with interceptors
-	opener := adaptor.NewOpenerAdaptor(
-		[]interceptors.InterceptorBuilder{
-			redo.NewInterceptorBuilder(),
-			lock.NewInterceptorBuilder(),
-			replicate.NewInterceptorBuilder(),
-			timetick.NewInterceptorBuilder(),
-			shard.NewInterceptorBuilder(),
-		},
-	)
+	opener := adaptor.NewOpenerAdaptor(defaultInterceptorBuilders())
 	return newManager(opener), nil
+}
+
+func defaultInterceptorBuilders() []interceptors.InterceptorBuilder {
+	return []interceptors.InterceptorBuilder{
+		idempotency.NewInterceptorBuilder(),
+		redo.NewInterceptorBuilder(),
+		lock.NewInterceptorBuilder(),
+		replicate.NewInterceptorBuilder(),
+		timetick.NewInterceptorBuilder(),
+		shard.NewInterceptorBuilder(),
+	}
 }
 
 // newManager create a wal manager.
