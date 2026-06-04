@@ -525,7 +525,7 @@ func (mt *MetaTable) getDatabaseByIDInternal(ctx context.Context, dbID int64, ts
 			return db, nil
 		}
 	}
-	return nil, merr.WrapErrServiceInternalMsg("database dbID:%d not found", dbID)
+	return nil, merr.WrapErrDatabaseNotFound(dbID)
 }
 
 func (mt *MetaTable) GetDatabaseByName(ctx context.Context, dbName string, ts Timestamp) (*model.Database, error) {

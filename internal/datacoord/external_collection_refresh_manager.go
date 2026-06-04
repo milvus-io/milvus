@@ -829,7 +829,7 @@ func normalizeRefreshJobProgress(job *datapb.ExternalCollectionRefreshJob, state
 func (m *externalCollectionRefreshManager) GetJobProgress(ctx context.Context, jobID int64) (*datapb.ExternalCollectionRefreshJob, error) {
 	job := m.refreshMeta.GetJob(jobID)
 	if job == nil {
-		return nil, merr.WrapErrServiceInternalMsg("job %d not found", jobID)
+		return nil, merr.WrapErrParameterInvalidMsg("refresh job %d not found", jobID)
 	}
 
 	// Aggregate state and progress from tasks
