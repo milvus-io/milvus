@@ -62,6 +62,7 @@ var (
 	PropertyWriterPolicy             = C.GoString(C.loon_properties_writer_policy)
 	PropertyWriterFormat             = "writer.format"
 	PropertyWriterSchemaBasedPattern = C.GoString(C.loon_properties_writer_schema_base_patterns)
+	PropertyWriterSchemaBasedFormats = C.GoString(C.loon_properties_writer_schema_base_formats)
 
 	// CMEK (Customer Managed Encryption Keys) writer properties
 	PropertyWriterEncEnable = C.GoString(C.loon_properties_writer_enc_enable)    // Enable encryption for written data

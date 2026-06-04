@@ -19,6 +19,7 @@ package segments
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -29,6 +30,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	milvuscommon "github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -343,7 +346,10 @@ func (m *GrowingFlushManager) doSync(ctx context.Context, segment Segment, isSea
 
 	// 3. flush data directly via C++ milvus-storage (unified interface)
 	// Use the last acknowledged manifest version as read_version.
-	flushConfig := m.buildFlushConfig(segment)
+	flushConfig, err := m.buildFlushConfig(segment)
+	if err != nil {
+		return err
+	}
 	flushConfig.ReadVersion = m.checkpointTracker.GetAcknowledgedVersion(segID)
 	flushResult, err := segment.FlushData(ctx, flushedOffset, currentOffset, flushConfig)
 	if err != nil {
@@ -390,7 +396,7 @@ func (m *GrowingFlushManager) doSync(ctx context.Context, segment Segment, isSea
 
 // buildFlushConfig builds FlushConfig for C++ FFI call.
 // Go layer only constructs paths and config, all logic is in C++ side.
-func (m *GrowingFlushManager) buildFlushConfig(segment Segment) *FlushConfig {
+func (m *GrowingFlushManager) buildFlushConfig(segment Segment) (*FlushConfig, error) {
 	// Build paths for C++ side
 	// Segment path: {root}/insert_log/{coll}/{part}/{seg}
 	segmentBasePath := m.chunkManager.RootPath() + "/insert_log/" +
@@ -415,6 +421,12 @@ func (m *GrowingFlushManager) buildFlushConfig(segment Segment) *FlushConfig {
 		}
 	}
 
+	globalWriterFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
+	writerFormat, err := m.resolveFlushWriterFormat(segment, globalWriterFormat)
+	if err != nil {
+		return nil, err
+	}
+
 	return &FlushConfig{
 		SegmentBasePath:   segmentBasePath,
 		PartitionBasePath: partitionBasePath,
@@ -422,7 +434,45 @@ func (m *GrowingFlushManager) buildFlushConfig(segment Segment) *FlushConfig {
 		PartitionID:       segment.Partition(),
 		TextFieldIDs:      textFieldIDs,
 		TextLobPaths:      textLobPaths,
+		WriterFormat:      writerFormat,
+	}, nil
+}
+
+func (m *GrowingFlushManager) resolveFlushWriterFormat(segment Segment, globalWriterFormat string) (string, error) {
+	if m.checkpointTracker == nil {
+		return globalWriterFormat, nil
 	}
+	manifest := m.checkpointTracker.GetAcknowledgedManifest(segment.ID())
+	if manifest == "" {
+		return globalWriterFormat, nil
+	}
+	format, err := packed.ResolveManifestSingleWriterFormat(manifest, packed.CreateStorageConfig(), m.flushWriterColumns(), globalWriterFormat)
+	if err != nil {
+		return "", err
+	}
+	return format, nil
+}
+
+func (m *GrowingFlushManager) flushWriterColumns() []string {
+	seen := make(map[string]struct{})
+	columns := []string{
+		strconv.FormatInt(milvuscommon.RowIDField, 10),
+		strconv.FormatInt(milvuscommon.TimeStampField, 10),
+	}
+	seen[columns[0]] = struct{}{}
+	seen[columns[1]] = struct{}{}
+	if m.schema == nil {
+		return columns
+	}
+	for _, field := range m.schema.GetFields() {
+		column := strconv.FormatInt(field.GetFieldID(), 10)
+		if _, ok := seen[column]; ok {
+			continue
+		}
+		seen[column] = struct{}{}
+		columns = append(columns, column)
+	}
+	return columns
 }
 
 // saveManifestAndCheckpoint saves manifest path and checkpoint to DataCoord.

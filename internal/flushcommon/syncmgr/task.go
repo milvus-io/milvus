@@ -232,6 +232,7 @@ func (t *SyncTask) getColumnGroups(segmentInfo *metacache.SegmentInfo) []storage
 			// legacy split found, use legacy policy
 			if len(cg.Fields) == 0 {
 				result := storagecommon.SplitColumns(allFields, map[int64]storagecommon.ColumnStats{}, storagecommon.NewSelectedDataTypePolicy(), storagecommon.NewRemanentShortPolicy(-1))
+				result = storagecommon.FillColumnGroupFormats(result, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 				log.Info("use legacy split policy", zap.Int64("segmentID", t.segmentID), zap.Stringers("columnGroups", result))
 				return result
 			}
@@ -246,11 +247,15 @@ func (t *SyncTask) getColumnGroups(segmentInfo *metacache.SegmentInfo) []storage
 			})
 			currentSplit[idx] = cg
 		}
-		return currentSplit
+		if segmentInfo.GetStorageVersion() == storage.StorageV3 && segmentInfo.ManifestPath() != "" {
+			return currentSplit
+		}
+		return storagecommon.FillColumnGroupFormats(currentSplit, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 	}
 
 	policies := storagecommon.DefaultPolicies()
 	result := storagecommon.SplitColumns(allFields, t.calcColumnStats(), policies...)
+	result = storagecommon.FillColumnGroupFormats(result, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 	log.Info("sync new split columns", zap.Int64("segmentID", t.segmentID), zap.Stringers("columnGroups", result))
 	return result
 }
