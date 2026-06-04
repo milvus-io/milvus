@@ -38,6 +38,9 @@ type insertTask struct {
 	schemaTimestamp uint64
 	collectionID    int64
 	schemaVersion   int32
+
+	idempotencyEnabled bool
+	idempotencyKey     string
 }
 
 // TraceCtx returns insertTask context
@@ -161,6 +164,17 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(it.schema)
+	if err != nil {
+		log.Ctx(ctx).Warn("get primary field schema failed", zap.Any("schema", it.schema), zap.Error(err))
+		return err
+	}
+	excludeAutoIDPrimary := primaryFieldSchema.GetAutoID() &&
+		!typeutil.IsPrimaryFieldDataExist(it.insertMsg.GetFieldsData(), primaryFieldSchema)
+	if err := it.prepareAutoIdempotencyKeyIfEnabled(ctx, colInfo.properties, excludeAutoIDPrimary); err != nil {
+		return err
+	}
+
 	if err := genFunctionFields(ctx, it.insertMsg, schema, false); err != nil {
 		return err
 	}
@@ -252,6 +266,9 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	err = normalizeFP32ToFP16BF16VectorFieldData(it.insertMsg.GetFieldsData(), schema)
 	if err != nil {
 		log.Info("normalize fp32 to fp16/bf16 vector field data failed", zap.Error(err))
+		return err
+	}
+	if err := it.reassignAutoIDForIdempotencyIfNeeded(ctx, excludeAutoIDPrimary, primaryFieldSchema); err != nil {
 		return err
 	}
 

@@ -21,6 +21,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -112,6 +113,11 @@ func (c *Client) Upsert(ctx context.Context, option UpsertOption, callOptions ..
 		}
 		req, err := option.UpsertRequest(collection)
 		if err != nil {
+			// Only the idempotency-key-on-Upsert rejection short-circuits; other
+			// parameter errors fall through to the schema-mismatch retry as before.
+			if errors.Is(err, errIdempotencyKeyUnsupportedForDML) {
+				return collection.UpdateTimestamp, err
+			}
 			// return schema mismatch err to retry with newer schema
 			return collection.UpdateTimestamp, merr.WrapErrCollectionSchemaMisMatch(err)
 		}

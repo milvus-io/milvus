@@ -394,6 +394,17 @@ func (s *WriteSuite) TestUpsert() {
 		}
 	})
 
+	s.Run("idempotency_key_not_supported", func() {
+		collName := fmt.Sprintf("coll_%s", s.randString(6))
+		s.setupCache(collName, s.schema)
+
+		_, err := s.client.Upsert(ctx, NewColumnBasedInsertOption(collName).
+			WithInt64Column("id", []int64{1}).
+			WithIdempotencyKey("key-1"))
+		s.ErrorIs(err, merr.ErrParameterInvalid)
+		s.ErrorContains(err, "only supported for Insert")
+	})
+
 	s.Run("failure", func() {
 		collName := fmt.Sprintf("coll_%s", s.randString(6))
 		s.setupCache(collName, s.schema)

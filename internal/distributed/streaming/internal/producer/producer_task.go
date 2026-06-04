@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 
@@ -115,6 +116,7 @@ func waitForReservationOK(ctx context.Context, tasks ...*ProduceGuard) error {
 type ProduceGuard struct {
 	producer *ResumableProducer
 	msgs     []message.MutableMessage
+	opts     []ProduceOption
 	r        *rate.Reservation
 }
 
@@ -125,7 +127,11 @@ func (g *ProduceGuard) commit(ctx context.Context) (*types.AppendResult, error) 
 	}
 	// auto commit if there's only one message.
 	if len(g.msgs) == 1 {
-		return g.producer.produceInternal(ctx, g.msgs[0])
+		msg, err := applyProduceOptionsToMessage(g.msgs[0], g.opts...)
+		if err != nil {
+			return nil, err
+		}
+		return g.producer.produceInternal(ctx, msg)
 	}
 	// produce with transaction.
 	return g.produceTxn(ctx, g.msgs...)
@@ -215,8 +221,41 @@ func (g *ProduceGuard) commitTxn(ctx context.Context, vchannel string, txn *mess
 		WithHeader(&message.CommitTxnMessageHeader{}).
 		WithBody(&message.CommitTxnMessageBody{}).
 		MustBuildMutable()
+	commitTxnOverwrite, err := applyProduceOptionsToMessage(commitTxn, g.opts...)
+	if err != nil {
+		return nil, err
+	}
+	return g.producer.produceInternal(ctx, commitTxnOverwrite.WithTxnContext(*txn))
+}
 
-	return g.producer.produceInternal(ctx, commitTxn.WithTxnContext(*txn))
+func applyProduceOptionsToMessage(msg message.MutableMessage, opts ...ProduceOption) (message.MutableMessage, error) {
+	idempotencyKey := idempotencyKeyFromProduceOptions(opts...)
+	if idempotencyKey == "" {
+		return msg, nil
+	}
+	// The idempotency key for a single insert is stamped on the insert header by
+	// the proxy (single-sourced alongside the insert result). Only the commit-txn
+	// message — synthesized here in the producer, so the proxy cannot reach it —
+	// needs the key applied at this layer.
+	if msg.MessageType() == message.MessageTypeCommitTxn {
+		commitMsg, err := message.AsMutableCommitTxnMessageV2(msg)
+		if err != nil {
+			return nil, errors.Wrap(err, "set idempotency key for commit txn message")
+		}
+		header := commitMsg.Header()
+		header.IdempotencyKey = idempotencyKey
+		commitMsg.OverwriteHeader(header)
+	}
+	return msg, nil
+}
+
+func idempotencyKeyFromProduceOptions(opts ...ProduceOption) string {
+	for i := len(opts) - 1; i >= 0; i-- {
+		if opts[i].IdempotencyKey != "" {
+			return opts[i].IdempotencyKey
+		}
+	}
+	return ""
 }
 
 // Cancel cancel the produce task.
