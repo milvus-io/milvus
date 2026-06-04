@@ -2,6 +2,7 @@ package walmanager
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -22,6 +23,23 @@ import (
 func TestMain(m *testing.M) {
 	paramtable.Init()
 	m.Run()
+}
+
+func TestDefaultInterceptorBuilderOrder(t *testing.T) {
+	builders := defaultInterceptorBuilders()
+	names := make([]string, 0, len(builders))
+	for _, builder := range builders {
+		names = append(names, reflect.TypeOf(builder).String())
+	}
+
+	assert.Equal(t, []string{
+		"*idempotency.interceptorBuilder",
+		"*redo.interceptorBuilder",
+		"*lock.interceptorBuilder",
+		"*replicate.interceptorBuilder",
+		"*timetick.interceptorBuilder",
+		"*shard.interceptorBuilder",
+	}, names)
 }
 
 func TestManager(t *testing.T) {
