@@ -107,10 +107,11 @@ func TestRepackInsert_SetsRoutingVersion(t *testing.T) {
 func TestRepackInsertWithPartitionKey_SetsRoutingVersion(t *testing.T) {
 	oldCache := globalMetaCache
 	cache := NewMockCache(t)
-	// partition key mode needs default partitions; use two partitions so hashing works.
+	// partition key mode resolves default partitions via GetPartitions, then
+	// looks up each partition id. Use two default partitions so hashing works.
+	cache.On("GetPartitions", mock.Anything, "db", "coll").Return(map[string]int64{"_default_0": 201, "_default_1": 202}, nil)
 	cache.On("GetPartitionID", mock.Anything, "db", "coll", "_default_0").Return(int64(201), nil)
 	cache.On("GetPartitionID", mock.Anything, "db", "coll", "_default_1").Return(int64(202), nil)
-	cache.On("GetDefaultPartitions", mock.Anything, "db", "coll").Return([]string{"_default_0", "_default_1"}, nil)
 	globalMetaCache = cache
 	defer func() { globalMetaCache = oldCache }()
 
