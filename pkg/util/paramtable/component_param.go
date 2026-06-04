@@ -5356,7 +5356,7 @@ This configuration takes effect only when dataCoord.enableCompaction is set as t
 
 	p.EnableCompactionReasonRecord = ParamItem{
 		Key:          "dataCoord.compaction.reasonRecord.enabled",
-		Version:      "2.6.10",
+		Version:      "3.0.0",
 		DefaultValue: "false",
 		Doc:          "Switch value to control if compaction reason records are written and reconciled.",
 		Export:       true,

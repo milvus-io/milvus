@@ -938,6 +938,7 @@ func TestDataCoordCompactionReasonRecordConfig(t *testing.T) {
 
 	cfg := &params.DataCoordCfg
 	assert.Equal(t, "dataCoord.compaction.reasonRecord.enabled", cfg.EnableCompactionReasonRecord.Key)
+	assert.Equal(t, "3.0.0", cfg.EnableCompactionReasonRecord.Version)
 	assert.Equal(t, "false", cfg.EnableCompactionReasonRecord.DefaultValue)
 	assert.False(t, cfg.EnableCompactionReasonRecord.GetAsBool())
 
