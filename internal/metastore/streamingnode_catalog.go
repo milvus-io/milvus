@@ -15,6 +15,21 @@ type StreamingNodeCataLog interface {
 	// ListVChannel list all vchannels on current pchannel.
 	ListVChannel(ctx context.Context, pchannelName string) ([]*streamingpb.VChannelMeta, error)
 
+	// ListVChannelWindowMetas lists all vchannel window metadata for a view type on current pchannel.
+	ListVChannelWindowMetas(ctx context.Context, pchannelName string, viewType string) ([]*streamingpb.VChannelWindowMeta, error)
+
+	// SaveVChannelWindowMetas saves vchannel window metadata for a view type on current pchannel.
+	SaveVChannelWindowMetas(ctx context.Context, pchannelName string, viewType string, windows map[string]*streamingpb.VChannelWindowMeta) error
+
+	// RemoveVChannelWindowMetas removes vchannel window metadata for a view type on current pchannel.
+	RemoveVChannelWindowMetas(ctx context.Context, pchannelName string, viewType string, vchannels []string) error
+
+	// GetPChannelWindowMeta gets pchannel-level physical window metadata.
+	GetPChannelWindowMeta(ctx context.Context, pchannelName string) (*streamingpb.PChannelWindowMeta, error)
+
+	// SavePChannelWindowMeta saves pchannel-level physical window metadata.
+	SavePChannelWindowMeta(ctx context.Context, pchannelName string, meta *streamingpb.PChannelWindowMeta) error
+
 	// ListSegmentAssignment list all segment assignments for the wal.
 	ListSegmentAssignment(ctx context.Context, pChannelName string) ([]*streamingpb.SegmentAssignmentMeta, error)
 

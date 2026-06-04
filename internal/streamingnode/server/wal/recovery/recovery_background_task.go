@@ -19,13 +19,11 @@ import (
 
 // isDirty checks if the recovery storage mem state is not consistent with the persisted recovery storage.
 func (rs *recoveryStorageImpl) isDirty() bool {
-	if rs.pendingPersistSnapshot != nil {
-		return true
-	}
-
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	return rs.dirtyCounter > 0 || rs.pendingSalvageCheckpoint != nil
+	// pendingRecoveryPersistSnapshot is written under rs.mu, so read it here too;
+	// the rest of the dirty predicate lives in one place (hasDirtyRecoveryStateUnsafe).
+	return rs.pendingRecoveryPersistSnapshot != nil || rs.hasDirtyRecoveryStateUnsafe()
 }
 
 // TODO: !!! all recovery persist operation should be a compare-and-swap operation to
@@ -39,8 +37,8 @@ func (rs *recoveryStorageImpl) backgroundTask() {
 	defer func() {
 		ticker.Stop()
 		rs.Logger().Info(context.TODO(), "recovery storage background task, perform a graceful exit...")
-		if err := rs.persistDritySnapshotWhenClosing(); err != nil {
-			rs.Logger().Warn(context.TODO(), "failed to persist dirty snapshot when closing", mlog.Err(err))
+		if err := rs.persistRecoverySnapshotWhenClosing(); err != nil {
+			rs.Logger().Warn(context.TODO(), "failed to persist recovery snapshot when closing", mlog.Err(err))
 		}
 		rs.backgroundTaskNotifier.Finish(struct{}{})
 		rs.Logger().Info(context.TODO(), "recovery storage background task exit")
@@ -53,19 +51,19 @@ func (rs *recoveryStorageImpl) backgroundTask() {
 		case <-rs.persistNotifier:
 		case <-ticker.C:
 		}
-		if err := rs.persistDirtySnapshot(rs.backgroundTaskNotifier.Context(), mlog.DebugLevel); err != nil {
+		if err := rs.persistRecoverySnapshot(rs.backgroundTaskNotifier.Context(), mlog.DebugLevel); err != nil {
 			return
 		}
 	}
 }
 
-// persistDritySnapshotWhenClosing persists the dirty snapshot when closing the recovery storage.
-func (rs *recoveryStorageImpl) persistDritySnapshotWhenClosing() error {
+// persistRecoverySnapshotWhenClosing persists the dirty recovery snapshot when closing the recovery storage.
+func (rs *recoveryStorageImpl) persistRecoverySnapshotWhenClosing() error {
 	ctx, cancel := context.WithTimeout(context.Background(), rs.cfg.gracefulTimeout)
 	defer cancel()
 
 	for rs.isDirty() {
-		if err := rs.persistDirtySnapshot(ctx, mlog.InfoLevel); err != nil {
+		if err := rs.persistRecoverySnapshot(ctx, mlog.InfoLevel); err != nil {
 			return err
 		}
 	}
@@ -73,17 +71,31 @@ func (rs *recoveryStorageImpl) persistDritySnapshotWhenClosing() error {
 	return nil
 }
 
-// persistDirtySnapshot persists the dirty snapshot to the catalog.
-func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlog.Level) (err error) {
-	if rs.pendingPersistSnapshot == nil {
-		// if there's no dirty snapshot, generate a new one.
-		rs.pendingPersistSnapshot = rs.consumeDirtySnapshot()
+func (rs *recoveryStorageImpl) persistRecoverySnapshot(ctx context.Context, lvl mlog.Level) error {
+	snapshot := rs.ensurePendingRecoveryPersistSnapshot()
+	return rs.persistRecoverySnapshotData(ctx, lvl, snapshot)
+}
+
+func (rs *recoveryStorageImpl) ensurePendingRecoveryPersistSnapshot() *RecoverySnapshot {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	if rs.pendingRecoveryPersistSnapshot == nil {
+		rs.pendingRecoveryPersistSnapshot = rs.consumeDirtySnapshotLocked()
 	}
-	if rs.pendingPersistSnapshot == nil {
+	return rs.pendingRecoveryPersistSnapshot
+}
+
+func (rs *recoveryStorageImpl) clearPendingRecoveryPersistSnapshot() {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	rs.pendingRecoveryPersistSnapshot = nil
+}
+
+func (rs *recoveryStorageImpl) persistRecoverySnapshotData(ctx context.Context, lvl mlog.Level, snapshot *RecoverySnapshot) (err error) {
+	if snapshot == nil {
 		return nil
 	}
 
-	snapshot := rs.pendingPersistSnapshot
 	rs.metrics.ObserveIsOnPersisting(true)
 	logger := rs.Logger().With(
 		mlog.String("checkpoint", snapshot.Checkpoint.MessageID.String()),
@@ -92,13 +104,13 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlo
 		mlog.Int("segmentCount", len(snapshot.SegmentAssignments)),
 	)
 	defer func() {
+		rs.metrics.ObserveIsOnPersisting(false)
 		if err != nil {
 			logger.Warn(ctx, "failed to persist dirty snapshot", mlog.Err(err))
 			return
 		}
-		rs.pendingPersistSnapshot = nil
+		rs.clearPendingRecoveryPersistSnapshot()
 		logger.Log(ctx, lvl, "persist dirty snapshot")
-		rs.metrics.ObserveIsOnPersisting(false)
 	}()
 
 	if err := rs.dropAllVirtualChannel(ctx, snapshot.VChannels); err != nil {
@@ -109,10 +121,11 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlo
 	// The catalog persists the whole snapshot as a single compound write, with
 	// the consume checkpoint always the last/commit-marker op - so a
 	// whole-snapshot retry is always safe (every part is an idempotent put).
+	effectiveCheckpoint := rs.windowManager.effectivePersistCheckpoint(snapshot, rs.getFlusherCheckpoint())
 	recoverySnapshot := &metastore.WALRecoverySnapshot{
 		SegmentAssignments: snapshot.SegmentAssignments,
 		VChannels:          snapshot.VChannels,
-		ConsumeCheckpoint:  snapshot.Checkpoint.IntoProto(),
+		ConsumeCheckpoint:  effectiveCheckpoint.IntoProto(),
 	}
 	if snapshot.SalvageCheckpoint != nil {
 		recoverySnapshot.SalvageCheckpoint = snapshot.SalvageCheckpoint.IntoProto()
@@ -128,10 +141,11 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlo
 		}); err != nil {
 		return err
 	}
+	rs.windowManager.markConsumeCheckpointPersisted(effectiveCheckpoint)
 
 	// sample the checkpoint for truncator to make wal truncation.
-	rs.metrics.ObServePersistedMetrics(snapshot.Checkpoint.TimeTick)
-	rs.simpleTruncateCheckpoint(ctx, snapshot.Checkpoint)
+	rs.metrics.ObServePersistedMetrics(effectiveCheckpoint.TimeTick)
+	rs.simpleTruncateCheckpoint(ctx, effectiveCheckpoint)
 	return
 }
 
@@ -170,7 +184,7 @@ func (rs *recoveryStorageImpl) dropAllVirtualChannel(ctx context.Context, vcs ma
 	}
 
 	for _, channelName := range channels {
-		if err := rs.retryOperationWithBackoff(ctx, rs.Logger().With(mlog.String("op", "dropAllVirtualChannel")), func(ctx context.Context) error {
+		if err := retryOperationWithBackoff(ctx, rs.Logger().With(mlog.String("op", "dropAllVirtualChannel")), func(ctx context.Context) error {
 			resp, err := mixCoordClient.DropVirtualChannel(ctx, &datapb.DropVirtualChannelRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -186,8 +200,8 @@ func (rs *recoveryStorageImpl) dropAllVirtualChannel(ctx context.Context, vcs ma
 }
 
 // retryOperationWithBackoff retries the operation with exponential backoff.
-func (rs *recoveryStorageImpl) retryOperationWithBackoff(ctx context.Context, logger *mlog.Logger, op func(ctx context.Context) error) error {
-	backoff := rs.newBackoff()
+func retryOperationWithBackoff(ctx context.Context, logger *mlog.Logger, op func(ctx context.Context) error) error {
+	backoff := newBackoff()
 	for {
 		err := op(ctx)
 		if err == nil {
@@ -210,7 +224,7 @@ func (rs *recoveryStorageImpl) retryOperationWithBackoff(ctx context.Context, lo
 }
 
 // newBackoff creates a new backoff instance with the default settings.
-func (rs *recoveryStorageImpl) newBackoff() *backoff.ExponentialBackOff {
+func newBackoff() *backoff.ExponentialBackOff {
 	backoff := backoff.NewExponentialBackOff()
 	backoff.InitialInterval = 10 * time.Millisecond
 	backoff.MaxInterval = 1 * time.Second
