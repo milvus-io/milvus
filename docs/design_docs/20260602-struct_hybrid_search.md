@@ -64,11 +64,13 @@ AnnSearchRequest(
     anns_field="structA[image_vec]",
     param={
         "metric_type": "COSINE",
-        "params": {"ef": 100},
-        "element_scope": {
-            "collapse": {
-                "strategy": "topk_sum",
-                "topk": 3,
+        "params": {
+            "ef": 100,
+            "element_scope": {
+                "collapse": {
+                    "strategy": "topk_sum",
+                    "topk": 3,
+                },
             },
         },
     },
@@ -278,6 +280,9 @@ rerank.
 7. Hybrid search supports only plain top-K for struct-array vector sub-searches.
    Element-level and embedding-list sub-searches reject group-by, range search,
    and search iterator.
+8. `sum` and `topk_sum` collapse strategies are valid only for positively
+   related metrics such as `IP` and `COSINE`. Negative distance metrics such as
+   `L2` must use `max`, `avg`, or `topk_avg`.
 
 ## Result Semantics
 

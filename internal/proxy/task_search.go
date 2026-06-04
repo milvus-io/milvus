@@ -565,6 +565,9 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			if subSearchInfo.Kind != hybridSubSearchStructElement {
 				return merr.WrapErrParameterInvalidMsg("%s is only supported for element-level search on struct array vector sub-fields", elementScopeKey)
 			}
+			if err := validateElementCollapseMetricType(collapseConfig, queryInfo.GetMetricType()); err != nil {
+				return err
+			}
 			queryInfo.SearchParams = sanitizedSearchParams
 			subSearchInfo.ElementScopeProvided = true
 			subSearchInfo.Collapse = collapseConfig

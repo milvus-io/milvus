@@ -6442,18 +6442,23 @@ func TestSearchTask_StructHybridElementScopeValidation(t *testing.T) {
 	}
 
 	type subSpec struct {
-		annsField string
-		params    string
-		phType    commonpb.PlaceholderType
+		annsField  string
+		params     string
+		phType     commonpb.PlaceholderType
+		metricType string
 	}
 	makeTask := func(specs ...subSpec) *searchTask {
 		subReqs := make([]*milvuspb.SubSearchRequest, 0, len(specs))
 		for _, spec := range specs {
+			metricType := spec.metricType
+			if metricType == "" {
+				metricType = metric.L2
+			}
 			subReqs = append(subReqs, &milvuspb.SubSearchRequest{
 				PlaceholderGroup: makePlaceholderGroup(spec.phType),
 				Nq:               1,
 				SearchParams: []*commonpb.KeyValuePair{
-					{Key: common.MetricTypeKey, Value: metric.L2},
+					{Key: common.MetricTypeKey, Value: metricType},
 					{Key: ParamsKey, Value: spec.params},
 					{Key: AnnsFieldKey, Value: spec.annsField},
 					{Key: TopKKey, Value: "10"},
@@ -6521,7 +6526,7 @@ func TestSearchTask_StructHybridElementScopeValidation(t *testing.T) {
 
 	t.Run("accepts element_scope for row-level hybrid with normal vector", func(t *testing.T) {
 		task := makeTask(
-			subSpec{annsField: "a_vec", params: topKScope, phType: commonpb.PlaceholderType_FloatVector},
+			subSpec{annsField: "a_vec", params: topKScope, phType: commonpb.PlaceholderType_FloatVector, metricType: metric.IP},
 			subSpec{annsField: "regular_vec", params: noScope, phType: commonpb.PlaceholderType_FloatVector},
 		)
 
@@ -6532,6 +6537,19 @@ func TestSearchTask_StructHybridElementScopeValidation(t *testing.T) {
 		assert.False(t, task.hybridElementLevel)
 		assert.Equal(t, elementCollapseTopKSum, task.hybridSubSearchInfos[0].Collapse.Strategy)
 		assert.Equal(t, 2, task.hybridSubSearchInfos[0].Collapse.TopK)
+	})
+
+	t.Run("rejects sum collapse on negative metric", func(t *testing.T) {
+		task := makeTask(
+			subSpec{annsField: "a_vec", params: topKScope, phType: commonpb.PlaceholderType_FloatVector, metricType: metric.L2},
+			subSpec{annsField: "regular_vec", params: noScope, phType: commonpb.PlaceholderType_FloatVector},
+		)
+
+		err := task.initAdvancedSearchRequest(ctx)
+
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "only supported for positively related metrics")
 	})
 
 	t.Run("accepts element_scope for row-level hybrid across different structs", func(t *testing.T) {
