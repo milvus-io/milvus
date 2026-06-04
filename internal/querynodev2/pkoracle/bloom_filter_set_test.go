@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -187,4 +188,18 @@ func TestMemSize(t *testing.T) {
 		size := bfs.MemSize()
 		assert.Greater(t, size, int64(0))
 	})
+}
+
+func TestRefundReleasesMmapWithoutCharge(t *testing.T) {
+	mgr := bloomfilter.NewPkStatsMmapManager(t.TempDir(), true)
+	handle, err := mgr.Load("stats-path", []byte("binary-stats"))
+	assert.NoError(t, err)
+
+	bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
+	bfs.SetMmapReference(handle, mgr, true)
+
+	bfs.Refund()
+
+	assert.Nil(t, handle.Data())
+	assert.Equal(t, 0, mgr.ActiveHandles())
 }

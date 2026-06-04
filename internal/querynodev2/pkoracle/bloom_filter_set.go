@@ -51,6 +51,11 @@ type BloomFilterSet struct {
 	// Resource tracking
 	trackedSize     int64 // memory size that was charged
 	resourceCharged bool  // tracks whether memory resources were charged for this bloom filter set
+
+	// Binary backing tracking for delegator-side PK stats.
+	mmapHandle     *bloomfilter.PkStatsMmapHandle
+	mmapManager    *bloomfilter.PkStatsMmapManager
+	mmapFileBacked bool
 }
 
 // MayPkExist returns whether any bloom filters returns positive.
@@ -229,36 +234,48 @@ func (s *BloomFilterSet) Charge() {
 
 	size := s.memSizeLocked()
 	if size > 0 {
-		C.ChargeLoadedResource(C.CResourceUsage{
-			memory_bytes: C.int64_t(size),
-			disk_bytes:   0,
-		})
+		usage := C.CResourceUsage{memory_bytes: C.int64_t(size)}
+		if s.mmapFileBacked {
+			usage = C.CResourceUsage{disk_bytes: C.int64_t(size)}
+		}
+		C.ChargeLoadedResource(usage)
 		s.trackedSize = size
 		s.resourceCharged = true
 		log.Debug("charged bloom filter resource",
 			zap.Int64("segmentID", s.segmentID),
-			zap.Int64("size", size))
+			zap.Int64("size", size),
+			zap.Bool("mmapFileBacked", s.mmapFileBacked))
 	}
 }
 
-// Refund refunds any charged resources. Safe to call multiple times.
+// Refund refunds any charged resources and releases mmap references.
+// Safe to call multiple times.
 func (s *BloomFilterSet) Refund() {
 	s.statsMutex.Lock()
 	defer s.statsMutex.Unlock()
 
-	if !s.resourceCharged || s.trackedSize <= 0 {
-		return
+	if s.resourceCharged && s.trackedSize > 0 {
+		usage := C.CResourceUsage{memory_bytes: C.int64_t(s.trackedSize)}
+		if s.mmapFileBacked {
+			usage = C.CResourceUsage{disk_bytes: C.int64_t(s.trackedSize)}
+		}
+		C.RefundLoadedResource(usage)
+		log.Debug("refunded bloom filter resource",
+			zap.Int64("segmentID", s.segmentID),
+			zap.Int64("size", s.trackedSize),
+			zap.Bool("mmapFileBacked", s.mmapFileBacked))
 	}
 
-	C.RefundLoadedResource(C.CResourceUsage{
-		memory_bytes: C.int64_t(s.trackedSize),
-		disk_bytes:   0,
-	})
-	log.Debug("refunded bloom filter resource",
-		zap.Int64("segmentID", s.segmentID),
-		zap.Int64("size", s.trackedSize))
 	s.trackedSize = 0
 	s.resourceCharged = false
+	if s.mmapManager != nil && s.mmapHandle != nil {
+		s.mmapManager.Release(s.mmapHandle)
+		s.mmapHandle = nil
+		s.mmapManager = nil
+		s.mmapFileBacked = false
+		s.historyStats = nil
+		s.currentStat = nil
+	}
 }
 
 // IsResourceCharged returns whether memory resources have been charged for this bloom filter set.
@@ -294,6 +311,16 @@ func (s *BloomFilterSet) memSizeLocked() int64 {
 		}
 	}
 	return size
+}
+
+// SetMmapReference records the binary stats backing handle owned by this bloom filter set.
+func (s *BloomFilterSet) SetMmapReference(handle *bloomfilter.PkStatsMmapHandle, mgr *bloomfilter.PkStatsMmapManager, fileBacked bool) {
+	s.statsMutex.Lock()
+	defer s.statsMutex.Unlock()
+
+	s.mmapHandle = handle
+	s.mmapManager = mgr
+	s.mmapFileBacked = fileBacked
 }
 
 // NewBloomFilterSet returns a new BloomFilterSet.

@@ -17,10 +17,13 @@ package bloomfilter
 
 import (
 	"fmt"
+	"io"
 	"testing"
 	"time"
 
 	"github.com/bits-and-blooms/bloom/v3"
+	"github.com/bytedance/mockey"
+	"github.com/greatroar/blobloom"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
@@ -310,4 +313,77 @@ func TestMarshal(t *testing.T) {
 	for _, key := range keys {
 		assert.True(t, emptyBF2.Test(key))
 	}
+}
+
+func TestBloomFilterUtilityBranches(t *testing.T) {
+	assert.Equal(t, BasicBFName, BasicBF.String())
+	assert.Equal(t, BasicBF, BFTypeFromString(BasicBFName))
+	assert.Equal(t, BlockedBF, BFTypeFromString(BlockBFName))
+	assert.Equal(t, AlwaysTrueBF, BFTypeFromString(AlwaysTrueBFName))
+	assert.Equal(t, UnsupportedBF, BFTypeFromString("bad"))
+
+	basicBF := NewBloomFilterWithType(100, 0.01, BasicBFName)
+	basicBF.AddString("pk")
+	assert.Equal(t, BasicBF, basicBF.Type())
+	assert.Greater(t, basicBF.Cap(), uint(0))
+	assert.True(t, basicBF.TestString("pk"))
+	_, err := DumpBlockData(basicBF)
+	assert.Error(t, err)
+
+	blockedBF := NewBloomFilterWithType(100, 0.01, BlockBFName)
+	assert.Equal(t, BlockedBF, blockedBF.Type())
+
+	fallbackBF := NewBloomFilterWithType(100, 0.01, "unknown")
+	assert.Equal(t, BlockedBF, fallbackBF.Type())
+
+	assert.Nil(t, Locations([]byte("pk"), 1, AlwaysTrueBF))
+	assert.Nil(t, Locations([]byte("pk"), 1, UnsupportedBF))
+	_, err = UnmarshalJSON([]byte("{}"), UnsupportedBF)
+	assert.Error(t, err)
+
+	alwaysTrue := AlwaysTrueBloomFilter
+	alwaysTrue.Add([]byte("pk"))
+	alwaysTrue.AddString("pk")
+	assert.Equal(t, AlwaysTrueBF, alwaysTrue.Type())
+	assert.Equal(t, uint(0), alwaysTrue.Cap())
+	assert.Equal(t, uint(0), alwaysTrue.K())
+	assert.True(t, alwaysTrue.TestString("pk"))
+	assert.True(t, alwaysTrue.TestLocations([]uint64{1}))
+	assert.Equal(t, []bool{true, true}, alwaysTrue.BatchTestLocations([][]uint64{{1}, {2}}, []bool{false, false}))
+	assert.NoError(t, alwaysTrue.UnmarshalJSON(nil))
+}
+
+func TestDumpBlockData_InvalidDumpOutput(t *testing.T) {
+	bf := newBlockedBloomFilter(100, 0.01)
+
+	patch := mockey.Mock(blobloom.Dump).To(
+		func(io.Writer, *blobloom.Filter, string) (int64, error) {
+			return 0, assert.AnError
+		},
+	).Build()
+	_, err := DumpBlockData(bf)
+	assert.Error(t, err)
+	patch.UnPatch()
+
+	patch = mockey.Mock(blobloom.Dump).To(
+		func(w io.Writer, _ *blobloom.Filter, _ string) (int64, error) {
+			n, err := w.Write([]byte("short"))
+			return int64(n), err
+		},
+	).Build()
+	_, err = DumpBlockData(bf)
+	assert.Error(t, err)
+	patch.UnPatch()
+
+	patch = mockey.Mock(blobloom.Dump).To(
+		func(w io.Writer, _ *blobloom.Filter, _ string) (int64, error) {
+			raw := make([]byte, blobloomHeaderSize)
+			copy(raw, "badmagic")
+			n, err := w.Write(raw)
+			return int64(n), err
+		},
+	).Build()
+	_, err = DumpBlockData(bf)
+	assert.Error(t, err)
+	patch.UnPatch()
 }

@@ -149,15 +149,12 @@ func (insertCodec *InsertCodec) SerializePkStats(stats *PrimaryKeyStats, rowNum 
 		return nil, errors.New("sericalize empty pk stats")
 	}
 
-	// Serialize by pk stats
 	blobKey := fmt.Sprintf("%d", stats.FieldID)
-	statsWriter := &StatsWriter{}
-	err := statsWriter.Generate(stats)
+	buffer, err := SerializeBinaryStats([]*PrimaryKeyStats{stats})
 	if err != nil {
 		return nil, err
 	}
 
-	buffer := statsWriter.GetBuffer()
 	return &Blob{
 		Key:        blobKey,
 		Value:      buffer,
@@ -172,18 +169,17 @@ func (insertCodec *InsertCodec) SerializePkStatsList(stats []*PrimaryKeyStats, r
 		return nil, merr.WrapErrServiceInternal("shall not serialize zero length statslog list")
 	}
 
-	blobKey := fmt.Sprintf("%d", stats[0].FieldID)
-	statsWriter := &StatsWriter{}
-	err := statsWriter.GenerateList(stats)
+	buffer, err := SerializeBinaryStats(stats)
 	if err != nil {
 		return nil, err
 	}
 
-	buffer := statsWriter.GetBuffer()
+	blobKey := fmt.Sprintf("%d", stats[0].FieldID)
 	return &Blob{
-		Key:    blobKey,
-		Value:  buffer,
-		RowNum: rowNum,
+		Key:        blobKey,
+		Value:      buffer,
+		RowNum:     rowNum,
+		MemorySize: int64(len(buffer)),
 	}, nil
 }
 
@@ -204,18 +200,12 @@ func (insertCodec *InsertCodec) SerializePkStatsByData(data *InsertData) (*Blob,
 			continue
 		}
 		singleData := data.Data[field.FieldID]
-		blobKey := fmt.Sprintf("%d", field.FieldID)
-		statsWriter := &StatsWriter{}
-		err := statsWriter.GenerateByData(field.FieldID, field.DataType, singleData)
+		stats, err := NewPrimaryKeyStats(field.FieldID, int64(field.DataType), rowNum)
 		if err != nil {
 			return nil, err
 		}
-		buffer := statsWriter.GetBuffer()
-		return &Blob{
-			Key:    blobKey,
-			Value:  buffer,
-			RowNum: rowNum,
-		}, nil
+		stats.UpdateByMsgs(singleData)
+		return insertCodec.SerializePkStats(stats, rowNum)
 	}
 	return nil, errors.New("there is no pk field")
 }

@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -1266,16 +1267,53 @@ func TestInsertCodec(t *testing.T) {
 
 	statsBlob1, err := insertCodec.SerializePkStatsByData(insertData1)
 	assert.NoError(t, err)
-	_, err = DeserializeStats([]*Blob{statsBlob1})
+	assert.True(t, IsBinaryStatsFormat(statsBlob1.Value))
+	stats1, err := DeserializeStats([]*Blob{statsBlob1})
 	assert.NoError(t, err)
+	require.Len(t, stats1, 1)
+	assert.IsType(t, &bloomfilter.MmapBloomFilter{}, stats1[0].BF)
 
 	statsBlob2, err := insertCodec.SerializePkStatsByData(insertData2)
 	assert.NoError(t, err)
-	_, err = DeserializeStats([]*Blob{statsBlob2})
+	assert.True(t, IsBinaryStatsFormat(statsBlob2.Value))
+	stats2, err := DeserializeStats([]*Blob{statsBlob2})
 	assert.NoError(t, err)
+	require.Len(t, stats2, 1)
+	assert.IsType(t, &bloomfilter.MmapBloomFilter{}, stats2[0].BF)
 
 	_, err = insertCodec.SerializePkStatsList([]*PrimaryKeyStats{}, 0)
 	assert.Error(t, err, "SerializePkStatsList zero length pkstats list shall return error")
+}
+
+func TestInsertCodecSerializePkStatsUsesBinaryFormat(t *testing.T) {
+	codec := NewInsertCodec()
+	stats1, err := NewPrimaryKeyStats(Int64Field, int64(schemapb.DataType_Int64), 10)
+	require.NoError(t, err)
+	stats1.Update(NewInt64PrimaryKey(1))
+	stats1.Update(NewInt64PrimaryKey(2))
+	stats2, err := NewPrimaryKeyStats(Int64Field, int64(schemapb.DataType_Int64), 10)
+	require.NoError(t, err)
+	stats2.Update(NewInt64PrimaryKey(10))
+	stats2.Update(NewInt64PrimaryKey(20))
+
+	blob, err := codec.SerializePkStats(stats1, 2)
+	require.NoError(t, err)
+	require.True(t, IsBinaryStatsFormat(blob.Value))
+	require.Equal(t, int64(len(blob.Value)), blob.MemorySize)
+	decoded, err := DeserializeStats([]*Blob{blob})
+	require.NoError(t, err)
+	require.Len(t, decoded, 1)
+	assert.IsType(t, &bloomfilter.MmapBloomFilter{}, decoded[0].BF)
+
+	listBlob, err := codec.SerializePkStatsList([]*PrimaryKeyStats{stats1, stats2}, 4)
+	require.NoError(t, err)
+	require.True(t, IsBinaryStatsFormat(listBlob.Value))
+	require.Equal(t, int64(len(listBlob.Value)), listBlob.MemorySize)
+	listDecoded, err := DeserializeStatsList(listBlob)
+	require.NoError(t, err)
+	require.Len(t, listDecoded, 2)
+	assert.IsType(t, &bloomfilter.MmapBloomFilter{}, listDecoded[0].BF)
+	assert.IsType(t, &bloomfilter.MmapBloomFilter{}, listDecoded[1].BF)
 }
 
 func TestDeleteCodec(t *testing.T) {

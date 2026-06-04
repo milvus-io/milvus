@@ -550,6 +550,9 @@ func (node *QueryNode) Stop() error {
 		if node.manager != nil {
 			node.manager.Segment.Clear(context.Background())
 		}
+		if closer, ok := node.loader.(interface{ Close() }); ok {
+			closer.Close()
+		}
 
 		node.CloseSegcore()
 

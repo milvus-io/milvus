@@ -1054,6 +1054,7 @@ common:
   bloomFilterType: BlockedBloomFilter # bloom filter type, support BasicBloomFilter and BlockedBloomFilter
   maxBloomFalsePositive: 0.001 # max false positive rate for bloom filter
   bloomFilterApplyBatchSize: 1000 # batch size when to apply pk to bloom filter
+  bloomFilterMmapEnabled: false # if true, mmap PK stats bloom filter data from local cache files; otherwise keep binary stats memory-backed
   usePartitionKeyAsClusteringKey: false # if true, do clustering compaction and segment prune on partition key field
   useVectorAsClusteringKey: false # if true, do clustering compaction and segment prune on vector field
   enableVectorClusteringKey: false # if true, enable vector clustering key and vector clustering compaction

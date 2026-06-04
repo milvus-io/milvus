@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -28,14 +30,18 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks/mock_storage"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
+	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -46,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type SegmentLoaderSuite struct {
@@ -163,6 +170,46 @@ func (suite *SegmentLoaderSuite) TestLoad() {
 	suite.NoError(err)
 }
 
+func (suite *SegmentLoaderSuite) TestLoadExternalL0SetsPKCandidate() {
+	ctx := context.Background()
+	collectionID := suite.collectionID + 100
+	schema := mock_segcore.GenTestCollectionSchema("external", schemapb.DataType_Int64, false)
+	schema.ExternalSource = "s3://bucket/path"
+	schema.ExternalSpec = `{"format":"parquet"}`
+	schema.Fields[0].ExternalField = schema.Fields[0].Name
+	indexMeta := mock_segcore.GenTestIndexMeta(collectionID, schema)
+	loadMeta := &querypb.LoadMetaInfo{
+		LoadType:     querypb.LoadType_LoadCollection,
+		CollectionID: collectionID,
+		PartitionIDs: []int64{suite.partitionID},
+	}
+	suite.manager.Collection.PutOrRef(collectionID, schema, indexMeta, loadMeta)
+
+	segmentID := int64(1)
+	collidingID := segmentID + (1 << 32)
+	segments, err := suite.loader.Load(ctx, collectionID, SegmentTypeSealed, 0,
+		&querypb.SegmentLoadInfo{
+			SegmentID:     segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  collectionID,
+			Level:         datapb.SegmentLevel_L0,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID),
+		},
+		&querypb.SegmentLoadInfo{
+			SegmentID:     collidingID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  collectionID,
+			Level:         datapb.SegmentLevel_L0,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID),
+		},
+	)
+	suite.NoError(err)
+	suite.Len(segments, 2)
+	for _, segment := range segments {
+		suite.True(segment.PkCandidateExist())
+	}
+}
+
 func (suite *SegmentLoaderSuite) TestLoadFail() {
 	ctx := context.Background()
 
@@ -229,12 +276,12 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfos...)
 	suite.NoError(err)
 
-	// Will load bloom filter with sealed segments
+	// Regular worker segments do not load bloom filters. They rely on the
+	// delegator for PK pruning and conservatively keep all local segments.
 	for _, segment := range segments {
 		for pk := 0; pk < 100; pk++ {
 			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
-			pkReady := segment.PkCandidateExist()
-			suite.Require().True(pkReady)
+			suite.Require().False(segment.PkCandidateExist())
 			exist := segment.MayPkExist(lc)
 			suite.Require().True(exist)
 		}
@@ -266,12 +313,12 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 
 	segments, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeGrowing, 0, loadInfos...)
 	suite.NoError(err)
-	// Should load bloom filter with growing segments
+	// Growing worker segments also skip bloom filters; deletes/searches use
+	// the segment data or delegator-side pruning.
 	for _, segment := range segments {
 		for pk := 0; pk < 100; pk++ {
 			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
-			pkReady := segment.PkCandidateExist()
-			suite.True(pkReady)
+			suite.False(segment.PkCandidateExist())
 			exist := segment.MayPkExist(lc)
 			suite.True(exist)
 		}
@@ -534,6 +581,125 @@ func (suite *SegmentLoaderSuite) TestLoadWithoutBloomFilter() {
 	suite.NotNil(bfs)
 	suite.Len(bfs, 1)
 	suite.False(bfs[0].PkCandidateExist()) // metadata-only stub when BF disabled
+}
+
+func (suite *SegmentLoaderSuite) TestWorkerLoadDoesNotReadPKStats() {
+	ctx := context.Background()
+	msgLength := 100
+
+	binlogs, statsLogs, err := mock_segcore.SaveBinLog(ctx,
+		suite.collectionID,
+		suite.partitionID,
+		suite.segmentID,
+		msgLength,
+		suite.schema,
+		suite.chunkManager,
+	)
+	suite.NoError(err)
+
+	for _, fieldBinlog := range statsLogs {
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			binlog.LogPath = "missing/pkstats/worker-should-not-read"
+		}
+	}
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:     suite.segmentID,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs,
+		Statslogs:     statsLogs,
+		NumOfRows:     int64(msgLength),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+	}
+
+	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfo)
+	suite.NoError(err)
+	suite.Len(segments, 1)
+	suite.False(segments[0].PkCandidateExist())
+	suite.True(segments[0].MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(42))))
+}
+
+func (suite *SegmentLoaderSuite) TestLoadBloomFilterSetMmapReleasesOnRefund() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterMmapEnabled.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.BloomFilterMmapEnabled.Key)
+
+	ctx := context.Background()
+	loader := NewLoader(ctx, suite.manager, suite.chunkManager)
+	defer loader.Close()
+	suite.True(loader.pkStatsMmapMgr.FileBacked())
+
+	msgLength := 100
+	binlogs, statsLogs, err := mock_segcore.SaveBinLog(ctx,
+		suite.collectionID,
+		suite.partitionID,
+		suite.segmentID,
+		msgLength,
+		suite.schema,
+		suite.chunkManager,
+	)
+	suite.NoError(err)
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:     suite.segmentID,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs,
+		Statslogs:     statsLogs,
+		NumOfRows:     int64(msgLength),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+	}
+
+	bfs, err := loader.LoadBloomFilterSet(ctx, suite.collectionID, loadInfo)
+	suite.NoError(err)
+	suite.Len(bfs, 1)
+	suite.True(bfs[0].PkCandidateExist())
+
+	suite.Equal(1, loader.pkStatsMmapMgr.ActiveHandles())
+
+	bfs[0].Refund()
+	suite.Equal(0, loader.pkStatsMmapMgr.ActiveHandles())
+}
+
+func (suite *SegmentLoaderSuite) TestLoadBloomFilterSetMemoryBackedBinaryReleasesOnRefund() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterMmapEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.BloomFilterMmapEnabled.Key)
+
+	ctx := context.Background()
+	loader := NewLoader(ctx, suite.manager, suite.chunkManager)
+	defer loader.Close()
+	suite.False(loader.pkStatsMmapMgr.FileBacked())
+
+	msgLength := 100
+	segmentID := suite.segmentID + 100
+	binlogs, statsLogs, err := mock_segcore.SaveBinLog(ctx,
+		suite.collectionID,
+		suite.partitionID,
+		segmentID,
+		msgLength,
+		suite.schema,
+		suite.chunkManager,
+	)
+	suite.NoError(err)
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:     segmentID,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs,
+		Statslogs:     statsLogs,
+		NumOfRows:     int64(msgLength),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+	}
+
+	bfs, err := loader.LoadBloomFilterSet(ctx, suite.collectionID, loadInfo)
+	suite.NoError(err)
+	suite.Len(bfs, 1)
+	suite.True(bfs[0].PkCandidateExist())
+	suite.Equal(1, loader.pkStatsMmapMgr.ActiveHandles())
+
+	bfs[0].Refund()
+	suite.Equal(0, loader.pkStatsMmapMgr.ActiveHandles())
 }
 
 func (suite *SegmentLoaderSuite) TestLoadDeltaLogs() {
@@ -1845,6 +2011,230 @@ func (suite *ExternalSegmentEstimateSuite) TestLazyLoadSubtractsRawData() {
 
 	suite.True(lazyUsage.MemorySize <= nonLazyUsage.MemorySize,
 		"lazy load memory (%d) should be <= non-lazy (%d)", lazyUsage.MemorySize, nonLazyUsage.MemorySize)
+}
+
+func TestSegmentLoaderMmapHelpers(t *testing.T) {
+	blockedBF := bloomfilter.NewBloomFilterWithType(100, 0.01, "BlockedBloomFilter")
+	blockedStat := &storage.PrimaryKeyStats{
+		FieldID: 100,
+		PkType:  int64(schemapb.DataType_Int64),
+		BFType:  bloomfilter.BlockedBF,
+		BF:      blockedBF,
+		MinPk:   storage.NewInt64PrimaryKey(1),
+		MaxPk:   storage.NewInt64PrimaryKey(2),
+	}
+
+	assert.True(t, allBlockedBF([]*storage.PrimaryKeyStats{blockedStat}))
+	assert.False(t, allBlockedBF([]*storage.PrimaryKeyStats{nil}))
+	assert.False(t, allBlockedBF([]*storage.PrimaryKeyStats{{BF: nil}}))
+	assert.False(t, allBlockedBF([]*storage.PrimaryKeyStats{{
+		FieldID: 100,
+		PkType:  int64(schemapb.DataType_Int64),
+		BF:      bloomfilter.NewBloomFilterWithType(100, 0.01, "BasicBloomFilter"),
+	}}))
+
+	binaryData, err := storage.SerializeBinaryStats([]*storage.PrimaryKeyStats{blockedStat})
+	require.NoError(t, err)
+
+	passthrough, err := binaryStatsData([]*storage.PrimaryKeyStats{blockedStat}, [][]byte{binaryData})
+	require.NoError(t, err)
+	assert.Equal(t, binaryData, passthrough)
+
+	serialized, err := binaryStatsData([]*storage.PrimaryKeyStats{blockedStat}, [][]byte{[]byte("legacy-json")})
+	require.NoError(t, err)
+	assert.True(t, storage.IsBinaryStatsFormat(serialized))
+
+	_, err = binaryStatsData([]*storage.PrimaryKeyStats{{
+		FieldID: 100,
+		PkType:  int64(schemapb.DataType_Int64),
+		BF:      bloomfilter.NewBloomFilterWithType(100, 0.01, "BasicBloomFilter"),
+		MinPk:   storage.NewInt64PrimaryKey(1),
+		MaxPk:   storage.NewInt64PrimaryKey(2),
+	}}, [][]byte{[]byte("legacy-json")})
+	assert.Error(t, err)
+}
+
+func TestSegmentLoaderLoadBloomFilterMmapFallbacks(t *testing.T) {
+	ctx := context.Background()
+	paths := []string{"stats/0"}
+
+	t.Run("serialize error falls back to heap stats", func(t *testing.T) {
+		stat1 := newLoaderTestPKStat(t, 100, 1)
+		stat2 := newLoaderTestPKStat(t, 101, 2)
+		values := [][]byte{
+			loaderTestPKStatBlob(t, stat1),
+			loaderTestPKStatBlob(t, stat2),
+		}
+		cm := mock_storage.NewMockChunkManager(t)
+		cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return(values, nil)
+
+		loader := &segmentLoader{
+			cm:             cm,
+			pkStatsMmapMgr: bloomfilter.NewPkStatsMmapManager("", false),
+		}
+		bfs := pkoracle.NewBloomFilterSet(1, 10, commonpb.SegmentState_Sealed)
+
+		err := loader.loadBloomFilter(ctx, 1, bfs, []string{"stats/a", "stats/b"})
+		require.NoError(t, err)
+		assert.True(t, bfs.PkCandidateExist())
+	})
+
+	t.Run("mmap manager error falls back to heap stats", func(t *testing.T) {
+		stat := newLoaderTestPKStat(t, 100, 3)
+		cm := mock_storage.NewMockChunkManager(t)
+		cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{loaderTestPKStatBlob(t, stat)}, nil)
+
+		blocker := filepath.Join(t.TempDir(), "file")
+		require.NoError(t, os.WriteFile(blocker, []byte("not a directory"), 0o600))
+		loader := &segmentLoader{
+			cm:             cm,
+			pkStatsMmapMgr: bloomfilter.NewPkStatsMmapManager(blocker, true),
+		}
+		bfs := pkoracle.NewBloomFilterSet(1, 10, commonpb.SegmentState_Sealed)
+
+		err := loader.loadBloomFilter(ctx, 1, bfs, paths)
+		require.NoError(t, err)
+		assert.True(t, bfs.PkCandidateExist())
+	})
+
+	t.Run("mmap deserialize error releases mapping and falls back", func(t *testing.T) {
+		stat := newLoaderTestPKStat(t, 100, 4)
+		cm := mock_storage.NewMockChunkManager(t)
+		cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{loaderTestPKStatBlob(t, stat)}, nil)
+
+		mgr := bloomfilter.NewPkStatsMmapManager("", false)
+		loader := &segmentLoader{
+			cm:             cm,
+			pkStatsMmapMgr: mgr,
+		}
+		bfs := pkoracle.NewBloomFilterSet(1, 10, commonpb.SegmentState_Sealed)
+
+		patch := mockey.Mock(storage.DeserializeBinaryStats).To(
+			func([]byte) ([]*storage.PrimaryKeyStats, error) {
+				return nil, errors.New("forced mmap deserialize failure")
+			},
+		).Build()
+		defer patch.UnPatch()
+
+		err := loader.loadBloomFilter(ctx, 1, bfs, paths)
+		require.NoError(t, err)
+		assert.True(t, bfs.PkCandidateExist())
+		assert.Equal(t, 0, mgr.ActiveHandles())
+	})
+}
+
+func TestSegmentLoaderLoadSegmentGrowingLoadsBloomFilterCandidate(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+
+	manager := NewManager()
+	collectionID := int64(100)
+	partitionID := int64(10)
+	segmentID := int64(1)
+	schema := mock_segcore.GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
+	indexMeta := mock_segcore.GenTestIndexMeta(collectionID, schema)
+	loadMeta := &querypb.LoadMetaInfo{
+		LoadType:     querypb.LoadType_LoadCollection,
+		CollectionID: collectionID,
+		PartitionIDs: []int64{partitionID},
+	}
+	manager.Collection.PutOrRef(collectionID, schema, indexMeta, loadMeta)
+	collection := manager.Collection.Get(collectionID)
+	require.NotNil(t, collection)
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:     segmentID,
+		PartitionID:   partitionID,
+		CollectionID:  collectionID,
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID),
+	}
+	base, err := newBaseSegment(collection, SegmentTypeGrowing, 0, loadInfo)
+	require.NoError(t, err)
+	segment := &LocalSegment{
+		baseSegment:        base,
+		manager:            manager.Segment,
+		lastDeltaTimestamp: atomic.NewUint64(0),
+		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
+		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+		fieldJSONStats:     make(map[int64]*querypb.JsonStatsInfo),
+		memSize:            atomic.NewInt64(-1),
+		binlogSize:         atomic.NewInt64(0),
+		rowNum:             atomic.NewInt64(-1),
+		insertCount:        atomic.NewInt64(0),
+	}
+	segment.pkCandidate = pkoracle.NewBloomFilterSet(segmentID, partitionID, SegmentTypeGrowing)
+	loader := &segmentLoader{
+		manager: manager,
+	}
+
+	patch := mockey.Mock((*LocalSegment).Load).To(func(*LocalSegment, context.Context) error {
+		return nil
+	}).Build()
+	defer patch.UnPatch()
+
+	err = loader.LoadSegment(ctx, segment, loadInfo)
+	require.NoError(t, err)
+}
+
+func TestSegmentLoaderSmallBranches(t *testing.T) {
+	resource := &LoadResource{}
+	assert.True(t, resource.IsZero())
+	resource.MemorySize = 1
+	assert.False(t, resource.IsZero())
+
+	collisions := detectVirtualPKCollisions(1, []*querypb.SegmentLoadInfo{
+		{SegmentID: 1},
+		{SegmentID: 1 + (1 << 32)},
+		{SegmentID: 2},
+	})
+	assert.Equal(t, []int64{1 + (1 << 32)}, collisions)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	paramtable.Init()
+
+	paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterMmapEnabled.Key, "false")
+	memoryLoader := NewLoader(ctx, NewManager(), nil)
+	require.NotNil(t, memoryLoader.pkStatsMmapMgr)
+	assert.False(t, memoryLoader.pkStatsMmapMgr.FileBacked())
+	assert.Nil(t, memoryLoader.GetChunkManager())
+	memoryLoader.Close()
+
+	paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterMmapEnabled.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.BloomFilterMmapEnabled.Key)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapDirPath.Key, "")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapDirPath.Key)
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, t.TempDir())
+	defer paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
+
+	loader := NewLoader(ctx, NewManager(), nil)
+	require.NotNil(t, loader.pkStatsMmapMgr)
+	assert.True(t, loader.pkStatsMmapMgr.FileBacked())
+	assert.Nil(t, loader.GetChunkManager())
+	loader.Close()
+}
+
+func newLoaderTestPKStat(t *testing.T, fieldID int64, pk int64) *storage.PrimaryKeyStats {
+	t.Helper()
+	bf := bloomfilter.NewBloomFilterWithType(100, 0.01, "BlockedBloomFilter")
+	key := make([]byte, 8)
+	common.Endian.PutUint64(key, uint64(pk))
+	bf.Add(key)
+	return &storage.PrimaryKeyStats{
+		FieldID: fieldID,
+		PkType:  int64(schemapb.DataType_Int64),
+		BFType:  bloomfilter.BlockedBF,
+		BF:      bf,
+		MinPk:   storage.NewInt64PrimaryKey(pk),
+		MaxPk:   storage.NewInt64PrimaryKey(pk),
+	}
+}
+
+func loaderTestPKStatBlob(t *testing.T, stat *storage.PrimaryKeyStats) []byte {
+	t.Helper()
+	writer := &storage.StatsWriter{}
+	require.NoError(t, writer.Generate(stat))
+	return writer.GetBuffer()
 }
 
 func TestSegmentLoader(t *testing.T) {
