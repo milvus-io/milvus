@@ -243,6 +243,45 @@ func TestCatalogVChannelWindowMetas(t *testing.T) {
 	})
 }
 
+// TestCatalogVChannelWindowMetasRecover is a regression test for the recover-side
+// vchannel-prefix bug. A real etcdkv returns keys that INCLUDE the metaKV rootPath,
+// so ListVChannelWindowMetas must strip the prefix rootPath-tolerantly. A naive
+// strings.TrimPrefix leaves the whole key as the vchannel name and fails recovery
+// with "vchannel mismatch", which wedged the WAL reopen on streamingnode restart
+// (collections on the pchannel became permanently unloadable). The mock-based
+// save_and_list case above could not catch this because the mock returns the
+// relative key, not the rootPath-prefixed key a real metaKV returns.
+func TestCatalogVChannelWindowMetasRecover(t *testing.T) {
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+	rootPath := "testCatalogVChannelWindowMetasRecover-" + uuid.New().String() + "/meta"
+	kv := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	catalog := NewCataLog(kv)
+	ctx := context.Background()
+
+	pchannel := "by-dev-rootcoord-dml_0"
+	vchannel := "by-dev-rootcoord-dml_0_123456789v0"
+	err := catalog.SaveVChannelWindowMetas(ctx, pchannel, common.VChannelWindowViewTypeIdempotency,
+		map[string]*streamingpb.VChannelWindowMeta{
+			vchannel: {
+				Pchannel:                   pchannel,
+				Vchannel:                   vchannel,
+				ViewType:                   common.VChannelWindowViewTypeIdempotency,
+				SnapshotCheckpointTimetick: 100,
+			},
+		})
+	assert.NoError(t, err)
+
+	metas, err := catalog.ListVChannelWindowMetas(ctx, pchannel, common.VChannelWindowViewTypeIdempotency)
+	if assert.NoError(t, err) && assert.Len(t, metas, 1) {
+		assert.Equal(t, vchannel, metas[0].GetVchannel())
+		assert.Equal(t, pchannel, metas[0].GetPchannel())
+		assert.Equal(t, common.VChannelWindowViewTypeIdempotency, metas[0].GetViewType())
+	}
+
+	err = catalog.RemoveVChannelWindowMetas(ctx, pchannel, common.VChannelWindowViewTypeIdempotency, []string{vchannel})
+	assert.NoError(t, err)
+}
+
 func TestCatalogPChannelWindowMeta(t *testing.T) {
 	ctx := context.Background()
 
