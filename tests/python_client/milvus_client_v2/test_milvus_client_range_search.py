@@ -1,3 +1,5 @@
+# ruff: noqa: E712,E731,F401,F403,F405,F541,F841,I001,UP031,UP032,W291,W292,W293
+# fmt: off
 import numpy as np
 from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_EVENTUALLY
 from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
@@ -12,6 +14,7 @@ from common import common_type as ct
 from common import common_func as cf
 from utils.util_log import test_log as log
 from base.client_base import TestcaseBase
+from base.client_v2_base import TestMilvusClientV2Base
 import heapq
 from time import sleep
 from decimal import Decimal, getcontext
@@ -79,6 +82,191 @@ index_name1 = cf.gen_unique_str("float")
 index_name2 = cf.gen_unique_str("varhar")
 half_nb = ct.default_nb // 2
 max_hybrid_search_req_num = ct.max_hybrid_search_req_num
+
+
+@pytest.mark.xdist_group("TestRangeSearchNullableVectorShared")
+@pytest.mark.tags(CaseLabel.GPU)
+class TestRangeSearchNullableVectorShared(TestMilvusClientV2Base):
+    """Shared MilvusClient collection for nullable-vector range search coverage."""
+
+    shared_alias = "TestRangeSearchNullableVectorShared"
+    nullable_float_vec_field = "nullable_float_vector"
+    nullable_sparse_vec_field = "nullable_sparse_vector"
+
+    def setup_class(self):
+        super().setup_class(self)
+        self.collection_name = "TestRangeSearchNullableVectorShared" + cf.gen_unique_str("_")
+
+    @pytest.fixture(scope="class", autouse=True)
+    def prepare_collection(self, request):
+        client = self._client(alias=self.shared_alias)
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT, nullable=True)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(ct.default_sparse_vec_field_name, DataType.SPARSE_FLOAT_VECTOR)
+        schema.add_field(self.nullable_float_vec_field, DataType.FLOAT_VECTOR, dim=default_dim, nullable=True)
+        schema.add_field(self.nullable_sparse_vec_field, DataType.SPARSE_FLOAT_VECTOR, nullable=True)
+        self.create_collection(client, self.collection_name, schema=schema, force_teardown=False)
+
+        nb = 3000
+        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
+        nullable_float_vectors = cf.gen_vectors(nb, default_dim, vector_data_type=DataType.FLOAT_VECTOR)
+        nullable_sparse_vectors = cf.gen_sparse_vectors(nb)
+        for i in range(nb):
+            is_null = i % 5 == 0
+            rows[i][ct.default_float_field_name] = None if is_null else float(i)
+            rows[i][self.nullable_float_vec_field] = None if is_null else nullable_float_vectors[i]
+            rows[i][self.nullable_sparse_vec_field] = None if is_null else nullable_sparse_vectors[i]
+        request.cls.shared_data = rows
+        request.cls.nullable_float_vector_by_pk = {
+            row[ct.default_int64_field_name]: row[self.nullable_float_vec_field] for row in rows
+        }
+        request.cls.nullable_sparse_vector_by_pk = {
+            row[ct.default_int64_field_name]: row[self.nullable_sparse_vec_field] for row in rows
+        }
+
+        self.insert(client, self.collection_name, data=rows)
+        self.flush(client, self.collection_name)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(
+            field_name=ct.default_float_vec_field_name,
+            metric_type="COSINE",
+            index_type="HNSW",
+            params={"M": 16, "efConstruction": 500},
+        )
+        index_params.add_index(
+            field_name=ct.default_sparse_vec_field_name,
+            metric_type="IP",
+            index_type="SPARSE_INVERTED_INDEX",
+            params={},
+        )
+        index_params.add_index(
+            field_name=self.nullable_float_vec_field,
+            metric_type="COSINE",
+            index_type="FLAT",
+            params={},
+        )
+        index_params.add_index(
+            field_name=self.nullable_sparse_vec_field,
+            metric_type="IP",
+            index_type="SPARSE_INVERTED_INDEX",
+            params={},
+        )
+        self.create_index(client, self.collection_name, index_params=index_params)
+        self.load_collection(client, self.collection_name)
+
+        def teardown():
+            self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
+
+        request.addfinalizer(teardown)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_range_search_nullable_float_vector(self):
+        """
+        target: verify range search on nullable float vector field returns no NaN distances
+        method: range search on nullable_float_vector with COSINE radius/range_filter
+        expected: returned distances are in range and never NaN
+        """
+        client = self._client(alias=self.shared_alias)
+        query_vector = self.shared_data[1][self.nullable_float_vec_field]
+        range_filter = 1
+        radius = -1
+        range_search_params = {"metric_type": "COSINE", "params": {"radius": radius, "range_filter": range_filter}}
+
+        search_res, _ = self.search(
+            client,
+            self.collection_name,
+            data=[query_vector],
+            anns_field=self.nullable_float_vec_field,
+            search_params=range_search_params,
+            limit=default_limit,
+            output_fields=[ct.default_int64_field_name],
+        )
+
+        assert len(search_res) == 1
+        for hits in search_res:
+            assert len(hits) > 0, "Range search should return non-null nullable float vector results"
+            for hit in hits:
+                pk = hit[ct.default_int64_field_name]
+                assert self.nullable_float_vector_by_pk[pk] is not None, f"Null vector row returned, pk={pk}"
+                assert not math.isnan(hit["distance"]), f"NaN distance found, pk={pk}"
+                assert range_filter >= hit["distance"] > radius, (
+                    f"distance {hit['distance']} out of range ({radius}, {range_filter}]"
+                )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_range_search_nullable_sparse_vector(self):
+        """
+        target: verify range search on nullable sparse vector field returns no NaN distances
+        method: range search on nullable_sparse_vector with IP radius/range_filter
+        expected: returned distances are in range and never NaN
+        """
+        client = self._client(alias=self.shared_alias)
+        query_vector = self.shared_data[1][self.nullable_sparse_vec_field]
+        range_filter = 100000
+        radius = 0
+        range_search_params = {"metric_type": "IP", "params": {"radius": radius, "range_filter": range_filter}}
+
+        search_res, _ = self.search(
+            client,
+            self.collection_name,
+            data=[query_vector],
+            anns_field=self.nullable_sparse_vec_field,
+            search_params=range_search_params,
+            limit=default_limit,
+            output_fields=[ct.default_int64_field_name],
+        )
+
+        assert len(search_res) == 1
+        for hits in search_res:
+            assert len(hits) > 0, "Range search should return non-null nullable sparse vector results"
+            for hit in hits:
+                pk = hit[ct.default_int64_field_name]
+                assert self.nullable_sparse_vector_by_pk[pk] is not None, f"Null sparse vector row returned, pk={pk}"
+                assert not math.isnan(hit["distance"]), f"NaN distance found, pk={pk}"
+                assert range_filter >= hit["distance"] > radius, (
+                    f"distance {hit['distance']} out of range ({radius}, {range_filter}]"
+                )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_nullable_vector_with_scalar_filter(self):
+        """
+        target: verify range search on nullable float vector combined with nullable scalar filter
+        method: range search on nullable_float_vector with filter on nullable float field
+        expected: results satisfy the scalar filter and distances are never NaN
+        """
+        client = self._client(alias=self.shared_alias)
+        filter_value = 1000
+        query_vector = self.shared_data[1001][self.nullable_float_vec_field]
+        range_search_params = {"metric_type": "COSINE", "params": {"radius": -1, "range_filter": 1}}
+
+        search_res, _ = self.search(
+            client,
+            self.collection_name,
+            data=[query_vector],
+            anns_field=self.nullable_float_vec_field,
+            search_params=range_search_params,
+            limit=default_limit,
+            filter=f"{ct.default_float_field_name} > {filter_value}",
+            output_fields=[ct.default_int64_field_name, ct.default_float_field_name],
+        )
+
+        assert len(search_res) == 1
+        for hits in search_res:
+            assert len(hits) > 0, "Range search with scalar filter should return non-null vector results"
+            for hit in hits:
+                pk = hit[ct.default_int64_field_name]
+                assert self.nullable_float_vector_by_pk[pk] is not None, f"Null vector row returned, pk={pk}"
+                assert not math.isnan(hit["distance"]), f"NaN distance found, pk={pk}"
+                float_val = hit.get(ct.default_float_field_name)
+                assert float_val is not None, f"Null float value should be excluded by filter > {filter_value}"
+                assert float_val > filter_value, (
+                    f"Filter not effective: {ct.default_float_field_name}={float_val} <= {filter_value}"
+                )
 
 
 class TestCollectionRangeSearch(TestcaseBase):

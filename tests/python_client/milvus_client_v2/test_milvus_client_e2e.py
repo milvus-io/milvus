@@ -1,4 +1,5 @@
 # ruff: noqa: F403, F405
+import math
 import time
 
 import pytest
@@ -143,8 +144,12 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
                 "nq": len(vectors_to_search),
                 "pk_name": "id",
                 "limit": default_limit,
+                "metric": "COSINE",
             },
         )
+        for hits in search_res:
+            for hit in hits:
+                assert not math.isnan(hit["distance"]), f"NaN distance found in search result, pk={hit['id']}"
         t1 = time.time()
         log.info(f"Search cost {t1 - t0:.4f} seconds")
 
@@ -581,6 +586,23 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             filter=default_search_exp,
             check_task=CheckTasks.check_query_results,
             check_items={"exp_res": []},
+        )
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            anns_field="vector",
+            search_params=search_params,
+            limit=default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "pk_name": "id",
+                "ids": [],
+                "limit": 0,
+                "metric": "COSINE",
+            },
         )
 
         # 8. Cleanup
