@@ -508,6 +508,8 @@ func (s *IndexServiceSuite) Test_CreateAnalyzeTask() {
 			MinClusterSizeRatio: 0.01,
 			MaxClusterSizeRatio: 10,
 			MaxClusterSize:      5 * 1024 * 1024 * 1024,
+			TrainBufferSize:     Params.DataCoordCfg.ClusteringCompactionMaxTrainBufferSize.GetAsSize(),
+			AssignBufferSize:    Params.DataCoordCfg.ClusteringCompactionMaxAssignBufferSize.GetAsSize(),
 		}
 
 		status, err := s.node.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
