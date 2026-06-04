@@ -60,11 +60,11 @@ func (s *L0CompactionPolicySuite) SetupTest() {
 
 	segments := genSegmentsForMeta(s.testLabel)
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
 	for id, segment := range segments {
-		meta.segments.SetSegment(id, segment)
+		meta.segments.SetSegment(id, segment, 0)
 	}
 	s.collection = &collectionInfo{
 		ID:     s.testLabel.CollectionID,
@@ -153,7 +153,7 @@ func (s *L0CompactionPolicySuite) TestTriggerViewChange() {
 		segments[arg.ID] = info
 	}
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
 	meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
@@ -161,7 +161,7 @@ func (s *L0CompactionPolicySuite) TestTriggerViewChange() {
 		Schema: &schemapb.CollectionSchema{},
 	})
 	for id, segment := range segments {
-		meta.segments.SetSegment(id, segment)
+		meta.segments.SetSegment(id, segment, 0)
 	}
 	s.l0Policy.meta = meta
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
@@ -243,11 +243,11 @@ func (s *L0CompactionPolicySuite) TestPositionFiltering() {
 	}
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
 	for id, segment := range segments {
-		meta.segments.SetSegment(id, segment)
+		meta.segments.SetSegment(id, segment, 0)
 	}
 	meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
 		ID:     s.testLabel.CollectionID,
@@ -328,11 +328,11 @@ func (s *L0CompactionPolicySuite) TestPositionFilteringWithNoGrowingSegments() {
 	}
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
 	for id, segment := range segments {
-		meta.segments.SetSegment(id, segment)
+		meta.segments.SetSegment(id, segment, 0)
 	}
 	meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
 		ID:     s.testLabel.CollectionID,
@@ -392,11 +392,11 @@ func (s *L0CompactionPolicySuite) TestPositionFilteringEdgeCase() {
 	}
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
 	for id, segment := range segments {
-		meta.segments.SetSegment(id, segment)
+		meta.segments.SetSegment(id, segment, 0)
 	}
 	meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
 		ID:     s.testLabel.CollectionID,
@@ -555,11 +555,11 @@ func (s *L0CompactionPolicySuite) TestMultiChannelPositionFiltering() {
 	}
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
 	for id, segment := range segments {
-		meta.segments.SetSegment(id, segment)
+		meta.segments.SetSegment(id, segment, 0)
 	}
 	meta.collections.Insert(label1.CollectionID, &collectionInfo{
 		ID:     label1.CollectionID,
@@ -628,14 +628,14 @@ func (s *L0CompactionPolicySuite) TestGroupL0ViewsByPartChan() {
 	}
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
 	for _, segView := range segments {
 		info := genTestSegmentInfo(segView.label, segView.ID, segView.Level, commonpb.SegmentState_Flushed)
 		info.DmlPosition = segView.dmlPos
 		info.Deltalogs = genTestBinlogs(1, 4*MB)
-		meta.segments.SetSegment(segView.ID, info)
+		meta.segments.SetSegment(segView.ID, info, 0)
 	}
 	meta.collections.Insert(label1.CollectionID, &collectionInfo{
 		ID:     label1.CollectionID,

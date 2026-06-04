@@ -74,7 +74,7 @@ func (s *CopySegmentCheckerSuite) SetupTest() {
 	s.broker = broker.NewMockBroker(s.T())
 	s.broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	s.meta, err = newMeta(context.TODO(), s.catalog, nil, s.broker)
+	s.meta, err = newMeta(context.TODO(), s.catalog, nil, s.broker, newTestSegmentPersist(), "")
 	s.NoError(err)
 	s.meta.AddCollection(&collectionInfo{
 		ID:     s.collectionID,
@@ -297,8 +297,6 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_AllTasksCompleted() {
 	// One call for AddJob, one for update progress, one for finishJob
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(3)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
-	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 
 	// Create segments
 	seg1 := NewSegmentInfo(&datapb.SegmentInfo{
@@ -582,8 +580,6 @@ func (s *CopySegmentCheckerSuite) TestClose() {
 func (s *CopySegmentCheckerSuite) TestFinishJob_UpdateSegmentStates() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
-	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 
 	// Create target segments in Importing state
 	seg1 := NewSegmentInfo(&datapb.SegmentInfo{
@@ -756,8 +752,6 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_AllTasksDone_ReleasesRef()
 	// Setup mocks: SaveCopySegmentJob is called once for AddJob, once for finishJob update
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
-	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
-	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	// Setup: Create job in Executing state with all tasks completed
 	job := &copySegmentJob{
@@ -869,9 +863,6 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
 	// Setup mocks
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
-	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Maybe()
-	// AlterSegments returns error to simulate flush failure
-	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(errors.New("etcd unavailable"))
 
 	// Setup: Create job in Executing state
 	job := &copySegmentJob{
@@ -900,6 +891,7 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
 		},
 	}
 	s.meta.AddSegment(context.TODO(), segment)
+	s.meta.segmentPersist = NewSegmentTxnWrapper(failCommitPersist{err: errors.New("persist unavailable")})
 
 	// Create a completed task
 	task := &copySegmentTask{
@@ -918,7 +910,7 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
 	task.task.Store(taskProto)
 	s.copyMeta.AddTask(context.TODO(), task)
 
-	// Execute: Check copying job - flush will fail due to AlterSegments error
+	// Execute: Check copying job - flush will fail due to segment persist error
 	s.checker.checkCopyingJob(job)
 
 	// Verify: Job marked as Failed (not Completed) due to flush failure

@@ -1116,10 +1116,10 @@ func TestDropVirtualChannel(t *testing.T) {
 						FieldID: 1,
 						Binlogs: []*datapb.Binlog{
 							{
-								LogPath: "/by-dev/test/0/1/2/1/Allo1",
+								LogID: 1,
 							},
 							{
-								LogPath: "/by-dev/test/0/1/2/1/Allo2",
+								LogID: 2,
 							},
 						},
 					},
@@ -1129,10 +1129,10 @@ func TestDropVirtualChannel(t *testing.T) {
 						FieldID: 1,
 						Binlogs: []*datapb.Binlog{
 							{
-								LogPath: "/by-dev/test/0/1/2/1/stats1",
+								LogID: 3,
 							},
 							{
-								LogPath: "/by-dev/test/0/1/2/1/stats2",
+								LogID: 4,
 							},
 						},
 					},
@@ -1142,7 +1142,7 @@ func TestDropVirtualChannel(t *testing.T) {
 						Binlogs: []*datapb.Binlog{
 							{
 								EntriesNum: 1,
-								LogPath:    "/by-dev/test/0/1/2/1/delta1",
+								LogID:      5,
 							},
 						},
 					},
@@ -2820,7 +2820,7 @@ func TestServer_InitMessageCallback(t *testing.T) {
 		meta: &meta{
 			catalog:      mockCatalog,
 			chunkManager: mockChunkManager,
-			segments:     NewSegmentsInfo(),
+			segments:     NewCachedSegmentsInfo(),
 		},
 		importMeta:     &importMeta{},
 		segmentManager: mockManager,

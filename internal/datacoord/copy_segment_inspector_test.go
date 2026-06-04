@@ -69,7 +69,7 @@ func (s *CopySegmentInspectorSuite) SetupTest() {
 	s.broker = broker.NewMockBroker(s.T())
 	s.broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	s.meta, err = newMeta(context.TODO(), s.catalog, nil, s.broker)
+	s.meta, err = newMeta(context.TODO(), s.catalog, nil, s.broker, newTestSegmentPersist(), "")
 	s.NoError(err)
 	s.meta.AddCollection(&collectionInfo{
 		ID:     s.collectionID,
@@ -230,8 +230,6 @@ func (s *CopySegmentInspectorSuite) TestProcessPending() {
 func (s *CopySegmentInspectorSuite) TestProcessFailed_DropTargetSegments() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
-	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 
 	// Create target segments
 	seg1 := NewSegmentInfo(&datapb.SegmentInfo{
@@ -332,8 +330,6 @@ func (s *CopySegmentInspectorSuite) TestProcessFailed_NoTargetSegment() {
 func (s *CopySegmentInspectorSuite) TestInspect_ProcessPendingAndFailedTasks() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(3)
-	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 
 	// Create target segment
 	seg1 := NewSegmentInfo(&datapb.SegmentInfo{
