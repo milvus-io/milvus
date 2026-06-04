@@ -11,8 +11,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func TestCompactionReasonPolicyTriggersEligibleRewriteSegments(t *testing.T) {
-	enableCompactionReasonPolicy(t)
+func TestCompactionReasonSelectorTriggersEligibleRewriteSegments(t *testing.T) {
+	enableCompactionReasonSelector(t)
 	ctx := context.Background()
 	record := &datapb.CompactionReasonRecord{
 		ReasonID:   100,
@@ -23,26 +23,31 @@ func TestCompactionReasonPolicyTriggersEligibleRewriteSegments(t *testing.T) {
 		State:      datapb.CompactionReasonState_REASON_STATE_ACTIVE,
 	}
 	reasonMeta := newLoadedCompactionReasonMeta(t, ctx, record)
-	meta := newCompactionReasonPolicyTestMeta(reasonMeta,
+	meta := newCompactionReasonSelectorTestMeta(reasonMeta,
 		sortedReasonSegment(1, 1, 10, "ch-1", 0, 199, false),
+		sortedReasonSegment(4, 1, 10, "ch-1", 0, 198, false),
 		reasonSegmentWithDataTS(2, 1, 10, "ch-1", 0, 199, false),
 		sortedReasonSegment(3, 1, 10, "ch-1", 0, 200, false),
 	)
 
-	events, err := newCompactionReasonPolicy(meta).Trigger(ctx)
+	events, err := newCompactionReasonSelector(meta).Trigger(ctx)
 
 	require.NoError(t, err)
-	views := events[TriggerTypeReasonRewrite]
-	require.Len(t, views, 1)
+	views := events[TriggerTypeReason]
+	require.Len(t, views, 2)
 	require.Equal(t, int64(100), views[0].GetTriggerID())
 	require.Equal(t, int64(10), views[0].GetGroupLabel().PartitionID)
 	require.Equal(t, "ch-1", views[0].GetGroupLabel().Channel)
 	require.Equal(t, []int64{1}, segmentIDsFromViews(views[0].GetSegmentsView()))
+	require.Equal(t, int64(100), views[1].GetTriggerID())
+	require.Equal(t, int64(10), views[1].GetGroupLabel().PartitionID)
+	require.Equal(t, "ch-1", views[1].GetGroupLabel().Channel)
+	require.Equal(t, []int64{4}, segmentIDsFromViews(views[1].GetSegmentsView()))
 	require.Equal(t, datapb.CompactionReasonState_REASON_STATE_ACTIVE, reasonMeta.GetCompactionReasonRecord(100).GetState())
 }
 
-func TestCompactionReasonPolicyCompletesRewriteReasonWhenNoMatchRemains(t *testing.T) {
-	enableCompactionReasonPolicy(t)
+func TestCompactionReasonSelectorCompletesRewriteReasonWhenNoMatchRemains(t *testing.T) {
+	enableCompactionReasonSelector(t)
 	ctx := context.Background()
 	record := &datapb.CompactionReasonRecord{
 		ReasonID:   100,
@@ -53,20 +58,20 @@ func TestCompactionReasonPolicyCompletesRewriteReasonWhenNoMatchRemains(t *testi
 		State:      datapb.CompactionReasonState_REASON_STATE_ACTIVE,
 	}
 	reasonMeta := newLoadedCompactionReasonMeta(t, ctx, record)
-	meta := newCompactionReasonPolicyTestMeta(reasonMeta,
+	meta := newCompactionReasonSelectorTestMeta(reasonMeta,
 		sortedReasonSegment(1, 1, 10, "ch-1", 201, 199, false),
 		sortedReasonSegment(2, 1, 10, "ch-1", 0, 200, false),
 	)
 
-	events, err := newCompactionReasonPolicy(meta).Trigger(ctx)
+	events, err := newCompactionReasonSelector(meta).Trigger(ctx)
 
 	require.NoError(t, err)
-	require.Empty(t, events[TriggerTypeReasonRewrite])
+	require.Empty(t, events[TriggerTypeReason])
 	require.Equal(t, datapb.CompactionReasonState_REASON_STATE_DONE, reasonMeta.GetCompactionReasonRecord(100).GetState())
 }
 
-func TestCompactionReasonPolicyKeepsMatchedButIneligibleRewriteActive(t *testing.T) {
-	enableCompactionReasonPolicy(t)
+func TestCompactionReasonSelectorKeepsMatchedButIneligibleRewriteActive(t *testing.T) {
+	enableCompactionReasonSelector(t)
 	ctx := context.Background()
 	record := &datapb.CompactionReasonRecord{
 		ReasonID:   100,
@@ -77,14 +82,14 @@ func TestCompactionReasonPolicyKeepsMatchedButIneligibleRewriteActive(t *testing
 		State:      datapb.CompactionReasonState_REASON_STATE_ACTIVE,
 	}
 	reasonMeta := newLoadedCompactionReasonMeta(t, ctx, record)
-	meta := newCompactionReasonPolicyTestMeta(reasonMeta,
+	meta := newCompactionReasonSelectorTestMeta(reasonMeta,
 		reasonSegmentWithDataTS(1, 1, 10, "ch-1", 0, 199, false),
 	)
 
-	events, err := newCompactionReasonPolicy(meta).Trigger(ctx)
+	events, err := newCompactionReasonSelector(meta).Trigger(ctx)
 
 	require.NoError(t, err)
-	require.Empty(t, events[TriggerTypeReasonRewrite])
+	require.Empty(t, events[TriggerTypeReason])
 	require.Equal(t, datapb.CompactionReasonState_REASON_STATE_ACTIVE, reasonMeta.GetCompactionReasonRecord(100).GetState())
 }
 
@@ -96,7 +101,7 @@ func newLoadedCompactionReasonMeta(t *testing.T, ctx context.Context, records ..
 	return reasonMeta
 }
 
-func enableCompactionReasonPolicy(t *testing.T) {
+func enableCompactionReasonSelector(t *testing.T) {
 	t.Helper()
 	paramtable.Get().Save(Params.DataCoordCfg.EnableCompactionReasonRecord.Key, "true")
 	t.Cleanup(func() {
@@ -104,7 +109,7 @@ func enableCompactionReasonPolicy(t *testing.T) {
 	})
 }
 
-func newCompactionReasonPolicyTestMeta(reasonMeta *compactionReasonMeta, segments ...*SegmentInfo) *meta {
+func newCompactionReasonSelectorTestMeta(reasonMeta *compactionReasonMeta, segments ...*SegmentInfo) *meta {
 	meta := &meta{
 		segments:             NewSegmentsInfo(),
 		collections:          typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
