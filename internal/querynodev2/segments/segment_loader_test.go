@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -1829,6 +1830,16 @@ func (suite *SegmentLoaderDetailSuite) TestCheckLoadingResourceWithMemoryLimit()
 	err = suite.loader.checkLoadingResource(ctx, mlog.With(), loadingUsage, maxSegmentSize, totalMem, memUsage, localDiskUsage)
 	suite.Error(err)
 	suite.True(errors.Is(err, merr.ErrSegmentRequestResourceFailed))
+}
+
+func (suite *SegmentLoaderDetailSuite) TestCheckSegmentGpuMemSizeWithBatchedEstimates() {
+	patch := mockey.Mock(hardware.GetAllGPUMemoryInfo).To(func() ([]hardware.GPUMemoryInfo, error) {
+		return []hardware.GPUMemoryInfo{{TotalMemory: 100, FreeMemory: 100}}, nil
+	}).Build()
+	defer patch.UnPatch()
+
+	err := checkSegmentGpuMemSize([]uint64{30, 30, 30}, 1.0)
+	suite.NoError(err)
 }
 
 // SegmentLoaderTextIndexEstimateSuite tests resource estimation for text index (TextStatsLogs).

@@ -2669,7 +2669,7 @@ func checkSegmentGpuMemSize(fieldGpuMemSizeList []uint64, OverloadedMemoryThresh
 			)
 			return merr.WrapErrSegmentRequestResourceFailed("GPU")
 		}
-		currentGpuMem[minId] += minGpuMem
+		currentGpuMem[minId] = minGpuMem
 	}
 	return nil
 }
