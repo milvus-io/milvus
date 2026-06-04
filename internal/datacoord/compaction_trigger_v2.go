@@ -51,7 +51,7 @@ const (
 	TriggerTypeForceMerge
 	TriggerTypeStorageVersionUpgrade
 	TriggerTypeBumpSchemaVersion
-	TriggerTypeReasonRewrite
+	TriggerTypeReason
 )
 
 type TickerType int8
@@ -69,7 +69,7 @@ func (t CompactionTriggerType) GetCompactionType() datapb.CompactionType {
 	switch t {
 	case TriggerTypeLevelZeroViewChange, TriggerTypeLevelZeroViewIDLE, TriggerTypeLevelZeroViewManual:
 		return datapb.CompactionType_Level0DeleteCompaction
-	case TriggerTypeSegmentSizeViewChange, TriggerTypeSingle, TriggerTypeForceMerge, TriggerTypeReasonRewrite:
+	case TriggerTypeSegmentSizeViewChange, TriggerTypeSingle, TriggerTypeForceMerge, TriggerTypeReason:
 		return datapb.CompactionType_MixCompaction
 	case TriggerTypeClustering:
 		return datapb.CompactionType_ClusteringCompaction
@@ -106,8 +106,8 @@ func (t CompactionTriggerType) String() string {
 		return "StorageVersionUpgrade"
 	case TriggerTypeBumpSchemaVersion:
 		return "BumpSchemaVersion"
-	case TriggerTypeReasonRewrite:
-		return "ReasonRewrite"
+	case TriggerTypeReason:
+		return "Reason"
 	default:
 		return ""
 	}
@@ -151,7 +151,7 @@ type CompactionTriggerManager struct {
 	forceMergePolicy            *forceMergeCompactionPolicy
 	upgradeStorageVersionPolicy *storageVersionUpgradePolicy
 	bumpSchemaVersionPolicy     *bumpSchemaVersionPolicy
-	reasonPolicy                *compactionReasonPolicy
+	reasonSelector              *compactionReasonSelector
 
 	cancel  context.CancelFunc
 	closeWg sync.WaitGroup
@@ -177,7 +177,7 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, ins
 	m.upgradeStorageVersionPolicy = newStorageVersionUpgradePolicy(meta, m.allocator, m.handler, versionManager)
 	m.bumpSchemaVersionPolicy = newBumpSchemaVersionPolicy(meta, m.allocator, m.handler)
 	if Params.DataCoordCfg.EnableCompactionReasonRecord.GetAsBool() {
-		m.reasonPolicy = newCompactionReasonPolicy(meta)
+		m.reasonSelector = newCompactionReasonSelector(meta)
 	}
 
 	// Initialize policies map for ticker handling
@@ -186,8 +186,8 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, ins
 	m.policies[SingleTicker] = m.singlePolicy
 	m.policies[BumpSchemaVersionTicker] = m.bumpSchemaVersionPolicy
 	m.policies[StorageVersionTicker] = m.upgradeStorageVersionPolicy
-	if m.reasonPolicy != nil {
-		m.policies[ReasonRecordTicker] = m.reasonPolicy
+	if m.reasonSelector != nil {
+		m.policies[ReasonRecordTicker] = m.reasonSelector
 	}
 	return m
 }
@@ -384,7 +384,7 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 					m.SubmitL0ViewToScheduler(ctx, outView)
 				case TriggerTypeClustering:
 					m.SubmitClusteringViewToScheduler(ctx, outView)
-				case TriggerTypeSingle, TriggerTypeSort, TriggerTypeStorageVersionUpgrade, TriggerTypeReasonRewrite:
+				case TriggerTypeSingle, TriggerTypeSort, TriggerTypeStorageVersionUpgrade, TriggerTypeReason:
 					m.SubmitSingleViewToScheduler(ctx, outView, eventType)
 				case TriggerTypeForceMerge:
 					m.SubmitForceMergeViewToScheduler(ctx, outView)

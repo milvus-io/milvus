@@ -4,7 +4,6 @@ import (
 	"context"
 	"sort"
 
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/log"
@@ -12,39 +11,45 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-type compactionReasonPolicy struct {
+type compactionReasonSelector struct {
 	meta *meta
 }
 
-var _ CompactionPolicy = (*compactionReasonPolicy)(nil)
+var _ CompactionPolicy = (*compactionReasonSelector)(nil)
 
-func newCompactionReasonPolicy(meta *meta) *compactionReasonPolicy {
-	return &compactionReasonPolicy{meta: meta}
+func newCompactionReasonSelector(meta *meta) *compactionReasonSelector {
+	return &compactionReasonSelector{meta: meta}
 }
 
-func (policy *compactionReasonPolicy) Enable() bool {
+func (selector *compactionReasonSelector) Enable() bool {
 	return paramtable.Get().DataCoordCfg.EnableCompactionReasonRecord.GetAsBool() &&
-		policy != nil &&
-		policy.meta != nil &&
-		policy.meta.GetCompactionReasonMeta() != nil
+		selector != nil &&
+		selector.meta != nil &&
+		selector.meta.GetCompactionReasonMeta() != nil
 }
 
-func (policy *compactionReasonPolicy) Name() string {
-	return "CompactionReasonPolicy"
+func (selector *compactionReasonSelector) Name() string {
+	return "CompactionReasonSelector"
 }
 
-func (policy *compactionReasonPolicy) Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error) {
+func (selector *compactionReasonSelector) Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error) {
 	events := map[CompactionTriggerType][]CompactionView{
-		TriggerTypeReasonRewrite: nil,
+		TriggerTypeReason: nil,
 	}
-	if !policy.Enable() {
+	if !selector.Enable() {
 		return events, nil
 	}
 
-	reasonMeta := policy.meta.GetCompactionReasonMeta()
-	for _, record := range activeRewriteCompactionReasonRecords(reasonMeta.GetCompactionReasonRecords()) {
+	reasonMeta := selector.meta.GetCompactionReasonMeta()
+	for _, record := range activeCompactionReasonRecords(reasonMeta.GetCompactionReasonRecords()) {
+		switch record.GetReasonType() {
+		case datapb.CompactionReasonType_REASON_INTENT_REWRITE:
+		default:
+			continue
+		}
+
 		reason := newCompactionReason(record)
-		matches := policy.meta.SelectSegments(ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
+		matches := selector.meta.SelectSegments(ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
 			return reason.Match(segment)
 		}))
 		if reason.ReasonSatisfied(matches) {
@@ -57,23 +62,21 @@ func (policy *compactionReasonPolicy) Trigger(ctx context.Context) (map[Compacti
 			continue
 		}
 
-		eligible := lo.Filter(matches, func(segment *SegmentInfo, _ int) bool {
-			return isNormalManualCompactionCandidate(policy.meta, segment)
-		})
-		if len(eligible) == 0 {
-			continue
+		for _, segment := range matches {
+			if !isNormalManualCompactionCandidate(selector.meta, segment) {
+				continue
+			}
+			events[TriggerTypeReason] = append(events[TriggerTypeReason], compactionReasonView(record, segment))
 		}
-		events[TriggerTypeReasonRewrite] = append(events[TriggerTypeReasonRewrite], compactionReasonViews(record, eligible)...)
 	}
+	sortCompactionReasonViews(events[TriggerTypeReason])
 	return events, nil
 }
 
-func activeRewriteCompactionReasonRecords(records map[int64]*datapb.CompactionReasonRecord) []*datapb.CompactionReasonRecord {
+func activeCompactionReasonRecords(records map[int64]*datapb.CompactionReasonRecord) []*datapb.CompactionReasonRecord {
 	active := make([]*datapb.CompactionReasonRecord, 0, len(records))
 	for _, record := range records {
-		if record.GetState() == datapb.CompactionReasonState_REASON_STATE_ACTIVE &&
-			record.GetReasonType() == datapb.CompactionReasonType_REASON_INTENT_REWRITE &&
-			record.GetTailLimit() == 0 {
+		if record.GetState() == datapb.CompactionReasonState_REASON_STATE_ACTIVE {
 			active = append(active, record)
 		}
 	}
@@ -83,23 +86,28 @@ func activeRewriteCompactionReasonRecords(records map[int64]*datapb.CompactionRe
 	return active
 }
 
-func compactionReasonViews(record *datapb.CompactionReasonRecord, segments []*SegmentInfo) []CompactionView {
-	grouped := groupByPartitionChannel(GetViewsByInfo(segments...))
-	views := make([]CompactionView, 0, len(grouped))
-	for label, segmentViews := range grouped {
-		views = append(views, &MixSegmentView{
-			label:     label,
-			segments:  segmentViews,
-			triggerID: record.GetReasonID(),
-		})
+func compactionReasonView(record *datapb.CompactionReasonRecord, segment *SegmentInfo) CompactionView {
+	segmentViews := GetViewsByInfo(segment)
+	return &MixSegmentView{
+		label:     segmentViews[0].label,
+		segments:  segmentViews,
+		triggerID: record.GetReasonID(),
 	}
+}
+
+func sortCompactionReasonViews(views []CompactionView) {
 	sort.Slice(views, func(i, j int) bool {
 		left := views[i].GetGroupLabel()
 		right := views[j].GetGroupLabel()
+		if left.CollectionID != right.CollectionID {
+			return left.CollectionID < right.CollectionID
+		}
 		if left.PartitionID != right.PartitionID {
 			return left.PartitionID < right.PartitionID
 		}
-		return left.Channel < right.Channel
+		if left.Channel != right.Channel {
+			return left.Channel < right.Channel
+		}
+		return views[i].GetSegmentsView()[0].ID < views[j].GetSegmentsView()[0].ID
 	})
-	return views
 }
