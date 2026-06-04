@@ -795,6 +795,9 @@ dataCoord:
       minClusterSizeRatio: 0.01 # minimum cluster size / avg size in Kmeans train
       maxClusterSizeRatio: 10 # maximum cluster size / avg size in Kmeans train
       maxClusterSize: 5g # maximum cluster size in Kmeans train
+      maxTrainBufferSize: 5g # maximum training buffer size in Kmeans train
+      maxAssignBufferSize: 5g # maximum assign buffer size in Kmeans train
+      maxCentroidsPerSegment: 2 # The maximum centroids per segment, minimum 1 means no grouping
   syncSegmentsInterval: 300 # The time interval for regularly syncing segments
   index:
     memSizeEstimateMultiplier: 2 # When the memory size is not setup by index procedure, multiplier to estimate the memory size of index data
@@ -915,6 +918,8 @@ dataNode:
   clusteringCompaction:
     memoryBufferRatio: 0.3 # The ratio of memory buffer of clustering compaction. Data larger than threshold will be flushed to storage.
     workPoolSize: 8 # worker pool size for one clustering compaction job.
+    flushPoolSize: 16 # worker pool size for one clustering compaction job.
+    useAdditionalCentroid: false # use additional balancing iteration with additional centroid per centroid group
   bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
   storage:
     format: parquet # storage format for insert data, options: [parquet, vortex]

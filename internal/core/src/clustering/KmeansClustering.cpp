@@ -48,7 +48,7 @@ KmeansClustering::FetchDataFiles(uint8_t* buf, const DatasetPart& part) {
     for (auto& data : field_datas) {
         size_t current_size =
             std::min((size_t)part.max_bytes - fetched, (size_t)data->Size());
-        milvus::fastmem::FastMemcpy(buf + offset, data->Data(), size);
+        std::memcpy(buf + fetched, data->Data(), current_size);
         data.reset();
         fetched += current_size;
         if (fetched >= part.max_bytes) {
