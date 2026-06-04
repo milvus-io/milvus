@@ -732,6 +732,27 @@ IndexEntryReader::ReadEntriesToFiles(
     }
 }
 
+void
+IndexEntryReader::ReadEntryStreamToFile(const std::string& name,
+                                        const std::string& local_path,
+                                        io::Priority write_priority) {
+    AssertInfo(HasEntry(name), "Entry not found: {}", name);
+    auto writer = FileWriter(local_path, write_priority);
+    ReadEntryStream(name, [&writer](const uint8_t* data, size_t len) {
+        writer.Write(data, len);
+    });
+    writer.Finish();
+}
+
+void
+IndexEntryReader::ReadEntriesStreamToFiles(
+    const std::vector<std::pair<std::string, std::string>>& name_path_pairs,
+    io::Priority write_priority) {
+    for (const auto& [name, path] : name_path_pairs) {
+        ReadEntryStreamToFile(name, path, write_priority);
+    }
+}
+
 size_t
 IndexEntryReader::GetEntrySize(const std::string& name) const {
     auto it = entry_index_.find(name);

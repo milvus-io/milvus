@@ -28,6 +28,7 @@
 #include "common/EasyAssert.h"
 #include "filemanager/InputStream.h"
 #include "nlohmann/json.hpp"
+#include "storage/FileWriter.h"
 #include "storage/IndexEntryWriter.h"
 #include "storage/ThreadPools.h"
 #include "storage/plugin/PluginInterface.h"
@@ -61,6 +62,16 @@ class IndexEntryReader {
     void
     ReadEntriesToFiles(const std::vector<std::pair<std::string, std::string>>&
                            name_path_pairs);
+
+    void
+    ReadEntryStreamToFile(const std::string& name,
+                          const std::string& local_path,
+                          io::Priority write_priority = io::Priority::MIDDLE);
+
+    void
+    ReadEntriesStreamToFiles(
+        const std::vector<std::pair<std::string, std::string>>& name_path_pairs,
+        io::Priority write_priority = io::Priority::MIDDLE);
 
     /// Stream entry data via transient memory budget.
     /// Downloads are concurrent (full bandwidth). Slices are delivered in entry

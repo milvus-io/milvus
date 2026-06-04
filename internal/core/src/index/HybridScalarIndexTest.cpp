@@ -47,6 +47,7 @@
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -196,6 +197,10 @@ class HybridIndexTestV1 : public testing::Test {
         config["index_type"] = milvus::index::HYBRID_INDEX_TYPE;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
         config["bitmap_cardinality_limit"] = "1000";
+        if (!hybrid_high_cardinality_index_type_.empty()) {
+            config[milvus::index::HYBRID_HIGH_CARDINALITY_INDEX_TYPE] =
+                hybrid_high_cardinality_index_type_;
+        }
         config[INDEX_NUM_ROWS_KEY] = nb_;
         config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 3;
         if (has_lack_binlog_row_) {
@@ -556,6 +561,7 @@ class HybridIndexTestV1 : public testing::Test {
     bool has_default_value_{false};
     bool has_lack_binlog_row_{false};
     size_t lack_binlog_row_{100};
+    std::string hybrid_high_cardinality_index_type_;
 };
 
 TYPED_TEST_SUITE_P(HybridIndexTestV1);
@@ -618,6 +624,7 @@ TYPED_TEST_P(HybridIndexTestV1, TestRangeCompareFuncTest) {
 
 using BitmapType =
     testing::Types<int8_t, int16_t, int32_t, int64_t, std::string>;
+using InvertedType = testing::Types<int16_t, int32_t, int64_t, std::string>;
 
 REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestV1,
                             CountFuncTest,
@@ -678,6 +685,55 @@ TYPED_TEST_P(HybridIndexTestV2, CompareValFuncTest) {
 
 TYPED_TEST_P(HybridIndexTestV2, TestRangeCompareFuncTest) {
     this->TestRangeCompareFunc();
+}
+
+template <typename T>
+class HybridIndexTestInverted : public HybridIndexTestV1<T> {
+ public:
+    virtual void
+    SetParam() override {
+        this->nb_ = 10000;
+        this->cardinality_ = 2000;
+        this->nullable_ = false;
+        this->index_version_ = 1005;
+        this->index_build_id_ = 1005;
+        this->hybrid_high_cardinality_index_type_ = "INVERTED";
+    }
+
+    virtual ~HybridIndexTestInverted() {
+    }
+};
+
+TYPED_TEST_SUITE_P(HybridIndexTestInverted);
+
+TYPED_TEST_P(HybridIndexTestInverted,
+             ResourceEstimateUsesInternalInvertedIndexType) {
+    auto stream_budget =
+        storage::TransientMemoryBudget::GetEntryStreamBudget().CapacityBytes();
+    auto index_size = static_cast<uint64_t>(stream_budget + 1024);
+    std::map<std::string, std::string> index_params{
+        {"index_type", milvus::index::HYBRID_INDEX_TYPE},
+        {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
+
+    storage::FileManagerContext ctx(
+        this->field_meta_, this->index_meta_, this->chunk_manager_, this->fs_);
+    ctx.set_for_loading_index(true);
+
+    auto request = index::IndexFactory::GetInstance().ScalarIndexLoadResource(
+        this->type_,
+        0,
+        index_size,
+        index_params,
+        false,
+        this->nb_,
+        this->index_files_,
+        ctx);
+
+    EXPECT_EQ(request.final_memory_cost, 0);
+    EXPECT_EQ(request.final_disk_cost, index_size);
+    EXPECT_EQ(request.max_memory_cost, stream_budget);
+    EXPECT_EQ(request.max_disk_cost, index_size);
+    EXPECT_FALSE(request.has_raw_data);
 }
 
 template <typename T>
@@ -874,9 +930,16 @@ REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestV4,
                             CompareValFuncTest,
                             TestRangeCompareFuncTest);
 
+REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestInverted,
+                            ResourceEstimateUsesInternalInvertedIndexType);
+
 INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_HighCardinality,
                                HybridIndexTestV2,
                                BitmapType);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_Inverted,
+                               HybridIndexTestInverted,
+                               InvertedType);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_Nullable,
                                HybridIndexTestNullable,

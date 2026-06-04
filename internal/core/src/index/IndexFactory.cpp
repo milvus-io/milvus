@@ -584,7 +584,7 @@ IndexFactory::ScalarIndexLoadResource(
                index_type == milvus::index::RTREE_INDEX_TYPE) {
         request.final_memory_cost = 0;
         request.final_disk_cost = index_size_in_bytes;
-        request.max_memory_cost = index_size_in_bytes;
+        request.max_memory_cost = stream_memory_overhead;
         request.max_disk_cost = index_size_in_bytes;
 
         request.has_raw_data = false;

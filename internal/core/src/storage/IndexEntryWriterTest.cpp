@@ -1186,6 +1186,39 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamMatchesReadEntry) {
     EXPECT_EQ(entry.data, streamed);
 }
 
+TEST_F(IndexEntryWriterV3Test, ReadEntryStreamToFileWritesEntry) {
+    const std::string file_path = kV3FilePath + "_stream_to_file";
+    const size_t entry_size = 3 * 1024 * 1024 + 19;
+    auto data = GeneratePattern(entry_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    auto reader = IndexEntryReader::Open(input, file_size);
+
+    std::string local_file = GetRootPath() + "/stream_entry_output.bin";
+    reader->ReadEntryStreamToFile(
+        "data", local_file, milvus::storage::io::Priority::HIGH);
+
+    std::ifstream ifs(local_file, std::ios::binary | std::ios::ate);
+    ASSERT_TRUE(ifs.is_open());
+    size_t read_size = ifs.tellg();
+    ASSERT_EQ(read_size, entry_size);
+
+    ifs.seekg(0);
+    std::vector<uint8_t> read_data(read_size);
+    ifs.read(reinterpret_cast<char*>(read_data.data()), read_size);
+    VerifyPattern(read_data, entry_size);
+
+    ::unlink(local_file.c_str());
+}
+
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamConsumerExceptionDoesNotLeak) {
     const std::string file_path = kV3FilePath + "_stream_consumer_throw";
     const size_t slice_size = 64 * 1024;
