@@ -32,6 +32,7 @@
 #include "bitset/bitset.h"
 #include "common/Array.h"
 #include "common/EasyAssert.h"
+#include "common/FastMem.h"
 #include "common/FieldDataInterface.h"
 #include "common/File.h"
 #include "common/Slice.h"
@@ -234,17 +235,21 @@ ScalarIndexSort<T>::Serialize(const Config& config) {
 
     auto index_data_size = data_.size() * sizeof(IndexStructure<T>);
     std::shared_ptr<uint8_t[]> index_data(new uint8_t[index_data_size]);
-    memcpy(index_data.get(), data_.data(), index_data_size);
+    milvus::fastmem::FastMemcpy(
+        index_data.get(), data_.data(), index_data_size);
 
     std::shared_ptr<uint8_t[]> index_length(new uint8_t[sizeof(size_t)]);
     auto index_size = data_.size();
-    memcpy(index_length.get(), &index_size, sizeof(size_t));
+    milvus::fastmem::FastMemcpy(
+        index_length.get(), &index_size, sizeof(size_t));
 
     std::shared_ptr<uint8_t[]> index_num_rows(new uint8_t[sizeof(size_t)]);
-    memcpy(index_num_rows.get(), &total_num_rows_, sizeof(size_t));
+    milvus::fastmem::FastMemcpy(
+        index_num_rows.get(), &total_num_rows_, sizeof(size_t));
 
     std::shared_ptr<uint8_t[]> is_nested_data(new uint8_t[sizeof(bool)]);
-    memcpy(is_nested_data.get(), &is_nested_index_, sizeof(bool));
+    milvus::fastmem::FastMemcpy(
+        is_nested_data.get(), &is_nested_index_, sizeof(bool));
 
     BinarySet res_set;
     res_set.Append("index_data", index_data, index_data_size);
@@ -339,13 +344,14 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
                                         const Config& config) {
     size_t index_size;
     auto index_length = index_binary.GetByName("index_length");
-    memcpy(&index_size, index_length->data.get(), (size_t)index_length->size);
+    milvus::fastmem::FastMemcpy(
+        &index_size, index_length->data.get(), (size_t)index_length->size);
 
     auto is_nested_index = index_binary.GetByName("is_nested_index");
     if (is_nested_index) {
-        memcpy(&is_nested_index_,
-               is_nested_index->data.get(),
-               (size_t)is_nested_index->size);
+        milvus::fastmem::FastMemcpy(&is_nested_index_,
+                                    is_nested_index->data.get(),
+                                    (size_t)is_nested_index->size);
     }
 
     is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
@@ -363,16 +369,17 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
             load_priority);
     } else {
         data_.resize(index_size);
-        memcpy(data_.data(), index_data->data.get(), (size_t)index_data->size);
+        milvus::fastmem::FastMemcpy(
+            data_.data(), index_data->data.get(), (size_t)index_data->size);
     }
 
     setup_data_pointers();
 
     auto index_num_rows = index_binary.GetByName("index_num_rows");
     if (index_num_rows) {
-        memcpy(&total_num_rows_,
-               index_num_rows->data.get(),
-               (size_t)index_num_rows->size);
+        milvus::fastmem::FastMemcpy(&total_num_rows_,
+                                    index_num_rows->data.get(),
+                                    (size_t)index_num_rows->size);
     } else {
         total_num_rows_ = index_size;
     }
@@ -690,7 +697,7 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
             data_entry.data.data(), data_entry.data.size(), load_priority);
     } else {
         data_.resize(index_size);
-        std::memcpy(
+        milvus::fastmem::FastMemcpy(
             data_.data(), data_entry.data.data(), data_entry.data.size());
     }
 

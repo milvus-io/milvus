@@ -13,6 +13,7 @@
 #include <string.h>
 #include <string>
 
+#include "common/FastMem.h"
 #include "common/PrometheusClient.h"
 #include "monitor_c.h"
 
@@ -21,7 +22,7 @@ GetCoreMetrics() {
     auto str = milvus::monitor::getPrometheusClient().GetMetrics();
     auto len = str.length();
     char* res = static_cast<char*>(malloc(len + 1));
-    memcpy(res, str.data(), len);
+    milvus::fastmem::FastMemcpy(res, str.data(), len);
     res[len] = '\0';
     return res;
 }

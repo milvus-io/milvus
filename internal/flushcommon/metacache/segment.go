@@ -173,6 +173,7 @@ func NewSegmentInfo(info *datapb.SegmentInfo, bfs pkoracle.PkStat, bm25Stats *Se
 			currentSplit = append(currentSplit, storagecommon.ColumnGroup{
 				GroupID: group.GetFieldID(),
 				Fields:  group.GetChildFields(),
+				Format:  group.GetFormat(),
 			})
 		}
 		log.Info("recover split info", zap.Int64("segmentID", info.GetID()), zap.Stringers("columnGroup", currentSplit))

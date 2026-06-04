@@ -242,6 +242,12 @@ func mergeFieldBinlogs(currentBinlogs []*datapb.FieldBinlog, newBinlogs []*datap
 		if fieldBinlogs == nil {
 			currentBinlogs = append(currentBinlogs, newBinlog)
 		} else {
+			if len(fieldBinlogs.ChildFields) == 0 {
+				fieldBinlogs.ChildFields = newBinlog.GetChildFields()
+			}
+			if fieldBinlogs.Format == "" {
+				fieldBinlogs.Format = newBinlog.GetFormat()
+			}
 			fieldBinlogs.Binlogs = append(fieldBinlogs.Binlogs, newBinlog.Binlogs...)
 		}
 	}
@@ -282,8 +288,10 @@ func filterDuplicateFieldBinlogs(existingLogs, newLogs []*datapb.FieldBinlog) []
 		}
 		if len(filteredBinlogs) > 0 {
 			result = append(result, &datapb.FieldBinlog{
-				FieldID: fb.GetFieldID(),
-				Binlogs: filteredBinlogs,
+				FieldID:     fb.GetFieldID(),
+				ChildFields: fb.GetChildFields(),
+				Format:      fb.GetFormat(),
+				Binlogs:     filteredBinlogs,
 			})
 		}
 	}

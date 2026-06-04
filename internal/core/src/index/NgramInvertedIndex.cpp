@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "index/NgramInvertedIndex.h"
+#include "common/FastMem.h"
 
 #include <simdjson.h>
 #include <string.h>
@@ -226,7 +227,8 @@ NgramInvertedIndex::LoadEntries(storage::IndexEntryReader& reader,
     InvertedIndexTantivy<std::string>::LoadEntries(reader, config);
 
     auto avg_row_entry = reader.ReadEntry(NGRAM_AVG_ROW_SIZE_FILE_NAME);
-    std::memcpy(&avg_row_size_, avg_row_entry.data.data(), sizeof(size_t));
+    milvus::fastmem::FastMemcpy(
+        &avg_row_size_, avg_row_entry.data.data(), sizeof(size_t));
 
     LOG_INFO("LoadEntries NgramInvertedIndex done, avg_row_size: {} bytes",
              avg_row_size_);
@@ -254,7 +256,7 @@ NgramInvertedIndex::LoadIndexMetas(const std::vector<std::string>& index_files,
             file_manager_->LoadIndexToMemory({*avg_row_size_it}, load_priority);
         auto avg_row_size_data =
             std::move(index_datas.at(NGRAM_AVG_ROW_SIZE_FILE_NAME));
-        memcpy(
+        milvus::fastmem::FastMemcpy(
             &avg_row_size_, avg_row_size_data->PayloadData(), sizeof(size_t));
         LOG_INFO("Loaded ngram index avg_row_size: {} bytes", avg_row_size_);
     } else {

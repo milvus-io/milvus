@@ -56,6 +56,7 @@
 #include "common/ArrayOffsets.h"
 #include "common/ArrowDataWrapper.h"
 #include "common/Channel.h"
+#include "common/FastMem.h"
 #include "common/Chunk.h"
 #include "common/ChunkWriter.h"
 #include "common/Common.h"
@@ -1218,9 +1219,10 @@ ChunkedSegmentSealedImpl::load_system_field_internal(
             auto array_vec = read_single_column_batches(r->reader);
             auto chunk = create_chunk(field_meta, array_vec);
             auto chunk_ptr = static_cast<FixedWidthChunk*>(chunk.get());
-            std::copy_n(static_cast<const Timestamp*>(chunk_ptr->Span().data()),
-                        chunk_ptr->Span().row_count(),
-                        timestamps.data() + offset);
+            milvus::fastmem::FastMemcpy(
+                timestamps.data() + offset,
+                static_cast<const Timestamp*>(chunk_ptr->Span().data()),
+                chunk_ptr->Span().row_count() * sizeof(*timestamps.data()));
             offset += chunk_ptr->Span().row_count();
         }
 
@@ -3861,7 +3863,8 @@ ChunkedSegmentSealedImpl::CalcDistByIDs(
     if (result_distances == nullptr) {
         return false;
     }
-    std::memcpy(distances, result_distances, count * sizeof(float));
+    milvus::fastmem::FastMemcpy(
+        distances, result_distances, count * sizeof(float));
     return true;
 }
 
@@ -5833,10 +5836,10 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
                     val = reinterpret_cast<const uint8_t*>(bin_val.data());
                 }
                 auto floats = reinterpret_cast<const float*>(val);
-                std::copy(floats,
-                          floats + dim,
-                          float_data->mutable_data()->mutable_data() +
-                              data_pos * dim);
+                milvus::fastmem::FastMemcpy(
+                    float_data->mutable_data()->mutable_data() + data_pos * dim,
+                    floats,
+                    dim * sizeof(float));
                 data_pos++;
             }
             break;
@@ -5898,9 +5901,10 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
                         bin_val.size());
                     val = reinterpret_cast<const uint8_t*>(bin_val.data());
                 }
-                std::memcpy(vector_data->data() + data_pos * byte_width,
-                            val,
-                            byte_width);
+                milvus::fastmem::FastMemcpy(
+                    vector_data->data() + data_pos * byte_width,
+                    val,
+                    byte_width);
                 data_pos++;
             }
             break;

@@ -48,21 +48,10 @@ MakePropertiesFromStorageConfig(CStorageConfig c_storage_config) {
     std::vector<const char*> keys;
     std::vector<const char*> values;
 
-    // Lance's BuildEndpointUrl defaults to HTTPS when no scheme is present.
-    // Prepend http:// when SSL is not enabled so that Lance sets allow_http=true.
-    std::string fs_address;
-    if (c_storage_config.address != nullptr) {
-        fs_address = c_storage_config.address;
-        if (!c_storage_config.useSSL &&
-            fs_address.find("://") == std::string::npos) {
-            fs_address = "http://" + fs_address;
-        }
-    }
-
     // Add non-null string fields
     if (c_storage_config.address != nullptr) {
         keys.emplace_back(PROPERTY_FS_ADDRESS);
-        values.emplace_back(fs_address.c_str());
+        values.emplace_back(c_storage_config.address);
     }
     if (c_storage_config.bucket_name != nullptr) {
         keys.emplace_back(PROPERTY_FS_BUCKET_NAME);
@@ -168,21 +157,10 @@ std::shared_ptr<milvus_storage::api::Properties>
 MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
     auto properties_map = std::make_shared<milvus_storage::api::Properties>();
 
-    // Lance's BuildEndpointUrl defaults to HTTPS when no scheme is present.
-    // Prepend http:// when SSL is not enabled so that Lance sets allow_http=true.
-    std::string fs_address_internal;
-    if (c_storage_config.address != nullptr) {
-        fs_address_internal = c_storage_config.address;
-        if (!c_storage_config.useSSL &&
-            fs_address_internal.find("://") == std::string::npos) {
-            fs_address_internal = "http://" + fs_address_internal;
-        }
-    }
-
     // Add non-null string fields
     if (c_storage_config.address != nullptr) {
         milvus_storage::api::SetValue(
-            *properties_map, PROPERTY_FS_ADDRESS, fs_address_internal.c_str());
+            *properties_map, PROPERTY_FS_ADDRESS, c_storage_config.address);
     }
     if (c_storage_config.bucket_name != nullptr) {
         milvus_storage::api::SetValue(*properties_map,

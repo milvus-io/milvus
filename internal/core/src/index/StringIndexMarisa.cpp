@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <boost/uuid/uuid_io.hpp>
+#include "common/FastMem.h"
 #include <fcntl.h>
 #include <stdio.h>
 #include <sys/stat.h>
@@ -228,7 +229,7 @@ StringIndexMarisa::Serialize(const Config& config) {
 
     auto str_ids_len = str_ids_.size() * sizeof(size_t);
     std::shared_ptr<uint8_t[]> str_ids(new uint8_t[str_ids_len]);
-    memcpy(str_ids.get(), str_ids_.data(), str_ids_len);
+    milvus::fastmem::FastMemcpy(str_ids.get(), str_ids_.data(), str_ids_len);
 
     BinarySet res_set;
     res_set.Append(MARISA_TRIE_INDEX, index_data, size);
@@ -287,7 +288,8 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     auto str_ids = set.GetByName(MARISA_STR_IDS);
     auto str_ids_len = str_ids->size;
     str_ids_.resize(str_ids_len / sizeof(size_t), MARISA_NULL_KEY_ID);
-    memcpy(str_ids_.data(), str_ids->data.get(), str_ids_len);
+    milvus::fastmem::FastMemcpy(
+        str_ids_.data(), str_ids->data.get(), str_ids_len);
 
     fill_offsets();
     built_ = true;
@@ -803,7 +805,8 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
 
     auto str_ids_len = str_ids_entry.data.size();
     str_ids_.resize(str_ids_len / sizeof(size_t), MARISA_NULL_KEY_ID);
-    memcpy(str_ids_.data(), str_ids_entry.data.data(), str_ids_len);
+    milvus::fastmem::FastMemcpy(
+        str_ids_.data(), str_ids_entry.data.data(), str_ids_len);
 
     fill_offsets();
     built_ = true;

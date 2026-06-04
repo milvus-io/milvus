@@ -80,7 +80,7 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 // only job is to write data files. Close returns the resulting column
 // groups, which the caller passes to packed.CommitManifestUpdates to
 // register them with a manifest version.
-func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*FFIPackedWriter, error) {
+func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, extraProperties ...map[string]string) (*FFIPackedWriter, error) {
 	cBasePath := C.CString(basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 
@@ -93,15 +93,19 @@ func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []st
 		storageConfig = CreateStorageConfig()
 	}
 
-	pattern := strings.Join(lo.Map(columnGroups, func(columnGroup storagecommon.ColumnGroup, _ int) string {
-		return strings.Join(lo.Map(columnGroup.Columns, func(index int, _ int) string {
-			return schema.Field(index).Name
-		}), "|")
-	}), ",")
+	pattern, err := SchemaBasedPattern(schema, columnGroups)
+	if err != nil {
+		return nil, err
+	}
 
 	extra := map[string]string{
 		PropertyWriterPolicy:             "schema_based",
 		PropertyWriterSchemaBasedPattern: pattern,
+	}
+	for _, properties := range extraProperties {
+		for key, value := range properties {
+			extra[key] = value
+		}
 	}
 
 	// Configure CMEK encryption if plugin context is provided
@@ -156,6 +160,17 @@ func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []st
 		cWriterHandle: writerHandle,
 		cProperties:   cProperties,
 	}, nil
+}
+
+func SchemaBasedPattern(schema *arrow.Schema, columnGroups []storagecommon.ColumnGroup) (string, error) {
+	if schema == nil {
+		return "", fmt.Errorf("arrow schema is required")
+	}
+	return strings.Join(lo.Map(columnGroups, func(columnGroup storagecommon.ColumnGroup, _ int) string {
+		return strings.Join(lo.Map(columnGroup.Columns, func(index int, _ int) string {
+			return schema.Field(index).Name
+		}), "|")
+	}), ","), nil
 }
 
 // AsNewColumnGroups marks this writer so that the column groups returned

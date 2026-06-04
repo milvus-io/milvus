@@ -13,13 +13,18 @@ package storage
 import (
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // TestPackedManifestRecordWriter_CloseWithoutWrite verifies the no-data
@@ -74,4 +79,94 @@ func TestPackedTextManifestRecordWriter_CloseWithoutWrite(t *testing.T) {
 
 	_, _, _, manifestPath, _ := w.GetLogs()
 	assert.Empty(t, manifestPath, "no Write means no manifest should be produced")
+}
+
+func TestPackedManifestRecordWriter_FillsV3ColumnGroupFormats(t *testing.T) {
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.DataNodeCfg.StorageFormat.Key, "vortex"))
+	defer params.Reset(params.DataNodeCfg.StorageFormat.Key)
+
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: common.TimeStampField, DataType: schemapb.DataType_Int64},
+		{FieldID: common.RowIDField, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, DataType: schemapb.DataType_Int64},
+	}}
+	columnGroups := []storagecommon.ColumnGroup{
+		{GroupID: 0, Columns: []int{0, 1}, Fields: []int64{common.TimeStampField, common.RowIDField}},
+		{GroupID: 101, Columns: []int{2}, Fields: []int64{101}, Format: "parquet"},
+	}
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+
+	var gotWriterFormat string
+	var gotSchemaBasedFormats []string
+	var gotColumnGroups []storagecommon.ColumnGroup
+	patch := mockey.Mock(NewPackedRecordBatchWriter).To(
+		func(_ string, _ *schemapb.CollectionSchema, _, _ int64, groups []storagecommon.ColumnGroup,
+			_ *indexpb.StorageConfig, _ *indexcgopb.StoragePluginContext, writerFormat string, schemaBasedFormats []string,
+		) (*packedRecordBatchWriter, error) {
+			gotWriterFormat = writerFormat
+			gotSchemaBasedFormats = append([]string(nil), schemaBasedFormats...)
+			gotColumnGroups = append([]storagecommon.ColumnGroup(nil), groups...)
+			return &packedRecordBatchWriter{}, nil
+		}).Build()
+	defer patch.UnPatch()
+
+	w, err := newPackedManifestRecordWriter(1, 2, 3, schema,
+		ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
+		allocator.NewLocalAllocator(1, 1<<20),
+		1024, 0, 0, columnGroups, cfg, nil)
+	require.NoError(t, err)
+	require.NoError(t, w.initWriters(nil))
+
+	assert.Equal(t, "vortex", gotWriterFormat)
+	assert.Equal(t, []string{"vortex", "parquet"}, gotSchemaBasedFormats)
+	require.Len(t, gotColumnGroups, 2)
+	assert.Equal(t, "vortex", gotColumnGroups[0].Format)
+	assert.Equal(t, "parquet", gotColumnGroups[1].Format)
+	assert.Equal(t, gotColumnGroups, w.columnGroups)
+}
+
+func TestPackedTextManifestRecordWriter_FillsV3ColumnGroupFormats(t *testing.T) {
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.DataNodeCfg.StorageFormat.Key, "vortex"))
+	defer params.Reset(params.DataNodeCfg.StorageFormat.Key)
+
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: common.TimeStampField, DataType: schemapb.DataType_Int64},
+		{FieldID: common.RowIDField, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, DataType: schemapb.DataType_Text, Name: "doc"},
+	}}
+	columnGroups := []storagecommon.ColumnGroup{
+		{GroupID: 0, Columns: []int{0, 1}, Fields: []int64{common.TimeStampField, common.RowIDField}},
+		{GroupID: 101, Columns: []int{2}, Fields: []int64{101}, Format: "parquet"},
+	}
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+
+	var gotWriterFormat string
+	var gotSchemaBasedFormats []string
+	var gotColumnGroups []storagecommon.ColumnGroup
+	patch := mockey.Mock(NewPackedTextBatchWriter).To(
+		func(_ string, _ string, _ *schemapb.CollectionSchema, _, _ int64, groups []storagecommon.ColumnGroup,
+			_ *indexpb.StorageConfig, _ []packed.TextColumnConfig, writerFormat string, schemaBasedFormats []string,
+		) (*packedTextBatchWriter, error) {
+			gotWriterFormat = writerFormat
+			gotSchemaBasedFormats = append([]string(nil), schemaBasedFormats...)
+			gotColumnGroups = append([]storagecommon.ColumnGroup(nil), groups...)
+			return &packedTextBatchWriter{}, nil
+		}).Build()
+	defer patch.UnPatch()
+
+	w, err := NewPackedTextManifestRecordWriter(1, 2, 3, schema,
+		ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
+		allocator.NewLocalAllocator(1, 1<<20),
+		1024, 0, 0, columnGroups, cfg, nil)
+	require.NoError(t, err)
+	require.NoError(t, w.initWriters(nil))
+
+	assert.Equal(t, "vortex", gotWriterFormat)
+	assert.Equal(t, []string{"vortex", "parquet"}, gotSchemaBasedFormats)
+	require.Len(t, gotColumnGroups, 2)
+	assert.Equal(t, "vortex", gotColumnGroups[0].Format)
+	assert.Equal(t, "parquet", gotColumnGroups[1].Format)
+	assert.Equal(t, gotColumnGroups, w.columnGroups)
 }

@@ -28,6 +28,7 @@
 #include <string>
 
 #include "common/Consts.h"
+#include "common/FastMem.h"
 #include "common/OffsetMapping.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
@@ -769,8 +770,14 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
     search_result.distances_.resize(total_num);
     search_result.total_nq_ = num_queries;
     search_result.unity_topK_ = topk;
-    std::copy_n(ids, total_num, search_result.seg_offsets_.data());
-    std::copy_n(distances, total_num, search_result.distances_.data());
+    milvus::fastmem::FastMemcpy(
+        search_result.seg_offsets_.data(),
+        ids,
+        total_num * sizeof(*search_result.seg_offsets_.data()));
+    milvus::fastmem::FastMemcpy(
+        search_result.distances_.data(),
+        distances,
+        total_num * sizeof(*search_result.distances_.data()));
 }
 
 template <typename T>

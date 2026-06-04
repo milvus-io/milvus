@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <algorithm>
+#include "common/FastMem.h"
 #include <boost/algorithm/string.hpp>
 #include <optional>
 #include <sys/errno.h>
@@ -223,7 +224,7 @@ template <typename T>
 void
 BitmapIndex<T>::SerializeIndexData(uint8_t* data_ptr) {
     for (auto& pair : data_) {
-        memcpy(data_ptr, &pair.first, sizeof(T));
+        milvus::fastmem::FastMemcpy(data_ptr, &pair.first, sizeof(T));
         data_ptr += sizeof(T);
 
         pair.second.write(reinterpret_cast<char*>(data_ptr));
@@ -258,7 +259,7 @@ BitmapIndex<T>::SerializeIndexMeta() {
     auto json_string = ss.str();
     auto str_size = json_string.size();
     std::shared_ptr<uint8_t[]> res(new uint8_t[str_size]);
-    memcpy(res.get(), json_string.data(), str_size);
+    milvus::fastmem::FastMemcpy(res.get(), json_string.data(), str_size);
     return std::make_pair(res, str_size);
 }
 
@@ -267,10 +268,10 @@ void
 BitmapIndex<std::string>::SerializeIndexData(uint8_t* data_ptr) {
     for (auto& pair : data_) {
         size_t key_size = pair.first.size();
-        memcpy(data_ptr, &key_size, sizeof(size_t));
+        milvus::fastmem::FastMemcpy(data_ptr, &key_size, sizeof(size_t));
         data_ptr += sizeof(size_t);
 
-        memcpy(data_ptr, pair.first.data(), key_size);
+        milvus::fastmem::FastMemcpy(data_ptr, pair.first.data(), key_size);
         data_ptr += key_size;
 
         pair.second.write(reinterpret_cast<char*>(data_ptr));
@@ -397,7 +398,7 @@ BitmapIndex<T>::DeserializeIndexData(const uint8_t* data_ptr,
     ChooseIndexLoadMode(index_length);
     for (size_t i = 0; i < index_length; ++i) {
         T key;
-        memcpy(&key, data_ptr, sizeof(T));
+        milvus::fastmem::FastMemcpy(&key, data_ptr, sizeof(T));
         data_ptr += sizeof(T);
 
         roaring::Roaring value;
@@ -461,7 +462,7 @@ BitmapIndex<std::string>::DeserializeIndexData(
     ChooseIndexLoadMode(index_length);
     for (size_t i = 0; i < index_length; ++i) {
         size_t key_size;
-        memcpy(&key_size, data_ptr, sizeof(size_t));
+        milvus::fastmem::FastMemcpy(&key_size, data_ptr, sizeof(size_t));
         data_ptr += sizeof(size_t);
 
         std::string key(reinterpret_cast<const char*>(data_ptr), key_size);
@@ -488,7 +489,7 @@ template <typename T>
 T
 BitmapIndex<T>::ParseKey(const uint8_t** ptr) {
     T key;
-    memcpy(&key, *ptr, sizeof(T));
+    milvus::fastmem::FastMemcpy(&key, *ptr, sizeof(T));
     *ptr += sizeof(T);
     return key;
 }
@@ -498,7 +499,7 @@ std::string
 BitmapIndex<std::string>::ParseKey(const uint8_t** ptr) {
     auto data_ptr = *ptr;
     size_t key_size;
-    memcpy(&key_size, data_ptr, sizeof(size_t));
+    milvus::fastmem::FastMemcpy(&key_size, data_ptr, sizeof(size_t));
     data_ptr += sizeof(size_t);
 
     std::string key(reinterpret_cast<const char*>(data_ptr), key_size);
