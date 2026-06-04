@@ -185,7 +185,10 @@ func (c *catalog) ListVChannelWindowMetas(ctx context.Context, pchannelName stri
 		if err := proto.Unmarshal([]byte(value), meta); err != nil {
 			return nil, errors.Wrapf(err, "unmarshal vchannel window meta %s failed", keys[i])
 		}
-		vchannelName := strings.TrimPrefix(keys[i], prefix)
+		// LoadWithPrefix returns full keys including the metaKV rootPath, so strip the
+		// prefix rootPath-tolerantly like removePrefix does; a plain strings.TrimPrefix
+		// would be a no-op and leave the whole key as the vchannel name.
+		vchannelName := typeutil.After(keys[i], prefix)
 		meta, _, err = normalizeVChannelWindowMeta(pchannelName, viewType, vchannelName, meta)
 		if err != nil {
 			return nil, errors.Wrapf(err, "invalid vchannel window meta %s", keys[i])
