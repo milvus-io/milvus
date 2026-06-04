@@ -326,7 +326,7 @@ func (bw *BulkPackWriterV3) resolveInsertWriterFormats() (string, []string, erro
 		if version != packed.ManifestEarliest {
 			for _, columnGroup := range bw.columnGroups {
 				if columnGroup.Format == "" {
-					return "", nil, fmt.Errorf("column group %d fields %v missing format for existing manifest %s",
+					return "", nil, merr.WrapErrDataIntegrityMsg("column group %d fields %v missing format for existing manifest %s",
 						columnGroup.GroupID, columnGroup.Fields, bw.initialManifestPath)
 				}
 			}

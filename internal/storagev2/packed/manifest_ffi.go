@@ -396,7 +396,7 @@ func ResolveManifestSingleWriterFormat(
 		return fallbackFormat, nil
 	}
 	if len(formats) > 1 {
-		return "", fmt.Errorf("mixed writer formats: single writer columns %v overlap mixed formats in manifest %s: %s",
+		return "", merr.WrapErrDataIntegrityMsg("mixed writer formats: single writer columns %v overlap mixed formats in manifest %s: %s",
 			columns, manifestPath, formatSetString(formats))
 	}
 	for format := range formats {
@@ -480,11 +480,11 @@ func readColumnGroupsFromManifest(
 		}
 		if cg.num_of_files > 0 {
 			if cg.format == nil {
-				return nil, fmt.Errorf("manifest column group %d has files but nil format", i)
+				return nil, merr.WrapErrDataIntegrityMsg("manifest column group %d has files but nil format", i)
 			}
 			group.Format = C.GoString(cg.format)
 			if group.Format == "" {
-				return nil, fmt.Errorf("manifest column group %d has files but empty format", i)
+				return nil, merr.WrapErrDataIntegrityMsg("manifest column group %d has files but empty format", i)
 			}
 		}
 		if cg.files != nil {

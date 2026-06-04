@@ -164,7 +164,7 @@ func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []st
 
 func SchemaBasedPattern(schema *arrow.Schema, columnGroups []storagecommon.ColumnGroup) (string, error) {
 	if schema == nil {
-		return "", fmt.Errorf("arrow schema is required")
+		return "", merr.WrapErrParameterInvalidMsg("arrow schema is required")
 	}
 	return strings.Join(lo.Map(columnGroups, func(columnGroup storagecommon.ColumnGroup, _ int) string {
 		return strings.Join(lo.Map(columnGroup.Columns, func(index int, _ int) string {
