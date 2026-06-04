@@ -67,6 +67,11 @@ func (opt *searchIteratorOption) WithPartitions(partitionNames ...string) *searc
 	return opt
 }
 
+func (opt *searchIteratorOption) WithNamespace(namespace string) *searchIteratorOption {
+	opt.searchOption.WithNamespace(namespace)
+	return opt
+}
+
 func (opt *searchIteratorOption) WithFilter(expr string) *searchIteratorOption {
 	opt.annRequest.WithFilter(expr)
 	return opt
@@ -163,6 +168,7 @@ type QueryIteratorOption interface {
 type queryIteratorOption struct {
 	collectionName             string
 	partitionNames             []string
+	namespace                  *string
 	outputFields               []string
 	expr                       string
 	batchSize                  int
@@ -175,6 +181,7 @@ func (opt *queryIteratorOption) Request() (*milvuspb.QueryRequest, error) {
 	return &milvuspb.QueryRequest{
 		CollectionName:        opt.collectionName,
 		PartitionNames:        opt.partitionNames,
+		Namespace:             opt.namespace,
 		OutputFields:          opt.outputFields,
 		Expr:                  opt.expr,
 		ConsistencyLevel:      opt.consistencyLevel.CommonConsistencyLevel(),
@@ -205,6 +212,11 @@ func (opt *queryIteratorOption) WithBatchSize(batchSize int) *queryIteratorOptio
 
 func (opt *queryIteratorOption) WithPartitions(partitionNames ...string) *queryIteratorOption {
 	opt.partitionNames = partitionNames
+	return opt
+}
+
+func (opt *queryIteratorOption) WithNamespace(namespace string) *queryIteratorOption {
+	opt.namespace = &namespace
 	return opt
 }
 

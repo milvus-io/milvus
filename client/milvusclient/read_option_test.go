@@ -90,6 +90,29 @@ func (s *SearchOptionSuite) TestBasic() {
 	s.Error(err)
 }
 
+func (s *SearchOptionSuite) TestWithNamespace() {
+	collName := "namespace_read_option"
+	namespace := "tenant_a"
+
+	searchReq, err := NewSearchOption(collName, 10, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+		WithNamespace(namespace).
+		Request()
+	s.Require().NoError(err)
+	s.Equal(namespace, searchReq.GetNamespace())
+
+	queryReq, err := NewQueryOption(collName).
+		WithNamespace(namespace).
+		Request()
+	s.Require().NoError(err)
+	s.Equal(namespace, queryReq.GetNamespace())
+
+	hybridReq, err := NewHybridSearchOption(collName, 10, NewAnnRequest("vector", 10, entity.FloatVector([]float32{0.1, 0.2}))).
+		WithNamespace(namespace).
+		HybridRequest()
+	s.Require().NoError(err)
+	s.Equal(namespace, hybridReq.GetNamespace())
+}
+
 func (s *SearchOptionSuite) TestPlaceHolder() {
 	type testCase struct {
 		tag         string
