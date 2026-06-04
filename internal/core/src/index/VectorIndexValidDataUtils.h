@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include "common/FastMem.h"
 #include <cstdint>
@@ -34,6 +35,46 @@ namespace milvus::index {
 inline bool
 IsValidDataBinary(const std::string& name) {
     return name == VALID_DATA_COUNT_KEY || name == VALID_DATA_KEY;
+}
+
+inline std::string
+GetIndexFileName(const std::string& file) {
+    auto pos = file.find_last_of("/\\");
+    if (pos == std::string::npos) {
+        return file;
+    }
+    return file.substr(pos + 1);
+}
+
+inline bool
+IsValidDataDiskFileSlice(const std::string& file) {
+    const auto file_name = GetIndexFileName(file);
+    const std::string prefix = std::string(VALID_DATA_KEY) + "_";
+    if (file_name.size() <= prefix.size() ||
+        file_name.compare(0, prefix.size(), prefix) != 0) {
+        return false;
+    }
+    return std::all_of(file_name.begin() + prefix.size(),
+                       file_name.end(),
+                       [](char c) { return c >= '0' && c <= '9'; });
+}
+
+inline std::vector<std::string>
+FilterValidDataDiskFileSlices(const std::vector<std::string>& files) {
+    std::vector<std::string> valid_data_files;
+    for (const auto& file : files) {
+        if (IsValidDataDiskFileSlice(file)) {
+            valid_data_files.emplace_back(file);
+        }
+    }
+    return valid_data_files;
+}
+
+inline std::vector<std::string>
+GetCacheFilesForDiskIndexLoad(const std::vector<std::string>& index_files,
+                              bool load_index_with_stream) {
+    return load_index_with_stream ? FilterValidDataDiskFileSlices(index_files)
+                                  : index_files;
 }
 
 inline bool
