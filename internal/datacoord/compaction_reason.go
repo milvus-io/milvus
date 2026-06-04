@@ -38,6 +38,7 @@ type compactionReasonMeta struct {
 	ctx     context.Context
 	catalog metastore.DataCoordCatalog
 	records map[int64]*datapb.CompactionReasonRecord
+	reasons *compactionReasons
 }
 
 func newCompactionReasonMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*compactionReasonMeta, error) {
@@ -45,6 +46,7 @@ func newCompactionReasonMeta(ctx context.Context, catalog metastore.DataCoordCat
 		ctx:     ctx,
 		catalog: catalog,
 		records: make(map[int64]*datapb.CompactionReasonRecord),
+		reasons: newCompactionReasons(nil),
 	}
 	if err := meta.reloadFromKV(); err != nil {
 		return nil, err
@@ -58,9 +60,12 @@ func (m *compactionReasonMeta) reloadFromKV() error {
 	if err != nil {
 		return err
 	}
+	loadedRecords := make(map[int64]*datapb.CompactionReasonRecord, len(records))
 	for _, reasonRecord := range records {
-		m.records[reasonRecord.GetReasonID()] = proto.Clone(reasonRecord).(*datapb.CompactionReasonRecord)
+		loadedRecords[reasonRecord.GetReasonID()] = proto.Clone(reasonRecord).(*datapb.CompactionReasonRecord)
 	}
+	m.records = loadedRecords
+	m.reasons = newCompactionReasons(loadedRecords)
 	log.Info("DataCoord compactionReasonMeta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
@@ -90,6 +95,13 @@ func (m *compactionReasonMeta) GetCompactionReasonRecords() map[int64]*datapb.Co
 	return records
 }
 
+func (m *compactionReasonMeta) GetActiveCompactionReasons() []compactionReason {
+	m.RLock()
+	defer m.RUnlock()
+
+	return m.reasons.Active()
+}
+
 // SaveCompactionReasonRecord persists a reason record before updating the
 // in-memory cache.
 func (m *compactionReasonMeta) SaveCompactionReasonRecord(ctx context.Context, record *datapb.CompactionReasonRecord) error {
@@ -103,7 +115,9 @@ func (m *compactionReasonMeta) SaveCompactionReasonRecord(ctx context.Context, r
 			zap.Error(err))
 		return err
 	}
-	m.records[record.GetReasonID()] = proto.Clone(record).(*datapb.CompactionReasonRecord)
+	cloned := proto.Clone(record).(*datapb.CompactionReasonRecord)
+	m.records[record.GetReasonID()] = cloned
+	m.reasons.Upsert(cloned)
 	log.Info("meta update: save compaction reason record done",
 		zap.Int64("reasonID", record.GetReasonID()),
 		zap.Int64("collectionID", record.GetScope().GetCollectionID()),
@@ -133,6 +147,7 @@ func (m *compactionReasonMeta) UpdateCompactionReasonRecordState(ctx context.Con
 		updated.State = state
 		updated.DroppedAtTS = droppedAtTS
 		m.records[reasonID] = updated
+		m.reasons.Upsert(updated)
 	}
 	log.Info("meta update: update compaction reason record state done",
 		zap.Int64("reasonID", reasonID),
@@ -154,7 +169,57 @@ func (m *compactionReasonMeta) DropCompactionReasonRecord(ctx context.Context, r
 		return err
 	}
 	delete(m.records, record.GetReasonID())
+	m.reasons.Delete(record.GetReasonID())
 	return nil
+}
+
+type compactionReasons struct {
+	reasons map[int64]compactionReason
+}
+
+func newCompactionReasons(records map[int64]*datapb.CompactionReasonRecord) *compactionReasons {
+	reasons := &compactionReasons{
+		reasons: make(map[int64]compactionReason, len(records)),
+	}
+	for _, record := range records {
+		reasons.Upsert(record)
+	}
+	return reasons
+}
+
+func (r *compactionReasons) Upsert(record *datapb.CompactionReasonRecord) {
+	if r == nil || record == nil {
+		return
+	}
+	if !isSupportedCompactionReason(record) {
+		delete(r.reasons, record.GetReasonID())
+		return
+	}
+	r.reasons[record.GetReasonID()] = newCompactionReason(record)
+}
+
+func (r *compactionReasons) Delete(reasonID int64) {
+	if r == nil {
+		return
+	}
+	delete(r.reasons, reasonID)
+}
+
+func (r *compactionReasons) Active() []compactionReason {
+	if r == nil {
+		return nil
+	}
+	active := make([]compactionReason, 0, len(r.reasons))
+	for _, reason := range r.reasons {
+		record := reason.Record()
+		if record.GetState() == datapb.CompactionReasonState_REASON_STATE_ACTIVE {
+			active = append(active, reason)
+		}
+	}
+	sort.Slice(active, func(i, j int) bool {
+		return active[i].Record().GetReasonID() < active[j].Record().GetReasonID()
+	})
+	return active
 }
 
 type compactionReason interface {
@@ -170,6 +235,9 @@ type compactionReasonBase struct {
 }
 
 func newCompactionReason(record *datapb.CompactionReasonRecord) compactionReason {
+	if record != nil {
+		record = proto.Clone(record).(*datapb.CompactionReasonRecord)
+	}
 	return finiteCompactionReason{compactionReasonBase: compactionReasonBase{record: record}}
 }
 
@@ -269,6 +337,10 @@ func isBaseRewriteCompactionReason(record *datapb.CompactionReasonRecord) bool {
 	return record != nil &&
 		record.GetReasonType() == datapb.CompactionReasonType_REASON_INTENT_REWRITE &&
 		record.GetTailLimit() == 0
+}
+
+func isSupportedCompactionReason(record *datapb.CompactionReasonRecord) bool {
+	return isBaseRewriteCompactionReason(record)
 }
 
 func allocCompactionReasonIdentity(ctx context.Context, alloc allocator.Allocator) (int64, uint64, error) {

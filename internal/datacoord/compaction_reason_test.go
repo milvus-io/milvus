@@ -158,6 +158,51 @@ func (s *CompactionReasonMetaSuite) TestSaveUpdateDrop() {
 	s.Equal([]int64{10}, *dropped)
 }
 
+func (s *CompactionReasonMetaSuite) TestMaterializesReasonsOnRecordMutation() {
+	activeRecord := &datapb.CompactionReasonRecord{
+		ReasonID:   10,
+		Scope:      compactionReasonScope(100, 0, ""),
+		ReasonType: datapb.CompactionReasonType_REASON_INTENT_REWRITE,
+		ExpectedTS: 1000,
+		TailLimit:  0,
+		State:      datapb.CompactionReasonState_REASON_STATE_ACTIVE,
+	}
+	inactiveRecord := &datapb.CompactionReasonRecord{
+		ReasonID:   20,
+		Scope:      compactionReasonScope(100, 0, ""),
+		ReasonType: datapb.CompactionReasonType_REASON_INTENT_REWRITE,
+		ExpectedTS: 1000,
+		TailLimit:  0,
+		State:      datapb.CompactionReasonState_REASON_STATE_INACTIVE,
+	}
+	catalog, _, _, _ := newCompactionReasonTestCatalog(s.T(), activeRecord, inactiveRecord)
+	meta, err := newCompactionReasonMeta(s.ctx, catalog)
+	s.Require().NoError(err)
+
+	activeReasons := meta.GetActiveCompactionReasons()
+	s.Require().Len(activeReasons, 1)
+	s.Equal(int64(10), activeReasons[0].Record().GetReasonID())
+	oldReason := activeReasons[0]
+	probe := reasonSegmentWithDataTS(1, 100, 10, "ch-1", 1500, 1500, false)
+	s.False(oldReason.Match(probe))
+
+	updatedRecord := proto.Clone(activeRecord).(*datapb.CompactionReasonRecord)
+	updatedRecord.ExpectedTS = 2000
+	s.Require().NoError(meta.SaveCompactionReasonRecord(s.ctx, updatedRecord))
+	activeReasons = meta.GetActiveCompactionReasons()
+	s.Require().Len(activeReasons, 1)
+	s.True(activeReasons[0].Match(probe))
+	s.False(oldReason.Match(probe))
+
+	s.Require().NoError(meta.UpdateCompactionReasonRecordState(s.ctx, 10, datapb.CompactionReasonState_REASON_STATE_DONE, 0))
+	s.Empty(meta.GetActiveCompactionReasons())
+
+	s.Require().NoError(meta.SaveCompactionReasonRecord(s.ctx, updatedRecord))
+	s.Require().Len(meta.GetActiveCompactionReasons(), 1)
+	s.Require().NoError(meta.DropCompactionReasonRecord(s.ctx, updatedRecord))
+	s.Empty(meta.GetActiveCompactionReasons())
+}
+
 func TestFiniteCompactionReasonMatchUsesRewriteBoundaryPredicate(t *testing.T) {
 	record := &datapb.CompactionReasonRecord{
 		Scope:      compactionReasonScope(100, 0, ""),
