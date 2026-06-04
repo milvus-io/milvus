@@ -11,4 +11,5 @@ var (
 	ErrUnrecoverable            = errors.New("unrecoverable")
 	ErrFenced                   = errors.New("fenced")
 	ErrIgnoredOperation         = errors.New("ignored operation")
+	ErrPKStateConflict          = errors.New("pk-state CAS conflict")
 )

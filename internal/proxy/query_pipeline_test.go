@@ -69,6 +69,7 @@ func TestNewQueryPipeline_Plain(t *testing.T) {
 		schema, 3, 0, reduce.IReduceNoOrder,
 		nil, nil, nil, nil,
 		[]int64{100, 101},
+		false,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, pipeline)
@@ -104,6 +105,7 @@ func TestNewQueryPipeline_Plain_ComplementFields(t *testing.T) {
 		schema, 2, 0, reduce.IReduceNoOrder,
 		nil, nil, nil, nil,
 		[]int64{100, 101},
+		false,
 	)
 	require.NoError(t, err)
 
@@ -139,6 +141,7 @@ func TestNewQueryPipeline_OrderBy(t *testing.T) {
 		schema, 3, 0, reduce.IReduceNoOrder,
 		orderByFields, nil, nil, nil,
 		[]int64{100, 101},
+		false,
 	)
 	require.NoError(t, err)
 
@@ -178,6 +181,7 @@ func TestNewQueryPipeline_OrderBy_WithOffset(t *testing.T) {
 		schema, 2, 1, reduce.IReduceNoOrder, // limit=2, offset=1
 		orderByFields, nil, nil, nil,
 		[]int64{100, 101},
+		false,
 	)
 	require.NoError(t, err)
 
@@ -205,6 +209,7 @@ func TestNewQueryPipeline_EmptyResult(t *testing.T) {
 		schema, 10, 0, reduce.IReduceNoOrder,
 		nil, nil, nil, nil,
 		[]int64{100, 101},
+		false,
 	)
 	require.NoError(t, err)
 
@@ -243,6 +248,7 @@ func TestNewQueryPipeline_GroupBy(t *testing.T) {
 		[]*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 500}},
 		outputMap,
 		nil, // outputFieldIDs not used for GROUP BY
+		false,
 	)
 	require.NoError(t, err)
 
@@ -293,6 +299,7 @@ func TestNewQueryPipeline_GroupByOrderBy(t *testing.T) {
 		[]*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 500}},
 		outputMap,
 		nil,
+		false,
 	)
 	require.NoError(t, err)
 
@@ -327,6 +334,7 @@ func TestNewQueryPipeline_Plain_ElementIndices(t *testing.T) {
 		schema, 3, 0, reduce.IReduceNoOrder,
 		nil, nil, nil, nil,
 		[]int64{100, 101},
+		false,
 	)
 	require.NoError(t, err)
 
@@ -367,6 +375,7 @@ func TestNewQueryPipeline_Plain_NoElementLevel(t *testing.T) {
 		schema, 3, 0, reduce.IReduceNoOrder,
 		nil, nil, nil, nil,
 		[]int64{100, 101},
+		false,
 	)
 	require.NoError(t, err)
 
@@ -403,7 +412,49 @@ func TestNewQueryPipeline_GroupByOrderBy_InvalidField(t *testing.T) {
 		nil,          // no aggregates
 		nil,          // outputMap (nil ok since we expect error before use)
 		nil,
+		false,
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
+}
+
+// =========================================================================
+// Partial-update OCC: keepTimestamp behavior in complementFieldOperator
+// =========================================================================
+
+func TestNewQueryPipeline_Plain_KeepTimestamp(t *testing.T) {
+	schema := testSchema()
+	// keepTimestamp=true is the partial-update OCC path: the hidden Timestamp
+	// system column must survive complementFieldOperator with FieldName/FieldId
+	// /Type populated so the proxy can read per-row versions.
+	pipeline, err := NewQueryPipeline(
+		schema, 3, 0, reduce.IReduceNoOrder,
+		nil, nil, nil, nil,
+		[]int64{100, 101},
+		true,
+	)
+	require.NoError(t, err)
+
+	r := &internalpb.RetrieveResults{
+		Ids: makeTestIntIDs([]int64{1, 2}),
+		FieldsData: []*schemapb.FieldData{
+			makeTestInt64Field(100, "", []int64{1, 2}),
+			makeTestInt64Field(101, "", []int64{10, 20}),
+			makeTestInt64Field(common.TimeStampField, "", []int64{42, 43}),
+		},
+	}
+
+	result, err := pipeline.Execute(context.Background(), []*internalpb.RetrieveResults{r})
+	require.NoError(t, err)
+
+	var tsCol *schemapb.FieldData
+	for _, fd := range result.GetFieldsData() {
+		if fd.GetFieldId() == common.TimeStampField {
+			tsCol = fd
+		}
+	}
+	require.NotNil(t, tsCol, "timestamp column must be preserved when keepTimestamp=true")
+	assert.Equal(t, common.TimeStampFieldName, tsCol.GetFieldName())
+	assert.Equal(t, schemapb.DataType_Int64, tsCol.GetType())
+	assert.Equal(t, []int64{42, 43}, tsCol.GetScalars().GetLongData().GetData())
 }

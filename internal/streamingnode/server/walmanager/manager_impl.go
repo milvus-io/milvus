@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/partial_update"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
@@ -33,6 +34,7 @@ func OpenManager() (Manager, error) {
 			lock.NewInterceptorBuilder(),
 			replicate.NewInterceptorBuilder(),
 			timetick.NewInterceptorBuilder(),
+			partial_update.NewInterceptorBuilder(),
 			shard.NewInterceptorBuilder(),
 		},
 	)

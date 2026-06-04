@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/partial_update"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
@@ -61,6 +62,7 @@ func TestWAL(t *testing.T) {
 		lock.NewInterceptorBuilder(),
 		replicate.NewInterceptorBuilder(),
 		timetick.NewInterceptorBuilder(),
+		partial_update.NewInterceptorBuilder(),
 		shard.NewInterceptorBuilder(),
 	)
 	message.RegisterDefaultWALName(message.WALNameTest)

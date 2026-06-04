@@ -86,10 +86,12 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 
 	// start to repack insert data
 	var msgs []message.MutableMessage
+	occInput := buildUpsertOCCInput(ut.req.GetPartialUpdate(), ut.result.IDs,
+		ut.occExpectedRowTs, ut.occExpectedRowExists)
 	if ut.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion)
+		msgs, err = repackInsertDataForStreamingServiceOCC(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion, occInput)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schemaVersion)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingServiceOCC(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schemaVersion, occInput)
 	}
 	if err != nil {
 		log.Warn("assign segmentID and repack insert data failed", zap.Error(err))

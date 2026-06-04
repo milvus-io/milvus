@@ -195,6 +195,7 @@ func TestResumableProducer_ProduceInternalErrors(t *testing.T) {
 	p.EXPECT().Append(mock.Anything, mock.Anything).Return(nil, status.NewUnrecoverableError("unrecoverable")).Once()
 	p.EXPECT().Append(mock.Anything, mock.Anything).Return(nil, status.NewIgnoreOperation("ignored")).Once()
 	p.EXPECT().Append(mock.Anything, mock.Anything).Return(nil, status.NewRateLimitRejected("rejected")).Once()
+	p.EXPECT().Append(mock.Anything, mock.Anything).Return(nil, status.NewInner(status.PKStateConflictCausePrefix+"version mismatch")).Once()
 	p.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.AppendResult{}, nil).Once()
 
 	rp := NewResumableProducer(func(ctx context.Context, opts *handler.ProducerOptions) (producer.Producer, error) {
@@ -214,6 +215,15 @@ func TestResumableProducer_ProduceInternalErrors(t *testing.T) {
 		_, err := rp.produceInternal(context.Background(), msg)
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, errs.ErrIgnoredOperation))
+	})
+
+	t.Run("PKStateConflict_NoRetry_Bubbles", func(t *testing.T) {
+		// CAS conflict must NOT be retried inside the streaming client; it
+		// has to surface to proxy's OCC retry loop unchanged. Mocked Append
+		// is `.Once()`, so any inner retry would panic the mock.
+		_, err := rp.produceInternal(context.Background(), msg)
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, errs.ErrPKStateConflict))
 	})
 
 	t.Run("RateLimitRejected_Retry", func(t *testing.T) {
