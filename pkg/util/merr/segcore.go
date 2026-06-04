@@ -48,27 +48,39 @@ type segcoreClass struct {
 	// outcome (e.g. pretend-finished / cluster-skip), not a failure. Callers
 	// that need the signal semantics match on the sentinel directly.
 	signal bool
+	// retriable marks transient system failures where a retry — possibly
+	// rerouted to another replica/node — can succeed: object-storage / local-IO
+	// errors, OOM, and field-not-loaded. inputError codes are non-retriable by
+	// construction and never set this; permanent system failures (corruption,
+	// config, internal bug, missing object) leave it false.
+	retriable bool
 }
 
 // segcoreCodeTable is the registry of known C++ segcore error codes. Codes
 // absent here fall back to ErrSegcore (see classifySegcoreError).
 //
-// NOTE on input-error scope: only codes whose C++ throw sites are unambiguously
-// caller-input errors are marked inputError. Codes whose single C++ value mixes
-// user-input and internal-unsupported semantics (e.g. DataTypeInvalid 2007,
-// OpTypeInvalid 2022, InvalidParameter 2042) are intentionally left as system
-// errors here; splitting those requires new C++ codes and is handled in a
-// later step.
+// Codes carry two orthogonal classifications:
+//   - inputError: the caller's fault (bad request) -> InputError, non-retriable
+//     by construction.
+//   - retriable: a transient system failure where a retry / reroute can succeed.
+//
+// They are mutually exclusive: a code is either the caller's fault (then a retry
+// of the same request is pointless) or a server-side condition that is either
+// transient (retriable) or permanent (neither flag). Codes whose single C++
+// value still mixes user-input and internal semantics (DataTypeInvalid 2007,
+// OpTypeInvalid 2022, ConfigInvalid 2006 — a server-side yaml/config error, not
+// the API caller's fault) are left as plain system errors until the C++ source
+// splits them.
 var segcoreCodeTable = map[int32]segcoreClass{
 	// Already-named segcore sentinels (identity preserved).
 	2000: {sentinel: ErrSegcore},
-	2001: {sentinel: ErrSegcoreUnsupported}, // Unsupported
-	2002: {sentinel: ErrSegcorePretendFinished, signal: true},
-	2037: {sentinel: ErrSegcoreFollyOtherException},       // FollyOtherException
-	2038: {sentinel: ErrSegcoreFollyCancel, signal: true}, // FollyCancel (converted to ctx error upstream)
-	2039: {sentinel: ErrSegcoreOutOfRange},                // OutOfRange (real out-of-bounds, not a signal)
-	2040: {sentinel: ErrSegcoreGCPNativeError},            // GcpNativeError
-	2099: {sentinel: KnowhereError},                       // KnowhereError
+	2001: {sentinel: ErrSegcoreUnsupported},                          // C++ UnexpectedError (sentinel name is legacy)
+	2002: {sentinel: ErrSegcorePretendFinished, signal: true},        // C++ NotImplemented (legacy pretend-finished signal mapping)
+	2037: {sentinel: ErrSegcoreFollyOtherException, retriable: true}, // FollyOtherException (folly async failure; retry/reroute)
+	2038: {sentinel: ErrSegcoreFollyCancel, signal: true},            // FollyCancel (converted to ctx error upstream)
+	2039: {sentinel: ErrSegcoreOutOfRange},                           // OutOfRange (internal bounds bug, not a signal)
+	2040: {sentinel: ErrSegcoreGCPNativeError, retriable: true},      // GcpNativeError (object storage; transient)
+	2099: {sentinel: KnowhereError},                                  // KnowhereError
 
 	// Wrapper-path special cases (preserve existing errors.Is behavior that
 	// datanode/index/scheduler.go relies on):
@@ -77,9 +89,34 @@ var segcoreCodeTable = map[int32]segcoreClass{
 	2003: {sentinel: ErrSegcoreUnsupported},
 	2033: {sentinel: ErrSegcorePretendFinished, signal: true},
 
-	// Clean caller-input errors (single, unambiguous C++ throw semantics).
+	// Caller-input errors (errType=input => non-retriable by construction).
+	2020: {sentinel: ErrSegcore, inputError: true}, // FieldIDInvalid: field id not in schema
+	2023: {sentinel: ErrSegcore, inputError: true}, // DataIsEmpty: indexing empty/all-null source data
+	2025: {sentinel: ErrSegcore, inputError: true}, // JsonKeyInvalid
+	2026: {sentinel: ErrSegcore, inputError: true}, // MetricTypeInvalid
 	2028: {sentinel: ErrSegcore, inputError: true}, // ExprInvalid: filter expression invalid
+	2031: {sentinel: ErrSegcore, inputError: true}, // MetricTypeNotMatch
 	2032: {sentinel: ErrSegcore, inputError: true}, // DimNotMatch: query vector dim != schema
+	2042: {sentinel: ErrSegcore, inputError: true}, // InvalidParameter: rescorer params
+
+	// Transient system errors (retriable: a retry / reroute to another replica
+	// can succeed).
+	2012: {sentinel: ErrSegcore, retriable: true}, // FileOpenFailed
+	2014: {sentinel: ErrSegcore, retriable: true}, // FileReadFailed
+	2015: {sentinel: ErrSegcore, retriable: true}, // FileWriteFailed
+	2018: {sentinel: ErrSegcore, retriable: true}, // S3Error: object-storage transient (throttling/timeout)
+	2027: {sentinel: ErrSegcore, retriable: true}, // FieldNotLoaded: another replica may have it loaded
+	2034: {sentinel: ErrSegcore, retriable: true}, // MemAllocateFailed: OOM
+	2036: {sentinel: ErrSegcore, retriable: true}, // MmapError
+	2043: {sentinel: ErrSegcore, retriable: true}, // InsufficientResource
+
+	// Permanent system errors registered explicitly so a future reader does not
+	// mistake them for "unclassified" and flip them to retriable. They map to the
+	// same non-retriable ErrSegcore as the fallback; the raw code is kept in
+	// segcoreCode.
+	2004: {sentinel: ErrSegcore}, // IndexBuildError: build failed (bad data / permanent)
+	2016: {sentinel: ErrSegcore}, // BucketInvalid: misconfigured bucket (same on every replica)
+	2017: {sentinel: ErrSegcore}, // ObjectNotExist: object missing in shared storage (reroute won't help)
 }
 
 // classifySegcoreError converts a C++ segcore error code + message into a
@@ -90,7 +127,8 @@ var segcoreCodeTable = map[int32]segcoreClass{
 //   - matches errors.Is against the mapped sentinel (ErrSegcore as fallback);
 //   - carries the original C++ code in the segcoreCode field;
 //   - is marked InputError when the code is an unambiguous caller-input error;
-//   - is non-retriable (segcore failures are not retried at this boundary).
+//   - is retriable only for transient system codes (object storage / IO / OOM /
+//     field-not-loaded); all other codes stay non-retriable.
 func classifySegcoreError(code int32, msg string) error {
 	cls, ok := segcoreCodeTable[code]
 	if !ok {
@@ -104,6 +142,9 @@ func classifySegcoreError(code int32, msg string) error {
 	base := cls.sentinel
 	if cls.inputError {
 		WithErrorType(InputError)(&base)
+	}
+	if cls.retriable {
+		base.retriable = true
 	}
 	err := wrapFields(base, value("segcoreCode", code))
 	if msg != "" {

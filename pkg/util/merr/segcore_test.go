@@ -51,9 +51,10 @@ func TestSegcoreErrorClassification(t *testing.T) {
 	})
 
 	t.Run("input_error_classification", func(t *testing.T) {
-		// DimNotMatch(2032) and ExprInvalid(2028) are clean caller-input
-		// errors -> InputError.
-		for _, code := range []int32{2028, 2032} {
+		// Caller-input codes -> InputError, non-retriable by construction:
+		// FieldIDInvalid, DataIsEmpty, JsonKeyInvalid, MetricTypeInvalid,
+		// ExprInvalid, MetricTypeNotMatch, DimNotMatch, InvalidParameter.
+		for _, code := range []int32{2020, 2023, 2025, 2026, 2028, 2031, 2032, 2042} {
 			err := SegcoreError(code, "bad query")
 			assert.Equal(t, InputError, GetErrorType(err), "code %d", code)
 			assert.ErrorIs(t, err, ErrSegcore, "code %d", code)
@@ -62,11 +63,33 @@ func TestSegcoreErrorClassification(t *testing.T) {
 		}
 	})
 
+	t.Run("retriable_system_classification", func(t *testing.T) {
+		// Transient system codes (object storage / local IO / OOM / mmap /
+		// folly / field-not-loaded / insufficient-resource) -> retriable
+		// system errors, never InputError.
+		for _, code := range []int32{2012, 2014, 2015, 2018, 2027, 2034, 2036, 2037, 2040, 2043} {
+			err := SegcoreError(code, "transient failure")
+			assert.Equal(t, SystemError, GetErrorType(err), "code %d", code)
+			assert.True(t, Status(err).GetRetriable(), "code %d should be retriable", code)
+		}
+	})
+
+	t.Run("permanent_system_classification", func(t *testing.T) {
+		// Registered permanent system codes stay non-retriable system errors:
+		// IndexBuildError, BucketInvalid, ObjectNotExist.
+		for _, code := range []int32{2004, 2016, 2017} {
+			err := SegcoreError(code, "permanent failure")
+			assert.Equal(t, SystemError, GetErrorType(err), "code %d", code)
+			assert.False(t, Status(err).GetRetriable(), "code %d should not be retriable", code)
+		}
+	})
+
 	t.Run("system_error_default", func(t *testing.T) {
-		// A plain segcore error is a system error.
+		// A plain segcore error is a non-retriable system error.
 		err := SegcoreError(2000, "x")
 		assert.Equal(t, SystemError, GetErrorType(err))
 		assert.ErrorIs(t, err, ErrSegcore)
+		assert.False(t, Status(err).GetRetriable())
 	})
 
 	t.Run("unknown_code_fallback", func(t *testing.T) {
