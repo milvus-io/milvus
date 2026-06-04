@@ -691,6 +691,63 @@ enum VChannelSchemaState {
 }
 
 ///
+/// VChannelWindowMeta
+///
+// VChannelWindowMeta stores logical window view progress for one view_type +
+// vchannel. Physical window entries are stored in the pchannel-level
+// PChannelWindow chunks. This meta only records the view checkpoint hint and the
+// oldest physical generation still required to recover the retained logical view.
+message VChannelWindowMeta {
+    string pchannel = 1;
+    string vchannel = 2;
+    uint64 evicted_watermark_timetick = 3;
+    uint64 snapshot_checkpoint_timetick = 4;
+    common.MessageID snapshot_checkpoint_message_id = 5;
+    uint64 latest_applied_generation = 6;
+    uint64 min_required_generation = 7;
+    // Window view type, e.g. idempotency or meta-only index.
+    string view_type = 8;
+    // Metrics only.
+    uint64 entry_count = 9;
+}
+
+// PChannelWindowMeta stores pchannel-level physical window store progress.
+// It points to the latest physical chunk and summarizes the generation range
+// that is still physically available / logically in use by active view metas.
+message PChannelWindowMeta {
+    string pchannel = 1;
+    uint64 source_checkpoint_timetick = 2;
+    common.MessageID source_checkpoint_message_id = 3;
+    uint64 latest_generation = 4;
+    // Used by GC. The cleaner deletes chunk generations in [min_available_generation, min_in_use_generation)
+    // and then advances min_available_generation up to min_in_use_generation; everything below
+    // min_available_generation is already deleted. [min_in_use_generation, latest_generation] is still in
+    // use and is required to rebuild active window views on recovery.
+    uint64 min_available_generation = 5;
+    uint64 min_in_use_generation = 6;
+    // Physical chunk codec version.
+    uint32 codec_version = 7;
+}
+
+message WindowEntry {
+    string key = 1;
+    uint64 commit_timetick = 2;
+    common.MessageID message_id = 3;
+    common.MessageID last_confirmed_message_id = 4;
+    // Result returned for duplicate insert response.
+    messages.IdempotentInsertResult idempotent_result = 5;
+}
+
+message WindowSnapshot {
+    string pchannel = 1;
+    string vchannel = 2;
+    uint64 evicted_watermark_timetick = 3;
+    uint64 snapshot_checkpoint_timetick = 4;
+    common.MessageID snapshot_checkpoint_message_id = 5;
+    repeated WindowEntry entries = 6;
+}
+
+///
 /// SegmentAssignment
 ///
 // SegmentAssignmentMeta is the stat of segment assignment.

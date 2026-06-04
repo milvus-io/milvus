@@ -239,6 +239,12 @@ const (
 	ExprUseJSONStatsKey = "expr_use_json_stats"
 )
 
+// Window view type keys.
+const (
+	VChannelWindowViewTypeIdempotency     = "idempotency"
+	VChannelWindowViewTypePrimaryKeyIndex = "pkindex"
+)
+
 // Doc-in-doc-out
 const (
 	EnableAnalyzerKey = `enable_analyzer`
@@ -255,6 +261,10 @@ const (
 	CollectionExternalSpec      = "collection.external_spec"
 	CollectionTTLFieldKey       = "ttl_field"
 	MaxTTLSeconds               = 3155760000 // 100 years
+
+	// CollectionInsertIdempotencyEnabledKey enables idempotency keys for Insert.
+	// Delete and Upsert are already idempotent and do not use this property.
+	CollectionInsertIdempotencyEnabledKey = "collection.insert.idempotency.enabled"
 
 	// Deprecated: will be removed in the 3.0 after implementing ack sync up semantic.
 	CollectionOnTruncatingKey = "collection.on.truncating" // when collection is on truncating, forbid the compaction of current collection.

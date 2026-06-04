@@ -5,7 +5,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
@@ -42,21 +41,23 @@ func TestMain(m *testing.M) {
 }
 
 func TestInitRecoveryInfoFromMeta(t *testing.T) {
+	ctx := context.Background()
+	channel := types.PChannelInfo{Name: "test_channel"}
+	checkpoint := utility.NewWALCheckpointFromProto(&streamingpb.WALCheckpoint{
+		MessageId:     rmq.NewRmqID(1).IntoProto(),
+		TimeTick:      1,
+		RecoveryMagic: utility.RecoveryMagicStreamingInitialized,
+	})
 	snCatalog := mock_metastore.NewMockStreamingNodeCataLog(t)
 	snCatalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return([]*streamingpb.SegmentAssignmentMeta{}, nil)
 	snCatalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).Return([]*streamingpb.VChannelMeta{}, nil)
 
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog))
-	channel := types.PChannelInfo{Name: "test_channel"}
 
 	lastConfirmed := message.CreateTestTimeTickSyncMessage(t, 1, 1, rmq.NewRmqID(1))
-	rs := newRecoveryStorage(channel, utility.NewWALCheckpointFromProto(&streamingpb.WALCheckpoint{
-		MessageId:     rmq.NewRmqID(1).IntoProto(),
-		TimeTick:      1,
-		RecoveryMagic: utility.RecoveryMagicStreamingInitialized,
-	}))
+	rs := newRecoveryStorage(channel, checkpoint)
 
-	err := rs.recoverRecoveryInfoFromMeta(context.Background(), channel, lastConfirmed.IntoImmutableMessage(rmq.NewRmqID(1)))
+	err := rs.recoverRecoveryInfoFromMeta(ctx, channel, lastConfirmed.IntoImmutableMessage(rmq.NewRmqID(1)))
 	assert.NoError(t, err)
 	assert.NotNil(t, rs.checkpoint)
 	assert.Equal(t, utility.RecoveryMagicStreamingInitialized, rs.checkpoint.Magic)
@@ -70,7 +71,11 @@ func TestInitRecoveryInfoFromCoord(t *testing.T) {
 		return []*streamingpb.SegmentAssignmentMeta{}, nil
 	})
 	snCatalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, channel string) ([]*streamingpb.VChannelMeta, error) {
-		return lo.Values(initialedVChannels), nil
+		values := make([]*streamingpb.VChannelMeta, 0, len(initialedVChannels))
+		for _, meta := range initialedVChannels {
+			values = append(values, meta)
+		}
+		return values, nil
 	})
 	snCatalog.EXPECT().SaveVChannels(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string, m map[string]*streamingpb.VChannelMeta) error {
 		initialedVChannels = m

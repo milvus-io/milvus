@@ -83,6 +83,8 @@ L:
 func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
 	segments := make(map[int64]*streamingpb.SegmentAssignmentMeta, len(r.segments))
 	vchannels := make(map[string]*streamingpb.VChannelMeta, len(r.vchannels))
+	idempotencyRuntimeWindows := r.windowManager.idempotencyWindows()
+	idempotencyWindows := make(map[string]*streamingpb.WindowSnapshot, len(idempotencyRuntimeWindows))
 	// Collect active vchannels and build a set of active partition IDs (globally unique).
 	activePartitions := make(map[int64]struct{})
 	for channelName, vchannel := range r.vchannels {
@@ -122,9 +124,13 @@ func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
 		}
 		segments[segmentID] = proto.Clone(segment.meta).(*streamingpb.SegmentAssignmentMeta)
 	}
+	for channelName, window := range idempotencyRuntimeWindows {
+		idempotencyWindows[channelName] = window.snapshot()
+	}
 	snapshot := &RecoverySnapshot{
 		VChannels:          vchannels,
 		SegmentAssignments: segments,
+		IdempotencyWindows: idempotencyWindows,
 		Checkpoint:         r.checkpoint.Clone(),
 	}
 	if r.alterWALInfo != nil {
