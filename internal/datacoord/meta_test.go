@@ -5087,6 +5087,64 @@ func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T
 		require.Equal(t, expectedCreateTS, meta.GetSegment(ctx, 2).GetCreateTs())
 	})
 
+	t.Run("clustering", func(t *testing.T) {
+		meta := newCompactionCreateTsTestMeta(
+			newCompactionCreateTsTestSegment(1, datapb.SegmentLevel_L1),
+			newCompactionCreateTsTestSegment(2, datapb.SegmentLevel_L1),
+		)
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1, 2},
+			Type:          datapb.CompactionType_ClusteringCompaction,
+			Channel:       "ch-1",
+			StartTime:     startTime,
+			CreateTs:      expectedCreateTS,
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{
+				SegmentID:           3,
+				InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 65000)},
+				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 65001)},
+				NumOfRows:           100,
+			}},
+		}
+
+		infos, _, err := meta.CompleteCompactionMutation(ctx, task, result)
+		require.NoError(t, err)
+		require.Len(t, infos, 1)
+		require.Equal(t, expectedCreateTS, infos[0].GetCreateTs())
+		require.Equal(t, expectedCreateTS, meta.GetSegment(ctx, 3).GetCreateTs())
+	})
+
+	t.Run("bump schema replacement", func(t *testing.T) {
+		meta := newCompactionCreateTsTestMeta(newCompactionCreateTsTestSegment(1, datapb.SegmentLevel_L1))
+		task := &datapb.CompactionTask{
+			InputSegments:          []int64{1},
+			Type:                   datapb.CompactionType_BumpSchemaVersionCompaction,
+			Channel:                "ch-1",
+			StartTime:              startTime,
+			CreateTs:               expectedCreateTS,
+			Schema:                 &schemapb.CollectionSchema{Version: 2},
+			PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 2, End: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{
+				SegmentID:           2,
+				InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 68000)},
+				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 68001)},
+				NumOfRows:           100,
+				StorageVersion:      storage.StorageV3,
+				Manifest:            "replacement-manifest",
+			}},
+		}
+
+		infos, _, err := meta.CompleteCompactionMutation(ctx, task, result)
+		require.NoError(t, err)
+		require.Len(t, infos, 1)
+		require.Equal(t, expectedCreateTS, infos[0].GetCreateTs())
+		require.Equal(t, expectedCreateTS, meta.GetSegment(ctx, 2).GetCreateTs())
+	})
+
 	t.Run("backfill preserves existing segment create ts", func(t *testing.T) {
 		segment := newCompactionCreateTsTestSegment(1, datapb.SegmentLevel_L1)
 		segment.CreateTs = 777
