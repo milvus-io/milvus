@@ -36,6 +36,7 @@ import (
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -59,6 +60,7 @@ type clusteringCompactionTask struct {
 	meta             CompactionMeta
 	handler          Handler
 	analyzeScheduler globalTask.GlobalScheduler
+	ievm             IndexEngineVersionManager
 
 	maxRetryTimes int32
 
@@ -249,12 +251,13 @@ func (t *clusteringCompactionTask) GetTaskProto() *datapb.CompactionTask {
 	return task.(*datapb.CompactionTask)
 }
 
-func newClusteringCompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, handler Handler, analyzeScheduler globalTask.GlobalScheduler) *clusteringCompactionTask {
+func newClusteringCompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, handler Handler, analyzeScheduler globalTask.GlobalScheduler, ievm IndexEngineVersionManager) *clusteringCompactionTask {
 	task := &clusteringCompactionTask{
 		allocator:        allocator,
 		meta:             meta,
 		handler:          handler,
 		analyzeScheduler: analyzeScheduler,
+		ievm:             ievm,
 		maxRetryTimes:    3,
 		times:            taskcommon.NewTimes(),
 	}
@@ -354,26 +357,42 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		return nil, err
 	}
 	plan := &datapb.CompactionPlan{
-		PlanID:                 taskProto.GetPlanID(),
-		StartTime:              taskProto.GetStartTime(),
-		Type:                   taskProto.GetType(),
-		Channel:                taskProto.GetChannel(),
-		CollectionTtl:          taskProto.GetCollectionTtl(),
-		TotalRows:              taskProto.GetTotalRows(),
-		Schema:                 taskProto.GetSchema(),
-		ClusteringKeyField:     taskProto.GetClusteringKeyField().GetFieldID(),
-		MaxSegmentRows:         taskProto.GetMaxSegmentRows(),
-		PreferSegmentRows:      taskProto.GetPreferSegmentRows(),
-		AnalyzeResultPath:      path.Join(t.meta.(*meta).chunkManager.RootPath(), common.AnalyzeStatsPath, metautil.JoinIDPath(taskProto.AnalyzeTaskID, taskProto.AnalyzeVersion)),
-		AnalyzeSegmentIds:      taskProto.GetInputSegments(),
-		BeginLogID:             logIDRange.Begin, // BeginLogID is deprecated, but still assign it for compatibility.
-		PreAllocatedSegmentIDs: taskProto.GetPreAllocatedSegmentIDs(),
-		PreAllocatedLogIDs:     logIDRange,
-		SlotUsage:              t.GetSlotUsage(),
-		MaxSize:                taskProto.GetMaxSize(),
-		JsonParams:             compactionParams,
+		PlanID:                    taskProto.GetPlanID(),
+		StartTime:                 taskProto.GetStartTime(),
+		Type:                      taskProto.GetType(),
+		Channel:                   taskProto.GetChannel(),
+		CollectionTtl:             taskProto.GetCollectionTtl(),
+		TotalRows:                 taskProto.GetTotalRows(),
+		Schema:                    taskProto.GetSchema(),
+		ClusteringKeyField:        taskProto.GetClusteringKeyField().GetFieldID(),
+		MaxSegmentRows:            taskProto.GetMaxSegmentRows(),
+		PreferSegmentRows:         taskProto.GetPreferSegmentRows(),
+		AnalyzeResultPath:         path.Join(t.meta.(*meta).chunkManager.RootPath(), common.AnalyzeStatsPath, metautil.JoinIDPath(taskProto.AnalyzeTaskID, taskProto.AnalyzeVersion)),
+		AnalyzeSegmentIds:         taskProto.GetInputSegments(),
+		BeginLogID:                logIDRange.Begin, // BeginLogID is deprecated, but still assign it for compatibility.
+		PreAllocatedSegmentIDs:    taskProto.GetPreAllocatedSegmentIDs(),
+		PreAllocatedLogIDs:        logIDRange,
+		SlotUsage:                 t.GetSlotUsage(),
+		MaxSize:                   taskProto.GetMaxSize(),
+		JsonParams:                compactionParams,
+		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
 	}
 	log := log.With(zap.Int64("taskID", taskProto.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
+
+	// set analyzer resource for text match index if use ref mode.
+	// Namespace-enabled clustering compaction is routed to the namespace compactor on the
+	// DataNode, which builds the text index inline and needs the analyzer resources.
+	taskSchema := taskProto.GetSchema()
+	if fileresource.IsRefMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) &&
+		taskSchema.GetEnableNamespace() &&
+		len(taskSchema.GetFileResourceIds()) > 0 {
+		resources, err := t.meta.GetFileResources(context.Background(), taskSchema.GetFileResourceIds()...)
+		if err != nil {
+			log.Warn("get file resources for clustering compaction failed", zap.Int64("collectionID", taskProto.GetCollectionID()), zap.Error(err))
+			return nil, errors.Errorf("get file resources for compaction failed: %v", err)
+		}
+		plan.FileResources = resources
+	}
 
 	for _, segID := range taskProto.GetInputSegments() {
 		segInfo := t.meta.GetHealthySegment(context.TODO(), segID)
