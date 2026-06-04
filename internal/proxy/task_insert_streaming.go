@@ -42,11 +42,14 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	it.insertMsg.CollectionID = collID
 
 	getCacheDur := tr.RecordSpan()
-	channelNames, err := it.chMgr.GetVChannels(collID)
-	if err != nil {
-		mlog.Warn(ctx, "get vChannels failed", mlog.FieldCollectionID(collID), mlog.Err(err))
-		it.result.Status = merr.Status(err)
-		return err
+	channelNames := it.vChannels
+	if len(channelNames) == 0 {
+		channelNames, err = it.chMgr.GetVChannels(collID)
+		if err != nil {
+			mlog.Warn(ctx, "get vChannels failed", mlog.FieldCollectionID(collID), mlog.Err(err))
+			it.result.Status = merr.Status(err)
+			return err
+		}
 	}
 
 	mlog.Debug(ctx, "send insert request to virtual channels",
@@ -64,17 +67,20 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 	// start to repack insert data
 	var msgs []message.MutableMessage
+	decorateHeader := it.idempotentInsertHeaderDecorator()
 	if it.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), it.getMetaCache(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion, nil)
+		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), it.getMetaCache(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion, nil, decorateHeader)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), it.getMetaCache(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion, nil)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), it.getMetaCache(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion, nil, decorateHeader)
 	}
 	if err != nil {
 		mlog.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
 		it.result.Status = merr.Status(err)
 		return err
 	}
-	resp := streaming.WAL().AppendMessages(ctx, msgs...)
+	resp := streaming.WAL().AppendMessagesWithOptions(ctx, msgs, streaming.AppendOption{
+		IdempotencyKey: it.idempotencyKey,
+	})
 	if err := resp.UnwrapFirstError(); err != nil {
 		mlog.Warn(ctx, "append messages to wal failed", mlog.Err(err))
 		if status.AsStreamingError(err).IsSchemaVersionMismatch() {
@@ -82,9 +88,18 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		} else {
 			it.result.Status = merr.Status(err)
 		}
+		return nil
 	}
 	// Update result.Timestamp for session consistency.
 	it.result.Timestamp = resp.MaxTimeTick()
+
+	if it.idempotencyEnabled {
+		err := mergeDuplicateInsertResults(it.result, resp)
+		if err != nil {
+			mlog.Warn(ctx, "merge idempotent duplicate insert result failed", mlog.Err(err))
+			it.result.Status = merr.Status(err)
+		}
+	}
 	return nil
 }
 
@@ -97,6 +112,7 @@ func repackInsertDataForStreamingService(
 	ez *message.CipherConfig,
 	schemaVersion int32,
 	partialUpdateCASGroups map[string]*messagespb.PartialUpdateCAS,
+	decorateHeader func(*message.InsertMessageHeader, []int) error,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
 	walName := channelmgr.GetActiveWALName()
@@ -129,6 +145,7 @@ func repackInsertDataForStreamingService(
 			schemaVersion,
 			partialUpdateCAS,
 			walName,
+			decorateHeader,
 		)
 		if err != nil {
 			return nil, err
@@ -149,6 +166,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 	schema *schemapb.CollectionSchema,
 	schemaVersion int32,
 	partialUpdateCASGroups map[string]*messagespb.PartialUpdateCAS,
+	decorateHeader func(*message.InsertMessageHeader, []int) error,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
 	walName := channelmgr.GetActiveWALName()
@@ -219,6 +237,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 				schemaVersion,
 				partialUpdateCAS,
 				walName,
+				decorateHeader,
 			)
 			if err != nil {
 				return nil, err
@@ -257,6 +276,7 @@ func repackInsertDataByPartitionForStreamingService(
 	schemaVersion int32,
 	partialUpdateCAS *messagespb.PartialUpdateCAS,
 	walName message.WALName,
+	decorateHeader func(*message.InsertMessageHeader, []int) error,
 ) ([]message.MutableMessage, error) {
 	type pendingInsertPack struct {
 		rowOffsets []int
@@ -307,6 +327,8 @@ func repackInsertDataByPartitionForStreamingService(
 			schemaVersion,
 			ez,
 			partialUpdateCAS,
+			pack.rowOffsets,
+			decorateHeader,
 		)
 		if err != nil {
 			return nil, err
@@ -341,20 +363,28 @@ func buildInsertMessageForStreamingService(
 	schemaVersion int32,
 	ez *message.CipherConfig,
 	partialUpdateCAS *messagespb.PartialUpdateCAS,
+	rowOffsets []int,
+	decorateHeader func(*message.InsertMessageHeader, []int) error,
 ) (message.MutableMessage, error) {
+	header := &message.InsertMessageHeader{
+		CollectionId: collectionID,
+		Partitions: []*message.PartitionSegmentAssignment{
+			{
+				PartitionId: partitionID,
+				Rows:        insertRequest.GetNumRows(),
+				BinarySize:  0, // TODO: current not used, message estimate size is used.
+			},
+		},
+		SchemaVersion: &schemaVersion,
+	}
+	if decorateHeader != nil {
+		if err := decorateHeader(header, rowOffsets); err != nil {
+			return nil, err
+		}
+	}
 	builder := message.NewInsertMessageBuilderV1().
 		WithVChannel(channel).
-		WithHeader(&message.InsertMessageHeader{
-			CollectionId: collectionID,
-			Partitions: []*message.PartitionSegmentAssignment{
-				{
-					PartitionId: partitionID,
-					Rows:        insertRequest.GetNumRows(),
-					BinarySize:  0, // TODO: current not used, message estimate size is used.
-				},
-			},
-			SchemaVersion: &schemaVersion,
-		}).
+		WithHeader(header).
 		WithBody(insertRequest)
 	if partialUpdateCAS != nil {
 		if err := builder.AddPartialUpdateCAS(partialUpdateCAS); err != nil {

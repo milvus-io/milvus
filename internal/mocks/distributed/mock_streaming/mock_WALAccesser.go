@@ -87,6 +87,68 @@ func (_c *MockWALAccesser_AppendMessages_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// AppendMessagesWithOptions provides a mock function with given fields: ctx, msgs, opts
+func (_m *MockWALAccesser) AppendMessagesWithOptions(ctx context.Context, msgs []message.MutableMessage, opts ...streaming.AppendOption) streaming.AppendResponses {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, msgs)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AppendMessagesWithOptions")
+	}
+
+	var r0 streaming.AppendResponses
+	if rf, ok := ret.Get(0).(func(context.Context, []message.MutableMessage, ...streaming.AppendOption) streaming.AppendResponses); ok {
+		r0 = rf(ctx, msgs, opts...)
+	} else {
+		r0 = ret.Get(0).(streaming.AppendResponses)
+	}
+
+	return r0
+}
+
+// MockWALAccesser_AppendMessagesWithOptions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AppendMessagesWithOptions'
+type MockWALAccesser_AppendMessagesWithOptions_Call struct {
+	*mock.Call
+}
+
+// AppendMessagesWithOptions is a helper method to define mock.On call
+//   - ctx context.Context
+//   - msgs []message.MutableMessage
+//   - opts ...streaming.AppendOption
+func (_e *MockWALAccesser_Expecter) AppendMessagesWithOptions(ctx interface{}, msgs interface{}, opts ...interface{}) *MockWALAccesser_AppendMessagesWithOptions_Call {
+	return &MockWALAccesser_AppendMessagesWithOptions_Call{Call: _e.mock.On("AppendMessagesWithOptions",
+		append([]interface{}{ctx, msgs}, opts...)...)}
+}
+
+func (_c *MockWALAccesser_AppendMessagesWithOptions_Call) Run(run func(ctx context.Context, msgs []message.MutableMessage, opts ...streaming.AppendOption)) *MockWALAccesser_AppendMessagesWithOptions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]streaming.AppendOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(streaming.AppendOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].([]message.MutableMessage), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockWALAccesser_AppendMessagesWithOptions_Call) Return(_a0 streaming.AppendResponses) *MockWALAccesser_AppendMessagesWithOptions_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWALAccesser_AppendMessagesWithOptions_Call) RunAndReturn(run func(context.Context, []message.MutableMessage, ...streaming.AppendOption) streaming.AppendResponses) *MockWALAccesser_AppendMessagesWithOptions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Balancer provides a mock function with no fields
 func (_m *MockWALAccesser) Balancer() streaming.Balancer {
 	ret := _m.Called()

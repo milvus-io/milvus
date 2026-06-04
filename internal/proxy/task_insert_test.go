@@ -63,7 +63,8 @@ func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t
 
 	mockMetaCache := NewMockCache(t)
 	mockMetaCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(0), nil)
-	msgs, err := repackInsertDataForStreamingService(context.Background(), mockMetaCache, []string{"ch"}, insertMsg, result, nil, 0, nil)
+	// Idempotency disabled: no header decorator, so no key and no insert result.
+	msgs, err := repackInsertDataForStreamingService(context.Background(), mockMetaCache, []string{"ch"}, insertMsg, result, nil, 0, nil, nil)
 	assert.NoError(t, err)
 	assert.Len(t, msgs, 1)
 
@@ -71,6 +72,24 @@ func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t
 	header := msg.Header()
 	assert.NotNil(t, header.SchemaVersion)
 	assert.Equal(t, int32(0), header.GetSchemaVersion())
+	assert.Empty(t, header.GetIdempotencyKey())
+	_, ok := message.IdempotentInsertResultFromInsertHeader(header)
+	assert.False(t, ok)
+
+	// Idempotency enabled: the proxy decorator single-sources both the idempotency
+	// key and the per-write-unit insert result onto the insert header.
+	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-1", result: result}
+	msgs, err = repackInsertDataForStreamingService(context.Background(), []string{"ch"}, insertMsg, result, nil, 0, nil, it.idempotentInsertHeaderDecorator())
+	assert.NoError(t, err)
+	assert.Len(t, msgs, 1)
+
+	msg = message.MustAsMutableInsertMessageV1(msgs[0])
+	header = msg.Header()
+	assert.Equal(t, "key-1", header.GetIdempotencyKey())
+	extra, ok := message.IdempotentInsertResultFromInsertHeader(header)
+	assert.True(t, ok)
+	assert.Equal(t, []uint32{0}, extra.GetRowOffsets())
+	assert.Equal(t, []int64{1}, extra.GetIds().GetIntId().GetData())
 }
 
 func TestInsertTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
