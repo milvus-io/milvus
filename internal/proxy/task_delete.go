@@ -143,6 +143,17 @@ func (dt *deleteTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+// routeDeleteHashValues returns the per-row channel hash for delete repacking.
+// When the routing-table kill-switch is on it routes via the RoutingTable
+// (bit-for-bit equivalent to the legacy path); otherwise it falls back to the
+// legacy typeutil.HashPK2Channels.
+func routeDeleteHashValues(primaryKeys *schemapb.IDs, vChannels []string) []uint32 {
+	if paramtable.Get().ProxyCfg.EnableRoutingTable.GetAsBool() {
+		return routing.DeriveCompat(vChannels).HashPKs(primaryKeys)
+	}
+	return typeutil.HashPK2Channels(primaryKeys, vChannels)
+}
+
 func repackDeleteMsgByHash(
 	ctx context.Context,
 	primaryKeys *schemapb.IDs,
@@ -156,12 +167,7 @@ func repackDeleteMsgByHash(
 	dbName string,
 ) (map[uint32][]*msgstream.DeleteMsg, int64, error) {
 	maxSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
-	var hashValues []uint32
-	if paramtable.Get().ProxyCfg.EnableRoutingTable.GetAsBool() {
-		hashValues = routing.DeriveCompat(vChannels).HashPKs(primaryKeys)
-	} else {
-		hashValues = typeutil.HashPK2Channels(primaryKeys, vChannels)
-	}
+	hashValues := routeDeleteHashValues(primaryKeys, vChannels)
 	// repack delete msg by dmChannel
 	result := make(map[uint32][]*msgstream.DeleteMsg)
 	lastMessageSize := map[uint32]int{}
