@@ -35,6 +35,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/Geometry.h"
+#include "common/Schema.h"
 #include "common/FieldDataInterface.h"
 #include "pb/common.pb.h"
 #include "storage/StorageV2FSCache.h"
@@ -1538,17 +1539,21 @@ GetFieldDatasFromManifest(
     const FieldDataMeta& field_meta,
     std::optional<DataType> data_type,
     int64_t dim,
-    std::optional<DataType> element_type) {
+    std::optional<DataType> element_type,
+    const std::string& external_spec) {
     auto loon_manifest = GetLoonManifest(manifest_path, loon_ffi_properties);
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
 
-    // Determine the column name to use:
-    //   - external input fields: external column name
-    //   - internal and function-output fields: numeric field ID string
+    // Determine the column name to use. Milvus-table manifests expose source
+    // field IDs as column names; other external formats use ExternalField.
+    // Internal and function-output fields use numeric field ID strings.
     std::string column_name;
     const auto& ext_field = field_meta.field_schema.external_field();
-    if (!ext_field.empty()) {
+    bool is_milvus_table = milvus::IsMilvusTableExternalSpec(external_spec);
+    if (is_milvus_table) {
+        column_name = std::to_string(field_meta.field_id);
+    } else if (!ext_field.empty()) {
         column_name = ext_field;
     } else {
         column_name = std::to_string(field_meta.field_id);
@@ -1573,7 +1578,7 @@ GetFieldDatasFromManifest(
     std::vector<std::string> needed_columns = {column_name};
 
     bool nullable = field_meta.field_schema.nullable();
-    bool is_external = !ext_field.empty();
+    bool is_external = !ext_field.empty() || is_milvus_table;
     std::optional<FieldMeta> normalize_field_meta;
     if (is_external) {
         auto schema = field_meta.field_schema;

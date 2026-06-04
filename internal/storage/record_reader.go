@@ -2,7 +2,6 @@ package storage
 
 import (
 	"io"
-	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -49,6 +48,7 @@ func newPackedRecordReader(
 	bufferSize int64,
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
+	externalReader packed.ExternalReaderContext,
 ) (*packedRecordReader, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
@@ -59,7 +59,7 @@ func newPackedRecordReader(
 	for i, field := range allFields {
 		field2Col[field.FieldID] = i
 	}
-	reader, err := packed.NewPackedReader(paths, arrowSchema, bufferSize, storageConfig, storagePluginContext)
+	reader, err := packed.NewPackedReaderWithExtfs(paths, arrowSchema, bufferSize, storageConfig, storagePluginContext, externalReader)
 	if err != nil {
 		return nil, err
 	}
@@ -128,6 +128,7 @@ func newIterativePackedRecordReader(
 	bufferSize int64,
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
+	externalReader packed.ExternalReaderContext,
 ) *IterativeRecordReader {
 	chunk := 0
 	return &IterativeRecordReader{
@@ -137,7 +138,7 @@ func newIterativePackedRecordReader(
 			}
 			currentPaths := paths[chunk]
 			chunk++
-			return newPackedRecordReader(currentPaths, schema, bufferSize, storageConfig, storagePluginContext)
+			return newPackedRecordReader(currentPaths, schema, bufferSize, storageConfig, storagePluginContext, externalReader)
 		},
 	}
 }
@@ -154,7 +155,7 @@ type ManifestReader struct {
 	field2Col            map[FieldID]int
 	storageConfig        *indexpb.StorageConfig
 	storagePluginContext *indexcgopb.StoragePluginContext
-	externalReader       packed.ExternalReaderContext
+	externalSpecContext  packed.ExternalSpecContext
 
 	neededColumns []string
 }
@@ -214,7 +215,32 @@ func NewManifestReader(manifest string,
 		opt(rwOptions)
 	}
 
-	arrowSchema, err := ConvertToArrowSchema(schema, true)
+	return NewManifestReaderWithExtfs(
+		manifest,
+		schema,
+		bufferSize,
+		storageConfig,
+		storagePluginContext,
+		rwOptions.externalReader,
+	)
+}
+
+// NewManifestReaderWithExtfs opens a manifest with external filesystem
+// properties injected for source manifests referenced by external collections.
+func NewManifestReaderWithExtfs(
+	manifest string,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+	extfs packed.ExternalSpecContext,
+) (*ManifestReader, error) {
+	columnResolver := typeutil.NewStorageColumnResolver(schema, typeutil.WithStorageColumnExternalSpec(extfs.Spec))
+	arrowSchema, err := ConvertToArrowSchemaWithNameResolver(
+		schema,
+		true,
+		columnResolver.ManifestStoredColumnName,
+	)
 	if err != nil {
 		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
@@ -227,8 +253,11 @@ func NewManifestReader(manifest string,
 	// RecordToInsertData conversion does not accidentally decode internal LOB
 	// references as user text. Any source type coercion must stay in the
 	// external-source normalization path, not in the internal manifest path.
-	if !typeutil.IsExternalCollection(schema) {
-		arrowSchema = overrideTextFieldsToBinary(schema, arrowSchema)
+	if !typeutil.IsExternalCollection(schema) || columnResolver.IsMilvusTable() {
+		arrowSchema = overrideTextFieldsToBinaryByFields(
+			columnResolver.ManifestStoredFields(),
+			arrowSchema,
+		)
 	}
 
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
@@ -238,14 +267,13 @@ func NewManifestReader(manifest string,
 	field2Col := make(map[FieldID]int)
 	allFields := typeutil.GetAllFieldSchemas(schema)
 	neededColumns := make([]string, 0, len(allFields))
-	for i, field := range allFields {
-		field2Col[field.FieldID] = i
-		// Use field id here or external field
-		if field.ExternalField != "" {
-			neededColumns = append(neededColumns, field.ExternalField)
-		} else {
-			neededColumns = append(neededColumns, strconv.FormatInt(field.FieldID, 10))
+	for _, field := range allFields {
+		columnName, ok := columnResolver.ManifestStoredColumnName(field)
+		if !ok {
+			continue
 		}
+		field2Col[field.FieldID] = len(neededColumns)
+		neededColumns = append(neededColumns, columnName)
 	}
 	prr := &ManifestReader{
 		manifest:             manifest,
@@ -256,7 +284,7 @@ func NewManifestReader(manifest string,
 		field2Col:            field2Col,
 		storageConfig:        storageConfig,
 		storagePluginContext: storagePluginContext,
-		externalReader:       rwOptions.externalReader,
+		externalSpecContext:  extfs,
 
 		neededColumns: neededColumns,
 	}
@@ -271,7 +299,11 @@ func NewManifestReader(manifest string,
 
 func (mr *ManifestReader) init() error {
 	reader, err := packed.NewFFIPackedReader(mr.manifest, mr.arrowSchema, mr.neededColumns,
-		mr.bufferSize, mr.storageConfig, mr.storagePluginContext, mr.externalReader)
+		mr.bufferSize,
+		mr.storageConfig,
+		mr.storagePluginContext,
+		mr.externalSpecContext,
+	)
 	if err != nil {
 		return err
 	}

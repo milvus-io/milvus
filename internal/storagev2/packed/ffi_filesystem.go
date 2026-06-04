@@ -23,6 +23,8 @@ package packed
 import "C"
 
 import (
+	"fmt"
+	"net/url"
 	"strings"
 	"unsafe"
 
@@ -82,4 +84,126 @@ func WriteFile(
 		nil, 0, // no file metadata
 	)
 	return HandleLoonFFIResult(result)
+}
+
+// ReadFile reads an entire file using milvus-storage filesystem FFI.
+func ReadFile(
+	storageConfig *indexpb.StorageConfig,
+	filePath string,
+) ([]byte, error) {
+	return ReadFileWithExternalSpec(storageConfig, filePath, ExternalSpecContext{})
+}
+
+// ReadFileWithExternalSpec reads an entire file after injecting external spec
+// filesystem aliases. This is used when the input path belongs to an external
+// object store described by external_spec.extfs.
+func ReadFileWithExternalSpec(
+	storageConfig *indexpb.StorageConfig,
+	filePath string,
+	extfs ExternalSpecContext,
+) ([]byte, error) {
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create properties: %w", err)
+	}
+	defer C.loon_properties_free(cProperties)
+	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
+		return nil, fmt.Errorf("inject extfs: %w", err)
+	}
+
+	filesystemPath, normalizedFilePath, err := normalizeExternalPathForFilesystem(filePath, cProperties, extfs)
+	if err != nil {
+		return nil, fmt.Errorf("normalize external file path: %w", err)
+	}
+	cPath := C.CString(normalizedFilePath)
+	defer C.free(unsafe.Pointer(cPath))
+	pathLen := C.uint32_t(len(normalizedFilePath))
+
+	var fsHandle C.FileSystemHandle
+	cFilesystemPath := C.CString(filesystemPath)
+	defer C.free(unsafe.Pointer(cFilesystemPath))
+	result := C.loon_filesystem_get(cProperties, cFilesystemPath, C.uint32_t(len(filesystemPath)), &fsHandle)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return nil, fmt.Errorf("failed to get filesystem: %w", err)
+	}
+	defer C.loon_filesystem_destroy(fsHandle)
+
+	var outData *C.uint8_t
+	var outSize C.uint64_t
+	result = C.loon_filesystem_read_file_all(fsHandle, cPath, pathLen, &outData, &outSize)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return nil, err
+	}
+	if outData == nil || outSize == 0 {
+		return nil, nil
+	}
+	defer C.free(unsafe.Pointer(outData))
+	return C.GoBytes(unsafe.Pointer(outData), C.int(outSize)), nil
+}
+
+func normalizeExternalPathForFilesystem(path string, properties *C.LoonProperties, extfs ExternalSpecContext) (string, string, error) {
+	if extfs.Source == "" || path == "" || properties == nil {
+		return path, path, nil
+	}
+
+	filesystemPath, err := resolveExternalSourceRelativePath(path, properties, extfs)
+	if err != nil {
+		return "", "", err
+	}
+
+	filePath, err := externalFilesystemFilePath(filesystemPath, properties, extfs)
+	if err != nil {
+		return "", "", err
+	}
+	return filesystemPath, filePath, nil
+}
+
+func externalFilesystemFilePath(path string, properties *C.LoonProperties, extfs ExternalSpecContext) (string, error) {
+	u, err := url.Parse(path)
+	if err != nil {
+		return "", err
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return path, nil
+	}
+
+	prefix := ExtfsPrefixForCollection(extfs.CollectionID)
+	address := filesystemLoonPropertyString(properties, prefix+"address")
+	bucketName := filesystemLoonPropertyString(properties, prefix+"bucket_name")
+	if address == "" || bucketName == "" {
+		return path, nil
+	}
+
+	addressHost, err := propertyAddressHost(address)
+	if err != nil {
+		return "", err
+	}
+	if addressHost != "" && addressHost != u.Host {
+		return path, nil
+	}
+
+	key := strings.TrimPrefix(u.Path, "/")
+	if key == "" {
+		return key, nil
+	}
+	if key == bucketName {
+		return "", nil
+	}
+	if strings.HasPrefix(key, bucketName+"/") {
+		return strings.TrimPrefix(key, bucketName+"/"), nil
+	}
+	if u.Host == bucketName {
+		return key, nil
+	}
+	return path, nil
+}
+
+func filesystemLoonPropertyString(properties *C.LoonProperties, key string) string {
+	cKey := C.CString(key)
+	defer C.free(unsafe.Pointer(cKey))
+	cValue := C.loon_properties_get(properties, cKey)
+	if cValue == nil {
+		return ""
+	}
+	return C.GoString(cValue)
 }

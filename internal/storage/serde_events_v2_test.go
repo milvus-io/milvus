@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -71,7 +72,7 @@ func TestPackedSerde(t *testing.T) {
 			prepareChunkData(chunkPaths, size)
 		}
 
-		reader := newIterativePackedRecordReader(paths, schema, bufferSize, nil, nil)
+		reader := newIterativePackedRecordReader(paths, schema, bufferSize, nil, nil, packed.ExternalReaderContext{})
 		defer reader.Close()
 
 		nRows := 0

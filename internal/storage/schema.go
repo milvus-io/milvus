@@ -14,10 +14,28 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+type ArrowFieldNameResolver func(field *schemapb.FieldSchema) (string, bool)
+
 func ConvertToArrowSchema(schema *schemapb.CollectionSchema, useFieldID bool) (*arrow.Schema, error) {
+	return ConvertToArrowSchemaWithNameResolver(schema, useFieldID, nil)
+}
+
+func ConvertToArrowSchemaWithNameResolver(
+	schema *schemapb.CollectionSchema,
+	useFieldID bool,
+	nameResolver ArrowFieldNameResolver,
+) (*arrow.Schema, error) {
 	fieldCount := len(typeutil.GetAllFieldSchemas(schema))
 	arrowFields := make([]arrow.Field, 0, fieldCount)
 	appendArrowField := func(field *schemapb.FieldSchema) error {
+		physicalName := ""
+		if nameResolver != nil {
+			name, ok := nameResolver(field)
+			if !ok {
+				return nil
+			}
+			physicalName = name
+		}
 		if serdeMap[field.DataType].arrowType == nil {
 			return merr.WrapErrParameterInvalidMsg("unknown field data type [%s] for field [%s]", field.DataType, field.GetName())
 		}
@@ -50,6 +68,9 @@ func ConvertToArrowSchema(schema *schemapb.CollectionSchema, useFieldID bool) (*
 		}
 
 		arrowField := ConvertToArrowField(field, arrowType, useFieldID)
+		if physicalName != "" {
+			arrowField.Name = physicalName
+		}
 
 		if field.GetNullable() {
 			switch field.DataType {
@@ -107,7 +128,10 @@ func FilterRowIDFromSchema(schema *schemapb.CollectionSchema) *schemapb.Collecti
 // overrideTextFieldsToBinary replaces utf8 arrow type with binary for TEXT fields.
 // In manifest storage, TEXT fields use LOB spillover and store binary-encoded LOB references.
 func overrideTextFieldsToBinary(schema *schemapb.CollectionSchema, arrowSchema *arrow.Schema) *arrow.Schema {
-	allFields := typeutil.GetAllFieldSchemas(schema)
+	return overrideTextFieldsToBinaryByFields(typeutil.GetAllFieldSchemas(schema), arrowSchema)
+}
+
+func overrideTextFieldsToBinaryByFields(allFields []*schemapb.FieldSchema, arrowSchema *arrow.Schema) *arrow.Schema {
 	fields := make([]arrow.Field, arrowSchema.NumFields())
 	changed := false
 	for i := 0; i < arrowSchema.NumFields(); i++ {

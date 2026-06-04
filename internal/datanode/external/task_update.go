@@ -46,6 +46,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -92,6 +93,9 @@ type RefreshExternalCollectionTask struct {
 	// Cached parsed spec (populated in PreExecute, reused in Execute)
 	parsedSpec *externalspec.ExternalSpec
 	columns    []string
+
+	milvusTableSourcePKFieldMu sync.Mutex
+	milvusTableSourcePKField   *schemapb.FieldSchema
 
 	// Result after execution — tracked separately for correct response building
 	keptSegmentIDs  []int64               // IDs of current segments that were kept unchanged
@@ -181,7 +185,16 @@ func (t *RefreshExternalCollectionTask) PreExecute(ctx context.Context) error {
 		return merr.Wrap(err, "failed to parse external spec")
 	}
 	t.parsedSpec = spec
-	t.columns = packed.GetColumnNamesFromSchema(t.req.GetSchema())
+	schema := t.req.GetSchema()
+	if schema != nil {
+		if schema.GetExternalSource() == "" {
+			schema.ExternalSource = t.req.GetExternalSource()
+		}
+		if schema.GetExternalSpec() == "" {
+			schema.ExternalSpec = t.req.GetExternalSpec()
+		}
+	}
+	t.columns = packed.GetColumnNamesFromSchema(schema)
 
 	return nil
 }
@@ -283,9 +296,8 @@ func (t *RefreshExternalCollectionTask) GetKeptSegmentIDs() []int64 {
 	return t.keptSegmentIDs
 }
 
-// fragmentKey generates a unique key for a fragment using its FilePath and row range
-// This composite key ensures fragments from the same file with different row ranges
-// are treated as distinct entities, which is critical for correct data mapping
+// fragmentKey identifies the L1 data fragment. Delete overlays are handled as
+// manifest-only updates so L0 changes do not force a new target segment ID.
 func fragmentKey(f packed.Fragment) string {
 	return fmt.Sprintf("%s:%d:%d", f.FilePath, f.StartRow, f.EndRow)
 }
@@ -337,11 +349,13 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 		}
 		fragments := currentSegmentFragments[seg.GetID()]
 		allFragmentsExist := true
+		matchedNewFragments := make([]packed.Fragment, 0, len(fragments))
 
 		// Check if all fragments of this segment still exist
 		for _, f := range fragments {
 			key := fragmentKey(f)
-			if _, exists := newFragmentMap[key]; !exists {
+			newFragment, exists := newFragmentMap[key]
+			if !exists {
 				allFragmentsExist = false
 				mlog.Info(context.TODO(), "Fragment removed from segment",
 					mlog.Int64("segmentID", seg.GetID()),
@@ -350,6 +364,7 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 					mlog.Int64("endRow", f.EndRow))
 				break
 			}
+			matchedNewFragments = append(matchedNewFragments, newFragment)
 		}
 
 		if !allFragmentsExist {
@@ -374,6 +389,29 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 		}
 
 		if !reusableSegment {
+			continue
+		}
+
+		shouldRefreshDeltalogs, err := t.shouldRefreshMilvusTableDeltalogs(seg, fragments, matchedNewFragments)
+		if err != nil {
+			return nil, err
+		}
+		if shouldRefreshDeltalogs {
+			updatedSegment, err := t.refreshMilvusTableSegmentManifest(ctx, seg, matchedNewFragments)
+			if err != nil {
+				return nil, err
+			}
+			patchedSegments = append(patchedSegments, updatedSegment)
+			for _, f := range fragments {
+				if err := ensureContext(ctx); err != nil {
+					return nil, err
+				}
+				usedFragments[fragmentKey(f)] = true
+			}
+			log.Info("Segment kept with refreshed milvus-table deltalogs",
+				zap.Int64("segmentID", seg.GetID()),
+				zap.String("oldManifestPath", seg.GetManifestPath()),
+				zap.String("newManifestPath", updatedSegment.GetManifestPath()))
 			continue
 		}
 
@@ -679,13 +717,13 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 		fragments   []packed.Fragment
 	}
 	var works []segmentWork
-	for _, bin := range bins {
-		if len(bin.fragments) == 0 {
-			continue
-		}
+	isMilvusTableVirtualPKTask := t.parsedSpec != nil &&
+		t.parsedSpec.Format == externalspec.FormatMilvusTable &&
+		!packed.HasExternalPrimaryKey(t.req.GetSchema())
+	appendWork := func(rowCount int64, fragments []packed.Fragment) error {
 		// Each segment needs 2 IDs: one for segment, one for fake binlog logID
 		if t.nextAllocID+1 >= t.preallocatedIDRange.End {
-			return nil, merr.WrapErrParameterInvalidMsg("insufficient pre-allocated IDs: need 2 more but only have %d IDs in range [%d, %d)",
+			return merr.WrapErrParameterInvalidMsg("insufficient pre-allocated IDs: need 2 more but only have %d IDs in range [%d, %d)",
 				t.preallocatedIDRange.End-t.nextAllocID,
 				t.preallocatedIDRange.Begin,
 				t.preallocatedIDRange.End)
@@ -693,12 +731,41 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 		segmentID := t.nextAllocID
 		binlogLogID := t.nextAllocID + 1
 		t.nextAllocID += 2
+		workFragments := fragments
+		if t.parsedSpec != nil && t.parsedSpec.Format == externalspec.FormatMilvusTable {
+			var err error
+			workFragments, err = t.prepareMilvusTableDeltalogFragments(fragments)
+			if err != nil {
+				return err
+			}
+		}
 		works = append(works, segmentWork{
 			segmentID:   segmentID,
 			binlogLogID: binlogLogID,
-			rowCount:    bin.rowCount,
-			fragments:   bin.fragments,
+			rowCount:    rowCount,
+			fragments:   workFragments,
 		})
+		return nil
+	}
+	if t.parsedSpec != nil && t.parsedSpec.Format == externalspec.FormatMilvusTable {
+		// milvus-table maps each source fragment to exactly one target segment
+		// (1:1) instead of bin-packing fragments by row count. This keeps the
+		// target segment aligned with a single source segment manifest, which is
+		// what makes manifest reuse and the virtual-PK offset mapping well defined.
+		for _, fragment := range fragments {
+			if err := appendWork(fragment.RowCount, []packed.Fragment{fragment}); err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		for _, bin := range bins {
+			if len(bin.fragments) == 0 {
+				continue
+			}
+			if err := appendWork(bin.rowCount, bin.fragments); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	mlog.Info(context.TODO(), "Allocated segment IDs, starting manifest creation",
@@ -706,9 +773,14 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 
 	// Phase 2: Create manifests concurrently with a fixed-size worker pool.
 	const createManifestWorkers = 16
+	const createManifestVirtualPKWorkers = 4
 	manifestStart := time.Now()
 
-	workers := createManifestWorkers
+	workerLimit := createManifestWorkers
+	if isMilvusTableVirtualPKTask {
+		workerLimit = createManifestVirtualPKWorkers
+	}
+	workers := workerLimit
 	if workers > len(works) {
 		workers = len(works)
 	}
@@ -928,14 +1000,27 @@ func (t *RefreshExternalCollectionTask) createManifestForSegment(
 		segmentID,
 	)
 
-	return packed.CreateSegmentManifestWithBasePath(
+	manifestPath, err := packed.CreateSegmentManifestWithBasePathAndExtfs(
 		ctx,
 		basePath,
 		t.parsedSpec.Format,
 		t.columns,
 		fragments,
 		t.req.GetStorageConfig(),
+		packed.ExternalSpecContext{
+			CollectionID:      t.req.GetCollectionID(),
+			Source:            t.req.GetExternalSource(),
+			Spec:              t.req.GetExternalSpec(),
+			MilvusTablePKMode: packed.MilvusTablePrimaryKeyModeFromSchema(t.req.GetSchema()),
+		},
 	)
+	if err != nil {
+		return "", err
+	}
+	if t.parsedSpec.Format == externalspec.FormatMilvusTable {
+		return t.postProcessMilvusTableDeltalogs(ctx, basePath, manifestPath, segmentID, fragments)
+	}
+	return manifestPath, nil
 }
 
 func segmentInsertLogBasePath(
@@ -972,7 +1057,7 @@ func (t *RefreshExternalCollectionTask) createManifestWithFunctions(
 		segmentID,
 	)
 
-	return ExecuteFunctionsForSegment(
+	manifestPath, err := ExecuteFunctionsForSegment(
 		ctx,
 		t.req.GetSchema(),
 		fragments,
@@ -983,6 +1068,13 @@ func (t *RefreshExternalCollectionTask) createManifestWithFunctions(
 		basePath,
 		clusterID,
 	)
+	if err != nil {
+		return "", err
+	}
+	if t.parsedSpec.Format == externalspec.FormatMilvusTable {
+		return t.postProcessMilvusTableDeltalogs(ctx, basePath, manifestPath, segmentID, fragments)
+	}
+	return manifestPath, nil
 }
 
 // buildFakeBinlogs creates a synthetic FieldBinlog slice for an external segment.
@@ -1036,8 +1128,6 @@ func estimateFunctionOutputBytesPerRow(schema *schemapb.CollectionSchema) (int64
 }
 
 // sumFieldSizes computes total avgBytesPerRow from per-field sampling results.
-// Only external fields (those with ExternalField set) are counted to match
-// the QueryNode estimation logic.
 func sumFieldSizes(fieldSizes map[string]int64, schema *schemapb.CollectionSchema) int64 {
 	if schema == nil {
 		var total int64
@@ -1046,13 +1136,20 @@ func sumFieldSizes(fieldSizes map[string]int64, schema *schemapb.CollectionSchem
 		}
 		return total
 	}
+	columnResolver := typeutil.NewStorageColumnResolver(schema)
 	var total int64
 	for _, field := range schema.GetFields() {
-		extName := field.GetExternalField()
-		if extName == "" {
+		columnName, ok := columnResolver.SourceDataColumnName(field)
+		if !ok {
 			continue
 		}
-		if avgBytes, ok := fieldSizes[extName]; ok && avgBytes > 0 {
+		if avgBytes, ok := fieldSizes[columnName]; ok && avgBytes > 0 {
+			total += avgBytes
+		}
+	}
+	if columnResolver.IsMilvusTable() && packed.HasExternalPrimaryKey(schema) {
+		timestampColumn := strconv.FormatInt(common.TimeStampField, 10)
+		if avgBytes, ok := fieldSizes[timestampColumn]; ok && avgBytes > 0 {
 			total += avgBytes
 		}
 	}

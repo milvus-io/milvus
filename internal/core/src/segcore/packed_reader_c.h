@@ -22,6 +22,7 @@ extern "C" {
 
 #include "common/common_type_c.h"
 #include "common/type_c.h"
+#include "milvus-storage/ffi_c.h"
 
 // Forward declarations for Arrow C Data Interface structs
 struct ArrowSchema;
@@ -39,6 +40,16 @@ NewPackedReaderWithStorageConfig(char** paths,
                                  CStorageConfig c_storage_config,
                                  CPackedReader* c_packed_reader,
                                  CPluginContext* c_plugin_context);
+
+CStatus
+NewPackedReaderWithProperties(char** paths,
+                              int64_t num_paths,
+                              struct ArrowSchema* schema,
+                              const int64_t buffer_size,
+                              const LoonProperties* c_properties,
+                              const char* filesystem_path,
+                              CPackedReader* c_packed_reader,
+                              CPluginContext* c_plugin_context);
 
 /**
  * @brief Open a packed reader to read needed columns in the specified path.

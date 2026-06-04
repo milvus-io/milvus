@@ -19,11 +19,13 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -190,7 +192,13 @@ func FetchFragmentsFromExternalSourceWithRange(
 	}
 
 	exploreStart := time.Now()
-	fileInfos, err := ReadFileInfosFromManifestPath(exploreManifestPath, storageConfig)
+	var fileInfos []FileInfo
+	var err error
+	if isMilvusTableFormat(format) {
+		fileInfos, err = readMilvusTableExploreManifest(exploreManifestPath, storageConfig)
+	} else {
+		fileInfos, err = ReadFileInfosFromManifestPath(exploreManifestPath, storageConfig)
+	}
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to read explore manifest")
 	}
@@ -224,9 +232,20 @@ func FetchFragmentsFromExternalSourceWithRange(
 	}
 
 	getFileInfoStart := time.Now()
-	rowCounts, err := fetchRowCountsConcurrently(ctx, format, fileInfos, storageConfig, extfs)
-	if err != nil {
-		return nil, err
+	var rowCounts []int64
+	if isMilvusTableFormat(format) {
+		rowCounts = make([]int64, len(fileInfos))
+		for i, fi := range fileInfos {
+			rowCounts[i] = fi.NumRows
+			if rowCounts[i] <= 0 {
+				return nil, fmt.Errorf("milvus-table source manifest %s has non-positive row count %d", fi.FilePath, rowCounts[i])
+			}
+		}
+	} else {
+		rowCounts, err = fetchRowCountsConcurrently(ctx, format, fileInfos, storageConfig, extfs)
+		if err != nil {
+			return nil, err
+		}
 	}
 	mlog.Info(ctx, "GetFileInfo phase completed",
 		mlog.Int("totalFiles", len(fileInfos)),
@@ -236,6 +255,18 @@ func FetchFragmentsFromExternalSourceWithRange(
 	fragmentIDGenerator := NewFragmentIDGenerator(0)
 	var fragments []Fragment
 	for i, fi := range fileInfos {
+		if isMilvusTableFormat(format) {
+			fragments = append(fragments, Fragment{
+				FragmentID:      fragmentIDGenerator(),
+				FilePath:        fi.FilePath,
+				StartRow:        0,
+				EndRow:          rowCounts[i],
+				RowCount:        rowCounts[i],
+				SourceSegmentID: fi.SourceSegmentID,
+				Deltalogs:       fi.Deltalogs,
+			})
+			continue
+		}
 		fragments = append(fragments, SplitFileToFragments(fi.FilePath, rowCounts[i], rowLimit, fragmentIDGenerator)...)
 	}
 	if len(fragments) == 0 {
@@ -301,10 +332,26 @@ func CreateSegmentManifestWithBasePath(
 	fragments []Fragment,
 	storageConfig *indexpb.StorageConfig,
 ) (string, error) {
+	return CreateSegmentManifestWithBasePathAndExtfs(ctx, basePath, format, columns, fragments, storageConfig, ExternalSpecContext{})
+}
+
+func CreateSegmentManifestWithBasePathAndExtfs(
+	ctx context.Context,
+	basePath string,
+	format string,
+	columns []string,
+	fragments []Fragment,
+	storageConfig *indexpb.StorageConfig,
+	extfs ExternalSpecContext,
+) (string, error) {
 	select {
 	case <-ctx.Done():
 		return "", ctx.Err()
 	default:
+	}
+
+	if isMilvusTableFormat(format) {
+		return CreateMilvusTableManifestFromSegmentManifests(basePath, columns, fragments, storageConfig, extfs)
 	}
 
 	manifestPath, err := CreateManifestForSegment(
@@ -321,30 +368,26 @@ func CreateSegmentManifestWithBasePath(
 	return manifestPath, nil
 }
 
-// GetColumnNamesFromSchema extracts column names from schema.
-// For external collections: only includes fields with ExternalField set
-// (system fields like __virtual_pk__ are skipped as they don't exist in parquet data).
-// For normal collections: uses field name for all fields.
+// GetColumnNamesFromSchema extracts physical source column names from schema.
 func GetColumnNamesFromSchema(schema *schemapb.CollectionSchema) []string {
-	if schema == nil {
-		return nil
-	}
+	return typeutil.NewStorageColumnResolver(schema).SourceDataColumnNames()
+}
 
-	isExternal := schema.GetExternalSource() != ""
-	var columns []string
-	for _, field := range schema.GetFields() {
-		if field.GetIsFunctionOutput() {
-			continue // function output fields don't exist in external data
-		}
-		extField := field.GetExternalField()
-		if extField != "" {
-			columns = append(columns, extField)
-		} else if !isExternal {
-			// Non-external collections: use field name
-			columns = append(columns, field.GetName())
-		}
-		// External collections: skip fields without ExternalField
-		// (e.g., __virtual_pk__, RowID, Timestamp)
+func HasExternalPrimaryKey(schema *schemapb.CollectionSchema) bool {
+	if schema == nil {
+		return false
 	}
-	return columns
+	for _, field := range schema.GetFields() {
+		if field.GetIsPrimaryKey() {
+			return field.GetName() != common.VirtualPKFieldName
+		}
+	}
+	return false
+}
+
+func MilvusTablePrimaryKeyModeFromSchema(schema *schemapb.CollectionSchema) MilvusTablePrimaryKeyMode {
+	if HasExternalPrimaryKey(schema) {
+		return MilvusTablePrimaryKeyModeExternal
+	}
+	return MilvusTablePrimaryKeyModeVirtual
 }

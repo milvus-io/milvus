@@ -21,18 +21,15 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/hamba/avro/v2"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // S3 snapshot storage path constants.
@@ -64,96 +61,8 @@ const (
 	// Version 2: Adds index_store_path_version to vector/scalar index files
 	// Version 3: Adds commit_timestamp to ManifestEntry (import/CDC segments)
 	// Version 4: Adds child_fields and format to AvroFieldBinlog
-	SnapshotFormatVersion = 4
+	SnapshotFormatVersion = snapshotio.SnapshotFormatVersion
 )
-
-var (
-	manifestSchemaV1Once sync.Once
-	manifestSchemaV1     avro.Schema
-	manifestSchemaV1Err  error
-
-	manifestSchemaV2Once sync.Once
-	manifestSchemaV2     avro.Schema
-	manifestSchemaV2Err  error
-
-	manifestSchemaV3Once sync.Once
-	manifestSchemaV3     avro.Schema
-	manifestSchemaV3Err  error
-
-	manifestSchemaV4Once sync.Once
-	manifestSchemaV4     avro.Schema
-	manifestSchemaV4Err  error
-)
-
-// getManifestSchema returns the cached Avro schema for writing new manifest files.
-// New writes always use the current schema version (V4).
-func getManifestSchema() (avro.Schema, error) {
-	return getManifestSchemaV4()
-}
-
-func getManifestSchemaV1() (avro.Schema, error) {
-	manifestSchemaV1Once.Do(func() {
-		manifestSchemaV1, manifestSchemaV1Err = avro.Parse(getAvroSchemaV1())
-	})
-	return manifestSchemaV1, manifestSchemaV1Err
-}
-
-func getManifestSchemaV2() (avro.Schema, error) {
-	manifestSchemaV2Once.Do(func() {
-		manifestSchemaV2, manifestSchemaV2Err = avro.Parse(getAvroSchemaV2())
-	})
-	return manifestSchemaV2, manifestSchemaV2Err
-}
-
-func getManifestSchemaV3() (avro.Schema, error) {
-	manifestSchemaV3Once.Do(func() {
-		manifestSchemaV3, manifestSchemaV3Err = avro.Parse(getAvroSchemaV3())
-	})
-	return manifestSchemaV3, manifestSchemaV3Err
-}
-
-func getManifestSchemaV4() (avro.Schema, error) {
-	manifestSchemaV4Once.Do(func() {
-		manifestSchemaV4, manifestSchemaV4Err = avro.Parse(getAvroSchemaV4())
-	})
-	return manifestSchemaV4, manifestSchemaV4Err
-}
-
-// getManifestSchemaByVersion returns the Avro schema for the specified format
-// version. Avro binary is positional, so each on-disk version must be decoded
-// with the exact schema it was written with — a single "current" schema with
-// `default` fields is not enough to cover legacy bytes.
-//
-// Version mapping:
-//   - Version 0, 1: Legacy schema (no index_store_path_version, no commit_timestamp)
-//   - Version 2: Adds index_store_path_version
-//   - Version 3: Adds commit_timestamp (import/CDC segments)
-//   - Version 4: Adds child_fields and format to AvroFieldBinlog
-//   - Version 5+: Future schemas (to be added when needed)
-//
-// When adding a new schema version:
-//  1. Create a new schema function (e.g., getAvroSchemaV4) that derives from
-//     the previous version's string.
-//  2. Add caching variables (schemaV4Once, schemaV4, schemaV4Err) and a
-//     getManifestSchemaV4 accessor.
-//  3. Add a case for the new version in this switch statement.
-//  4. Update getManifestSchema() to point at the new current version.
-//  5. Bump SnapshotFormatVersion.
-func getManifestSchemaByVersion(version int) (avro.Schema, error) {
-	switch version {
-	case 0, 1:
-		// Version 0 (legacy) and 1 use the same schema.
-		return getManifestSchemaV1()
-	case 2:
-		return getManifestSchemaV2()
-	case 3:
-		return getManifestSchemaV3()
-	case 4:
-		return getManifestSchemaV4()
-	default:
-		return nil, merr.WrapErrServiceInternalMsg("unsupported manifest schema version: %d", version)
-	}
-}
 
 // =============================================================================
 // Section 1: Core Data Structures
@@ -196,202 +105,7 @@ type SnapshotData struct {
 }
 
 // =============================================================================
-// Section 2: Avro Serialization Structures
-// =============================================================================
-// These structs define the Avro-compatible format for storing segment manifest data.
-// Avro format is chosen for efficient binary serialization and schema evolution support.
-// Each struct mirrors a protobuf message but uses Avro-compatible field types and tags.
-
-// ManifestEntry represents a single segment record in a manifest Avro file.
-// Each manifest file contains an array of ManifestEntry records.
-//
-// File structure: Each segment gets its own manifest file at:
-//
-//	snapshots/{collection_id}/manifests/{snapshot_id}/{segment_id}.avro
-type ManifestEntry struct {
-	// SegmentID is the unique identifier of the segment.
-	SegmentID int64 `avro:"segment_id"`
-	// PartitionID is the partition this segment belongs to.
-	PartitionID int64 `avro:"partition_id"`
-	// SegmentLevel indicates the compaction level (L0, L1, L2, etc.).
-	SegmentLevel int64 `avro:"segment_level"`
-	// BinlogFiles contains insert binlog file paths organized by field.
-	BinlogFiles []AvroFieldBinlog `avro:"binlog_files"`
-	// DeltalogFiles contains delete binlog file paths organized by field.
-	DeltalogFiles []AvroFieldBinlog `avro:"deltalog_files"`
-	// IndexFiles contains index file information for vector and scalar indexes.
-	IndexFiles []AvroIndexFilePathInfo `avro:"index_files"`
-	// ChannelName is the DML channel this segment subscribes to.
-	ChannelName string `avro:"channel_name"`
-	// NumOfRows is the total number of rows in this segment.
-	NumOfRows int64 `avro:"num_of_rows"`
-	// StatslogFiles contains statistics binlog file paths.
-	StatslogFiles []AvroFieldBinlog `avro:"statslog_files"`
-	// Bm25StatslogFiles contains BM25 statistics for text search.
-	Bm25StatslogFiles []AvroFieldBinlog `avro:"bm25_statslog_files"`
-	// TextIndexFiles contains text index file information for full-text search.
-	TextIndexFiles []AvroTextIndexEntry `avro:"text_index_files"`
-	// JSONKeyIndexFiles contains JSON key index file information.
-	JSONKeyIndexFiles []AvroJSONKeyIndexEntry `avro:"json_key_index_files"`
-	// StartPosition is the message queue position when segment was created.
-	StartPosition *AvroMsgPosition `avro:"start_position"`
-	// DmlPosition is the last consumed message queue position.
-	DmlPosition *AvroMsgPosition `avro:"dml_position"`
-	// StorageVersion indicates the storage format version (0=v1, 1=v2).
-	StorageVersion int64 `avro:"storage_version"`
-	// IsSorted indicates whether the segment data is sorted by primary key.
-	IsSorted bool `avro:"is_sorted"`
-	// CommitTimestamp mirrors SegmentInfo.commit_timestamp for import/CDC segments.
-	// Preserved so that GC, TTL, and MVCC protections survive snapshot/restore.
-	// Stored as int64 because Avro `long` is signed and hamba/avro/v2 rejects
-	// uint64 — the proto-side uint64 is converted at the boundary.
-	CommitTimestamp int64 `avro:"commit_timestamp"`
-}
-
-// AvroFieldBinlog represents datapb.FieldBinlog in Avro-compatible format.
-// Groups binlog files by field ID, allowing efficient access to field-specific data.
-type AvroFieldBinlog struct {
-	// FieldID is the unique identifier of the field these binlogs belong to.
-	FieldID int64 `avro:"field_id"`
-	// ChildFields lists the logical field IDs covered by this binlog group.
-	ChildFields []int64 `avro:"child_fields"`
-	// Format records the file format for this field binlog group.
-	Format string `avro:"format"`
-	// Binlogs contains the list of binlog files for this field.
-	Binlogs []AvroBinlog `avro:"binlogs"`
-}
-
-// AvroBinlog represents datapb.Binlog in Avro-compatible format.
-// Contains metadata about a single binlog file in object storage.
-type AvroBinlog struct {
-	// EntriesNum is the number of entries (rows) in this binlog file.
-	EntriesNum int64 `avro:"entries_num"`
-	// TimestampFrom is the minimum timestamp of entries in this file.
-	TimestampFrom int64 `avro:"timestamp_from"`
-	// TimestampTo is the maximum timestamp of entries in this file.
-	TimestampTo int64 `avro:"timestamp_to"`
-	// LogPath is the full path to the binlog file in object storage.
-	LogPath string `avro:"log_path"`
-	// LogSize is the size of the binlog file in bytes.
-	LogSize int64 `avro:"log_size"`
-	// LogID is the unique identifier of this binlog file.
-	LogID int64 `avro:"log_id"`
-	// MemorySize is the estimated memory consumption when loaded.
-	MemorySize int64 `avro:"memory_size"`
-}
-
-// AvroIndexFilePathInfo represents indexpb.IndexFilePathInfo in Avro-compatible format.
-// Contains all information needed to locate and load an index for a segment.
-type AvroIndexFilePathInfo struct {
-	// SegmentID is the segment this index belongs to.
-	SegmentID int64 `avro:"segment_id"`
-	// FieldID is the field this index is built on.
-	FieldID int64 `avro:"field_id"`
-	// IndexID is the unique identifier of the index definition.
-	IndexID int64 `avro:"index_id"`
-	// BuildID is the unique identifier of this index build task.
-	BuildID int64 `avro:"build_id"`
-	// IndexName is the user-defined name of the index.
-	IndexName string `avro:"index_name"`
-	// IndexParams contains index-specific parameters (e.g., nlist, m for IVF).
-	IndexParams []AvroKeyValuePair `avro:"index_params"`
-	// IndexFilePaths contains paths to all index files in object storage.
-	IndexFilePaths []string `avro:"index_file_paths"`
-	// SerializedSize is the total size of all index files in bytes.
-	SerializedSize int64 `avro:"serialized_size"`
-	// IndexVersion is the version of the index format.
-	IndexVersion int64 `avro:"index_version"`
-	// NumRows is the number of vectors indexed.
-	NumRows int64 `avro:"num_rows"`
-	// CurrentIndexVersion is the current index algorithm version.
-	CurrentIndexVersion int32 `avro:"current_index_version"`
-	// CurrentScalarIndexVersion is the current scalar index version.
-	CurrentScalarIndexVersion int32 `avro:"current_scalar_index_version"`
-	// MemSize is the estimated memory consumption when loaded.
-	MemSize int64 `avro:"mem_size"`
-	// IndexStorePathVersion records the object-storage path layout used by these index files.
-	IndexStorePathVersion int32 `avro:"index_store_path_version"`
-}
-
-// AvroKeyValuePair represents commonpb.KeyValuePair in Avro-compatible format.
-// Used for storing arbitrary key-value configuration parameters.
-type AvroKeyValuePair struct {
-	Key   string `avro:"key"`
-	Value string `avro:"value"`
-}
-
-// AvroMsgPosition represents msgpb.MsgPosition in Avro-compatible format.
-// Records a position in the message queue for checkpoint/recovery purposes.
-type AvroMsgPosition struct {
-	// ChannelName is the message queue channel name.
-	ChannelName string `avro:"channel_name"`
-	// MsgID is the message queue specific message identifier.
-	MsgID []byte `avro:"msg_id"`
-	// MsgGroup is the consumer group name.
-	MsgGroup string `avro:"msg_group"`
-	// Timestamp is the message timestamp.
-	Timestamp int64 `avro:"timestamp"`
-}
-
-// AvroTextIndexStats represents datapb.TextIndexStats in Avro-compatible format.
-// Contains statistics and file paths for text/full-text search indexes.
-type AvroTextIndexStats struct {
-	// FieldID is the field this text index is built on.
-	FieldID int64 `avro:"field_id"`
-	// Version is the index version for tracking updates.
-	Version int64 `avro:"version"`
-	// Files contains paths to text index files.
-	Files []string `avro:"files"`
-	// LogSize is the total size of index files.
-	LogSize int64 `avro:"log_size"`
-	// MemorySize is the estimated memory when loaded.
-	MemorySize int64 `avro:"memory_size"`
-	// BuildID is the index build task identifier.
-	BuildID int64 `avro:"build_id"`
-	// CurrentScalarIndexVersion is the scalar index version used for this text index.
-	CurrentScalarIndexVersion int32 `avro:"current_scalar_index_version"`
-}
-
-// AvroJSONKeyStats represents datapb.JsonKeyStats in Avro-compatible format.
-// Contains statistics and file paths for JSON key indexes.
-type AvroJSONKeyStats struct {
-	// FieldID is the JSON field this index is built on.
-	FieldID int64 `avro:"field_id"`
-	// Version is the index version for tracking updates.
-	Version int64 `avro:"version"`
-	// Files contains paths to JSON key index files.
-	Files []string `avro:"files"`
-	// LogSize is the total size of index files.
-	LogSize int64 `avro:"log_size"`
-	// MemorySize is the estimated memory when loaded.
-	MemorySize int64 `avro:"memory_size"`
-	// BuildID is the index build task identifier.
-	BuildID int64 `avro:"build_id"`
-	// JSONKeyStatsDataFormat indicates the data format version.
-	JSONKeyStatsDataFormat int64 `avro:"json_key_stats_data_format"`
-}
-
-// AvroTextIndexEntry wraps AvroTextIndexStats with its field ID.
-// Avro doesn't support maps with non-string keys, so we convert map[int64]*TextIndexStats
-// to an array of AvroTextIndexEntry for serialization.
-type AvroTextIndexEntry struct {
-	// FieldID is the map key (duplicated from Stats.FieldID for clarity).
-	FieldID int64 `avro:"field_id"`
-	// Stats contains the text index statistics.
-	Stats *AvroTextIndexStats `avro:"stats"`
-}
-
-// AvroJSONKeyIndexEntry wraps AvroJSONKeyStats with its field ID.
-// Similar to AvroTextIndexEntry, this converts map[int64]*JsonKeyStats to array format.
-type AvroJSONKeyIndexEntry struct {
-	// FieldID is the map key (duplicated from Stats.FieldID for clarity).
-	FieldID int64 `avro:"field_id"`
-	// Stats contains the JSON key index statistics.
-	Stats *AvroJSONKeyStats `avro:"stats"`
-}
-
-// =============================================================================
-// Section 3: SnapshotWriter - Write Operations
+// Section 2: SnapshotWriter - Write Operations
 // =============================================================================
 // SnapshotWriter handles all write operations for creating and deleting snapshots.
 // It implements a 2-phase commit (2PC) protocol for atomic snapshot creation:
@@ -527,22 +241,22 @@ func GetSegmentManifestPath(manifestDir string, segmentID int64) string {
 func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (string, error) {
 	// Validate input parameters
 	if snapshot == nil {
-		return "", merr.WrapErrServiceInternalMsg("snapshot cannot be nil")
+		return "", fmt.Errorf("snapshot cannot be nil")
 	}
 	if snapshot.SnapshotInfo == nil {
-		return "", merr.WrapErrServiceInternalMsg("snapshot info cannot be nil")
+		return "", fmt.Errorf("snapshot info cannot be nil")
 	}
 	collectionID := snapshot.SnapshotInfo.GetCollectionId()
 	if collectionID <= 0 {
-		return "", merr.WrapErrServiceInternalMsg("invalid collection ID: %d", collectionID)
+		return "", fmt.Errorf("invalid collection ID: %d", collectionID)
 	}
 	if snapshot.Collection == nil {
-		return "", merr.WrapErrServiceInternalMsg("collection description cannot be nil")
+		return "", fmt.Errorf("collection description cannot be nil")
 	}
 
 	snapshotID := snapshot.SnapshotInfo.GetId()
 	if snapshotID <= 0 {
-		return "", merr.WrapErrServiceInternalMsg("invalid snapshot ID: %d", snapshotID)
+		return "", fmt.Errorf("invalid snapshot ID: %d", snapshotID)
 	}
 	manifestDir, metadataPath := GetSnapshotPaths(w.chunkManager.RootPath(), collectionID, snapshotID)
 
@@ -552,7 +266,7 @@ func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (stri
 	for _, segment := range snapshot.Segments {
 		manifestPath := GetSegmentManifestPath(manifestDir, segment.GetSegmentId())
 		if err := w.writeSegmentManifest(ctx, manifestPath, segment); err != nil {
-			return "", merr.Wrapf(err, "failed to write manifest for segment %d", segment.GetSegmentId())
+			return "", fmt.Errorf("failed to write manifest for segment %d: %w", segment.GetSegmentId(), err)
 		}
 		manifestPaths = append(manifestPaths, manifestPath)
 	}
@@ -576,7 +290,7 @@ func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (stri
 	// Step 3: Write metadata file with all manifest paths
 	// This file is the entry point for reading the snapshot
 	if err := w.writeMetadataFile(ctx, metadataPath, snapshot, manifestPaths, storagev2Manifests); err != nil {
-		return "", merr.Wrap(err, "failed to write metadata file")
+		return "", fmt.Errorf("failed to write metadata file: %w", err)
 	}
 
 	mlog.Info(ctx, "Successfully wrote metadata file",
@@ -597,21 +311,10 @@ func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (stri
 // Returns:
 //   - error: Any serialization or write failure
 func (w *SnapshotWriter) writeSegmentManifest(ctx context.Context, manifestPath string, segment *datapb.SegmentDescription) error {
-	// Convert protobuf segment to Avro-compatible ManifestEntry
-	entry := convertSegmentToManifestEntry(segment)
-
-	// Serialize to Avro binary format (single record per file)
-	avroSchema, err := getManifestSchema()
+	binaryData, err := snapshotio.MarshalSegmentManifest(segment)
 	if err != nil {
-		return merr.WrapErrServiceInternalErr(err, "failed to get manifest schema")
+		return err
 	}
-
-	binaryData, err := avro.Marshal(avroSchema, entry)
-	if err != nil {
-		return merr.WrapErrServiceInternalErr(err, "failed to serialize entry to avro")
-	}
-
-	// Write to object storage
 	return w.chunkManager.Write(ctx, manifestPath, binaryData)
 }
 
@@ -653,7 +356,7 @@ func (w *SnapshotWriter) writeMetadataFile(ctx context.Context, metadataPath str
 	}
 	jsonData, err := opts.Marshal(metadata)
 	if err != nil {
-		return merr.WrapErrServiceInternalErr(err, "failed to marshal metadata to JSON")
+		return fmt.Errorf("failed to marshal metadata to JSON: %w", err)
 	}
 
 	// Write to object storage
@@ -682,13 +385,13 @@ func (w *SnapshotWriter) writeMetadataFile(ctx context.Context, metadataPath str
 func (w *SnapshotWriter) Drop(ctx context.Context, metadataFilePath string) error {
 	// Validate input parameter
 	if metadataFilePath == "" {
-		return merr.WrapErrServiceInternalMsg("metadata file path cannot be empty")
+		return fmt.Errorf("metadata file path cannot be empty")
 	}
 
 	// Step 1: Read metadata file to discover manifest file paths
 	metadata, err := w.readMetadataFile(ctx, metadataFilePath)
 	if err != nil {
-		return merr.Wrap(err, "failed to read metadata file")
+		return fmt.Errorf("failed to read metadata file: %w", err)
 	}
 
 	snapshotID := metadata.GetSnapshotInfo().GetId()
@@ -697,7 +400,7 @@ func (w *SnapshotWriter) Drop(ctx context.Context, metadataFilePath string) erro
 	manifestList := metadata.GetManifestList()
 	if len(manifestList) > 0 {
 		if err := w.chunkManager.MultiRemove(ctx, manifestList); err != nil {
-			return merr.Wrap(err, "failed to remove manifest files")
+			return fmt.Errorf("failed to remove manifest files: %w", err)
 		}
 		mlog.Info(ctx, "Successfully removed manifest files",
 			mlog.Int("count", len(manifestList)),
@@ -706,7 +409,7 @@ func (w *SnapshotWriter) Drop(ctx context.Context, metadataFilePath string) erro
 
 	// Step 3: Remove the metadata file (entry point)
 	if err := w.chunkManager.Remove(ctx, metadataFilePath); err != nil {
-		return merr.Wrap(err, "failed to remove metadata file")
+		return fmt.Errorf("failed to remove metadata file: %w", err)
 	}
 	mlog.Info(ctx, "Successfully removed metadata file",
 		mlog.String("metadataFilePath", metadataFilePath))
@@ -722,23 +425,14 @@ func (w *SnapshotWriter) readMetadataFile(ctx context.Context, filePath string) 
 	// Read raw JSON content from object storage
 	data, err := w.chunkManager.Read(ctx, filePath)
 	if err != nil {
-		return nil, merr.Wrap(err, "failed to read metadata file")
+		return nil, fmt.Errorf("failed to read metadata file: %w", err)
 	}
 
-	// Use protojson for deserialization to correctly handle protobuf oneof fields
-	metadata := &datapb.SnapshotMetadata{}
-	opts := protojson.UnmarshalOptions{
-		DiscardUnknown: true,
-	}
-	if err := opts.Unmarshal(data, metadata); err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "failed to parse metadata JSON")
-	}
-
-	return metadata, nil
+	return snapshotio.ParseSnapshotMetadata(data)
 }
 
 // =============================================================================
-// Section 5: SnapshotReader - Read Operations
+// Section 3: SnapshotReader - Read Operations
 // =============================================================================
 // SnapshotReader handles all read operations for loading snapshot data.
 // It supports two loading modes:
@@ -794,13 +488,13 @@ func NewSnapshotReader(cm storage.ChunkManager) *SnapshotReader {
 func (r *SnapshotReader) ReadSnapshot(ctx context.Context, metadataFilePath string, includeSegments bool) (*SnapshotData, error) {
 	// Validate input
 	if metadataFilePath == "" {
-		return nil, merr.WrapErrServiceInternalMsg("metadata file path cannot be empty")
+		return nil, fmt.Errorf("metadata file path cannot be empty")
 	}
 
 	// Step 1: Read metadata file (always required)
 	metadata, err := r.readMetadataFile(ctx, metadataFilePath)
 	if err != nil {
-		return nil, merr.Wrap(err, "failed to read metadata file")
+		return nil, fmt.Errorf("failed to read metadata file: %w", err)
 	}
 
 	// Step 2: Optionally read segment details from manifest files
@@ -810,7 +504,7 @@ func (r *SnapshotReader) ReadSnapshot(ctx context.Context, metadataFilePath stri
 		for _, manifestPath := range metadata.GetManifestList() {
 			segments, err := r.readManifestFile(ctx, manifestPath, int(metadata.GetFormatVersion()))
 			if err != nil {
-				return nil, merr.Wrapf(err, "failed to read manifest file %s", manifestPath)
+				return nil, fmt.Errorf("failed to read manifest file %s: %w", manifestPath, err)
 			}
 			allSegments = append(allSegments, segments...)
 		}
@@ -849,46 +543,10 @@ func (r *SnapshotReader) readMetadataFile(ctx context.Context, filePath string) 
 	// Read raw JSON content from object storage
 	data, err := r.chunkManager.Read(ctx, filePath)
 	if err != nil {
-		return nil, merr.Wrap(err, "failed to read metadata file")
+		return nil, fmt.Errorf("failed to read metadata file: %w", err)
 	}
 
-	// Use protojson for deserialization to correctly handle protobuf oneof fields
-	metadata := &datapb.SnapshotMetadata{}
-	opts := protojson.UnmarshalOptions{
-		DiscardUnknown: true,
-	}
-	if err := opts.Unmarshal(data, metadata); err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "failed to parse metadata JSON")
-	}
-
-	// Validate format version compatibility
-	if err := validateFormatVersion(int(metadata.GetFormatVersion())); err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "incompatible snapshot format")
-	}
-
-	return metadata, nil
-}
-
-// validateFormatVersion checks if the snapshot format version is compatible with current code.
-// Returns error if the version is not supported.
-//
-// Compatibility rules:
-//   - Version 0: Legacy snapshots without version field, treated as compatible (version 1)
-//   - Version <= SnapshotFormatVersion: Compatible, can be read
-//   - Version > SnapshotFormatVersion: Too new, cannot be read (requires code upgrade)
-func validateFormatVersion(version int) error {
-	// Version 0 means legacy snapshot without version field, treat as version 1
-	if version == 0 {
-		return nil
-	}
-
-	// Check if version is too new for current code
-	if version > SnapshotFormatVersion {
-		return merr.WrapErrServiceInternalMsg("snapshot format version %d is too new, current supported version: %d (please upgrade Milvus)",
-			version, SnapshotFormatVersion)
-	}
-
-	return nil
+	return snapshotio.ParseSnapshotMetadataWithVersionCheck(data)
 }
 
 // readManifestFile reads and parses a segment manifest Avro file.
@@ -907,67 +565,13 @@ func (r *SnapshotReader) readManifestFile(ctx context.Context, filePath string, 
 	// Read raw Avro content from object storage
 	data, err := r.chunkManager.Read(ctx, filePath)
 	if err != nil {
-		return nil, merr.Wrap(err, "failed to read manifest file")
+		return nil, fmt.Errorf("failed to read manifest file: %w", err)
 	}
 
-	// Get Avro schema for the specified format version
-	avroSchema, err := getManifestSchemaByVersion(formatVersion)
+	segment, err := snapshotio.ParseSegmentManifest(data, formatVersion)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "failed to get manifest schema for version %d", formatVersion)
+		return nil, err
 	}
-
-	// Deserialize Avro binary data to single ManifestEntry record
-	var record ManifestEntry
-	err = avro.Unmarshal(avroSchema, data, &record)
-	if err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "failed to parse avro data")
-	}
-
-	// Convert ManifestEntry record to protobuf SegmentDescription
-	segment := &datapb.SegmentDescription{
-		SegmentId:       record.SegmentID,
-		PartitionId:     record.PartitionID,
-		SegmentLevel:    datapb.SegmentLevel(record.SegmentLevel),
-		ChannelName:     record.ChannelName,
-		NumOfRows:       record.NumOfRows,
-		StartPosition:   convertAvroToMsgPosition(record.StartPosition),
-		DmlPosition:     convertAvroToMsgPosition(record.DmlPosition),
-		StorageVersion:  record.StorageVersion,
-		IsSorted:        record.IsSorted,
-		CommitTimestamp: uint64(record.CommitTimestamp), // int64 -> uint64
-	}
-
-	// Convert binlog files (insert data)
-	for _, binlogFile := range record.BinlogFiles {
-		segment.Binlogs = append(segment.Binlogs, convertAvroToFieldBinlog(binlogFile))
-	}
-
-	// Convert deltalog files (delete data)
-	for _, deltalogFile := range record.DeltalogFiles {
-		segment.Deltalogs = append(segment.Deltalogs, convertAvroToFieldBinlog(deltalogFile))
-	}
-
-	// Convert statslog files (statistics)
-	for _, statslogFile := range record.StatslogFiles {
-		segment.Statslogs = append(segment.Statslogs, convertAvroToFieldBinlog(statslogFile))
-	}
-
-	// Convert BM25 statslog files (full-text search statistics)
-	for _, bm25StatslogFile := range record.Bm25StatslogFiles {
-		segment.Bm25Statslogs = append(segment.Bm25Statslogs, convertAvroToFieldBinlog(bm25StatslogFile))
-	}
-
-	// Convert index files (vector and scalar indexes)
-	for _, indexFile := range record.IndexFiles {
-		segment.IndexFiles = append(segment.IndexFiles, convertAvroToIndexFilePathInfo(indexFile))
-	}
-
-	// Convert text index files (array back to map)
-	segment.TextIndexFiles = convertAvroToTextIndexMap(record.TextIndexFiles)
-
-	// Convert JSON key index files (array back to map)
-	segment.JsonKeyIndexFiles = convertAvroToJSONKeyIndexMap(record.JSONKeyIndexFiles)
-
 	return []*datapb.SegmentDescription{segment}, nil
 }
 
@@ -993,7 +597,7 @@ func (r *SnapshotReader) readManifestFile(ctx context.Context, filePath string, 
 func (r *SnapshotReader) ListSnapshots(ctx context.Context, collectionID int64) ([]*datapb.SnapshotInfo, error) {
 	// Validate input parameters
 	if collectionID <= 0 {
-		return nil, merr.WrapErrServiceInternalMsg("invalid collection ID: %d", collectionID)
+		return nil, fmt.Errorf("invalid collection ID: %d", collectionID)
 	}
 
 	// Construct metadata directory path
@@ -1003,7 +607,7 @@ func (r *SnapshotReader) ListSnapshots(ctx context.Context, collectionID int64) 
 	// List all files in the metadata directory
 	files, _, err := storage.ListAllChunkWithPrefix(ctx, r.chunkManager, metadataDir, false)
 	if err != nil {
-		return nil, merr.Wrap(storage.ToMilvusIoError(metadataDir, err), "failed to list metadata files")
+		return nil, fmt.Errorf("failed to list metadata files: %w", err)
 	}
 
 	// Read each metadata file and extract SnapshotInfo
@@ -1029,586 +633,4 @@ func (r *SnapshotReader) ListSnapshots(ctx context.Context, collectionID int64) 
 	}
 
 	return snapshots, nil
-}
-
-// =============================================================================
-// Section 6: Conversion Helper Functions
-// =============================================================================
-// These helper functions handle bidirectional conversion between protobuf messages
-// and Avro-compatible structs. The conversion is necessary because:
-//   - Avro requires specific field types and tags different from protobuf
-//   - Some protobuf types (maps with int64 keys) aren't directly supported in Avro
-//   - Timestamp types need conversion between uint64 (proto) and int64 (Avro)
-
-// --- Protobuf to Avro Conversion (for writing snapshots) ---
-
-// convertSegmentToManifestEntry converts a protobuf SegmentDescription to Avro ManifestEntry.
-// This is the main conversion function used when writing segment manifests.
-func convertSegmentToManifestEntry(segment *datapb.SegmentDescription) ManifestEntry {
-	// Convert insert binlog files to Avro format
-	var avroBinlogFiles []AvroFieldBinlog
-	for _, binlog := range segment.GetBinlogs() {
-		avroFieldBinlog := convertFieldBinlogToAvro(binlog)
-		avroBinlogFiles = append(avroBinlogFiles, avroFieldBinlog)
-	}
-
-	// Convert delete binlog files to Avro format
-	var avroDeltalogFiles []AvroFieldBinlog
-	for _, deltalog := range segment.GetDeltalogs() {
-		avroFieldBinlog := convertFieldBinlogToAvro(deltalog)
-		avroDeltalogFiles = append(avroDeltalogFiles, avroFieldBinlog)
-	}
-
-	// Convert statistics binlog files to Avro format
-	var avroStatslogFiles []AvroFieldBinlog
-	for _, statslog := range segment.GetStatslogs() {
-		avroFieldBinlog := convertFieldBinlogToAvro(statslog)
-		avroStatslogFiles = append(avroStatslogFiles, avroFieldBinlog)
-	}
-
-	// Convert BM25 statistics files to Avro format
-	var avroBm25StatslogFiles []AvroFieldBinlog
-	for _, bm25Statslog := range segment.GetBm25Statslogs() {
-		avroFieldBinlog := convertFieldBinlogToAvro(bm25Statslog)
-		avroBm25StatslogFiles = append(avroBm25StatslogFiles, avroFieldBinlog)
-	}
-
-	// Convert index files to Avro format
-	var avroIndexFiles []AvroIndexFilePathInfo
-	for _, indexFile := range segment.GetIndexFiles() {
-		avroIndexFile := convertIndexFilePathInfoToAvro(indexFile)
-		avroIndexFiles = append(avroIndexFiles, avroIndexFile)
-	}
-
-	// Convert text index map to Avro array format
-	avroTextIndexFiles := convertTextIndexMapToAvro(segment.GetTextIndexFiles())
-
-	// Convert JSON key index map to Avro array format
-	avroJSONKeyIndexFiles := convertJSONKeyIndexMapToAvro(segment.GetJsonKeyIndexFiles())
-
-	// Assemble the ManifestEntry with all converted fields
-	return ManifestEntry{
-		SegmentID:         segment.GetSegmentId(),
-		PartitionID:       segment.GetPartitionId(),
-		SegmentLevel:      int64(segment.GetSegmentLevel()),
-		BinlogFiles:       avroBinlogFiles,
-		DeltalogFiles:     avroDeltalogFiles,
-		IndexFiles:        avroIndexFiles,
-		ChannelName:       segment.GetChannelName(),
-		NumOfRows:         segment.GetNumOfRows(),
-		StatslogFiles:     avroStatslogFiles,
-		Bm25StatslogFiles: avroBm25StatslogFiles,
-		TextIndexFiles:    avroTextIndexFiles,
-		JSONKeyIndexFiles: avroJSONKeyIndexFiles,
-		StartPosition:     convertMsgPositionToAvro(segment.GetStartPosition()),
-		DmlPosition:       convertMsgPositionToAvro(segment.GetDmlPosition()),
-		StorageVersion:    segment.GetStorageVersion(),
-		IsSorted:          segment.GetIsSorted(),
-		CommitTimestamp:   int64(segment.GetCommitTimestamp()), // uint64 -> int64
-	}
-}
-
-// convertFieldBinlogToAvro converts protobuf FieldBinlog to Avro format.
-// Handles timestamp conversion from uint64 (proto) to int64 (Avro).
-func convertFieldBinlogToAvro(fb *datapb.FieldBinlog) AvroFieldBinlog {
-	avroFieldBinlog := AvroFieldBinlog{
-		FieldID:     fb.GetFieldID(),
-		ChildFields: append([]int64(nil), fb.GetChildFields()...),
-		Format:      fb.GetFormat(),
-		Binlogs:     make([]AvroBinlog, len(fb.GetBinlogs())),
-	}
-
-	for i, binlog := range fb.GetBinlogs() {
-		avroFieldBinlog.Binlogs[i] = AvroBinlog{
-			EntriesNum:    binlog.GetEntriesNum(),
-			TimestampFrom: int64(binlog.GetTimestampFrom()), // uint64 -> int64
-			TimestampTo:   int64(binlog.GetTimestampTo()),   // uint64 -> int64
-			LogPath:       binlog.GetLogPath(),
-			LogSize:       binlog.GetLogSize(),
-			LogID:         binlog.GetLogID(),
-			MemorySize:    binlog.GetMemorySize(),
-		}
-	}
-
-	return avroFieldBinlog
-}
-
-// convertIndexFilePathInfoToAvro converts protobuf IndexFilePathInfo to Avro format.
-// Handles size field conversion from uint64 (proto) to int64 (Avro).
-func convertIndexFilePathInfoToAvro(info *indexpb.IndexFilePathInfo) AvroIndexFilePathInfo {
-	avroInfo := AvroIndexFilePathInfo{
-		SegmentID:                 info.GetSegmentID(),
-		FieldID:                   info.GetFieldID(),
-		IndexID:                   info.GetIndexID(),
-		BuildID:                   info.GetBuildID(),
-		IndexName:                 info.GetIndexName(),
-		IndexFilePaths:            info.GetIndexFilePaths(),
-		SerializedSize:            int64(info.GetSerializedSize()), // uint64 -> int64
-		IndexVersion:              info.GetIndexVersion(),
-		NumRows:                   info.GetNumRows(),
-		CurrentIndexVersion:       info.GetCurrentIndexVersion(),
-		CurrentScalarIndexVersion: info.GetCurrentScalarIndexVersion(),
-		MemSize:                   int64(info.GetMemSize()), // uint64 -> int64
-		IndexStorePathVersion:     int32(info.GetIndexStorePathVersion()),
-		IndexParams:               make([]AvroKeyValuePair, len(info.GetIndexParams())),
-	}
-
-	// Convert key-value parameters
-	for i, param := range info.GetIndexParams() {
-		avroInfo.IndexParams[i] = AvroKeyValuePair{
-			Key:   param.GetKey(),
-			Value: param.GetValue(),
-		}
-	}
-
-	return avroInfo
-}
-
-// --- Avro to Protobuf Conversion (for reading snapshots) ---
-
-// convertAvroToFieldBinlog converts Avro FieldBinlog back to protobuf format.
-// Handles timestamp conversion from int64 (Avro) to uint64 (proto).
-func convertAvroToFieldBinlog(avroFB AvroFieldBinlog) *datapb.FieldBinlog {
-	fieldBinlog := &datapb.FieldBinlog{
-		FieldID:     avroFB.FieldID,
-		ChildFields: append([]int64(nil), avroFB.ChildFields...),
-		Format:      avroFB.Format,
-		Binlogs:     make([]*datapb.Binlog, len(avroFB.Binlogs)),
-	}
-
-	for i, avroBinlog := range avroFB.Binlogs {
-		fieldBinlog.Binlogs[i] = &datapb.Binlog{
-			EntriesNum:    avroBinlog.EntriesNum,
-			TimestampFrom: uint64(avroBinlog.TimestampFrom), // int64 -> uint64
-			TimestampTo:   uint64(avroBinlog.TimestampTo),   // int64 -> uint64
-			LogPath:       avroBinlog.LogPath,
-			LogSize:       avroBinlog.LogSize,
-			LogID:         avroBinlog.LogID,
-			MemorySize:    avroBinlog.MemorySize,
-		}
-	}
-
-	return fieldBinlog
-}
-
-// convertAvroToIndexFilePathInfo converts Avro IndexFilePathInfo back to protobuf format.
-// Handles size field conversion from int64 (Avro) to uint64 (proto).
-func convertAvroToIndexFilePathInfo(avroInfo AvroIndexFilePathInfo) *indexpb.IndexFilePathInfo {
-	info := &indexpb.IndexFilePathInfo{
-		SegmentID:                 avroInfo.SegmentID,
-		FieldID:                   avroInfo.FieldID,
-		IndexID:                   avroInfo.IndexID,
-		BuildID:                   avroInfo.BuildID,
-		IndexName:                 avroInfo.IndexName,
-		IndexFilePaths:            avroInfo.IndexFilePaths,
-		SerializedSize:            uint64(avroInfo.SerializedSize), // int64 -> uint64
-		IndexVersion:              avroInfo.IndexVersion,
-		NumRows:                   avroInfo.NumRows,
-		CurrentIndexVersion:       avroInfo.CurrentIndexVersion,
-		CurrentScalarIndexVersion: avroInfo.CurrentScalarIndexVersion,
-		MemSize:                   uint64(avroInfo.MemSize), // int64 -> uint64
-		IndexStorePathVersion:     indexpb.IndexStorePathVersion(avroInfo.IndexStorePathVersion),
-	}
-
-	// Convert key-value parameters
-	for _, param := range avroInfo.IndexParams {
-		info.IndexParams = append(info.IndexParams, &commonpb.KeyValuePair{
-			Key:   param.Key,
-			Value: param.Value,
-		})
-	}
-
-	return info
-}
-
-// --- Message Position Conversion ---
-
-// convertMsgPositionToAvro converts protobuf MsgPosition to Avro format.
-// Returns a zero-value struct for nil input (Avro doesn't support null for required fields).
-func convertMsgPositionToAvro(pos *msgpb.MsgPosition) *AvroMsgPosition {
-	if pos == nil {
-		// Return empty struct instead of nil (Avro schema requires non-null)
-		return &AvroMsgPosition{
-			ChannelName: "",
-			MsgID:       []byte{},
-			MsgGroup:    "",
-			Timestamp:   0,
-		}
-	}
-	return &AvroMsgPosition{
-		ChannelName: pos.GetChannelName(),
-		MsgID:       pos.GetMsgID(),
-		MsgGroup:    pos.GetMsgGroup(),
-		Timestamp:   int64(pos.GetTimestamp()), // uint64 -> int64
-	}
-}
-
-// convertAvroToMsgPosition converts Avro MsgPosition back to protobuf format.
-func convertAvroToMsgPosition(avroPos *AvroMsgPosition) *msgpb.MsgPosition {
-	if avroPos == nil {
-		return nil
-	}
-	return &msgpb.MsgPosition{
-		ChannelName: avroPos.ChannelName,
-		MsgID:       avroPos.MsgID,
-		MsgGroup:    avroPos.MsgGroup,
-		Timestamp:   uint64(avroPos.Timestamp), // int64 -> uint64
-	}
-}
-
-// --- Text Index Conversion ---
-
-// convertTextIndexStatsToAvro converts protobuf TextIndexStats to Avro format.
-func convertTextIndexStatsToAvro(stats *datapb.TextIndexStats) *AvroTextIndexStats {
-	if stats == nil {
-		return nil
-	}
-	return &AvroTextIndexStats{
-		FieldID:                   stats.GetFieldID(),
-		Version:                   stats.GetVersion(),
-		Files:                     stats.GetFiles(),
-		LogSize:                   stats.GetLogSize(),
-		MemorySize:                stats.GetMemorySize(),
-		BuildID:                   stats.GetBuildID(),
-		CurrentScalarIndexVersion: stats.GetCurrentScalarIndexVersion(),
-	}
-}
-
-// convertAvroToTextIndexStats converts Avro TextIndexStats back to protobuf format.
-func convertAvroToTextIndexStats(avroStats *AvroTextIndexStats) *datapb.TextIndexStats {
-	if avroStats == nil {
-		return nil
-	}
-	return &datapb.TextIndexStats{
-		FieldID:                   avroStats.FieldID,
-		Version:                   avroStats.Version,
-		Files:                     avroStats.Files,
-		LogSize:                   avroStats.LogSize,
-		MemorySize:                avroStats.MemorySize,
-		BuildID:                   avroStats.BuildID,
-		CurrentScalarIndexVersion: avroStats.CurrentScalarIndexVersion,
-	}
-}
-
-// convertTextIndexMapToAvro converts protobuf map[int64]*TextIndexStats to Avro array format.
-// Avro doesn't support maps with non-string keys, so we convert to array of entries.
-func convertTextIndexMapToAvro(indexMap map[int64]*datapb.TextIndexStats) []AvroTextIndexEntry {
-	var entries []AvroTextIndexEntry
-	for fieldID, stats := range indexMap {
-		entries = append(entries, AvroTextIndexEntry{
-			FieldID: fieldID,
-			Stats:   convertTextIndexStatsToAvro(stats),
-		})
-	}
-	return entries
-}
-
-// convertAvroToTextIndexMap converts Avro array back to protobuf map format.
-func convertAvroToTextIndexMap(entries []AvroTextIndexEntry) map[int64]*datapb.TextIndexStats {
-	indexMap := make(map[int64]*datapb.TextIndexStats)
-	for _, entry := range entries {
-		indexMap[entry.FieldID] = convertAvroToTextIndexStats(entry.Stats)
-	}
-	return indexMap
-}
-
-// --- JSON Key Index Conversion ---
-
-// convertJSONKeyStatsToAvro converts protobuf JsonKeyStats to Avro format.
-func convertJSONKeyStatsToAvro(stats *datapb.JsonKeyStats) *AvroJSONKeyStats {
-	if stats == nil {
-		return nil
-	}
-	return &AvroJSONKeyStats{
-		FieldID:                stats.GetFieldID(),
-		Version:                stats.GetVersion(),
-		Files:                  stats.GetFiles(),
-		LogSize:                stats.GetLogSize(),
-		MemorySize:             stats.GetMemorySize(),
-		BuildID:                stats.GetBuildID(),
-		JSONKeyStatsDataFormat: stats.GetJsonKeyStatsDataFormat(),
-	}
-}
-
-// convertAvroToJSONKeyStats converts Avro JsonKeyStats back to protobuf format.
-func convertAvroToJSONKeyStats(avroStats *AvroJSONKeyStats) *datapb.JsonKeyStats {
-	if avroStats == nil {
-		return nil
-	}
-	return &datapb.JsonKeyStats{
-		FieldID:                avroStats.FieldID,
-		Version:                avroStats.Version,
-		Files:                  avroStats.Files,
-		LogSize:                avroStats.LogSize,
-		MemorySize:             avroStats.MemorySize,
-		BuildID:                avroStats.BuildID,
-		JsonKeyStatsDataFormat: avroStats.JSONKeyStatsDataFormat,
-	}
-}
-
-// convertJSONKeyIndexMapToAvro converts protobuf map[int64]*JsonKeyStats to Avro array format.
-// Avro doesn't support maps with non-string keys, so we convert to array of entries.
-func convertJSONKeyIndexMapToAvro(indexMap map[int64]*datapb.JsonKeyStats) []AvroJSONKeyIndexEntry {
-	var entries []AvroJSONKeyIndexEntry
-	for fieldID, stats := range indexMap {
-		entries = append(entries, AvroJSONKeyIndexEntry{
-			FieldID: fieldID,
-			Stats:   convertJSONKeyStatsToAvro(stats),
-		})
-	}
-	return entries
-}
-
-// convertAvroToJSONKeyIndexMap converts Avro array back to protobuf map format.
-func convertAvroToJSONKeyIndexMap(entries []AvroJSONKeyIndexEntry) map[int64]*datapb.JsonKeyStats {
-	indexMap := make(map[int64]*datapb.JsonKeyStats)
-	for _, entry := range entries {
-		indexMap[entry.FieldID] = convertAvroToJSONKeyStats(entry.Stats)
-	}
-	return indexMap
-}
-
-// =============================================================================
-// Section 7: Avro Schema Definition
-// =============================================================================
-
-// getAvroSchemaV2 returns the V2 Avro schema for ManifestEntry. This is the
-// canonical schema string from which V1 and V3 are derived.
-//
-// V2 covers:
-//   - Basic segment metadata (ID, partition, level, channel, row count)
-//   - Binlog file references (insert, delete, stats, BM25 stats)
-//   - Index file references with index_store_path_version
-//   - Message queue positions (start and DML positions)
-//   - Storage version and sorting information
-//
-// Schema design notes:
-//   - Each manifest file contains a single ManifestEntry record (one file per segment)
-//   - Uses int64 for timestamps (Avro doesn't have uint64)
-//   - Uses arrays instead of maps (Avro maps require string keys)
-//   - Nested record types are defined inline and referenced by name
-//   - All fields are required (no null unions for simplicity)
-func getAvroSchemaV2() string {
-	return `{
-		"type": "record",
-		"name": "ManifestEntry",
-			"fields": [
-				{"name": "segment_id", "type": "long"},
-				{"name": "partition_id", "type": "long"},
-				{"name": "segment_level", "type": "long"},
-				{"name": "channel_name", "type": "string"},
-				{"name": "num_of_rows", "type": "long"},
-				{
-					"name": "start_position",
-					"type": {
-						"type": "record",
-						"name": "AvroMsgPosition",
-						"fields": [
-							{"name": "channel_name", "type": "string"},
-							{"name": "msg_id", "type": "bytes"},
-							{"name": "msg_group", "type": "string"},
-							{"name": "timestamp", "type": "long"}
-						]
-					}
-				},
-				{
-					"name": "dml_position",
-					"type": "AvroMsgPosition"
-				},
-				{"name": "storage_version", "type": "long"},
-				{"name": "is_sorted", "type": "boolean"},
-				{
-					"name": "binlog_files",
-					"type": {
-						"type": "array",
-						"items": {
-							"type": "record",
-							"name": "AvroFieldBinlog",
-							"fields": [
-								{"name": "field_id", "type": "long"},
-								{
-									"name": "binlogs",
-									"type": {
-										"type": "array",
-										"items": {
-											"type": "record",
-											"name": "AvroBinlog",
-											"fields": [
-												{"name": "entries_num", "type": "long"},
-												{"name": "timestamp_from", "type": "long"},
-												{"name": "timestamp_to", "type": "long"},
-												{"name": "log_path", "type": "string"},
-												{"name": "log_size", "type": "long"},
-												{"name": "log_id", "type": "long"},
-												{"name": "memory_size", "type": "long"}
-											]
-										}
-									}
-								}
-							]
-						}
-					}
-				},
-				{
-					"name": "deltalog_files",
-					"type": {
-						"type": "array",
-						"items": "AvroFieldBinlog"
-					}
-				},
-				{
-					"name": "statslog_files",
-					"type": {
-						"type": "array",
-						"items": "AvroFieldBinlog"
-					}
-				},
-				{
-					"name": "bm25_statslog_files",
-					"type": {
-						"type": "array",
-						"items": "AvroFieldBinlog"
-					}
-				},
-				{
-					"name": "index_files",
-					"type": {
-						"type": "array",
-						"items": {
-							"type": "record",
-							"name": "AvroIndexFilePathInfo",
-							"fields": [
-								{"name": "segment_id", "type": "long"},
-								{"name": "field_id", "type": "long"},
-								{"name": "index_id", "type": "long"},
-								{"name": "build_id", "type": "long"},
-								{"name": "index_name", "type": "string"},
-								{
-									"name": "index_params",
-									"type": {
-										"type": "array",
-										"items": {
-											"type": "record",
-											"name": "AvroKeyValuePair",
-											"fields": [
-												{"name": "key", "type": "string"},
-												{"name": "value", "type": "string"}
-											]
-										}
-									}
-								},
-								{"name": "index_file_paths", "type": {"type": "array", "items": "string"}},
-								{"name": "serialized_size", "type": "long"},
-								{"name": "index_version", "type": "long"},
-								{"name": "num_rows", "type": "long"},
-								{"name": "current_index_version", "type": "int"},
-								{"name": "mem_size", "type": "long"},
-								{"name": "current_scalar_index_version", "type": "int", "default": 0},
-								{"name": "index_store_path_version", "type": "int", "default": 0}
-							]
-						}
-					}
-				},
-				{
-					"name": "text_index_files",
-					"type": {
-						"type": "array",
-						"items": {
-							"type": "record",
-							"name": "AvroTextIndexEntry",
-							"fields": [
-								{"name": "field_id", "type": "long"},
-								{
-									"name": "stats",
-									"type": {
-										"type": "record",
-										"name": "AvroTextIndexStats",
-										"fields": [
-											{"name": "field_id", "type": "long"},
-											{"name": "version", "type": "long"},
-											{"name": "files", "type": {"type": "array", "items": "string"}},
-											{"name": "log_size", "type": "long"},
-											{"name": "memory_size", "type": "long"},
-											{"name": "build_id", "type": "long"}
-										]
-									}
-								}
-							]
-						}
-					}
-				},
-				{
-					"name": "json_key_index_files",
-					"type": {
-						"type": "array",
-						"items": {
-							"type": "record",
-							"name": "AvroJSONKeyIndexEntry",
-							"fields": [
-								{"name": "field_id", "type": "long"},
-								{
-									"name": "stats",
-									"type": {
-										"type": "record",
-										"name": "AvroJSONKeyStats",
-										"fields": [
-											{"name": "field_id", "type": "long"},
-											{"name": "version", "type": "long"},
-											{"name": "files", "type": {"type": "array", "items": "string"}},
-											{"name": "log_size", "type": "long"},
-											{"name": "memory_size", "type": "long"},
-											{"name": "build_id", "type": "long"},
-											{"name": "json_key_stats_data_format", "type": "long"}
-										]
-									}
-								}
-							]
-						}
-					}
-				}
-			]
-	}`
-}
-
-// getAvroSchemaV1 returns the V1 schema, derived from V2 by stripping
-// index_store_path_version. Legacy V1 manifests in the wild were written
-// without that field; Avro binary is positional, so V1 reads must use a
-// schema that omits it.
-func getAvroSchemaV1() string {
-	return strings.Replace(getAvroSchemaV2(),
-		`,
-								{"name": "index_store_path_version", "type": "int", "default": 0}`,
-		"",
-		1)
-}
-
-// getAvroSchemaV3 returns the V3 schema, derived from V2 by inserting
-// commit_timestamp after is_sorted. New writes use V3; legacy V2 manifests
-// are decoded with getAvroSchemaV2.
-func getAvroSchemaV3() string {
-	return strings.Replace(getAvroSchemaV2(),
-		`{"name": "is_sorted", "type": "boolean"},`,
-		`{"name": "is_sorted", "type": "boolean"},
-				{"name": "commit_timestamp", "type": "long", "default": 0},`,
-		1)
-}
-
-// getAvroSchemaV4 returns the V4 schema, derived from V3 by extending
-// AvroFieldBinlog with child_fields and format. New writes use V4; legacy V1/V2/V3
-// manifests are decoded with their exact historical schemas.
-func getAvroSchemaV4() string {
-	return strings.Replace(getAvroSchemaV3(),
-		`"name": "AvroFieldBinlog",
-							"fields": [
-								{"name": "field_id", "type": "long"},
-								{
-									"name": "binlogs",`,
-		`"name": "AvroFieldBinlog",
-							"fields": [
-								{"name": "field_id", "type": "long"},
-								{"name": "child_fields", "type": {"type": "array", "items": "long"}, "default": []},
-								{"name": "format", "type": "string", "default": ""},
-								{
-									"name": "binlogs",`,
-		1)
 }

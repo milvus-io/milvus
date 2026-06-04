@@ -28,11 +28,13 @@ import "C"
 import (
 	"context"
 	"net/url"
+	"path"
 	"sort"
 	"strings"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -87,8 +89,10 @@ func NormalizeFileInfos(fileInfos []FileInfo, format string) ([]FileInfo, int) {
 // a row total at this layer. Real row counts are only available after manifest
 // construction where Fragment.RowCount = endRow - startRow.
 type FileInfo struct {
-	FilePath string
-	NumRows  int64
+	FilePath        string
+	NumRows         int64
+	SourceSegmentID int64
+	Deltalogs       []*datapb.FieldBinlog
 }
 
 // ExploreFiles scans an external directory and returns file information.
@@ -172,6 +176,70 @@ func normalizeExternalPathForStorage(path string, properties *C.LoonProperties, 
 	return u.String(), nil
 }
 
+func resolveExternalSourceRelativePath(sourcePath string, properties *C.LoonProperties, extfs ExternalSpecContext) (string, error) {
+	if sourcePath == "" || extfs.Source == "" || properties == nil {
+		return sourcePath, nil
+	}
+	if isAbsoluteExternalPath(sourcePath) {
+		return normalizeExternalPathForStorage(sourcePath, properties, extfs)
+	}
+
+	sourceURI, err := url.Parse(extfs.Source)
+	if err != nil {
+		return "", err
+	}
+	if sourceURI.Scheme == "" || sourceURI.Host == "" {
+		return sourcePath, nil
+	}
+
+	prefix := ExtfsPrefixForCollection(extfs.CollectionID)
+	bucketName := loonPropertyString(properties, prefix+"bucket_name")
+	if bucketName == "" {
+		return "", fmt.Errorf("resolve external source relative path: missing bucket_name for %s", extfs.Source)
+	}
+	address := loonPropertyString(properties, prefix+"address")
+	addressHost, err := propertyAddressHost(address)
+	if err != nil {
+		return "", err
+	}
+
+	resolved := &url.URL{
+		Scheme: sourceURI.Scheme,
+		Host:   sourceURI.Host,
+	}
+	relativePath := strings.TrimPrefix(sourcePath, "/")
+	if addressHost != "" {
+		resolved.Host = addressHost
+		resolved.Path = "/" + path.Join(bucketName, relativePath)
+	} else if sourceURI.Host == bucketName {
+		resolved.Path = "/" + relativePath
+	} else if firstPathSegment(sourceURI.Path) == bucketName {
+		resolved.Path = "/" + path.Join(bucketName, relativePath)
+	} else {
+		resolved.Path = "/" + relativePath
+	}
+	return normalizeExternalPathForStorage(resolved.String(), properties, extfs)
+}
+
+func isAbsoluteExternalPath(filePath string) bool {
+	u, err := url.Parse(filePath)
+	if err != nil {
+		return false
+	}
+	return u.Scheme != "" || path.IsAbs(filePath)
+}
+
+func firstPathSegment(filePath string) string {
+	trimmed := strings.Trim(filePath, "/")
+	if trimmed == "" {
+		return ""
+	}
+	if idx := strings.Index(trimmed, "/"); idx >= 0 {
+		return trimmed[:idx]
+	}
+	return trimmed
+}
+
 func loonPropertyString(properties *C.LoonProperties, key string) string {
 	cKey := C.CString(key)
 	defer C.free(unsafe.Pointer(cKey))
@@ -207,6 +275,58 @@ func ExploreFilesReturnManifestPath(
 	storageConfig *indexpb.StorageConfig,
 	extfs ExternalSpecContext,
 ) ([]FileInfo, string, error) {
+	if isMilvusTableFormat(format) {
+		metadataPath, err := resolveMilvusTableSnapshotMetadataPath(exploreDir, extfs.Spec)
+		if err != nil {
+			return nil, "", err
+		}
+		metadataBytes, err := ReadFileWithExternalSpec(storageConfig, metadataPath, extfs)
+		if err != nil {
+			return nil, "", fmt.Errorf("read milvus snapshot metadata: %w", err)
+		}
+		cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to create properties: %w", err)
+		}
+		defer C.loon_properties_free(cProperties)
+		if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
+			return nil, "", fmt.Errorf("inject extfs: %w", err)
+		}
+		resolveSourcePath := func(sourcePath string) (string, error) {
+			return resolveExternalSourceRelativePath(sourcePath, cProperties, extfs)
+		}
+		fileInfos, err := buildMilvusTableFileInfosFromSnapshotMetadata(
+			metadataBytes,
+			func(manifestPath string, formatVersion int32) (*datapb.SegmentDescription, error) {
+				resolvedManifestPath, err := resolveSourcePath(manifestPath)
+				if err != nil {
+					return nil, err
+				}
+				segment, err := readMilvusSnapshotSegmentManifest(resolvedManifestPath, formatVersion, func(path string) ([]byte, error) {
+					return ReadFileWithExternalSpec(storageConfig, path, extfs)
+				})
+				if err != nil {
+					return nil, err
+				}
+				if err := resolveMilvusTableSegmentDeltalogPaths(segment, resolveSourcePath); err != nil {
+					return nil, err
+				}
+				return segment, nil
+			},
+			func(manifestPath string) (string, error) {
+				return resolveMilvusTableSourceManifestPath(manifestPath, resolveSourcePath)
+			},
+		)
+		if err != nil {
+			return nil, "", err
+		}
+		manifestPath, err := writeMilvusTableExploreManifest(baseDir, fileInfos, storageConfig)
+		if err != nil {
+			return nil, "", err
+		}
+		return fileInfos, manifestPath, nil
+	}
+
 	cColumns := make([]*C.char, len(columns))
 	for i, col := range columns {
 		cColumns[i] = C.CString(col)

@@ -46,6 +46,7 @@ type stubCatalog struct {
 	jobs            []*datapb.ExternalCollectionRefreshJob
 	tasks           []*datapb.ExternalCollectionRefreshTask
 	alterSegmentErr error
+	alteredSegments []*datapb.SegmentInfo
 }
 
 func (s *stubCatalog) ListExternalCollectionRefreshJobs(ctx context.Context) ([]*datapb.ExternalCollectionRefreshJob, error) {
@@ -73,6 +74,7 @@ func (s *stubCatalog) DropExternalCollectionRefreshTask(ctx context.Context, tas
 }
 
 func (s *stubCatalog) AlterSegments(ctx context.Context, newSegments []*datapb.SegmentInfo, binlogs ...metastore.BinlogsIncrement) error {
+	s.alteredSegments = append([]*datapb.SegmentInfo(nil), newSegments...)
 	return s.alterSegmentErr
 }
 
@@ -553,6 +555,53 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 		assert.Equal(t, commonpb.SegmentState_Flushed, newSegment.GetState())
 		assert.Equal(t, "by-dev-rootcoord-dml_0_v1", newSegment.GetInsertChannel())
 		assert.Equal(t, int64(1), newSegment.GetPartitionID())
+	})
+
+	t.Run("success_update_existing_segment_manifest", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+		assert.NoError(t, err)
+
+		segments := NewSegmentsInfo()
+		segments.SetSegment(1, &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             1,
+				CollectionID:   100,
+				PartitionID:    1,
+				InsertChannel:  "by-dev-rootcoord-dml_0_v1",
+				State:          commonpb.SegmentState_Flushed,
+				NumOfRows:      500,
+				ManifestPath:   "old-manifest",
+				StorageVersion: 3,
+			},
+		})
+
+		mt := &meta{
+			catalog:     catalog,
+			segments:    segments,
+			collections: newTestCollections(100),
+		}
+
+		task := createTestRefreshTaskWithMetaAndStubs(t, 1001, 1, 100, mt, refreshMeta)
+		resp := &datapb.RefreshExternalCollectionTaskResponse{
+			UpdatedSegments: []*datapb.SegmentInfo{{
+				ID:             1,
+				CollectionID:   100,
+				NumOfRows:      500,
+				ManifestPath:   "new-manifest",
+				StorageVersion: 3,
+			}},
+		}
+
+		err = task.SetJobInfo(ctx, resp)
+		assert.NoError(t, err)
+		segment := mt.segments.GetSegment(1)
+		assert.NotNil(t, segment)
+		assert.Equal(t, commonpb.SegmentState_Flushed, segment.GetState())
+		assert.Equal(t, "new-manifest", segment.GetManifestPath())
+		assert.Equal(t, uint64(0), segment.GetDroppedAt())
+		assert.Len(t, catalog.alteredSegments, 1)
+		assert.Equal(t, int64(1), catalog.alteredSegments[0].GetID())
 	})
 
 	t.Run("high_drop_ratio_warning", func(t *testing.T) {

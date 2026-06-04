@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <string>
@@ -27,7 +28,10 @@
 #include "arrow/util/key_value_metadata.h"
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
+#include "common/SystemProperty.h"
+#include "common/VirtualPK.h"
 #include "milvus-storage/common/constants.h"
+#include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
 #include "protobuf_utils.h"
 
@@ -58,6 +62,25 @@ ParseFieldIdColumnName(const std::string& column_name) {
         return std::nullopt;
     }
     return FieldId(field_id);
+}
+
+bool
+IsMilvusTableExternalSpec(const std::string& external_spec) {
+    if (external_spec.empty()) {
+        return false;
+    }
+    try {
+        auto spec = nlohmann::json::parse(external_spec);
+        return spec.value("format", "parquet") == "milvus-table";
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+void
+Schema::set_external_spec(const std::string& spec) {
+    external_spec_ = spec;
+    is_milvus_table_external_ = IsMilvusTableExternalSpec(spec);
 }
 
 std::shared_ptr<Schema>
@@ -165,7 +188,7 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         schema->set_external_spec(schema_proto.external_spec());
     }
 
-    // Collect function output field ids from FunctionSchema list.
+    // Collect function output field IDs from FunctionSchema.
     for (const auto& fn : schema_proto.functions()) {
         for (auto out_id : fn.output_field_ids()) {
             schema->add_function_output_field_id(FieldId(out_id));
@@ -293,20 +316,68 @@ Schema::GetExternalColumnNames() const {
         auto it = fields_.find(field_id);
         if (it == fields_.end())
             continue;
-        if (it->second.is_external_field()) {
-            columns->push_back(it->second.get_external_field());
-        } else if (is_function_output(field_id)) {
-            // Function output fields are computed by Milvus and stored by
-            // numeric field id, same as internal collection fields.
-            columns->push_back(std::to_string(field_id.get()));
+        if (IsExternalManifestStoredField(field_id)) {
+            columns->push_back(GetPhysicalColumnName(field_id));
         }
     }
     return columns;
 }
 
+bool
+Schema::IsExternalDataField(FieldId field_id) const {
+    auto it = fields_.find(field_id);
+    if (it == fields_.end() || !is_external_collection()) {
+        return false;
+    }
+    const auto& meta = it->second;
+    if (!is_milvus_table_external_collection()) {
+        return meta.is_external_field();
+    }
+    return !SystemProperty::Instance().IsSystem(field_id) &&
+           !is_function_output(field_id) &&
+           meta.get_name().get() != VIRTUAL_PK_FIELD_NAME;
+}
+
+bool
+Schema::IsExternalManifestStoredField(FieldId field_id) const {
+    if (!is_external_collection()) {
+        return false;
+    }
+    if (field_id == TimestampFieldID && RequiresSourceInsertTimestamps()) {
+        return true;
+    }
+    return IsExternalDataField(field_id) || is_function_output(field_id);
+}
+
+bool
+Schema::RequiresSourceInsertTimestamps() const {
+    return is_milvus_table_external_collection() &&
+           primary_field_id_opt_.has_value() &&
+           IsExternalDataField(primary_field_id_opt_.value());
+}
+
+std::string
+Schema::GetPhysicalColumnName(FieldId field_id) const {
+    const auto& meta = (*this)[field_id];
+    if (is_milvus_table_external_collection() &&
+        IsExternalDataField(field_id)) {
+        return std::to_string(field_id.get());
+    }
+    if (meta.is_external_field()) {
+        return meta.get_external_field();
+    }
+    return std::to_string(field_id.get());
+}
+
 FieldId
 Schema::ResolveColumnFieldId(const std::string& column_name) const {
     if (is_external_collection()) {
+        if (is_milvus_table_external_collection()) {
+            if (auto field_id = ParseFieldIdColumnName(column_name);
+                field_id.has_value() && fields_.count(field_id.value())) {
+                return field_id.value();
+            }
+        }
         for (const auto& [fid, meta] : fields_) {
             if (meta.is_external_field() &&
                 meta.get_external_field() == column_name) {

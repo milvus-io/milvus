@@ -44,7 +44,7 @@ func TestParseExternalSpec_DefaultFormat(t *testing.T) {
 }
 
 func TestParseExternalSpec_SupportedFormats(t *testing.T) {
-	for _, fmt := range []string{"parquet", "lance-table", "vortex"} {
+	for _, fmt := range []string{"parquet", "lance-table", "vortex", "iceberg-table", "milvus-table"} {
 		spec, err := ParseExternalSpec(`{"format":"` + fmt + `"}`)
 		require.NoError(t, err, "format %s should be supported", fmt)
 		assert.Equal(t, fmt, spec.Format)
