@@ -231,6 +231,9 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
             config, SEGMENT_INSERT_FILES_KEY);
     auto manifest =
         index::GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
+    auto external_spec =
+        index::GetValueFromConfig<std::string>(config, EXTERNAL_SPEC_KEY)
+            .value_or("");
     AssertInfo(segment_insert_files.has_value() || manifest.has_value(),
                "[StorageV2] insert file paths and manifest for storage v2 is "
                "empty when build index");
@@ -255,7 +258,8 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
                                          field_meta_,
                                          data_type,
                                          dim,
-                                         element_type);
+                                         element_type,
+                                         external_spec);
     }
 
     auto remote_files = segment_insert_files.value();
@@ -437,6 +441,9 @@ MemFileManagerImpl::cache_opt_field_memory_v3(const Config& config) {
 
     auto manifest =
         index::GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
+    auto external_spec =
+        index::GetValueFromConfig<std::string>(config, EXTERNAL_SPEC_KEY)
+            .value_or("");
     AssertInfo(manifest.has_value() && manifest.value() != "",
                "[StorageV3] manifest path is empty when build index");
     auto manifest_path_str = manifest.value();
@@ -463,7 +470,8 @@ MemFileManagerImpl::cache_opt_field_memory_v3(const Config& config) {
                                                      field_meta,
                                                      field_type,
                                                      1,  // scalar field
-                                                     element_type);
+                                                     element_type,
+                                                     external_spec);
 
         res[field_id] = GetOptFieldIvfData(field_type, field_datas);
     }

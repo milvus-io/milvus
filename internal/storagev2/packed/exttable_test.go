@@ -25,10 +25,14 @@ import (
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/snapshotio"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -466,6 +470,49 @@ func TestGetColumnNamesFromSchema_WithExternalField(t *testing.T) {
 	assert.Equal(t, []string{"external_id", "vector", "raw_text"}, columns)
 }
 
+func TestGetColumnNamesFromSchema_MilvusTableUsesSourceFieldIDs(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		ExternalSource: "s3://bucket/snapshots/100/metadata/200.json",
+		ExternalSpec:   `{"format":"milvus-table"}`,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 0, Name: "__virtual_pk__"},
+			{FieldID: 100, Name: "target_pk", ExternalField: "pk"},
+			{FieldID: 101, Name: "target_vector", ExternalField: "vector"},
+		},
+	}
+	columns := GetColumnNamesFromSchema(schema)
+	assert.Equal(t, []string{"100", "101"}, columns)
+}
+
+func TestGetColumnNamesFromSchema_MilvusTableSourceSchemaUsesFieldIDs(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		ExternalSource: "s3://bucket/snapshots/100/metadata/200.json",
+		ExternalSpec:   `{"format":"milvus-table"}`,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk"},
+			{FieldID: 101, Name: "vector"},
+		},
+	}
+	columns := GetColumnNamesFromSchema(schema)
+	assert.Equal(t, []string{"100", "101"}, columns)
+}
+
+func TestGetColumnNamesFromSchema_MilvusTableRealPKIncludesTimestamp(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		ExternalSource: "s3://bucket/snapshots/100/metadata/200.json",
+		ExternalSpec:   `{"format":"milvus-table"}`,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", IsPrimaryKey: true},
+			{FieldID: 101, Name: "vector"},
+			{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	columns := GetColumnNamesFromSchema(schema)
+	assert.Equal(t, []string{"100", "101", "1"}, columns)
+}
+
 func TestGetColumnNamesFromSchema_EmptyFields(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{},
@@ -485,6 +532,51 @@ func TestGetColumnNamesFromSchema_ExternalSkipsFunctionOutputAndSystemFields(t *
 	}
 	columns := GetColumnNamesFromSchema(schema)
 	assert.Equal(t, []string{"external_id"}, columns)
+}
+
+func TestGetColumnNamesFromSchema_MilvusTableSkipsFunctionOutput(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		ExternalSource: "s3://bucket/snapshots/100/metadata/200.json",
+		ExternalSpec:   `{"format":"milvus-table"}`,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "text", ExternalField: "text"},
+			{FieldID: 101, Name: "vec", ExternalField: "vec"},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "bm25",
+				InputFieldNames:  []string{"text"},
+				OutputFieldNames: []string{"sparse"},
+			},
+		},
+	}
+
+	columns := GetColumnNamesFromSchema(schema)
+	assert.Equal(t, []string{"100", "101"}, columns)
+}
+
+func TestHasExternalPrimaryKey(t *testing.T) {
+	assert.False(t, HasExternalPrimaryKey(nil))
+
+	assert.True(t, HasExternalPrimaryKey(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id", IsPrimaryKey: true, ExternalField: "source_id"},
+		},
+	}))
+
+	assert.False(t, HasExternalPrimaryKey(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "__virtual_pk__", IsPrimaryKey: true},
+			{Name: "id", ExternalField: "source_id"},
+		},
+	}))
+
+	assert.False(t, HasExternalPrimaryKey(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id", ExternalField: "source_id"},
+		},
+	}))
 }
 
 func TestBuildCurrentSegmentFragments_NoManifest(t *testing.T) {
@@ -927,6 +1019,79 @@ func TestNormalizeExternalPathForStorage_BareAddress(t *testing.T) {
 	assert.Equal(t, "s3://s3.us-west-2.amazonaws.com/liyiyang-test/all_types_v2/", got)
 }
 
+func TestResolveExternalSourceRelativePath_UsesSourceBucketRoot(t *testing.T) {
+	config := &indexpb.StorageConfig{
+		StorageType: "local",
+		BucketName:  "/tmp",
+		RootPath:    "/tmp",
+	}
+	extfs := ExternalSpecContext{
+		CollectionID: 42,
+		Source:       "s3://source-bucket/snapshots/100/metadata/200.json",
+		Spec:         `{"format":"milvus-table","extfs":{"cloud_provider":"aws","region":"us-west-2","access_key_id":"ak","access_key_value":"sk"}}`,
+	}
+
+	props, err := MakePropertiesFromStorageConfig(config, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	require.NoError(t, injectExternalSpecProperties(props, extfs.CollectionID, extfs.Source, extfs.Spec))
+
+	got, err := resolveExternalSourceRelativePath("files/insert_log/1/2/3", props, extfs)
+	require.NoError(t, err)
+	assert.Equal(t, "s3://s3.us-west-2.amazonaws.com/source-bucket/files/insert_log/1/2/3", got)
+}
+
+func TestNormalizeExternalPathForFilesystem_RemoteURI(t *testing.T) {
+	config := &indexpb.StorageConfig{
+		StorageType: "local",
+		BucketName:  "/tmp",
+		RootPath:    "/tmp",
+	}
+	prefix := ExtfsPrefixForCollection(42)
+	props, err := MakePropertiesFromStorageConfig(config, map[string]string{
+		prefix + "address":     "http://localhost:9000",
+		prefix + "bucket_name": "a-bucket",
+	})
+	require.NoError(t, err)
+	defer FreeProperties(props)
+
+	lookupPath, filePath, err := normalizeExternalPathForFilesystem(
+		"s3://localhost:9000/a-bucket/files/snapshots/metadata.json",
+		props,
+		ExternalSpecContext{CollectionID: 42, Source: "s3://localhost:9000/a-bucket/files/"},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "s3://localhost:9000/a-bucket/files/snapshots/metadata.json", lookupPath)
+	assert.Equal(t, "files/snapshots/metadata.json", filePath)
+
+	lookupPath, filePath, err = normalizeExternalPathForFilesystem(
+		"s3://a-bucket/files/snapshots/metadata.json",
+		props,
+		ExternalSpecContext{CollectionID: 42, Source: "s3://a-bucket/files/"},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "s3://localhost:9000/a-bucket/files/snapshots/metadata.json", lookupPath)
+	assert.Equal(t, "files/snapshots/metadata.json", filePath)
+
+	lookupPath, filePath, err = normalizeExternalPathForFilesystem(
+		"s3://other-bucket/files/snapshots/metadata.json",
+		props,
+		ExternalSpecContext{CollectionID: 42, Source: "s3://a-bucket/files/"},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "s3://other-bucket/files/snapshots/metadata.json", lookupPath)
+	assert.Equal(t, "s3://other-bucket/files/snapshots/metadata.json", filePath)
+
+	lookupPath, filePath, err = normalizeExternalPathForFilesystem(
+		"files/source/_delta/9001",
+		props,
+		ExternalSpecContext{CollectionID: 42, Source: "s3://a-bucket/snapshots/100/metadata/200.json"},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "s3://localhost:9000/a-bucket/files/source/_delta/9001", lookupPath)
+	assert.Equal(t, "files/source/_delta/9001", filePath)
+}
+
 // ==================== SampleExternalFieldSizes Tests ====================
 
 func TestSampleExternalFieldSizes_NilStorageConfig(t *testing.T) {
@@ -1024,6 +1189,22 @@ func TestExploreFilesReturnManifestPath_PropertiesError(t *testing.T) {
 	assert.Contains(t, err.Error(), "properties")
 }
 
+func TestResolveMilvusTableSnapshotMetadataPathRejectsNonJSONPath(t *testing.T) {
+	spec := `{"format":"milvus-table"}`
+
+	t.Run("accepts snapshot metadata JSON path", func(t *testing.T) {
+		metadataPath, err := resolveMilvusTableSnapshotMetadataPath("s3://bucket/snapshots/100/metadata/200.json", spec)
+		require.NoError(t, err)
+		assert.Equal(t, "s3://bucket/snapshots/100/metadata/200.json", metadataPath)
+	})
+
+	t.Run("rejects base path", func(t *testing.T) {
+		_, err := resolveMilvusTableSnapshotMetadataPath("s3://bucket", spec)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "snapshot metadata JSON path")
+	})
+}
+
 // ==================== ReadFileInfosFromManifestPath Tests ====================
 
 func TestReadFileInfosFromManifestPath_InvalidPath(t *testing.T) {
@@ -1038,6 +1219,283 @@ func TestReadFileInfosFromManifestPath_NilConfig(t *testing.T) {
 	_, err := ReadFileInfosFromManifestPath("/manifest.json", nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "properties")
+}
+
+func TestBuildMilvusTableFileInfosFromSnapshotMetadata(t *testing.T) {
+	metadata := &datapb.SnapshotMetadata{
+		FormatVersion: 2,
+		ManifestList: []string{
+			"segment-20.avro",
+			"segment-10.avro",
+		},
+		Storagev2ManifestList: []*datapb.StorageV2SegmentManifest{
+			{SegmentId: 20, Manifest: `{"base_path":"source/20","ver":1}`},
+			{SegmentId: 10, Manifest: `{"base_path":"source/10","ver":2}`},
+		},
+	}
+	metadataBytes, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(metadata)
+	require.NoError(t, err)
+
+	segments := map[string]*datapb.SegmentDescription{
+		"segment-10.avro": {SegmentId: 10, NumOfRows: 100},
+		"segment-20.avro": {SegmentId: 20, NumOfRows: 200},
+	}
+	fileInfos, err := buildMilvusTableFileInfosFromSnapshotMetadata(metadataBytes, func(manifestPath string, formatVersion int32) (*datapb.SegmentDescription, error) {
+		require.Equal(t, int32(2), formatVersion)
+		return segments[manifestPath], nil
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []FileInfo{
+		{FilePath: `{"base_path":"source/10","ver":2}`, NumRows: 100, SourceSegmentID: 10},
+		{FilePath: `{"base_path":"source/20","ver":1}`, NumRows: 200, SourceSegmentID: 20},
+	}, fileInfos)
+}
+
+func TestBuildMilvusTableFileInfosFromSnapshotMetadata_ResolvesManifestBasePath(t *testing.T) {
+	metadata := &datapb.SnapshotMetadata{
+		FormatVersion: 2,
+		ManifestList:  []string{"segment-manifest.avro"},
+		Storagev2ManifestList: []*datapb.StorageV2SegmentManifest{
+			{SegmentId: 10, Manifest: `{"base_path":"files/insert_log/10","ver":2}`},
+		},
+	}
+	metadataBytes, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(metadata)
+	require.NoError(t, err)
+
+	resolvedManifest := MarshalManifestPath("s3://source-bucket/files/insert_log/10", 2)
+	fileInfos, err := buildMilvusTableFileInfosFromSnapshotMetadata(
+		metadataBytes,
+		func(manifestPath string, formatVersion int32) (*datapb.SegmentDescription, error) {
+			require.Equal(t, "segment-manifest.avro", manifestPath)
+			require.Equal(t, int32(2), formatVersion)
+			return &datapb.SegmentDescription{
+				SegmentId: 10,
+				NumOfRows: 100,
+			}, nil
+		},
+		func(manifestPath string) (string, error) {
+			return resolveMilvusTableSourceManifestPath(manifestPath, func(sourcePath string) (string, error) {
+				return "s3://source-bucket/" + sourcePath, nil
+			})
+		},
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, []FileInfo{
+		{FilePath: resolvedManifest, NumRows: 100, SourceSegmentID: 10},
+	}, fileInfos)
+}
+
+func TestResolveMilvusTableSegmentDeltalogPaths(t *testing.T) {
+	segment := &datapb.SegmentDescription{
+		Deltalogs: []*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{{
+				LogPath: "files/delta_log/10/1",
+			}},
+		}},
+	}
+
+	err := resolveMilvusTableSegmentDeltalogPaths(segment, func(sourcePath string) (string, error) {
+		return "s3://source-bucket/" + sourcePath, nil
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "s3://source-bucket/files/delta_log/10/1", segment.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
+}
+
+func TestBuildMilvusTableFileInfosFromSnapshotMetadata_NoStorageV2(t *testing.T) {
+	metadataBytes, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(&datapb.SnapshotMetadata{})
+	require.NoError(t, err)
+
+	_, err = buildMilvusTableFileInfosFromSnapshotMetadata(metadataBytes, nil)
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrMilvusTableStorageV2ManifestListMissing))
+	assert.Contains(t, err.Error(), "storagev2_manifest_list")
+	assert.Contains(t, err.Error(), "common.storage.useLoonFFI=true")
+}
+
+func TestBuildMilvusTableFileInfosFromSnapshotMetadata_SourceSegmentDeltalogsSkipped(t *testing.T) {
+	metadata := &datapb.SnapshotMetadata{
+		FormatVersion: 2,
+		ManifestList:  []string{"segment-manifest.avro"},
+		Storagev2ManifestList: []*datapb.StorageV2SegmentManifest{
+			{SegmentId: 10, Manifest: `{"base_path":"source/10","ver":2}`},
+		},
+	}
+	metadataBytes, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(metadata)
+	require.NoError(t, err)
+
+	expected := []*datapb.FieldBinlog{{
+		Binlogs: []*datapb.Binlog{{LogPath: "files/source/10/_delta/1", EntriesNum: 8}},
+	}}
+	fileInfos, err := buildMilvusTableFileInfosFromSnapshotMetadata(metadataBytes, func(manifestPath string, formatVersion int32) (*datapb.SegmentDescription, error) {
+		require.Equal(t, "segment-manifest.avro", manifestPath)
+		require.Equal(t, int32(2), formatVersion)
+		return &datapb.SegmentDescription{
+			SegmentId:    10,
+			SegmentLevel: datapb.SegmentLevel_L1,
+			NumOfRows:    100,
+			Deltalogs:    expected,
+		}, nil
+	})
+
+	require.NoError(t, err)
+	require.Len(t, fileInfos, 1)
+	require.Equal(t, int64(10), fileInfos[0].SourceSegmentID)
+	require.Empty(t, fileInfos[0].Deltalogs)
+}
+
+func TestBuildMilvusTableFileInfosFromSnapshotMetadata_L0Deltalogs(t *testing.T) {
+	metadata := &datapb.SnapshotMetadata{
+		FormatVersion: 2,
+		ManifestList:  []string{"source-manifest.avro", "l0-manifest.avro"},
+		Storagev2ManifestList: []*datapb.StorageV2SegmentManifest{
+			{SegmentId: 10, Manifest: `{"base_path":"source/10","ver":2}`},
+		},
+	}
+	metadataBytes, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(metadata)
+	require.NoError(t, err)
+
+	l0Deltalogs := []*datapb.FieldBinlog{{
+		FieldID: 100,
+		Binlogs: []*datapb.Binlog{{
+			LogPath:    "files/delta_log/1",
+			EntriesNum: 8,
+		}},
+	}}
+	fileInfos, err := buildMilvusTableFileInfosFromSnapshotMetadata(metadataBytes, func(manifestPath string, formatVersion int32) (*datapb.SegmentDescription, error) {
+		require.Equal(t, int32(2), formatVersion)
+		switch manifestPath {
+		case "source-manifest.avro":
+			return &datapb.SegmentDescription{
+				SegmentId:    10,
+				SegmentLevel: datapb.SegmentLevel_L1,
+				NumOfRows:    100,
+			}, nil
+		case "l0-manifest.avro":
+			return &datapb.SegmentDescription{
+				SegmentId:    20,
+				SegmentLevel: datapb.SegmentLevel_L0,
+				Deltalogs:    l0Deltalogs,
+			}, nil
+		default:
+			return nil, fmt.Errorf("unexpected manifest path %s", manifestPath)
+		}
+	})
+
+	require.NoError(t, err)
+	require.Len(t, fileInfos, 1)
+	require.Equal(t, int64(10), fileInfos[0].SourceSegmentID)
+	require.Equal(t, l0Deltalogs, fileInfos[0].Deltalogs)
+}
+
+func TestBuildMilvusTableFileInfosFromSnapshotMetadata_DeltalogsBySegmentLevel(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		manifestList  []string
+		wantDeltalogs bool
+	}{
+		{name: "source_segment", manifestList: []string{"source-manifest.avro"}, wantDeltalogs: false},
+		{name: "l0_overlay", manifestList: []string{"source-manifest.avro", "l0-manifest.avro"}, wantDeltalogs: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			metadata := &datapb.SnapshotMetadata{
+				FormatVersion: 2,
+				ManifestList:  tc.manifestList,
+				Storagev2ManifestList: []*datapb.StorageV2SegmentManifest{
+					{SegmentId: 10, Manifest: `{"base_path":"source/10","ver":2}`},
+				},
+			}
+			metadataBytes, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(metadata)
+			require.NoError(t, err)
+
+			fileInfos, err := buildMilvusTableFileInfosFromSnapshotMetadata(
+				metadataBytes,
+				func(manifestPath string, formatVersion int32) (*datapb.SegmentDescription, error) {
+					require.Equal(t, int32(2), formatVersion)
+					switch manifestPath {
+					case "source-manifest.avro":
+						return &datapb.SegmentDescription{
+							SegmentId:    10,
+							SegmentLevel: datapb.SegmentLevel_L1,
+							NumOfRows:    100,
+						}, nil
+					case "l0-manifest.avro":
+						return &datapb.SegmentDescription{
+							SegmentId:    20,
+							SegmentLevel: datapb.SegmentLevel_L0,
+							Deltalogs: []*datapb.FieldBinlog{{
+								FieldID: 100,
+								Binlogs: []*datapb.Binlog{{
+									LogPath:    "files/delta_log/1",
+									EntriesNum: 1,
+								}},
+							}},
+						}, nil
+					default:
+						return nil, fmt.Errorf("unexpected manifest path %s", manifestPath)
+					}
+				},
+			)
+
+			require.NoError(t, err)
+			require.Len(t, fileInfos, 1)
+			if tc.wantDeltalogs {
+				require.Len(t, fileInfos[0].Deltalogs, 1)
+				require.Len(t, fileInfos[0].Deltalogs[0].GetBinlogs(), 1)
+				assert.Equal(t, "files/delta_log/1", fileInfos[0].Deltalogs[0].GetBinlogs()[0].GetLogPath())
+			} else {
+				assert.Empty(t, fileInfos[0].Deltalogs)
+			}
+		})
+	}
+}
+
+func TestReadMilvusSnapshotSegmentManifest_Deltalogs(t *testing.T) {
+	data, err := snapshotio.MarshalSegmentManifest(&datapb.SegmentDescription{
+		SegmentId:      100,
+		PartitionId:    10,
+		SegmentLevel:   datapb.SegmentLevel_L1,
+		ChannelName:    "by-dev-rootcoord-dml_0_100v0",
+		NumOfRows:      128,
+		StorageVersion: 3,
+		IsSorted:       true,
+		Deltalogs: []*datapb.FieldBinlog{{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{{
+				EntriesNum:    8,
+				TimestampFrom: 1,
+				TimestampTo:   2,
+				LogPath:       "delta/100/1",
+				LogSize:       64,
+				LogID:         1,
+				MemorySize:    64,
+			}},
+		}},
+	})
+	require.NoError(t, err)
+
+	segment, err := readMilvusSnapshotSegmentManifest("manifest.avro", snapshotio.SnapshotFormatVersion, func(path string) ([]byte, error) {
+		require.Equal(t, "manifest.avro", path)
+		return data, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(100), segment.GetSegmentId())
+	require.Len(t, segment.GetDeltalogs(), 1)
+	require.Len(t, segment.GetDeltalogs()[0].GetBinlogs(), 1)
+	require.Equal(t, "delta/100/1", segment.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
+}
+
+func TestReadMilvusSnapshotSegmentManifest_ParseErrorIncludesPath(t *testing.T) {
+	_, err := readMilvusSnapshotSegmentManifest("bad-manifest.avro", snapshotio.SnapshotFormatVersion, func(path string) ([]byte, error) {
+		require.Equal(t, "bad-manifest.avro", path)
+		return []byte("not a segment manifest"), nil
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parse source segment manifest bad-manifest.avro")
 }
 
 // ==================== GetFileInfo Additional Tests ====================

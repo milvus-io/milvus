@@ -21,13 +21,17 @@
 #include <cstring>
 #include <functional>
 #include <numeric>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "arrow/array.h"
 #include "arrow/table.h"
+#include "common/Consts.h"
 #include "common/FieldMeta.h"
+#include "common/Schema.h"
+#include "common/VirtualPK.h"
 #include "fmt/format.h"
 #include "log/Log.h"
 #include "milvus-storage/column_groups.h"
@@ -109,7 +113,11 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
             return MakeCStatusError("sample returned 0 rows");
         }
 
-        std::vector<milvus::FieldMeta> external_fields;
+        struct SampleField {
+            milvus::FieldMeta field_meta;
+            std::string column_name;
+        };
+        std::vector<SampleField> external_fields;
         if (collection_schema.proto_blob != nullptr &&
             collection_schema.proto_size > 0) {
             milvus::proto::schema::CollectionSchema schema;
@@ -118,13 +126,41 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
             if (!ok) {
                 return MakeCStatusError("failed to parse collection schema");
             }
+            bool is_milvus_table =
+                milvus::IsMilvusTableExternalSpec(schema.external_spec());
             external_fields.reserve(schema.fields_size());
+            bool uses_external_primary_key = false;
             for (const auto& field_schema : schema.fields()) {
-                if (field_schema.external_field().empty()) {
+                bool is_milvus_table_data_field =
+                    is_milvus_table &&
+                    field_schema.fieldid() >= START_USER_FIELDID &&
+                    field_schema.name() != milvus::VIRTUAL_PK_FIELD_NAME;
+                if (is_milvus_table_data_field &&
+                    field_schema.is_primary_key()) {
+                    uses_external_primary_key = true;
+                }
+                if (field_schema.external_field().empty() &&
+                    !is_milvus_table_data_field) {
                     continue;
                 }
-                external_fields.emplace_back(
-                    milvus::FieldMeta::ParseFrom(field_schema));
+                auto field_meta = milvus::FieldMeta::ParseFrom(field_schema);
+                auto column_name = is_milvus_table_data_field
+                                       ? std::to_string(field_schema.fieldid())
+                                       : field_meta.get_external_field();
+                external_fields.push_back(
+                    {std::move(field_meta), std::move(column_name)});
+            }
+            if (is_milvus_table && uses_external_primary_key) {
+                // Real-PK milvus-table loading also keeps source insert
+                // timestamps so source deltas can honor delete/reinsert order.
+                // Account for that eager column in the fake binlog memory size.
+                external_fields.push_back(
+                    {milvus::FieldMeta(milvus::FieldName("Timestamp"),
+                                       TimestampFieldID,
+                                       milvus::DataType::INT64,
+                                       false,
+                                       std::nullopt),
+                     std::to_string(TimestampFieldID.get())});
             }
         }
 
@@ -157,8 +193,9 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
         std::vector<std::pair<std::string, int64_t>> sampled_sizes;
         if (!external_fields.empty()) {
             sampled_sizes.reserve(external_fields.size());
-            for (const auto& field_meta : external_fields) {
-                const auto& column_name = field_meta.get_external_field();
+            for (const auto& sample_field : external_fields) {
+                const auto& field_meta = sample_field.field_meta;
+                const auto& column_name = sample_field.column_name;
                 auto chunked = table->GetColumnByName(column_name);
                 if (chunked == nullptr) {
                     return MakeCStatusError(

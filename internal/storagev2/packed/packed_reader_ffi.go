@@ -41,17 +41,36 @@ import (
 // ExternalReaderContext carries per-collection context needed by the FFI
 // reader to resolve extfs aliases for external collections. Zero value is
 // safe for non-external collections.
-type ExternalReaderContext struct {
-	CollectionID int64
-	Source       string
-	Spec         string
-}
+type ExternalReaderContext = ExternalSpecContext
 
 func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns []string, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, ext ExternalReaderContext) (*FFIPackedReader, error) {
-	collectionID := ext.CollectionID
-	externalSource := ext.Source
-	externalSpec := ext.Spec
-	cLoonManifest, err := GetManifestHandle(manifestPath, storageConfig)
+	return NewFFIPackedReaderWithExtfs(
+		manifestPath,
+		schema,
+		neededColumns,
+		bufferSize,
+		storageConfig,
+		storagePluginContext,
+		ext,
+	)
+}
+
+// NewFFIPackedReaderWithExtfs opens a StorageV3 manifest after injecting
+// external filesystem properties for source manifests referenced by
+// milvus-table external collections.
+func NewFFIPackedReaderWithExtfs(
+	manifestPath string,
+	schema *arrow.Schema,
+	neededColumns []string,
+	bufferSize int64,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+	extfs ExternalSpecContext,
+) (*FFIPackedReader, error) {
+	collectionID := extfs.CollectionID
+	externalSource := extfs.Source
+	externalSpec := extfs.Spec
+	cLoonManifest, err := GetManifestHandleWithExtfs(manifestPath, storageConfig, extfs)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to get manifest")
 	}
@@ -216,6 +235,17 @@ func (r *FFIPackedReader) Release() {
 }
 
 func GetManifestHandle(manifestPath string, storageConfig *indexpb.StorageConfig) (loonManifestHandle *C.LoonManifest, err error) {
+	return GetManifestHandleWithExtfs(manifestPath, storageConfig, ExternalSpecContext{})
+}
+
+// GetManifestHandleWithExtfs opens a StorageV3 manifest with optional extfs
+// properties so external source manifests can be resolved with their own
+// storage credentials and endpoint aliases.
+func GetManifestHandleWithExtfs(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	extfs ExternalSpecContext,
+) (loonManifestHandle *C.LoonManifest, err error) {
 	var cManifestHandle *C.LoonManifest
 	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
@@ -228,6 +258,9 @@ func GetManifestHandle(manifestPath string, storageConfig *indexpb.StorageConfig
 		return cManifestHandle, err
 	}
 	defer C.loon_properties_free(cProperties)
+	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
+		return cManifestHandle, fmt.Errorf("inject extfs: %w", err)
+	}
 	cBasePath := C.CString(basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 

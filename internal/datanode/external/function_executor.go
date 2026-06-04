@@ -63,8 +63,20 @@ func ExecuteFunctionsForSegment(
 
 	sourceColumns := packed.GetColumnNamesFromSchema(schema)
 
-	inputManifestPath, err := packed.CreateSegmentManifestWithBasePath(
-		ctx, basePath, format, sourceColumns, fragments, storageConfig)
+	inputManifestPath, err := packed.CreateSegmentManifestWithBasePathAndExtfs(
+		ctx,
+		basePath,
+		format,
+		sourceColumns,
+		fragments,
+		storageConfig,
+		packed.ExternalSpecContext{
+			CollectionID:      collectionID,
+			Source:            schema.GetExternalSource(),
+			Spec:              schema.GetExternalSpec(),
+			MilvusTablePKMode: packed.MilvusTablePrimaryKeyModeFromSchema(schema),
+		},
+	)
 	if err != nil {
 		return "", merr.Wrap(err, "create input manifest")
 	}

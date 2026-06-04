@@ -199,6 +199,7 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
         config[SEGMENT_INSERT_FILES_KEY] =
             get_segment_insert_files(info->segment_insert_files());
         config[SEGMENT_MANIFEST_KEY] = info->manifest();
+        config[EXTERNAL_SPEC_KEY] = info->external_spec();
     }
     config[DIM_KEY] = info->dim();
     config[DATA_TYPE_KEY] = info->field_schema().data_type();

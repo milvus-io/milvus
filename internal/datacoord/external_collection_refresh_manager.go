@@ -25,6 +25,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
@@ -52,6 +53,8 @@ func (e *nonRetriableJobError) Error() string { return e.reason }
 func newNonRetriableJobError(format string, args ...interface{}) error {
 	return &nonRetriableJobError{reason: fmt.Sprintf(format, args...)}
 }
+
+var errMilvusTableRefreshSchemaInvalid = errors.New("milvus-table refresh schema invalid")
 
 // exploreTempDirForJob returns the per-job explore temp directory path used
 // both when datacoord writes the explore manifest and when cleanupExploreTempForJob
@@ -703,15 +706,16 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 	// Manifest is written to S3 so DataNodes can read file info by range.
 	allFiles, manifestPath, err := m.exploreExternalFiles(ctx, job)
 	if err != nil {
-		// Any FFI failure during explore is terminal for this job: the
-		// source is unreachable, denied, malformed, or absent and no
-		// amount of in-loop retrying can change that. Surface as
-		// non-retriable so the user gets a clear RefreshFailed signal
-		// (with the underlying error attached) and can re-issue refresh
-		// after fixing the source. Pure in-process errors (ctx cancel,
-		// etcd unavailable, etc.) keep the existing transient path so
-		// a real outage still gets retried.
-		if errors.Is(err, packed.ErrLoonTransient) {
+		// Hard explore failures are terminal for this job: the source is
+		// unreachable, denied, malformed, absent, or its snapshot metadata
+		// is incompatible with the requested external format. Surface them
+		// as non-retriable so the user gets a clear RefreshFailed signal
+		// and can re-issue refresh after fixing the source. Pure
+		// in-process errors (ctx cancel, etcd unavailable, etc.) keep the
+		// existing transient path so a real outage still gets retried.
+		if errors.Is(err, errMilvusTableRefreshSchemaInvalid) ||
+			errors.Is(err, packed.ErrLoonTransient) ||
+			errors.Is(err, packed.ErrMilvusTableStorageV2ManifestListMissing) {
 			return nil, newNonRetriableJobError("explore external files failed: %v", err)
 		}
 		return nil, merr.WrapErrServiceInternalErr(err, "failed to explore external files")
@@ -889,13 +893,19 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 	if collInfo == nil {
 		return nil, "", merr.WrapErrCollectionNotFound(job.GetCollectionId())
 	}
+	if spec.Format == externalspec.FormatMilvusTable {
+		if err := validateMilvusTableRefreshSchema(job, collInfo.Schema); err != nil {
+			return nil, "", err
+		}
+	}
 
 	columns := packed.GetColumnNamesFromSchema(collInfo.Schema)
 	storageConfig := createStorageConfig()
 	extfs := packed.ExternalSpecContext{
-		CollectionID: job.GetCollectionId(),
-		Source:       job.GetExternalSource(),
-		Spec:         job.GetExternalSpec(),
+		CollectionID:      job.GetCollectionId(),
+		Source:            job.GetExternalSource(),
+		Spec:              job.GetExternalSpec(),
+		MilvusTablePKMode: packed.MilvusTablePrimaryKeyModeFromSchema(collInfo.Schema),
 	}
 
 	exploreBaseDir := exploreTempDirForJob(job.GetJobId())
@@ -920,4 +930,32 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 		}
 	}
 	return result, manifestPath, nil
+}
+
+func validateMilvusTableRefreshSchema(job *datapb.ExternalCollectionRefreshJob, targetSchema *schemapb.CollectionSchema) error {
+	metadata, err := packed.ReadMilvusTableSnapshotMetadata(
+		job.GetExternalSource(),
+		job.GetExternalSpec(),
+		createStorageConfig(),
+		packed.ExternalSpecContext{
+			CollectionID: job.GetCollectionId(),
+			Source:       job.GetExternalSource(),
+			Spec:         job.GetExternalSpec(),
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("read milvus-table snapshot metadata for schema validation: %w", err)
+	}
+	sourceSchema := metadata.GetCollection().GetSchema()
+	if sourceSchema == nil {
+		return fmt.Errorf("%w: missing collection schema", errMilvusTableRefreshSchemaInvalid)
+	}
+	if typeutil.IsExternalCollection(sourceSchema) {
+		return fmt.Errorf("%w: source snapshot is an external collection", errMilvusTableRefreshSchemaInvalid)
+	}
+	if err := typeutil.ValidateMilvusTableSchemaIdentity(targetSchema, sourceSchema, true); err != nil {
+		return fmt.Errorf("%w: source schema does not match target collection schema: %v",
+			errMilvusTableRefreshSchemaInvalid, err)
+	}
+	return nil
 }

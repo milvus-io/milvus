@@ -19,6 +19,7 @@
 #include <arrow/status.h>
 #include <exception>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -28,12 +29,42 @@
 #include "common/EasyAssert.h"
 #include "common/type_c.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/ffi_c.h"
 #include "milvus-storage/packed/reader.h"
+#include "milvus-storage/properties.h"
 #include "monitor/scope_metric.h"
 #include "storage/KeyRetriever.h"
 #include "storage/PluginLoader.h"
 #include "storage/StorageV2FSCache.h"
 #include "storage/plugin/PluginInterface.h"
+
+namespace {
+
+arrow::Result<milvus_storage::api::Properties>
+ConvertLoonProperties(const LoonProperties* properties) {
+    if (properties == nullptr) {
+        return arrow::Status::Invalid("properties is null");
+    }
+    milvus_storage::api::Properties converted;
+    auto opt = milvus_storage::api::ConvertFFIProperties(converted, properties);
+    if (opt != std::nullopt) {
+        return arrow::Status::Invalid("failed to parse properties: ", *opt);
+    }
+    return converted;
+}
+
+void
+UpdateCipherPluginIfNeeded(CPluginContext* c_plugin_context) {
+    auto plugin_ptr =
+        milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+    if (plugin_ptr != nullptr && c_plugin_context != nullptr) {
+        plugin_ptr->Update(c_plugin_context->ez_id,
+                           c_plugin_context->collection_id,
+                           std::string(c_plugin_context->key));
+    }
+}
+
+}  // namespace
 
 CStatus
 NewPackedReaderWithStorageConfig(char** paths,
@@ -79,13 +110,51 @@ NewPackedReaderWithStorageConfig(char** paths,
                 "[StorageV2] Failed to get filesystem");
         }
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
-        auto plugin_ptr =
-            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-        if (plugin_ptr != nullptr && c_plugin_context != nullptr) {
-            plugin_ptr->Update(c_plugin_context->ez_id,
-                               c_plugin_context->collection_id,
-                               std::string(c_plugin_context->key));
+        UpdateCipherPluginIfNeeded(c_plugin_context);
+
+        auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
+            trueFs,
+            truePaths,
+            trueSchema,
+            buffer_size,
+            milvus::storage::GetReaderProperties(),
+            milvus::storage::GetArrowReaderProperties());
+        *c_packed_reader = reader.release();
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+NewPackedReaderWithProperties(char** paths,
+                              int64_t num_paths,
+                              struct ArrowSchema* schema,
+                              const int64_t buffer_size,
+                              const LoonProperties* c_properties,
+                              const char* filesystem_path,
+                              CPackedReader* c_packed_reader,
+                              CPluginContext* c_plugin_context) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto truePaths = std::vector<std::string>(paths, paths + num_paths);
+        auto properties_result = ConvertLoonProperties(c_properties);
+        if (!properties_result.ok()) {
+            return milvus::FailureCStatus(
+                milvus::ErrorCode::FileReadFailed,
+                properties_result.status().ToString());
         }
+        auto properties = properties_result.ValueOrDie();
+        auto fs_result = milvus_storage::FilesystemCache::getInstance().get(
+            properties, filesystem_path != nullptr ? filesystem_path : "");
+        if (!fs_result.ok()) {
+            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
+                                          fs_result.status().ToString());
+        }
+        auto trueFs = fs_result.ValueOrDie();
+        auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
+        UpdateCipherPluginIfNeeded(c_plugin_context);
 
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
             trueFs,
@@ -120,13 +189,7 @@ NewPackedReader(char** paths,
         }
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
 
-        auto plugin_ptr =
-            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-        if (plugin_ptr != nullptr && c_plugin_context != nullptr) {
-            plugin_ptr->Update(c_plugin_context->ez_id,
-                               c_plugin_context->collection_id,
-                               std::string(c_plugin_context->key));
-        }
+        UpdateCipherPluginIfNeeded(c_plugin_context);
 
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
             trueFs,

@@ -397,11 +397,8 @@ ManifestGroupTranslator::load_group_chunk(
     array_vecs.reserve(schema->num_fields());
 
     // Iterate through fields to get field_id and create chunk.
-    // Normal collections store field IDs as column names (numeric strings).
-    // External collections use original column names, so we fall back to
-    // matching against external field names when stoll fails. Function output
-    // columns are Milvus-generated and use numeric field ids like normal
-    // internal columns.
+    // Normal collections and Milvus-generated columns store field IDs as
+    // column names. Other external columns use external_field names.
     for (int i = 0; i < schema->num_fields(); ++i) {
         auto column_name = schema->field(i)->name();
         int64_t field_id = -1;
@@ -420,13 +417,14 @@ ManifestGroupTranslator::load_group_chunk(
                     break;
                 }
             }
+        }
+        if (field_id < 0) {
             AssertInfo(
-                field_id >= 0,
-                fmt::format(
-                    "[StorageV2] translator {} field {} not a numeric field ID "
-                    "and not found as external field",
-                    key_,
-                    column_name));
+                false,
+                "[StorageV2] translator {} field {} not a numeric field ID "
+                "and not found as external field",
+                key_,
+                column_name);
         }
 
         auto fid = milvus::FieldId(field_id);

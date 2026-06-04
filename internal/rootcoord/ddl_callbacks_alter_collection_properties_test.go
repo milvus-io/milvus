@@ -647,10 +647,10 @@ func TestDDLCallbacksAlterCollectionProperties_AcceptExternalSourceSpec(t *testi
 	testSchema := &schemapb.CollectionSchema{
 		Name: collectionName,
 		Fields: []*schemapb.FieldSchema{
-			{Name: "field1", DataType: schemapb.DataType_Int64},
+			{Name: "field1", DataType: schemapb.DataType_Int64, ExternalField: "field1"},
 		},
 		ExternalSource: "s3://bucket/old/",
-		ExternalSpec:   `{"format":"parquet"}`,
+		ExternalSpec:   `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`,
 	}
 	schemaBytes, err := proto.Marshal(testSchema)
 	require.NoError(t, err)
@@ -667,12 +667,12 @@ func TestDDLCallbacksAlterCollectionProperties_AcceptExternalSourceSpec(t *testi
 		DbName: dbName, CollectionName: collectionName,
 		Properties: []*commonpb.KeyValuePair{
 			{Key: common.CollectionExternalSource, Value: "s3://bucket/new/"},
-			{Key: common.CollectionExternalSpec, Value: `{"format":"parquet"}`},
+			{Key: common.CollectionExternalSpec, Value: `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`},
 		},
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/new/")
-	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet"}`)
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`)
 }
 
 // Regression for #49335: refresh override path may carry source-only updates
@@ -691,10 +691,10 @@ func TestDDLCallbacksAlterCollectionProperties_PartialExternalUpdatePreservesOth
 	testSchema := &schemapb.CollectionSchema{
 		Name: collectionName,
 		Fields: []*schemapb.FieldSchema{
-			{Name: "field1", DataType: schemapb.DataType_Int64},
+			{Name: "field1", DataType: schemapb.DataType_Int64, ExternalField: "field1"},
 		},
 		ExternalSource: "s3://bucket/old/",
-		ExternalSpec:   `{"format":"parquet","extfs":{"region":"us-east-1"}}`,
+		ExternalSpec:   `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`,
 	}
 	schemaBytes, err := proto.Marshal(testSchema)
 	require.NoError(t, err)
@@ -715,7 +715,7 @@ func TestDDLCallbacksAlterCollectionProperties_PartialExternalUpdatePreservesOth
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/new/")
-	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"region":"us-east-1"}}`)
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`)
 }
 
 // Regression for #49335: alter that mixes external_source with a regular
@@ -734,10 +734,10 @@ func TestDDLCallbacksAlterCollectionProperties_MixedExternalAndRegular(t *testin
 	testSchema := &schemapb.CollectionSchema{
 		Name: collectionName,
 		Fields: []*schemapb.FieldSchema{
-			{Name: "field1", DataType: schemapb.DataType_Int64},
+			{Name: "field1", DataType: schemapb.DataType_Int64, ExternalField: "field1"},
 		},
 		ExternalSource: "s3://bucket/old/",
-		ExternalSpec:   `{"format":"parquet"}`,
+		ExternalSpec:   `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`,
 	}
 	schemaBytes, err := proto.Marshal(testSchema)
 	require.NoError(t, err)

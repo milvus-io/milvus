@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -377,27 +378,27 @@ func TestSnapshotReader_ReadSnapshot_Success(t *testing.T) {
 	metadataJSON, _ := marshalOpts.Marshal(metadata)
 
 	// Generate valid manifest entry with all required fields (single record per file)
-	manifestEntry := ManifestEntry{
+	manifestEntry := snapshotio.ManifestEntry{
 		SegmentID:         1001,
 		PartitionID:       1,
 		SegmentLevel:      1,
 		ChannelName:       "test_channel",
 		NumOfRows:         100,
-		BinlogFiles:       []AvroFieldBinlog{},
-		DeltalogFiles:     []AvroFieldBinlog{},
-		StatslogFiles:     []AvroFieldBinlog{},
-		Bm25StatslogFiles: []AvroFieldBinlog{},
-		TextIndexFiles:    []AvroTextIndexEntry{},
-		JSONKeyIndexFiles: []AvroJSONKeyIndexEntry{},
-		IndexFiles:        []AvroIndexFilePathInfo{},
-		StartPosition:     &AvroMsgPosition{ChannelName: "", MsgID: []byte{}, MsgGroup: "", Timestamp: 0},
-		DmlPosition:       &AvroMsgPosition{ChannelName: "", MsgID: []byte{}, MsgGroup: "", Timestamp: 0},
+		BinlogFiles:       []snapshotio.AvroFieldBinlog{},
+		DeltalogFiles:     []snapshotio.AvroFieldBinlog{},
+		StatslogFiles:     []snapshotio.AvroFieldBinlog{},
+		Bm25StatslogFiles: []snapshotio.AvroFieldBinlog{},
+		TextIndexFiles:    []snapshotio.AvroTextIndexEntry{},
+		JSONKeyIndexFiles: []snapshotio.AvroJSONKeyIndexEntry{},
+		IndexFiles:        []snapshotio.AvroIndexFilePathInfo{},
+		StartPosition:     &snapshotio.AvroMsgPosition{ChannelName: "", MsgID: []byte{}, MsgGroup: "", Timestamp: 0},
+		DmlPosition:       &snapshotio.AvroMsgPosition{ChannelName: "", MsgID: []byte{}, MsgGroup: "", Timestamp: 0},
 		StorageVersion:    0,
 		IsSorted:          false,
 	}
 
 	// Pre-generate valid Avro data for manifest using the real schema (single record)
-	manifestSchema, _ := getManifestSchema()
+	manifestSchema, _ := snapshotio.ManifestSchema()
 	validManifestData, _ := avro.Marshal(manifestSchema, manifestEntry)
 
 	metadataFilePath := "snapshots/100/metadata/00001-uuid.json"
@@ -547,8 +548,8 @@ func TestFieldBinlog_RoundtripConversion(t *testing.T) {
 		},
 	}
 
-	avroFieldBinlog := convertFieldBinlogToAvro(originalFieldBinlog)
-	resultFieldBinlog := convertAvroToFieldBinlog(avroFieldBinlog)
+	avroFieldBinlog := snapshotio.FieldBinlogToAvro(originalFieldBinlog)
+	resultFieldBinlog := snapshotio.AvroToFieldBinlog(avroFieldBinlog)
 
 	assert.Equal(t, originalFieldBinlog.FieldID, resultFieldBinlog.FieldID)
 	assert.Len(t, resultFieldBinlog.Binlogs, len(originalFieldBinlog.Binlogs))
@@ -586,8 +587,8 @@ func TestIndexFilePathInfo_RoundtripConversion(t *testing.T) {
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
 	}
 
-	avroIndexInfo := convertIndexFilePathInfoToAvro(originalIndexInfo)
-	resultIndexInfo := convertAvroToIndexFilePathInfo(avroIndexInfo)
+	avroIndexInfo := snapshotio.IndexFilePathInfoToAvro(originalIndexInfo)
+	resultIndexInfo := snapshotio.AvroToIndexFilePathInfo(avroIndexInfo)
 
 	assert.Equal(t, originalIndexInfo.SegmentID, resultIndexInfo.SegmentID)
 	assert.Equal(t, originalIndexInfo.FieldID, resultIndexInfo.FieldID)
@@ -632,10 +633,10 @@ func TestSnapshotReader_ReadManifestLegacyIndexFilePathInfoDefaultsBuildRooted(t
 			},
 		},
 	}
-	entry := convertSegmentToManifestEntry(segment)
+	entry := snapshotio.SegmentToManifestEntry(segment)
 
-	assert.NotContains(t, getAvroSchemaV1(), "index_store_path_version")
-	oldSchema, err := getManifestSchemaByVersion(1)
+	assert.NotContains(t, snapshotio.AvroSchemaV1(), "index_store_path_version")
+	oldSchema, err := snapshotio.ManifestSchemaByVersion(1)
 	require.NoError(t, err)
 	binaryData, err := avro.Marshal(oldSchema, entry)
 	require.NoError(t, err)
@@ -669,11 +670,11 @@ func TestSnapshotManifest_CommitTimestampRoundtripV3(t *testing.T) {
 		ChannelName:     "ch-0",
 		CommitTimestamp: wantCommitTs,
 	}
-	entry := convertSegmentToManifestEntry(segment)
+	entry := snapshotio.SegmentToManifestEntry(segment)
 	require.Equal(t, int64(wantCommitTs), entry.CommitTimestamp)
 
-	assert.Contains(t, getAvroSchemaV3(), "commit_timestamp")
-	schema, err := getManifestSchemaByVersion(3)
+	assert.Contains(t, snapshotio.AvroSchemaV3(), "commit_timestamp")
+	schema, err := snapshotio.ManifestSchemaByVersion(3)
 	require.NoError(t, err)
 	binaryData, err := avro.Marshal(schema, entry)
 	require.NoError(t, err)
@@ -702,10 +703,10 @@ func TestSnapshotManifest_LegacyV2NoCommitTimestamp(t *testing.T) {
 		ChannelName:     "ch-0",
 		CommitTimestamp: 999, // set on the struct; V2 schema must drop it
 	}
-	entry := convertSegmentToManifestEntry(segment)
+	entry := snapshotio.SegmentToManifestEntry(segment)
 
-	assert.NotContains(t, getAvroSchemaV2(), "commit_timestamp")
-	v2Schema, err := getManifestSchemaByVersion(2)
+	assert.NotContains(t, snapshotio.AvroSchemaV2(), "commit_timestamp")
+	v2Schema, err := snapshotio.ManifestSchemaByVersion(2)
 	require.NoError(t, err)
 	binaryData, err := avro.Marshal(v2Schema, entry)
 	require.NoError(t, err)
@@ -929,8 +930,8 @@ func TestSnapshot_ConversionFunctions(t *testing.T) {
 			MsgGroup:    "test_group",
 			Timestamp:   12345,
 		}
-		avro := convertMsgPositionToAvro(original)
-		restored := convertAvroToMsgPosition(avro)
+		avro := snapshotio.MsgPositionToAvro(original)
+		restored := snapshotio.AvroToMsgPosition(avro)
 
 		assert.Equal(t, original.ChannelName, restored.ChannelName)
 		assert.Equal(t, original.MsgID, restored.MsgID)
@@ -940,12 +941,12 @@ func TestSnapshot_ConversionFunctions(t *testing.T) {
 
 	// Test MsgPosition nil handling
 	t.Run("MsgPosition nil handling", func(t *testing.T) {
-		avro := convertMsgPositionToAvro(nil)
+		avro := snapshotio.MsgPositionToAvro(nil)
 		assert.NotNil(t, avro)
 		assert.Equal(t, "", avro.ChannelName)
 		assert.Equal(t, []byte{}, avro.MsgID)
 
-		restored := convertAvroToMsgPosition(nil)
+		restored := snapshotio.AvroToMsgPosition(nil)
 		assert.Nil(t, restored)
 	})
 
@@ -959,8 +960,8 @@ func TestSnapshot_ConversionFunctions(t *testing.T) {
 			MemorySize: 2048,
 			BuildID:    5000,
 		}
-		avro := convertTextIndexStatsToAvro(original)
-		restored := convertAvroToTextIndexStats(avro)
+		avro := snapshotio.TextIndexStatsToAvro(original)
+		restored := snapshotio.AvroToTextIndexStats(avro)
 
 		assert.Equal(t, original.FieldID, restored.FieldID)
 		assert.Equal(t, original.Version, restored.Version)
@@ -981,8 +982,8 @@ func TestSnapshot_ConversionFunctions(t *testing.T) {
 			BuildID:                6000,
 			JsonKeyStatsDataFormat: 1,
 		}
-		avro := convertJSONKeyStatsToAvro(original)
-		restored := convertAvroToJSONKeyStats(avro)
+		avro := snapshotio.JSONKeyStatsToAvro(original)
+		restored := snapshotio.AvroToJSONKeyStats(avro)
 
 		assert.Equal(t, original.FieldID, restored.FieldID)
 		assert.Equal(t, original.Version, restored.Version)
@@ -999,8 +1000,8 @@ func TestSnapshot_ConversionFunctions(t *testing.T) {
 			100: {FieldID: 100, Version: 1, Files: []string{"/file1"}},
 			200: {FieldID: 200, Version: 2, Files: []string{"/file2"}},
 		}
-		avroArray := convertTextIndexMapToAvro(originalMap)
-		restoredMap := convertAvroToTextIndexMap(avroArray)
+		avroArray := snapshotio.TextIndexMapToAvro(originalMap)
+		restoredMap := snapshotio.AvroToTextIndexMap(avroArray)
 
 		assert.Equal(t, len(originalMap), len(restoredMap))
 		for fieldID, origStats := range originalMap {
@@ -1018,8 +1019,8 @@ func TestSnapshot_ConversionFunctions(t *testing.T) {
 			100: {FieldID: 100, Version: 1, Files: []string{"/json1"}, JsonKeyStatsDataFormat: 1},
 			200: {FieldID: 200, Version: 2, Files: []string{"/json2"}, JsonKeyStatsDataFormat: 2},
 		}
-		avroArray := convertJSONKeyIndexMapToAvro(originalMap)
-		restoredMap := convertAvroToJSONKeyIndexMap(avroArray)
+		avroArray := snapshotio.JSONKeyIndexMapToAvro(originalMap)
+		restoredMap := snapshotio.AvroToJSONKeyIndexMap(avroArray)
 
 		assert.Equal(t, len(originalMap), len(restoredMap))
 		for fieldID, origStats := range originalMap {
@@ -1165,7 +1166,7 @@ func TestValidateFormatVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateFormatVersion(tt.version)
+			err := snapshotio.ValidateFormatVersion(tt.version)
 			if tt.wantErr {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errContains)
@@ -1219,7 +1220,7 @@ func TestGetManifestSchemaByVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			schema, err := getManifestSchemaByVersion(tt.version)
+			schema, err := snapshotio.ManifestSchemaByVersion(tt.version)
 			if tt.wantErr {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errContains)

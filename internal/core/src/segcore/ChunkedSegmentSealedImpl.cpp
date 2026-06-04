@@ -741,6 +741,13 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path,
         for (const auto& field_id : all_fields) {
             const auto& field_meta = (*schema_)[field_id];
             bool field_is_vector = IsVectorDataType(field_meta.get_data_type());
+            const auto pk_field_id = schema_->get_primary_field_id();
+            if (pk_field_id.has_value() &&
+                pk_field_id.value().get() == field_id.get() &&
+                schema_->IsExternalDataField(field_id)) {
+                eager_fields.push_back(field_id);
+                continue;
+            }
             auto [has_warmup, warmup_str] = schema_->WarmupPolicy(
                 field_id, field_is_vector, /*is_index=*/false);
             // Resolve effective warmup using global config as fallback
@@ -825,24 +832,44 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields() {
         return;
     }
 
-    // 1. VirtualPKChunkedColumn for the synthetic primary key
-    //    This is lazy — data is only materialized if DataOfChunk/Span is called.
     auto pk_field_id = schema_->get_primary_field_id().value();
-    auto virtual_pk = std::make_shared<VirtualPKChunkedColumn>(id_, num_rows);
-    fields_.wlock()->emplace(pk_field_id, virtual_pk);
-    set_bit(field_data_ready_bitset_, pk_field_id, true);
+    if (!schema_->IsExternalDataField(pk_field_id)) {
+        // 1. VirtualPKChunkedColumn for the synthetic primary key.
+        //    This is lazy; data is only materialized if DataOfChunk/Span is called.
+        auto virtual_pk =
+            std::make_shared<VirtualPKChunkedColumn>(id_, num_rows);
+        fields_.wlock()->emplace(pk_field_id, virtual_pk);
+        set_bit(field_data_ready_bitset_, pk_field_id, true);
 
-    // 2. PK→offset index using VirtualPKOffsetMap (zero storage).
-    //    Virtual PK = (seg_id << 32) | offset, so pk→offset is a simple
-    //    bit-extract. This replaces the OffsetOrderedArray that would
-    //    otherwise store num_rows (pk, offset) pairs (~17 GB for 1B rows).
-    insert_record_.set_virtual_pk_offset_map(id_, num_rows);
+        // 2. PK to offset index using VirtualPKOffsetMap (zero storage).
+        //    Virtual PK = (seg_id << 32) | offset, so pk to offset is a simple
+        //    bit-extract. This replaces the OffsetOrderedArray that would
+        //    otherwise store num_rows (pk, offset) pairs (~17 GB for 1B rows).
+        insert_record_.set_virtual_pk_offset_map(id_, num_rows);
+    } else {
+        AssertInfo(
+            get_column(pk_field_id) != nullptr,
+            "external primary key column {} is not loaded for segment {}",
+            pk_field_id.get(),
+            id_);
+    }
 
-    // 3. Synthetic timestamps: constant mode (all 0 — rows always visible).
-    //    No data is materialized, saving ~8 GB for 1B-row external tables.
-    insert_record_.init_timestamps_constant(num_rows, 0);
+    if (schema_->RequiresSourceInsertTimestamps()) {
+        // Real-PK milvus-table segments load source deltalogs. Those deltas use
+        // source delete timestamps, so the insert side must keep source row
+        // timestamps too; otherwise a delete-before-reinsert sequence would
+        // incorrectly hide the reinserted row.
+        AssertInfo(
+            get_column(TimestampFieldID) != nullptr,
+            "source timestamp column is not loaded for milvus-table segment {}",
+            id_);
+    } else {
+        // Synthetic timestamps: constant mode (all 0; rows always visible).
+        // No data is materialized, saving ~8 GB for 1B-row external tables.
+        insert_record_.init_timestamps_constant(num_rows, 0);
+    }
 
-    // 4. Row count + readiness
+    // Row count + readiness
     {
         std::unique_lock lck(mutex_);
         update_row_count(num_rows);
@@ -5388,7 +5415,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     auto needed_columns = std::make_shared<std::vector<std::string>>();
     needed_columns->reserve(milvus_field_ids.size());
     for (const auto& fid : milvus_field_ids) {
-        needed_columns->push_back(schema_->get_storage_column_name(fid));
+        needed_columns->push_back(schema_->GetPhysicalColumnName(fid));
     }
     auto chunk_reader_result = reader_->get_chunk_reader(index, needed_columns);
     AssertInfo(chunk_reader_result.ok(),
@@ -6280,9 +6307,9 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
         return pk_field_id.has_value() && pk_field_id.value() == fid;
     };
 
-    // Collect needed columns and their field IDs. External collections use
-    // user-provided external column names; internal storage v2 uses field-id
-    // strings in the Loon Arrow schema.
+    // Collect manifest-backed columns and their field IDs. Internal storage v2
+    // uses field-id strings; external collections may use mapped source column
+    // names, while milvus-table source fields use field-id strings.
     auto needed_columns = std::make_shared<std::vector<std::string>>();
     std::vector<FieldId> take_field_ids;
     std::vector<std::string> take_column_names;
@@ -6294,11 +6321,11 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
             continue;
         }
         auto& field_meta = schema_->operator[](field_id);
-        if (!field_meta.is_external_field() &&
-            !schema_->is_function_output(field_id) && is_external_collection) {
+        if (is_external_collection &&
+            !schema_->IsExternalManifestStoredField(field_id)) {
             continue;
         }
-        auto column_name = schema_->get_storage_column_name(field_id);
+        auto column_name = schema_->GetPhysicalColumnName(field_id);
         needed_columns->push_back(column_name);
         take_field_ids.push_back(field_id);
         take_column_names.push_back(std::move(column_name));
@@ -6407,9 +6434,9 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
 
         auto& field_meta = schema_->operator[](field_id);
 
-        // External virtual PK field (not external, not function-output).
-        if (!field_meta.is_external_field() &&
-            !schema_->is_function_output(field_id) && is_external_collection) {
+        // External virtual PK field (not manifest-stored, computed on the fly).
+        if (is_external_collection &&
+            !schema_->IsExternalManifestStoredField(field_id)) {
             if (is_pk_field(field_id) &&
                 field_meta.get_data_type() == DataType::INT64) {
                 auto data_array = std::make_unique<DataArray>();
@@ -6548,19 +6575,20 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
     }
     const bool is_external_collection = schema_->is_external_collection();
 
-    // Collect needed columns. External collections use external field names;
-    // internal storage v2 uses field-id strings.
+    // Collect manifest-backed columns. Internal storage v2 uses field-id
+    // strings; external collections may use mapped source column names, while
+    // milvus-table source fields use field-id strings.
     auto needed_columns = std::make_shared<std::vector<std::string>>();
     std::vector<FieldId> take_field_ids;
     std::vector<const FieldMeta*> take_field_metas;
     std::vector<std::string> take_column_names;
     for (auto field_id : plan->target_entries_) {
         auto& field_meta = schema_->operator[](field_id);
-        if (!field_meta.is_external_field() &&
-            !schema_->is_function_output(field_id) && is_external_collection) {
+        if (is_external_collection &&
+            !schema_->IsExternalManifestStoredField(field_id)) {
             continue;
         }
-        auto column_name = schema_->get_storage_column_name(field_id);
+        auto column_name = schema_->GetPhysicalColumnName(field_id);
         needed_columns->push_back(column_name);
         take_field_ids.push_back(field_id);
         take_field_metas.push_back(&field_meta);

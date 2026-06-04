@@ -796,6 +796,9 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     std::vector<FieldDataPtr> field_datas;
     auto manifest =
         index::GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
+    auto external_spec =
+        index::GetValueFromConfig<std::string>(config, EXTERNAL_SPEC_KEY)
+            .value_or("");
     auto manifest_path_str = manifest.value_or("");
     if (manifest_path_str != "") {
         AssertInfo(
@@ -806,7 +809,8 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                                 field_meta_,
                                                 data_type,
                                                 dim,
-                                                element_type);
+                                                element_type,
+                                                external_spec);
     } else {
         field_datas = GetFieldDatasFromStorageV2(all_remote_files,
                                                  GetFieldDataMeta().field_id,
@@ -1238,6 +1242,9 @@ DiskFileManagerImpl::cache_opt_field_to_disk_v3(const Config& config) {
 
     auto manifest =
         index::GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
+    auto external_spec =
+        index::GetValueFromConfig<std::string>(config, EXTERNAL_SPEC_KEY)
+            .value_or("");
     AssertInfo(manifest.has_value() && manifest.value() != "",
                "[StorageV3] manifest path is empty when build index");
     auto manifest_path_str = manifest.value();
@@ -1276,7 +1283,8 @@ DiskFileManagerImpl::cache_opt_field_to_disk_v3(const Config& config) {
                                                      field_meta,
                                                      field_type,
                                                      1,  // scalar field
-                                                     element_type);
+                                                     element_type,
+                                                     external_spec);
 
         if (WriteOptFieldIvfData(field_type,
                                  field_id,
