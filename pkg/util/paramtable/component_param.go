@@ -7607,6 +7607,14 @@ type streamingConfig struct {
 	WALRecoveryGracefulCloseTimeout      ParamItem `refreshable:"true"`
 	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
 
+	// idempotent write configuration.
+	IdempotencyEnabled             ParamItem `refreshable:"false"`
+	IdempotencyWindowTTL           ParamItem `refreshable:"false"`
+	IdempotencyMinEntriesPerWindow ParamItem `refreshable:"false"`
+	IdempotencyMaxEntriesPerWindow ParamItem `refreshable:"false"`
+	IdempotencySnapshotInterval    ParamItem `refreshable:"false"`
+	IdempotencyMaxKeyLength        ParamItem `refreshable:"false"`
+
 	// wal rate limit
 	WALRateLimitDefaultBurst                     ParamItem `refreshable:"true"`
 	WALRateLimitNodeMemorySlowdownThreshold      ParamItem `refreshable:"true"`
@@ -8030,6 +8038,66 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 		Export:       false,
 	}
 	p.WALRecoverySchemaExpirationTolerance.Init(base.mgr)
+
+	p.IdempotencyEnabled = ParamItem{
+		Key:          "streaming.idempotency.enabled",
+		Version:      "3.0.0",
+		Doc:          `Whether request-level idempotent write is enabled globally. Collection-level idempotent write still needs to be enabled by collection property.`,
+		DefaultValue: "true",
+		FallbackKeys: []string{"idempotency.enabled"},
+		Export:       false,
+	}
+	p.IdempotencyEnabled.Init(base.mgr)
+
+	p.IdempotencyWindowTTL = ParamItem{
+		Key:          "streaming.idempotency.windowTTL",
+		Version:      "3.0.0",
+		Doc:          `The retention TTL for completed idempotency key window entries. Recent entries are still retained up to minEntriesPerWindow even after TTL expires.`,
+		DefaultValue: "10m",
+		FallbackKeys: []string{"idempotency.windowTTL"},
+		Export:       false,
+	}
+	p.IdempotencyWindowTTL.Init(base.mgr)
+
+	p.IdempotencyMinEntriesPerWindow = ParamItem{
+		Key:          "streaming.idempotency.minEntriesPerWindow",
+		Version:      "3.0.0",
+		Doc:          `The minimum completed idempotency key entries retained for each vchannel window.`,
+		DefaultValue: "1000",
+		FallbackKeys: []string{"idempotency.minEntriesPerWindow"},
+		Export:       false,
+	}
+	p.IdempotencyMinEntriesPerWindow.Init(base.mgr)
+
+	p.IdempotencyMaxEntriesPerWindow = ParamItem{
+		Key:          "streaming.idempotency.maxEntriesPerWindow",
+		Version:      "3.0.0",
+		Doc:          `The maximum completed idempotency key entries retained for each vchannel window. 0 means no count cap beyond TTL/minEntries.`,
+		DefaultValue: "0",
+		FallbackKeys: []string{"idempotency.maxEntriesPerWindow"},
+		Export:       false,
+	}
+	p.IdempotencyMaxEntriesPerWindow.Init(base.mgr)
+
+	p.IdempotencySnapshotInterval = ParamItem{
+		Key:          "streaming.idempotency.snapshotInterval",
+		Version:      "3.0.0",
+		Doc:          `The interval for persisting idempotency write commit checkpoints. It is scheduled independently from walRecovery.persistInterval.`,
+		DefaultValue: "10s",
+		FallbackKeys: []string{"idempotency.snapshotInterval"},
+		Export:       false,
+	}
+	p.IdempotencySnapshotInterval.Init(base.mgr)
+
+	p.IdempotencyMaxKeyLength = ParamItem{
+		Key:          "streaming.idempotency.maxKeyLength",
+		Version:      "3.0.0",
+		Doc:          `The maximum accepted idempotency key string length in bytes. Explicit idempotency keys longer than this value are rejected.`,
+		DefaultValue: "1024",
+		FallbackKeys: []string{"idempotency.maxKeyLength"},
+		Export:       false,
+	}
+	p.IdempotencyMaxKeyLength.Init(base.mgr)
 
 	p.OldVersionLastConfirmedWindowSize = ParamItem{
 		Key:     "streaming.walScanner.oldVersionLastConfirmedWindowSize",
