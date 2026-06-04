@@ -4406,6 +4406,59 @@ func TestStructArrayFieldSchemaGetProtoTypeParams(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestFieldSchemaStructArrayHelpers(t *testing.T) {
+	var nilField *FieldSchema
+	assert.False(t, nilField.IsStructArrayField())
+	assert.False(t, (&FieldSchema{DataType: "Int64"}).IsStructArrayField())
+	assert.True(t, (&FieldSchema{DataType: "Array", ElementDataType: "Struct"}).IsStructArrayField())
+	assert.True(t, (&FieldSchema{DataType: "ArrayOfStruct"}).IsStructArrayField())
+
+	proto, err := (&FieldSchema{
+		FieldName:       "clips",
+		Description:     "clip metadata",
+		DataType:        "Array",
+		ElementDataType: "Struct",
+		Nullable:        true,
+		ElementTypeParams: map[string]interface{}{
+			common.MaxCapacityKey: 16,
+		},
+		TypeParams: map[string]interface{}{
+			common.MaxCapacityKey: 32,
+		},
+		Fields: []FieldSchema{
+			{
+				FieldName:       "tag",
+				DataType:        "Array",
+				ElementDataType: "VarChar",
+				ElementTypeParams: map[string]interface{}{
+					common.MaxLengthKey: 64,
+				},
+			},
+			{
+				FieldName:       "scores",
+				DataType:        "Array",
+				ElementDataType: "Int64",
+				ElementTypeParams: map[string]interface{}{
+					common.MaxCapacityKey: 7,
+				},
+			},
+		},
+	}).GetStructArrayProto(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "clips", proto.GetName())
+	assert.Equal(t, "clip metadata", proto.GetDescription())
+	assert.True(t, proto.GetNullable())
+	assert.Equal(t, "32", kvPairsToMap(proto.GetTypeParams())[common.MaxCapacityKey])
+
+	require.Len(t, proto.GetFields(), 2)
+	tagParams := kvPairsToMap(proto.GetFields()[0].GetTypeParams())
+	assert.Equal(t, "64", tagParams[common.MaxLengthKey])
+	assert.Equal(t, "32", tagParams[common.MaxCapacityKey])
+
+	scoreParams := kvPairsToMap(proto.GetFields()[1].GetTypeParams())
+	assert.Equal(t, "7", scoreParams[common.MaxCapacityKey])
+}
+
 func TestPrintStructArrayFieldsV2QualifiedSubFields(t *testing.T) {
 	printed := printStructArrayFieldsV2([]*schemapb.StructArrayFieldSchema{
 		{

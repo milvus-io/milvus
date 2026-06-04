@@ -568,6 +568,32 @@ func (s *CollectionSuite) TestAddCollectionStructField() {
 		s.Contains(err.Error(), "requires data type Array and element type Struct")
 	})
 
+	s.Run("nil_option", func() {
+		var opt *addCollectionStructFieldOption
+		err := opt.Validate()
+		s.Error(err)
+		s.Contains(err.Error(), "option is nil")
+	})
+
+	s.Run("nil_field_schema", func() {
+		collName := fmt.Sprintf("coll_%s", s.randString(6))
+		err := NewAddCollectionStructFieldOption(collName, nil).Validate()
+		s.Error(err)
+		s.Contains(err.Error(), "struct array field schema is required")
+	})
+
+	s.Run("nil_struct_schema", func() {
+		collName := fmt.Sprintf("coll_%s", s.randString(6))
+		field := entity.NewField().
+			WithName("clips").
+			WithDataType(entity.FieldTypeArray).
+			WithElementType(entity.FieldTypeStruct)
+
+		err := s.client.AddCollectionStructField(ctx, NewAddCollectionStructFieldOption(collName, field))
+		s.Error(err)
+		s.Contains(err.Error(), "struct schema is required")
+	})
+
 	s.Run("invalid_sub_field", func() {
 		collName := fmt.Sprintf("coll_%s", s.randString(6))
 		field := entity.NewField().

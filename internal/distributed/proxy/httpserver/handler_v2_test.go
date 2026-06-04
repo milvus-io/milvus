@@ -3664,6 +3664,51 @@ func (s *AddCollectionFieldSuite) TestAddCollectionStructFieldNormal() {
 	}
 }
 
+func (s *AddCollectionFieldSuite) TestAddCollectionStructFieldFail() {
+	s.Run("invalid_struct_schema", func() {
+		requestBody := []byte(`{"collectionName": "book", "schema": {
+			"fieldName": "clips",
+			"dataType": "ArrayOfStruct",
+			"nullable": true,
+			"typeParams": {"max_capacity": 16}
+		}}`)
+
+		req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionStructFieldCategory, AddAction), bytes.NewReader(requestBody))
+		w := httptest.NewRecorder()
+		s.testEngine.ServeHTTP(w, req)
+		s.Equal(http.StatusOK, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		s.NoError(err)
+		s.Equal(merr.Code(merr.ErrParameterInvalid), returnBody.Code)
+		s.Contains(returnBody.Message, "must contain at least one sub-field")
+	})
+
+	s.Run("server_error", func() {
+		requestBody := []byte(`{"collectionName": "book", "schema": {
+			"fieldName": "clips",
+			"dataType": "ArrayOfStruct",
+			"nullable": true,
+			"typeParams": {"max_capacity": 16},
+			"fields": [
+				{"fieldName": "tag", "dataType": "Array", "elementDataType": "VarChar", "elementTypeParams": {"max_length": 64}}
+			]
+		}}`)
+
+		s.mp.EXPECT().AddCollectionStructField(mock.Anything, mock.Anything).Return(merr.Status(merr.WrapErrServiceInternal("mock error")), nil).Once()
+
+		req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionStructFieldCategory, AddAction), bytes.NewReader(requestBody))
+		w := httptest.NewRecorder()
+		s.testEngine.ServeHTTP(w, req)
+		s.Equal(http.StatusOK, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		s.NoError(err)
+		s.Equal(merr.Code(merr.ErrServiceInternal), returnBody.Code)
+		s.Contains(returnBody.Message, "mock error")
+	})
+}
+
 func (s *AddCollectionFieldSuite) TestAddCollectionFieldRejectsStructArray() {
 	requestBody := []byte(`{"collectionName": "book", "schema": {
 		"fieldName": "clips",
