@@ -40,11 +40,14 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	it.insertMsg.CollectionID = collID
 
 	getCacheDur := tr.RecordSpan()
-	channelNames, err := it.chMgr.getVChannels(collID)
-	if err != nil {
-		mlog.Warn(ctx, "get vChannels failed", mlog.FieldCollectionID(collID), mlog.Err(err))
-		it.result.Status = merr.Status(err)
-		return err
+	channelNames := it.vChannels
+	if len(channelNames) == 0 {
+		channelNames, err = it.chMgr.getVChannels(collID)
+		if err != nil {
+			mlog.Warn(ctx, "get vChannels failed", mlog.FieldCollectionID(collID), mlog.Err(err))
+			it.result.Status = merr.Status(err)
+			return err
+		}
 	}
 
 	mlog.Debug(ctx, "send insert request to virtual channels",
@@ -62,17 +65,20 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 	// start to repack insert data
 	var msgs []message.MutableMessage
+	decorateHeader := it.idempotentInsertHeaderDecorator()
 	if it.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion)
+		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion, decorateHeader)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion, decorateHeader)
 	}
 	if err != nil {
 		mlog.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
 		it.result.Status = merr.Status(err)
 		return err
 	}
-	resp := streaming.WAL().AppendMessages(ctx, msgs...)
+	resp := streaming.WAL().AppendMessagesWithOptions(ctx, msgs, streaming.AppendOption{
+		IdempotencyKey: it.idempotencyKey,
+	})
 	if err := resp.UnwrapFirstError(); err != nil {
 		mlog.Warn(ctx, "append messages to wal failed", mlog.Err(err))
 		if status.AsStreamingError(err).IsSchemaVersionMismatch() {
@@ -80,9 +86,18 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		} else {
 			it.result.Status = merr.Status(err)
 		}
+		return nil
 	}
 	// Update result.Timestamp for session consistency.
 	it.result.Timestamp = resp.MaxTimeTick()
+
+	if it.idempotencyEnabled {
+		err := mergeDuplicateInsertResults(it.result, resp)
+		if err != nil {
+			mlog.Warn(ctx, "merge idempotent duplicate insert result failed", mlog.Err(err))
+			it.result.Status = merr.Status(err)
+		}
+	}
 	return nil
 }
 
@@ -93,6 +108,7 @@ func repackInsertDataForStreamingService(
 	result *milvuspb.MutationResult,
 	ez *message.CipherConfig,
 	schemaVersion int32,
+	decorateHeader func(*message.InsertMessageHeader, []int) error,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
 
@@ -108,25 +124,31 @@ func repackInsertDataForStreamingService(
 
 	for channel, rowOffsets := range channel2RowOffsets {
 		// segment id is assigned at streaming node.
-		msgs, err := genInsertMsgsByPartition(ctx, 0, partitionID, partitionName, rowOffsets, channel, insertMsg)
+		msgs, msgRowOffsets, err := genInsertMsgsByPartition(ctx, 0, partitionID, partitionName, rowOffsets, channel, insertMsg)
 		if err != nil {
 			return nil, err
 		}
-		for _, msg := range msgs {
+		for idx, msg := range msgs {
 			insertRequest := msg.(*msgstream.InsertMsg).InsertRequest
+			header := &message.InsertMessageHeader{
+				CollectionId: insertMsg.CollectionID,
+				Partitions: []*message.PartitionSegmentAssignment{
+					{
+						PartitionId: partitionID,
+						Rows:        insertRequest.GetNumRows(),
+						BinarySize:  0, // TODO: current not used, message estimate size is used.
+					},
+				},
+				SchemaVersion: &schemaVersion,
+			}
+			if decorateHeader != nil {
+				if err := decorateHeader(header, msgRowOffsets[idx]); err != nil {
+					return nil, err
+				}
+			}
 			newMsg, err := message.NewInsertMessageBuilderV1().
 				WithVChannel(channel).
-				WithHeader(&message.InsertMessageHeader{
-					CollectionId: insertMsg.CollectionID,
-					Partitions: []*message.PartitionSegmentAssignment{
-						{
-							PartitionId: partitionID,
-							Rows:        insertRequest.GetNumRows(),
-							BinarySize:  0, // TODO: current not used, message estimate size is used.
-						},
-					},
-					SchemaVersion: &schemaVersion,
-				}).
+				WithHeader(header).
 				WithBody(insertRequest).
 				WithCipher(ez).
 				BuildMutable()
@@ -148,6 +170,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 	ez *message.CipherConfig,
 	schema *schemapb.CollectionSchema,
 	schemaVersion int32,
+	decorateHeader func(*message.InsertMessageHeader, []int) error,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
 
@@ -201,25 +224,31 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 		}
 
 		for partitionName, rowOffsets := range partition2RowOffsets {
-			msgs, err := genInsertMsgsByPartition(ctx, 0, partitionIDs[partitionName], partitionName, rowOffsets, channel, insertMsg)
+			msgs, msgRowOffsets, err := genInsertMsgsByPartition(ctx, 0, partitionIDs[partitionName], partitionName, rowOffsets, channel, insertMsg)
 			if err != nil {
 				return nil, err
 			}
-			for _, msg := range msgs {
+			for idx, msg := range msgs {
 				insertRequest := msg.(*msgstream.InsertMsg).InsertRequest
+				header := &message.InsertMessageHeader{
+					CollectionId: insertMsg.CollectionID,
+					Partitions: []*message.PartitionSegmentAssignment{
+						{
+							PartitionId: partitionIDs[partitionName],
+							Rows:        insertRequest.GetNumRows(),
+							BinarySize:  0, // TODO: current not used, message estimate size is used.
+						},
+					},
+					SchemaVersion: &schemaVersion,
+				}
+				if decorateHeader != nil {
+					if err := decorateHeader(header, msgRowOffsets[idx]); err != nil {
+						return nil, err
+					}
+				}
 				newMsg, err := message.NewInsertMessageBuilderV1().
 					WithVChannel(channel).
-					WithHeader(&message.InsertMessageHeader{
-						CollectionId: insertMsg.CollectionID,
-						Partitions: []*message.PartitionSegmentAssignment{
-							{
-								PartitionId: partitionIDs[partitionName],
-								Rows:        insertRequest.GetNumRows(),
-								BinarySize:  0, // TODO: current not used, message estimate size is used.
-							},
-						},
-						SchemaVersion: &schemaVersion,
-					}).
+					WithHeader(header).
 					WithBody(insertRequest).
 					WithCipher(ez).
 					BuildMutable()

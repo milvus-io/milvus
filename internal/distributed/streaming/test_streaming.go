@@ -215,6 +215,10 @@ func (n *noopWALAccesser) Read(ctx context.Context, opts ReadOption) Scanner {
 }
 
 func (n *noopWALAccesser) AppendMessages(ctx context.Context, msgs ...message.MutableMessage) AppendResponses {
+	return n.AppendMessagesWithOptions(ctx, msgs)
+}
+
+func (n *noopWALAccesser) AppendMessagesWithOptions(ctx context.Context, msgs []message.MutableMessage, opts ...AppendOption) AppendResponses {
 	if err := getExpectErr(); err != nil {
 		return AppendResponses{
 			Responses: []AppendResponse{
