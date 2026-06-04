@@ -16,6 +16,8 @@
 
 #include <string.h>
 #include <algorithm>
+
+#include "common/FastMem.h"
 #include <atomic>
 #include <cstdint>
 #include <ctime>
@@ -87,7 +89,7 @@ KmeansClustering::FetchDataFiles(uint8_t* buf,
                 break;
             }
             fetched_file_size += size;
-            std::memcpy(buf + offset, data->Data(), size);
+            milvus::fastmem::FastMemcpy(buf + offset, data->Data(), size);
             offset += size;
             data.reset();
         }

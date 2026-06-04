@@ -16,8 +16,10 @@
 
 #pragma once
 
-#include <memory>
 #include <cstring>
+#include <memory>
+
+#include "common/FastMem.h"
 
 #include "FieldMeta.h"
 #include "Types.h"
@@ -46,7 +48,7 @@ class VectorArray : public milvus::VectorTrait {
 
         if (size_ > 0) {
             data_ = std::make_unique<char[]>(size_);
-            std::memcpy(data_.get(), data, size_);
+            milvus::fastmem::FastMemcpy(data_.get(), data, size_);
         }
     }
 
@@ -61,9 +63,10 @@ class VectorArray : public milvus::VectorTrait {
                 auto data = new float[length_ * dim_];
                 size_ =
                     vector_field.float_vector().data().size() * sizeof(float);
-                std::copy(vector_field.float_vector().data().begin(),
-                          vector_field.float_vector().data().end(),
-                          data);
+                milvus::fastmem::FastMemcpy(
+                    data,
+                    vector_field.float_vector().data().data(),
+                    vector_field.float_vector().data().size() * sizeof(float));
                 data_ = std::unique_ptr<char[]>(reinterpret_cast<char*>(data));
                 break;
             }
@@ -74,7 +77,7 @@ class VectorArray : public milvus::VectorTrait {
                     vector_field.binary_vector().size() / bytes_per_vector;
                 size_ = vector_field.binary_vector().size();
                 data_ = std::make_unique<char[]>(size_);
-                std::memcpy(
+                milvus::fastmem::FastMemcpy(
                     data_.get(), vector_field.binary_vector().data(), size_);
                 break;
             }
@@ -85,7 +88,7 @@ class VectorArray : public milvus::VectorTrait {
                           (dim_ * bytes_per_element);
                 size_ = vector_field.float16_vector().size();
                 data_ = std::make_unique<char[]>(size_);
-                std::memcpy(
+                milvus::fastmem::FastMemcpy(
                     data_.get(), vector_field.float16_vector().data(), size_);
                 break;
             }
@@ -96,7 +99,7 @@ class VectorArray : public milvus::VectorTrait {
                           (dim_ * bytes_per_element);
                 size_ = vector_field.bfloat16_vector().size();
                 data_ = std::make_unique<char[]>(size_);
-                std::memcpy(
+                milvus::fastmem::FastMemcpy(
                     data_.get(), vector_field.bfloat16_vector().data(), size_);
                 break;
             }
@@ -105,7 +108,7 @@ class VectorArray : public milvus::VectorTrait {
                 length_ = vector_field.int8_vector().size() / dim_;
                 size_ = vector_field.int8_vector().size();
                 data_ = std::make_unique<char[]>(size_);
-                std::memcpy(
+                milvus::fastmem::FastMemcpy(
                     data_.get(), vector_field.int8_vector().data(), size_);
                 break;
             }
@@ -340,7 +343,7 @@ class VectorArray : public milvus::VectorTrait {
         if (size > 0) {
             assert(data != nullptr);
             data_ = std::make_unique<char[]>(size);
-            std::copy(data, data + size, data_.get());
+            milvus::fastmem::FastMemcpy(data_.get(), data, size);
         }
     }
 

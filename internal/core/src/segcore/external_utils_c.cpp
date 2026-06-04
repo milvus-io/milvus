@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "segcore/external_utils_c.h"
+#include "common/FastMem.h"
 
 #include <algorithm>
 #include <cstring>
@@ -147,7 +148,8 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                             const std::string& name,
                             int64_t avg_mem_bytes) {
             char* name_copy = static_cast<char*>(malloc(name.size() + 1));
-            std::memcpy(name_copy, name.c_str(), name.size() + 1);
+            milvus::fastmem::FastMemcpy(
+                name_copy, name.c_str(), name.size() + 1);
             out_size.field_name = name_copy;
             out_size.avg_mem_bytes = avg_mem_bytes;
         };

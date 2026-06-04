@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <string.h>
+#include "common/FastMem.h"
 #include <cstdint>
 
 #include "arrow/api.h"
@@ -52,7 +53,7 @@ PayloadOutputStream::Write(const void* data, int64_t nbytes) {
         return arrow::Status::OK();
     auto size = buffer_.size();
     buffer_.resize(size + nbytes);
-    std::memcpy(buffer_.data() + size, data, nbytes);
+    milvus::fastmem::FastMemcpy(buffer_.data() + size, data, nbytes);
     return arrow::Status::OK();
 }
 
@@ -102,7 +103,7 @@ PayloadInputStream::Read(int64_t nbytes, void* out) {
     auto remain = size_ - tell_;
     if (nbytes > remain)
         nbytes = remain;
-    std::memcpy(out, data_ + tell_, nbytes);
+    milvus::fastmem::FastMemcpy(out, data_ + tell_, nbytes);
     tell_ += nbytes;
     return arrow::Result<int64_t>(nbytes);
 }

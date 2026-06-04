@@ -17,6 +17,7 @@
 #pragma once
 
 #include <algorithm>
+#include "common/FastMem.h"
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -404,7 +405,7 @@ ConvertFieldDataToArrowDataWrapper(const FieldDataPtr& field_data) {
     auto event_data_bytes = event_data.Serialize();
 
     std::shared_ptr<uint8_t[]> file_data(new uint8_t[event_data_bytes.size()]);
-    std::memcpy(
+    milvus::fastmem::FastMemcpy(
         file_data.get(), event_data_bytes.data(), event_data_bytes.size());
 
     storage::BinlogReaderPtr reader = std::make_shared<storage::BinlogReader>(

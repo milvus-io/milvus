@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <string>
 #include <memory>
 #include <utility>
@@ -24,9 +25,10 @@
 
 #include <oneapi/tbb/concurrent_queue.h>
 
-#include "common/FieldDataInterface.h"
-#include "common/Channel.h"
 #include "common/ArrowDataWrapper.h"
+#include "common/Channel.h"
+#include "common/FastMem.h"
+#include "common/FieldDataInterface.h"
 
 namespace milvus {
 
