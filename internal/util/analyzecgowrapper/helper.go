@@ -47,5 +47,7 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	if merr.IsSegcoreSignal(int32(errorCode)) {
 		log.Info("fake finished the task")
 	}
-	return merr.SegcoreError(int32(errorCode), logMsg)
+	// Pass the raw errorMsg (not the polluted logMsg) so the merr reason stays
+	// clean; the extraInfo breadcrumb lives in the log above.
+	return merr.SegcoreError(int32(errorCode), errorMsg)
 }

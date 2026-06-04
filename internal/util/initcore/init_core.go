@@ -32,7 +32,6 @@ import "C"
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
 	"strconv"
 	"sync"
 	"time"
@@ -40,7 +39,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
@@ -757,18 +755,17 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	if status.error_code == 0 {
 		return nil
 	}
-	errorCode := status.error_code
-	errorName, ok := commonpb.ErrorCode_name[int32(errorCode)]
-	if !ok {
-		errorName = "UnknownError"
-	}
+	errorCode := int32(status.error_code)
 	errorMsg := C.GoString(status.error_msg)
 	defer C.free(unsafe.Pointer(status.error_msg))
 
-	finalMsg := fmt.Sprintf("[%s] %s", errorName, errorMsg)
-	logMsg := fmt.Sprintf("%s, C Runtime Exception: %s\n", extraInfo, finalMsg)
-	log.Warn(logMsg)
-	return merr.WrapErrServiceInternalMsg("%s", finalMsg)
+	// SegcoreError classifies the raw C++ code (2000-2099) into the right merr
+	// sentinel + retriability instead of looking it up in the unrelated
+	// commonpb.ErrorCode enum and flattening it to ServiceInternal; the caller
+	// breadcrumb stays in the log.
+	err := merr.SegcoreError(errorCode, errorMsg)
+	log.Warn("C runtime exception", zap.Error(err), zap.String("extra", extraInfo))
+	return err
 }
 
 // tlsMinVersionForStorage converts minio config's TLS min version value
