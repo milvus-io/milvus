@@ -960,6 +960,7 @@ class TestSparseInvertedIndexV3Negative(_SparseInvertedIndexV3Base):
     def setup_class(self):
         super().setup_class(self)
         self.collection_name = "TestSparseInvertedIndexV3Negative" + cf.gen_unique_str("sparse_v3_bad")
+        self.bm25_collection_name = "TestSparseInvertedIndexV3Negative" + cf.gen_unique_str("sparse_v3_bad_bm25")
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_collection(self, request):
@@ -979,10 +980,14 @@ class TestSparseInvertedIndexV3Negative(_SparseInvertedIndexV3Base):
             "bad_block_size_negative",
         ]:
             schema.add_field(field_name, DataType.SPARSE_FLOAT_VECTOR)
-        schema.add_field("bad_text", DataType.VARCHAR, max_length=256, enable_analyzer=True)
-        schema.add_field("bad_bm25_quant", DataType.SPARSE_FLOAT_VECTOR)
-        schema.add_field("bad_bm25_quant_literal", DataType.SPARSE_FLOAT_VECTOR)
-        schema.add_function(
+        self.create_collection(client, self.collection_name, schema=schema, force_teardown=False)
+
+        bm25_schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        bm25_schema.add_field("id", DataType.INT64, is_primary=True)
+        bm25_schema.add_field("bad_text", DataType.VARCHAR, max_length=256, enable_analyzer=True)
+        bm25_schema.add_field("bad_bm25_quant", DataType.SPARSE_FLOAT_VECTOR)
+        bm25_schema.add_field("bad_bm25_quant_literal", DataType.SPARSE_FLOAT_VECTOR)
+        bm25_schema.add_function(
             Function(
                 name="bad_bm25_function",
                 function_type=FunctionType.BM25,
@@ -991,7 +996,7 @@ class TestSparseInvertedIndexV3Negative(_SparseInvertedIndexV3Base):
                 params={},
             )
         )
-        schema.add_function(
+        bm25_schema.add_function(
             Function(
                 name="bad_bm25_literal_function",
                 function_type=FunctionType.BM25,
@@ -1000,15 +1005,23 @@ class TestSparseInvertedIndexV3Negative(_SparseInvertedIndexV3Base):
                 params={},
             )
         )
-        self.create_collection(client, self.collection_name, schema=schema, force_teardown=False)
+        self.create_collection(client, self.bm25_collection_name, schema=bm25_schema, force_teardown=False)
 
         def teardown():
-            self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
+            client = self._client(alias=self.shared_alias)
+            self.drop_collection(client, self.collection_name)
+            self.drop_collection(client, self.bm25_collection_name)
 
         request.addfinalizer(teardown)
 
+    def _collection_for_field(self, field_name):
+        if field_name.startswith("bad_bm25"):
+            return self.bm25_collection_name
+        return self.collection_name
+
     def _assert_create_index_fails(self, field_name, metric_type, params, error_message):
         client = self._client(alias=self.shared_alias)
+        collection_name = self._collection_for_field(field_name)
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(
             field_name=field_name,
@@ -1018,12 +1031,12 @@ class TestSparseInvertedIndexV3Negative(_SparseInvertedIndexV3Base):
         )
         self.create_index(
             client,
-            self.collection_name,
+            collection_name,
             index_params=index_params,
             check_task=CheckTasks.err_res,
             check_items={ct.err_code: 1100, ct.err_msg: error_message},
         )
-        indexes, _ = self.list_indexes(client, self.collection_name, field_name=field_name)
+        indexes, _ = self.list_indexes(client, collection_name, field_name=field_name)
         assert indexes == []
 
     @pytest.mark.parametrize(

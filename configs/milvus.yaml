@@ -1522,3 +1522,4 @@ function:
   analyzer:
     local_resource_path: /var/lib/milvus/analyzer
     concurrency_per_cpu_core: 8 # The concurrency per cpu core for analyzer, pipeline not included
+    runner_concurrency: 8 # The concurrency for each function runner to tokenize text

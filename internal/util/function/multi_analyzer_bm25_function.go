@@ -45,7 +45,6 @@ type MultiAnalyzerBM25FunctionRunner struct {
 	schema      *schemapb.FunctionSchema
 	outputField *schemapb.FieldSchema
 	inputFields []*schemapb.FieldSchema
-	concurrency int
 }
 
 func getMultiAnalyzerParams(field *schemapb.FieldSchema) (string, bool) {
@@ -63,7 +62,6 @@ func NewMultiAnalyzerBM25FunctionRunner(coll *schemapb.CollectionSchema, schema 
 		inputFields: []*schemapb.FieldSchema{inputField},
 		outputField: outputField,
 		analyzers:   make(map[string]analyzer.Analyzer),
-		concurrency: 8,
 	}
 
 	var m map[string]json.RawMessage
@@ -213,12 +211,13 @@ func (v *MultiAnalyzerBM25FunctionRunner) BatchRun(inputs ...any) ([]any, error)
 	rowNum := len(text)
 	embedData := make([]map[uint32]float32, rowNum)
 	wg := sync.WaitGroup{}
+	concurrency := getAnalyzerRunnerConcurrency()
 
-	errCh := make(chan error, v.concurrency)
-	for i, j := 0, 0; i < v.concurrency && j < rowNum; i++ {
+	errCh := make(chan error, concurrency)
+	for i, j := 0, 0; i < concurrency && j < rowNum; i++ {
 		start := j
-		end := start + rowNum/v.concurrency
-		if i < rowNum%v.concurrency {
+		end := start + rowNum/concurrency
+		if i < rowNum%concurrency {
 			end += 1
 		}
 		wg.Add(1)
@@ -311,11 +310,12 @@ func (v *MultiAnalyzerBM25FunctionRunner) BatchAnalyze(withDetail bool, withHash
 	result := make([][]*milvuspb.AnalyzerToken, rowNum)
 	pool := getOrCreateAnalyzerPool()
 	futures := make([]*conc.Future[struct{}], 0)
+	concurrency := getAnalyzerRunnerConcurrency()
 
-	for i, j := 0, 0; i < v.concurrency && j < rowNum; i++ {
+	for i, j := 0, 0; i < concurrency && j < rowNum; i++ {
 		start := j
-		end := start + rowNum/v.concurrency
-		if i < rowNum%v.concurrency {
+		end := start + rowNum/concurrency
+		if i < rowNum%concurrency {
 			end += 1
 		}
 		future := pool.Submit(func() (struct{}, error) {
