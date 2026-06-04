@@ -29,7 +29,6 @@ import "C"
 import (
 	"fmt"
 	"strconv"
-	"strings"
 	"unsafe"
 
 	"go.uber.org/zap"
@@ -106,9 +105,6 @@ func makePropertiesFromConfig(storageConfig *indexpb.StorageConfig) (C.LoonPrope
 	var values []string
 
 	if addr := storageConfig.GetAddress(); addr != "" {
-		if !storageConfig.GetUseSSL() && !strings.Contains(addr, "://") {
-			addr = "http://" + addr
-		}
 		keys = append(keys, propAddress)
 		values = append(values, addr)
 	}
