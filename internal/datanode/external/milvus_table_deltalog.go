@@ -301,15 +301,16 @@ func collectMilvusTableDeltalogRefs(fragments []packed.Fragment) ([]milvusTableD
 	return refs, nil
 }
 
-// getMilvusTableSourcePKField loads the source snapshot schema once and returns
-// its supported primary-key field for virtual-PK delete translation.
+// getMilvusTableSourcePKField loads and caches the source snapshot schema's
+// supported primary-key field for virtual-PK delete translation.
 func (t *RefreshExternalCollectionTask) getMilvusTableSourcePKField() (*schemapb.FieldSchema, error) {
 	t.milvusTableSourcePKFieldMu.Lock()
-	defer t.milvusTableSourcePKFieldMu.Unlock()
-
 	if t.milvusTableSourcePKField != nil {
-		return t.milvusTableSourcePKField, nil
+		sourcePKField := t.milvusTableSourcePKField
+		t.milvusTableSourcePKFieldMu.Unlock()
+		return sourcePKField, nil
 	}
+	t.milvusTableSourcePKFieldMu.Unlock()
 
 	extfs := t.milvusTableExternalSpecContext()
 	metadata, err := packed.ReadMilvusTableSnapshotMetadata(
@@ -328,7 +329,13 @@ func (t *RefreshExternalCollectionTask) getMilvusTableSourcePKField() (*schemapb
 	}
 	switch sourcePKField.GetDataType() {
 	case schemapb.DataType_Int64, schemapb.DataType_VarChar:
-		t.milvusTableSourcePKField = sourcePKField
+		t.milvusTableSourcePKFieldMu.Lock()
+		if t.milvusTableSourcePKField != nil {
+			sourcePKField = t.milvusTableSourcePKField
+		} else {
+			t.milvusTableSourcePKField = sourcePKField
+		}
+		t.milvusTableSourcePKFieldMu.Unlock()
 		return sourcePKField, nil
 	default:
 		return nil, fmt.Errorf("milvus-table source primary key type %s is unsupported", sourcePKField.GetDataType())
@@ -388,7 +395,10 @@ func (t *RefreshExternalCollectionTask) loadMilvusTableSourcePKOffsets(
 }
 
 // loadMilvusTableFragmentSourcePKOffsets scans one source manifest fragment and
-// records target offsets for only the source PKs that have delete events.
+// records target offsets for only the source PKs that have delete events. This
+// is an O(rows) PK/timestamp column scan and should stay limited to virtual-PK
+// delete translation, where source-PK deletes must be mapped back to target row
+// offsets before the target deltalog can be written.
 func (t *RefreshExternalCollectionTask) loadMilvusTableFragmentSourcePKOffsets(
 	ctx context.Context,
 	fragment packed.Fragment,
