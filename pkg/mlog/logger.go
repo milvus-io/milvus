@@ -181,6 +181,11 @@ func WithLazy(fields ...Field) *Logger {
 	}
 }
 
+// WithOptions creates a new Logger from the global logger with options applied.
+func WithOptions(opts ...Option) *Logger {
+	return With().WithOptions(opts...)
+}
+
 // With creates a new Logger with additional fields (immediately encoded).
 // The new logger inherits all fields from the parent logger.
 func (l *Logger) With(fields ...Field) *Logger {

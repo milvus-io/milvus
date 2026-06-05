@@ -100,7 +100,7 @@ func (tr *TimeRecorder) printTimeRecord(ctx context.Context, msg string, span ti
 	if ts.IsRecording() {
 		ts.AddEvent(fmt.Sprintf("%s, cost %s", msg, span.String()))
 	}
-	mlog.With().WithOptions(mlog.AddCallerSkip(2)).
+	mlog.WithOptions(mlog.AddCallerSkip(2)).
 		Debug(ctx, tr.logLabel,
 			mlog.String("msg", msg),
 			mlog.Duration("duration", span),
