@@ -665,6 +665,40 @@ func (s *LocalSegment) ResetIndexesLazyLoad(lazyState bool) {
 	}
 }
 
+func (s *LocalSegment) syncFieldIndexes(indexInfos []*querypb.FieldIndexInfo) {
+	isLoadedByIndexID := make(map[int64]bool)
+	loadedForNewIndex := !s.IsLazyLoad()
+	for _, index := range s.Indexes() {
+		isLoadedByIndexID[index.IndexInfo.GetIndexID()] = index.IsLoaded
+	}
+
+	indexIDs := typeutil.NewSet[int64]()
+	for _, indexInfo := range indexInfos {
+		indexID := indexInfo.GetIndexID()
+		indexIDs.Insert(indexID)
+		isLoaded, ok := isLoadedByIndexID[indexID]
+		if !ok {
+			isLoaded = loadedForNewIndex
+		}
+		s.fieldIndexes.Insert(indexID, &IndexedFieldInfo{
+			FieldBinlog: &datapb.FieldBinlog{
+				FieldID: indexInfo.GetFieldID(),
+			},
+			IndexInfo: indexInfo,
+			IsLoaded:  isLoaded,
+		})
+	}
+
+	// QueryCoord builds reopen LoadInfo from DataCoord's full finished-index list for this segment.
+	// Treat absent index IDs as stale local metadata.
+	s.fieldIndexes.Range(func(indexID int64, _ *IndexedFieldInfo) bool {
+		if !indexIDs.Contain(indexID) {
+			s.fieldIndexes.Remove(indexID)
+		}
+		return true
+	})
+}
+
 // Search executes a search on the segment.
 // If searchReq.FilterOnly() is true, only executes the filter and returns valid_count (Stage 1 of two-stage search).
 func (s *LocalSegment) Search(ctx context.Context, searchReq *segcore.SearchRequest) (*segcore.SearchResult, error) {
@@ -1402,6 +1436,7 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 	if err != nil {
 		return err
 	}
+	s.syncFieldIndexes(newLoadInfo.GetIndexInfos())
 	s.loadInfo.Store(newLoadInfo)
 	s.syncFieldJSONStatsFromLoadInfo(ctx, newLoadInfo)
 	return nil

@@ -4844,6 +4844,9 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
             index_has_raw_data_[field_id]) {
             continue;
         }
+        if (schema_->is_function_output(field_id)) {
+            continue;
+        }
         const auto& field_meta = schema_->operator[](field_id);
         fill_empty_field(field_meta);
         EnsureArrayOffsetsForStructField(field_meta, num_rows_.value_or(0));

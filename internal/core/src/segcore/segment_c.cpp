@@ -390,19 +390,35 @@ AsyncSearch(CTraceContext c_trace,
 
             auto span = milvus::tracer::StartSpan("SegCoreSearch", &trace_ctx);
             milvus::tracer::SetRootSpan(span);
+            AssertInfo(phg_ptr != nullptr && !phg_ptr->empty(),
+                       "search requires non-empty placeholder group");
+            const int64_t num_queries = milvus::query::GetNumOfQueries(phg_ptr);
+            auto target_vector_field_id =
+                plan->plan_node_->search_info_.field_id_;
 
             milvus::OpContext op_ctx(cancel_token);
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
-
-            auto search_result = segment->Search(plan,
-                                                 phg_ptr,
-                                                 timestamp,
-                                                 cancel_token,
-                                                 consistency_level,
-                                                 collection_ttl,
-                                                 entity_ttl_physical_time_us,
-                                                 filter_only,
-                                                 enable_expr_cache);
+            auto internal_segment =
+                static_cast<milvus::segcore::SegmentInternalInterface*>(
+                    segment);
+            std::unique_ptr<milvus::SearchResult> search_result;
+            if (!filter_only &&
+                !internal_segment->FieldAccessible(target_vector_field_id)) {
+                search_result = std::make_unique<milvus::SearchResult>();
+                search_result->total_nq_ = num_queries;
+                search_result->unity_topK_ = 0;
+                search_result->total_data_cnt_ = 0;
+            } else {
+                search_result = segment->Search(plan,
+                                                phg_ptr,
+                                                timestamp,
+                                                cancel_token,
+                                                consistency_level,
+                                                collection_ttl,
+                                                entity_ttl_physical_time_us,
+                                                filter_only,
+                                                enable_expr_cache);
+            }
             if (!filter_only &&
                 !milvus::PositivelyRelated(
                     plan->plan_node_->search_info_.metric_type_)) {

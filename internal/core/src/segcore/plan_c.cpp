@@ -52,7 +52,7 @@ CreateSearchPlanByExpr(CCollection c_col,
             auto field_name =
                 (*schema)[milvus::FieldId(field_id)].get_name().get();
             std::string err_msg =
-                "field " + field_name +
+                "field index of the field: " + field_name +
                 " is not loaded, please reload the collection";
             status.error_msg = strdup(err_msg.c_str());
             *res_plan = nullptr;

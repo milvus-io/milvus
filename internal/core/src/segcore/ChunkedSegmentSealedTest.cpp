@@ -211,6 +211,46 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
     }
 }
 
+TEST(test_chunk_segment, ReopenSkipsFunctionOutputFieldWithoutData) {
+    auto old_schema = std::make_shared<Schema>();
+    old_schema->set_schema_version(1);
+    auto pk = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(pk);
+
+    auto segment = segcore::CreateSealedSegment(old_schema);
+
+    constexpr int64_t row_count = 5;
+    std::vector<int64_t> pk_values(row_count);
+    std::iota(pk_values.begin(), pk_values.end(), 0);
+
+    auto field_data =
+        std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
+    field_data->FillFieldData(pk_values.data(), row_count);
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, pk.get(), {field_data}, cm);
+    segment->LoadFieldData(load_info);
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->set_schema_version(2);
+    new_schema->AddField(
+        FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+    new_schema->set_primary_field_id(pk);
+    auto sparse = FieldId(pk.get() + 1);
+    new_schema->AddField(FieldName("sparse_out"),
+                         sparse,
+                         DataType::VECTOR_SPARSE_U32_F32,
+                         0,
+                         std::nullopt,
+                         false);
+    new_schema->add_function_output_field_id(sparse);
+
+    segment->Reopen(new_schema);
+    EXPECT_FALSE(segment->FieldAccessible(sparse));
+}
+
 TEST(test_chunk_segment, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
     auto old_schema = std::make_shared<Schema>();
     old_schema->set_schema_version(1);
