@@ -132,8 +132,23 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentInfo {
 	flushedSegments := i.meta.SelectSegments(ctx, SegmentFilterFunc(isFlush))
 
+	sortCompactionEnabled := enableSortCompaction()
+	externalCollections := make(map[UniqueID]bool)
 	unindexedSegments := make([]*SegmentInfo, 0)
 	for _, segment := range flushedSegments {
+		if segment.GetLevel() == datapb.SegmentLevel_L0 {
+			continue
+		}
+		if sortCompactionEnabled && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
+			isExternal, ok := externalCollections[segment.CollectionID]
+			if !ok {
+				isExternal = i.isExternalCollection(segment.CollectionID)
+				externalCollections[segment.CollectionID] = isExternal
+			}
+			if !isExternal {
+				continue
+			}
+		}
 		if i.meta.indexMeta.IsUnIndexedSegment(segment.CollectionID, segment.GetID()) {
 			unindexedSegments = append(unindexedSegments, segment)
 		}
@@ -276,6 +291,9 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 }
 
 func (i *indexInspector) isExternalCollection(collectionID int64) bool {
+	if i.meta == nil || i.meta.collections == nil {
+		return false
+	}
 	coll := i.meta.GetCollection(collectionID)
 	return coll != nil && coll.IsExternal()
 }
