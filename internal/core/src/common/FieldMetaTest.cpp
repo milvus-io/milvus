@@ -149,6 +149,7 @@ TEST(FieldMetaTest, ShouldLoadFieldReturnsFalseForBM25FunctionOutput) {
     bm25_vector->set_name("sparse");
     bm25_vector->set_data_type(
         milvus::proto::schema::DataType::SparseFloatVector);
+    bm25_vector->set_is_function_output(true);
 
     auto* function = schema_proto.add_functions();
     function->set_type(milvus::proto::schema::BM25);
@@ -161,6 +162,31 @@ TEST(FieldMetaTest, ShouldLoadFieldReturnsFalseForBM25FunctionOutput) {
 
     schema->UpdateLoadFields({101});
     EXPECT_FALSE(schema->ShouldLoadField(FieldId(101)));
+}
+
+TEST(FieldMetaTest, ShouldLoadFieldIgnoresUnmarkedBM25FunctionOutput) {
+    milvus::proto::schema::CollectionSchema schema_proto;
+
+    auto* pk_field = schema_proto.add_fields();
+    pk_field->set_fieldid(100);
+    pk_field->set_name("pk");
+    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk_field->set_is_primary_key(true);
+
+    auto* bm25_vector = schema_proto.add_fields();
+    bm25_vector->set_fieldid(101);
+    bm25_vector->set_name("sparse");
+    bm25_vector->set_data_type(
+        milvus::proto::schema::DataType::SparseFloatVector);
+
+    auto* function = schema_proto.add_functions();
+    function->set_type(milvus::proto::schema::BM25);
+    function->add_output_field_ids(101);
+
+    auto schema = Schema::ParseFrom(schema_proto);
+
+    EXPECT_TRUE(schema->ShouldLoadField(FieldId(101)));
+    EXPECT_FALSE(schema->is_function_output(FieldId(101)));
 }
 
 }  // namespace milvus

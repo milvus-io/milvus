@@ -147,7 +147,17 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
             continue;
         }
         for (const auto output_field_id : function.output_field_ids()) {
-            schema->bm25_function_output_fields_.emplace(output_field_id);
+            auto field_id = FieldId(output_field_id);
+            if (schema->is_function_output(field_id)) {
+                schema->bm25_function_output_fields_.emplace(field_id);
+            }
+        }
+        for (const auto& output_field_name : function.output_field_names()) {
+            auto it = schema->name_ids_.find(FieldName(output_field_name));
+            if (it != schema->name_ids_.end() &&
+                schema->is_function_output(it->second)) {
+                schema->bm25_function_output_fields_.emplace(it->second);
+            }
         }
     }
 
@@ -190,15 +200,6 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     if (!schema_proto.external_source().empty()) {
         schema->set_external_source(schema_proto.external_source());
         schema->set_external_spec(schema_proto.external_spec());
-    }
-
-    // Keep legacy FunctionSchema field-id metadata as a compatibility
-    // supplement. New schema normalization marks generated fields with
-    // FieldSchema::is_function_output; see typeutil.IsFunctionOutputField in Go.
-    for (const auto& fn : schema_proto.functions()) {
-        for (auto out_id : fn.output_field_ids()) {
-            schema->add_function_output_field_id(FieldId(out_id));
-        }
     }
 
     return schema;
