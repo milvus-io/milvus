@@ -28,9 +28,10 @@ import (
 func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, result message.BroadcastResultBatchUpdateManifestMessageV2) error {
 	body := result.Message.MustBody()
 	var (
-		mutations = make(map[int64][]MutateFunc, len(body.GetItems()))
-		v2Count   int
-		v3Count   int
+		mutations  = make(map[int64][]MutateFunc, len(body.GetItems()))
+		segmentIDs []UniqueID
+		v2Count    int
+		v3Count    int
 	)
 	for _, item := range body.GetItems() {
 		segID := item.GetSegmentId()
@@ -78,6 +79,7 @@ func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, res
 				seg.DataVersion++
 				return true
 			})
+			segmentIDs = append(segmentIDs, segID)
 			v2Count++
 		case hasV3:
 			manifestVersion := item.GetManifestVersion()
@@ -105,6 +107,7 @@ func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, res
 				seg.ManifestPath = packed.MarshalManifestPath(basePath, manifestVersion)
 				return true
 			})
+			segmentIDs = append(segmentIDs, segID)
 			v3Count++
 		default:
 			mlog.Warn(ctx, "batch update manifest item has no payload; skipping",
@@ -116,6 +119,7 @@ func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, res
 			mlog.Warn(ctx, "batch update manifest failed", mlog.Err(err))
 			return err
 		}
+		notifySegmentIndexBuild(segmentIDs...)
 	}
 	mlog.Info(ctx, "batch update manifest handled",
 		mlog.Int("itemCount", len(body.GetItems())),
