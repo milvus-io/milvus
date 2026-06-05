@@ -952,7 +952,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     }
 
     void
-    search_ids(BitsetType& bitset, const IdArray& id_array) const override;
+    search_ids(milvus::OpContext* op_ctx,
+               BitsetType& bitset,
+               const IdArray& id_array) const override;
 
     void
     LoadVecIndex(const LoadIndexInfo& info);

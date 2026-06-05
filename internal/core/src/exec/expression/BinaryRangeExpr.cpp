@@ -410,20 +410,20 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     };
 
     auto skip_index_func =
-        [val1, val2, lower_inclusive, upper_inclusive](
+        [op_ctx = op_ctx_, val1, val2, lower_inclusive, upper_inclusive](
             const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
             if (lower_inclusive && upper_inclusive) {
                 return skip_index.CanSkipBinaryRange<T>(
-                    field_id, chunk_id, val1, val2, true, true);
+                    op_ctx, field_id, chunk_id, val1, val2, true, true);
             } else if (lower_inclusive && !upper_inclusive) {
                 return skip_index.CanSkipBinaryRange<T>(
-                    field_id, chunk_id, val1, val2, true, false);
+                    op_ctx, field_id, chunk_id, val1, val2, true, false);
             } else if (!lower_inclusive && upper_inclusive) {
                 return skip_index.CanSkipBinaryRange<T>(
-                    field_id, chunk_id, val1, val2, false, true);
+                    op_ctx, field_id, chunk_id, val1, val2, false, true);
             } else {
                 return skip_index.CanSkipBinaryRange<T>(
-                    field_id, chunk_id, val1, val2, false, false);
+                    op_ctx, field_id, chunk_id, val1, val2, false, false);
             }
         };
     int64_t processed_size;

@@ -19,13 +19,15 @@ namespace milvus {
 static const FieldChunkMetrics defaultFieldChunkMetrics;
 
 const cachinglayer::PinWrapper<const FieldChunkMetrics*>
-SkipIndex::GetFieldChunkMetrics(milvus::FieldId field_id, int chunk_id) const {
+SkipIndex::GetFieldChunkMetrics(milvus::OpContext* op_ctx,
+                                milvus::FieldId field_id,
+                                int chunk_id) const {
     // skip index structure must be setup before using, thus we do not lock here.
     auto field_metrics = fieldChunkMetrics_.find(field_id);
     if (field_metrics != fieldChunkMetrics_.end()) {
         auto& field_chunk_metrics = field_metrics->second;
         auto ca = cachinglayer::SemiInlineGet(
-            field_chunk_metrics->PinCells(nullptr, {chunk_id}));
+            field_chunk_metrics->PinCells(op_ctx, {chunk_id}));
         auto metrics = ca->get_cell_of(chunk_id);
         return cachinglayer::PinWrapper<const FieldChunkMetrics*>(ca, metrics);
     }
