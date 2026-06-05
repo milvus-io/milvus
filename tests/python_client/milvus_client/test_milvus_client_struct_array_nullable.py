@@ -2368,7 +2368,8 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(
-        reason="StructArray parent is not registered for direct IS NULL/IS NOT NULL or array_length expressions",
+        reason="issue: https://github.com/milvus-io/milvus/issues/50081 - "
+        "StructArray parent is not registered for direct IS NULL/IS NOT NULL or array_length expressions",
         strict=True,
     )
     def test_create_scalar_struct_array_field_nullable_parent_null_expression(self):
@@ -2408,26 +2409,25 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(
-        reason="normal-vector search with element_filter on nullable StructArray returns rows that fail predicate",
+        reason="issue: https://github.com/milvus-io/milvus/issues/49438 - "
+        "normal-vector search should reject element_filter instead of returning false positives",
         strict=True,
     )
     def test_create_scalar_struct_array_field_nullable_element_filter_search(self):
         """
-        target: test element_filter as a normal-vector search filter for a nullable scalar Struct Array
+        target: test normal-vector search rejects element_filter on a nullable scalar Struct Array
         method: create >=3000 sealed rows plus growing rows with null/omitted/empty/non-empty profiles, then search
             normal_vector with `element_filter({STRUCT_FIELD}, $[{INT_SUBFIELD}] >= 9000)`
-        expected: expected result ids are computed from source data and expression; search only returns rows that
-            contain at least one matching struct element and excludes null/omitted/empty/zero-match rows
+        expected: normal-vector search returns a clear error because row-level vector search is incompatible with
+            element-level filtering
         """
         collection_name = cf.gen_unique_str(f"{prefix}_nullable_struct_element_filter_search")
         client = self._client()
         fixture = gen_expression_fixture(self, client, collection_name)
-        source_rows = fixture["source_rows"]
-        source_by_id = fixture["source_by_id"]
         expr = f"element_filter({STRUCT_FIELD}, $[{INT_SUBFIELD}] >= 9000)"
-        expected_ids = {row[PK_FIELD] for row in gt_nullable_scalar_struct_expression_rows(source_rows, expr)}
+        error = {ct.err_code: 1100, ct.err_msg: "element_filter"}
 
-        search_results, check = self.search(
+        self.search(
             client,
             collection_name,
             data=[gen_vector(7004)],
@@ -2435,15 +2435,10 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             filter=expr,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=len(expected_ids),
+            limit=len(fixture["controlled_ids"]),
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
-        assert check
-        assert {hit[PK_FIELD] for hit in search_results[0]} == expected_ids
-        for hit in search_results[0]:
-            expected = source_by_id[hit[PK_FIELD]]
-            entity = search_entity(hit)
-            assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_struct_array_field_with_vector_insert_omit_nullable_growing_row(self):
@@ -3803,9 +3798,15 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         )
         assert check
         iterator_hits = drain_iterator(iterator)
-        hit_ids = [hit[PK_FIELD] for hit in iterator_hits]
-        assert len(hit_ids) == len(set(hit_ids))
-        assert set(hit_ids) == set(source_by_id)
+        assert len(iterator_hits) == len(non_empty_rows)
+        hit_pairs = [(hit[PK_FIELD], hit["offset"]) for hit in iterator_hits]
+        expected_hit_pairs = {
+            (row[PK_FIELD], offset) for row in non_empty_rows for offset, _ in enumerate(row[STRUCT_FIELD])
+        }
+        assert len(hit_pairs) == len(set(hit_pairs))
+        assert set(hit_pairs).issubset(expected_hit_pairs)
+        hit_ids = [hit_id for hit_id, _ in hit_pairs]
+        assert set(hit_ids).issubset(source_by_id)
         assert not set(hit_ids).intersection(null_or_empty_ids)
         assert iterator_hits[0][PK_FIELD] == non_empty_rows[-1][PK_FIELD]
         assert iterator_hits[0]["offset"] == 0
@@ -4536,9 +4537,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, alias, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         for target in (collection_name, alias):
             describe_info, check = self.describe_collection(client, target)
             assert check
@@ -5011,8 +5009,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         assert task_results["upsert"] == len(concurrent_upsert_rows)
         assert task_results["delete"] == len(delete_ids)
 
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         post_add_rows = [
             {
                 PK_FIELD: 1200,
@@ -5165,8 +5161,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         new_rows = [
             {
                 PK_FIELD: i,
@@ -5269,9 +5263,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         new_rows = [
             {
                 PK_FIELD: i,
@@ -5388,9 +5379,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         new_rows = [
             {
                 PK_FIELD: i,
@@ -5476,9 +5464,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         new_rows = [
             {
                 PK_FIELD: i,
@@ -5571,9 +5556,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         new_rows = [
             {
                 PK_FIELD: i,
@@ -5654,142 +5636,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(
-        reason="normal-vector search with element_filter on dynamically added nullable StructArray returns rows that fail predicate when an empty row is present",
-        strict=True,
-    )
-    def test_add_scalar_struct_array_field_empty_array_query_search(self):
-        """
-        target: test null and empty array are distinguishable after dynamically adding a nullable struct array field
-        method: add a scalar struct array field to a loaded collection with old rows, then insert one empty profile
-            row and one non-empty profile row
-        expected: old rows return null, empty row returns [], non-empty row returns inserted data, and element_filter
-            only matches non-empty rows with matching elements
-        """
-        collection_name = cf.gen_unique_str(f"{prefix}_add_scalar_struct_empty")
-        client = self._client()
-
-        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
-        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
-
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
-
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
-        res, check = self.insert(client, collection_name, old_sealed_rows)
-        assert check
-        assert res["insert_count"] == len(old_sealed_rows)
-
-        res, check = self.flush(client, collection_name)
-        assert check
-
-        index_params = gen_index_params(self, client)
-        index_params.add_index(
-            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
-        )
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
-
-        res, check = self.load_collection(client, collection_name)
-        assert check
-
-        old_growing_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"growing_{i}"} for i in range(3, 5)]
-        res, check = self.insert(client, collection_name, old_growing_rows)
-        assert check
-        assert res["insert_count"] == len(old_growing_rows)
-
-        profile_schema = gen_struct_schema(self, client)
-        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
-        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
-        res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
-        )
-        assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
-        empty_profile_row = {
-            PK_FIELD: 5,
-            VECTOR_FIELD: gen_vector(5),
-            TAG_FIELD: "new_empty_profile",
-            STRUCT_FIELD: [],
-        }
-        non_empty_profile_row = {
-            PK_FIELD: 6,
-            VECTOR_FIELD: gen_vector(6),
-            TAG_FIELD: "new_non_empty_profile",
-            STRUCT_FIELD: gen_scalar_profile(6),
-        }
-        res, check = self.insert(client, collection_name, [empty_profile_row, non_empty_profile_row])
-        assert check
-        assert res["insert_count"] == 2
-
-        source_by_id = {row[PK_FIELD]: {**row, STRUCT_FIELD: None} for row in old_sealed_rows + old_growing_rows}
-        source_by_id[empty_profile_row[PK_FIELD]] = empty_profile_row
-        source_by_id[non_empty_profile_row[PK_FIELD]] = non_empty_profile_row
-
-        query_results, check = self.query(
-            client,
-            collection_name,
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=len(source_by_id),
-        )
-        assert check
-        assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
-        for row in query_results:
-            expected = source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert STRUCT_FIELD in row
-            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        element_filter_results, check = self.query(
-            client,
-            collection_name,
-            filter=f"element_filter({STRUCT_FIELD}, $[{INT_SUBFIELD}] == 60)",
-            output_fields=[PK_FIELD, STRUCT_FIELD],
-            limit=1,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in element_filter_results} == {non_empty_profile_row[PK_FIELD]}
-        assert_scalar_profile_equal(element_filter_results[0][STRUCT_FIELD], non_empty_profile_row[STRUCT_FIELD])
-
-        search_results, check = self.search(
-            client,
-            collection_name,
-            data=[gen_vector(6)],
-            anns_field=VECTOR_FIELD,
-            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=len(source_by_id),
-        )
-        assert check
-        assert {hit[PK_FIELD] for hit in search_results[0]} == set(source_by_id)
-        for hit in search_results[0]:
-            expected = source_by_id[hit[PK_FIELD]]
-            entity = search_entity(hit)
-            assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            assert STRUCT_FIELD in entity
-            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        filtered_search_results, check = self.search(
-            client,
-            collection_name,
-            data=[gen_vector(6)],
-            anns_field=VECTOR_FIELD,
-            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
-            filter=f"element_filter({STRUCT_FIELD}, $[{INT_SUBFIELD}] == 60)",
-            output_fields=[PK_FIELD, STRUCT_FIELD],
-            limit=1,
-        )
-        assert check
-        assert {hit[PK_FIELD] for hit in filtered_search_results[0]} == {non_empty_profile_row[PK_FIELD]}
-        entity = search_entity(filtered_search_results[0][0])
-        assert_scalar_profile_equal(entity[STRUCT_FIELD], non_empty_profile_row[STRUCT_FIELD])
-
-    @pytest.mark.tags(CaseLabel.L0)
     def test_add_struct_array_field_with_vector_search_on_added_subfield(self):
         """
         target: test struct array vector search after dynamically adding a nullable struct array field
@@ -5834,9 +5680,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         new_rows = [
             {
                 PK_FIELD: 3,
@@ -5958,9 +5801,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         new_rows = [
             {
                 PK_FIELD: 4,
@@ -6461,9 +6301,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         empty_profile_row = {
             PK_FIELD: 3,
             VECTOR_FIELD: gen_vector(3),
@@ -6600,9 +6437,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         new_rows = [
             {
                 PK_FIELD: i,
@@ -6701,9 +6535,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         new_rows = [
             {
                 PK_FIELD: i,
@@ -6802,9 +6633,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         new_rows = [
             {
                 PK_FIELD: i,
@@ -6892,9 +6720,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         new_rows = [
             {
                 PK_FIELD: i,
@@ -7096,9 +6921,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         new_rows = [
             {
                 PK_FIELD: i,
@@ -7197,9 +7019,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         new_rows = [
             {
                 PK_FIELD: i,
@@ -7617,9 +7436,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         omitted_profile_row = {
             PK_FIELD: 4,
             VECTOR_FIELD: gen_vector(4),
@@ -7757,9 +7573,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         explicit_null_profile_row = {
             PK_FIELD: 4,
             VECTOR_FIELD: gen_vector(4),
@@ -7912,9 +7725,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         sealed_explicit_null_profile_row = {
             PK_FIELD: 4,
             VECTOR_FIELD: gen_vector(4),
@@ -8138,9 +7948,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         sealed_non_empty_profile_row = {
             PK_FIELD: 7,
             VECTOR_FIELD: gen_vector(7),
@@ -8386,9 +8193,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         post_add_sealed_rows = [
             {
                 PK_FIELD: 4,
@@ -8612,9 +8416,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         deleted_profile = [
             {INT_SUBFIELD: 7000, TAG_SUBFIELD: "deleted_shared_0"},
             {INT_SUBFIELD: 7001, TAG_SUBFIELD: "deleted_shared_1"},
@@ -8847,9 +8648,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         deleted_profile = [
             {INT_SUBFIELD: 7000, TAG_SUBFIELD: "deleted_shared_0", VECTOR_SUBFIELD: gen_vector(7000)},
             {INT_SUBFIELD: 7001, TAG_SUBFIELD: "deleted_shared_1", VECTOR_SUBFIELD: gen_vector(7001)},
@@ -9119,9 +8917,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         sealed_non_empty_a = {
             PK_FIELD: 2,
             VECTOR_FIELD: gen_vector(2),
@@ -9363,9 +9158,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         sealed_non_empty_a = {
             PK_FIELD: 2,
             VECTOR_FIELD: gen_vector(2),
@@ -9640,9 +9432,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         rows_a = [
             {
                 PK_FIELD: 2,
@@ -9833,9 +9622,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         sealed_non_empty_a = {
             PK_FIELD: 2,
             VECTOR_FIELD: gen_vector(2),
@@ -10111,9 +9897,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         delete_profile = [
             {INT_SUBFIELD: 9000, TAG_SUBFIELD: "delete_shared_0"},
             {INT_SUBFIELD: 9001, TAG_SUBFIELD: "delete_shared_1"},
@@ -10420,9 +10203,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         delete_profile = [
             {INT_SUBFIELD: 9000, TAG_SUBFIELD: "delete_shared_0", VECTOR_SUBFIELD: gen_vector(9000)},
             {INT_SUBFIELD: 9001, TAG_SUBFIELD: "delete_shared_1", VECTOR_SUBFIELD: gen_vector(9001)},
@@ -10752,9 +10532,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         rows_a = [
             {
                 PK_FIELD: 2,
@@ -10937,9 +10714,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         rows_a = [
             {
                 PK_FIELD: 2,
@@ -11075,9 +10849,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         new_rows = [
             {
                 PK_FIELD: i,
@@ -11278,9 +11049,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         new_rows = [
             {
                 PK_FIELD: i,
@@ -11379,9 +11147,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
         new_rows = [
             {
                 PK_FIELD: i,
@@ -11435,30 +11200,22 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
 class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
     """Nullable struct array bulk import coverage."""
 
-    # MinIO configuration constants
     MINIO_ACCESS_KEY = "minioadmin"
     MINIO_SECRET_KEY = "minioadmin"
     REMOTE_DATA_PATH = "bulkinsert_data"
     LOCAL_FILES_PATH = "/tmp/milvus_bulkinsert/"
+    SCALAR_IMPORT_FORMATS = ("json", "parquet")
 
     @pytest.fixture(scope="function", autouse=True)
     def setup_minio(self, minio_host, minio_bucket):
-        """Setup MinIO configuration from fixtures"""
+        """Setup MinIO configuration from fixtures."""
         Path(self.LOCAL_FILES_PATH).mkdir(parents=True, exist_ok=True)
         self.minio_host = minio_host
         self.bucket_name = minio_bucket
         self.minio_endpoint = f"{minio_host}:9000"
 
     def upload_to_minio(self, local_file_path: str) -> list[list[str]]:
-        """
-        Upload parquet file to MinIO
-
-        Args:
-            local_file_path: Local path of the file to upload
-
-        Returns:
-            List of remote file paths in MinIO
-        """
+        """Upload a local bulk import file to MinIO."""
         if not os.path.exists(local_file_path):
             raise Exception(f"Local file '{local_file_path}' doesn't exist")
 
@@ -11470,11 +11227,9 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
                 secure=False,
             )
 
-            # Check if bucket exists
             if not minio_client.bucket_exists(self.bucket_name):
                 raise Exception(f"MinIO bucket '{self.bucket_name}' doesn't exist")
 
-            # Upload file
             filename = os.path.basename(local_file_path)
             minio_file_path = os.path.join(self.REMOTE_DATA_PATH, filename)
             minio_client.fput_object(self.bucket_name, minio_file_path, local_file_path)
@@ -11485,6 +11240,56 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         except S3Error as e:
             raise Exception(f"Failed to connect MinIO server {self.minio_endpoint}, error: {e}")
 
+    def write_import_rows_file(
+        self,
+        collection_name: str,
+        rows: list[dict[str, Any]],
+        file_format: str,
+        *,
+        row_group_size: int,
+        include_struct: bool = True,
+    ) -> str:
+        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.{file_format}")
+        if file_format == "json":
+            with open(local_file_path, "w") as f:
+                json.dump(rows, f)
+            return local_file_path
+
+        if file_format != "parquet":
+            raise ValueError(f"Unsupported import file format: {file_format}")
+
+        if include_struct:
+            write_scalar_struct_rows_parquet(rows, local_file_path, row_group_size=row_group_size)
+            return local_file_path
+
+        table = pa.table(
+            {
+                PK_FIELD: pa.array([row[PK_FIELD] for row in rows], type=pa.int64()),
+                VECTOR_FIELD: pa.array([row[VECTOR_FIELD] for row in rows], type=pa.list_(pa.float32())),
+                TAG_FIELD: pa.array([row[TAG_FIELD] for row in rows], type=pa.string()),
+            }
+        )
+        pq.write_table(table, local_file_path, row_group_size=row_group_size)
+        return local_file_path
+
+    def upload_import_rows(
+        self,
+        collection_name: str,
+        rows: list[dict[str, Any]],
+        file_format: str,
+        *,
+        row_group_size: int,
+        include_struct: bool = True,
+    ) -> list[list[str]]:
+        local_file_path = self.write_import_rows_file(
+            collection_name,
+            rows,
+            file_format,
+            row_group_size=row_group_size,
+            include_struct=include_struct,
+        )
+        return self.upload_to_minio(local_file_path)
+
     def call_bulkinsert(
         self,
         collection_name: str,
@@ -11492,18 +11297,7 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         expect_fail: bool = False,
         partition_name: str = "",
     ) -> dict[str, Any]:
-        """
-        Call bulk import API and wait for completion
-
-        Args:
-            collection_name: Target collection name
-            batch_files: List of file paths in MinIO
-            expect_fail: Whether the import job is expected to fail
-            partition_name: Optional target partition name
-
-        Returns:
-            Import result dict with state and reason
-        """
+        """Call bulk import API and wait for completion."""
         url = f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
 
         log.info(f"Starting bulk import to collection '{collection_name}'")
@@ -11518,7 +11312,6 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         job_id = resp.json()["data"]["jobId"]
         log.info(f"Bulk import job created, job_id: {job_id}")
 
-        # Wait for import to complete
         timeout = 300
         start_time = time.time()
         while time.time() - start_time < timeout:
@@ -11532,46 +11325,250 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
 
             if state == "Importing":
                 continue
-            elif state == "Failed":
+            if state == "Failed":
                 reason = resp.json()["data"].get("reason", "Unknown reason")
                 if expect_fail:
                     log.info(f"Bulk import job {job_id} failed as expected: {reason}")
                     return {"state": "Failed", "reason": reason}
                 raise Exception(f"Bulk import job {job_id} failed: {reason}")
-            elif state == "Completed" and progress == 100:
+            if state == "Completed" and progress == 100:
                 if expect_fail:
                     raise AssertionError(f"Bulk import job {job_id} unexpectedly completed")
                 log.info(f"Bulk import job {job_id} completed successfully")
                 return {"state": "Completed", "reason": None}
-        else:
-            raise Exception(f"Bulk import job {job_id} timeout after {timeout}s")
 
-        log.info("Bulk import finished")
+        raise Exception(f"Bulk import job {job_id} timeout after {timeout}s")
+
+    def create_scalar_struct_collection(self, client, collection_name: str, *, nullable: bool):
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
+
+        profile_schema = gen_struct_schema(self, client)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        field_kwargs = {
+            "datatype": STRUCT_TYPE,
+            "element_type": STRUCT_ELEMENT_TYPE,
+            "struct_schema": profile_schema,
+            "max_capacity": STRUCT_MAX_CAPACITY,
+        }
+        if nullable:
+            field_kwargs["nullable"] = True
+        schema.add_field(STRUCT_FIELD, **field_kwargs)
+
+        index_params = gen_index_params(self, client)
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        assert check
+        return schema
+
+    def create_collection_without_struct(self, client, collection_name: str):
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
+        res, check = self.create_collection(client, collection_name, schema=schema)
+        assert check
+        return schema
+
+    def add_nullable_scalar_struct_field_and_index(self, client, collection_name: str):
+        profile_schema = gen_struct_schema(self, client)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        res, check = self.add_collection_struct_field(
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
+        )
+        assert check
+
+        index_params = gen_index_params(self, client)
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
+
+    def gen_rows_without_struct(
+        self,
+        start_id: int,
+        count: int,
+        tag_prefix: str,
+        *,
+        source_by_id: dict[int, dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        rows = []
+        for row_id in range(start_id, start_id + count):
+            row = {
+                PK_FIELD: row_id,
+                VECTOR_FIELD: gen_vector(row_id),
+                TAG_FIELD: f"{tag_prefix}_{row_id}",
+            }
+            rows.append(row)
+            if source_by_id is not None:
+                source_by_id[row_id] = {**row, STRUCT_FIELD: None}
+        return rows
+
+    def gen_after_add_import_rows(
+        self,
+        start_id: int,
+        count: int,
+        tag_prefix: str,
+        *,
+        omit_struct: bool = False,
+    ) -> tuple[list[dict[str, Any]], dict[int, dict[str, Any]]]:
+        rows = []
+        source_by_id = {}
+        for row_id in range(start_id, start_id + count):
+            row = {
+                PK_FIELD: row_id,
+                VECTOR_FIELD: gen_vector(row_id),
+                TAG_FIELD: f"{tag_prefix}_{row_id}",
+            }
+            if omit_struct:
+                expected = {**row, STRUCT_FIELD: None}
+            else:
+                if row_id % 3 == 0:
+                    profile = None
+                elif row_id % 3 == 1:
+                    profile = []
+                else:
+                    profile = gen_scalar_profile(row_id)
+                row[STRUCT_FIELD] = profile
+                expected = row
+            rows.append(row)
+            source_by_id[row_id] = expected
+        return rows, source_by_id
+
+    def gen_partition_interference_rows(
+        self, count: int, *, same_vector_seed: int
+    ) -> tuple[list[dict[str, Any]], dict[int, dict[str, Any]]]:
+        rows = []
+        source_by_id = {}
+        for offset in range(count):
+            row_id = 100000 + offset
+            if offset == 0:
+                profile = gen_scalar_profile(row_id)
+                vector = gen_vector(same_vector_seed)
+                doc_tag = "other_partition_same_vector"
+            elif offset % 3 == 1:
+                profile = None
+                vector = gen_vector(row_id)
+                doc_tag = f"other_partition_null_profile_{offset}"
+            elif offset % 3 == 2:
+                profile = []
+                vector = gen_vector(row_id)
+                doc_tag = f"other_partition_empty_profile_{offset}"
+            else:
+                profile = gen_scalar_profile(row_id)
+                vector = gen_vector(row_id)
+                doc_tag = f"other_partition_profile_{offset}"
+            row = {
+                PK_FIELD: row_id,
+                VECTOR_FIELD: vector,
+                TAG_FIELD: doc_tag,
+                STRUCT_FIELD: profile,
+            }
+            rows.append(row)
+            source_by_id[row_id] = row
+        return rows, source_by_id
+
+    def assert_scalar_query_results(
+        self,
+        client,
+        collection_name: str,
+        source_by_id: dict[int, dict[str, Any]],
+        *,
+        partition_names: list[str] | None = None,
+        query_filter: str = ALL_ROWS_FILTER,
+    ):
+        query_kwargs = {"partition_names": partition_names} if partition_names else {}
+        query_results, check = self.query(
+            client,
+            collection_name,
+            filter=query_filter,
+            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
+            limit=len(source_by_id),
+            **query_kwargs,
+        )
+        assert check
+        assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
+        for row in query_results:
+            expected = source_by_id[row[PK_FIELD]]
+            assert row[TAG_FIELD] == expected[TAG_FIELD]
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+
+    def assert_scalar_query_and_search(
+        self,
+        client,
+        collection_name: str,
+        source_by_id: dict[int, dict[str, Any]],
+        *,
+        partition_names: list[str] | None = None,
+        search_pk: int | None = None,
+        excluded_ids: set[int] | None = None,
+    ):
+        self.assert_scalar_query_results(client, collection_name, source_by_id, partition_names=partition_names)
+
+        search_pk = max(source_by_id) if search_pk is None else search_pk
+        search_row = source_by_id[search_pk]
+        search_kwargs = {"partition_names": partition_names} if partition_names else {}
+        search_results, check = self.search(
+            client,
+            collection_name,
+            data=[search_row[VECTOR_FIELD]],
+            anns_field=VECTOR_FIELD,
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
+            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
+            limit=len(source_by_id),
+            **search_kwargs,
+        )
+        assert check
+        hits = search_results[0]
+        hit_ids = {hit[PK_FIELD] for hit in hits}
+        assert hit_ids == set(source_by_id)
+        if excluded_ids:
+            assert not hit_ids.intersection(excluded_ids)
+        assert hits[0][PK_FIELD] == search_row[PK_FIELD]
+        for hit in hits:
+            expected = source_by_id[hit[PK_FIELD]]
+            entity = search_entity(hit)
+            assert entity[TAG_FIELD] == expected[TAG_FIELD]
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+
+    def assert_all_subfield_outputs_are_parent_null(self, client, collection_name: str, source_by_id):
+        subfield_results, check = self.query(
+            client,
+            collection_name,
+            filter=ALL_ROWS_FILTER,
+            output_fields=[PK_FIELD, STRUCT_INT_FIELD, STRUCT_TAG_FIELD],
+            limit=len(source_by_id),
+        )
+        assert check
+        assert {row[PK_FIELD] for row in subfield_results} == set(source_by_id)
+        for row in subfield_results:
+            assert set(row) == {PK_FIELD, STRUCT_FIELD}
+            assert row[STRUCT_FIELD] is None
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_import_nullable_scalar_struct_array_with_json(self):
+    @pytest.mark.parametrize("file_format", SCALAR_IMPORT_FORMATS, ids=SCALAR_IMPORT_FORMATS)
+    def test_import_nullable_scalar_struct_array(self, file_format):
         """
-        target: test JSON bulk import for a nullable scalar-only struct array field
-        method: create a collection with nullable scalar Struct Array, import 3000 JSON rows with null, empty, and
-            non-empty profile values, then query and search the imported data
+        target: test bulk import for a nullable scalar-only Struct Array field
+        method: create a collection with nullable scalar Struct Array, import rows with null, empty, and non-empty
+            profile values, then query and search the imported data
         expected: imported row count matches source data, and query/search output preserves nullable struct semantics
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_scalar_struct_json")
+        collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_scalar_struct_{file_format}")
         entities = 3000
 
         schema = gen_indexed_struct_array_collection(self, client, collection_name)
-        rows, source_by_id = gen_nullable_scalar_struct_rows(
-            schema,
-            entities,
-            tag_prefix="import_row",
-        )
+        rows, source_by_id = gen_nullable_scalar_struct_rows(schema, entities, tag_prefix="import_row")
 
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.json")
-        with open(local_file_path, "w") as f:
-            json.dump(rows, f)
-
-        remote_files = self.upload_to_minio(local_file_path)
+        remote_files = self.upload_import_rows(collection_name, rows, file_format, row_group_size=entities)
         self.call_bulkinsert(collection_name, remote_files)
 
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
@@ -11582,51 +11579,20 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         assert check
         assert stats["row_count"] == entities
 
-        query_results, check = self.query(
-            client,
-            collection_name,
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=entities,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
-        for row in query_results:
-            expected = source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        search_row = source_by_id[entities - 1]
-        search_results, check = self.search(
-            client,
-            collection_name,
-            data=[search_row[VECTOR_FIELD]],
-            anns_field=VECTOR_FIELD,
-            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=entities,
-        )
-        assert check
-        hits = search_results[0]
-        assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
-        assert hits[0][PK_FIELD] == search_row[PK_FIELD]
-        for hit in hits:
-            expected = source_by_id[hit[PK_FIELD]]
-            entity = search_entity(hit)
-            assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+        self.assert_scalar_query_and_search(client, collection_name, source_by_id, search_pk=entities - 1)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_import_nullable_scalar_struct_array_with_json_partition_query_search(self):
+    @pytest.mark.parametrize("file_format", SCALAR_IMPORT_FORMATS, ids=SCALAR_IMPORT_FORMATS)
+    def test_import_nullable_scalar_struct_array_partition_query_search(self, file_format):
         """
-        target: test JSON bulk import into a specified partition for a nullable scalar-only struct array field
-        method: create two partitions, import 3000 JSON rows into one partition, insert same-vector interference rows
-            into the other partition, then query and search with partition_names
+        target: test bulk import into a specified partition for a nullable scalar-only Struct Array field
+        method: create two partitions, import rows into one partition, insert same-vector interference rows into the
+            other partition, then query and search with partition_names
         expected: imported row count is scoped to the target partition, and partition-scoped query/search never returns
             rows from the other partition while preserving nullable struct semantics
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_scalar_struct_json_partition")
+        collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_scalar_struct_{file_format}_partition")
         partition_a = cf.gen_unique_str("part_a")
         partition_b = cf.gen_unique_str("part_b")
         entities = 3000
@@ -11638,34 +11604,9 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         res, check = self.create_partition(client, collection_name, partition_b)
         assert check
 
-        other_partition_rows = []
-        other_source_by_id = {}
-        for offset in range(other_entities):
-            row_id = 100000 + offset
-            if offset == 0:
-                profile = gen_scalar_profile(row_id)
-                vector = gen_vector(entities - 1)
-                doc_tag = "other_partition_same_vector"
-            elif offset % 3 == 1:
-                profile = None
-                vector = gen_vector(row_id)
-                doc_tag = f"other_partition_null_profile_{offset}"
-            elif offset % 3 == 2:
-                profile = []
-                vector = gen_vector(row_id)
-                doc_tag = f"other_partition_empty_profile_{offset}"
-            else:
-                profile = gen_scalar_profile(row_id)
-                vector = gen_vector(row_id)
-                doc_tag = f"other_partition_profile_{offset}"
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: vector,
-                TAG_FIELD: doc_tag,
-                STRUCT_FIELD: profile,
-            }
-            other_partition_rows.append(row)
-            other_source_by_id[row_id] = row
+        other_partition_rows, other_source_by_id = self.gen_partition_interference_rows(
+            other_entities, same_vector_seed=entities - 1
+        )
         res, check = self.insert(client, collection_name, other_partition_rows, partition_name=partition_b)
         assert check
         assert res["insert_count"] == len(other_partition_rows)
@@ -11677,12 +11618,7 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
             entities,
             tag_prefix="target_partition_row",
         )
-
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.json")
-        with open(local_file_path, "w") as f:
-            json.dump(rows, f)
-
-        remote_files = self.upload_to_minio(local_file_path)
+        remote_files = self.upload_import_rows(collection_name, rows, file_format, row_group_size=entities)
         self.call_bulkinsert(collection_name, remote_files, partition_name=partition_a)
 
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
@@ -11701,770 +11637,113 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         assert check
         assert other_partition_stats["row_count"] == len(other_partition_rows)
 
-        query_results, check = self.query(
+        self.assert_scalar_query_results(client, collection_name, other_source_by_id, partition_names=[partition_b])
+        self.assert_scalar_query_and_search(
             client,
             collection_name,
+            source_by_id,
             partition_names=[partition_a],
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=entities,
+            search_pk=entities - 1,
+            excluded_ids=set(other_source_by_id),
         )
-        assert check
-        assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
-        for row in query_results:
-            expected = source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        other_query_results, check = self.query(
-            client,
-            collection_name,
-            partition_names=[partition_b],
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=len(other_partition_rows),
-        )
-        assert check
-        assert {row[PK_FIELD] for row in other_query_results} == set(other_source_by_id)
-        for row in other_query_results:
-            expected = other_source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        search_row = source_by_id[entities - 1]
-        search_results, check = self.search(
-            client,
-            collection_name,
-            partition_names=[partition_a],
-            data=[search_row[VECTOR_FIELD]],
-            anns_field=VECTOR_FIELD,
-            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=entities,
-        )
-        assert check
-        hits = search_results[0]
-        assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
-        assert not {hit[PK_FIELD] for hit in hits}.intersection({row[PK_FIELD] for row in other_partition_rows})
-        assert hits[0][PK_FIELD] == search_row[PK_FIELD]
-        for hit in hits:
-            expected = source_by_id[hit[PK_FIELD]]
-            entity = search_entity(hit)
-            assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_import_nullable_scalar_struct_array_with_parquet_partition_query_search(self):
+    @pytest.mark.parametrize("file_format", SCALAR_IMPORT_FORMATS, ids=SCALAR_IMPORT_FORMATS)
+    def test_import_nullable_scalar_struct_array_all_null(self, file_format):
         """
-        target: test Parquet bulk import into a specified partition for a nullable scalar-only struct array field
-        method: create two partitions, import 3000 Parquet rows into one partition, insert same-vector interference
-            rows into the other partition, then query and search with partition_names
-        expected: imported row count is scoped to the target partition, and partition-scoped query/search never returns
-            rows from the other partition while preserving nullable struct semantics
+        target: test bulk import for a nullable scalar-only Struct Array whose parent value is always null
+        method: create a collection with nullable scalar Struct Array, import rows where every profile value is null,
+            then query and search the imported data
+        expected: import succeeds, row count matches source data, and every returned profile value is null
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_scalar_struct_parquet_partition")
-        partition_a = cf.gen_unique_str("part_a")
-        partition_b = cf.gen_unique_str("part_b")
+        collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_scalar_struct_all_null_{file_format}")
         entities = 3000
-        other_entities = 3000
 
         schema = gen_indexed_struct_array_collection(self, client, collection_name)
-        res, check = self.create_partition(client, collection_name, partition_a)
-        assert check
-        res, check = self.create_partition(client, collection_name, partition_b)
-        assert check
-
-        other_partition_rows = []
-        other_source_by_id = {}
-        for offset in range(other_entities):
-            row_id = 100000 + offset
-            if offset == 0:
-                profile = gen_scalar_profile(row_id)
-                vector = gen_vector(entities - 1)
-                doc_tag = "other_partition_same_vector"
-            elif offset % 3 == 1:
-                profile = None
-                vector = gen_vector(row_id)
-                doc_tag = f"other_partition_null_profile_{offset}"
-            elif offset % 3 == 2:
-                profile = []
-                vector = gen_vector(row_id)
-                doc_tag = f"other_partition_empty_profile_{offset}"
-            else:
-                profile = gen_scalar_profile(row_id)
-                vector = gen_vector(row_id)
-                doc_tag = f"other_partition_profile_{offset}"
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: vector,
-                TAG_FIELD: doc_tag,
-                STRUCT_FIELD: profile,
-            }
-            other_partition_rows.append(row)
-            other_source_by_id[row_id] = row
-        res, check = self.insert(client, collection_name, other_partition_rows, partition_name=partition_b)
-        assert check
-        assert res["insert_count"] == len(other_partition_rows)
-        res, check = self.flush(client, collection_name)
-        assert check
-
         rows, source_by_id = gen_nullable_scalar_struct_rows(
             schema,
             entities,
-            tag_prefix="target_partition_row",
+            tag_prefix="import_null_row",
+            profile_factory=lambda _row_id, _offset, **_: None,
         )
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.parquet")
-        write_scalar_struct_rows_parquet(rows, local_file_path, row_group_size=entities)
 
-        remote_files = self.upload_to_minio(local_file_path)
-        self.call_bulkinsert(collection_name, remote_files, partition_name=partition_a)
+        remote_files = self.upload_import_rows(collection_name, rows, file_format, row_group_size=entities)
+        self.call_bulkinsert(collection_name, remote_files)
 
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
-        res, check = self.load_collection(client, collection_name)
-        assert check
         res, check = self.refresh_load(client, collection_name)
         assert check
 
         stats, check = self.get_collection_stats(client, collection_name)
         assert check
-        assert stats["row_count"] == entities + len(other_partition_rows)
-        target_partition_stats, check = self.get_partition_stats(client, collection_name, partition_a)
-        assert check
-        assert target_partition_stats["row_count"] == entities
-        other_partition_stats, check = self.get_partition_stats(client, collection_name, partition_b)
-        assert check
-        assert other_partition_stats["row_count"] == len(other_partition_rows)
+        assert stats["row_count"] == entities
 
-        query_results, check = self.query(
-            client,
-            collection_name,
-            partition_names=[partition_a],
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=entities,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
-        for row in query_results:
-            expected = source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        other_query_results, check = self.query(
-            client,
-            collection_name,
-            partition_names=[partition_b],
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=len(other_partition_rows),
-        )
-        assert check
-        assert {row[PK_FIELD] for row in other_query_results} == set(other_source_by_id)
-        for row in other_query_results:
-            expected = other_source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        search_row = source_by_id[entities - 1]
-        search_results, check = self.search(
-            client,
-            collection_name,
-            partition_names=[partition_a],
-            data=[search_row[VECTOR_FIELD]],
-            anns_field=VECTOR_FIELD,
-            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=entities,
-        )
-        assert check
-        hits = search_results[0]
-        assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
-        assert not {hit[PK_FIELD] for hit in hits}.intersection({row[PK_FIELD] for row in other_partition_rows})
-        assert hits[0][PK_FIELD] == search_row[PK_FIELD]
-        for hit in hits:
-            expected = source_by_id[hit[PK_FIELD]]
-            entity = search_entity(hit)
-            assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+        self.assert_scalar_query_and_search(client, collection_name, source_by_id, search_pk=entities - 1)
+        self.assert_all_subfield_outputs_are_parent_null(client, collection_name, source_by_id)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(
-        reason="known blocker: nullable scalar sub-field null values inside StructArray are rejected by JSON bulk import and PyMilvus row insert",
-        strict=True,
-    )
-    def test_import_nullable_scalar_struct_array_subfield_null_json(self):
+    @pytest.mark.parametrize("file_format", SCALAR_IMPORT_FORMATS, ids=SCALAR_IMPORT_FORMATS)
+    def test_import_nullable_scalar_struct_array_partial_null_subfield_rejected(self, file_format):
         """
-        target: test JSON bulk import for nullable scalar sub-fields inside a nullable Struct Array
-        method: create a collection with nullable scalar Struct Array, import 3000 JSON rows where non-empty profile
-            elements contain explicit null p_int or p_tag values, then query and search the imported data
-        expected: parent null/empty semantics are preserved, and scalar sub-field null values are returned as null
+        target: test bulk import rejects partial null values inside a nullable scalar-only Struct Array element
+        method: create a collection with nullable scalar Struct Array and import rows where profile is non-null but one
+            struct element has p_int=null or p_tag=null
+        expected: import fails because StructArray nullable is parent-level only, and no rows are imported
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_scalar_struct_subfield_null_json")
-        entities = 3000
+        collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_scalar_struct_partial_null_{file_format}")
+        entities = 8
 
-        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
-        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
-
-        profile_schema = gen_struct_schema(self, client)
-        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
-        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
-        schema.add_field(
-            STRUCT_FIELD,
-            datatype=STRUCT_TYPE,
-            element_type=STRUCT_ELEMENT_TYPE,
-            struct_schema=profile_schema,
-            max_capacity=STRUCT_MAX_CAPACITY,
-            nullable=True,
-        )
-
-        index_params = gen_index_params(self, client)
-        index_params.add_index(
-            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
-        )
-        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-        assert check
-
+        gen_indexed_struct_array_collection(self, client, collection_name)
         rows = []
-        source_by_id = {}
         for row_id in range(entities):
-            if row_id % 4 == 0:
+            if row_id == 0:
                 profile = None
-            elif row_id % 4 == 1:
+            elif row_id == 1:
                 profile = []
-            elif row_id % 4 == 2:
+            elif row_id == 2:
                 profile = [
-                    {INT_SUBFIELD: None, TAG_SUBFIELD: f"profile_{row_id}_null_int"},
-                    {INT_SUBFIELD: row_id * 10 + 1, TAG_SUBFIELD: None},
+                    {INT_SUBFIELD: None, TAG_SUBFIELD: "partial_null_int"},
+                    {INT_SUBFIELD: 21, TAG_SUBFIELD: "valid_int"},
                 ]
+            elif row_id == 3:
+                profile = [{INT_SUBFIELD: 30, TAG_SUBFIELD: None}]
             else:
                 profile = gen_scalar_profile(row_id)
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"import_row_{row_id}",
-                STRUCT_FIELD: profile,
-            }
-            rows.append(row)
-            source_by_id[row_id] = row
-
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.json")
-        with open(local_file_path, "w") as f:
-            json.dump(rows, f)
-
-        remote_files = self.upload_to_minio(local_file_path)
-        self.call_bulkinsert(collection_name, remote_files)
-
-        assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
-        res, check = self.refresh_load(client, collection_name)
-        assert check
-
-        stats, check = self.get_collection_stats(client, collection_name)
-        assert check
-        assert stats["row_count"] == entities
-
-        query_results, check = self.query(
-            client,
-            collection_name,
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=entities,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
-        for row in query_results:
-            expected = source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        subfield_results, check = self.query(
-            client,
-            collection_name,
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, STRUCT_INT_FIELD, STRUCT_TAG_FIELD],
-            limit=entities,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in subfield_results} == set(source_by_id)
-        for row in subfield_results:
-            expected = source_by_id[row[PK_FIELD]]
-            assert set(row) == {PK_FIELD, STRUCT_FIELD}
-            assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        search_row = source_by_id[entities - 1]
-        search_results, check = self.search(
-            client,
-            collection_name,
-            data=[search_row[VECTOR_FIELD]],
-            anns_field=VECTOR_FIELD,
-            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=entities,
-        )
-        assert check
-        hits = search_results[0]
-        assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
-        assert hits[0][PK_FIELD] == search_row[PK_FIELD]
-        for hit in hits:
-            expected = source_by_id[hit[PK_FIELD]]
-            entity = search_entity(hit)
-            assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            assert_nullable_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(
-        reason="known blocker: nullable scalar sub-field null values inside StructArray are rejected by Parquet bulk import",
-        strict=True,
-    )
-    def test_import_nullable_scalar_struct_array_subfield_null_parquet(self):
-        """
-        target: test Parquet bulk import for nullable scalar sub-fields inside a nullable Struct Array
-        method: create a collection with nullable scalar Struct Array, import 3000 Parquet rows where non-empty profile
-            elements contain explicit null p_int or p_tag values, then query and search the imported data
-        expected: parent null/empty semantics are preserved, and scalar sub-field null values are returned as null
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_scalar_struct_subfield_null_parquet")
-        entities = 3000
-
-        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
-        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
-
-        profile_schema = gen_struct_schema(self, client)
-        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
-        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
-        schema.add_field(
-            STRUCT_FIELD,
-            datatype=STRUCT_TYPE,
-            element_type=STRUCT_ELEMENT_TYPE,
-            struct_schema=profile_schema,
-            max_capacity=STRUCT_MAX_CAPACITY,
-            nullable=True,
-        )
-
-        index_params = gen_index_params(self, client)
-        index_params.add_index(
-            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
-        )
-        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-        assert check
-
-        ids = []
-        vectors = []
-        doc_tags = []
-        profiles = []
-        source_by_id = {}
-        for row_id in range(entities):
-            if row_id % 4 == 0:
-                profile = None
-            elif row_id % 4 == 1:
-                profile = []
-            elif row_id % 4 == 2:
-                profile = [
-                    {INT_SUBFIELD: None, TAG_SUBFIELD: f"profile_{row_id}_null_int"},
-                    {INT_SUBFIELD: row_id * 10 + 1, TAG_SUBFIELD: None},
-                ]
-            else:
-                profile = gen_scalar_profile(row_id)
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"import_row_{row_id}",
-                STRUCT_FIELD: profile,
-            }
-            ids.append(row[PK_FIELD])
-            vectors.append(row[VECTOR_FIELD])
-            doc_tags.append(row[TAG_FIELD])
-            profiles.append(row[STRUCT_FIELD])
-            source_by_id[row_id] = row
-
-        profile_type = pa.list_(
-            pa.struct(
-                [
-                    pa.field(INT_SUBFIELD, pa.int64()),
-                    pa.field(TAG_SUBFIELD, pa.string()),
-                ]
+            rows.append(
+                {
+                    PK_FIELD: row_id,
+                    VECTOR_FIELD: gen_vector(row_id),
+                    TAG_FIELD: f"import_row_{row_id}",
+                    STRUCT_FIELD: profile,
+                }
             )
-        )
-        table = pa.table(
-            {
-                PK_FIELD: pa.array(ids, type=pa.int64()),
-                VECTOR_FIELD: pa.array(vectors, type=pa.list_(pa.float32())),
-                TAG_FIELD: pa.array(doc_tags, type=pa.string()),
-                STRUCT_FIELD: pa.array(profiles, type=profile_type),
-            }
-        )
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.parquet")
-        pq.write_table(table, local_file_path, row_group_size=entities)
 
-        remote_files = self.upload_to_minio(local_file_path)
-        self.call_bulkinsert(collection_name, remote_files)
+        remote_files = self.upload_import_rows(collection_name, rows, file_format, row_group_size=entities)
+        import_result = self.call_bulkinsert(collection_name, remote_files, expect_fail=True)
 
-        assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
-        res, check = self.refresh_load(client, collection_name)
-        assert check
+        assert import_result["state"] == "Failed"
+        reason = import_result["reason"].lower()
+        assert any(keyword in reason for keyword in ["null", "expected element type", "not allowed"])
 
         stats, check = self.get_collection_stats(client, collection_name)
         assert check
-        assert stats["row_count"] == entities
-
-        query_results, check = self.query(
-            client,
-            collection_name,
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=entities,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
-        for row in query_results:
-            expected = source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        subfield_results, check = self.query(
-            client,
-            collection_name,
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, STRUCT_INT_FIELD, STRUCT_TAG_FIELD],
-            limit=entities,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in subfield_results} == set(source_by_id)
-        for row in subfield_results:
-            expected = source_by_id[row[PK_FIELD]]
-            assert set(row) == {PK_FIELD, STRUCT_FIELD}
-            assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        search_row = source_by_id[entities - 1]
-        search_results, check = self.search(
-            client,
-            collection_name,
-            data=[search_row[VECTOR_FIELD]],
-            anns_field=VECTOR_FIELD,
-            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=entities,
-        )
-        assert check
-        hits = search_results[0]
-        assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
-        assert hits[0][PK_FIELD] == search_row[PK_FIELD]
-        for hit in hits:
-            expected = source_by_id[hit[PK_FIELD]]
-            entity = search_entity(hit)
-            assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            assert_nullable_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+        assert stats["row_count"] == 0
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(
-        reason="known blocker: nullable scalar sub-field omission inside StructArray element is rejected by JSON bulk import and row insert",
-        strict=True,
-    )
-    def test_import_nullable_scalar_struct_array_subfield_omit_json(self):
+    @pytest.mark.parametrize("file_format", SCALAR_IMPORT_FORMATS, ids=SCALAR_IMPORT_FORMATS)
+    def test_import_non_nullable_scalar_struct_array_rejects_null(self, file_format):
         """
-        target: test JSON bulk import for omitted nullable scalar sub-fields inside a nullable Struct Array
-        method: create a collection with nullable scalar Struct Array, import 3000 JSON rows where non-empty profile
-            elements omit p_int or p_tag, then query and search the imported data
-        expected: parent null/empty semantics are preserved, and omitted scalar sub-field values are returned as null
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_scalar_struct_subfield_omit_json")
-        entities = 3000
-
-        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
-        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
-
-        profile_schema = gen_struct_schema(self, client)
-        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
-        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
-        schema.add_field(
-            STRUCT_FIELD,
-            datatype=STRUCT_TYPE,
-            element_type=STRUCT_ELEMENT_TYPE,
-            struct_schema=profile_schema,
-            max_capacity=STRUCT_MAX_CAPACITY,
-            nullable=True,
-        )
-
-        index_params = gen_index_params(self, client)
-        index_params.add_index(
-            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
-        )
-        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-        assert check
-
-        rows = []
-        source_by_id = {}
-        for row_id in range(entities):
-            if row_id % 4 == 0:
-                input_profile = None
-                expected_profile = None
-            elif row_id % 4 == 1:
-                input_profile = []
-                expected_profile = []
-            elif row_id % 4 == 2:
-                input_profile = [
-                    {TAG_SUBFIELD: f"profile_{row_id}_missing_int"},
-                    {INT_SUBFIELD: row_id * 10 + 1},
-                ]
-                expected_profile = [
-                    {INT_SUBFIELD: None, TAG_SUBFIELD: f"profile_{row_id}_missing_int"},
-                    {INT_SUBFIELD: row_id * 10 + 1, TAG_SUBFIELD: None},
-                ]
-            else:
-                input_profile = gen_scalar_profile(row_id)
-                expected_profile = input_profile
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"import_row_{row_id}",
-                STRUCT_FIELD: input_profile,
-            }
-            rows.append(row)
-            source_by_id[row_id] = {**row, STRUCT_FIELD: expected_profile}
-
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.json")
-        with open(local_file_path, "w") as f:
-            json.dump(rows, f)
-
-        remote_files = self.upload_to_minio(local_file_path)
-        self.call_bulkinsert(collection_name, remote_files)
-
-        assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
-        res, check = self.refresh_load(client, collection_name)
-        assert check
-
-        stats, check = self.get_collection_stats(client, collection_name)
-        assert check
-        assert stats["row_count"] == entities
-
-        query_results, check = self.query(
-            client,
-            collection_name,
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=entities,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
-        for row in query_results:
-            expected = source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        subfield_results, check = self.query(
-            client,
-            collection_name,
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, STRUCT_INT_FIELD, STRUCT_TAG_FIELD],
-            limit=entities,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in subfield_results} == set(source_by_id)
-        for row in subfield_results:
-            expected = source_by_id[row[PK_FIELD]]
-            assert set(row) == {PK_FIELD, STRUCT_FIELD}
-            assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        search_row = source_by_id[entities - 1]
-        search_results, check = self.search(
-            client,
-            collection_name,
-            data=[search_row[VECTOR_FIELD]],
-            anns_field=VECTOR_FIELD,
-            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=entities,
-        )
-        assert check
-        hits = search_results[0]
-        assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
-        assert hits[0][PK_FIELD] == search_row[PK_FIELD]
-        for hit in hits:
-            expected = source_by_id[hit[PK_FIELD]]
-            entity = search_entity(hit)
-            assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            assert_nullable_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(
-        reason="known blocker: nullable scalar sub-field omitted from Parquet StructArray schema is rejected",
-        strict=True,
-    )
-    def test_import_nullable_scalar_struct_array_subfield_omit_parquet(self):
-        """
-        target: test Parquet bulk import with an omitted nullable scalar sub-field inside a nullable Struct Array
-        method: create a collection with nullable scalar Struct Array, import 3000 Parquet rows whose profile struct
-            file schema only contains p_tag and omits p_int, then query and search the imported data
-        expected: parent null/empty semantics are preserved, and omitted p_int values are returned as null
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_scalar_struct_subfield_omit_parquet")
-        entities = 3000
-
-        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
-        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
-
-        profile_schema = gen_struct_schema(self, client)
-        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
-        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
-        schema.add_field(
-            STRUCT_FIELD,
-            datatype=STRUCT_TYPE,
-            element_type=STRUCT_ELEMENT_TYPE,
-            struct_schema=profile_schema,
-            max_capacity=STRUCT_MAX_CAPACITY,
-            nullable=True,
-        )
-
-        index_params = gen_index_params(self, client)
-        index_params.add_index(
-            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
-        )
-        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-        assert check
-
-        ids = []
-        vectors = []
-        doc_tags = []
-        profiles = []
-        source_by_id = {}
-        for row_id in range(entities):
-            if row_id % 3 == 0:
-                profile = None
-                expected_profile = None
-            elif row_id % 3 == 1:
-                profile = []
-                expected_profile = []
-            else:
-                profile = [
-                    {TAG_SUBFIELD: f"profile_{row_id}_missing_int_0"},
-                    {TAG_SUBFIELD: f"profile_{row_id}_missing_int_1"},
-                ]
-                expected_profile = [
-                    {INT_SUBFIELD: None, TAG_SUBFIELD: f"profile_{row_id}_missing_int_0"},
-                    {INT_SUBFIELD: None, TAG_SUBFIELD: f"profile_{row_id}_missing_int_1"},
-                ]
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"import_row_{row_id}",
-                STRUCT_FIELD: profile,
-            }
-            ids.append(row[PK_FIELD])
-            vectors.append(row[VECTOR_FIELD])
-            doc_tags.append(row[TAG_FIELD])
-            profiles.append(row[STRUCT_FIELD])
-            source_by_id[row_id] = {**row, STRUCT_FIELD: expected_profile}
-
-        profile_type = pa.list_(
-            pa.struct(
-                [
-                    pa.field(TAG_SUBFIELD, pa.string()),
-                ]
-            )
-        )
-        table = pa.table(
-            {
-                PK_FIELD: pa.array(ids, type=pa.int64()),
-                VECTOR_FIELD: pa.array(vectors, type=pa.list_(pa.float32())),
-                TAG_FIELD: pa.array(doc_tags, type=pa.string()),
-                STRUCT_FIELD: pa.array(profiles, type=profile_type),
-            }
-        )
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.parquet")
-        pq.write_table(table, local_file_path, row_group_size=entities)
-
-        remote_files = self.upload_to_minio(local_file_path)
-        self.call_bulkinsert(collection_name, remote_files)
-
-        assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
-        res, check = self.refresh_load(client, collection_name)
-        assert check
-
-        stats, check = self.get_collection_stats(client, collection_name)
-        assert check
-        assert stats["row_count"] == entities
-
-        query_results, check = self.query(
-            client,
-            collection_name,
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=entities,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
-        for row in query_results:
-            expected = source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        search_row = source_by_id[entities - 1]
-        search_results, check = self.search(
-            client,
-            collection_name,
-            data=[search_row[VECTOR_FIELD]],
-            anns_field=VECTOR_FIELD,
-            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=entities,
-        )
-        assert check
-        hits = search_results[0]
-        assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
-        assert hits[0][PK_FIELD] == search_row[PK_FIELD]
-        for hit in hits:
-            expected = source_by_id[hit[PK_FIELD]]
-            entity = search_entity(hit)
-            assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            assert_nullable_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_import_non_nullable_scalar_struct_array_rejects_null_json(self):
-        """
-        target: test JSON bulk import rejects null for a non-nullable scalar-only struct array field
-        method: create a collection with non-nullable scalar Struct Array, import 3000 JSON rows where one row uses
-            profile=null
+        target: test bulk import rejects null for a non-nullable scalar-only Struct Array field
+        method: create a collection with non-nullable scalar Struct Array, import rows where one row uses profile=null
         expected: import job fails with a nullable-related error and no rows are imported
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_non_nullable_scalar_struct_json")
+        collection_name = cf.gen_unique_str(f"{prefix}_import_non_nullable_scalar_struct_{file_format}")
         entities = 3000
 
-        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
-        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
-
-        profile_schema = gen_struct_schema(self, client)
-        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
-        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
-        schema.add_field(
-            STRUCT_FIELD,
-            datatype=STRUCT_TYPE,
-            element_type=STRUCT_ELEMENT_TYPE,
-            struct_schema=profile_schema,
-            max_capacity=STRUCT_MAX_CAPACITY,
-        )
-
-        index_params = gen_index_params(self, client)
-        index_params.add_index(
-            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
-        )
-        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-        assert check
-
+        self.create_scalar_struct_collection(client, collection_name, nullable=False)
         rows = []
         for row_id in range(entities):
             if row_id == 0:
@@ -12482,11 +11761,7 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
                 }
             )
 
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.json")
-        with open(local_file_path, "w") as f:
-            json.dump(rows, f)
-
-        remote_files = self.upload_to_minio(local_file_path)
+        remote_files = self.upload_import_rows(collection_name, rows, file_format, row_group_size=entities)
         import_result = self.call_bulkinsert(collection_name, remote_files, expect_fail=True)
 
         assert import_result["state"] == "Failed"
@@ -12497,55 +11772,27 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         assert stats["row_count"] == 0
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_import_non_nullable_scalar_struct_array_rejects_omit_field_json(self):
+    @pytest.mark.parametrize("file_format", SCALAR_IMPORT_FORMATS, ids=SCALAR_IMPORT_FORMATS)
+    def test_import_non_nullable_scalar_struct_array_rejects_omit_field(self, file_format):
         """
-        target: test JSON bulk import rejects omitted data for a non-nullable scalar-only struct array field
-        method: create a collection with non-nullable scalar Struct Array, import 3000 JSON rows that omit profile
-            entirely
+        target: test bulk import rejects omitted data for a non-nullable scalar-only Struct Array field
+        method: create a collection with non-nullable scalar Struct Array, import rows that omit profile entirely
         expected: import job fails with a schema/data mismatch error and no rows are imported
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_non_nullable_scalar_struct_omit_json")
+        collection_name = cf.gen_unique_str(f"{prefix}_import_non_nullable_scalar_struct_omit_{file_format}")
         entities = 3000
 
-        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
-        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
+        self.create_scalar_struct_collection(client, collection_name, nullable=False)
+        rows = self.gen_rows_without_struct(0, entities, "import_row")
 
-        profile_schema = gen_struct_schema(self, client)
-        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
-        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
-        schema.add_field(
-            STRUCT_FIELD,
-            datatype=STRUCT_TYPE,
-            element_type=STRUCT_ELEMENT_TYPE,
-            struct_schema=profile_schema,
-            max_capacity=STRUCT_MAX_CAPACITY,
+        remote_files = self.upload_import_rows(
+            collection_name,
+            rows,
+            file_format,
+            row_group_size=entities,
+            include_struct=False,
         )
-
-        index_params = gen_index_params(self, client)
-        index_params.add_index(
-            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
-        )
-        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-        assert check
-
-        rows = []
-        for row_id in range(entities):
-            rows.append(
-                {
-                    PK_FIELD: row_id,
-                    VECTOR_FIELD: gen_vector(row_id),
-                    TAG_FIELD: f"import_row_{row_id}",
-                }
-            )
-
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.json")
-        with open(local_file_path, "w") as f:
-            json.dump(rows, f)
-
-        remote_files = self.upload_to_minio(local_file_path)
         import_result = self.call_bulkinsert(collection_name, remote_files, expect_fail=True)
 
         assert import_result["state"] == "Failed"
@@ -12557,147 +11804,40 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         assert stats["row_count"] == 0
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_import_non_nullable_scalar_struct_array_rejects_omit_field_parquet(self):
+    @pytest.mark.parametrize("file_format", SCALAR_IMPORT_FORMATS, ids=SCALAR_IMPORT_FORMATS)
+    def test_import_after_add_nullable_scalar_struct_array(self, file_format):
         """
-        target: test Parquet bulk import rejects omitted data for a non-nullable scalar-only struct array field
-        method: create a collection with non-nullable scalar Struct Array, import 3000 Parquet rows whose file schema
-            omits profile entirely
-        expected: import job fails with a schema/data mismatch error and no rows are imported
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_non_nullable_scalar_struct_omit_parquet")
-        entities = 3000
-
-        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
-        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
-
-        profile_schema = gen_struct_schema(self, client)
-        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
-        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
-        schema.add_field(
-            STRUCT_FIELD,
-            datatype=STRUCT_TYPE,
-            element_type=STRUCT_ELEMENT_TYPE,
-            struct_schema=profile_schema,
-            max_capacity=STRUCT_MAX_CAPACITY,
-        )
-
-        index_params = gen_index_params(self, client)
-        index_params.add_index(
-            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
-        )
-        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-        assert check
-
-        ids = []
-        vectors = []
-        doc_tags = []
-        for row_id in range(entities):
-            ids.append(row_id)
-            vectors.append(gen_vector(row_id))
-            doc_tags.append(f"import_row_{row_id}")
-
-        table = pa.table(
-            {
-                PK_FIELD: pa.array(ids, type=pa.int64()),
-                VECTOR_FIELD: pa.array(vectors, type=pa.list_(pa.float32())),
-                TAG_FIELD: pa.array(doc_tags, type=pa.string()),
-            }
-        )
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.parquet")
-        pq.write_table(table, local_file_path, row_group_size=entities)
-
-        remote_files = self.upload_to_minio(local_file_path)
-        import_result = self.call_bulkinsert(collection_name, remote_files, expect_fail=True)
-
-        assert import_result["state"] == "Failed"
-        reason = import_result["reason"].lower()
-        assert any(keyword in reason for keyword in [STRUCT_FIELD, "null", "nullable", "missing", "required"])
-
-        stats, check = self.get_collection_stats(client, collection_name)
-        assert check
-        assert stats["row_count"] == 0
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_import_after_add_nullable_scalar_struct_array_with_json(self):
-        """
-        target: test JSON bulk import after dynamically adding a nullable scalar-only Struct Array field
-        method: insert and flush 3000 old rows, add nullable scalar Struct Array, import 3000 JSON rows with null,
-            empty, and non-empty profile values, then query and search all rows
+        target: test bulk import after dynamically adding a nullable scalar-only Struct Array field
+        method: insert and flush old rows, add nullable scalar Struct Array, import rows with null, empty, and
+            non-empty profile values, then query and search all rows
         expected: old sealed rows expose the added struct field as null, imported rows preserve nullable struct
             semantics, and normal vector search requery output matches source-of-truth
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_add_nullable_scalar_struct_json")
+        collection_name = cf.gen_unique_str(f"{prefix}_import_add_nullable_scalar_struct_{file_format}")
         old_entities = 3000
         import_entities = 3000
         total_entities = old_entities + import_entities
 
-        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
-        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
-
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
-
+        self.create_collection_without_struct(client, collection_name)
         source_by_id = {}
-        old_rows = []
-        for row_id in range(old_entities):
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"old_row_{row_id}",
-            }
-            old_rows.append(row)
-            source_by_id[row_id] = {**row, STRUCT_FIELD: None}
+        old_rows = self.gen_rows_without_struct(0, old_entities, "old_row", source_by_id=source_by_id)
         res, check = self.insert(client, collection_name, old_rows)
         assert check
         assert res["insert_count"] == old_entities
-
         res, check = self.flush(client, collection_name)
         assert check
 
-        profile_schema = gen_struct_schema(self, client)
-        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
-        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
-        res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
+        self.add_nullable_scalar_struct_field_and_index(client, collection_name)
+
+        import_rows, import_source_by_id = self.gen_after_add_import_rows(
+            old_entities,
+            import_entities,
+            "import_row",
         )
-        assert check
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
+        source_by_id.update(import_source_by_id)
 
-        index_params = gen_index_params(self, client)
-        index_params.add_index(
-            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
-        )
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
-
-        import_rows = []
-        for row_id in range(old_entities, total_entities):
-            if row_id % 3 == 0:
-                profile = None
-            elif row_id % 3 == 1:
-                profile = []
-            else:
-                profile = gen_scalar_profile(row_id)
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"import_row_{row_id}",
-                STRUCT_FIELD: profile,
-            }
-            import_rows.append(row)
-            source_by_id[row_id] = row
-
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.json")
-        with open(local_file_path, "w") as f:
-            json.dump(import_rows, f)
-
-        remote_files = self.upload_to_minio(local_file_path)
+        remote_files = self.upload_import_rows(collection_name, import_rows, file_format, row_group_size=import_entities)
         self.call_bulkinsert(collection_name, remote_files)
 
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
@@ -12708,52 +11848,21 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         assert check
         assert stats["row_count"] == total_entities
 
-        query_results, check = self.query(
-            client,
-            collection_name,
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=total_entities,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
-        for row in query_results:
-            expected = source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        search_row = source_by_id[total_entities - 1]
-        search_results, check = self.search(
-            client,
-            collection_name,
-            data=[search_row[VECTOR_FIELD]],
-            anns_field=VECTOR_FIELD,
-            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=total_entities,
-        )
-        assert check
-        hits = search_results[0]
-        assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
-        assert hits[0][PK_FIELD] == search_row[PK_FIELD]
-        for hit in hits:
-            expected = source_by_id[hit[PK_FIELD]]
-            entity = search_entity(hit)
-            assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+        self.assert_scalar_query_and_search(client, collection_name, source_by_id, search_pk=total_entities - 1)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_import_after_add_nullable_scalar_struct_array_with_json_partition_query_search(self):
+    @pytest.mark.parametrize("file_format", SCALAR_IMPORT_FORMATS, ids=SCALAR_IMPORT_FORMATS)
+    def test_import_after_add_nullable_scalar_struct_array_partition_query_search(self, file_format):
         """
-        target: test JSON bulk import into a specified partition after dynamically adding a nullable scalar-only Struct
-            Array field
-        method: insert and flush 3000 old rows in the target partition, add nullable scalar Struct Array, import 3000
-            JSON rows into the same partition, and keep same-vector interference rows in another partition
+        target: test bulk import into a specified partition after dynamically adding a nullable scalar-only Struct Array
+            field
+        method: insert and flush old rows in both target and non-target partitions, add nullable scalar Struct Array,
+            import rows into the target partition, and keep a same-vector interference row in another partition
         expected: old target-partition rows expose the added struct field as null, imported rows preserve nullable
             struct semantics, and partition-scoped query/search never returns rows from the other partition
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_add_nullable_scalar_struct_json_partition")
+        collection_name = cf.gen_unique_str(f"{prefix}_import_add_nullable_scalar_struct_{file_format}_partition")
         partition_a = cf.gen_unique_str("part_a")
         partition_b = cf.gen_unique_str("part_b")
         old_entities = 3000
@@ -12761,88 +11870,43 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         other_old_entities = 3000
         total_target_entities = old_entities + import_entities
 
-        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
-        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
-
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection_without_struct(client, collection_name)
         res, check = self.create_partition(client, collection_name, partition_a)
         assert check
         res, check = self.create_partition(client, collection_name, partition_b)
         assert check
 
         source_by_id = {}
-        old_rows = []
-        for row_id in range(old_entities):
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"old_target_partition_row_{row_id}",
-            }
-            old_rows.append(row)
-            source_by_id[row_id] = {**row, STRUCT_FIELD: None}
+        old_rows = self.gen_rows_without_struct(
+            0, old_entities, "old_target_partition_row", source_by_id=source_by_id
+        )
         res, check = self.insert(client, collection_name, old_rows, partition_name=partition_a)
         assert check
         assert res["insert_count"] == old_entities
 
-        other_old_rows = []
         other_source_by_id = {}
-        for offset in range(other_old_entities):
-            row_id = 100000 + offset
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"other_partition_old_{offset}",
-            }
-            other_old_rows.append(row)
-            other_source_by_id[row_id] = {**row, STRUCT_FIELD: None}
+        other_old_rows = self.gen_rows_without_struct(
+            100000,
+            other_old_entities,
+            "other_partition_old",
+            source_by_id=other_source_by_id,
+        )
         res, check = self.insert(client, collection_name, other_old_rows, partition_name=partition_b)
         assert check
         assert res["insert_count"] == len(other_old_rows)
-
         res, check = self.flush(client, collection_name)
         assert check
 
-        profile_schema = gen_struct_schema(self, client)
-        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
-        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
-        res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
+        self.add_nullable_scalar_struct_field_and_index(client, collection_name)
+
+        import_rows, import_source_by_id = self.gen_after_add_import_rows(
+            old_entities,
+            import_entities,
+            "import_target_partition_row",
         )
-        assert check
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
+        source_by_id.update(import_source_by_id)
 
-        index_params = gen_index_params(self, client)
-        index_params.add_index(
-            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
-        )
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
-
-        import_rows = []
-        for row_id in range(old_entities, total_target_entities):
-            if row_id % 3 == 0:
-                profile = None
-            elif row_id % 3 == 1:
-                profile = []
-            else:
-                profile = gen_scalar_profile(row_id)
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"import_target_partition_row_{row_id}",
-                STRUCT_FIELD: profile,
-            }
-            import_rows.append(row)
-            source_by_id[row_id] = row
-
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.json")
-        with open(local_file_path, "w") as f:
-            json.dump(import_rows, f)
-
-        remote_files = self.upload_to_minio(local_file_path)
+        remote_files = self.upload_import_rows(collection_name, import_rows, file_format, row_group_size=import_entities)
         self.call_bulkinsert(collection_name, remote_files, partition_name=partition_a)
 
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
@@ -12872,838 +11936,64 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         assert res["insert_count"] == 1
         other_source_by_id[other_post_add_row[PK_FIELD]] = other_post_add_row
 
-        query_results, check = self.query(
+        self.assert_scalar_query_results(
             client,
             collection_name,
-            partition_names=[partition_a],
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=total_target_entities,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
-        for row in query_results:
-            expected = source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        other_query_results, check = self.query(
-            client,
-            collection_name,
+            other_source_by_id,
             partition_names=[partition_b],
-            filter=f"{PK_FIELD} >= 100000",
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=len(other_old_rows) + 1,
+            query_filter=f"{PK_FIELD} >= 100000",
         )
-        assert check
-        assert {row[PK_FIELD] for row in other_query_results} == set(other_source_by_id)
-        for row in other_query_results:
-            expected = other_source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        search_row = source_by_id[total_target_entities - 1]
-        search_results, check = self.search(
+        self.assert_scalar_query_and_search(
             client,
             collection_name,
+            source_by_id,
             partition_names=[partition_a],
-            data=[search_row[VECTOR_FIELD]],
-            anns_field=VECTOR_FIELD,
-            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=total_target_entities,
+            search_pk=total_target_entities - 1,
+            excluded_ids=set(other_source_by_id),
         )
-        assert check
-        hits = search_results[0]
-        assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
-        assert not {hit[PK_FIELD] for hit in hits}.intersection(set(other_source_by_id))
-        assert hits[0][PK_FIELD] == search_row[PK_FIELD]
-        for hit in hits:
-            expected = source_by_id[hit[PK_FIELD]]
-            entity = search_entity(hit)
-            assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_import_after_add_nullable_scalar_struct_array_with_parquet_partition_query_search(self):
+    @pytest.mark.parametrize("file_format", SCALAR_IMPORT_FORMATS, ids=SCALAR_IMPORT_FORMATS)
+    def test_import_after_add_nullable_scalar_struct_array_omit_field(self, file_format):
         """
-        target: test Parquet bulk import into a specified partition after dynamically adding a nullable scalar-only
-            Struct Array field
-        method: insert and flush 3000 old rows in both target and non-target partitions, add nullable scalar Struct
-            Array, import 3000 Parquet rows into the target partition, and keep a growing same-vector interference row
-            in another partition
-        expected: old target-partition rows expose the added struct field as null, imported rows preserve nullable
-            struct semantics, and partition-scoped query/search never returns rows from the other partition
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_add_nullable_scalar_struct_parquet_partition")
-        partition_a = cf.gen_unique_str("part_a")
-        partition_b = cf.gen_unique_str("part_b")
-        old_entities = 3000
-        import_entities = 3000
-        other_old_entities = 3000
-        total_target_entities = old_entities + import_entities
-
-        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
-        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
-
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
-        res, check = self.create_partition(client, collection_name, partition_a)
-        assert check
-        res, check = self.create_partition(client, collection_name, partition_b)
-        assert check
-
-        source_by_id = {}
-        old_rows = []
-        for row_id in range(old_entities):
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"old_target_partition_row_{row_id}",
-            }
-            old_rows.append(row)
-            source_by_id[row_id] = {**row, STRUCT_FIELD: None}
-        res, check = self.insert(client, collection_name, old_rows, partition_name=partition_a)
-        assert check
-        assert res["insert_count"] == old_entities
-
-        other_old_rows = []
-        other_source_by_id = {}
-        for offset in range(other_old_entities):
-            row_id = 100000 + offset
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"other_partition_old_{offset}",
-            }
-            other_old_rows.append(row)
-            other_source_by_id[row_id] = {**row, STRUCT_FIELD: None}
-        res, check = self.insert(client, collection_name, other_old_rows, partition_name=partition_b)
-        assert check
-        assert res["insert_count"] == len(other_old_rows)
-
-        res, check = self.flush(client, collection_name)
-        assert check
-
-        profile_schema = gen_struct_schema(self, client)
-        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
-        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
-        res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
-        )
-        assert check
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
-        index_params = gen_index_params(self, client)
-        index_params.add_index(
-            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
-        )
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
-
-        ids = []
-        vectors = []
-        doc_tags = []
-        profiles = []
-        for row_id in range(old_entities, total_target_entities):
-            if row_id % 3 == 0:
-                profile = None
-            elif row_id % 3 == 1:
-                profile = []
-            else:
-                profile = gen_scalar_profile(row_id)
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"import_target_partition_row_{row_id}",
-                STRUCT_FIELD: profile,
-            }
-            ids.append(row[PK_FIELD])
-            vectors.append(row[VECTOR_FIELD])
-            doc_tags.append(row[TAG_FIELD])
-            profiles.append(row[STRUCT_FIELD])
-            source_by_id[row_id] = row
-
-        profile_type = pa.list_(
-            pa.struct(
-                [
-                    pa.field(INT_SUBFIELD, pa.int64()),
-                    pa.field(TAG_SUBFIELD, pa.string()),
-                ]
-            )
-        )
-        table = pa.table(
-            {
-                PK_FIELD: pa.array(ids, type=pa.int64()),
-                VECTOR_FIELD: pa.array(vectors, type=pa.list_(pa.float32())),
-                TAG_FIELD: pa.array(doc_tags, type=pa.string()),
-                STRUCT_FIELD: pa.array(profiles, type=profile_type),
-            }
-        )
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.parquet")
-        pq.write_table(table, local_file_path, row_group_size=import_entities)
-
-        remote_files = self.upload_to_minio(local_file_path)
-        self.call_bulkinsert(collection_name, remote_files, partition_name=partition_a)
-
-        assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
-        res, check = self.load_collection(client, collection_name)
-        assert check
-        res, check = self.refresh_load(client, collection_name)
-        assert check
-
-        stats, check = self.get_collection_stats(client, collection_name)
-        assert check
-        assert stats["row_count"] == total_target_entities + len(other_old_rows)
-        target_partition_stats, check = self.get_partition_stats(client, collection_name, partition_a)
-        assert check
-        assert target_partition_stats["row_count"] == total_target_entities
-        other_partition_stats, check = self.get_partition_stats(client, collection_name, partition_b)
-        assert check
-        assert other_partition_stats["row_count"] == len(other_old_rows)
-
-        other_post_add_row = {
-            PK_FIELD: 100000 + other_old_entities,
-            VECTOR_FIELD: gen_vector(total_target_entities - 1),
-            TAG_FIELD: "other_partition_same_vector_after_add",
-            STRUCT_FIELD: gen_scalar_profile(100000 + other_old_entities),
-        }
-        res, check = self.insert(client, collection_name, [other_post_add_row], partition_name=partition_b)
-        assert check
-        assert res["insert_count"] == 1
-        other_source_by_id[other_post_add_row[PK_FIELD]] = other_post_add_row
-
-        query_results, check = self.query(
-            client,
-            collection_name,
-            partition_names=[partition_a],
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=total_target_entities,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
-        for row in query_results:
-            expected = source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        other_query_results, check = self.query(
-            client,
-            collection_name,
-            partition_names=[partition_b],
-            filter=f"{PK_FIELD} >= 100000",
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=len(other_old_rows) + 1,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in other_query_results} == set(other_source_by_id)
-        for row in other_query_results:
-            expected = other_source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        search_row = source_by_id[total_target_entities - 1]
-        search_results, check = self.search(
-            client,
-            collection_name,
-            partition_names=[partition_a],
-            data=[search_row[VECTOR_FIELD]],
-            anns_field=VECTOR_FIELD,
-            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=total_target_entities,
-        )
-        assert check
-        hits = search_results[0]
-        assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
-        assert not {hit[PK_FIELD] for hit in hits}.intersection(set(other_source_by_id))
-        assert hits[0][PK_FIELD] == search_row[PK_FIELD]
-        for hit in hits:
-            expected = source_by_id[hit[PK_FIELD]]
-            entity = search_entity(hit)
-            assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_import_after_add_nullable_scalar_struct_array_omit_field_json_partition_query_search(self):
-        """
-        target: test JSON bulk import omitting a dynamically added nullable scalar-only Struct Array field into a
-            specified partition
-        method: insert and flush 3000 old rows in both target and non-target partitions, add nullable scalar Struct
-            Array, import 3000 JSON rows that omit profile into the target partition, and keep a growing same-vector
-            interference row in another partition
-        expected: old and imported target-partition rows expose the added struct field as null, and partition-scoped
-            query/search never returns rows from the other partition
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_add_nullable_scalar_struct_omit_json_partition")
-        partition_a = cf.gen_unique_str("part_a")
-        partition_b = cf.gen_unique_str("part_b")
-        old_entities = 3000
-        import_entities = 3000
-        other_old_entities = 3000
-        total_target_entities = old_entities + import_entities
-
-        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
-        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
-
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
-        res, check = self.create_partition(client, collection_name, partition_a)
-        assert check
-        res, check = self.create_partition(client, collection_name, partition_b)
-        assert check
-
-        source_by_id = {}
-        old_rows = []
-        for row_id in range(old_entities):
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"old_target_partition_row_{row_id}",
-            }
-            old_rows.append(row)
-            source_by_id[row_id] = {**row, STRUCT_FIELD: None}
-        res, check = self.insert(client, collection_name, old_rows, partition_name=partition_a)
-        assert check
-        assert res["insert_count"] == old_entities
-
-        other_old_rows = []
-        other_source_by_id = {}
-        for offset in range(other_old_entities):
-            row_id = 100000 + offset
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"other_partition_old_{offset}",
-            }
-            other_old_rows.append(row)
-            other_source_by_id[row_id] = {**row, STRUCT_FIELD: None}
-        res, check = self.insert(client, collection_name, other_old_rows, partition_name=partition_b)
-        assert check
-        assert res["insert_count"] == len(other_old_rows)
-
-        res, check = self.flush(client, collection_name)
-        assert check
-
-        profile_schema = gen_struct_schema(self, client)
-        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
-        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
-        res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
-        )
-        assert check
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
-        index_params = gen_index_params(self, client)
-        index_params.add_index(
-            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
-        )
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
-
-        import_rows = []
-        for row_id in range(old_entities, total_target_entities):
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"import_target_partition_omit_profile_row_{row_id}",
-            }
-            import_rows.append(row)
-            source_by_id[row_id] = {**row, STRUCT_FIELD: None}
-
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.json")
-        with open(local_file_path, "w") as f:
-            json.dump(import_rows, f)
-
-        remote_files = self.upload_to_minio(local_file_path)
-        self.call_bulkinsert(collection_name, remote_files, partition_name=partition_a)
-
-        assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
-        res, check = self.load_collection(client, collection_name)
-        assert check
-        res, check = self.refresh_load(client, collection_name)
-        assert check
-
-        stats, check = self.get_collection_stats(client, collection_name)
-        assert check
-        assert stats["row_count"] == total_target_entities + len(other_old_rows)
-        target_partition_stats, check = self.get_partition_stats(client, collection_name, partition_a)
-        assert check
-        assert target_partition_stats["row_count"] == total_target_entities
-        other_partition_stats, check = self.get_partition_stats(client, collection_name, partition_b)
-        assert check
-        assert other_partition_stats["row_count"] == len(other_old_rows)
-
-        other_post_add_row = {
-            PK_FIELD: 100000 + other_old_entities,
-            VECTOR_FIELD: gen_vector(total_target_entities - 1),
-            TAG_FIELD: "other_partition_same_vector_after_add",
-            STRUCT_FIELD: gen_scalar_profile(100000 + other_old_entities),
-        }
-        res, check = self.insert(client, collection_name, [other_post_add_row], partition_name=partition_b)
-        assert check
-        assert res["insert_count"] == 1
-        other_source_by_id[other_post_add_row[PK_FIELD]] = other_post_add_row
-
-        query_results, check = self.query(
-            client,
-            collection_name,
-            partition_names=[partition_a],
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=total_target_entities,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
-        for row in query_results:
-            expected = source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        other_query_results, check = self.query(
-            client,
-            collection_name,
-            partition_names=[partition_b],
-            filter=f"{PK_FIELD} >= 100000",
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=len(other_old_rows) + 1,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in other_query_results} == set(other_source_by_id)
-        for row in other_query_results:
-            expected = other_source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        search_row = source_by_id[total_target_entities - 1]
-        search_results, check = self.search(
-            client,
-            collection_name,
-            partition_names=[partition_a],
-            data=[search_row[VECTOR_FIELD]],
-            anns_field=VECTOR_FIELD,
-            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=total_target_entities,
-        )
-        assert check
-        hits = search_results[0]
-        assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
-        assert not {hit[PK_FIELD] for hit in hits}.intersection(set(other_source_by_id))
-        assert hits[0][PK_FIELD] == search_row[PK_FIELD]
-        for hit in hits:
-            expected = source_by_id[hit[PK_FIELD]]
-            entity = search_entity(hit)
-            assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_import_after_add_nullable_scalar_struct_array_omit_field_parquet_partition_query_search(self):
-        """
-        target: test Parquet bulk import omitting a dynamically added nullable scalar-only Struct Array field into a
-            specified partition
-        method: insert and flush 3000 old rows in both target and non-target partitions, add nullable scalar Struct
-            Array, import 3000 Parquet rows whose file schema omits profile into the target partition, and keep a
-            growing same-vector interference row in another partition
-        expected: old and imported target-partition rows expose the added struct field as null, and partition-scoped
-            query/search never returns rows from the other partition
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_add_nullable_scalar_struct_omit_parquet_partition")
-        partition_a = cf.gen_unique_str("part_a")
-        partition_b = cf.gen_unique_str("part_b")
-        old_entities = 3000
-        import_entities = 3000
-        other_old_entities = 3000
-        total_target_entities = old_entities + import_entities
-
-        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
-        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
-
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
-        res, check = self.create_partition(client, collection_name, partition_a)
-        assert check
-        res, check = self.create_partition(client, collection_name, partition_b)
-        assert check
-
-        source_by_id = {}
-        old_rows = []
-        for row_id in range(old_entities):
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"old_target_partition_row_{row_id}",
-            }
-            old_rows.append(row)
-            source_by_id[row_id] = {**row, STRUCT_FIELD: None}
-        res, check = self.insert(client, collection_name, old_rows, partition_name=partition_a)
-        assert check
-        assert res["insert_count"] == old_entities
-
-        other_old_rows = []
-        other_source_by_id = {}
-        for offset in range(other_old_entities):
-            row_id = 100000 + offset
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"other_partition_old_{offset}",
-            }
-            other_old_rows.append(row)
-            other_source_by_id[row_id] = {**row, STRUCT_FIELD: None}
-        res, check = self.insert(client, collection_name, other_old_rows, partition_name=partition_b)
-        assert check
-        assert res["insert_count"] == len(other_old_rows)
-
-        res, check = self.flush(client, collection_name)
-        assert check
-
-        profile_schema = gen_struct_schema(self, client)
-        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
-        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
-        res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
-        )
-        assert check
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
-        index_params = gen_index_params(self, client)
-        index_params.add_index(
-            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
-        )
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
-
-        ids = []
-        vectors = []
-        doc_tags = []
-        for row_id in range(old_entities, total_target_entities):
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"import_target_partition_omit_profile_row_{row_id}",
-            }
-            ids.append(row[PK_FIELD])
-            vectors.append(row[VECTOR_FIELD])
-            doc_tags.append(row[TAG_FIELD])
-            source_by_id[row_id] = {**row, STRUCT_FIELD: None}
-
-        table = pa.table(
-            {
-                PK_FIELD: pa.array(ids, type=pa.int64()),
-                VECTOR_FIELD: pa.array(vectors, type=pa.list_(pa.float32())),
-                TAG_FIELD: pa.array(doc_tags, type=pa.string()),
-            }
-        )
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.parquet")
-        pq.write_table(table, local_file_path, row_group_size=import_entities)
-
-        remote_files = self.upload_to_minio(local_file_path)
-        self.call_bulkinsert(collection_name, remote_files, partition_name=partition_a)
-
-        assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
-        res, check = self.load_collection(client, collection_name)
-        assert check
-        res, check = self.refresh_load(client, collection_name)
-        assert check
-
-        stats, check = self.get_collection_stats(client, collection_name)
-        assert check
-        assert stats["row_count"] == total_target_entities + len(other_old_rows)
-        target_partition_stats, check = self.get_partition_stats(client, collection_name, partition_a)
-        assert check
-        assert target_partition_stats["row_count"] == total_target_entities
-        other_partition_stats, check = self.get_partition_stats(client, collection_name, partition_b)
-        assert check
-        assert other_partition_stats["row_count"] == len(other_old_rows)
-
-        other_post_add_row = {
-            PK_FIELD: 100000 + other_old_entities,
-            VECTOR_FIELD: gen_vector(total_target_entities - 1),
-            TAG_FIELD: "other_partition_same_vector_after_add",
-            STRUCT_FIELD: gen_scalar_profile(100000 + other_old_entities),
-        }
-        res, check = self.insert(client, collection_name, [other_post_add_row], partition_name=partition_b)
-        assert check
-        assert res["insert_count"] == 1
-        other_source_by_id[other_post_add_row[PK_FIELD]] = other_post_add_row
-
-        query_results, check = self.query(
-            client,
-            collection_name,
-            partition_names=[partition_a],
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=total_target_entities,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
-        for row in query_results:
-            expected = source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        other_query_results, check = self.query(
-            client,
-            collection_name,
-            partition_names=[partition_b],
-            filter=f"{PK_FIELD} >= 100000",
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=len(other_old_rows) + 1,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in other_query_results} == set(other_source_by_id)
-        for row in other_query_results:
-            expected = other_source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        search_row = source_by_id[total_target_entities - 1]
-        search_results, check = self.search(
-            client,
-            collection_name,
-            partition_names=[partition_a],
-            data=[search_row[VECTOR_FIELD]],
-            anns_field=VECTOR_FIELD,
-            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=total_target_entities,
-        )
-        assert check
-        hits = search_results[0]
-        assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
-        assert not {hit[PK_FIELD] for hit in hits}.intersection(set(other_source_by_id))
-        assert hits[0][PK_FIELD] == search_row[PK_FIELD]
-        for hit in hits:
-            expected = source_by_id[hit[PK_FIELD]]
-            entity = search_entity(hit)
-            assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_import_after_add_nullable_scalar_struct_array_with_parquet(self):
-        """
-        target: test Parquet bulk import after dynamically adding a nullable scalar-only Struct Array field
-        method: insert and flush 3000 old rows, add nullable scalar Struct Array, import 3000 Parquet rows with null,
-            empty, and non-empty profile values, then query and search all rows
-        expected: old sealed rows expose the added struct field as null, imported rows preserve nullable struct
-            semantics, and normal vector search requery output matches source-of-truth
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_add_nullable_scalar_struct_parquet")
-        old_entities = 3000
-        import_entities = 3000
-        total_entities = old_entities + import_entities
-
-        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
-        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
-
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
-
-        source_by_id = {}
-        old_rows = []
-        for row_id in range(old_entities):
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"old_row_{row_id}",
-            }
-            old_rows.append(row)
-            source_by_id[row_id] = {**row, STRUCT_FIELD: None}
-        res, check = self.insert(client, collection_name, old_rows)
-        assert check
-        assert res["insert_count"] == old_entities
-
-        res, check = self.flush(client, collection_name)
-        assert check
-
-        profile_schema = gen_struct_schema(self, client)
-        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
-        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
-        res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
-        )
-        assert check
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
-
-        index_params = gen_index_params(self, client)
-        index_params.add_index(
-            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
-        )
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
-
-        ids = []
-        vectors = []
-        doc_tags = []
-        profiles = []
-        for row_id in range(old_entities, total_entities):
-            if row_id % 3 == 0:
-                profile = None
-            elif row_id % 3 == 1:
-                profile = []
-            else:
-                profile = gen_scalar_profile(row_id)
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"import_row_{row_id}",
-                STRUCT_FIELD: profile,
-            }
-            ids.append(row[PK_FIELD])
-            vectors.append(row[VECTOR_FIELD])
-            doc_tags.append(row[TAG_FIELD])
-            profiles.append(row[STRUCT_FIELD])
-            source_by_id[row_id] = row
-
-        profile_type = pa.list_(
-            pa.struct(
-                [
-                    pa.field(INT_SUBFIELD, pa.int64()),
-                    pa.field(TAG_SUBFIELD, pa.string()),
-                ]
-            )
-        )
-        table = pa.table(
-            {
-                PK_FIELD: pa.array(ids, type=pa.int64()),
-                VECTOR_FIELD: pa.array(vectors, type=pa.list_(pa.float32())),
-                TAG_FIELD: pa.array(doc_tags, type=pa.string()),
-                STRUCT_FIELD: pa.array(profiles, type=profile_type),
-            }
-        )
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.parquet")
-        pq.write_table(table, local_file_path, row_group_size=import_entities)
-
-        remote_files = self.upload_to_minio(local_file_path)
-        self.call_bulkinsert(collection_name, remote_files)
-
-        assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
-        res, check = self.load_collection(client, collection_name)
-        assert check
-
-        stats, check = self.get_collection_stats(client, collection_name)
-        assert check
-        assert stats["row_count"] == total_entities
-
-        query_results, check = self.query(
-            client,
-            collection_name,
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=total_entities,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
-        for row in query_results:
-            expected = source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        search_row = source_by_id[total_entities - 1]
-        search_results, check = self.search(
-            client,
-            collection_name,
-            data=[search_row[VECTOR_FIELD]],
-            anns_field=VECTOR_FIELD,
-            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=total_entities,
-        )
-        assert check
-        hits = search_results[0]
-        assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
-        assert hits[0][PK_FIELD] == search_row[PK_FIELD]
-        for hit in hits:
-            expected = source_by_id[hit[PK_FIELD]]
-            entity = search_entity(hit)
-            assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_import_after_add_nullable_scalar_struct_array_omit_field_json(self):
-        """
-        target: test JSON bulk import omitting a dynamically added nullable scalar-only Struct Array field
-        method: insert and flush 3000 old rows, add nullable scalar Struct Array, import 3000 JSON rows that omit
-            profile entirely, then query and search all rows
+        target: test bulk import omitting a dynamically added nullable scalar-only Struct Array field
+        method: insert and flush old rows, add nullable scalar Struct Array, import rows that omit profile entirely,
+            then query and search all rows
         expected: both old rows and imported rows expose the added struct field as null, and normal vector search
             requery output matches source-of-truth
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_add_nullable_scalar_struct_omit_json")
+        collection_name = cf.gen_unique_str(f"{prefix}_import_add_nullable_scalar_struct_omit_{file_format}")
         old_entities = 3000
         import_entities = 3000
         total_entities = old_entities + import_entities
 
-        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
-        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
-
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
-
+        self.create_collection_without_struct(client, collection_name)
         source_by_id = {}
-        old_rows = []
-        for row_id in range(old_entities):
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"old_row_{row_id}",
-            }
-            old_rows.append(row)
-            source_by_id[row_id] = {**row, STRUCT_FIELD: None}
+        old_rows = self.gen_rows_without_struct(0, old_entities, "old_row", source_by_id=source_by_id)
         res, check = self.insert(client, collection_name, old_rows)
         assert check
         assert res["insert_count"] == old_entities
-
         res, check = self.flush(client, collection_name)
         assert check
 
-        profile_schema = gen_struct_schema(self, client)
-        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
-        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
-        res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
+        self.add_nullable_scalar_struct_field_and_index(client, collection_name)
+
+        import_rows, import_source_by_id = self.gen_after_add_import_rows(
+            old_entities,
+            import_entities,
+            "import_row",
+            omit_struct=True,
         )
-        assert check
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
+        source_by_id.update(import_source_by_id)
 
-        index_params = gen_index_params(self, client)
-        index_params.add_index(
-            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        remote_files = self.upload_import_rows(
+            collection_name,
+            import_rows,
+            file_format,
+            row_group_size=import_entities,
+            include_struct=False,
         )
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
-
-        import_rows = []
-        for row_id in range(old_entities, total_entities):
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"import_row_{row_id}",
-            }
-            import_rows.append(row)
-            source_by_id[row_id] = {**row, STRUCT_FIELD: None}
-
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.json")
-        with open(local_file_path, "w") as f:
-            json.dump(import_rows, f)
-
-        remote_files = self.upload_to_minio(local_file_path)
         self.call_bulkinsert(collection_name, remote_files)
 
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
@@ -13714,176 +12004,125 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         assert check
         assert stats["row_count"] == total_entities
 
-        query_results, check = self.query(
-            client,
-            collection_name,
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=total_entities,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
-        for row in query_results:
-            expected = source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        search_row = source_by_id[total_entities - 1]
-        search_results, check = self.search(
-            client,
-            collection_name,
-            data=[search_row[VECTOR_FIELD]],
-            anns_field=VECTOR_FIELD,
-            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=total_entities,
-        )
-        assert check
-        hits = search_results[0]
-        assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
-        assert hits[0][PK_FIELD] == search_row[PK_FIELD]
-        for hit in hits:
-            expected = source_by_id[hit[PK_FIELD]]
-            entity = search_entity(hit)
-            assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+        self.assert_scalar_query_and_search(client, collection_name, source_by_id, search_pk=total_entities - 1)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_import_after_add_nullable_scalar_struct_array_omit_field_parquet(self):
+    @pytest.mark.parametrize("file_format", SCALAR_IMPORT_FORMATS, ids=SCALAR_IMPORT_FORMATS)
+    def test_import_after_add_nullable_scalar_struct_array_omit_field_partition_query_search(self, file_format):
         """
-        target: test Parquet bulk import omitting a dynamically added nullable scalar-only Struct Array field
-        method: insert and flush 3000 old rows, add nullable scalar Struct Array, import 3000 Parquet rows whose file
-            schema omits profile entirely, then query and search all rows
-        expected: both old rows and imported rows expose the added struct field as null, and normal vector search
-            requery output matches source-of-truth
+        target: test bulk import omitting a dynamically added nullable scalar-only Struct Array field into a specified
+            partition
+        method: insert and flush old rows in both target and non-target partitions, add nullable scalar Struct Array,
+            import rows that omit profile into the target partition, and keep a same-vector interference row in another
+            partition
+        expected: old and imported target-partition rows expose the added struct field as null, and partition-scoped
+            query/search never returns rows from the other partition
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_add_nullable_scalar_struct_omit_parquet")
+        collection_name = cf.gen_unique_str(f"{prefix}_import_add_nullable_scalar_struct_omit_{file_format}_partition")
+        partition_a = cf.gen_unique_str("part_a")
+        partition_b = cf.gen_unique_str("part_b")
         old_entities = 3000
         import_entities = 3000
-        total_entities = old_entities + import_entities
+        other_old_entities = 3000
+        total_target_entities = old_entities + import_entities
 
-        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
-        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
-
-        res, check = self.create_collection(client, collection_name, schema=schema)
+        self.create_collection_without_struct(client, collection_name)
+        res, check = self.create_partition(client, collection_name, partition_a)
+        assert check
+        res, check = self.create_partition(client, collection_name, partition_b)
         assert check
 
         source_by_id = {}
-        old_rows = []
-        for row_id in range(old_entities):
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"old_row_{row_id}",
-            }
-            old_rows.append(row)
-            source_by_id[row_id] = {**row, STRUCT_FIELD: None}
-        res, check = self.insert(client, collection_name, old_rows)
+        old_rows = self.gen_rows_without_struct(
+            0, old_entities, "old_target_partition_row", source_by_id=source_by_id
+        )
+        res, check = self.insert(client, collection_name, old_rows, partition_name=partition_a)
         assert check
         assert res["insert_count"] == old_entities
 
+        other_source_by_id = {}
+        other_old_rows = self.gen_rows_without_struct(
+            100000,
+            other_old_entities,
+            "other_partition_old",
+            source_by_id=other_source_by_id,
+        )
+        res, check = self.insert(client, collection_name, other_old_rows, partition_name=partition_b)
+        assert check
+        assert res["insert_count"] == len(other_old_rows)
         res, check = self.flush(client, collection_name)
         assert check
 
-        profile_schema = gen_struct_schema(self, client)
-        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
-        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
-        res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
+        self.add_nullable_scalar_struct_field_and_index(client, collection_name)
+
+        import_rows, import_source_by_id = self.gen_after_add_import_rows(
+            old_entities,
+            import_entities,
+            "import_target_partition_omit_profile_row",
+            omit_struct=True,
         )
-        assert check
-        self.wait_schema_version_consistent(client, collection_name, timeout=120)
+        source_by_id.update(import_source_by_id)
 
-        index_params = gen_index_params(self, client)
-        index_params.add_index(
-            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        remote_files = self.upload_import_rows(
+            collection_name,
+            import_rows,
+            file_format,
+            row_group_size=import_entities,
+            include_struct=False,
         )
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
-
-        ids = []
-        vectors = []
-        doc_tags = []
-        for row_id in range(old_entities, total_entities):
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"import_row_{row_id}",
-            }
-            ids.append(row[PK_FIELD])
-            vectors.append(row[VECTOR_FIELD])
-            doc_tags.append(row[TAG_FIELD])
-            source_by_id[row_id] = {**row, STRUCT_FIELD: None}
-
-        table = pa.table(
-            {
-                PK_FIELD: pa.array(ids, type=pa.int64()),
-                VECTOR_FIELD: pa.array(vectors, type=pa.list_(pa.float32())),
-                TAG_FIELD: pa.array(doc_tags, type=pa.string()),
-            }
-        )
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.parquet")
-        pq.write_table(table, local_file_path, row_group_size=import_entities)
-
-        remote_files = self.upload_to_minio(local_file_path)
-        self.call_bulkinsert(collection_name, remote_files)
+        self.call_bulkinsert(collection_name, remote_files, partition_name=partition_a)
 
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
         res, check = self.load_collection(client, collection_name)
         assert check
+        res, check = self.refresh_load(client, collection_name)
+        assert check
 
         stats, check = self.get_collection_stats(client, collection_name)
         assert check
-        assert stats["row_count"] == total_entities
+        assert stats["row_count"] == total_target_entities + len(other_old_rows)
+        target_partition_stats, check = self.get_partition_stats(client, collection_name, partition_a)
+        assert check
+        assert target_partition_stats["row_count"] == total_target_entities
+        other_partition_stats, check = self.get_partition_stats(client, collection_name, partition_b)
+        assert check
+        assert other_partition_stats["row_count"] == len(other_old_rows)
 
-        query_results, check = self.query(
+        other_post_add_row = {
+            PK_FIELD: 100000 + other_old_entities,
+            VECTOR_FIELD: gen_vector(total_target_entities - 1),
+            TAG_FIELD: "other_partition_same_vector_after_add",
+            STRUCT_FIELD: gen_scalar_profile(100000 + other_old_entities),
+        }
+        res, check = self.insert(client, collection_name, [other_post_add_row], partition_name=partition_b)
+        assert check
+        assert res["insert_count"] == 1
+        other_source_by_id[other_post_add_row[PK_FIELD]] = other_post_add_row
+
+        self.assert_scalar_query_results(
             client,
             collection_name,
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=total_entities,
+            other_source_by_id,
+            partition_names=[partition_b],
+            query_filter=f"{PK_FIELD} >= 100000",
         )
-        assert check
-        assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
-        for row in query_results:
-            expected = source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        search_row = source_by_id[total_entities - 1]
-        search_results, check = self.search(
+        self.assert_scalar_query_and_search(
             client,
             collection_name,
-            data=[search_row[VECTOR_FIELD]],
-            anns_field=VECTOR_FIELD,
-            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=total_entities,
+            source_by_id,
+            partition_names=[partition_a],
+            search_pk=total_target_entities - 1,
+            excluded_ids=set(other_source_by_id),
         )
-        assert check
-        hits = search_results[0]
-        assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
-        assert hits[0][PK_FIELD] == search_row[PK_FIELD]
-        for hit in hits:
-            expected = source_by_id[hit[PK_FIELD]]
-            entity = search_entity(hit)
-            assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(
-        reason="known blocker: nullable StructArray vector sub-field imported by JSON loses ArrayOfVector ValidData on output",
-        strict=True,
-    )
     def test_import_nullable_struct_array_with_vector_json(self):
         """
-        target: test JSON bulk import for a nullable struct array field with scalar and vector sub-fields
-        method: create a collection with nullable Struct Array, import 3000 JSON rows with null, empty, and non-empty
-            profile values, build indexes on normal vector and struct vector sub-field, then query and normal-vector
-            search the imported data
+        target: test JSON bulk import for a nullable Struct Array field with scalar and vector sub-fields
+        method: create a collection with nullable Struct Array, import rows with null, empty, and non-empty profile
+            values, build indexes on normal vector and struct vector sub-field, then query and normal-vector search the
+            imported data
         expected: imported row count matches source data, indexes are ready, and query/search output preserves nullable
             struct semantics including vector sub-field values
         """
@@ -13940,11 +12179,7 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
             rows.append(row)
             source_by_id[row_id] = row
 
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.json")
-        with open(local_file_path, "w") as f:
-            json.dump(rows, f)
-
-        remote_files = self.upload_to_minio(local_file_path)
+        remote_files = self.upload_import_rows(collection_name, rows, "json", row_group_size=entities)
         self.call_bulkinsert(collection_name, remote_files)
 
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
@@ -13989,207 +12224,3 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
             entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
             assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_import_nullable_scalar_struct_array_with_parquet(self):
-        """
-        target: test Parquet bulk import for a nullable scalar-only struct array field
-        method: create a collection with nullable scalar Struct Array, import 3000 Parquet rows with null, empty, and
-            non-empty profile values, then query and search the imported data
-        expected: imported row count matches source data, and query/search output preserves nullable struct semantics
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_scalar_struct_parquet")
-        entities = 3000
-
-        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
-        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
-
-        profile_schema = gen_struct_schema(self, client)
-        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
-        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
-        schema.add_field(
-            STRUCT_FIELD,
-            datatype=STRUCT_TYPE,
-            element_type=STRUCT_ELEMENT_TYPE,
-            struct_schema=profile_schema,
-            max_capacity=STRUCT_MAX_CAPACITY,
-            nullable=True,
-        )
-
-        index_params = gen_index_params(self, client)
-        index_params.add_index(
-            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
-        )
-        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-        assert check
-
-        ids = []
-        vectors = []
-        doc_tags = []
-        profiles = []
-        source_by_id = {}
-        for row_id in range(entities):
-            if row_id % 3 == 0:
-                profile = None
-            elif row_id % 3 == 1:
-                profile = []
-            else:
-                profile = gen_scalar_profile(row_id)
-            row = {
-                PK_FIELD: row_id,
-                VECTOR_FIELD: gen_vector(row_id),
-                TAG_FIELD: f"import_row_{row_id}",
-                STRUCT_FIELD: profile,
-            }
-            ids.append(row[PK_FIELD])
-            vectors.append(row[VECTOR_FIELD])
-            doc_tags.append(row[TAG_FIELD])
-            profiles.append(row[STRUCT_FIELD])
-            source_by_id[row_id] = row
-
-        profile_type = pa.list_(
-            pa.struct(
-                [
-                    pa.field(INT_SUBFIELD, pa.int64()),
-                    pa.field(TAG_SUBFIELD, pa.string()),
-                ]
-            )
-        )
-        table = pa.table(
-            {
-                PK_FIELD: pa.array(ids, type=pa.int64()),
-                VECTOR_FIELD: pa.array(vectors, type=pa.list_(pa.float32())),
-                TAG_FIELD: pa.array(doc_tags, type=pa.string()),
-                STRUCT_FIELD: pa.array(profiles, type=profile_type),
-            }
-        )
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.parquet")
-        pq.write_table(table, local_file_path, row_group_size=entities)
-
-        remote_files = self.upload_to_minio(local_file_path)
-        self.call_bulkinsert(collection_name, remote_files)
-
-        assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
-        res, check = self.refresh_load(client, collection_name)
-        assert check
-
-        stats, check = self.get_collection_stats(client, collection_name)
-        assert check
-        assert stats["row_count"] == entities
-
-        query_results, check = self.query(
-            client,
-            collection_name,
-            filter=ALL_ROWS_FILTER,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=entities,
-        )
-        assert check
-        assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
-        for row in query_results:
-            expected = source_by_id[row[PK_FIELD]]
-            assert row[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-        search_row = source_by_id[entities - 1]
-        search_results, check = self.search(
-            client,
-            collection_name,
-            data=[search_row[VECTOR_FIELD]],
-            anns_field=VECTOR_FIELD,
-            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
-            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=entities,
-        )
-        assert check
-        hits = search_results[0]
-        assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
-        assert hits[0][PK_FIELD] == search_row[PK_FIELD]
-        for hit in hits:
-            expected = source_by_id[hit[PK_FIELD]]
-            entity = search_entity(hit)
-            assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_import_non_nullable_scalar_struct_array_rejects_null_parquet(self):
-        """
-        target: test Parquet bulk import rejects null for a non-nullable scalar-only struct array field
-        method: create a collection with non-nullable scalar Struct Array, import 3000 Parquet rows where one row uses
-            profile=null
-        expected: import job fails with a nullable-related error and no rows are imported
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_non_nullable_scalar_struct_parquet")
-        entities = 3000
-
-        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
-        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
-
-        profile_schema = gen_struct_schema(self, client)
-        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
-        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
-        schema.add_field(
-            STRUCT_FIELD,
-            datatype=STRUCT_TYPE,
-            element_type=STRUCT_ELEMENT_TYPE,
-            struct_schema=profile_schema,
-            max_capacity=STRUCT_MAX_CAPACITY,
-        )
-
-        index_params = gen_index_params(self, client)
-        index_params.add_index(
-            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
-        )
-        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-        assert check
-
-        ids = []
-        vectors = []
-        doc_tags = []
-        profiles = []
-        for row_id in range(entities):
-            if row_id == 0:
-                profile = None
-            elif row_id % 2 == 0:
-                profile = []
-            else:
-                profile = gen_scalar_profile(row_id)
-            ids.append(row_id)
-            vectors.append(gen_vector(row_id))
-            doc_tags.append(f"import_row_{row_id}")
-            profiles.append(profile)
-
-        profile_type = pa.list_(
-            pa.struct(
-                [
-                    pa.field(INT_SUBFIELD, pa.int64()),
-                    pa.field(TAG_SUBFIELD, pa.string()),
-                ]
-            )
-        )
-        table = pa.table(
-            {
-                PK_FIELD: pa.array(ids, type=pa.int64()),
-                VECTOR_FIELD: pa.array(vectors, type=pa.list_(pa.float32())),
-                TAG_FIELD: pa.array(doc_tags, type=pa.string()),
-                STRUCT_FIELD: pa.array(profiles, type=profile_type),
-            }
-        )
-        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.parquet")
-        pq.write_table(table, local_file_path, row_group_size=entities)
-
-        remote_files = self.upload_to_minio(local_file_path)
-        import_result = self.call_bulkinsert(collection_name, remote_files, expect_fail=True)
-
-        assert import_result["state"] == "Failed"
-        assert any(keyword in import_result["reason"].lower() for keyword in ["null", "nullable"])
-
-        stats, check = self.get_collection_stats(client, collection_name)
-        assert check
-        assert stats["row_count"] == 0
