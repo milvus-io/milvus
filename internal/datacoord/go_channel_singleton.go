@@ -33,6 +33,15 @@ func getBuildIndexChSingleton() chan UniqueID {
 	return buildIndexCh
 }
 
+func notifySegmentIndexBuild(segIDs ...UniqueID) {
+	for _, segID := range segIDs {
+		select {
+		case getBuildIndexChSingleton() <- segID:
+		default:
+		}
+	}
+}
+
 func getStatsTaskChSingleton() chan UniqueID {
 	statsTaskChOnce.Do(func() {
 		statsTaskCh = make(chan UniqueID, 1024)

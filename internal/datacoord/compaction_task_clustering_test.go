@@ -974,12 +974,16 @@ func (s *ClusteringCompactionTaskSuite) TestProcessStatsState() {
 	s.Run("not enable stats task", func() {
 		Params.Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
 		defer Params.Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+		drainBuildIndexChForTest()
+		defer drainBuildIndexChForTest()
 		task := s.generateBasicTask(false)
 		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_statistic), setTmpSegments(task.GetTaskProto().GetResultSegments()), setResultSegments(nil))
 		task.maxRetryTimes = 3
+		expectedSegments := append([]UniqueID{}, task.GetTaskProto().GetTmpSegments()...)
 
 		s.False(task.Process())
 		s.Equal(datapb.CompactionTaskState_indexing, task.GetTaskProto().GetState())
 		s.Equal(int32(0), task.GetTaskProto().RetryTimes)
+		assertBuildIndexEvents(s.T(), expectedSegments...)
 	})
 }

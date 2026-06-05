@@ -246,12 +246,7 @@ func (t *mixCompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult)
 	// Apply metrics after successful meta update.
 	newSegmentIDs := lo.Map(newSegments, func(s *SegmentInfo, _ int) UniqueID { return s.GetID() })
 	metricMutation.commit()
-	for _, newSegID := range newSegmentIDs {
-		select {
-		case getBuildIndexChSingleton() <- newSegID:
-		default:
-		}
-	}
+	notifySegmentIndexBuild(newSegmentIDs...)
 
 	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(newSegmentIDs))
 	if err != nil {

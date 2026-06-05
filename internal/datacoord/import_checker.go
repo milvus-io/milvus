@@ -428,13 +428,11 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 
 	healthySegments := c.meta.GetSegments(targetSegmentIDs, isSegmentHealthy)
 	unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), healthySegments)
-	if Params.DataCoordCfg.WaitForIndex.GetAsBool() && len(unindexed) > 0 && !importutilv2.IsL0Import(job.GetOptions()) {
-		for _, segmentID := range unindexed {
-			select {
-			case getBuildIndexChSingleton() <- segmentID: // accelerate index building:
-			default:
-			}
-		}
+	isL0Import := importutilv2.IsL0Import(job.GetOptions())
+	if len(unindexed) > 0 && !isL0Import {
+		notifySegmentIndexBuild(unindexed...)
+	}
+	if Params.DataCoordCfg.WaitForIndex.GetAsBool() && len(unindexed) > 0 && !isL0Import {
 		log.Debug("waiting for import segments building index...", zap.Int64s("unindexed", unindexed))
 		return
 	}
