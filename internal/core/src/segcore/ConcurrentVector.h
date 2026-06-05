@@ -49,21 +49,13 @@ class ThreadSafeValidData {
     void
     set_data_raw(const std::vector<FieldDataPtr>& datas) {
         std::unique_lock<std::shared_mutex> lck(mutex_);
-        auto total = 0;
-        for (auto& field_data : datas) {
-            total += field_data->get_num_rows();
-        }
-        if (length_ + total > data_.size()) {
-            data_.resize(length_ + total);
-        }
+        set_data_raw_locked(length_, datas);
+    }
 
-        for (auto& field_data : datas) {
-            auto num_row = field_data->get_num_rows();
-            for (size_t i = 0; i < num_row; i++) {
-                data_[length_ + i] = field_data->is_valid(i);
-            }
-            length_ += num_row;
-        }
+    void
+    set_data_raw(size_t offset, const std::vector<FieldDataPtr>& datas) {
+        std::unique_lock<std::shared_mutex> lck(mutex_);
+        set_data_raw_locked(offset, datas);
     }
 
     void
@@ -71,16 +63,75 @@ class ThreadSafeValidData {
                  const DataArray* data,
                  const FieldMeta& field_meta) {
         std::unique_lock<std::shared_mutex> lck(mutex_);
-        if (field_meta.is_nullable()) {
-            if (length_ + num_rows > data_.size()) {
-                data_.resize(length_ + num_rows);
-            }
-            auto src = data->valid_data().data();
-            std::copy_n(src, num_rows, data_.data() + length_);
-            length_ += num_rows;
-        }
+        set_data_raw_locked(length_, num_rows, data, field_meta);
     }
 
+    void
+    set_data_raw(size_t offset,
+                 size_t num_rows,
+                 const DataArray* data,
+                 const FieldMeta& field_meta) {
+        std::unique_lock<std::shared_mutex> lck(mutex_);
+        set_data_raw_locked(offset, num_rows, data, field_meta);
+    }
+
+    size_t
+    length() const {
+        std::shared_lock<std::shared_mutex> lck(mutex_);
+        return length_;
+    }
+
+ private:
+    void
+    set_data_raw_locked(size_t offset,
+                        const std::vector<FieldDataPtr>& datas) {
+        size_t total = 0;
+        for (auto& field_data : datas) {
+            total += field_data->get_num_rows();
+        }
+        auto end = offset + total;
+        if (end > data_.size()) {
+            data_.resize(end);
+        }
+
+        auto write_offset = offset;
+        for (auto& field_data : datas) {
+            auto num_row = field_data->get_num_rows();
+            for (size_t i = 0; i < num_row; i++) {
+                data_[write_offset + i] = field_data->is_valid(i);
+            }
+            write_offset += num_row;
+        }
+        length_ = std::max(length_, end);
+    }
+
+    void
+    set_data_raw_locked(size_t offset,
+                        size_t num_rows,
+                        const DataArray* data,
+                        const FieldMeta& field_meta) {
+        if (!field_meta.is_nullable()) {
+            return;
+        }
+
+        AssertInfo(data != nullptr, "nullable field data should not be null");
+        AssertInfo(static_cast<size_t>(data->valid_data_size()) >= num_rows,
+                   "nullable field valid data size {} is less than row count {}",
+                   data->valid_data_size(),
+                   num_rows);
+
+        auto end = offset + num_rows;
+        if (end > data_.size()) {
+            data_.resize(end);
+        }
+        if (num_rows > 0) {
+            auto src = data->valid_data().data();
+            std::copy_n(src, num_rows, data_.data() + offset);
+        }
+        length_ = std::max(length_, end);
+    }
+
+ public:
     bool
     is_valid(size_t offset) const {
         std::shared_lock<std::shared_mutex> lck(mutex_);

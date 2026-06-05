@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <optional>
 #include <random>
 #include <thread>
 #include <tuple>
@@ -97,6 +98,44 @@ TEST(ConcurrentVector, TestMultithreads) {
             ASSERT_EQ(raw_data, std_data) << data;
         }
     }
+}
+
+TEST(ThreadSafeValidData, SetDataRawWithOffsetAlignsByLogicalRowOffset) {
+    ThreadSafeValidData valid_data;
+    milvus::FieldMeta field_meta(milvus::FieldName("nullable"),
+                                 milvus::FieldId(100),
+                                 milvus::DataType::INT64,
+                                 true,
+                                 std::nullopt);
+
+    milvus::DataArray out_of_order_data;
+    out_of_order_data.add_valid_data(true);
+    out_of_order_data.add_valid_data(false);
+    out_of_order_data.add_valid_data(true);
+
+    valid_data.set_data_raw(4, 3, &out_of_order_data, field_meta);
+
+    ASSERT_EQ(valid_data.length(), 7);
+    auto bitmap = valid_data.get_data();
+    ASSERT_EQ(bitmap.size(), 7);
+    for (size_t i = 0; i < 4; ++i) {
+        EXPECT_FALSE(bitmap[i]);
+    }
+    EXPECT_TRUE(bitmap[4]);
+    EXPECT_FALSE(bitmap[5]);
+    EXPECT_TRUE(bitmap[6]);
+
+    milvus::DataArray append_data;
+    append_data.add_valid_data(false);
+    append_data.add_valid_data(true);
+
+    valid_data.set_data_raw(2, &append_data, field_meta);
+
+    ASSERT_EQ(valid_data.length(), 9);
+    bitmap = valid_data.get_data();
+    ASSERT_EQ(bitmap.size(), 9);
+    EXPECT_FALSE(bitmap[7]);
+    EXPECT_TRUE(bitmap[8]);
 }
 
 TEST(ConcurrentVector, TestAckSingle) {
