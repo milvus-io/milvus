@@ -187,6 +187,13 @@ class IndexEntryReader {
         std::vector<RangeCrc> range_crcs;
     };
 
+    struct EntryStreamDownloadState {
+        std::string name;
+        std::unique_ptr<PositionedFileWriter> writer;
+        uint32_t expected_crc;
+        std::vector<RangeCrc> range_crcs;
+    };
+
     // Prepare download state for an entry (open file, allocate CRC vector)
     EntryDownloadState
     PrepareEntryDownload(const std::string& name,
@@ -202,6 +209,20 @@ class IndexEntryReader {
     // Verify CRC and close file descriptor
     void
     FinalizeEntryDownload(EntryDownloadState& state);
+
+    EntryStreamDownloadState
+    PrepareEntryStreamDownload(const std::string& name,
+                               const std::string& local_path,
+                               const EntryMeta& meta,
+                               io::Priority write_priority);
+
+    void
+    SubmitEntryStreamDownloadTasks(const EntryMeta& meta,
+                                   EntryStreamDownloadState& state,
+                                   std::vector<std::future<void>>& futures);
+
+    void
+    FinalizeEntryStreamDownload(EntryStreamDownloadState& state);
 
     std::shared_ptr<milvus::InputStream> input_;
     int64_t file_size_ = 0;

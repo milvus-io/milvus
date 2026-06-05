@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -38,6 +39,7 @@
 #include "storage/PluginLoader.h"
 #include "storage/RemoteInputStream.h"
 #include "storage/RemoteOutputStream.h"
+#include "storage/ThreadPools.h"
 
 using namespace milvus::storage;
 
@@ -218,6 +220,92 @@ class DelayedFailingInputStream : public milvus::InputStream {
  private:
     std::shared_ptr<milvus::InputStream> base_;
     std::vector<Rule> rules_;
+};
+
+class TrackingDelayedInputStream : public milvus::InputStream {
+ public:
+    TrackingDelayedInputStream(std::shared_ptr<milvus::InputStream> base,
+                               size_t tracked_read_size,
+                               std::chrono::milliseconds delay)
+        : base_(std::move(base)),
+          tracked_read_size_(tracked_read_size),
+          delay_(delay) {
+    }
+
+    void
+    EnableTracking() {
+        tracking_enabled_.store(true);
+    }
+
+    size_t
+    MaxActiveReads() const {
+        return max_active_reads_.load();
+    }
+
+    size_t
+    Size() const override {
+        return base_->Size();
+    }
+
+    bool
+    Seek(int64_t offset) override {
+        return base_->Seek(offset);
+    }
+
+    size_t
+    Tell() const override {
+        return base_->Tell();
+    }
+
+    bool
+    Eof() const override {
+        return base_->Eof();
+    }
+
+    size_t
+    Read(void* ptr, size_t size) override {
+        return base_->Read(ptr, size);
+    }
+
+    size_t
+    ReadAt(void* ptr, size_t offset, size_t size) override {
+        if (!tracking_enabled_.load() || size != tracked_read_size_) {
+            return base_->ReadAt(ptr, offset, size);
+        }
+
+        auto active = active_reads_.fetch_add(1) + 1;
+        UpdateMaxActiveReads(active);
+        std::this_thread::sleep_for(delay_);
+        try {
+            auto bytes_read = base_->ReadAt(ptr, offset, size);
+            active_reads_.fetch_sub(1);
+            return bytes_read;
+        } catch (...) {
+            active_reads_.fetch_sub(1);
+            throw;
+        }
+    }
+
+    size_t
+    Read(int fd, size_t size) override {
+        return base_->Read(fd, size);
+    }
+
+ private:
+    void
+    UpdateMaxActiveReads(size_t active) {
+        auto current = max_active_reads_.load();
+        while (active > current &&
+               !max_active_reads_.compare_exchange_weak(current, active)) {
+        }
+    }
+
+    std::shared_ptr<milvus::InputStream> base_;
+    size_t tracked_read_size_;
+    std::chrono::milliseconds delay_;
+    std::atomic<bool> tracking_enabled_{false};
+    std::atomic<size_t> active_reads_{0};
+    std::atomic<size_t> max_active_reads_{0};
 };
 
 }  // namespace
@@ -1264,6 +1352,62 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamToFileWritesEntry) {
     VerifyPattern(read_data, entry_size);
 
     ::unlink(local_file.c_str());
+}
+
+TEST_F(IndexEntryWriterV3Test, ReadEntriesStreamToFilesRunsFilesConcurrently) {
+    const std::string file_path = kV3FilePath + "_stream_files_parallel";
+    const size_t entry_size = 1024 * 1024;
+    auto data = GeneratePattern(entry_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("entry_a", data.data(), data.size());
+        writer.WriteEntry("entry_b", data.data(), data.size());
+        writer.WriteEntry("entry_c", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto input = std::make_shared<TrackingDelayedInputStream>(
+        CreateInputStream(file_path),
+        entry_size,
+        std::chrono::milliseconds(50));
+    int64_t file_size = GetFileSize(file_path);
+    auto reader = IndexEntryReader::Open(input, file_size);
+    if (milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH)
+            .GetMaxThreadNum() <= 1) {
+        GTEST_SKIP() << "HIGH load thread pool has only one worker";
+    }
+
+    std::string file_a = GetRootPath() + "/stream_parallel_a.bin";
+    std::string file_b = GetRootPath() + "/stream_parallel_b.bin";
+    std::string file_c = GetRootPath() + "/stream_parallel_c.bin";
+    std::vector<std::pair<std::string, std::string>> pairs = {
+        {"entry_a", file_a}, {"entry_b", file_b}, {"entry_c", file_c}};
+
+    input->EnableTracking();
+    reader->ReadEntriesStreamToFiles(pairs,
+                                     milvus::storage::io::Priority::HIGH);
+
+    EXPECT_GT(input->MaxActiveReads(), 1);
+
+    auto verify_file = [](const std::string& path, size_t expected_size) {
+        std::ifstream ifs(path, std::ios::binary | std::ios::ate);
+        ASSERT_TRUE(ifs.is_open()) << "Failed to open: " << path;
+        size_t read_size = ifs.tellg();
+        ASSERT_EQ(read_size, expected_size);
+        ifs.seekg(0);
+        std::vector<uint8_t> read_data(read_size);
+        ifs.read(reinterpret_cast<char*>(read_data.data()), read_size);
+        VerifyPattern(read_data, expected_size);
+    };
+    verify_file(file_a, entry_size);
+    verify_file(file_b, entry_size);
+    verify_file(file_c, entry_size);
+
+    ::unlink(file_a.c_str());
+    ::unlink(file_b.c_str());
+    ::unlink(file_c.c_str());
 }
 
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamConsumerExceptionDoesNotLeak) {
