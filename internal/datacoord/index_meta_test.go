@@ -1801,6 +1801,69 @@ func TestIndexMeta_GetUnindexedSegments(t *testing.T) {
 	assert.Equal(t, 0, len(unindexed))
 }
 
+func TestIndexMeta_GetUnIndexedSegmentIDsForIndexTask(t *testing.T) {
+	const (
+		segWithNoIndex       = UniqueID(1000)
+		segWithPartialIndex  = UniqueID(1001)
+		segWithCompleteIndex = UniqueID(1002)
+	)
+	m := &indexMeta{
+		segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: {
+					CollectionID: collID,
+					FieldID:      fieldID,
+					IndexID:      indexID,
+				},
+				indexID + 1: {
+					CollectionID: collID,
+					FieldID:      fieldID + 1,
+					IndexID:      indexID + 1,
+				},
+			},
+			collID + 1: {
+				indexID + 2: {
+					CollectionID: collID + 1,
+					FieldID:      fieldID + 2,
+					IndexID:      indexID + 2,
+				},
+			},
+		},
+	}
+	partial := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	partial.Insert(indexID, &model.SegmentIndex{
+		CollectionID: collID,
+		SegmentID:    segWithPartialIndex,
+		IndexID:      indexID,
+	})
+	m.segmentIndexes.Insert(segWithPartialIndex, partial)
+	complete := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	complete.Insert(indexID, &model.SegmentIndex{
+		CollectionID: collID,
+		SegmentID:    segWithCompleteIndex,
+		IndexID:      indexID,
+	})
+	complete.Insert(indexID+1, &model.SegmentIndex{
+		CollectionID: collID,
+		SegmentID:    segWithCompleteIndex,
+		IndexID:      indexID + 1,
+	})
+	m.segmentIndexes.Insert(segWithCompleteIndex, complete)
+
+	unindexed := m.GetUnIndexedSegmentIDsForIndexTask(collID, []UniqueID{
+		segWithNoIndex,
+		segWithPartialIndex,
+		segWithCompleteIndex,
+	})
+	assert.True(t, unindexed.Contain(segWithNoIndex))
+	assert.True(t, unindexed.Contain(segWithPartialIndex))
+	assert.False(t, unindexed.Contain(segWithCompleteIndex))
+
+	unindexed = m.GetUnIndexedSegmentIDsForIndexTask(collID+2, []UniqueID{segWithNoIndex})
+	assert.Empty(t, unindexed)
+}
+
 func TestBuildIndexTaskStatsJSON(t *testing.T) {
 	im := &indexMeta{segmentBuildInfo: newSegmentIndexBuildInfo()}
 	si1 := &model.SegmentIndex{

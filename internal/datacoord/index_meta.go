@@ -859,35 +859,46 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 }
 
 func (m *indexMeta) IsUnIndexedSegment(collectionID UniqueID, segID UniqueID) bool {
+	return m.GetUnIndexedSegmentIDsForIndexTask(collectionID, []UniqueID{segID}).Contain(segID)
+}
+
+func (m *indexMeta) GetUnIndexedSegmentIDsForIndexTask(collectionID UniqueID, segIDs []UniqueID) typeutil.UniqueSet {
+	unindexed := typeutil.NewUniqueSet()
+	if len(segIDs) == 0 {
+		return unindexed
+	}
+
 	m.fieldIndexLock.RLock()
 	fieldIndexesMap, ok := m.indexes[collectionID]
 	if !ok {
 		m.fieldIndexLock.RUnlock()
-		return false
+		return unindexed
 	}
-	// Copy the map to avoid data race after releasing the lock
-	fieldIndexes := make(map[UniqueID]*model.Index, len(fieldIndexesMap))
-	for id, index := range fieldIndexesMap {
-		fieldIndexes[id] = index
+	activeIndexIDs := make([]UniqueID, 0, len(fieldIndexesMap))
+	for _, index := range fieldIndexesMap {
+		if !index.IsDeleted {
+			activeIndexIDs = append(activeIndexIDs, index.IndexID)
+		}
 	}
 	m.fieldIndexLock.RUnlock()
 
-	// the segment should be unindexed status if the fieldIndexes is not nil
-	segIndexInfos, ok := m.segmentIndexes.Get(segID)
-	if !ok || segIndexInfos.Len() == 0 {
-		return true
-	}
-
-	for _, index := range fieldIndexes {
-		if !index.IsDeleted {
-			if _, ok := segIndexInfos.Get(index.IndexID); !ok {
+	for _, segID := range segIDs {
+		// the segment should be unindexed status if the fieldIndexes is not nil
+		segIndexInfos, ok := m.segmentIndexes.Get(segID)
+		if !ok || segIndexInfos.Len() == 0 {
+			unindexed.Insert(segID)
+			continue
+		}
+		for _, indexID := range activeIndexIDs {
+			if _, ok := segIndexInfos.Get(indexID); !ok {
 				// the segment should be unindexed status if the segment index is not found within field indexes
-				return true
+				unindexed.Insert(segID)
+				break
 			}
 		}
 	}
 
-	return false
+	return unindexed
 }
 
 func (m *indexMeta) GetSegmentsIndexes(collectionID UniqueID, segIDs []UniqueID) map[int64]map[UniqueID]*model.SegmentIndex {
