@@ -21,23 +21,33 @@ func TestNewWALCheckpointFromProto(t *testing.T) {
 		MessageId:     messageID.IntoProto(),
 		TimeTick:      timeTick,
 		RecoveryMagic: recoveryMagic,
+		DataCheckpoint: &streamingpb.WALConsumeCheckpoint{
+			MessageId: rmq.NewRmqID(10).IntoProto(),
+			TimeTick:  1000,
+		},
 	}
 	checkpoint := NewWALCheckpointFromProto(protoCheckpoint)
 
 	assert.True(t, messageID.EQ(checkpoint.MessageID))
 	assert.Equal(t, timeTick, checkpoint.TimeTick)
 	assert.Equal(t, recoveryMagic, checkpoint.Magic)
+	assert.True(t, rmq.NewRmqID(10).EQ(checkpoint.DataCheckpoint.MessageID))
+	assert.Equal(t, uint64(1000), checkpoint.DataCheckpoint.TimeTick)
 
 	proto := checkpoint.IntoProto()
 	checkpoint2 := NewWALCheckpointFromProto(proto)
 	assert.True(t, messageID.EQ(checkpoint2.MessageID))
 	assert.Equal(t, timeTick, checkpoint2.TimeTick)
 	assert.Equal(t, recoveryMagic, checkpoint2.Magic)
+	assert.True(t, rmq.NewRmqID(10).EQ(checkpoint2.DataCheckpoint.MessageID))
+	assert.Equal(t, uint64(1000), checkpoint2.DataCheckpoint.TimeTick)
 
 	checkpoint3 := checkpoint.Clone()
 	assert.True(t, messageID.EQ(checkpoint3.MessageID))
 	assert.Equal(t, timeTick, checkpoint3.TimeTick)
 	assert.Equal(t, recoveryMagic, checkpoint3.Magic)
+	assert.True(t, rmq.NewRmqID(10).EQ(checkpoint3.DataCheckpoint.MessageID))
+	assert.Equal(t, uint64(1000), checkpoint3.DataCheckpoint.TimeTick)
 
 	protoCheckpoint.ReplicateConfig = &commonpb.ReplicateConfiguration{}
 	protoCheckpoint.ReplicateCheckpoint = &commonpb.ReplicateCheckpoint{

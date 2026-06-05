@@ -7,10 +7,10 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 // newSegmentAllocManagerFromProto creates a new segment assignment meta from proto.
@@ -31,7 +31,7 @@ func newSegmentAllocManagerFromProto(pchannel types.PChannelInfo, inner *streami
 
 // newSegmentAllocManager creates a new segment assignment meta.
 func newSegmentAllocManager(pchannel types.PChannelInfo, msg message.ImmutableCreateSegmentMessageV2) *segmentAllocManager {
-	meta := recovery.NewSegmentAssignmentMetaFromCreateSegmentMessage(msg)
+	meta := newSegmentAssignmentMetaFromCreateSegmentMessage(msg)
 	stat := utils.NewSegmentStatFromProto(meta.Stat)
 	h := msg.Header()
 	resource.Resource().SegmentStatsManager().RegisterNewGrowingSegment(utils.SegmentBelongs{
@@ -46,6 +46,32 @@ func newSegmentAllocManager(pchannel types.PChannelInfo, msg message.ImmutableCr
 		inner:    meta,
 		ackSem:   atomic.NewInt32(0),
 		txnSem:   atomic.NewInt32(0),
+	}
+}
+
+func newSegmentAssignmentMetaFromCreateSegmentMessage(msg message.ImmutableCreateSegmentMessageV2) *streamingpb.SegmentAssignmentMeta {
+	header := msg.Header()
+	now := tsoutil.PhysicalTime(msg.TimeTick()).Unix()
+	return &streamingpb.SegmentAssignmentMeta{
+		CollectionId:       header.CollectionId,
+		PartitionId:        header.PartitionId,
+		SegmentId:          header.SegmentId,
+		Vchannel:           msg.VChannel(),
+		State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
+		StorageVersion:     header.StorageVersion,
+		CheckpointTimeTick: msg.TimeTick(),
+		PersistedStorage:   &streamingpb.L1SegmentPersistedStorage{},
+		Stat: &streamingpb.SegmentAssignmentStat{
+			MaxRows:               header.MaxRows,
+			MaxBinarySize:         header.MaxSegmentSize,
+			ModifiedRows:          0,
+			ModifiedBinarySize:    0,
+			CreateTimestamp:       now,
+			LastModifiedTimestamp: now,
+			BinlogCounter:         0,
+			CreateSegmentTimeTick: msg.TimeTick(),
+			Level:                 header.Level,
+		},
 	}
 }
 

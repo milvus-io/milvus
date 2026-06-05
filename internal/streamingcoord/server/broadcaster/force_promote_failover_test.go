@@ -210,6 +210,9 @@ func initForcePromoteTestGlobals(t *testing.T) {
 	registry.RegisterDropCollectionV1AckCallback(func(ctx context.Context, msg message.BroadcastResultDropCollectionMessageV1) error {
 		return nil
 	})
+	registry.RegisterDropCollectionV1AckOnceCallback(func(ctx context.Context, msg message.AckResultDropCollectionMessageV1) error {
+		return nil
+	})
 	registry.RegisterAlterReplicateConfigV2AckCallback(func(ctx context.Context, msg message.BroadcastResultAlterReplicateConfigMessageV2) error {
 		return nil
 	})

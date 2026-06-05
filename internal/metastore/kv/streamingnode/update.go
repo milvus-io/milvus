@@ -24,7 +24,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
 // SaveRecoverySnapshot saves a WAL recovery snapshot in one compound
@@ -46,25 +45,15 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 		return nil
 	}
 	b := txn.New()
-	// Aggregate every removal and every save across segments, vchannels and
-	// the salvage checkpoint into two disjoint sets first, then stage all
-	// removals before all saves. The keys never overlap (a segment/schema/
-	// vchannel key is either removed or saved, never both; segment, vchannel,
-	// schema and salvage keyspaces are disjoint), so this global two-phase
-	// ordering is equivalent to the per-entry ordering while letting the
-	// chunked fallback coalesce into a single remove run and a single save run
-	// (O(total/limit) round trips) instead of alternating per entry.
+	// Aggregate every save across segments, vchannels and the salvage
+	// checkpoint. Closed and tombstoned recovery metadata remains persisted
+	// until the growing-module cleanup task explicitly drops it.
 	// Pre-size to the segment count (a lower bound - vchannels add more) to
 	// avoid the first rounds of slice/map growth on a segment-heavy snapshot.
 	removes := make([]string, 0, len(snapshot.SegmentAssignments))
 	saves := make(map[string]string, len(snapshot.SegmentAssignments))
 	for _, info := range snapshot.SegmentAssignments {
 		key := buildSegmentAssignmentKey(pChannelName, info.GetSegmentId())
-		if info.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED {
-			// Flushed segment should be removed from meta.
-			removes = append(removes, key)
-			continue
-		}
 		data, err := proto.Marshal(info)
 		if err != nil {
 			return errors.Wrapf(err, "marshal segment %d at pchannel %s failed", info.GetSegmentId(), pChannelName)

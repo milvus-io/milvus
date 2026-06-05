@@ -63,7 +63,7 @@ func (w *roWALAdaptorImpl) GetSalvageCheckpoint() []*wal.ReplicateCheckpoint {
 	panic("we cannot get salvage checkpoint from a read only wal")
 }
 
-// Append writes a record to the log.
+// Append writes a record to the logger.
 func (w *roWALAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage) (*wal.AppendResult, error) {
 	panic("we cannot append message into a read only wal")
 }

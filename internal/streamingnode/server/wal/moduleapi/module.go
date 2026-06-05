@@ -1,78 +1,68 @@
 package moduleapi
 
 import (
-	"google.golang.org/protobuf/proto"
+	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
+	walcheckpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/checkpoint"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	scheduler "github.com/milvus-io/milvus/pkg/v3/syncutil/preconditioned"
 )
 
-type CleanupContext struct {
-	PhysicalTimeTick uint64
+type Module interface {
+	Name() string
+	ObserveMessage(ctx context.Context, msg message.ImmutableMessage) ObserveResult
+	SwitchIntoMetaAndData() Snapshot
+	RequirePersist()
 }
 
-type ModuleName string
-
-const (
-	ModuleNameVChannel     ModuleName = "vchannel"
-	ModuleNameSegment      ModuleName = "segment"
-	ModuleNameTransformLog ModuleName = "transformlog"
-)
-
-// WritePathRecoveryModuleSnapshot contains only the state needed to resume the WAL
-// write path. It intentionally excludes persisted binlogs and historical schemas.
-type WritePathRecoveryModuleSnapshot struct {
-	VChannels       map[string]VChannelWritePathRecoveryState
-	GrowingSegments map[int64]SegmentWritePathRecoveryState
+type ObserveResult struct {
+	Meta walcheckpoint.Barrier
+	Data walcheckpoint.Barrier
 }
 
-type VChannelWritePathRecoveryState struct {
-	VChannel     string
-	CollectionID int64
-	PartitionIDs []int64
-	Schema       *schemapb.CollectionSchema
+type Snapshot interface{}
+
+type CheckpointPersistedObserver interface {
+	NotifyCheckpointPersisted(metaTimeTick uint64, dataTimeTick uint64)
 }
 
-type SegmentWritePathRecoveryState struct {
-	VChannel     string
-	CollectionID int64
-	PartitionID  int64
-	SegmentID    int64
-	Stat         *streamingpb.SegmentAssignmentStat
+type DurableFrontierView interface {
+	PartitionDurableFrontier(collectionID int64, partitionID int64) walcheckpoint.Barrier
+	VChannelDurableFrontier(vchannel string) walcheckpoint.Barrier
+	AllDurableFrontier() walcheckpoint.Barrier
 }
 
-type SnapshotKey struct {
-	PChannel  string
-	VChannel  string
-	SegmentID int64
-}
-
-type SnapshotOp int
-
-const (
-	SnapshotOpUpsert SnapshotOp = iota
-	SnapshotOpUpsertBase
-	SnapshotOpDelete
-)
-
-type DirtySnapshot interface {
-	ModuleName() ModuleName
-	Key() SnapshotKey
-	Op() SnapshotOp
-	Payload() proto.Message
-	MarkPersisted()
+type DataCheckpointView interface {
+	DataCheckpointTimeTick() uint64
 }
 
 type Runtime struct {
 	Scheduler AsyncTaskScheduler
-	Notifier  ModuleNotifier
+	Notifier  BarrierUpdatedNotifier
 }
 
 type AsyncTaskScheduler interface {
-	Submit(task nodescheduler.Task) nodescheduler.TaskHandle
+	Submit(task scheduler.Task) scheduler.TaskHandle
+	Notify()
 }
 
-type ModuleNotifier interface {
-	NotifyModuleUpdated(module ModuleName)
+type BarrierUpdatedNotifier interface {
+	NotifyBarrierUpdated()
+}
+
+func ComposeBarriers(results []ObserveResult) ObserveResult {
+	metaBarriers := make([]walcheckpoint.Barrier, 0, len(results))
+	dataBarriers := make([]walcheckpoint.Barrier, 0, len(results))
+	for _, result := range results {
+		if result.Meta != nil {
+			metaBarriers = append(metaBarriers, result.Meta)
+		}
+		if result.Data != nil {
+			dataBarriers = append(dataBarriers, result.Data)
+		}
+	}
+	return ObserveResult{
+		Meta: walcheckpoint.NewCompositeBarrier(metaBarriers...),
+		Data: walcheckpoint.NewCompositeBarrier(dataBarriers...),
+	}
 }

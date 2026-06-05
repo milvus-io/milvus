@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -14,13 +13,12 @@ import (
 
 type WALCheckpoint = utility.WALCheckpoint
 
-const RecoveryMagicStreamingInitialized = utility.RecoveryMagicStreamingInitialized
-
 // RecoverySnapshot is the snapshot of the recovery info.
 type RecoverySnapshot struct {
 	VChannels          map[string]*streamingpb.VChannelMeta
 	SegmentAssignments map[int64]*streamingpb.SegmentAssignmentMeta
 	Checkpoint         *WALCheckpoint
+	CheckpointDirty    bool
 	TxnBuffer          *utility.TxnBuffer
 	// Used during WAL alteration process
 	AlterWALInfo *AlterWALInfo
@@ -87,19 +85,11 @@ type RecoveryStorage interface {
 	// Metrics gets the metrics of the recovery storage.
 	Metrics() RecoveryMetrics
 
-	// TODO: should be removed in future,
-	// GetSchema gets last schema of the collection which timetick is less than the given timetick.
-	GetSchema(ctx context.Context, vchannel string, timetick uint64) (*schemapb.CollectionSchema, error)
-
 	// ObserveMessage observes the message from the WAL.
-	ObserveMessage(ctx context.Context, msg message.ImmutableMessage) error
+	ObserveMessage(ctx context.Context, msg message.ImmutableMessage)
 
-	// UpdateFlusherCheckpoint updates the checkpoint of flusher.
-	// TODO: should be removed in future, after merge the flusher logic into recovery storage.
-	UpdateFlusherCheckpoint(vchannel string, checkpoint *WALCheckpoint)
-
-	// GetFlusherCheckpointByTimeTick returns the minimum flush checkpoint among all vchannels based on time tick.
-	GetFlusherCheckpointByTimeTick(ctx context.Context) *WALCheckpoint
+	// GetDataCheckpoint returns the recovery-owned data checkpoint.
+	GetDataCheckpoint(ctx context.Context) *WALCheckpoint
 
 	// Close closes the recovery storage.
 	Close()

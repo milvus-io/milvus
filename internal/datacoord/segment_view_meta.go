@@ -24,14 +24,13 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -131,7 +130,7 @@ func (m *segmentViewMeta) GetCompactionTo(fromSegmentID int64) ([]*SegmentInfo, 
 		for _, toID := range compactTos {
 			to, found := m.segments.Get(toID)
 			if !found {
-				log.Warn("compactionTo relation is broken", zap.Int64("from", fromSegmentID), zap.Int64("to", toID))
+				mlog.Warn(context.TODO(), "compactionTo relation is broken", mlog.Int64("from", fromSegmentID), mlog.Int64("to", toID))
 				return nil, exist
 			}
 			result = append(result, to)
@@ -218,23 +217,23 @@ func (m *segmentViewMeta) ModifySegments(collectionID int64, segmentIDs []Unique
 
 // DropSegment removes a segment from both catalog and memory.
 func (m *segmentViewMeta) DropSegment(ctx context.Context, collectionID int64, segmentID UniqueID) error {
-	log := log.Ctx(ctx)
-	log.Debug("meta update: dropping segment", zap.Int64("segmentID", segmentID))
+	log := logger.Ctx(ctx)
+	mlog.Debug(context.TODO(), "meta update: dropping segment", mlog.Int64("segmentID", segmentID))
 
 	m.collLock.Lock(collectionID)
 	defer m.collLock.Unlock(collectionID)
 
 	segment := m.GetSegment(segmentID)
 	if segment == nil {
-		log.Warn("meta update: dropping segment failed - segment not found",
-			zap.Int64("segmentID", segmentID))
+		mlog.Warn(context.TODO(), "meta update: dropping segment failed - segment not found",
+			mlog.Int64("segmentID", segmentID))
 		return nil
 	}
 
 	if err := m.catalog.DropSegment(ctx, segment.SegmentInfo); err != nil {
-		log.Warn("meta update: dropping segment failed",
-			zap.Int64("segmentID", segmentID),
-			zap.Error(err))
+		mlog.Warn(context.TODO(), "meta update: dropping segment failed",
+			mlog.Int64("segmentID", segmentID),
+			mlog.Err(err))
 		return err
 	}
 
@@ -243,8 +242,8 @@ func (m *segmentViewMeta) DropSegment(ctx context.Context, collectionID int64, s
 		getSortStatus(segment.GetIsSorted()), fmt.Sprint(segment.GetStorageVersion()),
 	).Dec()
 	m.dropSegmentFromMemory(segmentID)
-	log.Info("meta update: dropping segment - complete",
-		zap.Int64("segmentID", segmentID))
+	mlog.Info(context.TODO(), "meta update: dropping segment - complete",
+		mlog.Int64("segmentID", segmentID))
 	return nil
 }
 
@@ -278,7 +277,7 @@ func (m *segmentViewMeta) UpdateSegments(ctx context.Context, collectionID int64
 	increments := lo.Values(updatePack.increments)
 
 	if err := m.catalog.AlterSegments(ctx, segments, increments...); err != nil {
-		log.Ctx(ctx).Error("meta update: update segments failed", zap.Error(err))
+		mlog.Error(ctx, "meta update: update segments failed", mlog.Err(err))
 		return err
 	}
 
@@ -286,7 +285,7 @@ func (m *segmentViewMeta) UpdateSegments(ctx context.Context, collectionID int64
 	for id, s := range updatePack.segments {
 		m.setSegment(id, s)
 	}
-	log.Ctx(ctx).Info("meta update: update segments - complete")
+	mlog.Info(ctx, "meta update: update segments - complete")
 	return nil
 }
 
@@ -692,8 +691,8 @@ func (m *segmentViewMeta) reloadDataViews() error {
 
 		m.dataViews.Insert(collectionID, dvc)
 	}
-	log.Info("segmentViewMeta reloadDataViews done",
-		zap.Int("numCollections", len(allViews)))
+	mlog.Info(context.TODO(), "segmentViewMeta reloadDataViews done",
+		mlog.Int("numCollections", len(allViews)))
 	return nil
 }
 
@@ -772,7 +771,7 @@ func (m *segmentViewMeta) FlushSegments(ctx context.Context, collectionID int64,
 	segments := lo.MapToSlice(updatePack.segments, func(_ int64, seg *SegmentInfo) *datapb.SegmentInfo { return seg.SegmentInfo })
 	increments := lo.Values(updatePack.increments)
 	if err := m.catalog.AlterSegmentsAndSaveDataView(ctx, segments, collectionID, newViewProto, increments...); err != nil {
-		log.Ctx(ctx).Error("meta update: flush segments failed", zap.Int64s("segmentIDs", segmentIDs), zap.Error(err))
+		mlog.Error(ctx, "meta update: flush segments failed", mlog.Int64s("segmentIDs", segmentIDs), mlog.Err(err))
 		return err
 	}
 
@@ -785,7 +784,7 @@ func (m *segmentViewMeta) FlushSegments(ctx context.Context, collectionID int64,
 	// 5. Update DataView memory
 	m.addDataView(collectionID, newCDV)
 
-	log.Ctx(ctx).Info("meta update: flush segments - complete", zap.Int64s("segmentIDs", segmentIDs))
+	mlog.Info(ctx, "meta update: flush segments - complete", mlog.Int64s("segmentIDs", segmentIDs))
 	return nil
 }
 
@@ -799,11 +798,11 @@ func (m *segmentViewMeta) DropPartition(ctx context.Context, collectionID int64,
 	m.collLock.Lock(collectionID)
 	defer m.collLock.Unlock(collectionID)
 
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", collectionID),
-		zap.Int64s("partitionIDs", partitionIDs),
+	logger := mlog.With(
+		mlog.Int64("collectionID", collectionID),
+		mlog.Int64s("partitionIDs", partitionIDs),
 	)
-	log.Info("DropPartition - Start")
+	mlog.Info(context.TODO(), "DropPartition - Start")
 
 	// 1. Find and mark segments as Dropped.
 	metricMutation := &segMetricMutation{stateChange: make(map[string]map[string]map[string]map[string]int)}
@@ -847,7 +846,7 @@ func (m *segmentViewMeta) DropPartition(ctx context.Context, collectionID int64,
 	}
 	if len(segInfos) > 0 || newViewProto != nil {
 		if err := m.catalog.AlterSegmentsAndSaveDataView(ctx, segInfos, collectionID, newViewProto); err != nil {
-			log.Error("DropPartition: catalog write failed", zap.Error(err))
+			mlog.Error(context.TODO(), "DropPartition: catalog write failed", mlog.Err(err))
 			return err
 		}
 	}
@@ -859,8 +858,8 @@ func (m *segmentViewMeta) DropPartition(ctx context.Context, collectionID int64,
 	metricMutation.commit()
 	m.addDataView(collectionID, newCDV)
 
-	log.Info("DropPartition - complete",
-		zap.Int("numDroppedSegments", len(modSegments)))
+	mlog.Info(context.TODO(), "DropPartition - complete",
+		mlog.Int("numDroppedSegments", len(modSegments)))
 	return nil
 }
 
@@ -875,11 +874,11 @@ func (m *segmentViewMeta) TruncateCollection(ctx context.Context, collectionID i
 	m.collLock.Lock(collectionID)
 	defer m.collLock.Unlock(collectionID)
 
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", collectionID),
-		zap.Int("numSegments", len(segmentIDs)),
+	logger := mlog.With(
+		mlog.Int64("collectionID", collectionID),
+		mlog.Int("numSegments", len(segmentIDs)),
 	)
-	log.Info("TruncateCollection - Start")
+	mlog.Info(context.TODO(), "TruncateCollection - Start")
 
 	// 1. Find and mark segments as Dropped.
 	metricMutation := &segMetricMutation{stateChange: make(map[string]map[string]map[string]map[string]int)}
@@ -925,7 +924,7 @@ func (m *segmentViewMeta) TruncateCollection(ctx context.Context, collectionID i
 	}
 	if len(segInfos) > 0 || newViewProto != nil {
 		if err := m.catalog.AlterSegmentsAndSaveDataView(ctx, segInfos, collectionID, newViewProto); err != nil {
-			log.Error("TruncateCollection: catalog write failed", zap.Error(err))
+			mlog.Error(context.TODO(), "TruncateCollection: catalog write failed", mlog.Err(err))
 			return err
 		}
 	}
@@ -937,8 +936,8 @@ func (m *segmentViewMeta) TruncateCollection(ctx context.Context, collectionID i
 	metricMutation.commit()
 	m.addDataView(collectionID, newCDV)
 
-	log.Info("TruncateCollection - complete",
-		zap.Int("numDroppedSegments", len(modSegments)))
+	mlog.Info(context.TODO(), "TruncateCollection - complete",
+		mlog.Int("numDroppedSegments", len(modSegments)))
 	return nil
 }
 
@@ -995,11 +994,11 @@ func (m *segmentViewMeta) buildCompactionDataView(collectionID int64, vchannel s
 // completeClusterCompactionMutation handles cluster compaction mutation.
 // Caller must hold collLock.Lock(collectionID).
 func (m *segmentViewMeta) completeClusterCompactionMutation(t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
-	log := log.Ctx(context.TODO()).With(zap.Int64("planID", t.GetPlanID()),
-		zap.String("type", t.GetType().String()),
-		zap.Int64("collectionID", t.CollectionID),
-		zap.Int64("partitionID", t.PartitionID),
-		zap.String("channel", t.GetChannel()))
+	log := logger.Ctx(context.TODO()).With(mlog.Int64("planID", t.GetPlanID()),
+		mlog.String("type", t.GetType().String()),
+		mlog.Int64("collectionID", t.CollectionID),
+		mlog.Int64("partitionID", t.PartitionID),
+		mlog.String("channel", t.GetChannel()))
 
 	metricMutation := &segMetricMutation{stateChange: make(map[string]map[string]map[string]map[string]int)}
 	compactFromSegIDs := make([]int64, 0)
@@ -1013,9 +1012,9 @@ func (m *segmentViewMeta) completeClusterCompactionMutation(t *datapb.Compaction
 			return nil, nil, merr.WrapErrSegmentNotFound(segmentID)
 		}
 		if !isSegmentHealthy(segment) {
-			log.Warn("input segment was dropped during compaction mutation",
-				zap.Int64("segmentID", segmentID),
-				zap.String("state", segment.GetState().String()))
+			mlog.Warn(context.TODO(), "input segment was dropped during compaction mutation",
+				mlog.Int64("segmentID", segmentID),
+				mlog.String("state", segment.GetState().String()))
 			return nil, nil, merr.WrapErrSegmentNotFound(segmentID, "input segment was dropped")
 		}
 		cloned := segment.Clone()
@@ -1055,8 +1054,8 @@ func (m *segmentViewMeta) completeClusterCompactionMutation(t *datapb.Compaction
 		metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetIsSorted(), segment.GetStorageVersion(), segment.GetNumOfRows())
 	}
 
-	log = log.With(zap.Int64s("compact from", compactFromSegIDs), zap.Int64s("compact to", compactToSegIDs))
-	log.Debug("meta update: prepare for meta mutation - complete")
+	logger = logger.With(mlog.Int64s("compact from", compactFromSegIDs), mlog.Int64s("compact to", compactToSegIDs))
+	mlog.Debug(context.TODO(), "meta update: prepare for meta mutation - complete")
 
 	compactToInfos := lo.Map(compactToSegInfos, func(info *SegmentInfo, _ int) *datapb.SegmentInfo {
 		return info.SegmentInfo
@@ -1074,7 +1073,7 @@ func (m *segmentViewMeta) completeClusterCompactionMutation(t *datapb.Compaction
 		newViewProto = newCDV.toProto()
 	}
 	if err := m.catalog.AlterSegmentsAndSaveDataView(m.ctx, compactToInfos, t.CollectionID, newViewProto, binlogs...); err != nil {
-		log.Warn("fail to alter compactTo segments", zap.Error(err))
+		mlog.Warn(context.TODO(), "fail to alter compactTo segments", mlog.Err(err))
 		return nil, nil, err
 	}
 	lo.ForEach(compactToSegInfos, func(info *SegmentInfo, _ int) {
@@ -1082,7 +1081,7 @@ func (m *segmentViewMeta) completeClusterCompactionMutation(t *datapb.Compaction
 	})
 	m.addDataView(t.CollectionID, newCDV)
 
-	log.Info("meta update: alter in memory meta after compaction - complete")
+	mlog.Info(context.TODO(), "meta update: alter in memory meta after compaction - complete")
 	return compactToSegInfos, metricMutation, nil
 }
 
@@ -1092,11 +1091,11 @@ func (m *segmentViewMeta) completeMixCompactionMutation(
 	t *datapb.CompactionTask,
 	result *datapb.CompactionPlanResult,
 ) ([]*SegmentInfo, *segMetricMutation, error) {
-	log := log.Ctx(context.TODO()).With(zap.Int64("planID", t.GetPlanID()),
-		zap.String("type", t.GetType().String()),
-		zap.Int64("collectionID", t.CollectionID),
-		zap.Int64("partitionID", t.PartitionID),
-		zap.String("channel", t.GetChannel()),
+	log := logger.Ctx(context.TODO()).With(mlog.Int64("planID", t.GetPlanID()),
+		mlog.String("type", t.GetType().String()),
+		mlog.Int64("collectionID", t.CollectionID),
+		mlog.Int64("partitionID", t.PartitionID),
+		mlog.String("channel", t.GetChannel()),
 	)
 
 	metricMutation := &segMetricMutation{stateChange: make(map[string]map[string]map[string]map[string]int)}
@@ -1108,9 +1107,9 @@ func (m *segmentViewMeta) completeMixCompactionMutation(
 			return nil, nil, merr.WrapErrSegmentNotFound(segmentID)
 		}
 		if !isSegmentHealthy(segment) {
-			log.Warn("input segment was dropped during compaction mutation",
-				zap.Int64("segmentID", segmentID),
-				zap.String("state", segment.GetState().String()))
+			mlog.Warn(context.TODO(), "input segment was dropped during compaction mutation",
+				mlog.Int64("segmentID", segmentID),
+				mlog.String("state", segment.GetState().String()))
 			return nil, nil, merr.WrapErrSegmentNotFound(segmentID, "input segment was dropped")
 		}
 
@@ -1123,14 +1122,14 @@ func (m *segmentViewMeta) completeMixCompactionMutation(
 
 		updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
 
-		log.Info("compact from segment",
-			zap.Int64("segmentID", cloned.GetID()),
-			zap.Int64("segment size", cloned.getSegmentSize()),
-			zap.Int64("num rows", cloned.GetNumOfRows()),
+		mlog.Info(context.TODO(), "compact from segment",
+			mlog.Int64("segmentID", cloned.GetID()),
+			mlog.Int64("segment size", cloned.getSegmentSize()),
+			mlog.Int64("num rows", cloned.GetNumOfRows()),
 		)
 	}
 
-	log = log.With(zap.Int64s("compactFrom", compactFromSegIDs))
+	logger = logger.With(mlog.Int64s("compactFrom", compactFromSegIDs))
 
 	compactToSegments := make([]*SegmentInfo, 0)
 	for _, compactToSegment := range result.GetSegments() {
@@ -1171,19 +1170,19 @@ func (m *segmentViewMeta) completeMixCompactionMutation(
 
 		metricMutation.addNewSeg(compactToSegmentInfo.GetState(), compactToSegmentInfo.GetLevel(), compactToSegmentInfo.GetIsSorted(), compactToSegmentInfo.GetStorageVersion(), compactToSegmentInfo.GetNumOfRows())
 
-		log.Info("Add a new compactTo segment",
-			zap.Int64("compactTo", compactToSegmentInfo.GetID()),
-			zap.Int64("compactTo segment numRows", compactToSegmentInfo.GetNumOfRows()),
-			zap.Int("binlog count", len(compactToSegmentInfo.GetBinlogs())),
-			zap.Int("statslog count", len(compactToSegmentInfo.GetStatslogs())),
-			zap.Int("deltalog count", len(compactToSegmentInfo.GetDeltalogs())),
-			zap.Int64("segment size", compactToSegmentInfo.getSegmentSize()),
-			zap.Int64s("expirQuantiles", compactToSegmentInfo.GetExpirQuantiles()),
+		mlog.Info(context.TODO(), "Add a new compactTo segment",
+			mlog.Int64("compactTo", compactToSegmentInfo.GetID()),
+			mlog.Int64("compactTo segment numRows", compactToSegmentInfo.GetNumOfRows()),
+			mlog.Int("binlog count", len(compactToSegmentInfo.GetBinlogs())),
+			mlog.Int("statslog count", len(compactToSegmentInfo.GetStatslogs())),
+			mlog.Int("deltalog count", len(compactToSegmentInfo.GetDeltalogs())),
+			mlog.Int64("segment size", compactToSegmentInfo.getSegmentSize()),
+			mlog.Int64s("expirQuantiles", compactToSegmentInfo.GetExpirQuantiles()),
 		)
 		compactToSegments = append(compactToSegments, compactToSegmentInfo)
 	}
 
-	log.Debug("meta update: prepare for meta mutation - complete")
+	mlog.Debug(context.TODO(), "meta update: prepare for meta mutation - complete")
 	compactFromInfos := lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *datapb.SegmentInfo {
 		return info.SegmentInfo
 	})
@@ -1206,11 +1205,11 @@ func (m *segmentViewMeta) completeMixCompactionMutation(
 		newViewProto = newCDV.toProto()
 	}
 	if err := m.catalog.AlterSegmentsAndSaveDataView(m.ctx, compactToInfos, t.CollectionID, newViewProto, binlogs...); err != nil {
-		log.Warn("fail to alter compactTo segments", zap.Error(err))
+		mlog.Warn(context.TODO(), "fail to alter compactTo segments", mlog.Err(err))
 		return nil, nil, err
 	}
 	if err := m.catalog.AlterSegments(m.ctx, compactFromInfos); err != nil {
-		log.Warn("fail to alter compactFrom segments", zap.Error(err))
+		mlog.Warn(context.TODO(), "fail to alter compactFrom segments", mlog.Err(err))
 		return nil, nil, err
 	}
 	lo.ForEach(compactFromSegInfos, func(info *SegmentInfo, _ int) {
@@ -1221,7 +1220,7 @@ func (m *segmentViewMeta) completeMixCompactionMutation(
 	})
 	m.addDataView(t.CollectionID, newCDV)
 
-	log.Info("meta update: alter in memory meta after compaction - complete")
+	mlog.Info(context.TODO(), "meta update: alter in memory meta after compaction - complete")
 	return compactToSegments, metricMutation, nil
 }
 
@@ -1231,11 +1230,11 @@ func (m *segmentViewMeta) completeSortCompactionMutation(
 	t *datapb.CompactionTask,
 	result *datapb.CompactionPlanResult,
 ) ([]*SegmentInfo, *segMetricMutation, error) {
-	log := log.Ctx(context.TODO()).With(zap.Int64("planID", t.GetPlanID()),
-		zap.String("type", t.GetType().String()),
-		zap.Int64("collectionID", t.CollectionID),
-		zap.Int64("partitionID", t.PartitionID),
-		zap.String("channel", t.GetChannel()))
+	log := logger.Ctx(context.TODO()).With(mlog.Int64("planID", t.GetPlanID()),
+		mlog.String("type", t.GetType().String()),
+		mlog.Int64("collectionID", t.CollectionID),
+		mlog.Int64("partitionID", t.PartitionID),
+		mlog.String("channel", t.GetChannel()))
 
 	metricMutation := &segMetricMutation{stateChange: make(map[string]map[string]map[string]map[string]int)}
 	compactFromSegID := t.GetInputSegments()[0]
@@ -1245,9 +1244,9 @@ func (m *segmentViewMeta) completeSortCompactionMutation(
 	}
 
 	if !isSegmentHealthy(oldSegment) {
-		log.Warn("input segment was dropped during compaction mutation",
-			zap.Int64("segmentID", compactFromSegID),
-			zap.String("state", oldSegment.GetState().String()))
+		mlog.Warn(context.TODO(), "input segment was dropped during compaction mutation",
+			mlog.Int64("segmentID", compactFromSegID),
+			mlog.String("state", oldSegment.GetState().String()))
 		return nil, nil, merr.WrapErrSegmentNotFound(compactFromSegID, "input segment was dropped")
 	}
 
@@ -1294,7 +1293,7 @@ func (m *segmentViewMeta) completeSortCompactionMutation(
 	} else {
 		segment.State = commonpb.SegmentState_Dropped
 		segment.DroppedAt = uint64(time.Now().UnixNano())
-		log.Info("drop segment due to 0 rows", zap.Int64("segmentID", segment.GetID()))
+		mlog.Info(context.TODO(), "drop segment due to 0 rows", mlog.Int64("segmentID", segment.GetID()))
 	}
 
 	cloned := oldSegment.Clone()
@@ -1303,23 +1302,23 @@ func (m *segmentViewMeta) completeSortCompactionMutation(
 
 	updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
 
-	log = log.With(zap.Int64s("compactFrom", []int64{oldSegment.GetID()}), zap.Int64("compactTo", segment.GetID()))
+	logger = logger.With(mlog.Int64s("compactFrom", []int64{oldSegment.GetID()}), mlog.Int64("compactTo", segment.GetID()))
 
 	compactFromSegIDs := []int64{oldSegment.GetID()}
 	compactToSegIDs := []int64{segment.GetID()}
 	newCDV := m.buildCompactionDataView(t.CollectionID, t.GetChannel(), t.PartitionID, compactFromSegIDs, compactToSegIDs)
 
-	log.Info("meta update: prepare for complete stats mutation - complete",
-		zap.Int64("num rows", segment.GetNumOfRows()),
-		zap.Int64("segment size", segment.getSegmentSize()),
-		zap.Int64s("expirQuantiles", segment.GetExpirQuantiles()))
+	mlog.Info(context.TODO(), "meta update: prepare for complete stats mutation - complete",
+		mlog.Int64("num rows", segment.GetNumOfRows()),
+		mlog.Int64("segment size", segment.getSegmentSize()),
+		mlog.Int64s("expirQuantiles", segment.GetExpirQuantiles()))
 
 	var newViewProto *viewpb.DataViewOfCollection
 	if newCDV != nil {
 		newViewProto = newCDV.toProto()
 	}
 	if err := m.catalog.AlterSegmentsAndSaveDataView(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo, segment.SegmentInfo}, t.CollectionID, newViewProto, metastore.BinlogsIncrement{Segment: segment.SegmentInfo}); err != nil {
-		log.Warn("fail to alter segments and new segment", zap.Error(err))
+		mlog.Warn(context.TODO(), "fail to alter segments and new segment", mlog.Err(err))
 		return nil, nil, err
 	}
 
@@ -1327,7 +1326,7 @@ func (m *segmentViewMeta) completeSortCompactionMutation(
 	m.setSegment(segment.GetID(), segment)
 	m.addDataView(t.CollectionID, newCDV)
 
-	log.Info("meta update: alter in memory meta after compaction - complete")
+	mlog.Info(context.TODO(), "meta update: alter in memory meta after compaction - complete")
 	return []*SegmentInfo{segment}, metricMutation, nil
 }
 
@@ -1342,17 +1341,17 @@ func (m *segmentViewMeta) CompleteCompactionHandoff(ctx context.Context, collect
 	m.collLock.Lock(collectionID)
 	defer m.collLock.Unlock(collectionID)
 
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", collectionID),
-		zap.Int64s("compactFrom", compactFromIDs),
-		zap.Int64s("compactTo", compactToIDs),
-		zap.String("channel", vchannel),
+	logger := mlog.With(
+		mlog.Int64("collectionID", collectionID),
+		mlog.Int64s("compactFrom", compactFromIDs),
+		mlog.Int64s("compactTo", compactToIDs),
+		mlog.String("channel", vchannel),
 	)
 
 	// Build new DataView: remove compactFrom, add compactTo
 	newCDV := m.buildCompactionDataView(collectionID, vchannel, partitionID, compactFromIDs, compactToIDs)
 	if newCDV == nil {
-		log.Warn("CompleteCompactionHandoff: no DataView for collection, skip")
+		mlog.Warn(context.TODO(), "CompleteCompactionHandoff: no DataView for collection, skip")
 		return nil
 	}
 
@@ -1376,7 +1375,7 @@ func (m *segmentViewMeta) CompleteCompactionHandoff(ctx context.Context, collect
 	for _, segID := range compactToIDs {
 		seg := m.GetSegment(segID)
 		if seg == nil {
-			log.Warn("CompleteCompactionHandoff: compactTo segment not found", zap.Int64("segmentID", segID))
+			mlog.Warn(context.TODO(), "CompleteCompactionHandoff: compactTo segment not found", mlog.Int64("segmentID", segID))
 			return merr.WrapErrSegmentNotFound(segID)
 		}
 		compactToInfos = append(compactToInfos, seg.SegmentInfo)
@@ -1385,12 +1384,12 @@ func (m *segmentViewMeta) CompleteCompactionHandoff(ctx context.Context, collect
 	// Persist: compactTo segments (+ DataView), then compactFrom segments
 	newViewProto := newCDV.toProto()
 	if err := m.catalog.AlterSegmentsAndSaveDataView(ctx, compactToInfos, collectionID, newViewProto); err != nil {
-		log.Warn("CompleteCompactionHandoff: fail to save DataView and compactTo", zap.Error(err))
+		mlog.Warn(context.TODO(), "CompleteCompactionHandoff: fail to save DataView and compactTo", mlog.Err(err))
 		return err
 	}
 	if len(compactFromInfos) > 0 {
 		if err := m.catalog.AlterSegments(ctx, compactFromInfos); err != nil {
-			log.Warn("CompleteCompactionHandoff: fail to drop compactFrom", zap.Error(err))
+			mlog.Warn(context.TODO(), "CompleteCompactionHandoff: fail to drop compactFrom", mlog.Err(err))
 			return err
 		}
 	}
@@ -1402,7 +1401,7 @@ func (m *segmentViewMeta) CompleteCompactionHandoff(ctx context.Context, collect
 	metricMutation.commit()
 	m.addDataView(collectionID, newCDV)
 
-	log.Info("CompleteCompactionHandoff complete")
+	mlog.Info(context.TODO(), "CompleteCompactionHandoff complete")
 	return nil
 }
 
@@ -1417,11 +1416,11 @@ func (m *segmentViewMeta) RegisterSegments(ctx context.Context, collectionID int
 	m.collLock.Lock(collectionID)
 	defer m.collLock.Unlock(collectionID)
 
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", collectionID),
-		zap.Int("numSegments", len(segments)),
+	logger := mlog.With(
+		mlog.Int64("collectionID", collectionID),
+		mlog.Int("numSegments", len(segments)),
 	)
-	log.Info("RegisterSegments - Start")
+	mlog.Info(context.TODO(), "RegisterSegments - Start")
 
 	segInfos := make([]*datapb.SegmentInfo, 0, len(segments))
 	for _, seg := range segments {
@@ -1429,7 +1428,7 @@ func (m *segmentViewMeta) RegisterSegments(ctx context.Context, collectionID int
 	}
 
 	if err := m.catalog.AlterSegments(ctx, segInfos); err != nil {
-		log.Error("RegisterSegments: catalog write failed", zap.Error(err))
+		mlog.Error(context.TODO(), "RegisterSegments: catalog write failed", mlog.Err(err))
 		return err
 	}
 
@@ -1441,7 +1440,7 @@ func (m *segmentViewMeta) RegisterSegments(ctx context.Context, collectionID int
 		).Inc()
 	}
 
-	log.Info("RegisterSegments - complete")
+	mlog.Info(context.TODO(), "RegisterSegments - complete")
 	return nil
 }
 
@@ -1451,11 +1450,11 @@ func (m *segmentViewMeta) ActivateSegments(ctx context.Context, collectionID int
 	m.collLock.Lock(collectionID)
 	defer m.collLock.Unlock(collectionID)
 
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", collectionID),
-		zap.Int64s("segmentIDs", segmentIDs),
+	logger := mlog.With(
+		mlog.Int64("collectionID", collectionID),
+		mlog.Int64s("segmentIDs", segmentIDs),
 	)
-	log.Info("ActivateSegments - Start")
+	mlog.Info(context.TODO(), "ActivateSegments - Start")
 
 	// Compute new DataView
 	// streaming_version increments, compact_version resets to 0.
@@ -1489,7 +1488,7 @@ func (m *segmentViewMeta) ActivateSegments(ctx context.Context, collectionID int
 	for _, segID := range segmentIDs {
 		seg := m.GetSegment(segID)
 		if seg == nil {
-			log.Warn("ActivateSegments: segment not found, skip", zap.Int64("segmentID", segID))
+			mlog.Warn(context.TODO(), "ActivateSegments: segment not found, skip", mlog.Int64("segmentID", segID))
 			continue
 		}
 		cloned := seg.Clone()
@@ -1499,14 +1498,14 @@ func (m *segmentViewMeta) ActivateSegments(ctx context.Context, collectionID int
 	}
 
 	if len(segInfos) == 0 {
-		log.Info("ActivateSegments: no segments to complete")
+		mlog.Info(context.TODO(), "ActivateSegments: no segments to complete")
 		return nil
 	}
 
 	// Atomic catalog write
 	newViewProto := newCDV.toProto()
 	if err := m.catalog.AlterSegmentsAndSaveDataView(ctx, segInfos, collectionID, newViewProto); err != nil {
-		log.Error("ActivateSegments: catalog write failed", zap.Error(err))
+		mlog.Error(context.TODO(), "ActivateSegments: catalog write failed", mlog.Err(err))
 		return err
 	}
 
@@ -1516,7 +1515,7 @@ func (m *segmentViewMeta) ActivateSegments(ctx context.Context, collectionID int
 	}
 	m.addDataView(collectionID, newCDV)
 
-	log.Info("ActivateSegments - complete", zap.Int("numSegments", len(segInfos)))
+	mlog.Info(context.TODO(), "ActivateSegments - complete", mlog.Int("numSegments", len(segInfos)))
 	return nil
 }
 
@@ -1550,7 +1549,7 @@ func (m *segmentViewMeta) reloadFromKV(ctx context.Context, collectionIDs []int6
 	if err := conc.AwaitAll(futures...); err != nil {
 		return err
 	}
-	log.Info("segmentViewMeta reloadFromKV: segments loaded", zap.Duration("dur", record.RecordSpan()))
+	mlog.Info(context.TODO(), "segmentViewMeta reloadFromKV: segments loaded", mlog.Duration("dur", record.RecordSpan()))
 
 	// Populate in-memory structures.
 	metrics.DataCoordNumSegments.Reset()
@@ -1593,9 +1592,9 @@ func (m *segmentViewMeta) reloadFromKV(ctx context.Context, collectionIDs []int6
 		return err
 	}
 
-	log.Info("segmentViewMeta reloadFromKV done",
-		zap.Int("numSegments", numSegments),
-		zap.Int64("numStoredRows", numStoredRows),
-		zap.Duration("duration", record.ElapseSpan()))
+	mlog.Info(context.TODO(), "segmentViewMeta reloadFromKV done",
+		mlog.Int("numSegments", numSegments),
+		mlog.Int64("numStoredRows", numStoredRows),
+		mlog.Duration("duration", record.ElapseSpan()))
 	return nil
 }

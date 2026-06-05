@@ -80,6 +80,7 @@ func (c *DDLCallback) registerCollectionCallbacks() {
 	registry.RegisterCreateCollectionV1AckCallback(c.createCollectionV1AckCallback)
 	registry.RegisterAlterCollectionV2AckCallback(c.alterCollectionV2AckCallback)
 	registry.RegisterDropCollectionV1AckCallback(c.dropCollectionV1AckCallback)
+	registry.RegisterDropCollectionV1AckOnceCallback(c.dropCollectionV1AckOnceCallback)
 
 	registry.RegisterTruncateCollectionV2AckCallback(c.truncateCollectionV2AckCallback)
 	registry.RegisterTruncateCollectionV2AckOnceCallback(c.truncateCollectionV2AckOnceCallback)
