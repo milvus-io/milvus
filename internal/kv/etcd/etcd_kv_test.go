@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -572,9 +573,11 @@ func (s *EtcdKVSuite) TestTxnWithPredicates() {
 	err := etcdKV.MultiSave(context.TODO(), prepareKV)
 	s.Require().NoError(err)
 
-	badPredicate := predicates.NewMockPredicate(s.T())
-	badPredicate.EXPECT().Type().Return(0)
-	badPredicate.EXPECT().Target().Return(predicates.PredTargetValue)
+	badPredicate := &struct{ predicates.Predicate }{}
+	targetMock := mockey.Mock((*struct{ predicates.Predicate }).Target).Return(predicates.PredTargetValue).Build()
+	defer targetMock.UnPatch()
+	typeMock := mockey.Mock((*struct{ predicates.Predicate }).Type).Return(predicates.PredicateType(0)).Build()
+	defer typeMock.UnPatch()
 
 	multiSaveAndRemovePredTests := []struct {
 		tag           string

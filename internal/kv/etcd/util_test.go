@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc/metadata"
 
@@ -50,8 +51,9 @@ func (s *EtcdKVUtilSuite) TestParsePredicates() {
 		expectSucceed bool
 	}
 
-	badPredicate := predicates.NewMockPredicate(s.T())
-	badPredicate.EXPECT().Target().Return(0)
+	badPredicate := &struct{ predicates.Predicate }{}
+	targetMock := mockey.Mock((*struct{ predicates.Predicate }).Target).Return(predicates.PredicateTarget(0)).Build()
+	defer targetMock.UnPatch()
 
 	cases := []testCase{
 		{tag: "normal_value_equal", input: []predicates.Predicate{predicates.ValueEqual("a", "b")}, expectSucceed: true},

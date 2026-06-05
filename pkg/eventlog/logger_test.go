@@ -19,7 +19,7 @@ package eventlog
 import (
 	"testing"
 
-	mock "github.com/stretchr/testify/mock"
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -32,65 +32,121 @@ func (s *LoggerSuite) TearDownTest() {
 }
 
 func (s *LoggerSuite) TestRecord() {
-	mock1 := NewMockLogger(s.T())
-	mock2 := NewMockLogger(s.T())
+	calls := make(map[*struct{ Logger }]*loggerCalls)
+	recordMock := mockey.Mock((*struct{ Logger }).Record).To(
+		func(logger *struct{ Logger }, evt Evt) {
+			calls[logger].records = append(calls[logger].records, evt)
+		},
+	).Build()
+	defer recordMock.UnPatch()
 
-	Register("mock1", mock1)
-	Register("mock2", mock2)
+	logger1 := newTestLogger(calls)
+	logger2 := newTestLogger(calls)
+	Register("logger1", logger1)
+	Register("logger2", logger2)
 
 	rawEvt := NewRawEvt(Level_Info, "test")
 
-	mock1.EXPECT().Record(rawEvt)
-	mock2.EXPECT().Record(rawEvt)
-
 	Record(rawEvt)
 
-	mock3 := NewMockLogger(s.T())
+	s.Equal([]Evt{rawEvt}, calls[logger1].records)
+	s.Equal([]Evt{rawEvt}, calls[logger2].records)
 
-	Register("mock3", mock3) // register logger without expectations
+	logger3 := newTestLogger(calls)
+	Register("logger3", logger3)
 
 	rawEvt = NewRawEvt(Level_Debug, "test")
 
 	Record(rawEvt)
+
+	s.Equal(1, calls[logger1].recordCount())
+	s.Equal(1, calls[logger2].recordCount())
+	s.Equal(0, calls[logger3].recordCount())
 }
 
 func (s *LoggerSuite) TestRecordFunc() {
-	mock1 := NewMockLogger(s.T())
-	mock2 := NewMockLogger(s.T())
+	calls := make(map[*struct{ Logger }]*loggerCalls)
+	recordFuncMock := mockey.Mock((*struct{ Logger }).RecordFunc).To(
+		func(logger *struct{ Logger }, level Level, fn func() Evt) {
+			calls[logger].recordFuncs = append(calls[logger].recordFuncs, recordFuncCall{
+				level: level,
+				evt:   fn(),
+			})
+		},
+	).Build()
+	defer recordFuncMock.UnPatch()
 
-	Register("mock1", mock1)
-	Register("mock2", mock2)
+	logger1 := newTestLogger(calls)
+	logger2 := newTestLogger(calls)
+
+	Register("logger1", logger1)
+	Register("logger2", logger2)
 
 	rawEvt := NewRawEvt(Level_Info, "test")
 
-	mock1.EXPECT().RecordFunc(mock.Anything, mock.Anything)
-	mock2.EXPECT().RecordFunc(mock.Anything, mock.Anything)
-
 	RecordFunc(Level_Info, func() Evt { return rawEvt })
 
-	mock3 := NewMockLogger(s.T())
+	s.Equal([]recordFuncCall{{level: Level_Info, evt: rawEvt}}, calls[logger1].recordFuncs)
+	s.Equal([]recordFuncCall{{level: Level_Info, evt: rawEvt}}, calls[logger2].recordFuncs)
 
-	Register("mock3", mock3) // register logger without expectations
+	logger3 := newTestLogger(calls)
+	Register("logger3", logger3)
 
 	rawEvt = NewRawEvt(Level_Debug, "test")
 
 	RecordFunc(Level_Debug, func() Evt { return rawEvt })
+
+	s.Equal(1, calls[logger1].recordFuncCount())
+	s.Equal(1, calls[logger2].recordFuncCount())
+	s.Equal(0, calls[logger3].recordFuncCount())
 }
 
 func (s *LoggerSuite) TestFlush() {
-	mock1 := NewMockLogger(s.T())
-	mock2 := NewMockLogger(s.T())
+	calls := make(map[*struct{ Logger }]*loggerCalls)
+	flushMock := mockey.Mock((*struct{ Logger }).Flush).To(
+		func(logger *struct{ Logger }) error {
+			calls[logger].flushes++
+			return nil
+		},
+	).Build()
+	defer flushMock.UnPatch()
 
-	Register("mock1", mock1)
-	Register("mock2", mock2)
-
-	mock1.EXPECT().Flush().Return(nil)
-	mock2.EXPECT().Flush().Return(nil)
+	logger1 := newTestLogger(calls)
+	logger2 := newTestLogger(calls)
+	Register("logger1", logger1)
+	Register("logger2", logger2)
 
 	err := Flush()
 	s.NoError(err)
+	s.Equal(1, calls[logger1].flushes)
+	s.Equal(1, calls[logger2].flushes)
 }
 
 func TestLogger(t *testing.T) {
 	suite.Run(t, new(LoggerSuite))
+}
+
+type recordFuncCall struct {
+	level Level
+	evt   Evt
+}
+
+type loggerCalls struct {
+	records     []Evt
+	recordFuncs []recordFuncCall
+	flushes     int
+}
+
+func (c *loggerCalls) recordCount() int {
+	return len(c.records)
+}
+
+func (c *loggerCalls) recordFuncCount() int {
+	return len(c.recordFuncs)
+}
+
+func newTestLogger(calls map[*struct{ Logger }]*loggerCalls) *struct{ Logger } {
+	logger := &struct{ Logger }{}
+	calls[logger] = &loggerCalls{}
+	return logger
 }
