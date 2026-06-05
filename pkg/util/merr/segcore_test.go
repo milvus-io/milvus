@@ -113,3 +113,46 @@ func TestSegcoreErrorClassification(t *testing.T) {
 		assert.True(t, errors.Is(err, ErrSegcore))
 	})
 }
+
+// TestSegcoreCodeTableCoverage cross-checks segcoreCodeTable against the C++
+// ErrorCode enum (common/EasyAssert.h). It guards two things:
+//   - regression: codes we deliberately classified must stay registered with
+//     their intended class (a silent edit that drops one fails here);
+//   - drift: a C++ enum value not present in the table falls back to a plain
+//     non-retriable ErrSegcore — t.Log lists those so a maintainer adding a new
+//     C++ code is reminded to classify it here instead of letting it degrade.
+func TestSegcoreCodeTableCoverage(t *testing.T) {
+	// C++ ErrorCode enum values (common/EasyAssert.h, 2000-2099). Keep in sync
+	// with the C++ side; a new value here that isn't in segcoreCodeTable is
+	// reported below.
+	cppCodes := []int32{
+		2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2009, 2010, 2011,
+		2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022,
+		2023, 2024, 2025, 2026, 2027, 2028, 2030, 2031, 2032, 2033, 2034,
+		2035, 2036, 2037, 2038, 2039, 2040, 2041, 2042, 2043, 2099,
+	}
+
+	// Regression guard: the codes we classified on purpose must stay registered
+	// with the intended property.
+	wantInput := []int32{2020, 2023, 2025, 2026, 2028, 2031, 2032, 2042}
+	wantRetriable := []int32{2012, 2014, 2015, 2018, 2027, 2034, 2036, 2037, 2040, 2043}
+	for _, c := range wantInput {
+		cls, ok := segcoreCodeTable[c]
+		assert.True(t, ok && cls.inputError, "code %d must stay registered as inputError", c)
+	}
+	for _, c := range wantRetriable {
+		cls, ok := segcoreCodeTable[c]
+		assert.True(t, ok && cls.retriable, "code %d must stay registered as retriable", c)
+	}
+
+	// Drift report: C++ codes that fall back to the generic ErrSegcore.
+	var unregistered []int32
+	for _, c := range cppCodes {
+		if _, ok := segcoreCodeTable[c]; !ok {
+			unregistered = append(unregistered, c)
+		}
+	}
+	if len(unregistered) > 0 {
+		t.Logf("segcore C++ codes not registered in segcoreCodeTable (fall back to generic ErrSegcore, non-retriable): %v", unregistered)
+	}
+}

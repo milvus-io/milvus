@@ -240,8 +240,12 @@ func Handle(ctx context.Context, fn func() (bool, error), opts ...Option) error 
 	return lastErr
 }
 
-// errUnrecoverable is error instance for unrecoverable.
-var errUnrecoverable = merr.WrapErrParameterInvalidMsg("unrecoverable error")
+// errUnrecoverable is a private identity sentinel used only as a marker by
+// Unrecoverable/IsRecoverable. It must NOT be a typed merr error: milvusError.Is
+// compares by error code, so giving it a real code (e.g. ParameterInvalid) makes
+// every error of that code spuriously match errUnrecoverable and corrupts the
+// retriable/InputError classification of whatever was wrapped.
+var errUnrecoverable = errors.New("unrecoverable error")
 
 // Unrecoverable method wrap an error to unrecoverableError. This will make retry
 // quick return.

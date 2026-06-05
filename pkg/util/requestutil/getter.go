@@ -19,8 +19,6 @@
 package requestutil
 
 import (
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -244,17 +242,12 @@ func ParseMetricLabel(resp any, err error) string {
 			return metrics.RetryLabel
 		}
 
-		// Hard failure: classify by responsible party. merr.Error reconstructs
-		// the ErrorType from status.ExtraInfo[is_input_error].
-		classifiedErr := merr.Error(status)
-		var classifier merr.ErrorClassifier
-		if errors.As(classifiedErr, &classifier) {
-			if classifier.GetErrorType() == merr.InputError {
-				return metrics.FailInputLabel
-			}
-			return metrics.FailSystemLabel
+		// Hard failure: classify by responsible party. merr.Status already
+		// stamps the InputError flag into ExtraInfo, so read it directly instead
+		// of reconstructing the whole milvusError (this is the proxy hot path).
+		if status.GetExtraInfo()[merr.InputErrorFlagKey] == "true" {
+			return metrics.FailInputLabel
 		}
-		// Fallback (should not happen): treat as a system error.
 		return metrics.FailSystemLabel
 	}
 	return metrics.SuccessLabel
