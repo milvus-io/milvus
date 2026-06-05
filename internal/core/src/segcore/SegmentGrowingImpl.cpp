@@ -2629,19 +2629,11 @@ SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
 
         if (vec_index != nullptr && vec_index->HasValidData()) {
             result.valid_data = std::make_unique<bool[]>(count);
-            result.valid_offsets.reserve(count);
-
-            for (int64_t i = 0; i < count; ++i) {
-                bool is_valid = vec_index->IsRowValid(seg_offsets[i]);
-                result.valid_data[i] = is_valid;
-                if (is_valid) {
-                    int64_t physical_offset =
-                        vec_index->GetPhysicalOffset(seg_offsets[i]);
-                    if (physical_offset >= 0) {
-                        result.valid_offsets.push_back(physical_offset);
-                    }
-                }
-            }
+            vec_index->GetOffsetMapping().FilterValidLogicalOffsets(
+                seg_offsets,
+                count,
+                result.valid_data.get(),
+                result.valid_offsets);
             result.valid_count = result.valid_offsets.size();
         }
     } else {
@@ -2651,23 +2643,22 @@ SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
             bool is_mapping_storage = vec_base->is_mapping_storage();
             if (!valid_data_vec.empty()) {
                 result.valid_data = std::make_unique<bool[]>(count);
-                result.valid_offsets.reserve(count);
 
-                for (int64_t i = 0; i < count; ++i) {
-                    auto offset = seg_offsets[i];
-                    bool is_valid =
-                        offset >= 0 &&
-                        offset < static_cast<int64_t>(valid_data_vec.size()) &&
-                        valid_data_vec[offset];
-                    result.valid_data[i] = is_valid;
-                    if (is_valid) {
-                        if (is_mapping_storage) {
-                            int64_t physical_offset =
-                                vec_base->get_physical_offset(offset);
-                            if (physical_offset >= 0) {
-                                result.valid_offsets.push_back(physical_offset);
-                            }
-                        }
+                if (is_mapping_storage) {
+                    vec_base->get_offset_mapping().FilterValidLogicalOffsets(
+                        seg_offsets,
+                        count,
+                        result.valid_data.get(),
+                        result.valid_offsets);
+                } else {
+                    result.valid_offsets.reserve(count);
+                    for (int64_t i = 0; i < count; ++i) {
+                        auto offset = seg_offsets[i];
+                        bool is_valid = offset >= 0 &&
+                                        offset < static_cast<int64_t>(
+                                                     valid_data_vec.size()) &&
+                                        valid_data_vec[offset];
+                        result.valid_data[i] = is_valid;
                     }
                 }
                 result.valid_count = result.valid_offsets.size();

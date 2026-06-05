@@ -1616,70 +1616,52 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
 }
 
 ChunkedSegmentSealedImpl::ValidResult
-ChunkedSegmentSealedImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
-                                                   FieldId field_id,
-                                                   const int64_t* seg_offsets,
-                                                   int64_t count) const {
+ChunkedSegmentSealedImpl::FilterVectorValidOffsetsFromIndex(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const int64_t* seg_offsets,
+    int64_t count) const {
     ValidResult result;
     result.valid_count = count;
 
-    bool got_valid_offsets_from_index = false;
-    if (vector_indexings_.is_ready(field_id)) {
-        auto field_indexing = vector_indexings_.get_field_indexing(field_id);
-        auto cache_index = field_indexing->indexing_;
-        auto ca = SemiInlineGet(cache_index->PinCells(op_ctx, {0}));
-        auto vec_index = dynamic_cast<index::VectorIndex*>(ca->get_cell_of(0));
+    AssertInfo(vector_indexings_.is_ready(field_id),
+               "vector index is not ready");
+    auto field_indexing = vector_indexings_.get_field_indexing(field_id);
+    auto cache_index = field_indexing->indexing_;
+    auto ca = SemiInlineGet(cache_index->PinCells(op_ctx, {0}));
+    auto vec_index = dynamic_cast<index::VectorIndex*>(ca->get_cell_of(0));
+    AssertInfo(vec_index != nullptr, "invalid vector indexing");
+    AssertInfo(vec_index->HasValidData(),
+               "nullable vector index does not contain valid data");
 
-        if (vec_index != nullptr && vec_index->HasValidData()) {
-            result.valid_data = std::make_unique<bool[]>(count);
-            result.valid_offsets.reserve(count);
+    result.valid_data = std::make_unique<bool[]>(count);
+    vec_index->GetOffsetMapping().FilterValidLogicalOffsets(
+        seg_offsets, count, result.valid_data.get(), result.valid_offsets);
+    result.valid_count = result.valid_offsets.size();
+    return result;
+}
 
-            for (int64_t i = 0; i < count; ++i) {
-                bool is_valid = vec_index->IsRowValid(seg_offsets[i]);
-                result.valid_data[i] = is_valid;
-                if (is_valid) {
-                    int64_t physical_offset =
-                        vec_index->GetPhysicalOffset(seg_offsets[i]);
-                    if (physical_offset >= 0) {
-                        result.valid_offsets.push_back(physical_offset);
-                    }
-                }
+ChunkedSegmentSealedImpl::ValidResult
+ChunkedSegmentSealedImpl::FilterVectorValidOffsetsFromColumn(
+    milvus::OpContext* op_ctx,
+    const ChunkedColumnInterface* column,
+    const int64_t* seg_offsets,
+    int64_t count) const {
+    ValidResult result;
+    result.valid_data = std::make_unique<bool[]>(count);
+    result.valid_offsets.reserve(count);
+
+    column->BulkIsValid(
+        op_ctx,
+        [&](bool is_valid, size_t offset) {
+            result.valid_data[offset] = is_valid;
+            if (is_valid) {
+                result.valid_offsets.push_back(seg_offsets[offset]);
             }
-            result.valid_count = result.valid_offsets.size();
-            got_valid_offsets_from_index = true;
-        }
-    }
-
-    if (!got_valid_offsets_from_index) {
-        auto column = get_column(field_id);
-        if (column != nullptr && column->IsNullable()) {
-            result.valid_data = std::make_unique<bool[]>(count);
-            result.valid_offsets.reserve(count);
-
-            std::unordered_set<int64_t> touched_chunks;
-            for (int64_t i = 0; i < count; ++i) {
-                auto [chunk_id, _] = column->GetChunkIDByOffset(seg_offsets[i]);
-                touched_chunks.insert(static_cast<int64_t>(chunk_id));
-            }
-            for (int64_t c : touched_chunks) {
-                column->EnsureChunkOffsetMapping(c, op_ctx);
-            }
-
-            const auto& offset_mapping = column->GetOffsetMapping();
-            for (int64_t i = 0; i < count; ++i) {
-                bool is_valid = offset_mapping.IsValid(seg_offsets[i]);
-                result.valid_data[i] = is_valid;
-                if (is_valid) {
-                    int64_t physical_offset =
-                        offset_mapping.GetPhysicalOffset(seg_offsets[i]);
-                    if (physical_offset >= 0) {
-                        result.valid_offsets.push_back(physical_offset);
-                    }
-                }
-            }
-            result.valid_count = result.valid_offsets.size();
-        }
-    }
+        },
+        seg_offsets,
+        count);
+    result.valid_count = result.valid_offsets.size();
     return result;
 }
 
@@ -1713,8 +1695,18 @@ ChunkedSegmentSealedImpl::get_vector(milvus::OpContext* op_ctx,
         int64_t valid_count = count;
         const bool* valid_data = nullptr;
         if (field_meta.is_nullable()) {
+            if (!vec_index->HasValidData()) {
+                auto column = get_column(field_id);
+                if (column != nullptr) {
+                    return get_raw_data(
+                        op_ctx, field_id, field_meta, ids, count);
+                }
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "nullable vector index has raw data but no valid "
+                          "data, and field data is unavailable");
+            }
             filter_result =
-                FilterVectorValidOffsets(op_ctx, field_id, ids, count);
+                FilterVectorValidOffsetsFromIndex(op_ctx, field_id, ids, count);
             ids_ds = GenIdsDataset(filter_result.valid_count,
                                    filter_result.valid_offsets.data());
             valid_count = filter_result.valid_count;
@@ -1770,13 +1762,21 @@ ChunkedSegmentSealedImpl::get_emb_list(milvus::OpContext* op_ctx,
     const bool* valid_data = nullptr;
     const int64_t* valid_offsets = seg_offsets;
     if (field_meta.is_nullable()) {
-        filter_result =
-            FilterVectorValidOffsets(op_ctx, field_id, seg_offsets, count);
-        if (filter_result.valid_data != nullptr) {
-            valid_count = filter_result.valid_count;
-            valid_data = filter_result.valid_data.get();
-            valid_offsets = filter_result.valid_offsets.data();
+        if (!vec_index->HasValidData()) {
+            auto column = get_column(field_id);
+            if (column != nullptr) {
+                return get_raw_data(
+                    op_ctx, field_id, field_meta, seg_offsets, count);
+            }
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "nullable vector index has raw data but no valid "
+                      "data, and field data is unavailable");
         }
+        filter_result = FilterVectorValidOffsetsFromIndex(
+            op_ctx, field_id, seg_offsets, count);
+        valid_count = filter_result.valid_count;
+        valid_data = filter_result.valid_data.get();
+        valid_offsets = filter_result.valid_offsets.data();
     }
 
     auto data_array =
@@ -1785,9 +1785,9 @@ ChunkedSegmentSealedImpl::get_emb_list(milvus::OpContext* op_ctx,
         return data_array;
     }
 
-    // Build el_ids dataset from valid_offsets. For nullable VECTOR_ARRAY,
-    // FilterVectorValidOffsets maps logical row offsets to the index's compact
-    // physical embedding-list ids.
+    // Build el_ids dataset from valid_offsets. For nullable VECTOR_ARRAY, the
+    // index offset mapping maps logical row offsets to compact physical
+    // embedding-list ids.
     auto ids_ds = GenIdsDataset(valid_count, valid_offsets);
 
     auto [raw_data, offsets] = vec_index->GetEmbListByIds(ids_ds, metric_type);
@@ -3307,9 +3307,11 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
     const int64_t* valid_offsets = seg_offsets;
     ValidResult filter_result;
 
-    if (field_meta.is_vector() && field_meta.is_nullable()) {
-        filter_result =
-            FilterVectorValidOffsets(op_ctx, field_id, seg_offsets, count);
+    const bool nullable_vector =
+        field_meta.is_vector() && field_meta.is_nullable();
+    if (nullable_vector) {
+        filter_result = FilterVectorValidOffsetsFromColumn(
+            op_ctx, column.get(), seg_offsets, count);
         valid_count = filter_result.valid_count;
         valid_data = filter_result.valid_data.get();
         valid_offsets = filter_result.valid_offsets.data();
@@ -3566,7 +3568,7 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
         case DataType::VECTOR_ARRAY: {
             auto dst =
                 ret->mutable_vectors()->mutable_vector_array()->mutable_data();
-            if (field_meta.is_nullable() && valid_data != nullptr) {
+            if (nullable_vector) {
                 if (valid_count == 0) {
                     break;
                 }
@@ -3856,13 +3858,8 @@ ChunkedSegmentSealedImpl::CalcDistByIDs(
     std::vector<int64_t> physical_offsets;
     const int64_t* labels = seg_offsets;
     if (offset_mapping.IsEnabled()) {
-        physical_offsets.resize(count);
-        for (size_t i = 0; i < count; ++i) {
-            physical_offsets[i] =
-                seg_offsets[i] < 0
-                    ? seg_offsets[i]
-                    : offset_mapping.GetPhysicalOffset(seg_offsets[i]);
-        }
+        physical_offsets.assign(seg_offsets, seg_offsets + count);
+        offset_mapping.TransformLogicalOffsets(physical_offsets);
         labels = physical_offsets.data();
     }
     auto res = vec_index->CalcDistByIDs(
@@ -4124,7 +4121,8 @@ ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
 
 bool
 ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
-                                                 int64_t num_rows) {
+                                                 int64_t num_rows,
+                                                 milvus::OpContext* op_ctx) {
     if (col_index_meta_ == nullptr || !col_index_meta_->HasField(field_id)) {
         return false;
     }
@@ -4171,9 +4169,15 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
         std::shared_ptr<ChunkedColumnInterface> vec_data = get_column(field_id);
         AssertInfo(
             vec_data != nullptr, "vector field {} not loaded", field_id.get());
-        int64_t row_count = field_meta.is_nullable()
-                                ? vec_data->GetOffsetMapping().GetValidCount()
-                                : num_rows;
+        int64_t row_count = num_rows;
+        if (field_meta.is_nullable()) {
+            vec_data->BuildValidRowIds(op_ctx);
+            const auto& offset_mapping = vec_data->GetOffsetMapping();
+            if (!offset_mapping.IsEnabled()) {
+                return false;
+            }
+            row_count = offset_mapping.GetValidCount();
+        }
 
         // generate index params
         auto field_binlog_config = std::unique_ptr<VecIndexConfig>(
@@ -4329,35 +4333,6 @@ ChunkedSegmentSealedImpl::load_field_data_common(
         return;
     }
 
-    if (column->IsNullable() && IsVectorDataType(data_type)) {
-        bool lazy_inited = false;
-        // For VECTOR_ARRAY, Parquet num_values is the child vector count, not
-        // the outer row count. Empty non-null rows would corrupt physical row
-        // mapping if we derived valid counts from those statistics.
-        if (data_type != DataType::VECTOR_ARRAY && statistics.has_value() &&
-            !statistics.value().empty()) {
-            const auto& stats = statistics.value();
-            bool any_null = false;
-            for (const auto& s : stats) {
-                if (s == nullptr) {
-                    any_null = true;
-                    break;
-                }
-            }
-            if (!any_null) {
-                lazy_inited = column->TryInitValidRowIdsFromRowGroups(
-                    stats.size(),
-                    [&](size_t i) {
-                        return stats[i]->num_values() + stats[i]->null_count();
-                    },
-                    [&](size_t i) { return stats[i]->null_count(); });
-            }
-        }
-        if (!lazy_inited) {
-            column->BuildValidRowIds(op_ctx);
-        }
-    }
-
     if (!enable_mmap) {
         if (!is_proxy_column ||
             (is_proxy_column &&
@@ -4394,7 +4369,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     }
 
     // now interim index does not touch column warmup
-    generate_interim_index(field_id, num_rows);
+    generate_interim_index(field_id, num_rows, op_ctx);
 
     std::string struct_name;
     const FieldMeta* field_meta_ptr = nullptr;
@@ -4824,10 +4799,6 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
     auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
         std::move(translator), nullptr);
     auto column = MakeChunkedColumnBase(data_type, std::move(slot), field_meta);
-
-    if (column->IsNullable() && IsVectorDataType(data_type)) {
-        column->BuildValidRowIds(nullptr);
-    }
 
     fields_.wlock()->emplace(field_id, column);
     set_bit(field_data_ready_bitset_, field_id, true);
