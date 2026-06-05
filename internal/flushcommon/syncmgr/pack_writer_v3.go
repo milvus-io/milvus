@@ -232,6 +232,10 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 
 	tsFrom, tsTo := bw.getTsRange(rec)
 	pluginContextPtr := bw.getPluginContext(pack.collectionID)
+	writerFormat, schemaBasedFormats, err := bw.resolveInsertWriterFormats()
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// LOB base path is at partition level: {basePath}/.. = {root}/insert_log/{coll}/{part}
 	partitionBasePath := path.Dir(basePath)
@@ -242,10 +246,10 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 			zap.Int("textFieldCount", len(textColumnConfigs)),
 			zap.String("basePath", basePath))
 		w, err = storage.NewPackedTextBatchWriter("", basePath, bw.schema,
-			bw.bufferSize, bw.multiPartUploadSize, bw.columnGroups, bw.storageConfig, textColumnConfigs)
+			bw.bufferSize, bw.multiPartUploadSize, bw.columnGroups, bw.storageConfig, textColumnConfigs, writerFormat, schemaBasedFormats)
 	} else {
 		w, err = storage.NewPackedRecordBatchWriter(basePath, bw.schema,
-			bw.bufferSize, bw.multiPartUploadSize, bw.columnGroups, bw.storageConfig, pluginContextPtr)
+			bw.bufferSize, bw.multiPartUploadSize, bw.columnGroups, bw.storageConfig, pluginContextPtr, writerFormat, schemaBasedFormats)
 	}
 	if err != nil {
 		return nil, nil, err
@@ -294,6 +298,7 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 		logs[columnGroupID] = &datapb.FieldBinlog{
 			FieldID:     columnGroupID,
 			ChildFields: columnGroup.Fields,
+			Format:      columnGroup.Format,
 			Binlogs: []*datapb.Binlog{
 				{
 					LogSize:         int64(w.GetColumnGroupWrittenCompressed(columnGroup.GroupID)),
@@ -308,6 +313,26 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 		}
 	}
 	return logs, files, nil
+}
+
+func (bw *BulkPackWriterV3) resolveInsertWriterFormats() (string, []string, error) {
+	writerFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
+	if bw.initialManifestPath != "" {
+		_, version, err := packed.UnmarshalManifestPath(bw.initialManifestPath)
+		if err != nil {
+			return "", nil, err
+		}
+		if version != packed.ManifestEarliest {
+			for _, columnGroup := range bw.columnGroups {
+				if columnGroup.Format == "" {
+					return "", nil, fmt.Errorf("column group %d fields %v missing format for existing manifest %s",
+						columnGroup.GroupID, columnGroup.Fields, bw.initialManifestPath)
+				}
+			}
+		}
+	}
+	schemaBasedFormats := storagecommon.ColumnGroupFormats(bw.columnGroups, writerFormat)
+	return writerFormat, schemaBasedFormats, nil
 }
 
 // writeDelta writes the deltalog file and returns the DeltaLogEntry list

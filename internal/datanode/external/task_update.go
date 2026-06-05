@@ -595,7 +595,7 @@ func (t *RefreshExternalCollectionTask) patchSegmentForMissingColumns(
 	patched.ManifestPath = newManifestPath
 	patched.SchemaVersion = schema.GetVersion()
 	patched.StorageVersion = storage.StorageV3
-	patched.Binlogs = buildFakeBinlogs(seg.GetID(), seg.GetNumOfRows(), memorySize, schema)
+	patched.Binlogs = buildFakeBinlogs(seg.GetID(), seg.GetNumOfRows(), memorySize, schema, t.parsedSpec.Format)
 	return patched, nil
 }
 
@@ -909,7 +909,7 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			// Fake binlog so downstream treats external segments like normal
 			// StorageV3 segments. MemorySize is pre-computed from Take sampling
 			// so QueryNode skips the external-specific sampling path.
-			Binlogs: buildFakeBinlogs(work.binlogLogID, work.rowCount, memorySize, t.req.GetSchema()),
+			Binlogs: buildFakeBinlogs(work.binlogLogID, work.rowCount, memorySize, t.req.GetSchema(), t.parsedSpec.Format),
 		}
 		result = append(result, seg)
 	}
@@ -994,7 +994,7 @@ func (t *RefreshExternalCollectionTask) createManifestWithFunctions(
 // downstream code (row count calculation, index association, memory estimation)
 // treats external segments the same as normal packed segments.
 // ChildFields must list all field IDs so that QueryNode can resolve field schemas.
-func buildFakeBinlogs(logID, numRows, memorySize int64, schema *schemapb.CollectionSchema) []*datapb.FieldBinlog {
+func buildFakeBinlogs(logID, numRows, memorySize int64, schema *schemapb.CollectionSchema, format string) []*datapb.FieldBinlog {
 	var childFields []int64
 	if schema != nil {
 		for _, field := range schema.GetFields() {
@@ -1005,6 +1005,7 @@ func buildFakeBinlogs(logID, numRows, memorySize int64, schema *schemapb.Collect
 		{
 			FieldID:     int64(storagecommon.DefaultShortColumnGroupID),
 			ChildFields: childFields,
+			Format:      format,
 			Binlogs: []*datapb.Binlog{
 				{
 					LogID:      logID,

@@ -978,7 +978,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildMergedLogsV3() {
 	}
 	writerResult := &bumpSchemaVersionWriterResult{
 		columnGroups: []storagecommon.ColumnGroup{
-			{GroupID: 102, Fields: []int64{102}},
+			{GroupID: 102, Fields: []int64{102}, Format: "vortex"},
 		},
 	}
 
@@ -989,6 +989,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildMergedLogsV3() {
 	s.Equal(2, len(mergedInsert))
 	s.Equal(int64(100), mergedInsert[0].GetFieldID())
 	s.Equal(int64(102), mergedInsert[1].GetFieldID())
+	s.Equal("vortex", mergedInsert[1].GetFormat())
 	s.Equal(int64(512), mergedInsert[1].GetBinlogs()[0].GetMemorySize())
 	s.Equal(int64(1000), mergedInsert[1].GetBinlogs()[0].GetEntriesNum())
 	// V3 binlog presence marker must carry a non-zero LogID so buildBinlogKvs validation

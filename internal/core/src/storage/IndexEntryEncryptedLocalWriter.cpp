@@ -28,6 +28,7 @@
 #include <boost/uuid/uuid_io.hpp>
 
 #include "common/EasyAssert.h"
+#include "common/FastMem.h"
 #include "folly/ScopeGuard.h"
 #include "nlohmann/json.hpp"
 #include "storage/Crc32cUtil.h"
@@ -240,9 +241,9 @@ IndexEntryEncryptedLocalWriter::Finish() {
     uint32_t meta_size_u32 = static_cast<uint32_t>(meta_entry_size);
     uint32_t dir_size_u32 = static_cast<uint32_t>(dir_str.size());
 
-    std::memcpy(footer + 0, &version, sizeof(uint16_t));
-    std::memcpy(footer + 24, &meta_size_u32, sizeof(uint32_t));
-    std::memcpy(footer + 28, &dir_size_u32, sizeof(uint32_t));
+    milvus::fastmem::FastMemcpy(footer + 0, &version, sizeof(uint16_t));
+    milvus::fastmem::FastMemcpy(footer + 24, &meta_size_u32, sizeof(uint32_t));
+    milvus::fastmem::FastMemcpy(footer + 28, &dir_size_u32, sizeof(uint32_t));
 
     written = ::write(local_fd_, footer, MILVUS_V3_FOOTER_SIZE);
     AssertInfo(written == static_cast<ssize_t>(MILVUS_V3_FOOTER_SIZE),

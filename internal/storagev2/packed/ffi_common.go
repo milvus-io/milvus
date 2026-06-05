@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"strings"
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
@@ -62,6 +61,7 @@ var (
 	PropertyWriterPolicy             = C.GoString(C.loon_properties_writer_policy)
 	PropertyWriterFormat             = "writer.format"
 	PropertyWriterSchemaBasedPattern = C.GoString(C.loon_properties_writer_schema_base_patterns)
+	PropertyWriterSchemaBasedFormats = C.GoString(C.loon_properties_writer_schema_base_formats)
 
 	// CMEK (Customer Managed Encryption Keys) writer properties
 	PropertyWriterEncEnable = C.GoString(C.loon_properties_writer_enc_enable)    // Enable encryption for written data
@@ -69,18 +69,6 @@ var (
 	PropertyWriterEncMeta   = C.GoString(C.loon_properties_writer_enc_meta)      // Encoded metadata containing zone ID, collection ID, and key version
 	PropertyWriterEncAlgo   = C.GoString(C.loon_properties_writer_enc_algorithm) // Encryption algorithm (e.g., "AES_GCM_V1")
 )
-
-// ensureHTTPScheme prepends http:// or https:// to a bare address so it stays
-// consistent with use_ssl; leaves addresses that already carry a scheme alone.
-func ensureHTTPScheme(address string, useSSL bool) string {
-	if strings.Contains(address, "://") {
-		return address
-	}
-	if useSSL {
-		return "https://" + address
-	}
-	return "http://" + address
-}
 
 // ExtfsPrefixForCollection returns the per-collection extfs property prefix.
 func ExtfsPrefixForCollection(collectionID int64) string {
@@ -103,7 +91,7 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	// Add non-empty string fields
 	if storageConfig.GetAddress() != "" {
 		keys = append(keys, PropertyFSAddress)
-		values = append(values, ensureHTTPScheme(storageConfig.GetAddress(), storageConfig.GetUseSSL()))
+		values = append(values, storageConfig.GetAddress())
 	}
 	if storageConfig.GetBucketName() != "" {
 		keys = append(keys, PropertyFSBucketName)

@@ -17,6 +17,7 @@
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/FastMem.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Utils.h"
@@ -166,7 +167,8 @@ CachedSearchIterator::CachedSearchIterator(
             auto buf = std::make_unique<uint8_t[]>(total_bytes);
             auto* ptr = buf.get();
             for (int64_t i = 0; i < chunk_size; ++i) {
-                memcpy(ptr, va_ptr[i].data(), va_ptr[i].byte_size());
+                milvus::fastmem::FastMemcpy(
+                    ptr, va_ptr[i].data(), va_ptr[i].byte_size());
                 ptr += va_ptr[i].byte_size();
             }
             const void* flat_data = buf.get();

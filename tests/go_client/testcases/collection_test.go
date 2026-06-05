@@ -1326,7 +1326,7 @@ func TestCollectionPropertyTtl(t *testing.T) {
 	err = mc.DropCollectionProperties(ctx, client.NewDropCollectionPropertiesOption(schema.CollectionName, common.CollectionTTLSeconds))
 	common.CheckErr(t, err, true)
 	coll, _ = mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
-	require.Equal(t, 1, len(coll.Properties))
+	require.NotContains(t, coll.Properties, common.CollectionTTLSeconds)
 }
 
 // create collection with property -> alter property -> writing and reading
@@ -1395,7 +1395,7 @@ func TestCollectionPropertyMmap(t *testing.T) {
 	err = mc.DropCollectionProperties(ctx, client.NewDropCollectionPropertiesOption(schema.CollectionName, common.MmapEnabled))
 	common.CheckErr(t, err, true)
 	coll, _ = mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
-	require.Equal(t, 1, len(coll.Properties))
+	require.NotContains(t, coll.Properties, common.MmapEnabled)
 }
 
 func TestCollectionFakeProperties(t *testing.T) {

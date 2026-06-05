@@ -139,6 +139,132 @@ func TestGetManifestFieldIDs_FromPackedWriterManifest(t *testing.T) {
 	require.ErrorContains(t, err, "FFIPackedWriter already closed")
 }
 
+func TestResolveManifestSingleWriterFormat_Earliest(t *testing.T) {
+	format, err := ResolveManifestSingleWriterFormat(MarshalManifestPath("files/empty/segment", ManifestEarliest), nil, nil, "")
+
+	require.NoError(t, err)
+	assert.Empty(t, format)
+}
+
+func TestResolveManifestSingleWriterFormat_FromPackedWriterManifest(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	pt.Save(pt.LocalStorageCfg.Path.Key, t.TempDir())
+	pt.Save(pt.DataNodeCfg.StorageFormat.Key, "parquet")
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+		pt.Reset(pt.DataNodeCfg.StorageFormat.Key)
+	})
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{
+			Name:     "100",
+			Type:     arrow.PrimitiveTypes.Int64,
+			Nullable: false,
+			Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{"100"}),
+		},
+	}, nil)
+	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0}, GroupID: storagecommon.DefaultShortColumnGroupID, Fields: []int64{100}}}
+	basePath := "files/packed_writer_format/1"
+	cfg := CreateStorageConfig()
+	writer, err := NewFFIPackedWriter(basePath, schema, columnGroups, cfg, nil)
+	require.NoError(t, err)
+
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	defer builder.Release()
+	builder.Field(0).(*array.Int64Builder).Append(1)
+	record := builder.NewRecord()
+	defer record.Release()
+	require.NoError(t, writer.WriteRecordBatch(record))
+	out, err := writer.Close()
+	require.NoError(t, err)
+	defer out.Destroy()
+	manifest, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{NewFiles: out})
+	require.NoError(t, err)
+
+	format, err := ResolveManifestSingleWriterFormat(manifest, cfg, []string{"100"}, "")
+	require.NoError(t, err)
+	assert.Equal(t, "parquet", format)
+
+	format, err = ResolveManifestSingleWriterFormat(manifest, cfg, []string{"101"}, "")
+	require.NoError(t, err)
+	assert.Empty(t, format)
+}
+
+func TestResolveManifestSingleWriterFormat_FiltersMixedAddColumnGroups(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	pt.Save(pt.LocalStorageCfg.Path.Key, t.TempDir())
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+	})
+
+	basePath := "files/packed_writer_mixed_format/1"
+	cfg := CreateStorageConfig()
+	writeColumn := func(name string, fieldID int64, format string, asNewColumnGroup bool) WriterOutput {
+		schema := arrow.NewSchema([]arrow.Field{
+			{
+				Name:     name,
+				Type:     arrow.PrimitiveTypes.Int64,
+				Nullable: false,
+				Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{name}),
+			},
+		}, nil)
+		columnGroups := []storagecommon.ColumnGroup{
+			{Columns: []int{0}, GroupID: fieldID, Fields: []int64{fieldID}},
+		}
+		writer, err := NewFFIPackedWriter(
+			basePath,
+			schema,
+			columnGroups,
+			cfg,
+			nil,
+			map[string]string{PropertyWriterFormat: format},
+		)
+		require.NoError(t, err)
+		if asNewColumnGroup {
+			writer.AsNewColumnGroups()
+		}
+
+		builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+		defer builder.Release()
+		builder.Field(0).(*array.Int64Builder).Append(1)
+		record := builder.NewRecord()
+		defer record.Release()
+		require.NoError(t, writer.WriteRecordBatch(record))
+		out, err := writer.Close()
+		require.NoError(t, err)
+		return out
+	}
+
+	parquetOut := writeColumn("100", 100, "parquet", false)
+	manifest, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{NewFiles: parquetOut})
+	parquetOut.Destroy()
+	require.NoError(t, err)
+
+	committedBasePath, version, err := UnmarshalManifestPath(manifest)
+	require.NoError(t, err)
+	vortexOut := writeColumn("101", 101, "vortex", true)
+	manifest, err = CommitManifestUpdates(committedBasePath, version, cfg, &ManifestUpdates{NewFiles: vortexOut})
+	vortexOut.Destroy()
+	require.NoError(t, err)
+
+	format, err := ResolveManifestSingleWriterFormat(manifest, cfg, []string{"100"}, "")
+	require.NoError(t, err)
+	assert.Equal(t, "parquet", format)
+
+	format, err = ResolveManifestSingleWriterFormat(manifest, cfg, []string{"101"}, "")
+	require.NoError(t, err)
+	assert.Equal(t, "vortex", format)
+
+	_, err = ResolveManifestSingleWriterFormat(manifest, cfg, nil, "")
+	require.ErrorContains(t, err, "mixed writer formats")
+}
+
 func TestPackedFFIWriter(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()

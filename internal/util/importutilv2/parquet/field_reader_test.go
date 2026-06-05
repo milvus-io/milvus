@@ -999,6 +999,174 @@ func TestTypeMismatch(t *testing.T) {
 	}
 }
 
+func TestReadFP16BF16VectorFromFloatParquet(t *testing.T) {
+	const (
+		fieldID  = int64(100)
+		rowCount = 2
+		dim      = 4
+	)
+	rows := [][]float32{
+		{0.1, 0.2, 0.3, 0.4},
+		{0.5, 0.6, 0.7, 0.8},
+	}
+	flattened := []float32{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8}
+	makeField := func(dataType schemapb.DataType) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			FieldID:  fieldID,
+			Name:     "vector",
+			DataType: dataType,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: "dim", Value: "4"},
+			},
+		}
+	}
+	buildArray := func(t *testing.T, elemType arrow.DataType, fixedSize bool, validData []bool) arrow.Array {
+		mem := memory.NewGoAllocator()
+		if fixedSize {
+			builder := array.NewFixedSizeListBuilder(mem, dim, elemType)
+			switch elemType.ID() {
+			case arrow.FLOAT32:
+				valueBuilder := builder.ValueBuilder().(*array.Float32Builder)
+				for i, row := range rows {
+					valid := validData == nil || validData[i]
+					builder.Append(valid)
+					if valid {
+						valueBuilder.AppendValues(row, nil)
+					}
+				}
+			case arrow.FLOAT64:
+				valueBuilder := builder.ValueBuilder().(*array.Float64Builder)
+				for i, row := range rows {
+					valid := validData == nil || validData[i]
+					builder.Append(valid)
+					if valid {
+						for _, value := range row {
+							valueBuilder.Append(float64(value))
+						}
+					}
+				}
+			}
+			return builder.NewArray()
+		}
+
+		builder := array.NewListBuilder(mem, elemType)
+		switch elemType.ID() {
+		case arrow.FLOAT32:
+			valueBuilder := builder.ValueBuilder().(*array.Float32Builder)
+			for i, row := range rows {
+				valid := validData == nil || validData[i]
+				builder.Append(valid)
+				if valid {
+					valueBuilder.AppendValues(row, nil)
+				}
+			}
+		case arrow.FLOAT64:
+			valueBuilder := builder.ValueBuilder().(*array.Float64Builder)
+			for i, row := range rows {
+				valid := validData == nil || validData[i]
+				builder.Append(valid)
+				if valid {
+					for _, value := range row {
+						valueBuilder.Append(float64(value))
+					}
+				}
+			}
+		}
+		return builder.NewArray()
+	}
+
+	for _, tt := range []struct {
+		name      string
+		dataType  schemapb.DataType
+		elemType  arrow.DataType
+		fixedSize bool
+		expected  []byte
+	}{
+		{"list float32 to float16", schemapb.DataType_Float16Vector, arrow.PrimitiveTypes.Float32, false, typeutil.Float32ArrayToFloat16Bytes(flattened)},
+		{"list float32 to bfloat16", schemapb.DataType_BFloat16Vector, arrow.PrimitiveTypes.Float32, false, typeutil.Float32ArrayToBFloat16Bytes(flattened)},
+		{"list float64 to float16", schemapb.DataType_Float16Vector, arrow.PrimitiveTypes.Float64, false, typeutil.Float32ArrayToFloat16Bytes(flattened)},
+		{"list float64 to bfloat16", schemapb.DataType_BFloat16Vector, arrow.PrimitiveTypes.Float64, false, typeutil.Float32ArrayToBFloat16Bytes(flattened)},
+		{"fixed size list float32 to float16", schemapb.DataType_Float16Vector, arrow.PrimitiveTypes.Float32, true, typeutil.Float32ArrayToFloat16Bytes(flattened)},
+		{"fixed size list float32 to bfloat16", schemapb.DataType_BFloat16Vector, arrow.PrimitiveTypes.Float32, true, typeutil.Float32ArrayToBFloat16Bytes(flattened)},
+		{"fixed size list float64 to float16", schemapb.DataType_Float16Vector, arrow.PrimitiveTypes.Float64, true, typeutil.Float32ArrayToFloat16Bytes(flattened)},
+		{"fixed size list float64 to bfloat16", schemapb.DataType_BFloat16Vector, arrow.PrimitiveTypes.Float64, true, typeutil.Float32ArrayToBFloat16Bytes(flattened)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			field := makeField(tt.dataType)
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
+			arr := buildArray(t, tt.elemType, tt.fixedSize, nil)
+			defer arr.Release()
+			var arrType arrow.DataType = arrow.ListOf(tt.elemType)
+			if tt.fixedSize {
+				arrType = arrow.FixedSizeListOf(dim, tt.elemType)
+			}
+			pqSchema := arrow.NewSchema([]arrow.Field{{Name: field.GetName(), Type: arrType, Nullable: true}}, nil)
+
+			filePath := fmt.Sprintf("/tmp/test_%d_low_precision_reader.parquet", rand.Int())
+			defer os.Remove(filePath)
+			wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+			assert.NoError(t, err)
+			fw, err := pqarrow.NewFileWriter(pqSchema, wf,
+				parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(rowCount)), pqarrow.DefaultWriterProps())
+			assert.NoError(t, err)
+			recordBatch := array.NewRecord(pqSchema, []arrow.Array{arr}, rowCount)
+			defer recordBatch.Release()
+			err = fw.Write(recordBatch)
+			assert.NoError(t, err)
+			assert.NoError(t, fw.Close())
+
+			ctx := context.Background()
+			f := storage.NewChunkManagerFactory("local", objectstorage.RootPath(testOutputPath))
+			cm, err := f.NewPersistentStorageChunkManager(ctx)
+			assert.NoError(t, err)
+			reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024)
+			assert.NoError(t, err)
+			defer reader.Close()
+
+			insertData, err := reader.Read()
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expected, insertData.Data[fieldID].GetDataRows().([]byte))
+		})
+	}
+
+	t.Run("nullable float64 list to bfloat16", func(t *testing.T) {
+		validData := []bool{true, false}
+		expectedRows := []float32{0.1, 0.2, 0.3, 0.4}
+		field := makeField(schemapb.DataType_BFloat16Vector)
+		field.Nullable = true
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
+		arr := buildArray(t, arrow.PrimitiveTypes.Float64, false, validData)
+		defer arr.Release()
+		pqSchema := arrow.NewSchema([]arrow.Field{{Name: field.GetName(), Type: arrow.ListOf(arrow.PrimitiveTypes.Float64), Nullable: true}}, nil)
+
+		filePath := fmt.Sprintf("/tmp/test_%d_nullable_fp16bf16_reader.parquet", rand.Int())
+		defer os.Remove(filePath)
+		wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+		assert.NoError(t, err)
+		fw, err := pqarrow.NewFileWriter(pqSchema, wf,
+			parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(rowCount)), pqarrow.DefaultWriterProps())
+		assert.NoError(t, err)
+		recordBatch := array.NewRecord(pqSchema, []arrow.Array{arr}, rowCount)
+		defer recordBatch.Release()
+		assert.NoError(t, fw.Write(recordBatch))
+		assert.NoError(t, fw.Close())
+
+		ctx := context.Background()
+		f := storage.NewChunkManagerFactory("local", objectstorage.RootPath(testOutputPath))
+		cm, err := f.NewPersistentStorageChunkManager(ctx)
+		assert.NoError(t, err)
+		reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024)
+		assert.NoError(t, err)
+		defer reader.Close()
+
+		insertData, err := reader.Read()
+		assert.NoError(t, err)
+		fieldData := insertData.Data[fieldID].(*storage.BFloat16VectorFieldData)
+		assert.Equal(t, typeutil.Float32ArrayToBFloat16Bytes(expectedRows), fieldData.Data)
+		assert.Equal(t, validData, fieldData.ValidData)
+	})
+}
+
 func TestArrayNullElement(t *testing.T) {
 	checkFunc := func(dataType schemapb.DataType, elementType schemapb.DataType) {
 		fieldName := "test_field"

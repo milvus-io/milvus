@@ -41,6 +41,7 @@
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/FastMem.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #include "common/File.h"
@@ -583,7 +584,8 @@ VectorMemIndex<T>::Build(const Config& config) {
             // TODO: avoid copying
             for (auto& data : field_datas) {
                 auto valid_size = data->DataSize();
-                std::memcpy(buf.get() + offset, data->Data(), valid_size);
+                milvus::fastmem::FastMemcpy(
+                    buf.get() + offset, data->Data(), valid_size);
                 offset += valid_size;
                 data.reset();
             }
@@ -612,7 +614,7 @@ VectorMemIndex<T>::Build(const Config& config) {
                     auto vec_array = vec_array_data->value_at(physical_row);
 
                     if (size > 0) {
-                        std::memcpy(
+                        milvus::fastmem::FastMemcpy(
                             buf.get() + offset, vec_array->data(), size);
                     }
                     offset += size;
@@ -805,8 +807,14 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
     search_result.distances_.resize(total_num);
     search_result.total_nq_ = num_queries;
     search_result.unity_topK_ = topk;
-    std::copy_n(ids, total_num, search_result.seg_offsets_.data());
-    std::copy_n(distances, total_num, search_result.distances_.data());
+    milvus::fastmem::FastMemcpy(
+        search_result.seg_offsets_.data(),
+        ids,
+        total_num * sizeof(*search_result.seg_offsets_.data()));
+    milvus::fastmem::FastMemcpy(
+        search_result.distances_.data(),
+        distances,
+        total_num * sizeof(*search_result.distances_.data()));
 }
 
 template <typename T>
@@ -1157,7 +1165,7 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
     // Restore valid_data for nullable vector support
     if (valid_data_count_codec && valid_data_codec) {
         size_t count;
-        std::memcpy(
+        milvus::fastmem::FastMemcpy(
             &count, valid_data_count_codec->PayloadData(), sizeof(size_t));
 
         std::unique_ptr<bool[]> valid_data(new bool[count]);

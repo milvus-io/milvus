@@ -33,6 +33,7 @@
 #include "common/Array.h"
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
+#include "common/FastMem.h"
 #include "common/FieldMeta.h"
 #include "common/Span.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
@@ -510,7 +511,8 @@ class ChunkedColumn : public ChunkedColumnBase {
                 offset = chunk->PhysicalOffsetOf(offset);
             }
             auto value = chunk->ValueAt(offset);
-            memcpy(dst_vec + i * element_sizeof, value, element_sizeof);
+            milvus::fastmem::FastMemcpy(
+                dst_vec + i * element_sizeof, value, element_sizeof);
         }
     }
 

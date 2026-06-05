@@ -26,6 +26,7 @@
 #include "common/BitsetView.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/FastMem.h"
 #include "common/FieldMeta.h"
 #include "common/IndexMeta.h"
 #include "common/OffsetMapping.h"
@@ -286,7 +287,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                     auto count = 0;
                     auto ptr = buf.get();
                     for (int i = 0; i < size_per_chunk; ++i) {
-                        memcpy(ptr, vec_ptr[i].data(), vec_ptr[i].byte_size());
+                        milvus::fastmem::FastMemcpy(
+                            ptr, vec_ptr[i].data(), vec_ptr[i].byte_size());
                         ptr += vec_ptr[i].byte_size();
                         count += vec_ptr[i].length();
                     }
@@ -301,7 +303,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                     auto offset = 0;
                     auto ptr = buf.get();
                     for (int i = 0; i < size_per_chunk; ++i) {
-                        memcpy(ptr, vec_ptr[i].data(), vec_ptr[i].byte_size());
+                        milvus::fastmem::FastMemcpy(
+                            ptr, vec_ptr[i].data(), vec_ptr[i].byte_size());
                         ptr += vec_ptr[i].byte_size();
 
                         offset += vec_ptr[i].length();

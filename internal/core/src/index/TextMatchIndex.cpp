@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <boost/uuid/random_generator.hpp>
+#include "common/FastMem.h"
 #include <boost/uuid/uuid_io.hpp>
 #include <memory>
 #include <shared_mutex>
@@ -226,9 +227,9 @@ TextMatchIndex::Load(const Config& config) {
         index_datas.clear();
         auto index_valid_data = binary_set.GetByName("index_null_offset");
         null_offset_.resize((size_t)index_valid_data->size / sizeof(size_t));
-        memcpy(null_offset_.data(),
-               index_valid_data->data.get(),
-               (size_t)index_valid_data->size);
+        milvus::fastmem::FastMemcpy(null_offset_.data(),
+                                    index_valid_data->data.get(),
+                                    (size_t)index_valid_data->size);
     }
     disk_file_manager_->CacheTextLogToDisk(files_value, load_priority);
     AssertInfo(

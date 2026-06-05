@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "index/StringIndexSort.h"
+#include "common/FastMem.h"
 
 #include <assert.h>
 #include <fcntl.h>
@@ -64,7 +65,7 @@ StringIndexSortImpl::ParseBinaryData(const uint8_t* data, size_t data_size) {
 
     // Verify magic code at the end first
     uint64_t magic_at_end;
-    memcpy(
+    milvus::fastmem::FastMemcpy(
         &magic_at_end, data + data_size - sizeof(uint64_t), sizeof(uint64_t));
     if (magic_at_end != StringIndexSort::MAGIC_CODE) {
         ThrowInfo(DataFormatBroken,
@@ -74,7 +75,7 @@ StringIndexSortImpl::ParseBinaryData(const uint8_t* data, size_t data_size) {
     }
 
     // Read unique count
-    memcpy(&result.unique_count, ptr, sizeof(uint32_t));
+    milvus::fastmem::FastMemcpy(&result.unique_count, ptr, sizeof(uint32_t));
     ptr += sizeof(uint32_t);
 
     // Handle all-null case where unique_count is 0
@@ -98,7 +99,7 @@ StringIndexSortImpl::ParseBinaryData(const uint8_t* data, size_t data_size) {
         result.string_data_start +
         result.string_offsets[result.unique_count - 1];
     uint32_t last_str_len;
-    memcpy(&last_str_len, last_str_ptr, sizeof(uint32_t));
+    milvus::fastmem::FastMemcpy(&last_str_len, last_str_ptr, sizeof(uint32_t));
     total_string_size = result.string_offsets[result.unique_count - 1] +
                         sizeof(uint32_t) + last_str_len;
 
@@ -239,7 +240,7 @@ StringIndexSort::Serialize(const Config& config) {
 
     std::shared_ptr<uint8_t[]> version_buf(new uint8_t[sizeof(uint32_t)]);
     uint32_t version = SERIALIZATION_VERSION;
-    memcpy(version_buf.get(), &version, sizeof(uint32_t));
+    milvus::fastmem::FastMemcpy(version_buf.get(), &version, sizeof(uint32_t));
     res_set.Append("version", version_buf, sizeof(uint32_t));
 
     // Use MemoryImpl to serialize
@@ -254,7 +255,8 @@ StringIndexSort::Serialize(const Config& config) {
 
     // Serialize total number of rows (use same key as ScalarIndexSort)
     std::shared_ptr<uint8_t[]> index_num_rows(new uint8_t[sizeof(size_t)]);
-    memcpy(index_num_rows.get(), &total_num_rows_, sizeof(size_t));
+    milvus::fastmem::FastMemcpy(
+        index_num_rows.get(), &total_num_rows_, sizeof(size_t));
     res_set.Append("index_num_rows", index_num_rows, sizeof(size_t));
 
     // Serialize valid_bitset
@@ -272,7 +274,8 @@ StringIndexSort::Serialize(const Config& config) {
 
     // Serialize is_nested_index
     std::shared_ptr<uint8_t[]> is_nested_data(new uint8_t[sizeof(bool)]);
-    memcpy(is_nested_data.get(), &is_nested_index_, sizeof(bool));
+    milvus::fastmem::FastMemcpy(
+        is_nested_data.get(), &is_nested_index_, sizeof(bool));
     res_set.Append("is_nested_index", is_nested_data, sizeof(bool));
 
     milvus::Disassemble(res_set);
@@ -335,7 +338,8 @@ StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
     auto index_num_rows = binary_set.GetByName("index_num_rows");
     AssertInfo(index_num_rows != nullptr,
                "Failed to find 'index_num_rows' in binary_set");
-    memcpy(&total_num_rows_, index_num_rows->data.get(), sizeof(size_t));
+    milvus::fastmem::FastMemcpy(
+        &total_num_rows_, index_num_rows->data.get(), sizeof(size_t));
 
     // Initialize idx_to_offsets - it will be rebuilt by LoadFromBinary
     idx_to_offsets_.resize(total_num_rows_);
@@ -354,7 +358,8 @@ StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
     // Deserialize is_nested_index (optional for backward compatibility)
     auto is_nested_data = binary_set.GetByName("is_nested_index");
     if (is_nested_data != nullptr) {
-        memcpy(&is_nested_index_, is_nested_data->data.get(), sizeof(bool));
+        milvus::fastmem::FastMemcpy(
+            &is_nested_index_, is_nested_data->data.get(), sizeof(bool));
     }
 
     auto version_data = binary_set.GetByName("version");
@@ -362,7 +367,8 @@ StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
                "Failed to find 'version' in binary_set");
 
     uint32_t version;
-    memcpy(&version, version_data->data.get(), sizeof(uint32_t));
+    milvus::fastmem::FastMemcpy(
+        &version, version_data->data.get(), sizeof(uint32_t));
 
     if (version != SERIALIZATION_VERSION) {
         ThrowInfo(milvus::ErrorCode::Unsupported,
@@ -742,7 +748,7 @@ StringIndexSortMemoryImpl::SerializeToBinary(uint8_t* ptr,
                                              size_t& offset) const {
     // Write unique count as uint32_t
     uint32_t unique_count = static_cast<uint32_t>(unique_values_.size());
-    memcpy(ptr + offset, &unique_count, sizeof(uint32_t));
+    milvus::fastmem::FastMemcpy(ptr + offset, &unique_count, sizeof(uint32_t));
     offset += sizeof(uint32_t);
 
     // Calculate and write string offsets
@@ -760,16 +766,17 @@ StringIndexSortMemoryImpl::SerializeToBinary(uint8_t* ptr,
 
         // Write string length and content
         uint32_t str_len = static_cast<uint32_t>(unique_values_[i].size());
-        memcpy(ptr + offset, &str_len, sizeof(uint32_t));
+        milvus::fastmem::FastMemcpy(ptr + offset, &str_len, sizeof(uint32_t));
         offset += sizeof(uint32_t);
-        memcpy(ptr + offset, unique_values_[i].data(), str_len);
+        milvus::fastmem::FastMemcpy(
+            ptr + offset, unique_values_[i].data(), str_len);
         offset += str_len;
     }
 
     // Write string offsets back
-    memcpy(ptr + string_offsets_start,
-           string_offsets.data(),
-           string_offsets.size() * sizeof(uint32_t));
+    milvus::fastmem::FastMemcpy(ptr + string_offsets_start,
+                                string_offsets.data(),
+                                string_offsets.size() * sizeof(uint32_t));
 
     // Calculate and write posting list offsets
     size_t post_list_offsets_start = offset;
@@ -787,23 +794,25 @@ StringIndexSortMemoryImpl::SerializeToBinary(uint8_t* ptr,
         // Write posting list length and content
         uint32_t post_list_len =
             static_cast<uint32_t>(posting_lists_[i].size());
-        memcpy(ptr + offset, &post_list_len, sizeof(uint32_t));
+        milvus::fastmem::FastMemcpy(
+            ptr + offset, &post_list_len, sizeof(uint32_t));
         offset += sizeof(uint32_t);
 
         for (uint32_t row_id : posting_lists_[i]) {
-            memcpy(ptr + offset, &row_id, sizeof(uint32_t));
+            milvus::fastmem::FastMemcpy(
+                ptr + offset, &row_id, sizeof(uint32_t));
             offset += sizeof(uint32_t);
         }
     }
 
     // Write posting list offsets back
-    memcpy(ptr + post_list_offsets_start,
-           post_list_offsets.data(),
-           post_list_offsets.size() * sizeof(uint32_t));
+    milvus::fastmem::FastMemcpy(ptr + post_list_offsets_start,
+                                post_list_offsets.data(),
+                                post_list_offsets.size() * sizeof(uint32_t));
 
     // Write magic code at the very end
     uint64_t magic = StringIndexSort::MAGIC_CODE;
-    memcpy(ptr + offset, &magic, sizeof(uint64_t));
+    milvus::fastmem::FastMemcpy(ptr + offset, &magic, sizeof(uint64_t));
     offset += sizeof(uint64_t);
 }
 
@@ -845,7 +854,7 @@ StringIndexSortMemoryImpl::LoadFromData(const uint8_t* data,
         const uint8_t* str_ptr =
             parsed.string_data_start + parsed.string_offsets[unique_idx];
         uint32_t str_len;
-        memcpy(&str_len, str_ptr, sizeof(uint32_t));
+        milvus::fastmem::FastMemcpy(&str_len, str_ptr, sizeof(uint32_t));
         str_ptr += sizeof(uint32_t);
         std::string value(reinterpret_cast<const char*>(str_ptr), str_len);
 
@@ -853,7 +862,8 @@ StringIndexSortMemoryImpl::LoadFromData(const uint8_t* data,
         const uint8_t* post_list_ptr =
             parsed.post_list_data_start + parsed.post_list_offsets[unique_idx];
         uint32_t post_list_len;
-        memcpy(&post_list_len, post_list_ptr, sizeof(uint32_t));
+        milvus::fastmem::FastMemcpy(
+            &post_list_len, post_list_ptr, sizeof(uint32_t));
         post_list_ptr += sizeof(uint32_t);
 
         PostingList posting_list;

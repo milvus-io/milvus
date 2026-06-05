@@ -26,6 +26,7 @@ import "C"
 
 import (
 	"fmt"
+	"strings"
 	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -48,8 +49,11 @@ type TextColumnConfig struct {
 // writer is concerned only with file output; manifest-level concerns
 // (version, retry) live in CommitManifestUpdates.
 type SegmentWriterConfig struct {
-	SegmentPath string
-	TextColumns []TextColumnConfig
+	SegmentPath        string
+	TextColumns        []TextColumnConfig
+	WriterFormat       string
+	SchemaBasedPattern string
+	SchemaBasedFormats []string
 }
 
 // FFISegmentWriter wraps the C SegmentWriter handle for incremental writes.
@@ -77,7 +81,18 @@ func NewFFISegmentWriter(
 	}
 
 	// create properties
-	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	extra := map[string]string{}
+	if config != nil && config.WriterFormat != "" {
+		extra[PropertyWriterFormat] = config.WriterFormat
+	}
+	if config != nil && config.SchemaBasedPattern != "" {
+		extra[PropertyWriterPolicy] = "schema_based"
+		extra[PropertyWriterSchemaBasedPattern] = config.SchemaBasedPattern
+	}
+	if config != nil && len(config.SchemaBasedFormats) > 0 {
+		extra[PropertyWriterSchemaBasedFormats] = strings.Join(config.SchemaBasedFormats, ",")
+	}
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, extra)
 	if err != nil {
 		return nil, err
 	}

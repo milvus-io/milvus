@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include "common/FastMem.h"
 #include <cstring>
 #include <limits>
 #include <mutex>
@@ -67,7 +68,7 @@ struct TextLobRef {
                    kEncodedSize,
                    s.size());
         TextLobRef ref;
-        std::memcpy(&ref, s.data(), kEncodedSize);
+        milvus::fastmem::FastMemcpy(&ref, s.data(), kEncodedSize);
         return ref;
     }
 

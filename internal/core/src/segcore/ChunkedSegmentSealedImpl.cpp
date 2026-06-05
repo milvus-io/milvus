@@ -56,6 +56,7 @@
 #include "common/ArrayOffsets.h"
 #include "common/ArrowDataWrapper.h"
 #include "common/Channel.h"
+#include "common/FastMem.h"
 #include "common/Chunk.h"
 #include "common/ChunkWriter.h"
 #include "common/Common.h"
@@ -999,9 +1000,20 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         std::vector<FieldId> milvus_field_ids;
         milvus_field_ids.reserve(field_id_list.size());
         for (int i = 0; i < field_id_list.size(); ++i) {
-            milvus_field_ids.emplace_back(field_id_list.Get(i));
-            merged_in_load_list = merged_in_load_list ||
-                                  schema_->ShouldLoadField(milvus_field_ids[i]);
+            auto fid = FieldId(field_id_list.Get(i));
+            // Defense-in-depth for legacy binlog meta (child_field_ids empty):
+            // dropped fields are normally filtered at ComputeDiffBinlogs level,
+            // but legacy data reads field IDs from parquet which may still
+            // contain dropped fields.
+            if (!schema_->has_field(fid)) {
+                continue;
+            }
+            milvus_field_ids.emplace_back(fid);
+            merged_in_load_list =
+                merged_in_load_list || schema_->ShouldLoadField(fid);
+        }
+        if (milvus_field_ids.empty()) {
+            continue;
         }
 
         auto mmap_dir_path =
@@ -1218,9 +1230,10 @@ ChunkedSegmentSealedImpl::load_system_field_internal(
             auto array_vec = read_single_column_batches(r->reader);
             auto chunk = create_chunk(field_meta, array_vec);
             auto chunk_ptr = static_cast<FixedWidthChunk*>(chunk.get());
-            std::copy_n(static_cast<const Timestamp*>(chunk_ptr->Span().data()),
-                        chunk_ptr->Span().row_count(),
-                        timestamps.data() + offset);
+            milvus::fastmem::FastMemcpy(
+                timestamps.data() + offset,
+                static_cast<const Timestamp*>(chunk_ptr->Span().data()),
+                chunk_ptr->Span().row_count() * sizeof(*timestamps.data()));
             offset += chunk_ptr->Span().row_count();
         }
 
@@ -3858,7 +3871,8 @@ ChunkedSegmentSealedImpl::CalcDistByIDs(
     if (result_distances == nullptr) {
         return false;
     }
-    std::memcpy(distances, result_distances, count * sizeof(float));
+    milvus::fastmem::FastMemcpy(
+        distances, result_distances, count * sizeof(float));
     return true;
 }
 
@@ -5804,10 +5818,10 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
                     val = reinterpret_cast<const uint8_t*>(bin_val.data());
                 }
                 auto floats = reinterpret_cast<const float*>(val);
-                std::copy(floats,
-                          floats + dim,
-                          float_data->mutable_data()->mutable_data() +
-                              data_pos * dim);
+                milvus::fastmem::FastMemcpy(
+                    float_data->mutable_data()->mutable_data() + data_pos * dim,
+                    floats,
+                    dim * sizeof(float));
                 data_pos++;
             }
             break;
@@ -5869,9 +5883,10 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
                         bin_val.size());
                     val = reinterpret_cast<const uint8_t*>(bin_val.data());
                 }
-                std::memcpy(vector_data->data() + data_pos * byte_width,
-                            val,
-                            byte_width);
+                milvus::fastmem::FastMemcpy(
+                    vector_data->data() + data_pos * byte_width,
+                    val,
+                    byte_width);
                 data_pos++;
             }
             break;

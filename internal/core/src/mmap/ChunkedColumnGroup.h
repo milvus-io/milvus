@@ -32,6 +32,7 @@
 #include "common/Chunk.h"
 #include "common/GroupChunk.h"
 #include "common/EasyAssert.h"
+#include "common/FastMem.h"
 #include "common/OpContext.h"
 #include "common/Span.h"
 #include "mmap/ChunkedColumnInterface.h"
@@ -562,7 +563,8 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                 offset = chunk->PhysicalOffsetOf(offset);
             }
             auto value = chunk->ValueAt(offset);
-            memcpy(dst_vec + i * element_sizeof, value, element_sizeof);
+            milvus::fastmem::FastMemcpy(
+                dst_vec + i * element_sizeof, value, element_sizeof);
         }
     }
 
