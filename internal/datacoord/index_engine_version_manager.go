@@ -245,24 +245,7 @@ func (m *versionManagerImpl) GetMaximumIndexEngineVersion() int32 {
 }
 
 func (m *versionManagerImpl) getMaximumVersion() int32 {
-	if len(m.versions) == 0 {
-		return math.MaxInt32
-	}
-
-	maximum := int32(math.MaxInt32)
-	for _, version := range m.versions {
-		// Old QueryNodes do not report MaximumIndexVersion. In that case, use
-		// CurrentIndexVersion as the conservative upper bound; maxVersion should
-		// never be lower than the current version that the node already supports.
-		maxVersion := max(version.CurrentIndexVersion, version.MaximumIndexVersion)
-		if maxVersion == 0 {
-			continue
-		}
-		if maxVersion < maximum {
-			maximum = maxVersion
-		}
-	}
-	return maximum
+	return getMaximumVersionFrom(m.versions)
 }
 
 func (m *versionManagerImpl) GetMaximumScalarIndexEngineVersion() int32 {
@@ -273,12 +256,16 @@ func (m *versionManagerImpl) GetMaximumScalarIndexEngineVersion() int32 {
 }
 
 func (m *versionManagerImpl) getMaximumScalarVersion() int32 {
-	if len(m.scalarIndexVersions) == 0 {
+	return getMaximumVersionFrom(m.scalarIndexVersions)
+}
+
+func getMaximumVersionFrom(versions map[int64]sessionutil.IndexEngineVersion) int32 {
+	if len(versions) == 0 {
 		return math.MaxInt32
 	}
 
 	maximum := int32(math.MaxInt32)
-	for _, version := range m.scalarIndexVersions {
+	for _, version := range versions {
 		// Old QueryNodes do not report MaximumIndexVersion. In that case, use
 		// CurrentIndexVersion as the conservative upper bound; maxVersion should
 		// never be lower than the current version that the node already supports.
