@@ -956,12 +956,8 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		case getStatsTaskChSingleton() <- segmentID:
 		default:
 		}
-	} else {
-		select {
-		case getBuildIndexChSingleton() <- segmentID:
-		default:
-		}
 	}
+	notifySegmentIndexBuild(segmentID)
 
 	insertFileNum := 0
 	for _, fieldBinlog := range segment.GetBinlogs() {
