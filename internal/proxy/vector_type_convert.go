@@ -61,46 +61,6 @@ func isVectorTypeMatch(placeholderType commonpb.PlaceholderType, fieldType schem
 	return expectedDataType == fieldType
 }
 
-const (
-	// float16MaxValue is the maximum representable value in float16
-	float16MaxValue = 65504.0
-	// float16MinPositive is the minimum positive normal value in float16
-	float16MinPositive = 6.103515625e-5
-)
-
-// validateFloat32ForFloat16 checks if all float32 values can be safely converted to float16.
-// Returns error if any value exceeds float16 range or underflows.
-func validateFloat32ForFloat16(values []float32) error {
-	for i, v := range values {
-		absV := math.Abs(float64(v))
-
-		// Check overflow
-		if absV > float16MaxValue {
-			return fmt.Errorf("value at dimension %d (%v) exceeds float16 range [-65504, 65504]", i, v)
-		}
-
-		// Check underflow (non-zero values smaller than min positive)
-		if v != 0 && absV < float16MinPositive {
-			return fmt.Errorf("value at dimension %d (%v) underflows float16 precision (min abs value: %v)", i, v, float16MinPositive)
-		}
-	}
-	return nil
-}
-
-// validateFloat32ForBFloat16 checks if all float32 values can be safely converted to bfloat16.
-// BFloat16 has the same exponent range as float32, so only need to check for Inf/NaN.
-func validateFloat32ForBFloat16(values []float32) error {
-	for i, v := range values {
-		if math.IsInf(float64(v), 0) {
-			return fmt.Errorf("value at dimension %d is infinity, cannot convert to bfloat16", i)
-		}
-		if math.IsNaN(float64(v)) {
-			return fmt.Errorf("value at dimension %d is NaN, cannot convert to bfloat16", i)
-		}
-	}
-	return nil
-}
-
 // ConvertPlaceholderGroup checks and converts placeholder group vector types if needed.
 // If the placeholder type matches the field type, returns the original bytes unchanged.
 // If the placeholder is fp32 and field is fp16/bf16, converts the vectors.
@@ -146,10 +106,10 @@ func ConvertPlaceholderGroup(phgBytes []byte, fieldSchema *schemapb.FieldSchema)
 
 	switch fieldType {
 	case schemapb.DataType_Float16Vector:
-		converted, err := convertPlaceholder(&phg, validateFloat32ForFloat16, typeutil.Float32ArrayToFloat16Bytes, commonpb.PlaceholderType_Float16Vector)
+		converted, err := convertPlaceholder(&phg, fieldType, commonpb.PlaceholderType_Float16Vector)
 		return converted, phType, err
 	case schemapb.DataType_BFloat16Vector:
-		converted, err := convertPlaceholder(&phg, validateFloat32ForBFloat16, typeutil.Float32ArrayToBFloat16Bytes, commonpb.PlaceholderType_BFloat16Vector)
+		converted, err := convertPlaceholder(&phg, fieldType, commonpb.PlaceholderType_BFloat16Vector)
 		return converted, phType, err
 	default:
 		// This should never be reached due to the check above, but keep for safety
@@ -160,8 +120,7 @@ func ConvertPlaceholderGroup(phgBytes []byte, fieldSchema *schemapb.FieldSchema)
 // convertPlaceholder converts fp32 vectors in placeholder to the target type.
 func convertPlaceholder(
 	phg *commonpb.PlaceholderGroup,
-	validateFn func([]float32) error,
-	convertFn func([]float32) []byte,
+	fieldType schemapb.DataType,
 	targetType commonpb.PlaceholderType,
 ) ([]byte, error) {
 	placeholder := phg.Placeholders[0]
@@ -173,17 +132,51 @@ func convertPlaceholder(
 			return nil, fmt.Errorf("failed to parse float32 vector at index %d: %w", i, err)
 		}
 
-		if err := validateFn(floats); err != nil {
+		convertedValues[i], err = typeutil.ConvertFloat32ToFP16BF16Bytes(floats, fieldType)
+		if err != nil {
 			return nil, err
 		}
-
-		convertedValues[i] = convertFn(floats)
 	}
 
 	placeholder.Type = targetType
 	placeholder.Values = convertedValues
 
 	return proto.Marshal(phg)
+}
+
+func normalizeFP32ToFP16BF16VectorFieldData(columns []*schemapb.FieldData, schema *schemaInfo) error {
+	for _, fieldData := range columns {
+		fieldSchema, err := schema.schemaHelper.GetFieldFromNameDefaultJSON(fieldData.GetFieldName())
+		if err != nil {
+			return err
+		}
+		if err := normalizeFP32ToFP16BF16VectorField(fieldData, fieldSchema); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func normalizeFP32ToFP16BF16VectorField(fieldData *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	fieldType := fieldSchema.GetDataType()
+	if fieldType != schemapb.DataType_Float16Vector && fieldType != schemapb.DataType_BFloat16Vector {
+		return nil
+	}
+	vectors := fieldData.GetVectors()
+	if vectors == nil || vectors.GetFloatVector() == nil {
+		return nil
+	}
+	converted, err := typeutil.ConvertFloat32ToFP16BF16Bytes(vectors.GetFloatVector().GetData(), fieldType)
+	if err != nil {
+		return err
+	}
+	switch fieldType {
+	case schemapb.DataType_Float16Vector:
+		vectors.Data = &schemapb.VectorField_Float16Vector{Float16Vector: converted}
+	case schemapb.DataType_BFloat16Vector:
+		vectors.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: converted}
+	}
+	return nil
 }
 
 // bytesToFloat32Array converts byte slice to float32 array.
