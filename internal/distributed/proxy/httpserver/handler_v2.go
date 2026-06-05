@@ -410,6 +410,35 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			dbName,
 			collectionName,
 		).Inc()
+
+		// Mirror the fail_input/fail_system metric split into the logs so a
+		// failed REST request can be filtered by error_type. System failures are
+		// logged at Warn (actionable); input failures at Info (expected user
+		// mistakes — keeping them at Warn would spam the logs).
+		if label == metrics.FailSystemLabel || label == metrics.FailInputLabel {
+			var status *commonpb.Status
+			switch r := resp.(type) {
+			case interface{ GetStatus() *commonpb.Status }:
+				status = r.GetStatus()
+			case *commonpb.Status:
+				status = r
+			}
+			errType := merr.SystemError
+			if label == metrics.FailInputLabel {
+				errType = merr.InputError
+			}
+			logger := log.Ctx(ctx).With(
+				zap.String("method", methodTag),
+				zap.String("error_type", errType.String()),
+				zap.Int32("code", status.GetCode()),
+				zap.String("reason", status.GetReason()),
+			)
+			if errType == merr.InputError {
+				logger.Info("restful request returned an input error")
+			} else {
+				logger.Warn("restful request returned a system error")
+			}
+		}
 	}
 }
 
