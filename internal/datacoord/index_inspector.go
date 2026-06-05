@@ -130,14 +130,14 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 }
 
 func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentInfo {
-	flushedSegments := i.meta.SelectSegments(ctx, SegmentFilterFunc(isFlush))
-
 	sortCompactionEnabled := enableSortCompaction()
 	externalCollections := make(map[UniqueID]bool)
-	unindexedSegments := make([]*SegmentInfo, 0)
-	for _, segment := range flushedSegments {
+	candidateSegments := i.meta.SelectSegments(ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
+		if !isFlush(segment) {
+			return false
+		}
 		if segment.GetLevel() == datapb.SegmentLevel_L0 {
-			continue
+			return false
 		}
 		if sortCompactionEnabled && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
 			isExternal, ok := externalCollections[segment.CollectionID]
@@ -145,10 +145,13 @@ func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentI
 				isExternal = i.isExternalCollection(segment.CollectionID)
 				externalCollections[segment.CollectionID] = isExternal
 			}
-			if !isExternal {
-				continue
-			}
+			return isExternal
 		}
+		return true
+	}))
+
+	unindexedSegments := make([]*SegmentInfo, 0)
+	for _, segment := range candidateSegments {
 		if i.meta.indexMeta.IsUnIndexedSegment(segment.CollectionID, segment.GetID()) {
 			unindexedSegments = append(unindexedSegments, segment)
 		}
