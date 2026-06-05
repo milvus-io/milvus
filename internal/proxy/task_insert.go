@@ -251,7 +251,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 	err = normalizeFP32ToFP16BF16VectorFieldData(it.insertMsg.GetFieldsData(), schema)
 	if err != nil {
-		log.Info("normalize fp32 to fp16/bf16 vector field data failed", zap.Error(err))
+		log.Info(ctx, "normalize fp32 to fp16/bf16 vector field data failed", mlog.Err(err))
 		return err
 	}
 
