@@ -30,7 +30,7 @@ import (
 
 func TestShardInterceptorLogsOmittedSchemaVersionAsNotProvided(t *testing.T) {
 	core, logs := observer.New(mlog.WarnLevel)
-	logger := mlog.With().WithOptions(zap.WrapCore(func(zapcore.Core) zapcore.Core { return core }))
+	logger := mlog.WithOptions(zap.WrapCore(func(zapcore.Core) zapcore.Core { return core }))
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
 	shardManager.EXPECT().Logger().Return(logger).Maybe()
