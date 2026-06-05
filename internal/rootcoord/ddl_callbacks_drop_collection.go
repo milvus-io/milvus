@@ -131,16 +131,6 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 			}
 			continue
 		}
-		// Drop virtual channel data when the vchannel is acknowledged.
-		resp, err := c.mixCoord.DropVirtualChannel(ctx, &datapb.DropVirtualChannelRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			),
-			ChannelName: vchannel,
-		})
-		if err := merr.CheckRPCCall(resp, err); err != nil {
-			return merr.Wrap(err, "failed to drop virtual channel")
-		}
 	}
 	// add the collection tombstone to the sweeper.
 	c.tombstoneSweeper.AddTombstone(newCollectionTombstone(c.meta, c.broker, header.CollectionId))
@@ -158,6 +148,23 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 		ce.OptLPCMCollectionName(body.CollectionName),
 		ce.OptLPCMCollectionID(header.CollectionId),
 		ce.OptLPCMMsgType(commonpb.MsgType_DropCollection)).Build())
+}
+
+func (c *DDLCallback) dropCollectionV1AckOnceCallback(ctx context.Context, result message.AckResultDropCollectionMessageV1) error {
+	msg := result.Message
+	if funcutil.IsControlChannel(msg.VChannel()) {
+		return nil
+	}
+	resp, err := c.mixCoord.DropVirtualChannel(ctx, &datapb.DropVirtualChannelRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		ChannelName: msg.VChannel(),
+	})
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		return errors.Wrap(err, "failed to drop virtual channel")
+	}
+	return nil
 }
 
 // newCollectionTombstone creates a new collection tombstone.

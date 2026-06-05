@@ -4,16 +4,16 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/growing"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
-// recoverFromStream recovers the recovery storage from the recovery stream.
-func (r *recoveryStorageImpl) recoverFromStream(
+// runBoundedMetaScannerAndSwitchModules recovers fast module metadata from a bounded WAL scan,
+// then switches modules into MetaAndData mode and returns their open snapshot.
+func (r *recoveryStorageImpl) runBoundedMetaScannerAndSwitchModules(
 	ctx context.Context,
 	recoveryStreamBuilder RecoveryStreamBuilder,
 	lastTimeTickMessage message.ImmutableMessage,
@@ -29,7 +29,7 @@ func (r *recoveryStorageImpl) recoverFromStream(
 		mlog.String("state", recoveryStorageStateStreamRecovering),
 	))
 
-	r.Logger().Info(ctx, "recover from wal stream...")
+	r.Logger().Info(context.TODO(), "recover from wal stream...")
 	rs := recoveryStreamBuilder.Build(BuildRecoveryStreamParam{
 		StartCheckpoint: r.checkpoint.MessageID,
 		EndTimeTick:     lastTimeTickMessage.TimeTick(),
@@ -37,7 +37,7 @@ func (r *recoveryStorageImpl) recoverFromStream(
 	defer func() {
 		rs.Close()
 		if err != nil {
-			r.Logger().Warn(ctx, "recovery from wal stream failed", mlog.Err(err))
+			r.Logger().Warn(context.TODO(), "recovery from wal stream failed", mlog.Err(err))
 			return
 		}
 	}()
@@ -57,7 +57,7 @@ L:
 	if rs.Error() != nil {
 		return nil, errors.Wrap(rs.Error(), "failed to read the recovery info from wal")
 	}
-	snapshot = r.getSnapshot()
+	snapshot = r.switchModulesIntoMetaAndData()
 	snapshot.TxnBuffer = rs.TxnBuffer()
 	logFields := []mlog.Field{
 		mlog.String("channel", recoveryStreamBuilder.Channel().String()),
@@ -72,59 +72,21 @@ L:
 			mlog.Stringer("targetWALName", snapshot.AlterWALInfo.TargetWALName),
 		)
 	}
-	r.Logger().Info(ctx, "recovery from wal stream done", logFields...)
+	r.Logger().Info(context.TODO(), "recovery from wal stream done", logFields...)
 	return snapshot, nil
 }
 
-// getSnapshot returns the snapshot of the recovery storage.
-// Use this function to get the snapshot after recovery is finished,
-// and use the snapshot to recover all write ahead components.
-func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
-	segments := make(map[int64]*streamingpb.SegmentAssignmentMeta, len(r.segments))
-	vchannels := make(map[string]*streamingpb.VChannelMeta, len(r.vchannels))
-	// Collect active vchannels and build a set of active partition IDs (globally unique).
-	activePartitions := make(map[int64]struct{})
-	for channelName, vchannel := range r.vchannels {
-		if vchannel.IsActive() {
-			vchannels[channelName] = proto.Clone(vchannel.meta).(*streamingpb.VChannelMeta)
-			for _, p := range vchannel.meta.CollectionInfo.Partitions {
-				activePartitions[p.PartitionId] = struct{}{}
-			}
-		}
-	}
-	for segmentID, segment := range r.segments {
-		if !segment.IsGrowing() {
-			continue
-		}
-		// Defensive filtering: skip recoverable segment assignments whose parent vchannel
-		// does not exist or is not active, or whose partition has been dropped. This can happen due to
-		// non-atomic etcd persistence or Kafka offset compaction replaying CreateSegment
-		// for dropped collections/partitions.
-		if _, ok := vchannels[segment.meta.Vchannel]; !ok {
-			r.Logger().Warn(context.TODO(), "getSnapshot: skipping orphaned segment assignment with non-active vchannel",
-				mlog.Int64("segmentID", segmentID),
-				mlog.String("vchannel", segment.meta.Vchannel),
-				mlog.Int64("collectionID", segment.meta.CollectionId),
-				mlog.String("state", segment.meta.State.String()),
-			)
-			continue
-		}
-		if _, ok := activePartitions[segment.meta.PartitionId]; !ok {
-			r.Logger().Warn(context.TODO(), "getSnapshot: skipping orphaned segment assignment with dropped partition",
-				mlog.Int64("segmentID", segmentID),
-				mlog.String("vchannel", segment.meta.Vchannel),
-				mlog.Int64("collectionID", segment.meta.CollectionId),
-				mlog.Int64("partitionID", segment.meta.PartitionId),
-				mlog.String("state", segment.meta.State.String()),
-			)
-			continue
-		}
-		segments[segmentID] = proto.Clone(segment.meta).(*streamingpb.SegmentAssignmentMeta)
-	}
+func (r *recoveryStorageImpl) switchModulesIntoMetaAndData() *RecoverySnapshot {
 	snapshot := &RecoverySnapshot{
-		VChannels:          vchannels,
-		SegmentAssignments: segments,
-		Checkpoint:         r.checkpoint.Clone(),
+		Checkpoint: r.checkpointManager.Snapshot(),
+	}
+	for _, module := range r.modules {
+		moduleSnapshot := module.SwitchIntoMetaAndData()
+		switch s := moduleSnapshot.(type) {
+		case *growing.Snapshot:
+			snapshot.VChannels = s.VChannels
+			snapshot.SegmentAssignments = s.SegmentAssignments
+		}
 	}
 	if r.alterWALInfo != nil {
 		alterWALInfoCopy := *r.alterWALInfo

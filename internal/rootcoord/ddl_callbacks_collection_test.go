@@ -21,12 +21,18 @@ import (
 	"testing"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -171,6 +177,34 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 		CollectionName: collectionName,
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
+}
+
+func TestDropCollectionAckOnceCallbackDropsVirtualChannel(t *testing.T) {
+	ctx := context.Background()
+	mixCoord := mocks.NewMixCoord(t)
+	mixCoord.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
+			require.Equal(t, "v1", req.GetChannelName())
+			return &datapb.DropVirtualChannelResponse{Status: merr.Success()}, nil
+		})
+
+	callback := &DDLCallback{Core: &Core{mixCoord: mixCoord}}
+	err := callback.dropCollectionV1AckOnceCallback(ctx, buildDropCollectionAckResult("v1"))
+	require.NoError(t, err)
+}
+
+func buildDropCollectionAckResult(vchannel string) message.AckResultDropCollectionMessageV1 {
+	msg := message.NewDropCollectionMessageBuilderV1().
+		WithVChannel(vchannel).
+		WithHeader(&message.DropCollectionMessageHeader{CollectionId: 100}).
+		WithBody(&msgpb.DropCollectionRequest{}).
+		MustBuildMutable().
+		WithTimeTick(10).
+		WithLastConfirmed(rmq.NewRmqID(10)).
+		IntoImmutableMessage(rmq.NewRmqID(10))
+	return message.AckResultDropCollectionMessageV1{
+		Message: message.MustAsImmutableDropCollectionMessageV1(msg),
+	}
 }
 
 func TestCreatePartitionMaxCountIgnoresDroppedPartitions(t *testing.T) {

@@ -16,5 +16,6 @@ Persists WAL consumer state to the catalog (etcd) and object storage. **Core inv
 
 ## Key Packages
 
-- `internal/streamingnode/server/wal/recovery/` — `RecoveryStorage`, `RecoverySnapshot`, `WALCheckpoint`, background persist task
-- `internal/streamingnode/server/flusher/flusherimpl/` — `WALFlusherImpl`, segment data flush to object storage
+- `internal/streamingnode/server/wal/recovery/` — `RecoveryStorage`, `RecoverySnapshot`, WAL replay orchestration, meta recovery and background persist task
+- `internal/streamingnode/server/wal/checkpoint/` — WAL checkpoint manager, meta/data barriers and checkpoint advancement rules
+- `internal/streamingnode/server/wal/growing/` — Growing segment data durability path, write-only buffers, object storage flush and lifecycle commits

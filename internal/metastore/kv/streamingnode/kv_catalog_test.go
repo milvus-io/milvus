@@ -201,9 +201,9 @@ func TestCatalogListQueryViewsRejectsCompactKeyValueMismatch(t *testing.T) {
 }
 
 // TestCatalogSegmentAssignments round-trips segment assignments through the
-// compound SaveRecoverySnapshot: GROWING segments are persisted and listed
-// back, and a FLUSHED segment is removed from meta while untouched segments
-// (absent from the delta) are left in place.
+// compound SaveRecoverySnapshot. Closed segment metadata stays persisted until
+// an explicit cleanup task drops it, while entries absent from the delta remain
+// unchanged.
 func TestCatalogSegmentAssignments(t *testing.T) {
 	catalog := newTestEtcdCatalog(t, "testCatalogSegmentAssignments")
 	ctx := context.Background()
@@ -224,7 +224,7 @@ func TestCatalogSegmentAssignments(t *testing.T) {
 	assert.Len(t, segments, 2)
 	assert.NoError(t, err)
 
-	// A FLUSHED segment is removed; segment 2 is not in the delta, so it stays.
+	// A FLUSHED segment is retained; segment 2 is not in the delta, so it stays.
 	err = catalog.SaveRecoverySnapshot(ctx, "p1", &metastore.WALRecoverySnapshot{
 		SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{
 			1: {SegmentId: 1, State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED},
@@ -233,9 +233,318 @@ func TestCatalogSegmentAssignments(t *testing.T) {
 	assert.NoError(t, err)
 
 	segments, err = catalog.ListSegmentAssignment(ctx, "p1")
-	assert.Len(t, segments, 1)
+	assert.Len(t, segments, 2)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(2), segments[0].GetSegmentId())
+	byID := make(map[int64]*streamingpb.SegmentAssignmentMeta, len(segments))
+	for _, segment := range segments {
+		byID[segment.GetSegmentId()] = segment
+	}
+	assert.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED, byID[1].GetState())
+	assert.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING, byID[2].GetState())
+}
+
+func TestCatalogListSegmentAssignmentRejectsMismatchedOwner(t *testing.T) {
+	kv := mocks.NewMetaKv(t)
+	segment := &streamingpb.SegmentAssignmentMeta{
+		SegmentId: 20,
+		State:     streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
+	}
+	value, err := proto.Marshal(segment)
+	require.NoError(t, err)
+	kv.EXPECT().LoadWithPrefix(mock.Anything, buildSegmentAssignmentPrefix("p1")).Return(
+		[]string{buildSegmentAssignmentKey("p1", 10)},
+		[]string{string(value)},
+		nil,
+	)
+
+	catalog := NewCataLog(kv)
+	segments, err := catalog.ListSegmentAssignment(context.Background(), "p1")
+	require.Error(t, err)
+	assert.Nil(t, segments)
+	assert.ErrorContains(t, err, "mismatched segment assignment")
+}
+
+func TestCatalogRetainsClosedRecoveryMeta(t *testing.T) {
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+	rootPath := "testCatalogRetainsClosedRecoveryMeta-" + uuid.New().String() + "/meta"
+	kv := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	catalog := NewCataLog(kv)
+	ctx := context.Background()
+
+	vchannels := map[string]*streamingpb.VChannelMeta{
+		"vchannel-1": {
+			Vchannel: "vchannel-1",
+			State:    streamingpb.VChannelState_VCHANNEL_STATE_DROPPED,
+			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+				CollectionId: 100,
+				Partitions:   []*streamingpb.PartitionInfoOfVChannel{{PartitionId: 200}},
+				Schemas: []*streamingpb.CollectionSchemaOfVChannel{
+					{
+						Schema:             &schemapb.CollectionSchema{Name: "collection-1"},
+						CheckpointTimeTick: 10,
+						State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+					},
+				},
+			},
+			CheckpointTimeTick:     100,
+			DataCheckpointTimeTick: 50,
+		},
+	}
+	require.NoError(t, catalog.SaveVChannels(ctx, "p1", vchannels))
+
+	loadedVChannels, err := catalog.ListVChannel(ctx, "p1")
+	require.NoError(t, err)
+	require.Len(t, loadedVChannels, 1)
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, loadedVChannels[0].GetState())
+	assert.Equal(t, uint64(100), loadedVChannels[0].GetCheckpointTimeTick())
+	assert.Equal(t, uint64(50), loadedVChannels[0].GetDataCheckpointTimeTick())
+
+	segments := map[int64]*streamingpb.SegmentAssignmentMeta{
+		300: {
+			CollectionId:           100,
+			PartitionId:            200,
+			SegmentId:              300,
+			Vchannel:               "vchannel-1",
+			State:                  streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
+			CheckpointTimeTick:     120,
+			DataCheckpointTimeTick: 80,
+		},
+	}
+	require.NoError(t, catalog.SaveSegmentAssignments(ctx, "p1", segments))
+
+	loadedSegments, err := catalog.ListSegmentAssignment(ctx, "p1")
+	require.NoError(t, err)
+	require.Len(t, loadedSegments, 1)
+	assert.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED, loadedSegments[0].GetState())
+	assert.Equal(t, uint64(120), loadedSegments[0].GetCheckpointTimeTick())
+	assert.Equal(t, uint64(80), loadedSegments[0].GetDataCheckpointTimeTick())
+}
+
+func TestCatalogListVChannelRejectsMissingSchema(t *testing.T) {
+	kv := mocks.NewMetaKv(t)
+	vchannel := &streamingpb.VChannelMeta{
+		Vchannel: "v1",
+		State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+		CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+			CollectionId: 100,
+		},
+	}
+	value, err := proto.Marshal(vchannel)
+	require.NoError(t, err)
+	kv.EXPECT().LoadWithPrefix(mock.Anything, buildVChannelPrefix("p1")).
+		Return([]string{buildVChannelKey("p1", "v1")}, []string{string(value)}, nil)
+
+	catalog := NewCataLog(kv)
+	vchannels, err := catalog.ListVChannel(context.Background(), "p1")
+	require.Error(t, err)
+	assert.Nil(t, vchannels)
+	assert.ErrorContains(t, err, "missing schemas")
+}
+
+func TestCatalogListVChannelRejectsMismatchedOwner(t *testing.T) {
+	kv := mocks.NewMetaKv(t)
+	vchannel := &streamingpb.VChannelMeta{
+		Vchannel: "other",
+		State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+		CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+			CollectionId: 100,
+		},
+	}
+	vchannelValue, err := proto.Marshal(vchannel)
+	require.NoError(t, err)
+	schemaValue, err := proto.Marshal(&streamingpb.CollectionSchemaOfVChannel{
+		Schema:             &schemapb.CollectionSchema{Name: "schema"},
+		CheckpointTimeTick: 10,
+	})
+	require.NoError(t, err)
+	kv.EXPECT().LoadWithPrefix(mock.Anything, buildVChannelPrefix("p1")).Return(
+		[]string{
+			buildVChannelKey("p1", "v1"),
+			buildVChannelSchemaKey("p1", "v1", 10),
+		},
+		[]string{string(vchannelValue), string(schemaValue)},
+		nil,
+	)
+
+	catalog := NewCataLog(kv)
+	vchannels, err := catalog.ListVChannel(context.Background(), "p1")
+	require.Error(t, err)
+	assert.Nil(t, vchannels)
+	assert.ErrorContains(t, err, "mismatched vchannel")
+}
+
+func TestCatalogRetainsTombstonedRecoveryMeta(t *testing.T) {
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+	rootPath := "testCatalogRetainsTombstonedRecoveryMeta-" + uuid.New().String() + "/meta"
+	kv := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	catalog := NewCataLog(kv)
+	ctx := context.Background()
+
+	vchannels := map[string]*streamingpb.VChannelMeta{
+		"vchannel-1": {
+			Vchannel: "vchannel-1",
+			State:    streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED,
+			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+				CollectionId: 100,
+				Partitions: []*streamingpb.PartitionInfoOfVChannel{
+					{
+						PartitionId:       200,
+						State:             streamingpb.PartitionState_PARTITION_STATE_TOMBSTONED,
+						TombstoneTimeTick: 120,
+					},
+				},
+				Schemas: []*streamingpb.CollectionSchemaOfVChannel{
+					{
+						Schema:             &schemapb.CollectionSchema{Name: "collection-1"},
+						CheckpointTimeTick: 10,
+						State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+					},
+				},
+			},
+			CheckpointTimeTick:     100,
+			DataCheckpointTimeTick: 100,
+			TombstoneTimeTick:      100,
+		},
+	}
+	require.NoError(t, catalog.SaveVChannels(ctx, "p1", vchannels))
+
+	loadedVChannels, err := catalog.ListVChannel(ctx, "p1")
+	require.NoError(t, err)
+	require.Len(t, loadedVChannels, 1)
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED, loadedVChannels[0].GetState())
+	assert.Equal(t, uint64(100), loadedVChannels[0].GetTombstoneTimeTick())
+	require.Len(t, loadedVChannels[0].GetCollectionInfo().GetPartitions(), 1)
+	assert.Equal(t, streamingpb.PartitionState_PARTITION_STATE_TOMBSTONED, loadedVChannels[0].GetCollectionInfo().GetPartitions()[0].GetState())
+	assert.Equal(t, uint64(120), loadedVChannels[0].GetCollectionInfo().GetPartitions()[0].GetTombstoneTimeTick())
+
+	segments := map[int64]*streamingpb.SegmentAssignmentMeta{
+		300: {
+			CollectionId:           100,
+			PartitionId:            200,
+			SegmentId:              300,
+			Vchannel:               "vchannel-1",
+			State:                  streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED,
+			CheckpointTimeTick:     120,
+			DataCheckpointTimeTick: 120,
+			TombstoneTimeTick:      120,
+		},
+	}
+	require.NoError(t, catalog.SaveSegmentAssignments(ctx, "p1", segments))
+
+	loadedSegments, err := catalog.ListSegmentAssignment(ctx, "p1")
+	require.NoError(t, err)
+	require.Len(t, loadedSegments, 1)
+	assert.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED, loadedSegments[0].GetState())
+	assert.Equal(t, uint64(120), loadedSegments[0].GetTombstoneTimeTick())
+}
+
+func TestCatalogDropsTombstonedRecoveryMeta(t *testing.T) {
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+	rootPath := "testCatalogDropsTombstonedRecoveryMeta-" + uuid.New().String() + "/meta"
+	kv := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	catalog := NewCataLog(kv)
+	ctx := context.Background()
+
+	vchannels := map[string]*streamingpb.VChannelMeta{
+		"vchannel-1": {
+			Vchannel: "vchannel-1",
+			State:    streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED,
+			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+				CollectionId: 100,
+				Schemas: []*streamingpb.CollectionSchemaOfVChannel{
+					{
+						Schema:             &schemapb.CollectionSchema{Name: "collection-1"},
+						CheckpointTimeTick: 10,
+						State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+					},
+					{
+						Schema:             &schemapb.CollectionSchema{Name: "collection-2"},
+						CheckpointTimeTick: 20,
+						State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+					},
+				},
+			},
+			CheckpointTimeTick:     100,
+			DataCheckpointTimeTick: 100,
+			TombstoneTimeTick:      100,
+		},
+		"vchannel-2": {
+			Vchannel: "vchannel-2",
+			State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+				CollectionId: 101,
+				Schemas: []*streamingpb.CollectionSchemaOfVChannel{
+					{
+						Schema:             &schemapb.CollectionSchema{Name: "collection-3"},
+						CheckpointTimeTick: 30,
+						State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+					},
+				},
+			},
+		},
+	}
+	require.NoError(t, catalog.SaveVChannels(ctx, "p1", vchannels))
+
+	segments := map[int64]*streamingpb.SegmentAssignmentMeta{
+		300: {
+			SegmentId:              300,
+			Vchannel:               "vchannel-1",
+			State:                  streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED,
+			CheckpointTimeTick:     120,
+			DataCheckpointTimeTick: 120,
+			TombstoneTimeTick:      120,
+		},
+		301: {
+			SegmentId: 301,
+			Vchannel:  "vchannel-2",
+			State:     streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
+		},
+	}
+	require.NoError(t, catalog.SaveSegmentAssignments(ctx, "p1", segments))
+
+	require.NoError(t, catalog.DropVChannels(ctx, "p1", vchannelsByName(vchannels, "vchannel-1")))
+	require.NoError(t, catalog.DropSegmentAssignments(ctx, "p1", []int64{300}))
+
+	loadedVChannels, err := catalog.ListVChannel(ctx, "p1")
+	require.NoError(t, err)
+	require.Len(t, loadedVChannels, 1)
+	assert.Equal(t, "vchannel-2", loadedVChannels[0].GetVchannel())
+
+	loadedSegments, err := catalog.ListSegmentAssignment(ctx, "p1")
+	require.NoError(t, err)
+	require.Len(t, loadedSegments, 1)
+	assert.Equal(t, int64(301), loadedSegments[0].GetSegmentId())
+}
+
+func vchannelsByName(vchannels map[string]*streamingpb.VChannelMeta, names ...string) map[string]*streamingpb.VChannelMeta {
+	selected := make(map[string]*streamingpb.VChannelMeta, len(names))
+	for _, name := range names {
+		selected[name] = vchannels[name]
+	}
+	return selected
+}
+
+func TestCatalogRejectsDroppedVChannelSchemaOnSave(t *testing.T) {
+	catalog := &catalog{}
+	vchannel := &streamingpb.VChannelMeta{
+		Vchannel: "vchannel-1",
+		CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+			CollectionId: 100,
+			Schemas: []*streamingpb.CollectionSchemaOfVChannel{
+				{
+					Schema:             &schemapb.CollectionSchema{Name: "collection-1"},
+					CheckpointTimeTick: 10,
+					State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED,
+				},
+			},
+		},
+	}
+
+	removes, kvs, err := catalog.getRemovalAndSaveForVChannel("p1", vchannel)
+	require.Error(t, err)
+	assert.Nil(t, removes)
+	assert.Nil(t, kvs)
+	assert.ErrorContains(t, err, "unknown vchannel schema state")
 }
 
 func TestCatalogVChannel(t *testing.T) {
@@ -264,7 +573,7 @@ func TestCatalogVChannel(t *testing.T) {
 							Name: "collection-1",
 						},
 						CheckpointTimeTick: 0,
-						State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED,
+						State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
 					},
 					{
 						Schema: &schemapb.CollectionSchema{
@@ -315,13 +624,16 @@ func TestCatalogVChannel(t *testing.T) {
 	for _, vchannel := range vchannels {
 		switch vchannel.Vchannel {
 		case "vchannel-1":
-			assert.Len(t, vchannel.CollectionInfo.Schemas, 2)
-			assert.Equal(t, vchannel.CollectionInfo.Schemas[0].Schema.Name, "collection-2")
-			assert.Equal(t, vchannel.CollectionInfo.Schemas[0].CheckpointTimeTick, uint64(8))
+			assert.Len(t, vchannel.CollectionInfo.Schemas, 3)
+			assert.Equal(t, vchannel.CollectionInfo.Schemas[0].Schema.Name, "collection-1")
+			assert.Equal(t, vchannel.CollectionInfo.Schemas[0].CheckpointTimeTick, uint64(0))
 			assert.Equal(t, vchannel.CollectionInfo.Schemas[0].State, streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL)
-			assert.Equal(t, vchannel.CollectionInfo.Schemas[1].Schema.Name, "collection-3")
-			assert.Equal(t, vchannel.CollectionInfo.Schemas[1].CheckpointTimeTick, uint64(101))
+			assert.Equal(t, vchannel.CollectionInfo.Schemas[1].Schema.Name, "collection-2")
+			assert.Equal(t, vchannel.CollectionInfo.Schemas[1].CheckpointTimeTick, uint64(8))
 			assert.Equal(t, vchannel.CollectionInfo.Schemas[1].State, streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL)
+			assert.Equal(t, vchannel.CollectionInfo.Schemas[2].Schema.Name, "collection-3")
+			assert.Equal(t, vchannel.CollectionInfo.Schemas[2].CheckpointTimeTick, uint64(101))
+			assert.Equal(t, vchannel.CollectionInfo.Schemas[2].State, streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL)
 		case "vchannel-2":
 			assert.Len(t, vchannel.CollectionInfo.Schemas, 1)
 			assert.Equal(t, vchannel.CollectionInfo.Schemas[0].Schema.Name, "collection-1")
@@ -330,20 +642,22 @@ func TestCatalogVChannel(t *testing.T) {
 		}
 	}
 
-	vchannelMetas["vchannel-1"].CollectionInfo.Schemas[1].State = streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED
 	vchannelMetas["vchannel-2"].State = streamingpb.VChannelState_VCHANNEL_STATE_DROPPED
 	err = catalog.SaveRecoverySnapshot(ctx, channel1, &metastore.WALRecoverySnapshot{VChannels: vchannelMetas})
 	assert.NoError(t, err)
 
 	vchannels, err = catalog.ListVChannel(ctx, channel1)
-	assert.Len(t, vchannels, 1)
+	assert.Len(t, vchannels, 2)
 	assert.NoError(t, err)
 	for _, vchannel := range vchannels {
 		switch vchannel.Vchannel {
 		case "vchannel-1":
+			assert.Len(t, vchannel.CollectionInfo.Schemas, 3)
+		case "vchannel-2":
+			assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, vchannel.GetState())
 			assert.Len(t, vchannel.CollectionInfo.Schemas, 1)
-			assert.Equal(t, vchannel.CollectionInfo.Schemas[0].Schema.Name, "collection-3")
-			assert.Equal(t, vchannel.CollectionInfo.Schemas[0].CheckpointTimeTick, uint64(101))
+			assert.Equal(t, vchannel.CollectionInfo.Schemas[0].Schema.Name, "collection-1")
+			assert.Equal(t, vchannel.CollectionInfo.Schemas[0].CheckpointTimeTick, uint64(0))
 			assert.Equal(t, vchannel.CollectionInfo.Schemas[0].State, streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL)
 		}
 	}

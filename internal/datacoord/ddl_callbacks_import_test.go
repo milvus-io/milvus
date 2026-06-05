@@ -27,6 +27,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -47,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -896,18 +898,6 @@ func newTestImportMeta(t *testing.T) (ImportMeta, *mocks.DataCoordCatalog) {
 	return importMeta, catalog
 }
 
-func buildCommitImportBroadcastResult(jobID int64) message.BroadcastResultCommitImportMessageV2 {
-	broadcastMsg := message.NewCommitImportMessageBuilderV2().
-		WithHeader(&message.CommitImportMessageHeader{JobId: jobID}).
-		WithBody(&messagespb.CommitImportMessageBody{}).
-		WithBroadcast([]string{"control_channel"}).
-		MustBuildBroadcast()
-	return message.BroadcastResultCommitImportMessageV2{
-		Message: message.MustAsSpecializedBroadcastMessage[*message.CommitImportMessageHeader, *messagespb.CommitImportMessageBody](broadcastMsg),
-		Results: map[string]*message.AppendResult{},
-	}
-}
-
 func buildRollbackImportBroadcastResult(jobID int64) message.BroadcastResultRollbackImportMessageV2 {
 	broadcastMsg := message.NewRollbackImportMessageBuilderV2().
 		WithHeader(&message.RollbackImportMessageHeader{JobId: jobID}).
@@ -920,28 +910,66 @@ func buildRollbackImportBroadcastResult(jobID int64) message.BroadcastResultRoll
 	}
 }
 
-func TestCommitImportCallback_UncommittedToCommitting(t *testing.T) {
+func buildCommitImportAckResult(jobID int64, vchannel string) message.AckResultCommitImportMessageV2 {
+	msg := message.NewCommitImportMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.CommitImportMessageHeader{JobId: jobID}).
+		WithBody(&messagespb.CommitImportMessageBody{}).
+		MustBuildMutable().
+		WithTimeTick(10).
+		WithLastConfirmed(rmq.NewRmqID(10)).
+		IntoImmutableMessage(rmq.NewRmqID(10))
+	return message.AckResultCommitImportMessageV2{
+		Message: message.MustAsImmutableCommitImportMessageV2(msg),
+	}
+}
+
+func TestCommitImportAckOnceCallback_FirstDataVChannelMovesJobToImporting(t *testing.T) {
 	ctx := context.Background()
 	importMeta, _ := newTestImportMeta(t)
 
-	job := &importJob{
+	const jobID int64 = 10
+	err := importMeta.AddJob(ctx, &importJob{
 		ImportJob: &datapb.ImportJob{
-			JobID:      1,
+			JobID:      jobID,
 			State:      internalpb.ImportJobState_Uncommitted,
 			AutoCommit: false,
 		},
 		tr: timerecord.NewTimeRecorder("test"),
-	}
-	err := importMeta.AddJob(ctx, job)
+	})
 	assert.NoError(t, err)
 
 	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(1))
+	err = callbacks.commitImportV2AckOnceCallback(ctx, buildCommitImportAckResult(jobID, "v1"))
 	assert.NoError(t, err)
 
-	updatedJob := importMeta.GetJob(ctx, 1)
-	assert.NotNil(t, updatedJob)
-	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
+	updatedJob := importMeta.GetJob(ctx, jobID)
+	assert.Equal(t, internalpb.ImportJobState_Importing, updatedJob.GetState())
+	assert.ElementsMatch(t, []string{"v1"}, updatedJob.GetCommittedVchannels())
+}
+
+func TestCommitImportAckOnceCallback_RecordsAdditionalDataVChannel(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+
+	const jobID int64 = 11
+	err := importMeta.AddJob(ctx, &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:      jobID,
+			State:      internalpb.ImportJobState_Importing,
+			AutoCommit: false,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	})
+	assert.NoError(t, err)
+
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	err = callbacks.commitImportV2AckOnceCallback(ctx, buildCommitImportAckResult(jobID, "v1"))
+	assert.NoError(t, err)
+
+	updatedJob := importMeta.GetJob(ctx, jobID)
+	assert.Equal(t, internalpb.ImportJobState_Importing, updatedJob.GetState())
+	assert.ElementsMatch(t, []string{"v1"}, updatedJob.GetCommittedVchannels())
 }
 
 func TestCommitImportCallback_BeforeUncommitted_Retry(t *testing.T) {
@@ -1061,7 +1089,7 @@ func TestRollbackImportCallback_TransitionToFailed(t *testing.T) {
 		"Failed transition must set CleanupTs for GC eligibility")
 }
 
-func TestCommitImportCallback_AfterAbort_NoOp(t *testing.T) {
+func TestCommitImportAckOnceCallback_AfterAbort_NoOp(t *testing.T) {
 	ctx := context.Background()
 	importMeta, _ := newTestImportMeta(t)
 
@@ -1077,13 +1105,14 @@ func TestCommitImportCallback_AfterAbort_NoOp(t *testing.T) {
 	assert.NoError(t, err)
 
 	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(3))
+	err = callbacks.commitImportV2AckOnceCallback(ctx, buildCommitImportAckResult(3, "v1"))
 	assert.NoError(t, err)
 
 	// UpdateJob skips jobs in Failed state → no-op.
 	updatedJob := importMeta.GetJob(ctx, 3)
 	assert.NotNil(t, updatedJob)
 	assert.Equal(t, internalpb.ImportJobState_Failed, updatedJob.GetState())
+	assert.Empty(t, updatedJob.GetCommittedVchannels())
 }
 
 func TestRollbackImportCallback_AfterCommit_NoOp(t *testing.T) {
@@ -1111,16 +1140,16 @@ func TestRollbackImportCallback_AfterCommit_NoOp(t *testing.T) {
 	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
 }
 
-// TestImportAckCallbacks_CommitVsAbort_Race fires commit and rollback ack
-// callbacks concurrently against the same Uncommitted job. In production these
-// callbacks are serialized by the broadcaster's exclusive collection-level
-// resource-key lock (both CommitImport and RollbackImport are ExclusiveRequired
-// on NewExclusiveCollectionNameResourceKey), so this race is unreachable. The
-// test documents the invariant from the callback side and provides regression
-// coverage against future drift: the job must end in a deterministic terminal
-// state (Committing or Failed) without panicking or corrupting meta. Run with
-// `-race` to detect any unsynchronized access.
-func TestImportAckCallbacks_CommitVsAbort_Race(t *testing.T) {
+// TestImportAckOnceCallbacks_CommitVsAbort_Race fires commit ack-once and
+// rollback ack callbacks concurrently against the same Uncommitted job. In
+// production these callbacks are serialized by the broadcaster's exclusive
+// collection-level resource-key lock (both CommitImport and RollbackImport are
+// ExclusiveRequired on NewExclusiveCollectionNameResourceKey), so this race is
+// unreachable. The test documents the invariant from the callback side and
+// provides regression coverage against future drift: the job must end in a
+// deterministic terminal state (Importing or Failed) without panicking or
+// corrupting meta. Run with `-race` to detect any unsynchronized access.
+func TestImportAckOnceCallbacks_CommitVsAbort_Race(t *testing.T) {
 	for iter := 0; iter < 32; iter++ {
 		ctx := context.Background()
 		importMeta, _ := newTestImportMeta(t)
@@ -1145,7 +1174,7 @@ func TestImportAckCallbacks_CommitVsAbort_Race(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			commitErr = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(jobID))
+			commitErr = callbacks.commitImportV2AckOnceCallback(ctx, buildCommitImportAckResult(jobID, "v1"))
 		}()
 		go func() {
 			defer wg.Done()
@@ -1160,8 +1189,8 @@ func TestImportAckCallbacks_CommitVsAbort_Race(t *testing.T) {
 
 		final := importMeta.GetJob(ctx, jobID).GetState()
 		assert.Contains(t,
-			[]internalpb.ImportJobState{internalpb.ImportJobState_Committing, internalpb.ImportJobState_Failed},
-			final, "iter %d: terminal state must be Committing or Failed, got %s", iter, final)
+			[]internalpb.ImportJobState{internalpb.ImportJobState_Importing, internalpb.ImportJobState_Failed},
+			final, "iter %d: terminal state must be Importing or Failed, got %s", iter, final)
 	}
 }
 
@@ -1223,6 +1252,39 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 // message must reach data vchannels for HandleCommitVchannel to run.
 func TestBroadcastCommitImportMessage_TargetsDataVchannels(t *testing.T) {
 	testBroadcastTargetsDataVchannels(t, (*Server).broadcastCommitImportMessage)
+}
+
+func TestBroadcastCommitImportMessage_RequiresAckSyncUp(t *testing.T) {
+	ctx := context.Background()
+	wantVchannels := []string{"by-dev-rootcoord-dml_0_v0", "by-dev-rootcoord-dml_1_v0"}
+
+	mockBroker := broker.NewMockBroker(t)
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(7)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+	}, nil)
+
+	capture := &captureBroadcastAPI{}
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(_ context.Context, _ ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			return capture, nil
+		}).Build()
+	defer mockBroadcast.UnPatch()
+
+	server := &Server{broker: mockBroker}
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        7,
+			CollectionID: 7,
+			Vchannels:    wantVchannels,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+
+	err := server.broadcastCommitImportMessage(ctx, job)
+	assert.NoError(t, err)
+	require.NotNil(t, capture.captured)
+	assert.True(t, capture.captured.BroadcastHeader().AckSyncUp)
 }
 
 // TestBroadcastRollbackImportMessage_TargetsDataVchannels asserts that the

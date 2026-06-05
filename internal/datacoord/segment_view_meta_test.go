@@ -1134,7 +1134,6 @@ func TestSegmentViewMeta_FlushSegments(t *testing.T) {
 		require.NotNil(t, cv)
 		assert.Equal(t, int64(1), cv.GetStreamingVersion())
 		assert.Equal(t, int64(0), cv.GetCompactVersion())
-
 	})
 
 	t.Run("flush increments streaming version", func(t *testing.T) {
@@ -1961,7 +1960,6 @@ func TestSegmentViewMeta_CompleteCompactionMutation_Cluster(t *testing.T) {
 		require.NotNil(t, cv)
 		assert.Equal(t, int64(1), cv.GetStreamingVersion())
 		assert.Equal(t, int64(1), cv.GetCompactVersion())
-
 	})
 }
 
@@ -2152,7 +2150,6 @@ func TestSegmentViewMeta_CompleteCompactionMutation_Sort(t *testing.T) {
 		require.NotNil(t, cv)
 		assert.Equal(t, int64(3), cv.GetStreamingVersion())
 		assert.Equal(t, int64(2), cv.GetCompactVersion())
-
 	})
 
 	t.Run("sort compaction preserves invisible for compaction-created segment", func(t *testing.T) {
@@ -2413,7 +2410,6 @@ func TestSegmentViewMeta_ActivateSegments(t *testing.T) {
 		require.NotNil(t, cv)
 		assert.Equal(t, int64(1), cv.GetStreamingVersion())
 		assert.Equal(t, int64(0), cv.GetCompactVersion())
-
 	})
 
 	t.Run("with existing DataView increments version", func(t *testing.T) {

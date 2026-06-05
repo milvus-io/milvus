@@ -10,7 +10,6 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher/flusherimpl"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
@@ -66,7 +65,6 @@ func adaptImplsToRWWAL(
 	roWAL *roWALAdaptorImpl,
 	builders []interceptors.InterceptorBuilder,
 	interceptorParam *interceptors.InterceptorBuildParam,
-	flusher *flusherimpl.WALFlusherImpl,
 ) *walAdaptorImpl {
 	if roWAL.Channel().AccessMode != types.AccessModeRW {
 		panic("wal should be read-write")
@@ -79,7 +77,6 @@ func adaptImplsToRWWAL(
 		appendExecutionPool:    conc.NewPool[struct{}](0),
 		param:                  interceptorParam,
 		interceptorBuildResult: buildInterceptor(builders, interceptorParam),
-		flusher:                flusher,
 		writeMetrics:           metricsutil.NewWriteMetrics(roWAL.Channel(), roWAL.WALName()),
 		isFenced:               atomic.NewBool(false),
 		appendRateCounter:      utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
@@ -99,7 +96,6 @@ type walAdaptorImpl struct {
 	appendExecutionPool    *conc.Pool[struct{}]
 	param                  *interceptors.InterceptorBuildParam
 	interceptorBuildResult interceptorBuildResult
-	flusher                *flusherimpl.WALFlusherImpl
 	writeMetrics           *metricsutil.WriteMetrics
 	isFenced               *atomic.Bool
 	appendRateCounter      *utility.AverageRateCounter // tracks append rate (bytes/sec)
@@ -108,11 +104,14 @@ type walAdaptorImpl struct {
 // Metrics returns the metrics of the wal.
 func (w *walAdaptorImpl) Metrics() types.WALMetrics {
 	currentMVCC := w.param.MVCCManager.GetMVCCOfVChannel(w.Channel().Name)
-	recoveryMetrics := w.flusher.Metrics()
+	recoveryTimeTick := uint64(0)
+	if w.param.RecoveryStorage != nil {
+		recoveryTimeTick = w.param.RecoveryStorage.Metrics().RecoveryTimeTick
+	}
 	return types.RWWALMetrics{
 		ChannelInfo:      w.Channel(),
 		MVCCTimeTick:     currentMVCC.Timetick,
-		RecoveryTimeTick: recoveryMetrics.RecoveryTimeTick,
+		RecoveryTimeTick: recoveryTimeTick,
 	}
 }
 
@@ -243,7 +242,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 			// if the append operation of wal is fenced, we should report the error to the client.
 			if w.isFenced.CompareAndSwap(false, true) {
 				w.forceCancelAfterGracefulTimeout()
-				w.Logger().Warn(ctx, "wal is fenced, mark as unavailable, all append opertions will be rejected", mlog.Err(err))
+				w.Logger().Warn(context.TODO(), "wal is fenced, mark as unavailable, all append opertions will be rejected", mlog.Err(err))
 			}
 			return nil, status.NewChannelFenced(w.Channel().String())
 		}
@@ -304,7 +303,7 @@ func (w *walAdaptorImpl) retryAppendWhenRecoverableError(ctx context.Context, ms
 		if err == nil {
 			if msg.MessageType() == message.MessageTypeAlterWAL {
 				// if the append operation is a alter WAL message, we should log the message
-				w.Logger().Info(ctx, "append alter WAL message to WAL finish", mlog.String("channel", msg.VChannel()), mlog.Uint64("timetick", msg.TimeTick()))
+				w.Logger().Info(context.TODO(), "append alter WAL message to WAL finish", mlog.String("channel", msg.VChannel()), mlog.Uint64("timetick", msg.TimeTick()))
 			}
 			return msgID, nil
 		}
@@ -313,7 +312,7 @@ func (w *walAdaptorImpl) retryAppendWhenRecoverableError(ctx context.Context, ms
 		}
 		w.writeMetrics.ObserveRetry()
 		nextInterval := backoff.NextBackOff()
-		w.Logger().Warn(ctx, "append message into wal impls failed, retrying...", mlog.FieldMessage(msg), mlog.Int("retry", i), mlog.Duration("nextInterval", nextInterval), mlog.Err(err))
+		w.Logger().Warn(context.TODO(), "append message into wal impls failed, retrying...", mlog.FieldMessage(msg), mlog.Int("retry", i), mlog.Duration("nextInterval", nextInterval), mlog.Err(err))
 
 		select {
 		case <-ctx.Done():
@@ -354,11 +353,10 @@ func (w *walAdaptorImpl) Close() {
 	w.forceCancelAfterGracefulTimeout()
 	w.lifetime.Wait()
 
-	// close the flusher.
-	w.Logger().Info(context.TODO(), "wal begin to close flusher...")
-	if w.flusher != nil {
-		// only in test, the flusher is nil.
-		w.flusher.Close()
+	// close the recovery-owned data path.
+	w.Logger().Info(context.TODO(), "wal begin to close recovery data path...")
+	if w.param.RecoveryStorage != nil {
+		w.param.RecoveryStorage.Close()
 	}
 
 	w.Logger().Info(context.TODO(), "wal begin to close scanners...")
