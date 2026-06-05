@@ -759,9 +759,10 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
         size_t write_offset = 0;
         reader.ReadEntryStream(
             "index_data", [&](const uint8_t* data, size_t len) {
-                memcpy(reinterpret_cast<uint8_t*>(data_.data()) + write_offset,
-                       data,
-                       len);
+                milvus::fastmem::FastMemcpy(
+                    reinterpret_cast<uint8_t*>(data_.data()) + write_offset,
+                    data,
+                    len);
                 write_offset += len;
             });
         AssertInfo(write_offset == index_size * sizeof(IndexStructure<T>),

@@ -63,6 +63,14 @@
 
 namespace milvus::index {
 
+namespace {
+
+constexpr uint32_t MARISA_CSR_FORMAT_VERSION = 1;
+constexpr const char* MARISA_CSR_FORMAT_VERSION_META =
+    "marisa_csr_format_version";
+
+}  // namespace
+
 StringIndexMarisa::StringIndexMarisa(
     const storage::FileManagerContext& file_manager_context)
     : StringIndex(MARISA_TRIE) {
@@ -133,6 +141,85 @@ StringIndexMarisa::CalculateTotalSize() const {
 bool
 valid_str_id(size_t str_id) {
     return str_id != MARISA_NULL_KEY_ID && str_id != MARISA_INVALID_KEY_ID;
+}
+
+void
+ValidateMarisaEntryElementSize(const char* entry_name,
+                               size_t bytes,
+                               size_t element_size) {
+    AssertInfo(bytes % element_size == 0,
+               "invalid {} size: expected multiple of {}, got {}",
+               entry_name,
+               element_size,
+               bytes);
+}
+
+bool
+IsStoredMarisaNull(size_t str_id) {
+    return str_id == MARISA_NULL_KEY_ID || str_id == MARISA_INVALID_KEY_ID;
+}
+
+void
+ValidateMarisaStrIds(const int64_t* str_ids, size_t count, size_t num_keys) {
+    for (size_t i = 0; i < count; i++) {
+        auto raw_id = static_cast<size_t>(str_ids[i]);
+        if (IsStoredMarisaNull(raw_id)) {
+            continue;
+        }
+        AssertInfo(str_ids[i] >= 0 && raw_id < num_keys,
+                   "invalid marisa str id at offset {}: {}, num_keys {}",
+                   i,
+                   str_ids[i],
+                   num_keys);
+    }
+}
+
+void
+ValidateMarisaCsr(const uint32_t* csr_index,
+                  size_t csr_index_count,
+                  const uint32_t* csr_offsets,
+                  size_t csr_offsets_count,
+                  size_t num_keys,
+                  size_t num_rows) {
+    AssertInfo(csr_index_count == num_keys + 1,
+               "invalid marisa CSR index count: expected {}, got {}",
+               num_keys + 1,
+               csr_index_count);
+    AssertInfo(csr_offsets_count <= num_rows,
+               "invalid marisa CSR offsets count: expected at most {}, got {}",
+               num_rows,
+               csr_offsets_count);
+    AssertInfo(csr_index[0] == 0,
+               "invalid marisa CSR index: first offset must be 0, got {}",
+               csr_index[0]);
+
+    uint32_t previous = 0;
+    for (size_t i = 1; i < csr_index_count; i++) {
+        auto current = csr_index[i];
+        AssertInfo(current >= previous,
+                   "invalid marisa CSR index at {}: {} < {}",
+                   i,
+                   current,
+                   previous);
+        AssertInfo(current <= csr_offsets_count,
+                   "invalid marisa CSR index at {}: {} exceeds offsets {}",
+                   i,
+                   current,
+                   csr_offsets_count);
+        previous = current;
+    }
+    AssertInfo(csr_index[num_keys] == csr_offsets_count,
+               "invalid marisa CSR index terminal offset: expected {}, got {}",
+               csr_offsets_count,
+               csr_index[num_keys]);
+
+    for (size_t i = 0; i < csr_offsets_count; i++) {
+        AssertInfo(csr_offsets[i] < num_rows,
+                   "invalid marisa CSR row offset at {}: {} >= {}",
+                   i,
+                   csr_offsets[i],
+                   num_rows);
+    }
 }
 
 void
@@ -301,10 +388,14 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
 
     auto str_ids = set.GetByName(MARISA_STR_IDS);
     auto str_ids_len = str_ids->size;
+    ValidateMarisaEntryElementSize(
+        MARISA_STR_IDS, str_ids_len, sizeof(int64_t));
     str_ids_.resize(str_ids_len / sizeof(int64_t), MARISA_NULL_KEY_ID);
-    memcpy(str_ids_.data(), str_ids->data.get(), str_ids_len);
+    milvus::fastmem::FastMemcpy(
+        str_ids_.data(), str_ids->data.get(), str_ids_len);
     str_ids_ptr_ = str_ids_.data();
     str_ids_size_ = str_ids_.size();
+    ValidateMarisaStrIds(str_ids_ptr_, str_ids_size_, trie_.num_keys());
 
     fill_offsets();
     built_ = true;
@@ -836,6 +927,7 @@ StringIndexMarisa::WriteEntries(storage::IndexEntryWriter* writer) {
     writer->WriteEntry(MARISA_CSR_OFFSETS,
                        csr_offsets_.data(),
                        csr_offsets_.size() * sizeof(uint32_t));
+    writer->PutMeta(MARISA_CSR_FORMAT_VERSION_META, MARISA_CSR_FORMAT_VERSION);
     writer->PutMeta("csr_num_keys", csr_num_keys_);
 }
 
@@ -882,6 +974,8 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
 
     // Stream str_ids entry
     auto str_ids_bytes = reader.GetEntrySize(MARISA_STR_IDS);
+    ValidateMarisaEntryElementSize(
+        MARISA_STR_IDS, str_ids_bytes, sizeof(int64_t));
     if (config.contains(MMAP_FILE_PATH)) {
         // mmap path: stream to disk file, then mmap
         auto str_ids_path = file_name + ".str_ids";
@@ -889,9 +983,16 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
             auto fw = storage::FileWriter(
                 str_ids_path,
                 storage::io::GetPriorityFromLoadPriority(load_priority));
-            reader.ReadEntryStream(
-                MARISA_STR_IDS,
-                [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
+            size_t written = 0;
+            reader.ReadEntryStream(MARISA_STR_IDS,
+                                   [&](const uint8_t* d, size_t len) {
+                                       fw.Write(d, len);
+                                       written += len;
+                                   });
+            AssertInfo(written == str_ids_bytes,
+                       "str_ids stream read size mismatch: got {}, expected {}",
+                       written,
+                       str_ids_bytes);
             fw.Finish();
         }
         auto str_ids_file_raii = std::make_unique<MmapFileRAII>(str_ids_path);
@@ -920,19 +1021,55 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
         size_t write_offset = 0;
         reader.ReadEntryStream(
             MARISA_STR_IDS, [&](const uint8_t* d, size_t len) {
-                memcpy(
+                milvus::fastmem::FastMemcpy(
                     reinterpret_cast<uint8_t*>(str_ids_.data()) + write_offset,
                     d,
                     len);
                 write_offset += len;
             });
+        AssertInfo(write_offset == str_ids_bytes,
+                   "str_ids stream read size mismatch: got {}, expected {}",
+                   write_offset,
+                   str_ids_bytes);
         str_ids_ptr_ = str_ids_.data();
         str_ids_size_ = str_ids_.size();
     }
+    ValidateMarisaStrIds(str_ids_ptr_, str_ids_size_, trie_.num_keys());
 
     // Load persisted CSR or rebuild from str_ids
-    if (reader.HasEntry(MARISA_CSR_INDEX)) {
+    auto has_csr_index = reader.HasEntry(MARISA_CSR_INDEX);
+    auto has_csr_offsets = reader.HasEntry(MARISA_CSR_OFFSETS);
+    auto has_csr_num_keys = reader.HasMeta("csr_num_keys");
+    auto has_csr_version = reader.HasMeta(MARISA_CSR_FORMAT_VERSION_META);
+    auto has_any_csr =
+        has_csr_index || has_csr_offsets || has_csr_num_keys || has_csr_version;
+
+    if (has_any_csr) {
+        AssertInfo(has_csr_index && has_csr_offsets && has_csr_num_keys &&
+                       has_csr_version,
+                   "incomplete marisa CSR side entries: index {}, offsets {}, "
+                   "num_keys {}, version {}",
+                   has_csr_index,
+                   has_csr_offsets,
+                   has_csr_num_keys,
+                   has_csr_version);
+        auto csr_format_version =
+            reader.GetMeta<uint32_t>(MARISA_CSR_FORMAT_VERSION_META);
+        AssertInfo(csr_format_version == MARISA_CSR_FORMAT_VERSION,
+                   "unsupported marisa CSR format version: expected {}, got {}",
+                   MARISA_CSR_FORMAT_VERSION,
+                   csr_format_version);
+
         csr_num_keys_ = reader.GetMeta<size_t>("csr_num_keys");
+        AssertInfo(csr_num_keys_ == trie_.num_keys(),
+                   "invalid marisa CSR key count: expected {}, got {}",
+                   trie_.num_keys(),
+                   csr_num_keys_);
+        AssertInfo(
+            csr_num_keys_ <=
+                std::numeric_limits<size_t>::max() / sizeof(uint32_t) - 1,
+            "marisa CSR key count {} is too large",
+            csr_num_keys_);
 
         // csr_offsets_ is indexed with values up to str_ids_size_; uint32_t
         // slots require the segment to fit below 2^32 rows. Guard the load
@@ -942,22 +1079,41 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                    "segment row count {} exceeds uint32_t capacity for CSR",
                    str_ids_size_);
 
+        size_t idx_bytes = reader.GetEntrySize(MARISA_CSR_INDEX);
+        size_t off_bytes = reader.GetEntrySize(MARISA_CSR_OFFSETS);
+        ValidateMarisaEntryElementSize(
+            MARISA_CSR_INDEX, idx_bytes, sizeof(uint32_t));
+        ValidateMarisaEntryElementSize(
+            MARISA_CSR_OFFSETS, off_bytes, sizeof(uint32_t));
+        AssertInfo(idx_bytes == (csr_num_keys_ + 1) * sizeof(uint32_t),
+                   "invalid marisa CSR index size: expected {}, got {}",
+                   (csr_num_keys_ + 1) * sizeof(uint32_t),
+                   idx_bytes);
+        auto csr_offsets_count = off_bytes / sizeof(uint32_t);
+
         if (config.contains(MMAP_FILE_PATH)) {
             // mmap path: stream csr_index + csr_offsets to disk, then mmap
             auto csr_path = file_name + ".csr";
-            size_t idx_bytes = reader.GetEntrySize(MARISA_CSR_INDEX);
-            size_t off_bytes = reader.GetEntrySize(MARISA_CSR_OFFSETS);
 
             {
                 auto fw = storage::FileWriter(
                     csr_path,
                     storage::io::GetPriorityFromLoadPriority(load_priority));
-                reader.ReadEntryStream(
-                    MARISA_CSR_INDEX,
-                    [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
-                reader.ReadEntryStream(
-                    MARISA_CSR_OFFSETS,
-                    [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
+                size_t written = 0;
+                reader.ReadEntryStream(MARISA_CSR_INDEX,
+                                       [&](const uint8_t* d, size_t len) {
+                                           fw.Write(d, len);
+                                           written += len;
+                                       });
+                reader.ReadEntryStream(MARISA_CSR_OFFSETS,
+                                       [&](const uint8_t* d, size_t len) {
+                                           fw.Write(d, len);
+                                           written += len;
+                                       });
+                AssertInfo(written == idx_bytes + off_bytes,
+                           "CSR stream read size mismatch: got {}, expected {}",
+                           written,
+                           idx_bytes + off_bytes);
                 fw.Finish();
             }
 
@@ -985,31 +1141,47 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                 reinterpret_cast<const uint32_t*>(csr_mmap_data_ + idx_bytes);
         } else {
             // memory path: stream into vectors
-            auto idx_bytes = reader.GetEntrySize(MARISA_CSR_INDEX);
             csr_index_.resize(idx_bytes / sizeof(uint32_t));
             size_t wo = 0;
             reader.ReadEntryStream(
                 MARISA_CSR_INDEX, [&](const uint8_t* d, size_t len) {
-                    memcpy(reinterpret_cast<uint8_t*>(csr_index_.data()) + wo,
-                           d,
-                           len);
+                    milvus::fastmem::FastMemcpy(
+                        reinterpret_cast<uint8_t*>(csr_index_.data()) + wo,
+                        d,
+                        len);
                     wo += len;
                 });
+            AssertInfo(wo == idx_bytes,
+                       "CSR index stream read size mismatch: got {}, expected "
+                       "{}",
+                       wo,
+                       idx_bytes);
 
-            auto off_bytes = reader.GetEntrySize(MARISA_CSR_OFFSETS);
             csr_offsets_.resize(off_bytes / sizeof(uint32_t));
             wo = 0;
             reader.ReadEntryStream(
                 MARISA_CSR_OFFSETS, [&](const uint8_t* d, size_t len) {
-                    memcpy(reinterpret_cast<uint8_t*>(csr_offsets_.data()) + wo,
-                           d,
-                           len);
+                    milvus::fastmem::FastMemcpy(
+                        reinterpret_cast<uint8_t*>(csr_offsets_.data()) + wo,
+                        d,
+                        len);
                     wo += len;
                 });
+            AssertInfo(wo == off_bytes,
+                       "CSR offsets stream read size mismatch: got {}, "
+                       "expected {}",
+                       wo,
+                       off_bytes);
 
             csr_index_ptr_ = csr_index_.data();
             csr_offsets_ptr_ = csr_offsets_.data();
         }
+        ValidateMarisaCsr(csr_index_ptr_,
+                          idx_bytes / sizeof(uint32_t),
+                          csr_offsets_ptr_,
+                          csr_offsets_count,
+                          csr_num_keys_,
+                          str_ids_size_);
     } else {
         // Backward compat: rebuild CSR from str_ids
         fill_offsets();

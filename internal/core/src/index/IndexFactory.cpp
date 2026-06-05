@@ -92,6 +92,33 @@ BitsetBytes(int64_t num_rows) {
 }
 
 uint64_t
+AlignUp(uint64_t size, uint64_t alignment) {
+    if (alignment == 0 || size == 0) {
+        return size;
+    }
+    if (size > std::numeric_limits<uint64_t>::max() - (alignment - 1)) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+    return ((size + alignment - 1) / alignment) * alignment;
+}
+
+uint64_t
+SaturatingAdd(uint64_t lhs, uint64_t rhs) {
+    if (lhs > std::numeric_limits<uint64_t>::max() - rhs) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+    return lhs + rhs;
+}
+
+uint64_t
+BitmapMmapFrozenBufferBytes(int64_t num_rows, uint64_t index_size_in_bytes) {
+    constexpr uint64_t kBitmapFrozenAlignment = 32;
+    auto dense_bitmap_bytes =
+        AlignUp(BitsetBytes(num_rows), kBitmapFrozenAlignment);
+    return std::max(dense_bitmap_bytes, index_size_in_bytes);
+}
+
+uint64_t
 MarisaLegacyCsrBytes(int64_t num_rows, uint64_t arrays_per_row) {
     if (num_rows <= 0) {
         return 0;
@@ -588,11 +615,18 @@ IndexFactory::ScalarIndexLoadResource(
         request.has_raw_data = false;
     } else if (index_type == milvus::index::BITMAP_INDEX_TYPE) {
         if (mmap_enable) {
-            // V3 streaming: stream to temp file (mmap'd, no heap), then
-            // MMapIndexData writes frozen format to final file
-            request.final_memory_cost = 0;
+            // V3 streaming: stream to temp file (mmap'd), then MMapIndexData
+            // converts one bitmap at a time to frozen format. The conversion
+            // still allocates a per-bitmap heap buffer, so reserve for the
+            // largest plausible bitmap in addition to stream buffers.
+            auto resident_bytes = BitsetBytes(num_rows);
+            auto frozen_buffer_bytes =
+                BitmapMmapFrozenBufferBytes(num_rows, index_size_in_bytes);
+            request.final_memory_cost = resident_bytes;
             request.final_disk_cost = index_size_in_bytes;
-            request.max_memory_cost = stream_memory_overhead;
+            request.max_memory_cost = SaturatingAdd(
+                SaturatingAdd(resident_bytes, stream_memory_overhead),
+                frozen_buffer_bytes);
             request.max_disk_cost = 2 * index_size_in_bytes;  // temp + final
         } else {
             // V3 streaming: pre-allocate buffer + deserialize

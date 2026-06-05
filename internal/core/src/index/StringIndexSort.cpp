@@ -610,6 +610,19 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
         GetValueFromConfig<milvus::proto::common::LoadPriority>(
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
+    auto get_idx_to_offsets_bytes = [&]() {
+        AssertInfo(total_num_rows_ <=
+                       std::numeric_limits<size_t>::max() / sizeof(int32_t),
+                   "idx_to_offsets size overflow for {} rows",
+                   total_num_rows_);
+        auto expected_offsets_bytes = total_num_rows_ * sizeof(int32_t);
+        auto offsets_bytes = reader.GetEntrySize("idx_to_offsets");
+        AssertInfo(offsets_bytes == expected_offsets_bytes,
+                   "invalid idx_to_offsets size: expected {}, got {}",
+                   expected_offsets_bytes,
+                   offsets_bytes);
+        return offsets_bytes;
+    };
 
     if (config.contains(MMAP_FILE_PATH)) {
         LOG_INFO("StringIndexSort::LoadEntries: loading with mmap strategy");
@@ -644,14 +657,22 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
         if (reader.HasEntry("idx_to_offsets")) {
             // Stream idx_to_offsets to meta file, then mmap it
             mmap_meta_filepath_ = mmap_path + "-meta";
-            size_t offsets_bytes = reader.GetEntrySize("idx_to_offsets");
+            size_t offsets_bytes = get_idx_to_offsets_bytes();
             {
                 auto fw = storage::FileWriter(
                     mmap_meta_filepath_,
                     storage::io::GetPriorityFromLoadPriority(load_priority));
-                reader.ReadEntryStream(
-                    "idx_to_offsets",
-                    [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
+                size_t written = 0;
+                reader.ReadEntryStream("idx_to_offsets",
+                                       [&](const uint8_t* d, size_t len) {
+                                           fw.Write(d, len);
+                                           written += len;
+                                       });
+                AssertInfo(written == offsets_bytes,
+                           "idx_to_offsets stream read size mismatch: got {}, "
+                           "expected {}",
+                           written,
+                           offsets_bytes);
                 fw.Finish();
             }
             mmap_meta_size_ = offsets_bytes;
