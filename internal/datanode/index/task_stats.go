@@ -117,13 +117,12 @@ func (st *statsTask) Name() string {
 func (st *statsTask) OnEnqueue(ctx context.Context) error {
 	st.queueDur = 0
 	st.tr.RecordSpan()
-	mlog.With().
-		Info(ctx,
-			"statsTask enqueue",
-			mlog.FieldTaskID(st.req.GetTaskID()),
-			mlog.FieldCollectionID(st.req.GetCollectionID()),
-			mlog.FieldPartitionID(st.req.GetPartitionID()),
-			mlog.FieldSegmentID(st.req.GetSegmentID()))
+	mlog.Info(ctx,
+		"statsTask enqueue",
+		mlog.FieldTaskID(st.req.GetTaskID()),
+		mlog.FieldCollectionID(st.req.GetCollectionID()),
+		mlog.FieldPartitionID(st.req.GetPartitionID()),
+		mlog.FieldSegmentID(st.req.GetSegmentID()))
 	return nil
 }
 
@@ -148,46 +147,42 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 	defer span.End()
 
 	st.queueDur = st.tr.RecordSpan()
-	mlog.With().
-		Info(ctx,
-			"Begin to PreExecute stats task",
-			mlog.String("clusterID", st.req.GetClusterID()),
-			mlog.FieldTaskID(st.req.GetTaskID()),
-			mlog.FieldCollectionID(st.req.GetCollectionID()),
-			mlog.FieldPartitionID(st.req.GetPartitionID()),
-			mlog.FieldSegmentID(st.req.GetSegmentID()),
-			mlog.Int64("queue duration(ms)", st.queueDur.Milliseconds()),
-		)
+	mlog.Info(ctx,
+		"Begin to PreExecute stats task",
+		mlog.String("clusterID", st.req.GetClusterID()),
+		mlog.FieldTaskID(st.req.GetTaskID()),
+		mlog.FieldCollectionID(st.req.GetCollectionID()),
+		mlog.FieldPartitionID(st.req.GetPartitionID()),
+		mlog.FieldSegmentID(st.req.GetSegmentID()),
+		mlog.Int64("queue duration(ms)", st.queueDur.Milliseconds()),
+	)
 
 	if err := binlog.DecompressBinLogWithRootPath(st.req.GetStorageConfig().GetRootPath(), storage.InsertBinlog, st.req.GetCollectionID(), st.req.GetPartitionID(),
 		st.req.GetSegmentID(), st.req.GetInsertLogs()); err != nil {
-		mlog.With().
-			Warn(ctx,
-				"Decompress insert binlog error", mlog.Err(err))
+		mlog.Warn(ctx,
+			"Decompress insert binlog error", mlog.Err(err))
 		return err
 	}
 
 	if err := binlog.DecompressBinLogWithRootPath(st.req.GetStorageConfig().GetRootPath(), storage.DeleteBinlog, st.req.GetCollectionID(), st.req.GetPartitionID(),
 		st.req.GetSegmentID(), st.req.GetDeltaLogs()); err != nil {
-		mlog.With().
-			Warn(ctx,
-				"Decompress delta binlog error", mlog.Err(err))
+		mlog.Warn(ctx,
+			"Decompress delta binlog error", mlog.Err(err))
 		return err
 	}
 
 	preExecuteRecordSpan := st.tr.RecordSpan()
-	mlog.With().
-		Info(ctx,
-			"successfully PreExecute stats task",
-			mlog.String("clusterID", st.req.GetClusterID()),
-			mlog.FieldTaskID(st.req.GetTaskID()),
-			mlog.FieldCollectionID(st.req.GetCollectionID()),
-			mlog.FieldPartitionID(st.req.GetPartitionID()),
-			mlog.FieldSegmentID(st.req.GetSegmentID()),
-			mlog.Int64("storageVersion", st.req.GetStorageVersion()),
-			mlog.Int64("preExecuteRecordSpan(ms)", preExecuteRecordSpan.Milliseconds()),
-			mlog.Any("storageConfig", st.req.StorageConfig),
-		)
+	mlog.Info(ctx,
+		"successfully PreExecute stats task",
+		mlog.String("clusterID", st.req.GetClusterID()),
+		mlog.FieldTaskID(st.req.GetTaskID()),
+		mlog.FieldCollectionID(st.req.GetCollectionID()),
+		mlog.FieldPartitionID(st.req.GetPartitionID()),
+		mlog.FieldSegmentID(st.req.GetSegmentID()),
+		mlog.Int64("storageVersion", st.req.GetStorageVersion()),
+		mlog.Int64("preExecuteRecordSpan(ms)", preExecuteRecordSpan.Milliseconds()),
+		mlog.Any("storageConfig", st.req.StorageConfig),
+	)
 	return nil
 }
 
@@ -214,21 +209,19 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		storage.WithStorageConfig(st.req.GetStorageConfig()),
 	)
 	if err != nil {
-		mlog.With().
-			Warn(ctx,
-				"sort segment wrong, unable to init segment writer",
-				mlog.FieldTaskID(st.req.GetTaskID()), mlog.Err(err))
+		mlog.Warn(ctx,
+			"sort segment wrong, unable to init segment writer",
+			mlog.FieldTaskID(st.req.GetTaskID()), mlog.Err(err))
 		return nil, err
 	}
 
-	log := mlog.With().
-		With(
-			mlog.String("clusterID", st.req.GetClusterID()),
-			mlog.FieldTaskID(st.req.GetTaskID()),
-			mlog.FieldCollectionID(st.req.GetCollectionID()),
-			mlog.FieldPartitionID(st.req.GetPartitionID()),
-			mlog.FieldSegmentID(st.req.GetSegmentID()),
-		)
+	log := mlog.With(
+		mlog.String("clusterID", st.req.GetClusterID()),
+		mlog.FieldTaskID(st.req.GetTaskID()),
+		mlog.FieldCollectionID(st.req.GetCollectionID()),
+		mlog.FieldPartitionID(st.req.GetPartitionID()),
+		mlog.FieldSegmentID(st.req.GetSegmentID()),
+	)
 
 	deletePKs, err := compaction.ComposeDeleteFromDeltalogsV1(ctx, pkField.DataType, st.req.GetDeltaLogs(),
 		storage.WithDownloader(st.binlogIO.Download),
@@ -369,9 +362,8 @@ func (st *statsTask) Execute(ctx context.Context) error {
 	}
 
 	if len(insertLogs) == 0 {
-		mlog.With().
-			Info(ctx,
-				"there is no insertBinlogs, skip creating text index")
+		mlog.Info(ctx,
+			"there is no insertBinlogs, skip creating text index")
 		return nil
 	}
 
@@ -385,9 +377,8 @@ func (st *statsTask) Execute(ctx context.Context) error {
 			st.req.GetTaskID(),
 			insertLogs)
 		if err != nil {
-			mlog.With().
-				Warn(ctx,
-					"stats wrong, failed to create text index", mlog.Err(err))
+			mlog.Warn(ctx,
+				"stats wrong, failed to create text index", mlog.Err(err))
 			return err
 		}
 	}
@@ -399,9 +390,8 @@ func (st *statsTask) Execute(ctx context.Context) error {
 		// for compatibility, we only support json data format version 2 and above after 2.6
 		// for old version, we skip creating json key index
 		if st.req.GetJsonKeyStatsDataFormat() < 2 {
-			mlog.With().
-				Info(ctx,
-					"json data format version is too old, skip creating json key index", mlog.Int64("data format", st.req.GetJsonKeyStatsDataFormat()))
+			mlog.Info(ctx,
+				"json data format version is too old, skip creating json key index", mlog.Int64("data format", st.req.GetJsonKeyStatsDataFormat()))
 			return nil
 		}
 
@@ -494,15 +484,14 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 	taskID int64,
 	insertBinlogs []*datapb.FieldBinlog,
 ) error {
-	log := mlog.With().
-		With(
-			mlog.String("clusterID", st.req.GetClusterID()),
-			mlog.FieldTaskID(st.req.GetTaskID()),
-			mlog.FieldCollectionID(st.req.GetCollectionID()),
-			mlog.FieldPartitionID(st.req.GetPartitionID()),
-			mlog.FieldSegmentID(st.req.GetSegmentID()),
-			mlog.Int64("storageVersion", st.req.GetStorageVersion()),
-		)
+	log := mlog.With(
+		mlog.String("clusterID", st.req.GetClusterID()),
+		mlog.FieldTaskID(st.req.GetTaskID()),
+		mlog.FieldCollectionID(st.req.GetCollectionID()),
+		mlog.FieldPartitionID(st.req.GetPartitionID()),
+		mlog.FieldSegmentID(st.req.GetSegmentID()),
+		mlog.Int64("storageVersion", st.req.GetStorageVersion()),
+	)
 
 	fieldBinlogs := lo.GroupBy(insertBinlogs, func(binlog *datapb.FieldBinlog) int64 {
 		return binlog.GetFieldID()
@@ -673,20 +662,19 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 	jsonStatsShreddingRatioThreshold float64,
 	jsonStatsWriteBatchSize int64,
 ) error {
-	log := mlog.With().
-		With(
-			mlog.String("clusterID", st.req.GetClusterID()),
-			mlog.FieldTaskID(st.req.GetTaskID()),
-			mlog.Int64("version", version),
-			mlog.FieldCollectionID(st.req.GetCollectionID()),
-			mlog.FieldPartitionID(st.req.GetPartitionID()),
-			mlog.FieldSegmentID(st.req.GetSegmentID()),
-			mlog.Any("statsJobType", st.req.GetSubJobType()),
-			mlog.Int64("jsonKeyStatsDataFormat", jsonKeyStatsDataFormat),
-			mlog.Int64("jsonStatsMaxShreddingColumns", jsonStatsMaxShreddingColumns),
-			mlog.Float64("jsonStatsShreddingRatioThreshold", jsonStatsShreddingRatioThreshold),
-			mlog.Int64("jsonStatsWriteBatchSize", jsonStatsWriteBatchSize),
-		)
+	log := mlog.With(
+		mlog.String("clusterID", st.req.GetClusterID()),
+		mlog.FieldTaskID(st.req.GetTaskID()),
+		mlog.Int64("version", version),
+		mlog.FieldCollectionID(st.req.GetCollectionID()),
+		mlog.FieldPartitionID(st.req.GetPartitionID()),
+		mlog.FieldSegmentID(st.req.GetSegmentID()),
+		mlog.Any("statsJobType", st.req.GetSubJobType()),
+		mlog.Int64("jsonKeyStatsDataFormat", jsonKeyStatsDataFormat),
+		mlog.Int64("jsonStatsMaxShreddingColumns", jsonStatsMaxShreddingColumns),
+		mlog.Float64("jsonStatsShreddingRatioThreshold", jsonStatsShreddingRatioThreshold),
+		mlog.Int64("jsonStatsWriteBatchSize", jsonStatsWriteBatchSize),
+	)
 
 	if jsonKeyStatsDataFormat != common.JSONStatsDataFormatVersion {
 		log.Warn(ctx, "create json key index failed dataformat invalid", mlog.Int64("dataformat version", jsonKeyStatsDataFormat),

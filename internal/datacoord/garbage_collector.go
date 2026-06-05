@@ -1143,11 +1143,10 @@ func (gc *garbageCollector) removeObjectFiles(ctx context.Context, filePaths map
 				if !errors.Is(err, merr.ErrIoKeyNotFound) {
 					return struct{}{}, err
 				}
-				mlog.With().
-					Info(ctx,
-						"remove log failed, key not found, may be removed at previous GC, ignore the error",
-						mlog.String("path", filePath),
-						mlog.Err(err))
+				mlog.Info(ctx,
+					"remove log failed, key not found, may be removed at previous GC, ignore the error",
+					mlog.String("path", filePath),
+					mlog.Err(err))
 			}
 			return struct{}{}, nil
 		})
@@ -1159,8 +1158,7 @@ func (gc *garbageCollector) removeObjectFiles(ctx context.Context, filePaths map
 // recycleUnusedIndexes is used to delete those indexes that is deleted by collection.
 func (gc *garbageCollector) recycleUnusedIndexes(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
-	log := mlog.With().
-		With(mlog.String("gcName", "recycleUnusedIndexes"), mlog.Time("startAt", start))
+	log := mlog.With(mlog.String("gcName", "recycleUnusedIndexes"), mlog.Time("startAt", start))
 	log.Info(ctx, "start recycleUnusedIndexes...")
 	defer func() {
 		log.Info(ctx, "recycleUnusedIndexes done", mlog.Duration("timeCost", time.Since(start)))
@@ -1189,8 +1187,7 @@ func (gc *garbageCollector) recycleUnusedIndexes(ctx context.Context, signal <-c
 // recycleUnusedSegIndexes remove the index of segment if index is deleted or segment itself is deleted.
 func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
-	log := mlog.With().
-		With(mlog.String("gcName", "recycleUnusedSegIndexes"), mlog.Time("startAt", start))
+	log := mlog.With(mlog.String("gcName", "recycleUnusedSegIndexes"), mlog.Time("startAt", start))
 	log.Info(ctx, "start recycleUnusedSegIndexes...")
 	defer func() {
 		log.Info(ctx, "recycleUnusedSegIndexes done", mlog.Duration("timeCost", time.Since(start)))
@@ -1253,8 +1250,7 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 // checked against index meta directly.
 func (gc *garbageCollector) recycleUnusedIndexFilesV0(ctx context.Context) {
 	start := time.Now()
-	log := mlog.With().
-		With(mlog.String("gcName", "recycleUnusedIndexFilesV0"), mlog.Time("startAt", start))
+	log := mlog.With(mlog.String("gcName", "recycleUnusedIndexFilesV0"), mlog.Time("startAt", start))
 	log.Info(ctx, "start recycleUnusedIndexFilesV0...")
 
 	prefix := path.Join(gc.option.cli.RootPath(), common.SegmentIndexV0Path) + "/"
@@ -1384,8 +1380,7 @@ func (gc *garbageCollector) getAllIndexFilesOfIndex(segmentIndex *model.SegmentI
 // v1 uses the separate index_v1 prefix and puts collectionID before buildID,
 // so GC iterates deleted metadata entries instead of trying to parse buildID from a prefix walk.
 func (gc *garbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
-	log := mlog.With().
-		With(mlog.String("gcName", "recycleUnusedIndexFilesV1"))
+	log := mlog.With(mlog.String("gcName", "recycleUnusedIndexFilesV1"))
 
 	snapshotMeta := gc.meta.GetSnapshotMeta()
 	deletedIndexes := gc.meta.indexMeta.GetDeletedIndexesWithV1Path()
@@ -1528,8 +1523,7 @@ func (gc *garbageCollector) recycleUnusedAnalyzeFiles(ctx context.Context, signa
 // if missing found, performs gc cleanup
 func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
-	log := mlog.With().
-		With(mlog.String("gcName", "recycleUnusedTextIndexFiles"), mlog.Time("startAt", start))
+	log := mlog.With(mlog.String("gcName", "recycleUnusedTextIndexFiles"), mlog.Time("startAt", start))
 	log.Info(ctx, "start recycleUnusedTextIndexFiles...")
 	defer func() {
 		log.Info(ctx, "recycleUnusedTextIndexFiles done", mlog.Duration("timeCost", time.Since(start)))
@@ -1613,8 +1607,7 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context, sig
 // if missing found, performs gc cleanup
 func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
-	log := mlog.With().
-		With(mlog.String("gcName", "recycleUnusedJSONStatsFiles"), mlog.Time("startAt", start))
+	log := mlog.With(mlog.String("gcName", "recycleUnusedJSONStatsFiles"), mlog.Time("startAt", start))
 	log.Info(ctx, "start recycleUnusedJSONStatsFiles...")
 	defer func() {
 		log.Info(ctx, "recycleUnusedJSONStatsFiles done", mlog.Duration("timeCost", time.Since(start)))
@@ -1734,8 +1727,7 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 // recycleUnusedJSONIndexFiles load meta file info and compares OSS keys
 func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
-	log := mlog.With().
-		With(mlog.String("gcName", "recycleUnusedJSONIndexFiles"), mlog.Time("startAt", start))
+	log := mlog.With(mlog.String("gcName", "recycleUnusedJSONIndexFiles"), mlog.Time("startAt", start))
 	log.Info(ctx, "start recycleUnusedJSONIndexFiles...")
 	defer func() {
 		log.Info(ctx, "recycleUnusedJSONIndexFiles done", mlog.Duration("timeCost", time.Since(start)))
@@ -1833,8 +1825,7 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, sig
 //     artifacts.
 func (gc *garbageCollector) recycleSnapshots(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
-	log := mlog.With().
-		With(mlog.String("gcName", "recycleSnapshots"), mlog.Time("startAt", start))
+	log := mlog.With(mlog.String("gcName", "recycleSnapshots"), mlog.Time("startAt", start))
 	log.Info(ctx, "start recycleSnapshots...")
 	defer func() {
 		log.Info(ctx, "recycleSnapshots done", mlog.Duration("timeCost", time.Since(start)))

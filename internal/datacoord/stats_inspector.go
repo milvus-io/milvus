@@ -344,12 +344,11 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 		return merr.WrapErrSegmentNotFound(originSegmentID)
 	}
 	if si.isExternalCollection(originSegment.GetCollectionID()) && subJobType != indexpb.StatsSubJob_TextIndexJob {
-		mlog.With().
-			Info(si.ctx,
-				"skip submit stats task for external collection",
-				mlog.FieldCollectionID(originSegment.GetCollectionID()),
-				mlog.FieldSegmentID(originSegmentID),
-				mlog.String("subJobType", subJobType.String()))
+		mlog.Info(si.ctx,
+			"skip submit stats task for external collection",
+			mlog.FieldCollectionID(originSegment.GetCollectionID()),
+			mlog.FieldSegmentID(originSegmentID),
+			mlog.String("subJobType", subJobType.String()))
 		return nil
 	}
 	taskID, err := si.allocator.AllocID(context.Background())
@@ -387,13 +386,12 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 		return err
 	}
 	si.scheduler.Enqueue(newStatsTask(proto.Clone(t).(*indexpb.StatsTask), taskSlot, si.mt, si.handler, si.allocator, si.ievm))
-	mlog.With().
-		Info(si.ctx,
-			"submit stats task success", mlog.FieldTaskID(taskID),
-			mlog.String("subJobType", subJobType.String()),
-			mlog.FieldCollectionID(originSegment.GetCollectionID()),
-			mlog.Int64("originSegmentID", originSegmentID),
-			mlog.Int64("targetSegmentID", targetSegmentID), mlog.Int64("taskSlot", taskSlot))
+	mlog.Info(si.ctx,
+		"submit stats task success", mlog.FieldTaskID(taskID),
+		mlog.String("subJobType", subJobType.String()),
+		mlog.FieldCollectionID(originSegment.GetCollectionID()),
+		mlog.Int64("originSegmentID", originSegmentID),
+		mlog.Int64("targetSegmentID", targetSegmentID), mlog.Int64("taskSlot", taskSlot))
 	return nil
 }
 

@@ -67,10 +67,9 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 	collectionID int64,
 	targetSize int64,
 ) ([]CompactionView, int64, error) {
-	log := mlog.With().
-		With(
-			mlog.FieldCollectionID(collectionID),
-			mlog.Int64("targetSize", targetSize))
+	log := mlog.With(
+		mlog.FieldCollectionID(collectionID),
+		mlog.Int64("targetSize", targetSize))
 	if policy.meta.isCollectionCompactionBlocked(collectionID) {
 		log.Info(ctx, "skip force merge compaction for collection due to unloaded protected snapshot RefIndex",
 			mlog.FieldCollectionID(collectionID))
@@ -180,8 +179,7 @@ func newMetricsNodeMemoryQuerier(nodeManager session.NodeManager, mixCoord types
 var _ CollectionTopologyQuerier = (*metricsNodeMemoryQuerier)(nil)
 
 func (q *metricsNodeMemoryQuerier) GetCollectionTopology(ctx context.Context, collectionID int64) (*CollectionTopology, error) {
-	log := mlog.With().
-		With(mlog.FieldCollectionID(collectionID))
+	log := mlog.With(mlog.FieldCollectionID(collectionID))
 	if q.mixCoord == nil {
 		return nil, fmt.Errorf("mixCoord not available for topology query")
 	}
