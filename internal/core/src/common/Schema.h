@@ -615,9 +615,7 @@ class Schema {
     std::pair<bool, std::string>
     WarmupPolicy(const FieldId& field, bool is_vector, bool is_index) const;
 
-    // True if the field is declared as a function output. New schemas use the
-    // FieldSchema flag; FunctionSchema output field IDs are kept as a legacy
-    // compatibility supplement during ParseFrom.
+    // True if the field carries FieldSchema::is_function_output.
     bool
     is_function_output(const FieldId& field_id) const {
         return function_output_field_ids_.count(field_id) > 0;
@@ -687,8 +685,7 @@ class Schema {
     std::string
         external_spec_;  // External data source specification (JSON format)
 
-    // Field IDs declared as function outputs in the collection's FunctionSchema
-    // list.
+    // Field IDs marked as function outputs by FieldSchema::is_function_output.
     std::unordered_set<FieldId> function_output_field_ids_;
 
     bool is_milvus_table_external_ = false;

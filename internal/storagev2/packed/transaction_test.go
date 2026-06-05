@@ -16,6 +16,7 @@ package packed
 
 import (
 	"fmt"
+	"path"
 	"path/filepath"
 	"testing"
 
@@ -460,6 +461,29 @@ func TestCreateMilvusTableManifestFromSegmentManifests_ImportsSourceDeltalogs(t 
 	require.NoError(t, err)
 	require.Len(t, paths, 1)
 	assert.Equal(t, sourceDeltaPath, paths[0])
+}
+
+func TestGetDeltaLogsFromManifestWithExtfsResolvesRelativeSourceDeltalogs(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	sourceBasePath := "files/source/segment/10"
+	sourceManifest := createBaseManifest(t, sourceBasePath, cfg)
+	sourceDeltaPath := path.Join(sourceBasePath, "_delta/9001")
+
+	sourceManifest, err := AddDeltaLogsToManifest(sourceManifest, cfg, []DeltaLogEntry{
+		{Path: sourceDeltaPath, NumEntries: 7},
+	})
+	require.NoError(t, err)
+
+	deltalogs, err := GetDeltaLogsFromManifestWithExtfs(sourceManifest, cfg, ExternalSpecContext{
+		CollectionID: 42,
+		Source:       "s3://source-bucket/snapshots/100/metadata/200.json",
+		Spec:         `{"format":"milvus-table","extfs":{"cloud_provider":"aws","region":"us-west-2","access_key_id":"ak","access_key_value":"sk"}}`,
+	})
+	require.NoError(t, err)
+	require.Len(t, deltalogs, 1)
+	require.Len(t, deltalogs[0].GetBinlogs(), 1)
+	assert.Equal(t, sourceDeltaPath, deltalogs[0].GetBinlogs()[0].GetLogPath())
+	assert.Equal(t, int64(7), deltalogs[0].GetBinlogs()[0].GetEntriesNum())
 }
 
 func TestCreateMilvusTableManifestFromSegmentManifests_VirtualPKSkipsSourceDeltalogs(t *testing.T) {
