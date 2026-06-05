@@ -5,7 +5,7 @@
 
 ## Rules
 
-1. Every log call must receive a `ctx context.Context`. Never pass `nil`. Choose ctx by priority: function parameter ctx > struct-level ctx (e.g. `s.ctx`) > `context.TODO()`.
+1. Every log call must receive a `ctx context.Context`. Never pass `nil`. Choose ctx by priority: function parameter ctx > struct-level ctx (e.g. `s.ctx`) > `context.TODO()`. Use `context.TODO()` only when no request/component context is available, and do not use `context.Background()` for logging.
 2. If the current struct has a `*mlog.Logger` field, use it. Otherwise use package-level functions like `mlog.Info(ctx, ...)`.
 3. When a predefined `FieldXxx` exists for a key, always use `FieldXxx(val)`. Never write `mlog.Int64("segmentID", v)`.
 4. In loops or hot paths, use `Rated` variants: `mlog.RatedInfo(ctx, limit, msg, fields...)`.
