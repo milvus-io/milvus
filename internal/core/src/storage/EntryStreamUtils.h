@@ -32,7 +32,13 @@
 namespace milvus::storage {
 
 constexpr size_t kMinStreamSliceSize = 64 * 1024;
+constexpr size_t kStreamSliceAlignment = 4 * 1024;
 constexpr size_t kTailMergeGrace = 1 * 1024 * 1024;
+
+inline bool
+IsStreamSliceSizeAligned(size_t slice_size) {
+    return slice_size > 0 && slice_size % kStreamSliceAlignment == 0;
+}
 
 inline size_t
 DefaultStreamSliceSize() {

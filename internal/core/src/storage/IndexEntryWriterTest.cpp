@@ -863,8 +863,7 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedSmallEntryRoundtrip) {
     const size_t entry_size = 1024;
     auto data = GeneratePattern(entry_size);
 
-    // Use small slice_size for testing multi-slice behavior
-    const size_t slice_size = 512;
+    const size_t slice_size = kStreamSliceAlignment;
 
     {
         // Note: remote_path should be relative to fs root
@@ -885,11 +884,23 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedSmallEntryRoundtrip) {
     EXPECT_GT(info.ValueOrDie().size(), entry_size);  // ciphertext > plaintext
 }
 
+TEST_F(IndexEntryEncryptedV3Test, EncryptedWriterRejectsUnalignedSliceSize) {
+    const std::string file_path = kV3FilePath + "_enc_unaligned_slice";
+    EXPECT_THROW(IndexEntryEncryptedLocalWriter writer(file_path,
+                                                       fs_,
+                                                       mock_cipher_,
+                                                       /*ez_id=*/1,
+                                                       /*collection_id=*/100,
+                                                       GetRootPath(),
+                                                       1024),
+                 milvus::SegcoreError);
+}
+
 TEST_F(IndexEntryEncryptedV3Test, EncryptedMultiSliceEntry) {
     // Entry larger than slice_size, requiring multiple slices
     const std::string file_path = kV3FilePath + "_enc_multislice";
-    const size_t slice_size = 1024;            // 1KB slices
-    const size_t entry_size = 5 * 1024 + 100;  // 5KB + 100B = 6 slices
+    const size_t slice_size = kStreamSliceAlignment;
+    const size_t entry_size = 5 * slice_size + 100;
     auto data = GeneratePattern(entry_size);
 
     {
@@ -912,11 +923,11 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedMultiSliceEntry) {
 TEST_F(IndexEntryEncryptedV3Test, EncryptedMultipleEntriesMultiSlice) {
     // Multiple entries, each requiring multiple slices
     const std::string file_path = kV3FilePath + "_enc_multi_multi";
-    const size_t slice_size = 1024;  // 1KB slices
+    const size_t slice_size = kStreamSliceAlignment;
 
-    const size_t size_a = 3 * 1024 + 500;  // 4 slices
-    const size_t size_b = 2 * 1024 + 100;  // 3 slices
-    const size_t size_c = 5 * 1024;        // 5 slices
+    const size_t size_a = 3 * slice_size + 500;
+    const size_t size_b = 2 * slice_size + 100;
+    const size_t size_c = 5 * slice_size;
 
     auto data_a = GeneratePattern(size_a);
     auto data_b = GeneratePattern(size_b);
@@ -944,7 +955,7 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedMultipleEntriesMultiSlice) {
 TEST_F(IndexEntryEncryptedV3Test, EncryptedLargeMetaMultiSlice) {
     // Large meta entry requiring multiple slices
     const std::string file_path = kV3FilePath + "_enc_largemeta";
-    const size_t slice_size = 1024;  // 1KB slices
+    const size_t slice_size = kStreamSliceAlignment;
 
     auto data = GeneratePattern(256);
 
@@ -958,7 +969,7 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedLargeMetaMultiSlice) {
                                               slice_size);
         writer.WriteEntry("data", data.data(), data.size());
 
-        // Meta will be ~5KB = 5 slices
+        // Meta is larger than one slice.
         std::string meta_value(5000, 'M');
         writer.PutMeta("large_meta", meta_value);
         writer.Finish();
@@ -971,8 +982,8 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedLargeMetaMultiSlice) {
 TEST_F(IndexEntryEncryptedV3Test, EncryptedFdEntryMultiSlice) {
     // Test fd-based entry with multiple slices
     const std::string file_path = kV3FilePath + "_enc_fd";
-    const size_t slice_size = 1024;            // 1KB slices
-    const size_t entry_size = 4 * 1024 + 200;  // 5 slices
+    const size_t slice_size = kStreamSliceAlignment;
+    const size_t entry_size = 4 * slice_size + 200;
     auto data = GeneratePattern(entry_size);
 
     // Write source file
@@ -1090,6 +1101,10 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamRejectsInvalidSliceSize) {
     EXPECT_THROW(
         reader->ReadEntryStream(
             "data", [](const uint8_t*, size_t) {}, kMinStreamSliceSize - 1),
+        milvus::SegcoreError);
+    EXPECT_THROW(
+        reader->ReadEntryStream(
+            "data", [](const uint8_t*, size_t) {}, kMinStreamSliceSize + 1),
         milvus::SegcoreError);
 }
 

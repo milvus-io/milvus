@@ -338,6 +338,10 @@ IndexEntryReader::ReadFooterAndDirectory() {
         edek_ = dir_json["__edek__"].get<std::string>();
         ez_id_ = std::stoll(dir_json["__ez_id__"].get<std::string>());
         slice_size_ = dir_json["slice_size"].get<size_t>();
+        AssertInfo(IsStreamSliceSizeAligned(slice_size_),
+                   "Encrypted entry slice_size must be {}-byte aligned, got {}",
+                   kStreamSliceAlignment,
+                   slice_size_);
 
         cipher_plugin_ = PluginLoader::GetInstance().getCipherPlugin();
         AssertInfo(cipher_plugin_ != nullptr,
@@ -787,6 +791,10 @@ IndexEntryReader::ReadPlainEntryStream(
     AssertInfo(slice_size >= kMinStreamSliceSize,
                "ReadEntryStream slice_size must be at least {} bytes, got {}",
                kMinStreamSliceSize,
+               slice_size);
+    AssertInfo(IsStreamSliceSizeAligned(slice_size),
+               "ReadEntryStream slice_size must be {}-byte aligned, got {}",
+               kStreamSliceAlignment,
                slice_size);
     auto tail_size = pm.size % slice_size;
     auto merge_tail =
