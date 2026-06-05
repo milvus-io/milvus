@@ -168,9 +168,46 @@ VectorBase::set_data_raw(ssize_t element_offset,
         case DataType::ARRAY: {
             auto& array_data = FIELD_DATA(data, array);
             std::vector<Array> data_raw{};
-            data_raw.reserve(array_data.size());
-            for (auto& array_bytes : array_data) {
-                data_raw.emplace_back(Array(array_bytes));
+            if (field_meta.is_nullable() &&
+                data->valid_data_size() == element_count) {
+                ssize_t valid_count = 0;
+                for (ssize_t i = 0; i < element_count; ++i) {
+                    if (data->valid_data(i)) {
+                        ++valid_count;
+                    }
+                }
+
+                auto dense_aligned = array_data.size() == element_count;
+                auto compact_nullable = array_data.size() == valid_count;
+                AssertInfo(
+                    dense_aligned || compact_nullable,
+                    "nullable ARRAY data size {} must match element count {} "
+                    "or valid count {}",
+                    array_data.size(),
+                    element_count,
+                    valid_count);
+
+                data_raw.reserve(element_count);
+                ssize_t physical_row = 0;
+                for (ssize_t i = 0; i < element_count; ++i) {
+                    if (!data->valid_data(i)) {
+                        data_raw.emplace_back(Array());
+                        continue;
+                    }
+
+                    auto source_index = dense_aligned ? i : physical_row++;
+                    data_raw.emplace_back(Array(array_data[source_index]));
+                }
+            } else {
+                AssertInfo(array_data.size() == element_count,
+                           "ARRAY data size {} must match element count {} "
+                           "when not using compact nullable format",
+                           array_data.size(),
+                           element_count);
+                data_raw.reserve(array_data.size());
+                for (auto& array_bytes : array_data) {
+                    data_raw.emplace_back(Array(array_bytes));
+                }
             }
 
             return set_data_raw(element_offset, data_raw.data(), element_count);

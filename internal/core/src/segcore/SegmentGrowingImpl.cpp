@@ -212,31 +212,76 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
         // ARRAY: extract from scalars().array_data().data(i)
         const auto& array_data = field_data.scalars().array_data();
         auto element_type = field_meta.get_element_type();
+        bool dense_aligned = true;
+        bool compact_nullable = false;
+        int64_t valid_count = num_rows;
+        auto has_valid_data = field_data.valid_data_size() == num_rows;
+        if (field_meta.is_nullable() && has_valid_data) {
+            valid_count = 0;
+            for (int64_t i = 0; i < num_rows; ++i) {
+                if (field_data.valid_data(i)) {
+                    ++valid_count;
+                }
+            }
+            dense_aligned = array_data.data_size() == num_rows;
+            compact_nullable = array_data.data_size() == valid_count;
+            AssertInfo(
+                dense_aligned || compact_nullable,
+                "nullable ARRAY supports only dense-aligned data "
+                "(data_size == num_rows) or compact data "
+                "(valid_data_size == num_rows and data_size == valid_count), "
+                "got data_size {}, valid_data_size {}, num_rows {}, "
+                "valid_count {}",
+                array_data.data_size(),
+                field_data.valid_data_size(),
+                num_rows,
+                valid_count);
+            compact_nullable = compact_nullable && !dense_aligned;
+        } else {
+            AssertInfo(array_data.data_size() == num_rows,
+                       "non-nullable ARRAY data_size {} must match num_rows {}",
+                       array_data.data_size(),
+                       num_rows);
+        }
 
+        int64_t physical_row = 0;
         for (int i = 0; i < num_rows; ++i) {
+            if (field_meta.is_nullable() && has_valid_data &&
+                !field_data.valid_data(i)) {
+                array_lengths[i] = 0;
+                continue;
+            }
+
+            auto source_index = compact_nullable ? physical_row++ : i;
             int32_t array_len = 0;
 
             switch (element_type) {
                 case DataType::BOOL:
-                    array_len = array_data.data(i).bool_data().data_size();
+                    array_len =
+                        array_data.data(source_index).bool_data().data_size();
                     break;
                 case DataType::INT8:
                 case DataType::INT16:
                 case DataType::INT32:
-                    array_len = array_data.data(i).int_data().data_size();
+                    array_len =
+                        array_data.data(source_index).int_data().data_size();
                     break;
                 case DataType::INT64:
-                    array_len = array_data.data(i).long_data().data_size();
+                    array_len =
+                        array_data.data(source_index).long_data().data_size();
                     break;
                 case DataType::FLOAT:
-                    array_len = array_data.data(i).float_data().data_size();
+                    array_len =
+                        array_data.data(source_index).float_data().data_size();
                     break;
                 case DataType::DOUBLE:
-                    array_len = array_data.data(i).double_data().data_size();
+                    array_len =
+                        array_data.data(source_index).double_data().data_size();
                     break;
                 case DataType::STRING:
                 case DataType::VARCHAR:
-                    array_len = array_data.data(i).string_data().data_size();
+                    array_len =
+                        array_data.data(source_index).string_data().data_size();
                     break;
                 default:
                     ThrowInfo(ErrorCode::UnexpectedError,

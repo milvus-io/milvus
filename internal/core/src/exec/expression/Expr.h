@@ -959,6 +959,13 @@ class SegmentExpr : public Expr {
             auto data_pos =
                 i == current_data_chunk_ ? current_data_chunk_pos_ : 0;
             int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
+            if (segment_->type() == SegmentType::Growing &&
+                i == num_data_chunk_ - 1) {
+                auto tail_size = active_count_ % size_per_chunk_;
+                auto active_chunk_size =
+                    tail_size == 0 ? size_per_chunk_ : tail_size;
+                size = active_chunk_size - data_pos;
+            }
             size = std::min(size, batch_size_ - processed_rows);
             if (size == 0)
                 continue;

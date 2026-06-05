@@ -138,6 +138,48 @@ TEST(ThreadSafeValidData, SetDataRawWithOffsetAlignsByLogicalRowOffset) {
     EXPECT_TRUE(bitmap[8]);
 }
 
+TEST(ConcurrentVector, NullableArrayCompactDataAlignsByLogicalRowOffset) {
+    auto valid_data = std::make_shared<ThreadSafeValidData>();
+    milvus::FieldMeta field_meta(milvus::FieldName("profile[p_int]"),
+                                 milvus::FieldId(100),
+                                 milvus::DataType::ARRAY,
+                                 milvus::DataType::INT64,
+                                 true,
+                                 std::nullopt);
+
+    milvus::DataArray data;
+    data.add_valid_data(false);
+    data.add_valid_data(true);
+    data.add_valid_data(true);
+    data.add_valid_data(true);
+    auto* array_data = data.mutable_scalars()->mutable_array_data();
+    array_data->set_element_type(milvus::proto::schema::DataType::Int64);
+    array_data->mutable_data()->Add();
+    array_data->mutable_data()->Add()->mutable_long_data()->add_data(60);
+    array_data->mutable_data()->Add()->mutable_long_data()->add_data(61);
+
+    valid_data->set_data_raw(5, 4, &data, field_meta);
+
+    ConcurrentVector<milvus::Array> vec(16, nullptr, valid_data);
+    vec.set_data_raw(5, 4, &data, field_meta);
+
+    auto span = milvus::Span<milvus::Array>(vec.get_span_base(0));
+    ASSERT_GE(span.row_count(), 9);
+    EXPECT_EQ(span.data()[5].length(), 0);
+    EXPECT_EQ(span.data()[6].length(), 0);
+    ASSERT_EQ(span.data()[7].length(), 1);
+    EXPECT_EQ(span.data()[7].get_data<int64_t>(0), 60);
+    ASSERT_EQ(span.data()[8].length(), 1);
+    EXPECT_EQ(span.data()[8].get_data<int64_t>(0), 61);
+
+    auto bitmap = valid_data->get_data();
+    ASSERT_EQ(bitmap.size(), 9);
+    EXPECT_FALSE(bitmap[5]);
+    EXPECT_TRUE(bitmap[6]);
+    EXPECT_TRUE(bitmap[7]);
+    EXPECT_TRUE(bitmap[8]);
+}
+
 TEST(ConcurrentVector, TestAckSingle) {
     std::vector<std::tuple<int64_t, int64_t, int64_t>> raw_data;
     std::default_random_engine e(42);
