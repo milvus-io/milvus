@@ -1752,12 +1752,16 @@ func (loader *segmentLoader) checkLoadingResource(
 		zap.Int("mmapFieldCount", loadingUsage.MmapFieldCount),
 	)
 
+	var loadingResource C.CResourceUsage
+	reservedLoadingResource := false
 	if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() {
-		// try to reserve loading resource from caching layer
-		if ok := C.TryReserveLoadingResourceWithTimeout(C.CResourceUsage{
+		loadingResource = C.CResourceUsage{
 			memory_bytes: C.int64_t(loadingUsage.MemorySize),
 			disk_bytes:   C.int64_t(loadingUsage.DiskSize),
-		}, 1000); !ok {
+		}
+
+		// try to reserve loading resource from caching layer
+		if ok := C.TryReserveLoadingResourceWithTimeout(loadingResource, 1000); !ok {
 			return merr.WrapErrSegmentRequestResourceFailed("memory/disk",
 				fmt.Sprintf("failed to reserve loading resource from caching layer, predictMemUsage = %v MB, predictDiskUsage = %v MB, memUsage = %v MB, diskUsage = %v MB, memoryThresholdFactor = %f, diskThresholdFactor = %f",
 					logutil.ToMB(float64(predictMemUsage)),
@@ -1768,6 +1772,7 @@ func (loader *segmentLoader) checkLoadingResource(
 					paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat(),
 				))
 		}
+		reservedLoadingResource = true
 	} else {
 		// fallback to original segment loading logic
 		if predictMemUsage > uint64(float64(totalMem)*paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
@@ -1796,6 +1801,9 @@ func (loader *segmentLoader) checkLoadingResource(
 
 	err := checkSegmentGpuMemSize(loadingUsage.FieldGpuMemorySize, float32(paramtable.Get().GpuConfig.OverloadedMemoryThresholdPercentage.GetAsFloat()))
 	if err != nil {
+		if reservedLoadingResource {
+			C.ReleaseLoadingResource(loadingResource)
+		}
 		return err
 	}
 
