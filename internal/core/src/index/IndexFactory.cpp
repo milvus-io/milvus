@@ -79,10 +79,8 @@ ScalarIndexStreamMemoryOverhead(uint64_t index_size_in_bytes,
     if (scalar_version < 3) {
         return index_size_in_bytes;
     }
-    auto budget_bytes =
-        milvus::storage::TransientMemoryBudget::GetEntryStreamBudget()
-            .CapacityBytes();
-    return std::min<uint64_t>(index_size_in_bytes, budget_bytes);
+    return std::min<uint64_t>(index_size_in_bytes,
+                              milvus::storage::EntryStreamMaxTransientBytes());
 }
 
 uint64_t

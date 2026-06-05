@@ -1108,7 +1108,8 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamUsesDefaultSliceSize) {
               ExpectedEntryStreamBudgetBytes(3.5));
 
     const std::string file_path = kV3FilePath + "_stream_configured_default";
-    const size_t entry_size = 2 * slice_size + 17;
+    const size_t tail_size = kTailMergeGrace + 17;
+    const size_t entry_size = 2 * slice_size + tail_size;
     auto data = GeneratePattern(entry_size);
 
     {
@@ -1130,7 +1131,38 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamUsesDefaultSliceSize) {
     });
 
     ASSERT_EQ(reassembled, data);
-    ASSERT_EQ(slice_sizes, (std::vector<size_t>{slice_size, slice_size, 17}));
+    ASSERT_EQ(slice_sizes,
+              (std::vector<size_t>{slice_size, slice_size, tail_size}));
+}
+
+TEST_F(IndexEntryWriterV3Test, ReadEntryStreamMergesSmallTail) {
+    const size_t slice_size = DEFAULT_INDEX_FILE_SLICE_SIZE;
+    const size_t tail_size = kTailMergeGrace / 2;
+    ASSERT_GT(tail_size, 0);
+    const std::string file_path = kV3FilePath + "_stream_merge_small_tail";
+    const size_t entry_size = slice_size + tail_size;
+    auto data = GeneratePattern(entry_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    auto reader = IndexEntryReader::Open(input, file_size);
+
+    std::vector<size_t> slice_sizes;
+    std::vector<uint8_t> reassembled;
+    reader->ReadEntryStream("data", [&](const uint8_t* d, size_t len) {
+        slice_sizes.push_back(len);
+        reassembled.insert(reassembled.end(), d, d + len);
+    });
+
+    ASSERT_EQ(reassembled, data);
+    ASSERT_EQ(slice_sizes, (std::vector<size_t>{entry_size}));
 }
 
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamEmptyEntryVerifiesCrc) {

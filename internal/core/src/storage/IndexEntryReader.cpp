@@ -788,12 +788,23 @@ IndexEntryReader::ReadPlainEntryStream(
                "ReadEntryStream slice_size must be at least {} bytes, got {}",
                kMinStreamSliceSize,
                slice_size);
+    auto tail_size = pm.size % slice_size;
+    auto merge_tail =
+        pm.size > slice_size && tail_size > 0 && tail_size <= kTailMergeGrace;
     size_t num_slices =
-        pm.size == 0 ? 0 : 1 + (static_cast<size_t>(pm.size) - 1) / slice_size;
-    auto sliceBytes = [pm, slice_size](size_t seq) {
-        size_t off = seq * slice_size;
-        return std::min<size_t>(slice_size, pm.size - off);
-    };
+        pm.size == 0
+            ? 0
+            : (merge_tail
+                   ? pm.size / slice_size
+                   : 1 + (static_cast<size_t>(pm.size) - 1) / slice_size);
+    auto sliceBytes =
+        [pm, slice_size, tail_size, merge_tail, num_slices](size_t seq) {
+            size_t off = seq * slice_size;
+            if (merge_tail && seq + 1 == num_slices) {
+                return slice_size + static_cast<size_t>(tail_size);
+            }
+            return std::min<size_t>(slice_size, pm.size - off);
+        };
     auto input = input_;
     auto load_slice = [input, pm, slice_size, sliceBytes](size_t seq) {
         size_t off = seq * slice_size;

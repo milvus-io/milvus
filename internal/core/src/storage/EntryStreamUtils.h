@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -31,6 +32,7 @@
 namespace milvus::storage {
 
 constexpr size_t kMinStreamSliceSize = 64 * 1024;
+constexpr size_t kTailMergeGrace = 1 * 1024 * 1024;
 
 inline size_t
 DefaultStreamSliceSize() {
@@ -137,5 +139,15 @@ class TransientMemoryBudget {
     std::condition_variable cv_;
     size_t inflight_bytes_{0};
 };
+
+inline size_t
+EntryStreamMaxTransientBytes() {
+    auto capacity =
+        TransientMemoryBudget::GetEntryStreamBudget().CapacityBytes();
+    if (capacity > std::numeric_limits<size_t>::max() - kTailMergeGrace) {
+        return std::numeric_limits<size_t>::max();
+    }
+    return capacity + kTailMergeGrace;
+}
 
 }  // namespace milvus::storage

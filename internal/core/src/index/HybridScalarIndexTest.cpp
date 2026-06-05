@@ -710,7 +710,9 @@ TYPED_TEST_P(HybridIndexTestInverted,
              ResourceEstimateUsesInternalInvertedIndexType) {
     auto stream_budget =
         storage::TransientMemoryBudget::GetEntryStreamBudget().CapacityBytes();
-    auto index_size = static_cast<uint64_t>(stream_budget + 1024);
+    auto stream_overhead =
+        static_cast<uint64_t>(stream_budget + storage::kTailMergeGrace);
+    auto index_size = stream_overhead + 1024;
     std::map<std::string, std::string> index_params{
         {"index_type", milvus::index::HYBRID_INDEX_TYPE},
         {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
@@ -731,7 +733,7 @@ TYPED_TEST_P(HybridIndexTestInverted,
 
     EXPECT_EQ(request.final_memory_cost, 0);
     EXPECT_EQ(request.final_disk_cost, index_size);
-    EXPECT_EQ(request.max_memory_cost, stream_budget);
+    EXPECT_EQ(request.max_memory_cost, stream_overhead);
     EXPECT_EQ(request.max_disk_cost, index_size);
     EXPECT_FALSE(request.has_raw_data);
 }
