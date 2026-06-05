@@ -36,6 +36,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// postProcessMilvusTableDeltalogs finalizes deltalog handling after the target
+// segment manifest is built. Real-PK milvus-table segments keep source deltas
+// in the manifest; virtual-PK segments rewrite source-PK deletes into target
+// virtual-PK deltalogs.
 func (t *RefreshExternalCollectionTask) postProcessMilvusTableDeltalogs(
 	ctx context.Context,
 	basePath string,
@@ -52,6 +56,9 @@ func (t *RefreshExternalCollectionTask) postProcessMilvusTableDeltalogs(
 	return t.addMilvusTableL0DeltalogsToManifest(ctx, manifestPath, fragments)
 }
 
+// addMilvusTableL0DeltalogsToManifest appends snapshot L0 deltalogs to a
+// real-PK target manifest without copying files. Segment-manifest deltas have
+// already been imported by the C++ manifest builder.
 func (t *RefreshExternalCollectionTask) addMilvusTableL0DeltalogsToManifest(
 	ctx context.Context,
 	manifestPath string,
@@ -103,32 +110,50 @@ func (t *RefreshExternalCollectionTask) addMilvusTableL0DeltalogsToManifest(
 	return updatedManifestPath, nil
 }
 
+// milvusTableDeltalogRef identifies one source StorageV3 deltalog that may
+// need to be translated into a target virtual-PK deltalog.
 type milvusTableDeltalogRef struct {
 	sourcePath string
 	logID      int64
 }
 
+// milvusTableSourcePKOffset records where a source PK lands in the target
+// segment and the insert timestamp used by delete visibility rules.
 type milvusTableSourcePKOffset struct {
 	targetOffset    int64
 	insertTimestamp storage.Timestamp
 }
 
+// milvusTableSourceDeleteEvent is one delete event read from a source deltalog.
 type milvusTableSourceDeleteEvent struct {
 	sourcePKKey     string
 	deleteTimestamp storage.Timestamp
 }
 
+// milvusTableSourceDeltalogDeletes keeps delete events grouped by source log so
+// the translated virtual-PK log can preserve the source log identity.
 type milvusTableSourceDeltalogDeletes struct {
 	ref    milvusTableDeltalogRef
 	events []milvusTableSourceDeleteEvent
 }
 
+// getMilvusTableSourceManifestDeltalogs reads source segment deltas from the
+// StorageV3 manifest and caches a deep copy by manifest path for the refresh
+// task lifetime.
 func (t *RefreshExternalCollectionTask) getMilvusTableSourceManifestDeltalogs(
 	manifestPath string,
 ) ([]*datapb.FieldBinlog, error) {
 	if manifestPath == "" {
 		return nil, nil
 	}
+
+	t.milvusTableSourceDeltalogsMu.Lock()
+	if cached, ok := t.milvusTableSourceDeltalogs[manifestPath]; ok {
+		t.milvusTableSourceDeltalogsMu.Unlock()
+		return cloneFieldBinlogs(cached), nil
+	}
+	t.milvusTableSourceDeltalogsMu.Unlock()
+
 	extfs := t.milvusTableExternalSpecContext()
 	deltalogs, err := packed.GetDeltaLogsFromManifestWithExtfs(manifestPath, t.req.GetStorageConfig(), extfs)
 	if err != nil {
@@ -137,9 +162,20 @@ func (t *RefreshExternalCollectionTask) getMilvusTableSourceManifestDeltalogs(
 	if err := populateDeltalogIDsFromPath(deltalogs); err != nil {
 		return nil, err
 	}
+
+	t.milvusTableSourceDeltalogsMu.Lock()
+	if t.milvusTableSourceDeltalogs == nil {
+		t.milvusTableSourceDeltalogs = make(map[string][]*datapb.FieldBinlog)
+	}
+	t.milvusTableSourceDeltalogs[manifestPath] = cloneFieldBinlogs(deltalogs)
+	t.milvusTableSourceDeltalogsMu.Unlock()
+
 	return deltalogs, nil
 }
 
+// populateDeltalogIDsFromPath fills missing source LogID values from StorageV3
+// _delta/<logID> paths. The parsed ID is stable across refresh rounds; invalid
+// paths are rejected instead of assigning a synthetic target-side ID.
 func populateDeltalogIDsFromPath(binlogs []*datapb.FieldBinlog) error {
 	for _, fieldBinlog := range binlogs {
 		for _, binlog := range fieldBinlog.GetBinlogs() {
@@ -159,6 +195,8 @@ func populateDeltalogIDsFromPath(binlogs []*datapb.FieldBinlog) error {
 	return nil
 }
 
+// parseMilvusTableDeltalogIDFromPath extracts the numeric log ID from a
+// StorageV3 source deltalog path.
 func parseMilvusTableDeltalogIDFromPath(logPath string) (int64, error) {
 	if err := packed.ValidateMilvusTableStorageV3DeltalogPath(logPath); err != nil {
 		return 0, err
@@ -171,6 +209,9 @@ func parseMilvusTableDeltalogIDFromPath(logPath string) (int64, error) {
 	return logID, nil
 }
 
+// translateMilvusTableDeltalogsToVirtualPKManifest rewrites source-PK deletes
+// into target-owned virtual-PK deltalogs and returns the manifest that points to
+// those target deltas.
 func (t *RefreshExternalCollectionTask) translateMilvusTableDeltalogsToVirtualPKManifest(
 	ctx context.Context,
 	basePath string,
@@ -231,6 +272,8 @@ func (t *RefreshExternalCollectionTask) translateMilvusTableDeltalogsToVirtualPK
 	return packed.AddDeltaLogsToManifestOverwrite(manifestPath, t.req.GetStorageConfig(), entries)
 }
 
+// collectMilvusTableDeltalogRefs collects unique source deltalog paths from the
+// fragments selected for a target segment.
 func collectMilvusTableDeltalogRefs(fragments []packed.Fragment) ([]milvusTableDeltalogRef, error) {
 	seen := make(map[string]struct{})
 	var refs []milvusTableDeltalogRef
@@ -258,6 +301,8 @@ func collectMilvusTableDeltalogRefs(fragments []packed.Fragment) ([]milvusTableD
 	return refs, nil
 }
 
+// getMilvusTableSourcePKField loads the source snapshot schema once and returns
+// its supported primary-key field for virtual-PK delete translation.
 func (t *RefreshExternalCollectionTask) getMilvusTableSourcePKField() (*schemapb.FieldSchema, error) {
 	t.milvusTableSourcePKFieldMu.Lock()
 	defer t.milvusTableSourcePKFieldMu.Unlock()
@@ -290,6 +335,8 @@ func (t *RefreshExternalCollectionTask) getMilvusTableSourcePKField() (*schemapb
 	}
 }
 
+// milvusTableExternalSpecContext builds the extfs context used to read source
+// manifests, stats, and deltalogs. Bare local paths intentionally clear Source.
 func (t *RefreshExternalCollectionTask) milvusTableExternalSpecContext() packed.ExternalSpecContext {
 	source := t.req.GetExternalSource()
 	if !packed.IsRemoteObjectURL(source) {
@@ -340,6 +387,8 @@ func (t *RefreshExternalCollectionTask) loadMilvusTableSourcePKOffsets(
 	return sourcePKOffsets, nil
 }
 
+// loadMilvusTableFragmentSourcePKOffsets scans one source manifest fragment and
+// records target offsets for only the source PKs that have delete events.
 func (t *RefreshExternalCollectionTask) loadMilvusTableFragmentSourcePKOffsets(
 	ctx context.Context,
 	fragment packed.Fragment,
@@ -400,6 +449,8 @@ func (t *RefreshExternalCollectionTask) loadMilvusTableFragmentSourcePKOffsets(
 	return nil
 }
 
+// appendMilvusTableSourcePKOffsetsFromRecord appends target offsets for matching
+// deleted PKs from one source data batch.
 func appendMilvusTableSourcePKOffsetsFromRecord(
 	record storage.Record,
 	sourcePKField *schemapb.FieldSchema,
@@ -435,6 +486,9 @@ func appendMilvusTableSourcePKOffsetsFromRecord(
 	return nil
 }
 
+// loadMilvusTableSourceDeltalogDeletes reads source StorageV3 deltalogs and
+// returns both grouped delete events and the set of source PKs to look up in
+// source data fragments.
 func (t *RefreshExternalCollectionTask) loadMilvusTableSourceDeltalogDeletes(
 	ctx context.Context,
 	refs []milvusTableDeltalogRef,
@@ -491,6 +545,8 @@ func (t *RefreshExternalCollectionTask) loadMilvusTableSourceDeltalogDeletes(
 	return deltalogDeletes, deletedSourcePKKeys, nil
 }
 
+// appendMilvusTableSourceDeleteEventsFromRecord decodes one deltalog batch into
+// source-PK delete events.
 func appendMilvusTableSourceDeleteEventsFromRecord(
 	record storage.Record,
 	sourcePKType schemapb.DataType,
@@ -517,6 +573,8 @@ func appendMilvusTableSourceDeleteEventsFromRecord(
 	return nil
 }
 
+// writeMilvusTableVirtualPKDeltalog writes one target-owned packed deltalog for
+// translated virtual-PK deletes that originated from a source deltalog.
 func (t *RefreshExternalCollectionTask) writeMilvusTableVirtualPKDeltalog(
 	ctx context.Context,
 	basePath string,
@@ -574,6 +632,8 @@ func (t *RefreshExternalCollectionTask) writeMilvusTableVirtualPKDeltalog(
 	}, true, nil
 }
 
+// buildMilvusTableVirtualPKDeletes converts source-PK delete events into target
+// virtual-PK delete rows after applying insert/delete timestamp visibility.
 func buildMilvusTableVirtualPKDeletes(
 	segmentID int64,
 	sourcePKOffsets map[string][]milvusTableSourcePKOffset,
@@ -599,6 +659,8 @@ func buildMilvusTableVirtualPKDeletes(
 	return virtualPKs, timestamps
 }
 
+// milvusTablePrimaryKeyMapKey normalizes supported source PK values into map
+// keys used while joining source deltalog deletes with source data rows.
 func milvusTablePrimaryKeyMapKey(pkType schemapb.DataType, pkColumn arrow.Array, index int) (string, error) {
 	switch pkType {
 	case schemapb.DataType_Int64:

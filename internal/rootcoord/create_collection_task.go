@@ -302,6 +302,8 @@ func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.Collect
 	return assignFunctionIDsFromFieldNames(schema)
 }
 
+// assignFunctionIDsFromFieldNames resolves function input/output field IDs
+// after field IDs have been assigned or aligned from a source snapshot.
 func assignFunctionIDsFromFieldNames(schema *schemapb.CollectionSchema) error {
 	name2id := map[string]int64{}
 	for _, field := range schema.GetFields() {
@@ -444,6 +446,8 @@ func (t *createCollectionTask) appendSysFields(schema *schemapb.CollectionSchema
 	})
 }
 
+// prepareMilvusTableSnapshotSchema validates the source snapshot and aligns
+// target field IDs before normal create-collection field ID assignment runs.
 func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Context) error {
 	schema := t.body.CollectionSchema
 	if schema == nil || schema.GetExternalSource() == "" || schema.GetExternalSpec() == "" {
@@ -495,7 +499,7 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 	}
 
 	sourceFields := milvusTableSourceFieldsByName(sourceSchema)
-	nextTargetOnlyFieldID := nextMilvusTableTargetOnlyFieldID(sourceSchema, schema)
+	nextTargetOnlyFieldID := nextMilvusTableTargetOnlyFieldID(sourceSchema)
 	for _, field := range schema.GetFields() {
 		if field.GetName() == common.VirtualPKFieldName || typeutil.IsFunctionOutputField(schema, field) {
 			// Milvus-table mapped fields must reuse source field IDs because
@@ -503,13 +507,11 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 			// fields, including virtual PK and target function outputs, are not
 			// read from the source manifest and therefore need IDs outside the
 			// source snapshot range.
-			if field.GetFieldID() == 0 {
-				field.FieldID = nextTargetOnlyFieldID
-				nextTargetOnlyFieldID++
-			}
+			field.FieldID = nextTargetOnlyFieldID
+			nextTargetOnlyFieldID++
 			continue
 		}
-		if isMilvusTableSystemOrVirtualField(field.GetName()) {
+		if typeutil.IsExternalSystemOrVirtualField(field.GetName()) {
 			continue
 		}
 		sourceField := sourceFields[field.GetExternalField()]
@@ -530,6 +532,8 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 	return nil
 }
 
+// createMilvusTableSnapshotStorageConfig builds the local Milvus storage config
+// used to read source snapshot metadata during create collection.
 func createMilvusTableSnapshotStorageConfig() *indexpb.StorageConfig {
 	params := paramtable.Get()
 	if params.CommonCfg.StorageType.GetValue() == "local" {
@@ -559,6 +563,8 @@ func createMilvusTableSnapshotStorageConfig() *indexpb.StorageConfig {
 	}
 }
 
+// nextMilvusTableTargetOnlyFieldID returns the first field ID above all source
+// snapshot IDs so target-only fields cannot collide with source columns.
 func nextMilvusTableTargetOnlyFieldID(schemas ...*schemapb.CollectionSchema) int64 {
 	next := int64(StartOfUserFieldID)
 	for _, schema := range schemas {
@@ -571,10 +577,12 @@ func nextMilvusTableTargetOnlyFieldID(schemas ...*schemapb.CollectionSchema) int
 	return next
 }
 
+// milvusTableSourceFieldsByName indexes source user fields that can be targets
+// of ExternalField mappings.
 func milvusTableSourceFieldsByName(schema *schemapb.CollectionSchema) map[string]*schemapb.FieldSchema {
 	fields := make(map[string]*schemapb.FieldSchema, len(schema.GetFields()))
 	for _, field := range schema.GetFields() {
-		if isMilvusTableSystemOrVirtualField(field.GetName()) {
+		if typeutil.IsExternalSystemOrVirtualField(field.GetName()) {
 			continue
 		}
 		fields[field.GetName()] = field
@@ -582,12 +590,8 @@ func milvusTableSourceFieldsByName(schema *schemapb.CollectionSchema) map[string
 	return fields
 }
 
-func isMilvusTableSystemOrVirtualField(name string) bool {
-	return name == common.RowIDFieldName ||
-		name == common.TimeStampFieldName ||
-		name == common.VirtualPKFieldName
-}
-
+// upsertCreateCollectionProperty inserts or updates one create-collection
+// property without disturbing the remaining request properties.
 func upsertCreateCollectionProperty(properties []*commonpb.KeyValuePair, key, value string) []*commonpb.KeyValuePair {
 	for _, property := range properties {
 		if property.GetKey() == key {

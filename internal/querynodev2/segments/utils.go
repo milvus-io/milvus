@@ -379,6 +379,8 @@ func IsExternalField(field *schemapb.FieldSchema) bool {
 	return field.GetExternalField() != ""
 }
 
+// HasExternalPrimaryKey reports whether the loaded collection schema uses a
+// user primary key instead of the milvus-table virtual primary key.
 func HasExternalPrimaryKey(schema *schemapb.CollectionSchema) bool {
 	if schema == nil {
 		return false

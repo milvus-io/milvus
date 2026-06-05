@@ -249,11 +249,17 @@ func FreeProperties(props *C.LoonProperties) {
 	}
 }
 
+// MilvusTablePrimaryKeyMode describes whether a milvus-table target segment
+// keeps source primary keys or uses target-generated virtual primary keys.
 type MilvusTablePrimaryKeyMode int
 
 const (
+	// MilvusTablePrimaryKeyModeUnspecified keeps the legacy real-PK behavior for
+	// callers that do not know the collection schema.
 	MilvusTablePrimaryKeyModeUnspecified MilvusTablePrimaryKeyMode = iota
+	// MilvusTablePrimaryKeyModeExternal means source primary keys are preserved.
 	MilvusTablePrimaryKeyModeExternal
+	// MilvusTablePrimaryKeyModeVirtual means DataNode generates virtual PKs.
 	MilvusTablePrimaryKeyModeVirtual
 )
 

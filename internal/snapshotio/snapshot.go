@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package snapshotio serializes Milvus snapshot metadata and per-segment
+// manifests used by external milvus-table refresh.
 package snapshotio
 
 import (

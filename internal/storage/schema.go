@@ -14,12 +14,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// ArrowFieldNameResolver maps a Milvus field to the physical Arrow column name
+// that should be read. Returning false skips the field.
 type ArrowFieldNameResolver func(field *schemapb.FieldSchema) (string, bool)
 
 func ConvertToArrowSchema(schema *schemapb.CollectionSchema, useFieldID bool) (*arrow.Schema, error) {
 	return ConvertToArrowSchemaWithNameResolver(schema, useFieldID, nil)
 }
 
+// ConvertToArrowSchemaWithNameResolver converts a Milvus schema to Arrow and
+// lets callers override physical column names for external/manifest reads.
 func ConvertToArrowSchemaWithNameResolver(
 	schema *schemapb.CollectionSchema,
 	useFieldID bool,

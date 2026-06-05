@@ -98,6 +98,9 @@ type RefreshExternalCollectionTask struct {
 	milvusTableSourcePKFieldMu sync.Mutex
 	milvusTableSourcePKField   *schemapb.FieldSchema
 
+	milvusTableSourceDeltalogsMu sync.Mutex
+	milvusTableSourceDeltalogs   map[string][]*datapb.FieldBinlog
+
 	// Result after execution — tracked separately for correct response building
 	keptSegmentIDs  []int64               // IDs of current segments that were kept unchanged
 	updatedSegments []*datapb.SegmentInfo // upsert payload: patched current segments plus newly created segments
@@ -395,27 +398,39 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 			continue
 		}
 
+		missingColumns := missingExternalColumns(seg, t.req.GetSchema())
 		shouldRefreshDeltalogs, err := t.shouldRefreshMilvusTableDeltalogs(seg, fragments, matchedNewFragments)
 		if err != nil {
 			return nil, err
 		}
+		var patchedSegment *datapb.SegmentInfo
 		if shouldRefreshDeltalogs {
 			updatedSegment, err := t.refreshMilvusTableSegmentManifest(ctx, seg, matchedNewFragments)
 			if err != nil {
 				return nil, err
 			}
-			patchedSegments = append(patchedSegments, updatedSegment)
-			for _, f := range fragments {
-				if err := ensureContext(ctx); err != nil {
-					return nil, err
-				}
-				usedFragments[fragmentKey(f)] = true
-			}
+			patchedSegment = updatedSegment
 			log.Info("Segment kept with refreshed milvus-table deltalogs",
 				zap.Int64("segmentID", seg.GetID()),
 				zap.String("oldManifestPath", seg.GetManifestPath()),
 				zap.String("newManifestPath", updatedSegment.GetManifestPath()))
-			continue
+		}
+
+		if len(missingColumns) > 0 {
+			segmentToPatch := seg
+			patchFragments := fragments
+			if patchedSegment != nil {
+				segmentToPatch = patchedSegment
+				patchFragments = matchedNewFragments
+			}
+			patchedWithColumns, err := t.patchSegmentForMissingColumns(ctx, segmentToPatch, patchFragments, missingColumns)
+			if err != nil {
+				return nil, err
+			}
+			patchedSegment = patchedWithColumns
+			log.Info("Segment patched with missing external columns",
+				zap.Int64("segmentID", seg.GetID()),
+				zap.Strings("missingColumns", missingColumns))
 		}
 
 		for _, f := range fragments {
@@ -425,21 +440,13 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 			key := fragmentKey(f)
 			usedFragments[key] = true
 		}
-		missingColumns := missingExternalColumns(seg, t.req.GetSchema())
-		if len(missingColumns) == 0 {
+		if patchedSegment == nil {
 			// Keep this segment unchanged
 			keptSegments = append(keptSegments, seg)
 			log.Debug("Segment kept unchanged",
 				zap.Int64("segmentID", seg.GetID()))
 		} else {
-			patchedSegment, err := t.patchSegmentForMissingColumns(ctx, seg, fragments, missingColumns)
-			if err != nil {
-				return nil, err
-			}
 			patchedSegments = append(patchedSegments, patchedSegment)
-			log.Info("Segment patched with missing external columns",
-				zap.Int64("segmentID", seg.GetID()),
-				zap.Strings("missingColumns", missingColumns))
 		}
 	}
 
@@ -665,55 +672,6 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			fmt.Sprintf("external source has %d fragments but zero total rows", len(fragments)))
 	}
 
-	// Get target rows per segment from configuration
-	targetRowsPerSegment := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
-	if totalRows < targetRowsPerSegment {
-		targetRowsPerSegment = totalRows
-	}
-
-	numSegments := (totalRows + targetRowsPerSegment - 1) / targetRowsPerSegment
-	if numSegments == 0 {
-		numSegments = 1
-	}
-
-	avgRowsPerSegment := totalRows / numSegments
-
-	log.Info("Balancing fragments to segments",
-		zap.Int("numFragments", len(fragments)),
-		zap.Int64("totalRows", totalRows),
-		zap.Int64("numSegments", numSegments),
-		zap.Int64("avgRowsPerSegment", avgRowsPerSegment))
-
-	// Sort fragments by row count descending for better bin-packing
-	sortedFragments := make([]packed.Fragment, len(fragments))
-	copy(sortedFragments, fragments)
-	sort.Slice(sortedFragments, func(i, j int) bool {
-		return sortedFragments[i].RowCount > sortedFragments[j].RowCount
-	})
-
-	// Initialize segment bins
-	type segmentBin struct {
-		fragments []packed.Fragment
-		rowCount  int64
-	}
-	bins := make([]segmentBin, numSegments)
-
-	// Greedy bin-packing: assign each fragment to the bin with lowest current row count
-	for _, f := range sortedFragments {
-		if err := ensureContext(ctx); err != nil {
-			return nil, err
-		}
-		// Find bin with minimum row count
-		minIdx := 0
-		for i := 1; i < len(bins); i++ {
-			if bins[i].rowCount < bins[minIdx].rowCount {
-				minIdx = i
-			}
-		}
-		bins[minIdx].fragments = append(bins[minIdx].fragments, f)
-		bins[minIdx].rowCount += f.RowCount
-	}
-
 	// Phase 1: Allocate segment IDs (sequential, lightweight)
 	type segmentWork struct {
 		segmentID   int64
@@ -725,6 +683,7 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 	isMilvusTableVirtualPKTask := t.parsedSpec != nil &&
 		t.parsedSpec.Format == externalspec.FormatMilvusTable &&
 		!packed.HasExternalPrimaryKey(t.req.GetSchema())
+	isMilvusTableTask := t.parsedSpec != nil && t.parsedSpec.Format == externalspec.FormatMilvusTable
 	appendWork := func(rowCount int64, fragments []packed.Fragment) error {
 		// Each segment needs 2 IDs: one for segment, one for fake binlog logID
 		if t.nextAllocID+1 >= t.preallocatedIDRange.End {
@@ -752,17 +711,70 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 		})
 		return nil
 	}
-	if t.parsedSpec != nil && t.parsedSpec.Format == externalspec.FormatMilvusTable {
+	if isMilvusTableTask {
 		// milvus-table maps each source fragment to exactly one target segment
 		// (1:1) instead of bin-packing fragments by row count. This keeps the
 		// target segment aligned with a single source segment manifest, which is
 		// what makes manifest reuse and the virtual-PK offset mapping well defined.
+		log.Info("Assigning milvus-table fragments to one segment each",
+			zap.Int("numFragments", len(fragments)),
+			zap.Int64("totalRows", totalRows),
+			zap.Int("numSegments", len(fragments)))
 		for _, fragment := range fragments {
 			if err := appendWork(fragment.RowCount, []packed.Fragment{fragment}); err != nil {
 				return nil, err
 			}
 		}
 	} else {
+		// Get target rows per segment from configuration
+		targetRowsPerSegment := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
+		if totalRows < targetRowsPerSegment {
+			targetRowsPerSegment = totalRows
+		}
+
+		numSegments := (totalRows + targetRowsPerSegment - 1) / targetRowsPerSegment
+		if numSegments == 0 {
+			numSegments = 1
+		}
+
+		avgRowsPerSegment := totalRows / numSegments
+
+		log.Info("Balancing fragments to segments",
+			zap.Int("numFragments", len(fragments)),
+			zap.Int64("totalRows", totalRows),
+			zap.Int64("numSegments", numSegments),
+			zap.Int64("avgRowsPerSegment", avgRowsPerSegment))
+
+		// Sort fragments by row count descending for better bin-packing
+		sortedFragments := make([]packed.Fragment, len(fragments))
+		copy(sortedFragments, fragments)
+		sort.Slice(sortedFragments, func(i, j int) bool {
+			return sortedFragments[i].RowCount > sortedFragments[j].RowCount
+		})
+
+		// Initialize segment bins
+		type segmentBin struct {
+			fragments []packed.Fragment
+			rowCount  int64
+		}
+		bins := make([]segmentBin, numSegments)
+
+		// Greedy bin-packing: assign each fragment to the bin with lowest current row count
+		for _, f := range sortedFragments {
+			if err := ensureContext(ctx); err != nil {
+				return nil, err
+			}
+			// Find bin with minimum row count
+			minIdx := 0
+			for i := 1; i < len(bins); i++ {
+				if bins[i].rowCount < bins[minIdx].rowCount {
+					minIdx = i
+				}
+			}
+			bins[minIdx].fragments = append(bins[minIdx].fragments, f)
+			bins[minIdx].rowCount += f.RowCount
+		}
+
 		for _, bin := range bins {
 			if len(bin.fragments) == 0 {
 				continue
