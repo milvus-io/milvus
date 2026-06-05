@@ -7,6 +7,6 @@ import (
 )
 
 func TestName(t *testing.T) {
-	assert.Equal(t, 1.5, ToMB(1024*1024+512*1024))
+	assert.Equal(t, 1.5, ToMB(float64(1024*1024+512*1024)))
 	assert.Equal(t, int64(2), ToMB(int64(2*1024*1024)))
 }
