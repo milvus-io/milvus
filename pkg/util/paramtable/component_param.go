@@ -30,7 +30,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/fips"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -130,7 +130,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 
 	p.CommonCfg.init(bt)
 	if fips.MaybeEnableOpenSSLFIPS() && !p.MinioCfg.UseCRC32C.GetAsBool() {
-		log.Warn("FIPS mode requires CRC32C checksum for S3 PutObject requests; override minio.ssl.useCRC32C to true at runtime")
+		mlog.Warn(context.TODO(), "FIPS mode requires CRC32C checksum for S3 PutObject requests; override minio.ssl.useCRC32C to true at runtime")
 		p.MinioCfg.UseCRC32C.SwapTempValue("true")
 	}
 	p.QuotaConfig.init(bt)

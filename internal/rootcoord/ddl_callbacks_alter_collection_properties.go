@@ -16,7 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
@@ -485,11 +485,11 @@ func (c *DDLCallback) cascadeDropFieldIndexesInline(ctx context.Context, result 
 	var indexIDs []int64
 	for _, indexInfo := range resp.GetIndexInfos() {
 		if _, ok := droppedFieldSet[indexInfo.GetFieldID()]; ok {
-			log.Ctx(ctx).Info("cascade dropping index on dropped field",
-				log.FieldMessage(result.Message),
-				zap.Int64("fieldID", indexInfo.GetFieldID()),
-				zap.String("indexName", indexInfo.GetIndexName()),
-				zap.Int64("indexID", indexInfo.GetIndexID()),
+			mlog.Info(ctx, "cascade dropping index on dropped field",
+				mlog.FieldMessage(result.Message),
+				mlog.FieldFieldID(indexInfo.GetFieldID()),
+				mlog.String("indexName", indexInfo.GetIndexName()),
+				mlog.FieldIndexID(indexInfo.GetIndexID()),
 			)
 			indexIDs = append(indexIDs, indexInfo.GetIndexID())
 		}
