@@ -142,7 +142,7 @@ func compileMetricPlans(metrics map[string]MetricSpec) ([]metricPlan, error) {
 // deriveTopKAndGroupSize maps the ES-style nested aggregation sizes into the
 // (topK, groupSize) pair consumed by the Delegator/QN group-reduce algorithm:
 //
-//	topK      = product of every level's Size (distinct composite keys cap)
+//	topK      = product of every level's SearchSize
 //	groupSize = max TopHits.Size across all levels, or 1 when TopHits is absent
 //
 // groupSize is global because upstream group-reduce keeps rows per full
@@ -154,10 +154,17 @@ func normalizeAggregationSize(size int64) int64 {
 	return size
 }
 
+func candidateSize(level LevelContext) int64 {
+	if level.SearchSize > 0 {
+		return level.SearchSize
+	}
+	return normalizeAggregationSize(level.Size)
+}
+
 func deriveTopKAndGroupSize(levels []LevelContext) (topK, groupSize int64) {
 	topK = 1
 	for _, lvl := range levels {
-		topK *= normalizeAggregationSize(lvl.Size)
+		topK *= candidateSize(lvl)
 	}
 	return topK, deriveGroupSize(levels)
 }
@@ -166,7 +173,7 @@ func deriveTopKAndGroupSizeChecked(levels []LevelContext) (topK, groupSize int64
 	topK = 1
 	for _, lvl := range levels {
 		var ok bool
-		topK, ok = checkedMulInt64(topK, normalizeAggregationSize(lvl.Size))
+		topK, ok = checkedMulInt64(topK, candidateSize(lvl))
 		if !ok {
 			return 0, 0, fmt.Errorf("search_aggregation derived topK overflows int64")
 		}
@@ -263,10 +270,23 @@ func resolveAggregationSpec(groupBy *commonpb.SearchAggregationSpec, schema *sch
 		if spec.GetSize() < 0 {
 			return fmt.Errorf("search_aggregation size must be non-negative")
 		}
+		if spec.GetSearchSize() < 0 {
+			return fmt.Errorf("search_aggregation search_size must be non-negative")
+		}
+
+		levelSize := normalizeAggregationSize(spec.GetSize())
+		searchSize := spec.GetSearchSize()
+		if searchSize == 0 {
+			searchSize = levelSize
+		}
+		if searchSize < levelSize {
+			return fmt.Errorf("search_aggregation search_size must be greater than or equal to size")
+		}
 
 		level := LevelContext{
 			OwnFieldIDs: make([]int64, 0, len(spec.GetFields())),
-			Size:        normalizeAggregationSize(spec.GetSize()),
+			Size:        levelSize,
+			SearchSize:  searchSize,
 		}
 
 		levelFieldSeen := make(map[int64]struct{})
@@ -275,14 +295,12 @@ func resolveAggregationSpec(groupBy *commonpb.SearchAggregationSpec, schema *sch
 			if err != nil {
 				return fmt.Errorf("invalid group_by field %q: %w", fieldName, err)
 			}
-			// jsonPath plumbing to segcore is not wired for SearchAggregation yet;
-			// reject JSON / dynamic-field group_by up-front so callers get a
-			// deterministic error instead of an empty group-by column downstream.
-			if fs := typeutil.GetFieldByID(schema, fieldID); fs != nil {
-				if fs.GetDataType() == schemapb.DataType_JSON || fs.GetIsDynamic() {
-					return fmt.Errorf("group_by field %q: JSON / dynamic fields are not yet supported with search_aggregation", fieldName)
-				}
-				if fs.GetDataType() == schemapb.DataType_Float || fs.GetDataType() == schemapb.DataType_Double {
+			field, err := validateSearchAggregationFieldSupport(fieldName, fieldID, schema, "group_by field")
+			if err != nil {
+				return err
+			}
+			if field != nil {
+				if field.GetDataType() == schemapb.DataType_Float || field.GetDataType() == schemapb.DataType_Double {
 					return fmt.Errorf("group_by field %q: FLOAT / DOUBLE fields are not supported with search_aggregation (BucketKeyEntry has no float variant; equality on floats is fragile)", fieldName)
 				}
 			}
@@ -388,7 +406,11 @@ func buildMetricSpec(metric *commonpb.MetricAggSpec, schema *schemapb.Collection
 			return MetricSpec{}, 0, err
 		}
 		fieldType := schemapb.DataType_None
-		if field := typeutil.GetFieldByName(schema, fieldName); field != nil {
+		field, err := validateSearchAggregationFieldSupport(fieldName, fieldID, schema, "metric field")
+		if err != nil {
+			return MetricSpec{}, 0, err
+		}
+		if field != nil {
 			fieldType = field.GetDataType()
 		}
 		return MetricSpec{Op: op, FieldID: fieldID, FieldType: fieldType}, fieldID, nil
@@ -436,6 +458,9 @@ func buildTopHitsConfig(topHits *commonpb.TopHitsSpec, schema *schemapb.Collecti
 		fieldID, err := resolveFieldID(fieldName, schema, dynamicField)
 		if err != nil {
 			return nil, nil, fmt.Errorf("invalid top_hits.sort field %q: %w", fieldName, err)
+		}
+		if _, err := validateSearchAggregationFieldSupport(fieldName, fieldID, schema, "top_hits.sort field"); err != nil {
+			return nil, nil, err
 		}
 		cfg.Sort = append(cfg.Sort, SortCriterion{FieldID: fieldID, Dir: direction, NullFirst: sortSpec.GetNullFirst()})
 		appendUniqueFieldID(seen, &sortFieldIDs, fieldID)
@@ -488,6 +513,17 @@ func normalizeDirection(direction string, defaultDir string) (string, error) {
 	default:
 		return "", fmt.Errorf("direction must be asc or desc")
 	}
+}
+
+func validateSearchAggregationFieldSupport(fieldName string, fieldID int64, schema *schemapb.CollectionSchema, usage string) (*schemapb.FieldSchema, error) {
+	field := typeutil.GetFieldByID(schema, fieldID)
+	if field == nil {
+		return nil, nil
+	}
+	if field.GetDataType() == schemapb.DataType_JSON || field.GetIsDynamic() {
+		return nil, fmt.Errorf("%s %q: JSON / dynamic fields are not yet supported with search_aggregation", usage, fieldName)
+	}
+	return field, nil
 }
 
 func isJSONPathFieldExpr(fieldExpr string) bool {

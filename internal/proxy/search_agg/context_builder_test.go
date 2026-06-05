@@ -88,11 +88,40 @@ func TestBuildSearchAggregationContextDefaultsOmittedSizeToOne(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, ctx.Levels, 2)
 	require.Equal(t, int64(1), ctx.Levels[0].Size)
+	require.Equal(t, int64(1), ctx.Levels[0].SearchSize)
 	require.Equal(t, int64(1), ctx.Levels[1].Size)
+	require.Equal(t, int64(1), ctx.Levels[1].SearchSize)
 	require.NotNil(t, ctx.Levels[1].TopHits)
 	require.Equal(t, int64(1), ctx.Levels[1].TopHits.Size)
 	require.Equal(t, int64(1), ctx.DerivedTopK)
 	require.Equal(t, int64(1), ctx.DerivedGroupSize)
+}
+
+func TestBuildSearchAggregationContextUsesSearchSizeForDerivedTopK(t *testing.T) {
+	schema := testCollectionSchema()
+	spec := &commonpb.SearchAggregationSpec{
+		Fields:     []string{"brand"},
+		Size:       2,
+		SearchSize: 5,
+		SubAggregation: &commonpb.SearchAggregationSpec{
+			Fields:     []string{"category"},
+			Size:       3,
+			SearchSize: 4,
+			TopHits: &commonpb.TopHitsSpec{
+				Size: 2,
+			},
+		},
+	}
+
+	ctx, err := BuildSearchAggregationContext(spec, schema, 1)
+	require.NoError(t, err)
+	require.Len(t, ctx.Levels, 2)
+	require.Equal(t, int64(2), ctx.Levels[0].Size)
+	require.Equal(t, int64(5), ctx.Levels[0].SearchSize)
+	require.Equal(t, int64(3), ctx.Levels[1].Size)
+	require.Equal(t, int64(4), ctx.Levels[1].SearchSize)
+	require.Equal(t, int64(20), ctx.DerivedTopK)
+	require.Equal(t, int64(2), ctx.DerivedGroupSize)
 }
 
 func TestBuildSearchAggregationContextRejectsNegativeSize(t *testing.T) {
@@ -105,6 +134,26 @@ func TestBuildSearchAggregationContextRejectsNegativeSize(t *testing.T) {
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "search_aggregation size must be non-negative")
+}
+
+func TestBuildSearchAggregationContextRejectsInvalidSearchSize(t *testing.T) {
+	schema := testCollectionSchema()
+
+	_, err := BuildSearchAggregationContext(&commonpb.SearchAggregationSpec{
+		Fields:     []string{"brand"},
+		Size:       3,
+		SearchSize: -1,
+	}, schema, 1)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "search_aggregation search_size must be non-negative")
+
+	_, err = BuildSearchAggregationContext(&commonpb.SearchAggregationSpec{
+		Fields:     []string{"brand"},
+		Size:       3,
+		SearchSize: 2,
+	}, schema, 1)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "search_aggregation search_size must be greater than or equal to size")
 }
 
 func TestBuildSearchAggregationContextRejectsNegativeTopHitsSize(t *testing.T) {
@@ -129,6 +178,16 @@ func TestDeriveTopKAndGroupSizeDefaultsZeroSizesToOne(t *testing.T) {
 
 	require.Equal(t, int64(3), topK)
 	require.Equal(t, int64(1), groupSize)
+}
+
+func TestDeriveTopKAndGroupSizeUsesSearchSize(t *testing.T) {
+	topK, groupSize := deriveTopKAndGroupSize([]LevelContext{
+		{Size: 2, SearchSize: 5},
+		{Size: 3, SearchSize: 4, TopHits: &TopHitsConfig{Size: 2}},
+	})
+
+	require.Equal(t, int64(20), topK)
+	require.Equal(t, int64(2), groupSize)
 }
 
 func TestNewContextReturnsMetricCompileError(t *testing.T) {
@@ -364,14 +423,14 @@ func TestBuildSearchAggregationContextRejectsJSONField(t *testing.T) {
 			Fields: []string{"meta"}, Size: 3,
 		}, schema, 1)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "not yet supported with search_aggregation")
+		require.Contains(t, err.Error(), "group_by field \"meta\": JSON / dynamic fields are not yet supported with search_aggregation")
 	})
 	t.Run("json path", func(t *testing.T) {
 		_, err := BuildSearchAggregationContext(&commonpb.SearchAggregationSpec{
 			Fields: []string{"meta['region']"}, Size: 3,
 		}, schema, 1)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "not yet supported with search_aggregation")
+		require.Contains(t, err.Error(), "group_by field \"meta['region']\": JSON / dynamic fields are not yet supported with search_aggregation")
 	})
 }
 
@@ -443,6 +502,7 @@ func TestBuildSearchAggregationContextRejectsDynamicField(t *testing.T) {
 		Name: "agg_test",
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "brand", DataType: schemapb.DataType_VarChar},
 			{FieldID: 109, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
 		},
 	}
@@ -450,7 +510,74 @@ func TestBuildSearchAggregationContextRejectsDynamicField(t *testing.T) {
 		Fields: []string{"arbitrary_dyn_field"}, Size: 3,
 	}, schema, 1)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "not yet supported with search_aggregation")
+	require.Contains(t, err.Error(), "group_by field \"arbitrary_dyn_field\": JSON / dynamic fields are not yet supported with search_aggregation")
+}
+
+func TestBuildSearchAggregationContextRejectsJSONDynamicMetricFields(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "agg_test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "brand", DataType: schemapb.DataType_VarChar},
+			{FieldID: 108, Name: "meta", DataType: schemapb.DataType_JSON},
+			{FieldID: 109, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+	}
+
+	cases := []struct {
+		name      string
+		fieldName string
+	}{
+		{name: "plain json", fieldName: "meta"},
+		{name: "json path", fieldName: "meta['region']"},
+		{name: "dynamic field", fieldName: "dynamic_brand"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := BuildSearchAggregationContext(&commonpb.SearchAggregationSpec{
+				Fields: []string{"brand"},
+				Metrics: map[string]*commonpb.MetricAggSpec{
+					"field_count": {Op: "count", FieldName: tc.fieldName},
+				},
+			}, schema, 1)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "not yet supported with search_aggregation")
+		})
+	}
+}
+
+func TestBuildSearchAggregationContextRejectsJSONDynamicTopHitsSortFields(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "agg_test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "brand", DataType: schemapb.DataType_VarChar},
+			{FieldID: 108, Name: "meta", DataType: schemapb.DataType_JSON},
+			{FieldID: 109, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+	}
+
+	cases := []struct {
+		name      string
+		fieldName string
+	}{
+		{name: "plain json", fieldName: "meta"},
+		{name: "dynamic field", fieldName: "dynamic_brand"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := BuildSearchAggregationContext(&commonpb.SearchAggregationSpec{
+				Fields: []string{"brand"},
+				TopHits: &commonpb.TopHitsSpec{
+					Sort: []*commonpb.SortSpec{{FieldName: tc.fieldName}},
+				},
+			}, schema, 1)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "not yet supported with search_aggregation")
+		})
+	}
 }
 
 func TestBuildSearchAggregationContextValidationMatrix(t *testing.T) {

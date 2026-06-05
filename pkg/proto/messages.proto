@@ -66,6 +66,8 @@ enum MessageType {
     BatchUpdateManifest          = 42;
     RefreshExternalCollection    = 43;
     DropSnapshotsByCollection    = 44;
+    CommitImport                 = 45;
+    RollbackImport               = 46;
 
     // AlterWAL is used to alter the wal configuration to the current cluster.
     AlterWAL             = 700;
@@ -289,6 +291,7 @@ message AlterCollectionMessageHeader {
     google.protobuf.FieldMask update_mask = 3;
     CacheExpirations cache_expirations = 4;
     repeated int64 flushed_segment_ids = 5; // will be filled by wal shard manager.
+    repeated int64 dropped_field_ids = 6; // field IDs removed by this alter operation, used to cascade-delete indexes in ack callback.
 }
 
 // AlterCollectionMessageBody is the body of alter collection message.
@@ -643,6 +646,26 @@ message RefreshExternalCollectionMessageHeader {
 // Empty - all info is in header.
 message RefreshExternalCollectionMessageBody {}
 
+// CommitImportMessageHeader is the header of commit import message.
+message CommitImportMessageHeader {
+    int64 collection_id = 1;
+    int64 job_id        = 2;
+}
+
+// CommitImportMessageBody is the body of commit import message.
+// Empty - all info is in header.
+message CommitImportMessageBody {}
+
+// RollbackImportMessageHeader is the header of rollback import message.
+message RollbackImportMessageHeader {
+    int64 collection_id = 1;
+    int64 job_id        = 2;
+}
+
+// RollbackImportMessageBody is the body of rollback import message.
+// Empty - all info is in header.
+message RollbackImportMessageBody {}
+
 // CacheExpirations is the cache expirations of proxy collection meta cache.
 message CacheExpirations {
     repeated CacheExpiration cache_expirations = 1;
@@ -804,4 +827,3 @@ message BatchUpdateManifestItem {
 message BatchUpdateManifestV2ColumnGroups {
     map<int64, data.FieldBinlog> column_groups = 1;
 }
-

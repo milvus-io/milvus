@@ -158,7 +158,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         }
         auto ca = SemiInlineGet(iter->second->PinCells(op_ctx, {0}));
         auto index = ca->get_cell_of(0);
-        return {PinWrapper<const index::IndexBase*>(ca, index)};
+        return {PinWrapper<const index::IndexBase*>(std::move(ca), index)};
     }
 
     bool
@@ -187,10 +187,33 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                   const int64_t* seg_offsets,
                   size_t count,
                   bool is_cosine,
+                  float* distances) const override {
+        return CalcDistByIDs(nullptr,
+                             field_id,
+                             query_dataset,
+                             seg_offsets,
+                             count,
+                             is_cosine,
+                             distances);
+    }
+
+    bool
+    CalcDistByIDs(milvus::OpContext* op_ctx,
+                  FieldId field_id,
+                  const knowhere::DataSetPtr& query_dataset,
+                  const int64_t* seg_offsets,
+                  size_t count,
+                  bool is_cosine,
                   float* distances) const override;
 
     bool
-    IsIndexRefineEnabled(FieldId field_id) const override;
+    IsIndexRefineEnabled(FieldId field_id) const override {
+        return IsIndexRefineEnabled(nullptr, field_id);
+    }
+
+    bool
+    IsIndexRefineEnabled(milvus::OpContext* op_ctx,
+                         FieldId field_id) const override;
 
     DataType
     GetFieldDataType(FieldId fieldId) const override;
@@ -536,7 +559,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                    TargetBitmap& valid_map,
                    bool small_int_raw_type = false) const override;
 
-    // Override to inject take() fast path for Search on external tables.
+    // Override to inject take() fast path for Search output fields.
     // Uses existing vtable slot — no layout change.
     void
     FillTargetEntry(const query::Plan* plan,
@@ -562,10 +585,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // Converts a combined Arrow array into a proto DataArray using
     // result_mapping for reorder.  Returns nullptr on unsupported type.
     static std::unique_ptr<DataArray>
-    ArrowToDataArray(const std::shared_ptr<arrow::Array>& arr,
-                     const FieldMeta& field_meta,
-                     const std::vector<int64_t>& result_mapping,
-                     int64_t size);
+    ArrowToDataArray(
+        const std::shared_ptr<arrow::Array>& arr,
+        const FieldMeta& field_meta,
+        const std::vector<int64_t>& result_mapping,
+        int64_t size,
+        const std::vector<std::string>* dynamic_field_names = nullptr,
+        const std::string* text_lob_path = nullptr);
 
     // Calls reader_->take() with timing. Returns the table on success,
     // or nullptr on failure (logs a warning). Checks op_ctx for cancellation
@@ -1127,10 +1153,16 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     };
 
     ValidResult
-    FilterVectorValidOffsets(milvus::OpContext* op_ctx,
-                             FieldId field_id,
-                             const int64_t* seg_offsets,
-                             int64_t count) const;
+    FilterVectorValidOffsetsFromIndex(milvus::OpContext* op_ctx,
+                                      FieldId field_id,
+                                      const int64_t* seg_offsets,
+                                      int64_t count) const;
+
+    ValidResult
+    FilterVectorValidOffsetsFromColumn(milvus::OpContext* op_ctx,
+                                       const ChunkedColumnInterface* column,
+                                       const int64_t* seg_offsets,
+                                       int64_t count) const;
 
     void
     update_row_count(int64_t row_count) {
@@ -1174,7 +1206,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadIndex(LoadIndexInfo& info, bool is_replace);
 
     bool
-    generate_interim_index(const FieldId field_id, int64_t num_rows);
+    generate_interim_index(const FieldId field_id,
+                           int64_t num_rows,
+                           milvus::OpContext* op_ctx);
 
     void
     fill_empty_field(const FieldMeta& field_meta);
@@ -1411,6 +1445,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         use_take_for_output_.store(val, std::memory_order_relaxed);
     }
 
+    // Test-only: inject TEXT LOB base path.
+    void
+    SetTextLobPathForTesting(FieldId field_id, std::string lob_base_path) {
+        text_lob_paths_[field_id] = std::move(lob_base_path);
+    }
+
     // Test-only: snapshot access to segment_load_info_ for asserting Reopen
     // preserves runtime-only state (e.g. created_text_indexes_).
     std::shared_ptr<const SegmentLoadInfo>
@@ -1510,7 +1550,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // 1. will skip index loading for primary key field
     bool is_sorted_by_pk_ = false;
 
-    // When true, use take() API for output field retrieval from external storage.
+    // When true, use take() API for output field retrieval from storage.
     // Published alongside segment_load_info_ by the writer entry points; read
     // lock-free on query hot paths.
     std::atomic<bool> use_take_for_output_{false};

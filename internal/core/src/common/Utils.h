@@ -12,6 +12,7 @@
 #pragma once
 
 #include <fcntl.h>
+#include "common/FastMem.h"
 #include <fmt/core.h>
 #include <google/protobuf/text_format.h>
 #include <sys/mman.h>
@@ -275,7 +276,7 @@ CopyAndWrapSparseRow(const void* data,
     size_t num_elements =
         size / knowhere::sparse::SparseRow<SparseValueType>::element_size();
     knowhere::sparse::SparseRow<SparseValueType> row(num_elements);
-    std::memcpy(row.data(), data, size);
+    milvus::fastmem::FastMemcpy(row.data(), data, size);
     if (validate) {
         AssertInfo(size % knowhere::sparse::SparseRow<
                               SparseValueType>::element_size() ==

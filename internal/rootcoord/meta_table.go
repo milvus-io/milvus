@@ -266,6 +266,7 @@ func (mt *MetaTable) reload() error {
 				)
 			}
 			collection.DBName = dbName // some collections may not have db name or its dbname is not correct, we should fix it here.
+			ensureCollectionMaxFieldIDProperty(collection)
 			mt.collID2Meta[collection.CollectionID] = collection
 			// Build partition name index
 			mt.partitionName2ID[collection.CollectionID] = make(map[string]int64)
@@ -343,6 +344,7 @@ func (mt *MetaTable) reloadWithNonDatabase() error {
 	}
 
 	for _, collection := range oldCollections {
+		ensureCollectionMaxFieldIDProperty(collection)
 		mt.collID2Meta[collection.CollectionID] = collection
 		if collection.Available() {
 			mt.names.insert(util.DefaultDBName, collection.Name, collection.CollectionID)
@@ -1101,7 +1103,6 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 		zap.Int64("oldCollectionID", oldColl.CollectionID),
 		zap.Bool("dbChanged", dbChanged),
 		zap.Uint64("ts", newColl.UpdateTimestamp),
-		zap.Bool("doPhysicalBackfill", newColl.DoPhysicalBackfill),
 		zap.Int32("schemaVersion", newColl.SchemaVersion),
 	)
 	return nil

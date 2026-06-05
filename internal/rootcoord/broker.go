@@ -273,7 +273,7 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, collectio
 	log.Ctx(ctx).Info("done to broadcast request to alter collection",
 		zap.String("collectionName", colMeta.Name), zap.Int64("collectionID", dcReq.GetCollectionID()),
 		zap.Any("props", colMeta.Properties), zap.Any("fields", colMeta.Fields),
-		zap.Int32("schemaVersion", colMeta.SchemaVersion), zap.Bool("doPhysicalBackfill", colMeta.DoPhysicalBackfill))
+		zap.Int32("schemaVersion", colMeta.SchemaVersion))
 	return nil
 }
 

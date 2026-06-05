@@ -866,6 +866,7 @@ func buildIndexParams(
 		PartitionID:                      req.GetPartitionID(),
 		SegmentID:                        req.GetTargetSegmentID(),
 		IndexVersion:                     req.GetTaskVersion(),
+		NumRows:                          req.GetNumRows(),
 		InsertFiles:                      files,
 		FieldSchema:                      field,
 		StorageConfig:                    storageConfig,
@@ -886,6 +887,10 @@ func buildIndexParams(
 			req.GetPartitionID(),
 			req.GetTargetSegmentID(),
 		)
+		if schema := req.GetSchema(); schema != nil {
+			params.ExternalSource = schema.GetExternalSource()
+			params.ExternalSpec = schema.GetExternalSpec()
+		}
 		log.Info("build index params", zap.Any("segment insert files", params.SegmentInsertFiles))
 	}
 

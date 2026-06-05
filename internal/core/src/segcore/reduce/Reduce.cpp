@@ -129,7 +129,7 @@ ReduceHelper::IsSearchResultRefineEnabled(SearchResult* search_result) const {
     }
     auto segment = static_cast<SegmentInterface*>(search_result->segment_);
     return segment->IsIndexRefineEnabled(
-        plan_->plan_node_->search_info_.field_id_);
+        op_ctx_, plan_->plan_node_->search_info_.field_id_);
 }
 
 void
@@ -416,7 +416,8 @@ ReduceHelper::RefineOneSegment(SearchResult* search_result,
         auto result_count = static_cast<size_t>(count);
         auto* offsets = &search_result->seg_offsets_[nq_begin];
         new_distances.resize(result_count);
-        bool ok = segment->CalcDistByIDs(field_id,
+        bool ok = segment->CalcDistByIDs(op_ctx_,
+                                         field_id,
                                          query_dataset,
                                          offsets,
                                          count,
@@ -1041,7 +1042,8 @@ ReduceHelper::GetSearchResultDataSlice(const int slice_index,
 
                 for (auto field_id : plan_->target_entries_) {
                     auto& field_meta = plan_->schema_->operator[](field_id);
-                    if (field_meta.is_vector() && field_meta.is_nullable()) {
+                    if (field_meta.is_vector() && field_meta.is_nullable() &&
+                        field_meta.get_data_type() != DataType::VECTOR_ARRAY) {
                         auto it =
                             search_result->output_fields_data_.find(field_id);
                         if (it != search_result->output_fields_data_.end()) {

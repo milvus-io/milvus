@@ -212,6 +212,7 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	defer s.wg.Done()
 	ginHandler := gin.New()
 	ginHandler.Use(httpserver.MetricsHandlerFunc)
+	ginHandler.Use(httpserver.TraceIDHandlerFunc)
 	ginHandler.Use(accesslog.AccessLogMiddleware)
 	ginHandler.Use(httpserver.LoggerHandlerFunc(), gin.Recovery())
 	ginHandler.Use(httpserver.RequestHandlerFunc)
@@ -731,6 +732,11 @@ func (s *Server) AddCollectionStructField(ctx context.Context, request *milvuspb
 	return s.proxy.AddCollectionStructField(ctx, request)
 }
 
+// AlterCollectionSchema alters the collection schema (add/drop fields)
+func (s *Server) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	return s.proxy.AlterCollectionSchema(ctx, request)
+}
+
 // GetCollectionStatistics notifies Proxy to get a collection's Statistics
 func (s *Server) GetCollectionStatistics(ctx context.Context, request *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
 	return s.proxy.GetCollectionStatistics(ctx, request)
@@ -746,10 +752,6 @@ func (s *Server) AlterCollection(ctx context.Context, request *milvuspb.AlterCol
 
 func (s *Server) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
 	return s.proxy.AlterCollectionField(ctx, request)
-}
-
-func (s *Server) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
-	return s.proxy.AlterCollectionSchema(ctx, request)
 }
 
 func (s *Server) AddCollectionFunction(ctx context.Context, request *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
@@ -1227,6 +1229,10 @@ func (s *Server) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegment
 
 func (s *Server) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	return s.proxy.GetQuotaMetrics(ctx, req)
+}
+
+func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return s.proxy.ClearReadTaskQueue(ctx, req)
 }
 
 // AddFileResource add file resource

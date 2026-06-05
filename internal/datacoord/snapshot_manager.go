@@ -1239,6 +1239,7 @@ func (sm *snapshotManager) createRestoreJob(
 				StorageVersion:      segDesc.GetStorageVersion(),
 				IsSorted:            segDesc.GetIsSorted(),
 				CommitTimestamp:     segDesc.GetCommitTimestamp(),
+				IsImporting:         true,
 			},
 		}
 		targetSegments[targetSegmentID] = newSegment

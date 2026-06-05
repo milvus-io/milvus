@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math"
+	"net/http"
 	"reflect"
 	"strconv"
 	"strings"
@@ -30,6 +31,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
 	"github.com/tidwall/gjson"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	oteltrace "go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -57,6 +61,7 @@ func HTTPReturn(c *gin.Context, code int, result gin.H) {
 	if errorMsg, ok := result[HTTPReturnMessage]; ok {
 		c.Set(HTTPReturnMessage, errorMsg)
 	}
+	setTraceIDHeader(c)
 	c.JSON(code, result)
 }
 
@@ -67,6 +72,7 @@ func HTTPReturnStream(c *gin.Context, code int, result gin.H) {
 	if errorMsg, ok := result[HTTPReturnMessage]; ok {
 		c.Set(HTTPReturnMessage, errorMsg)
 	}
+	setTraceIDHeader(c)
 	c.Render(code, jsonRender{Data: result})
 }
 
@@ -75,7 +81,56 @@ func HTTPAbortReturn(c *gin.Context, code int, result gin.H) {
 	if errorMsg, ok := result[HTTPReturnMessage]; ok {
 		c.Set(HTTPReturnMessage, errorMsg)
 	}
+	setTraceIDHeader(c)
 	c.AbortWithStatusJSON(code, result)
+}
+
+func TraceIDHandlerFunc(c *gin.Context) {
+	ctx := otel.GetTextMapPropagator().Extract(c.Request.Context(), propagation.HeaderCarrier(c.Request.Header))
+	ctx, span := otel.Tracer(typeutil.ProxyRole).Start(ctx, c.Request.URL.Path)
+	defer span.End()
+
+	traceID := span.SpanContext().TraceID()
+	if traceID.IsValid() {
+		traceIDStr := traceID.String()
+		ctx = log.WithTraceID(ctx, traceIDStr)
+		c.Set("traceID", traceIDStr)
+		c.Request = c.Request.WithContext(ctx)
+		setTraceIDHeader(c)
+	}
+
+	c.Next()
+}
+
+func getTraceID(c *gin.Context) (string, bool) {
+	traceID, ok := c.Get("traceID")
+	if ok {
+		traceIDStr, ok := traceID.(string)
+		if ok && traceIDStr != "" {
+			return traceIDStr, true
+		}
+	}
+
+	if c.Request == nil {
+		return "", false
+	}
+	spanTraceID := oteltrace.SpanFromContext(c.Request.Context()).SpanContext().TraceID()
+	if !spanTraceID.IsValid() {
+		return "", false
+	}
+	return spanTraceID.String(), true
+}
+
+func setTraceIDHeader(c *gin.Context) {
+	traceID, ok := getTraceID(c)
+	if !ok {
+		return
+	}
+	setTraceIDHeaderTo(c.Writer.Header(), traceID)
+}
+
+func setTraceIDHeaderTo(header http.Header, traceID string) {
+	header.Set(HTTPHeaderMilvusTraceID, traceID)
 }
 
 func ParseUsernamePassword(c *gin.Context) (string, string, bool) {

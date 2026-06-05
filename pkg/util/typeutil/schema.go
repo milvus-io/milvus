@@ -2566,10 +2566,6 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 			schema.GetName(), schema.GetExternalSource(), schema.GetExternalSpec())
 	}
 
-	if len(schema.GetFunctions()) > 0 {
-		return fmt.Errorf("external collection %s does not support functions", schema.GetName())
-	}
-
 	if schema.GetEnableDynamicField() {
 		return fmt.Errorf("external collection %s does not support dynamic field", schema.GetName())
 	}
@@ -2578,16 +2574,26 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 		return fmt.Errorf("external collection %s does not support struct fields", schema.GetName())
 	}
 
+	generatedColumns := externalGeneratedColumnOwners(schema)
+
 	// Pass 1: validate all user fields. No mutation here so a failure at any
 	// field leaves the input schema untouched.
 	externalFieldOwners := make(map[string][]*schemapb.FieldSchema)
 	for _, field := range schema.GetFields() {
-		if isExternalSystemOrVirtualField(field.GetName()) {
+		if IsExternalSystemOrVirtualField(field.GetName()) {
+			continue
+		}
+
+		// Function output fields are computed internally, skip all external-data checks.
+		if isExternalGeneratedField(field, generatedColumns) {
+			if field.GetExternalField() != "" {
+				return fmt.Errorf("function output field '%s' in external collection %s must not have external_field mapping", field.GetName(), schema.GetName())
+			}
 			continue
 		}
 
 		if field.GetIsPrimaryKey() {
-			return fmt.Errorf("external collection %s does not support primary key field %s", schema.GetName(), field.GetName())
+			return fmt.Errorf("external collection %s does not support user-defined primary key field %s", schema.GetName(), field.GetName())
 		}
 		if field.GetIsPartitionKey() {
 			return fmt.Errorf("external collection %s does not support partition key field %s", schema.GetName(), field.GetName())
@@ -2597,11 +2603,6 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 		}
 		if field.GetAutoID() {
 			return fmt.Errorf("external collection %s does not support auto id on field %s", schema.GetName(), field.GetName())
-		}
-
-		helper := CreateFieldSchemaHelper(field)
-		if helper.EnableMatch() {
-			return fmt.Errorf("external collection %s does not support text match on field %s", schema.GetName(), field.GetName())
 		}
 
 		if field.GetExternalField() == "" {
@@ -2614,29 +2615,29 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 		}
 
 		ext := field.GetExternalField()
+		if outputField, ok := generatedColumns[ext]; ok {
+			return fmt.Errorf("external_field %q on field '%s' in external collection %s conflicts with generated function output field '%s' (field id %d)",
+				ext, field.GetName(), schema.GetName(), outputField.GetName(), outputField.GetFieldID())
+		}
 		externalFieldOwners[ext] = append(externalFieldOwners[ext], field)
 	}
 
 	// Each external_field column must back at most one user field. A single
 	// physical column cannot satisfy two distinct type bindings, and even
 	// same-type aliasing has no semantic value here.
-	for ext, owners := range externalFieldOwners {
-		if len(owners) <= 1 {
-			continue
-		}
-		parts := make([]string, 0, len(owners))
-		for _, f := range owners {
-			parts = append(parts, fmt.Sprintf("%s (%s)", f.GetName(), f.GetDataType().String()))
-		}
-		return fmt.Errorf("external_field %q is mapped by multiple fields: %s; each external_field must be referenced by at most one user field",
-			ext, strings.Join(parts, ", "))
+	if err := validateUniqueExternalFieldOwners(externalFieldOwners); err != nil {
+		return err
 	}
 
 	// Pass 2: normalize. All fields passed validation; safe to mutate.
 	// Force nullable for external scalar fields: Parquet columns can contain
 	// nulls, and non-nullable scalars would silently produce incorrect results.
 	for _, field := range schema.GetFields() {
-		if isExternalSystemOrVirtualField(field.GetName()) {
+		if IsExternalSystemOrVirtualField(field.GetName()) {
+			continue
+		}
+		// Function output fields are computed internally.
+		if isExternalGeneratedField(field, generatedColumns) {
 			continue
 		}
 		if IsVectorType(field.GetDataType()) {
@@ -2652,7 +2653,111 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 	return nil
 }
 
-func isExternalSystemOrVirtualField(name string) bool {
+func validateUniqueExternalFieldOwners(externalFieldOwners map[string][]*schemapb.FieldSchema) error {
+	for ext, owners := range externalFieldOwners {
+		if len(owners) <= 1 {
+			continue
+		}
+		parts := make([]string, 0, len(owners))
+		for _, f := range owners {
+			parts = append(parts, fmt.Sprintf("%s (%s)", f.GetName(), f.GetDataType().String()))
+		}
+		return fmt.Errorf("external_field %q is mapped by multiple fields: %s; each external_field must be referenced by at most one user field",
+			ext, strings.Join(parts, ", "))
+	}
+	return nil
+}
+
+func externalGeneratedColumnOwners(schema *schemapb.CollectionSchema) map[string]*schemapb.FieldSchema {
+	fieldsByID := make(map[int64]*schemapb.FieldSchema, len(schema.GetFields()))
+	generatedFields := make(map[int64]*schemapb.FieldSchema)
+	for _, field := range schema.GetFields() {
+		if field.GetFieldID() == 0 {
+			continue
+		}
+		fieldsByID[field.GetFieldID()] = field
+		if field.GetIsFunctionOutput() {
+			generatedFields[field.GetFieldID()] = field
+		}
+	}
+	for _, function := range schema.GetFunctions() {
+		for _, fieldID := range function.GetOutputFieldIds() {
+			if fieldID == 0 {
+				continue
+			}
+			if _, ok := generatedFields[fieldID]; ok {
+				continue
+			}
+			if field, ok := fieldsByID[fieldID]; ok {
+				generatedFields[fieldID] = field
+			}
+		}
+	}
+
+	generatedColumns := make(map[string]*schemapb.FieldSchema, len(generatedFields))
+	for fieldID, field := range generatedFields {
+		generatedColumns[strconv.FormatInt(fieldID, 10)] = field
+	}
+	return generatedColumns
+}
+
+func isExternalGeneratedField(field *schemapb.FieldSchema, generatedColumns map[string]*schemapb.FieldSchema) bool {
+	if field.GetIsFunctionOutput() {
+		return true
+	}
+	if field.GetFieldID() == 0 {
+		return false
+	}
+	return generatedColumns[strconv.FormatInt(field.GetFieldID(), 10)] == field
+}
+
+// ValidateExternalCollectionResolvedSchema checks external-collection
+// constraints after RootCoord has resolved field IDs and function output IDs.
+// At this point generated function outputs can be matched by their field-ID
+// based external column names, so this is the shared post-resolution validation
+// boundary for create, add-field, and alter-schema flows. Keep external user
+// field checks here as well so those flows consistently reject unsupported
+// source field types, duplicate external_field owners, and mappings that
+// collide with generated output columns.
+func ValidateExternalCollectionResolvedSchema(schema *schemapb.CollectionSchema) error {
+	if !IsExternalCollection(schema) {
+		return nil
+	}
+	generatedColumns := externalGeneratedColumnOwners(schema)
+	externalFieldOwners := make(map[string][]*schemapb.FieldSchema)
+	for _, field := range schema.GetFields() {
+		if IsExternalSystemOrVirtualField(field.GetName()) {
+			continue
+		}
+		if isExternalGeneratedField(field, generatedColumns) {
+			if field.GetExternalField() != "" {
+				return fmt.Errorf("function output field '%s' in external collection %s must not have external_field mapping", field.GetName(), schema.GetName())
+			}
+			continue
+		}
+		if !isExternalFieldTypeSupported(field.GetDataType()) {
+			return fmt.Errorf("external collection %s does not support field type %s on field %s",
+				schema.GetName(), field.GetDataType().String(), field.GetName())
+		}
+		ext := field.GetExternalField()
+		if ext == "" {
+			continue
+		}
+		outputField, ok := generatedColumns[ext]
+		if !ok {
+			externalFieldOwners[ext] = append(externalFieldOwners[ext], field)
+			continue
+		}
+		return fmt.Errorf("external_field %q on field '%s' in external collection %s conflicts with generated function output field '%s' (field id %d)",
+			ext, field.GetName(), schema.GetName(), outputField.GetName(), outputField.GetFieldID())
+	}
+	return validateUniqueExternalFieldOwners(externalFieldOwners)
+}
+
+// IsExternalSystemOrVirtualField returns true for names reserved by the
+// external-table pipeline (RowID, Timestamp, VirtualPK) and never present in
+// user-provided external source data.
+func IsExternalSystemOrVirtualField(name string) bool {
 	return name == common.RowIDFieldName ||
 		name == common.TimeStampFieldName ||
 		name == common.VirtualPKFieldName

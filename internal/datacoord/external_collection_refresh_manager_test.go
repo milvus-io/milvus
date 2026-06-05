@@ -65,6 +65,101 @@ func testCollectionGetter(mt *meta) func(ctx context.Context, collectionID int64
 	}
 }
 
+func TestSubmitRefreshJobWithIDStoresJobMetadata(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(100)
+	schema := &schemapb.CollectionSchema{
+		Name:           "ext",
+		ExternalSource: "s3://bucket/path",
+		ExternalSpec:   `{"format":"parquet"}`,
+		Version:        7,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", ExternalField: "id"},
+		},
+	}
+	mt := &meta{
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+	}
+	mt.collections.Insert(collectionID, &collectionInfo{
+		ID:            collectionID,
+		Schema:        schema,
+		VChannelNames: []string{"by-dev-rootcoord-dml_0_v1"},
+		Partitions:    []int64{1},
+	})
+	refreshMeta := createTestRefreshMetaWithJobs(t, nil, nil)
+	mgr := NewExternalCollectionRefreshManager(
+		ctx, mt, newStubScheduler(), &stubAllocator{nextID: 2000},
+		refreshMeta, nil, testCollectionGetter(mt), nil, nil)
+
+	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
+		Return([]*datapb.ExternalFileInfo{{FilePath: "s3://bucket/path/a.parquet", NumRows: 10}}, "manifest-path", nil).
+		Build()
+	defer mockExplore.UnPatch()
+
+	jobID, err := mgr.SubmitRefreshJobWithID(
+		ctx, 1001, collectionID, "ext", "", "")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1001), jobID)
+
+	job := refreshMeta.GetJob(1001)
+	assert.NotNil(t, job)
+	assert.Equal(t, collectionID, job.GetCollectionId())
+	assert.Equal(t, "ext", job.GetCollectionName())
+	assert.Equal(t, "s3://bucket/path", job.GetExternalSource())
+	assert.Equal(t, `{"format":"parquet"}`, job.GetExternalSpec())
+
+	mgr.Stop()
+}
+
+func TestCreateTasksForJobCopiesJobMetadata(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(100)
+	schema := &schemapb.CollectionSchema{
+		Name:           "ext",
+		ExternalSource: "s3://bucket/path",
+		ExternalSpec:   `{"format":"parquet"}`,
+		Version:        9,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", ExternalField: "id"},
+		},
+	}
+	mt := &meta{
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+	}
+	mt.collections.Insert(collectionID, &collectionInfo{
+		ID:            collectionID,
+		Schema:        schema,
+		VChannelNames: []string{"by-dev-rootcoord-dml_0_v1"},
+		Partitions:    []int64{1},
+	})
+	refreshMeta := createTestRefreshMetaWithJobs(t, nil, nil)
+	mgr := NewExternalCollectionRefreshManager(
+		ctx, mt, newStubScheduler(), &stubAllocator{nextID: 2000},
+		refreshMeta, nil, testCollectionGetter(mt), nil, nil).(*externalCollectionRefreshManager)
+
+	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
+		Return([]*datapb.ExternalFileInfo{{FilePath: "s3://bucket/path/a.parquet", NumRows: 10}}, "manifest-path", nil).
+		Build()
+	defer mockExplore.UnPatch()
+
+	job := &datapb.ExternalCollectionRefreshJob{
+		JobId:          1001,
+		CollectionId:   collectionID,
+		CollectionName: "ext",
+		ExternalSource: "s3://bucket/path",
+		ExternalSpec:   `{"format":"parquet"}`,
+		State:          indexpb.JobState_JobStateInit,
+	}
+	assert.NoError(t, refreshMeta.AddJob(job))
+
+	tasks, err := mgr.createTasksForJob(ctx, job)
+	assert.NoError(t, err)
+	assert.Len(t, tasks, 1)
+	assert.Equal(t, collectionID, tasks[0].GetCollectionId())
+	assert.Equal(t, "s3://bucket/path", tasks[0].GetExternalSource())
+	assert.Equal(t, `{"format":"parquet"}`, tasks[0].GetExternalSpec())
+}
+
 func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResults(t *testing.T) {
 	ctx := context.Background()
 	catalog := &stubCatalog{}
@@ -78,7 +173,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 		State:           indexpb.JobState_JobStateFinished,
 		ResultReady:     true,
 		KeptSegments:    []int64{1},
-		UpdatedSegments: []*datapb.SegmentInfo{{ID: 10, CollectionID: 100, NumOfRows: 7}},
+		UpdatedSegments: []*datapb.SegmentInfo{newTestExternalRefreshSegment(10, 100, 7)},
 	}))
 	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
 		TaskId:          1002,
@@ -87,7 +182,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 		State:           indexpb.JobState_JobStateFinished,
 		ResultReady:     true,
 		KeptSegments:    []int64{1},
-		UpdatedSegments: []*datapb.SegmentInfo{{ID: 20, CollectionID: 100, NumOfRows: 7}},
+		UpdatedSegments: []*datapb.SegmentInfo{newTestExternalRefreshSegment(20, 100, 7)},
 	}))
 
 	segments := NewSegmentsInfo()

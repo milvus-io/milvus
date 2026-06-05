@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <string.h>
+#include "common/FastMem.h"
 #include <cstdint>
 #include <exception>
 #include <map>
@@ -335,7 +336,8 @@ void
 HybridScalarIndex<T>::DeserializeIndexType(const BinarySet& binary_set) {
     uint8_t index_type;
     auto index_type_buffer = binary_set.GetByName(INDEX_TYPE);
-    memcpy(&index_type, index_type_buffer->data.get(), index_type_buffer->size);
+    milvus::fastmem::FastMemcpy(
+        &index_type, index_type_buffer->data.get(), index_type_buffer->size);
     internal_index_type_ = static_cast<ScalarIndexType>(index_type);
 }
 

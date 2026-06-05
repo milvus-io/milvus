@@ -241,8 +241,20 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 	bufPool := &BufferPool{}
 	return func(gCtx *gin.Context) {
 		timeout := paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond)
-		timeoutSecond, err := strconv.ParseInt(gCtx.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout), 10, 64)
-		if err == nil {
+		requestTimeout := gCtx.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout)
+		if requestTimeout != "" {
+			timeoutSecond, err := strconv.ParseInt(requestTimeout, 10, 64)
+			if err != nil {
+				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
+					mhttp.HTTPReturnCode: merr.Code(merr.ErrParameterInvalid),
+					mhttp.HTTPReturnMessage: merr.WrapErrParameterInvalidMsg(
+						"%s parse failed, err: %s",
+						mhttp.HTTPHeaderRequestTimeout,
+						err.Error(),
+					).Error(),
+				})
+				return
+			}
 			timeout = time.Duration(timeoutSecond) * time.Second
 		}
 		topCtx, cancel := context.WithTimeout(gCtx.Request.Context(), timeout)
@@ -305,6 +317,9 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			bufPool.Put(buffer)
 
 			realWriter.Header().Set("Content-Type", "application/json; charset=utf-8")
+			if traceID, ok := getTraceID(gCtx); ok {
+				setTraceIDHeaderTo(realWriter.Header(), traceID)
+			}
 			realWriter.WriteHeader(http.StatusRequestTimeout)
 			body, _ := json.Marshal(gin.H{HTTPReturnCode: merr.TimeoutCode, HTTPReturnMessage: "request timeout"})
 			realWriter.Write(body)

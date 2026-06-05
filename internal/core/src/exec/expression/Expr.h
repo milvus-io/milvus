@@ -1341,7 +1341,7 @@ class SegmentExpr : public Expr {
                         // use valid_data to see if raw data is null
                         auto pw = segment_->get_batch_views<T>(
                             op_ctx_, field_id_, i, data_pos, size);
-                        auto [data_vec, valid_data] = pw.get();
+                        const auto& [data_vec, valid_data] = pw.get();
 
                         if constexpr (NeedSegmentOffsets) {
                             func(data_vec.data(),
@@ -2049,23 +2049,12 @@ class SegmentExpr : public Expr {
         }
 
         using Index = index::ScalarIndex<IndexInnerType>;
-        if (op == OpType::Match || op == OpType::InnerMatch ||
-            op == OpType::PostfixMatch || op == OpType::RegexMatch) {
-            AssertInfo(num_index_chunk_ == 1,
-                       "scalar index should have exactly 1 chunk, got {}",
-                       num_index_chunk_);
-            auto scalar_index =
-                dynamic_cast<const Index*>(pinned_index_[0].get());
-            auto* index_ptr = const_cast<Index*>(scalar_index);
-            // 1. index supports PatternMatch (iterates unique values) — preferred;
-            // 2. index supports PatternQuery via TryUsePatternQuery;
-            // 3. index has raw data for Reverse_Lookup fallback.
-            return index_ptr->SupportPatternMatch() ||
-                   (index_ptr->TryUsePatternQuery() &&
-                    index_ptr->SupportPatternQuery()) ||
-                   index_ptr->HasRawData();
-        }
-        return true;
+        AssertInfo(num_index_chunk_ == 1,
+                   "scalar index should have exactly 1 chunk, got {}",
+                   num_index_chunk_);
+        auto scalar_index = dynamic_cast<const Index*>(pinned_index_[0].get());
+        AssertInfo(scalar_index != nullptr, "invalid scalar index type");
+        return scalar_index->ShouldUseOp(op);
     }
 
     template <typename T>

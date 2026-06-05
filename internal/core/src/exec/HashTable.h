@@ -16,6 +16,7 @@
 #pragma once
 #ifdef __SSE2__
 #include <emmintrin.h>
+#include "common/FastMem.h"
 #elif defined(__ARM_NEON) || defined(__ARM_NEON__)
 #include <arm_neon.h>
 #endif
@@ -127,7 +128,7 @@ class BaseHashTable {
 #else
         // Generic fallback: load bytes into std::array<uint8_t, 16>
         TagVector result;
-        std::memcpy(result.data(), src, result.size());
+        milvus::fastmem::FastMemcpy(result.data(), src, result.size());
         return result;
 #endif
     }

@@ -487,6 +487,9 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := typeutil.ValidateExternalCollectionResolvedSchema(t.body.CollectionSchema); err != nil {
+		return err
+	}
 
 	// Validate timezone
 	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.Req.GetProperties())
@@ -495,7 +498,7 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	}
 
 	// Set properties for persistent
-	t.body.CollectionSchema.Properties = t.Req.GetProperties()
+	t.body.CollectionSchema.Properties = updateMaxFieldIDProperty(t.Req.GetProperties(), maxAssignedFieldIDFromSchema(t.body.CollectionSchema))
 	t.body.CollectionSchema.Version = 0
 	t.appendSysFields(t.body.CollectionSchema)
 	return nil

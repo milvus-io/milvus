@@ -33,7 +33,6 @@ include_directories(
     ${SIMDJSON_INCLUDE_DIR}
     ${TANTIVY_INCLUDE_DIR}
     ${BSONCXX_INCLUDE_DIR}
-    ${MILVUS_COMMON_INCLUDE_DIR}
     ${MILVUS_STORAGE_INCLUDE_DIR}
 )
 
@@ -74,6 +73,7 @@ set(CONAN_TARGETS
     abseil::abseil
     rapidjson
     simde::simde
+    milvus-common::milvus-common
     LibLZMA::LibLZMA
     RdKafka::rdkafka++
     googleapis::googleapis
@@ -164,7 +164,6 @@ set(LINK_TARGETS
     tantivy_binding
     knowhere
     milvus-storage
-    milvus-common
     bsoncxx
     ${OpenMP_CXX_FLAGS}
     ${CONAN_TARGETS}

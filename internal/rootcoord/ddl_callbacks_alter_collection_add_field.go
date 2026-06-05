@@ -68,12 +68,17 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 		return merr.WrapErrParameterInvalidMsg("field already exists, name: %s", fieldSchema.Name)
 	}
 
-	// assign a new field id.
-	fieldSchema.FieldID = nextFieldID(coll)
 	// build new collection schema.
 	schema := coll.ToCollectionSchemaPB()
+	// assign a new field id.
+	fieldSchema.FieldID = maxAssignedFieldIDFromSchema(schema) + 1
 	schema.Version = coll.SchemaVersion + 1
 	schema.Fields = append(schema.Fields, fieldSchema)
+	properties := updateMaxFieldIDProperty(coll.Properties, fieldSchema.GetFieldID())
+	schema.Properties = properties
+	if err := typeutil.ValidateExternalCollectionResolvedSchema(schema); err != nil {
+		return err
+	}
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
@@ -89,13 +94,14 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 			DbId:         coll.DBID,
 			CollectionId: coll.CollectionID,
 			UpdateMask: &fieldmaskpb.FieldMask{
-				Paths: []string{message.FieldMaskCollectionSchema},
+				Paths: []string{message.FieldMaskCollectionSchema, message.FieldMaskCollectionProperties},
 			},
 			CacheExpirations: cacheExpirations,
 		}).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
-				Schema: schema,
+				Schema:     schema,
+				Properties: properties,
 			},
 		}).
 		WithBroadcast(channels).

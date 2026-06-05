@@ -1132,6 +1132,52 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 	})
 }
 
+func TestConfigureUseTakeForOutput(t *testing.T) {
+	paramtable.Init()
+	internalKey := paramtable.Get().QueryNodeCfg.InternalCollectionUseTakeForOutput.Key
+	externalKey := paramtable.Get().QueryNodeCfg.ExternalCollectionUseTakeForOutput.Key
+	paramtable.Get().Reset(internalKey)
+	paramtable.Get().Reset(externalKey)
+	defer paramtable.Get().Reset(internalKey)
+	defer paramtable.Get().Reset(externalKey)
+
+	t.Run("nil load info", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			configureUseTakeForOutput(nil, &schemapb.CollectionSchema{})
+		})
+	})
+
+	t.Run("internal collection disabled by default", func(t *testing.T) {
+		loadInfo := &querypb.SegmentLoadInfo{}
+		configureUseTakeForOutput(loadInfo, &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64}},
+		})
+		assert.False(t, loadInfo.GetUseTakeForOutput())
+	})
+
+	t.Run("internal collection uses internal switch", func(t *testing.T) {
+		paramtable.Get().Save(internalKey, "true")
+		defer paramtable.Get().Reset(internalKey)
+
+		loadInfo := &querypb.SegmentLoadInfo{}
+		configureUseTakeForOutput(loadInfo, &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64}},
+		})
+		assert.True(t, loadInfo.GetUseTakeForOutput())
+	})
+
+	t.Run("external collection uses external switch", func(t *testing.T) {
+		paramtable.Get().Save(externalKey, "false")
+		defer paramtable.Get().Reset(externalKey)
+
+		loadInfo := &querypb.SegmentLoadInfo{}
+		configureUseTakeForOutput(loadInfo, &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"}},
+		})
+		assert.False(t, loadInfo.GetUseTakeForOutput())
+	})
+}
+
 func (suite *SegmentLoaderDetailSuite) TestRequestResource() {
 	suite.Run("out_of_memory_zero_info", func() {
 		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.Key, "0")
@@ -1881,6 +1927,59 @@ func TestGpuIndexRequiresGpu(t *testing.T) {
 		assert.False(t, gpuIndexRequiresGpu([]*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
 		}))
+	})
+}
+
+func TestEstimateLoadingResourceUsage_DroppedFieldSkipped(t *testing.T) {
+	paramtable.Init()
+
+	// Schema only has fieldID=100 and 101; fieldID=999 is "dropped" (not in schema)
+	schema := &schemapb.CollectionSchema{
+		Name: "test_dropped_field",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+		},
+	}
+
+	t.Run("index on dropped field is skipped", func(t *testing.T) {
+		loadInfo := &querypb.SegmentLoadInfo{
+			SegmentID:    1,
+			CollectionID: 10,
+			NumOfRows:    100,
+			IndexInfos: []*querypb.FieldIndexInfo{
+				{
+					FieldID:        999, // dropped field
+					IndexID:        2001,
+					IndexFilePaths: []string{"index/999/file1"},
+				},
+			},
+		}
+		factor := resourceEstimateFactor{}
+		usage, err := estimateLoadingResourceUsageOfSegment(schema, loadInfo, factor)
+		assert.NoError(t, err)
+		assert.NotNil(t, usage)
+	})
+
+	t.Run("binlog with dropped field in child fields is skipped", func(t *testing.T) {
+		loadInfo := &querypb.SegmentLoadInfo{
+			SegmentID:    2,
+			CollectionID: 10,
+			NumOfRows:    100,
+			BinlogPaths: []*datapb.FieldBinlog{
+				{
+					FieldID: 888, // column group containing a dropped field
+					Binlogs: []*datapb.Binlog{
+						{LogSize: 1024},
+					},
+					ChildFields: []int64{999}, // dropped field
+				},
+			},
+		}
+		factor := resourceEstimateFactor{}
+		usage, err := estimateLoadingResourceUsageOfSegment(schema, loadInfo, factor)
+		assert.NoError(t, err)
+		assert.NotNil(t, usage)
 	})
 }
 

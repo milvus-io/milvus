@@ -21,6 +21,7 @@
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/FastMem.h"
 #include "common/FieldData.h"
 #include "exec/QueryContext.h"
 #include "exec/expression/Utils.h"
@@ -96,9 +97,9 @@ PhyProjectNode::GetOutput() {
 
         if (field_id == SegmentOffsetFieldID) {
             FixedVector<int64_t> offsets(selected_count);
-            std::copy(selected_offsets.begin(),
-                      selected_offsets.end(),
-                      offsets.begin());
+            milvus::fastmem::FastMemcpy(offsets.data(),
+                                        selected_offsets.data(),
+                                        selected_count * sizeof(int64_t));
             auto field_data = std::make_shared<FieldData<int64_t>>(
                 DataType::INT64, false, std::move(offsets));
             auto valid_map = TargetBitmap(selected_count, true);

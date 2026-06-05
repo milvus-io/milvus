@@ -268,7 +268,8 @@ class SegmentInterface {
     // Compute exact distances from the index for given query vectors and candidate IDs.
     // Used for refine step in reduce phase. Returns false if not supported (e.g., no index).
     virtual bool
-    CalcDistByIDs(FieldId field_id,
+    CalcDistByIDs(milvus::OpContext* op_ctx,
+                  FieldId field_id,
                   const knowhere::DataSetPtr& query_dataset,
                   const int64_t* seg_offsets,
                   size_t count,
@@ -278,8 +279,29 @@ class SegmentInterface {
     }
 
     virtual bool
-    IsIndexRefineEnabled(FieldId field_id) const {
+    CalcDistByIDs(FieldId field_id,
+                  const knowhere::DataSetPtr& query_dataset,
+                  const int64_t* seg_offsets,
+                  size_t count,
+                  bool is_cosine,
+                  float* distances) const {
+        return CalcDistByIDs(nullptr,
+                             field_id,
+                             query_dataset,
+                             seg_offsets,
+                             count,
+                             is_cosine,
+                             distances);
+    }
+
+    virtual bool
+    IsIndexRefineEnabled(milvus::OpContext* op_ctx, FieldId field_id) const {
         return false;
+    }
+
+    virtual bool
+    IsIndexRefineEnabled(FieldId field_id) const {
+        return IsIndexRefineEnabled(nullptr, field_id);
     }
 
     virtual void
@@ -361,15 +383,17 @@ class SegmentInternalInterface : public SegmentInterface {
         } else if constexpr (std::is_same_v<ViewType, Json>) {
             auto pw =
                 chunk_string_view_impl(op_ctx, field_id, chunk_id, offset_len);
-            auto [string_views, valid_data] = pw.get();
+            auto& [string_views, valid_data] = pw.get();
             std::vector<Json> res;
             res.reserve(string_views.size());
             for (const auto& str_view : string_views) {
                 res.emplace_back(Json(str_view));
             }
+            std::pair<std::vector<ViewType>, FixedVector<bool>> content{
+                std::move(res), std::move(valid_data)};
             return PinWrapper<
                 std::pair<std::vector<ViewType>, FixedVector<bool>>>(
-                pw, {std::move(res), std::move(valid_data)});
+                std::move(pw), std::move(content));
         }
     }
 
@@ -404,14 +428,17 @@ class SegmentInternalInterface : public SegmentInterface {
         } else if constexpr (std::is_same_v<ViewType, Json>) {
             auto pw = chunk_string_views_by_offsets(
                 op_ctx, field_id, chunk_id, offsets);
+            auto& [string_views, valid_data] = pw.get();
             std::vector<ViewType> res;
-            res.reserve(pw.get().first.size());
-            for (const auto& view : pw.get().first) {
+            res.reserve(string_views.size());
+            for (const auto& view : string_views) {
                 res.emplace_back(view);
             }
+            std::pair<std::vector<ViewType>, FixedVector<bool>> content{
+                std::move(res), std::move(valid_data)};
             return PinWrapper<
                 std::pair<std::vector<ViewType>, FixedVector<bool>>>(
-                {std::move(res), pw.get().second});
+                std::move(pw), std::move(content));
         } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
             return chunk_array_views_by_offsets(
                 op_ctx, field_id, chunk_id, offsets);

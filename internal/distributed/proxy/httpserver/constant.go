@@ -87,6 +87,9 @@ const (
 	TransferReplicaAction           = "transfer_replica"
 
 	RunAnalyzerAction = "run_analyzer"
+
+	CommitAction = "commit"
+	AbortAction  = "abort"
 )
 
 const (
@@ -132,6 +135,7 @@ const (
 	HTTPHeaderAllowInt64     = "Accept-Type-Allow-Int64"
 	HTTPHeaderDBName         = "DB-Name"
 	HTTPHeaderRequestTimeout = "Request-Timeout"
+	HTTPHeaderMilvusTraceID  = "X-Milvus-Trace-Id"
 	HTTPReturnCode           = "code"
 	HTTPReturnMessage        = "message"
 	HTTPReturnData           = "data"

@@ -80,7 +80,8 @@ S3ErrorMessage(const std::string& func,
                const std::string& fmt_string,
                Args&&... args) {
     std::ostringstream oss;
-    const auto& message = fmt::format(fmt_string, std::forward<Args>(args)...);
+    const auto& message =
+        fmt::format(fmt::runtime(fmt_string), std::forward<Args>(args)...);
     oss << "Error in " << func << "[errcode:" << int(err.GetResponseCode())
         << ", exception:" << err.GetExceptionName()
         << ", errmessage:" << err.GetMessage() << ", params:" << message << "]";

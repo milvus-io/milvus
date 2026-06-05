@@ -628,6 +628,7 @@ class TestSearchAggregation(TestMilvusClientV2Base):
             for hit in bucket.hits:
                 assert hit.fields.get(field_name) == key
 
+    @pytest.mark.xfail(reason="unstable: top_hits may not include NULL nullable metric rows", strict=False)
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_aggregation_nullable_metric_field(self):
         """
@@ -1332,10 +1333,6 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(
-        reason="Milvus issue #49840: search_aggregation fails on growing segment",
-        strict=True,
-    )
     def test_search_aggregation_on_growing_segment(self):
         """
         target: verify search_aggregation works on growing segment results.

@@ -479,6 +479,28 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 		err := suite.core.broadcastAlterCollectionForAlterFunction(context.Background(), req)
 		suite.NoError(err)
 	})
+
+	suite.Run("external collection rejected", func() {
+		coll := suite.createTestCollection()
+		coll.Fields[2].ExternalField = "text_col"
+
+		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
+		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
+		suite.core.meta = mockMeta
+
+		req := &milvuspb.AlterCollectionFunctionRequest{
+			DbName:         "test_db",
+			CollectionName: "test_collection",
+			FunctionSchema: &schemapb.FunctionSchema{
+				Name:             "test_function",
+				Type:             schemapb.FunctionType_TextEmbedding,
+				InputFieldNames:  []string{"text_field"},
+				OutputFieldNames: []string{"output_field"},
+			},
+		}
+		err := suite.core.broadcastAlterCollectionForAlterFunction(context.Background(), req)
+		suite.ErrorContains(err, externalCollectionFunctionMutationUnsupportedMsg)
+	})
 }
 
 func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollectionForDropFunction() {
@@ -502,7 +524,31 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 		suite.NoError(err)
 	})
 
+	suite.Run("external collection rejected", func() {
+		coll := suite.createTestCollection()
+		coll.Fields[2].ExternalField = "text_col"
+
+		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
+		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
+		suite.core.meta = mockMeta
+
+		req := &milvuspb.DropCollectionFunctionRequest{
+			DbName:         "test_db",
+			CollectionName: "test_collection",
+			FunctionName:   "test_function",
+		}
+
+		err := suite.core.broadcastAlterCollectionForDropFunction(context.Background(), req)
+		suite.ErrorContains(err, externalCollectionFunctionMutationUnsupportedMsg)
+	})
+
 	suite.Run("function not exists", func() {
+		coll := suite.createTestCollection()
+
+		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
+		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
+		suite.core.meta = mockMeta
+
 		req := &milvuspb.DropCollectionFunctionRequest{
 			DbName:         "test_db",
 			CollectionName: "test_collection",

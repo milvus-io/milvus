@@ -53,10 +53,6 @@ func (policy *clusteringCompactionPolicy) Enable() bool {
 		Params.DataCoordCfg.ClusteringCompactionAutoEnable.GetAsBool()
 }
 
-func (policy *clusteringCompactionPolicy) TriggerInline(_ context.Context) (map[CompactionTriggerType][]CompactionView, error) {
-	return nil, nil
-}
-
 func (policy *clusteringCompactionPolicy) Name() string {
 	return "ClusteringCompactionPolicy"
 }
@@ -330,9 +326,6 @@ func triggerClusteringCompactionPolicy(ctx context.Context, meta *meta, collecti
 }
 
 var _ CompactionView = (*ClusteringSegmentsView)(nil)
-
-// IsInlineExecutable returns false: clustering compaction is real compaction work.
-func (v *ClusteringSegmentsView) IsInlineExecutable() bool { return false }
 
 type ClusteringSegmentsView struct {
 	label              *CompactionGroupLabel

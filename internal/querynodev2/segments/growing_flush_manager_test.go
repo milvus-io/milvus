@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/mock_storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -437,14 +438,76 @@ func TestGrowingFlushManager_BuildFlushConfig(t *testing.T) {
 	seg.EXPECT().ID().Return(int64(1001)).Maybe()
 	seg.EXPECT().Partition().Return(int64(10)).Maybe()
 
-	config := m.buildFlushConfig(seg)
+	config, err := m.buildFlushConfig(seg)
 
+	assert.NoError(t, err)
 	assert.NotNil(t, config)
 	assert.Contains(t, config.SegmentBasePath, "/test/root")
 	assert.Contains(t, config.SegmentBasePath, "insert_log")
 	assert.Contains(t, config.PartitionBasePath, "/test/root")
 	assert.Equal(t, int64(1), config.CollectionID)
 	assert.Equal(t, int64(10), config.PartitionID)
+	assert.Equal(t, "parquet", config.WriterFormat)
+}
+
+func TestGrowingFlushManager_BuildFlushConfigKeepsGlobalFormatAndUsesManifestForSinglePolicy(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	rootPath := t.TempDir()
+	assert.NoError(t, params.Save(params.CommonCfg.StorageType.Key, "local"))
+	assert.NoError(t, params.Save(params.LocalStorageCfg.Path.Key, rootPath))
+	assert.NoError(t, params.Save(params.DataNodeCfg.StorageFormat.Key, "parquet"))
+	t.Cleanup(func() {
+		_ = params.Reset(params.CommonCfg.StorageType.Key)
+		_ = params.Reset(params.LocalStorageCfg.Path.Key)
+		_ = params.Reset(params.DataNodeCfg.StorageFormat.Key)
+	})
+
+	manifestPath, err := packed.CreateManifestForSegment(
+		"files/querynode_format/segment",
+		[]string{"0", "1", "100", "101"},
+		"parquet",
+		[]packed.Fragment{{FilePath: "files/querynode_format/segment/_data/0.parquet", StartRow: 0, EndRow: 1, RowCount: 1}},
+		packed.CreateStorageConfig(),
+	)
+	assert.NoError(t, err)
+
+	assert.NoError(t, params.Save(params.DataNodeCfg.StorageFormat.Key, "vortex"))
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+		},
+	}
+
+	tracker := NewCheckpointTracker()
+	tracker.InitSegmentWithManifest(1001, 1, manifestPath)
+
+	mockCM := mock_storage.NewMockChunkManager(t)
+	mockCM.EXPECT().RootPath().Return(rootPath).Maybe()
+
+	m := NewGrowingFlushManager(
+		1,
+		"test-channel",
+		schema,
+		nil,
+		nil,
+		nil,
+		mockCM,
+		tracker,
+	)
+
+	seg := NewMockSegment(t)
+	seg.EXPECT().ID().Return(int64(1001)).Maybe()
+	seg.EXPECT().Partition().Return(int64(10)).Maybe()
+
+	config, err := m.buildFlushConfig(seg)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, config)
+	assert.Equal(t, "parquet", config.WriterFormat)
 }
 
 func TestGrowingFlushManager_DoSync_NoUnflushedData(t *testing.T) {

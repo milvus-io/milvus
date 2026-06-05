@@ -45,10 +45,6 @@ type LevelZeroCompactionView struct {
 
 var _ CompactionView = (*LevelZeroCompactionView)(nil)
 
-// IsInlineExecutable returns false: L0 compaction is real compaction work that must
-// be dispatched to the inspector.
-func (v *LevelZeroCompactionView) IsInlineExecutable() bool { return false }
-
 func (v *LevelZeroCompactionView) String() string {
 	l0strings := lo.Map(v.l0Segments, func(v *SegmentView, _ int) string {
 		return v.LevelZeroString()

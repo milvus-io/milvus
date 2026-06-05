@@ -342,6 +342,12 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 		}
 	}
 
+	// Intentionally allow the collection schema to advance while tasks are
+	// running. For the current additive-only scope, an older-schema refresh can
+	// be applied; it may miss newly added external columns, and the next refresh
+	// self-heals them. Segment-level validation still rejects schema-version
+	// rollback, but drop, rename, or type changes need a schema gate or lock
+	// before they are supported.
 	return applyExternalCollectionSegmentUpdate(
 		ctx,
 		m.mt,

@@ -22,6 +22,8 @@ import (
 	"math"
 
 	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 func bfloat16IsNaN(f uint16) bool {
@@ -105,4 +107,20 @@ func VerifyBFloats16(value []byte) error {
 		}
 	}
 	return nil
+}
+
+func ConvertFloat32ToFP16BF16Bytes(floatData []float32, dataType schemapb.DataType) ([]byte, error) {
+	if err := VerifyFloats32(floatData); err != nil {
+		return nil, err
+	}
+	switch dataType {
+	case schemapb.DataType_Float16Vector:
+		converted := Float32ArrayToFloat16Bytes(floatData)
+		return converted, VerifyFloats16(converted)
+	case schemapb.DataType_BFloat16Vector:
+		converted := Float32ArrayToBFloat16Bytes(floatData)
+		return converted, VerifyBFloats16(converted)
+	default:
+		return nil, fmt.Errorf("unsupported fp16/bf16 vector type: %s", dataType.String())
+	}
 }

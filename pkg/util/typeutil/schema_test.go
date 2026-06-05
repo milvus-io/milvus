@@ -5212,14 +5212,83 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 			},
 		}
 		assert.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
+		assert.NoError(t, ValidateExternalCollectionResolvedSchema(schema))
 	})
 
-	t.Run("functions disabled", func(t *testing.T) {
+	t.Run("resolved schema skips system and unmapped fields", func(t *testing.T) {
 		schema := buildSchema()
-		schema.Functions = []*schemapb.FunctionSchema{{Name: "test_func"}}
+		schema.Fields = append(schema.Fields,
+			&schemapb.FieldSchema{
+				Name:     common.RowIDFieldName,
+				DataType: schemapb.DataType_Int64,
+			},
+			&schemapb.FieldSchema{
+				Name:     "late_field",
+				DataType: schemapb.DataType_Int64,
+			},
+		)
+		assert.NoError(t, ValidateExternalCollectionResolvedSchema(schema))
+	})
+
+	t.Run("resolved schema skips generated output fields", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:             "sparse",
+			FieldID:          102,
+			DataType:         schemapb.DataType_SparseFloatVector,
+			IsFunctionOutput: true,
+		})
+		assert.NoError(t, ValidateExternalCollectionResolvedSchema(schema))
+	})
+
+	t.Run("resolved schema rejects generated output external mapping", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:             "sparse",
+			FieldID:          102,
+			DataType:         schemapb.DataType_SparseFloatVector,
+			IsFunctionOutput: true,
+			ExternalField:    "sparse_col",
+		})
+		err := ValidateExternalCollectionResolvedSchema(schema)
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "must not have external_field mapping")
+		}
+	})
+
+	t.Run("functions allowed", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:             "sparse",
+			DataType:         schemapb.DataType_SparseFloatVector,
+			IsFunctionOutput: true,
+		})
+		schema.Functions = []*schemapb.FunctionSchema{{
+			Name:             "bm25_fn",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"sparse"},
+		}}
+		assert.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
+	})
+
+	t.Run("function output external_field rejected", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:             "sparse",
+			DataType:         schemapb.DataType_SparseFloatVector,
+			ExternalField:    "sparse_col",
+			IsFunctionOutput: true,
+		})
+		schema.Functions = []*schemapb.FunctionSchema{{
+			Name:             "bm25_fn",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"sparse"},
+		}}
 		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "does not support functions")
+		assert.Contains(t, err.Error(), "must not have external_field mapping")
 	})
 
 	t.Run("dynamic field disabled", func(t *testing.T) {
@@ -5260,13 +5329,16 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
-	t.Run("text match disabled", func(t *testing.T) {
+	t.Run("text match allowed", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Fields[0].TypeParams = append(schema.Fields[0].TypeParams, &commonpb.KeyValuePair{
 			Key:   "enable_match",
 			Value: "true",
+		}, &commonpb.KeyValuePair{
+			Key:   "enable_analyzer",
+			Value: "true",
 		})
-		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
+		assert.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("external_field mapping required", func(t *testing.T) {
@@ -5342,6 +5414,97 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "mapped by multiple fields")
+	})
+
+	t.Run("external_field matching function output name allowed", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields[1].ExternalField = "sparse"
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:             "sparse",
+			DataType:         schemapb.DataType_SparseFloatVector,
+			IsFunctionOutput: true,
+		})
+		schema.Functions = []*schemapb.FunctionSchema{{
+			Name:             "bm25_fn",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"sparse"},
+		}}
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.NoError(t, err)
+	})
+
+	t.Run("external_field matching function output field id rejected", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields[0].FieldID = 100
+		schema.Fields[1].FieldID = 101
+		schema.Fields[1].ExternalField = "102"
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:             "sparse",
+			FieldID:          102,
+			DataType:         schemapb.DataType_SparseFloatVector,
+			IsFunctionOutput: true,
+		})
+		schema.Functions = []*schemapb.FunctionSchema{{
+			Name:             "bm25_fn",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"text"},
+			InputFieldIds:    []int64{100},
+			OutputFieldNames: []string{"sparse"},
+			OutputFieldIds:   []int64{102},
+		}}
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "conflicts with generated function output field")
+	})
+
+	t.Run("function output ids define generated columns after rootcoord assigns ids", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields[0].FieldID = 100
+		schema.Fields[1].FieldID = 101
+		schema.Fields[1].ExternalField = "102"
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:     "sparse",
+			FieldID:  102,
+			DataType: schemapb.DataType_SparseFloatVector,
+		})
+		schema.Functions = []*schemapb.FunctionSchema{{
+			Name:             "bm25_fn",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"text"},
+			InputFieldIds:    []int64{100},
+			OutputFieldNames: []string{"sparse"},
+			OutputFieldIds:   []int64{102},
+		}}
+		err := ValidateExternalCollectionResolvedSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "conflicts with generated function output field")
+	})
+
+	t.Run("duplicate external field mapping rejected", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:          "score",
+			DataType:      schemapb.DataType_Double,
+			ExternalField: "text_col",
+		})
+		err := ValidateExternalCollectionResolvedSchema(schema)
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "external_field \"text_col\" is mapped by multiple fields")
+		}
+	})
+
+	t.Run("resolved schema validation rejects unsupported user field type", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:          "bad_field",
+			DataType:      schemapb.DataType_SparseFloatVector,
+			ExternalField: "bad_col",
+		})
+		err := ValidateExternalCollectionResolvedSchema(schema)
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "does not support field type")
+		}
 	})
 
 	t.Run("unsupported field types rejected", func(t *testing.T) {

@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -40,6 +42,7 @@ type ImportMeta interface {
 	GetJobBy(ctx context.Context, filters ...ImportJobFilter) []ImportJob
 	CountJobBy(ctx context.Context, filters ...ImportJobFilter) int
 	RemoveJob(ctx context.Context, jobID int64) error
+	HandleCommitVchannel(ctx context.Context, jobID int64, vchannel string, callback func() error) error
 
 	AddTask(ctx context.Context, task ImportTask) error
 	UpdateTask(ctx context.Context, taskID int64, actions ...UpdateAction) error
@@ -334,4 +337,45 @@ func (m *importMeta) TaskStatsJSON(ctx context.Context) string {
 		return ""
 	}
 	return string(ret)
+}
+
+func (m *importMeta) HandleCommitVchannel(ctx context.Context, jobID int64, vchannel string, callback func() error) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	job := m.jobs[jobID]
+	if job == nil {
+		return merr.WrapErrImportFailed(fmt.Sprintf("job %d not found", jobID))
+	}
+	// Idempotency: if vchannel already committed, skip.
+	for _, c := range job.GetCommittedVchannels() {
+		if c == vchannel {
+			return nil
+		}
+	}
+	// Callback first, persist second.
+	// If callback fails, we return error without persisting — the caller retries
+	// and the callback will be invoked again. This avoids the scenario where persist
+	// succeeds but callback fails, causing the idempotency check to skip the callback
+	// on retry (data stays invisible forever).
+	// The callback (setting is_importing=false) is idempotent, so re-execution on
+	// retry after a persist failure is safe.
+	//
+	// Visibility ordering note: the callback clears segment meta (is_importing=false)
+	// before this function persists job meta (committed_vchannels). Therefore a
+	// vchannel's imported data can become visible before the job-level transition
+	// to Completed (which happens later in checkCommittingJob once all vchannels
+	// have been recorded here). This is inherent to per-vchannel commit fences —
+	// 2PC for import is per-vchannel-atomic, not job-atomic. See MEP
+	// (milvus-io/milvus-design-docs#29) "Segment Visibility" section.
+	if err := callback(); err != nil {
+		return err
+	}
+	updatedJob := job.Clone()
+	updatedJob.(*importJob).CommittedVchannels = append(updatedJob.GetCommittedVchannels(), vchannel)
+	if err := m.catalog.SaveImportJob(ctx, updatedJob.(*importJob).ImportJob); err != nil {
+		return err
+	}
+	m.jobs[jobID] = updatedJob
+	return nil
 }

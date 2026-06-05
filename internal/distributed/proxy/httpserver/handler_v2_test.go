@@ -656,6 +656,39 @@ func TestTimeoutMiddlewarePassesDeadline(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
+func TestTimeoutMiddlewareRejectsInvalidRequestTimeout(t *testing.T) {
+	for _, requestTimeout := range []string{"3.5", "abc"} {
+		t.Run(requestTimeout, func(t *testing.T) {
+			ginHandler := gin.New()
+			path := "/middleware/timeout/invalid"
+			called := make(chan struct{}, 1)
+			ginHandler.POST(path, timeoutMiddleware(func(c *gin.Context) {
+				called <- struct{}{}
+				HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil)})
+			}))
+
+			req := httptest.NewRequest(http.MethodPost, path, nil)
+			req.Header.Set(mhttp.HTTPHeaderRequestTimeout, requestTimeout)
+			w := httptest.NewRecorder()
+			ginHandler.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.NoError(t, err)
+			assert.Equal(t, merr.Code(merr.ErrParameterInvalid), returnBody.Code)
+			assert.Contains(t, returnBody.Message, mhttp.HTTPHeaderRequestTimeout)
+			assert.Contains(t, returnBody.Message, requestTimeout)
+
+			select {
+			case <-called:
+				t.Fatal("handler was invoked for invalid Request-Timeout")
+			default:
+			}
+		})
+	}
+}
+
 func TestDocInDocOutCreateCollection(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
@@ -3842,4 +3875,62 @@ func TestSearchByPK(t *testing.T) {
 	})
 
 	validateTestCases(t, testEngine, queryTestCases, false)
+}
+
+func TestCommitImportJob(t *testing.T) {
+	paramtable.Init()
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().CommitImport(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+	queryTestCases := []requestBodyTestCase{}
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        versionalV2(ImportJobCategory, CommitAction),
+		requestBody: []byte(`{"jobId": "123"}`),
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        versionalV2(ImportJobCategory, CommitAction),
+		requestBody: []byte(`{"jobId": "not-a-number"}`),
+		errCode:     1100, // ErrParameterInvalid
+	})
+	for _, testcase := range queryTestCases {
+		t.Run(testcase.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader(testcase.requestBody))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
+		})
+	}
+}
+
+func TestAbortImportJob(t *testing.T) {
+	paramtable.Init()
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().AbortImport(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+	queryTestCases := []requestBodyTestCase{}
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        versionalV2(ImportJobCategory, AbortAction),
+		requestBody: []byte(`{"jobId": "123"}`),
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        versionalV2(ImportJobCategory, AbortAction),
+		requestBody: []byte(`{"jobId": "not-a-number"}`),
+		errCode:     1100, // ErrParameterInvalid
+	})
+	for _, testcase := range queryTestCases {
+		t.Run(testcase.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader(testcase.requestBody))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
+		})
+	}
 }

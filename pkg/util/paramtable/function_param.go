@@ -28,6 +28,7 @@ type functionConfig struct {
 	LinderaDownloadUrls           ParamGroup `refreshable:"true"`
 	ZillizProviders               ParamGroup `refreshable:"true"`
 	AnalyzerConcurrencyPerCPUCore ParamItem  `refreshable:"true"`
+	AnalyzerRunnerConcurrency     ParamItem  `refreshable:"true"`
 }
 
 func (p *functionConfig) init(base *BaseTable) {
@@ -182,6 +183,15 @@ func (p *functionConfig) init(base *BaseTable) {
 		DefaultValue: "8",
 	}
 	p.AnalyzerConcurrencyPerCPUCore.Init(base.mgr)
+
+	p.AnalyzerRunnerConcurrency = ParamItem{
+		Key:          "function.analyzer.runner_concurrency",
+		Version:      "2.6.8",
+		Export:       true,
+		Doc:          "The concurrency for each function runner to tokenize text",
+		DefaultValue: "8",
+	}
+	p.AnalyzerRunnerConcurrency.Init(base.mgr)
 }
 
 func (p *functionConfig) GetTextEmbeddingProviderConfig(providerName string) map[string]string {
@@ -204,6 +214,14 @@ func (p *functionConfig) GetBatchFactor() int {
 		factor = 1
 	}
 	return factor
+}
+
+func (p *functionConfig) GetAnalyzerRunnerConcurrency() int {
+	concurrency := p.AnalyzerRunnerConcurrency.GetAsInt()
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	return concurrency
 }
 
 func (p *functionConfig) GetRerankModelProviders(providerName string) map[string]string {

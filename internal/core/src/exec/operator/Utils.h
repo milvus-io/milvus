@@ -72,10 +72,12 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                     PositivelyRelated(search_info.metric_type_);
                 // Element-level search skips row-level mapping (element IDs
                 // are not row-aligned); see ChunkMergeIterator ctor.
+                const auto& offset_mapping = index.GetOffsetMapping();
                 const milvus::OffsetMapping* iter_offset_mapping =
-                    search_info.array_offsets_ != nullptr
+                    (search_info.array_offsets_ != nullptr ||
+                     !offset_mapping.IsEnabled())
                         ? nullptr
-                        : &index.GetOffsetMapping();
+                        : &offset_mapping;
                 search_result.AssembleChunkVectorIterators(
                     nq,
                     1,
@@ -101,7 +103,7 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                         "inside, terminate {} operation",
                         operator_type));
             }
-            search_result.total_nq_ = dataset->GetRows();
+            search_result.total_nq_ = nq;
             search_result.unity_topK_ = search_info.topk_;
         } catch (const std::runtime_error& e) {
             std::string operator_type = "";
@@ -117,9 +119,9 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                 e.what(),
                 operator_type);
             ThrowInfo(ErrorCode::Unsupported,
-                      fmt::format("Failed to {}, current index:" +
-                                      index.GetIndexType() + " doesn't support",
-                                  operator_type));
+                      "Failed to {}, current index:{} doesn't support",
+                      operator_type,
+                      index.GetIndexType());
         }
         return true;
     }

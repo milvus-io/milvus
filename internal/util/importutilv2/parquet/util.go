@@ -272,6 +272,10 @@ func isArrowArithmeticType(dataType arrow.Type) bool {
 func isArrowDataTypeConvertible(src arrow.DataType, dst arrow.DataType, field *schemapb.FieldSchema, allowFixedSizeList bool) bool {
 	srcType := src.ID()
 	dstType := dst.ID()
+	// arrow.UINT8 is the byte-backed Arrow representation for fp16/bf16 vectors, not INT8_VECTOR.
+	if isFP16BF16VectorField(field) && dstType == arrow.UINT8 && isArrowFloatingType(srcType) {
+		return true
+	}
 	switch srcType {
 	case arrow.BOOL:
 		return dstType == arrow.BOOL
@@ -315,6 +319,10 @@ func isArrowDataTypeConvertible(src arrow.DataType, dst arrow.DataType, field *s
 	default:
 		return false
 	}
+}
+
+func isFP16BF16VectorField(field *schemapb.FieldSchema) bool {
+	return field.GetDataType() == schemapb.DataType_Float16Vector || field.GetDataType() == schemapb.DataType_BFloat16Vector
 }
 
 func isFixedSizeListImportTarget(field *schemapb.FieldSchema) bool {

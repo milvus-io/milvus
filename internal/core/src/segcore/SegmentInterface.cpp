@@ -447,7 +447,7 @@ SegmentInternalInterface::FillTargetEntry(
     milvus::OpContext* op_ctx) const {
     tracer::AutoSpan span("FillTargetEntry", tracer::GetRootSpan());
 
-    // Fast path: use take() API for external tables with small result sets.
+    // Fast path: use take() API for eligible output fields.
     // Use dynamic_cast to avoid adding new virtual methods (vtable layout
     // change causes SIGSEGV in cgo boundary).
     if (auto* chunked = dynamic_cast<const ChunkedSegmentSealedImpl*>(this)) {
@@ -753,7 +753,8 @@ SegmentInternalInterface::GetTextIndex(milvus::OpContext* op_ctx,
                                      milvus::cachinglayer::CacheSlot<
                                          milvus::index::TextMatchIndex>>>) {
             auto ca = SemiInlineGet(alt->PinCells(op_ctx, {0}));
-            return PinWrapper<index::TextMatchIndex*>(ca, ca->get_cell_of(0));
+            auto index = ca->get_cell_of(0);
+            return PinWrapper<index::TextMatchIndex*>(std::move(ca), index);
         } else {
             throw SegcoreError(
                 milvus::ErrorCode::UnexpectedError,

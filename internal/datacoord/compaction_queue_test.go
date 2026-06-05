@@ -135,6 +135,14 @@ func TestCompactionQueue(t *testing.T) {
 	})
 }
 
+func TestBumpSchemaVersionPrioritizer(t *testing.T) {
+	task := &bumpSchemaVersionTask{}
+	task.SetTask(&datapb.CompactionTask{Type: datapb.CompactionType_BumpSchemaVersionCompaction})
+
+	assert.Equal(t, 10, LevelPrioritizer(task))
+	assert.Equal(t, 1, MixFirstPrioritizer(task))
+}
+
 func TestConcurrency(t *testing.T) {
 	c := 10
 

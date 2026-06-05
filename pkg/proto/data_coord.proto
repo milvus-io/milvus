@@ -125,6 +125,11 @@ service DataCoord {
   rpc RefreshExternalCollection(RefreshExternalCollectionRequest) returns(RefreshExternalCollectionResponse){}
   rpc GetRefreshExternalCollectionProgress(GetRefreshExternalCollectionProgressRequest) returns(GetRefreshExternalCollectionProgressResponse){}
   rpc ListRefreshExternalCollectionJobs(ListRefreshExternalCollectionJobsRequest) returns(ListRefreshExternalCollectionJobsResponse){}
+
+  // Import 2PC RPCs — internal only, not exposed in public MilvusService
+  rpc CommitImport(CommitImportRequest)                 returns (common.Status) {}
+  rpc AbortImport(AbortImportRequest)                   returns (common.Status) {}
+  rpc HandleCommitVchannel(HandleCommitVchannelRequest) returns (common.Status) {}
 }
 
 service DataNode {
@@ -537,6 +542,7 @@ message FieldBinlog{
   int64 fieldID = 1;
   repeated Binlog binlogs = 2;
   repeated int64 child_fields = 3;
+  string format = 4;
 }
 
 message TextIndexStats {
@@ -675,7 +681,7 @@ enum CompactionType {
   SortCompaction = 9;
   PartitionKeySortCompaction = 10;
   ClusteringPartitionKeySortCompaction = 11;
-  BackfillCompaction = 12;
+  BumpSchemaVersionCompaction = 12;
 }
 
 message CompactionStateRequest {
@@ -1276,6 +1282,8 @@ message ImportJob {
   string create_time = 16;
   repeated string ready_vchannels = 17;
   uint64 data_ts = 18;
+  repeated string committed_vchannels = 19;
+  bool            auto_commit         = 20;
 }
 
 enum ImportTaskStateV2 {
@@ -1454,6 +1462,7 @@ message GetRefreshExternalCollectionProgressRequest {
 // ExternalCollectionRefreshJob - Job level abstraction for API tracking and user queries
 // A Job represents a user-initiated refresh operation and can contain multiple tasks (1:N)
 message ExternalCollectionRefreshJob {
+  reserved 12;                   // removed: schema_version
   int64 job_id = 1;              // Unique job identifier for API tracking
   int64 collection_id = 2;
   string collection_name = 3;
@@ -1476,6 +1485,7 @@ message ExternalFileInfo {
 }
 
 message ExternalCollectionRefreshTask {
+  reserved 18;                   // removed: schema_version
   int64 task_id = 1;             // Unique task identifier
   int64 job_id = 2;              // Parent job ID
   int64 collection_id = 3;
@@ -1491,7 +1501,7 @@ message ExternalCollectionRefreshTask {
   int64 file_index_begin = 13;        // File range start for this task
   int64 file_index_end = 14;          // File range end for this task
   repeated int64 kept_segments = 15;  // Segment IDs kept by this task result
-  repeated SegmentInfo updated_segments = 16;  // New segments created by this task result
+  repeated SegmentInfo updated_segments = 16;  // Segment upsert payload produced by this task result
   bool result_ready = 17;  // True once this task has persisted job-level refresh result payload
 }
 
@@ -1732,4 +1742,20 @@ message PinSnapshotDataResponse {
 message UnpinSnapshotDataRequest {
   common.MsgBase base = 1;
   int64 pin_id = 2;                 // pin ID from PinSnapshotData response
+}
+
+message CommitImportRequest {
+  common.MsgBase base   = 1;
+  int64          job_id = 2;
+}
+
+message AbortImportRequest {
+  common.MsgBase base   = 1;
+  int64          job_id = 2;
+}
+
+message HandleCommitVchannelRequest {
+  common.MsgBase base     = 1;
+  int64          job_id   = 2;
+  string         vchannel = 3;
 }

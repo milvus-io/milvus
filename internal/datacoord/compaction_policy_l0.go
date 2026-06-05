@@ -40,10 +40,6 @@ func (policy *l0CompactionPolicy) Enable() bool {
 	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool()
 }
 
-func (policy *l0CompactionPolicy) TriggerInline(_ context.Context) (map[CompactionTriggerType][]CompactionView, error) {
-	return nil, nil
-}
-
 func (policy *l0CompactionPolicy) Name() string {
 	return "L0Compaction"
 }

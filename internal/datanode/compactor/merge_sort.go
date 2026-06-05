@@ -63,31 +63,31 @@ func mergeSortMultipleSegments(ctx context.Context,
 	hasTTLField := ttlFieldID >= common.StartOfUserFieldID
 
 	segmentReaders := make([]storage.RecordReader, len(binlogs))
+	defer func() {
+		for _, r := range segmentReaders {
+			if r != nil {
+				r.Close()
+			}
+		}
+	}()
+
 	segmentFilters := make([]compaction.EntityFilter, len(binlogs))
 	for i, s := range binlogs {
-		var reader storage.RecordReader
-		if s.GetManifest() != "" {
-			reader, err = storage.NewManifestRecordReader(ctx,
-				s.GetManifest(),
-				plan.GetSchema(),
-				storage.WithCollectionID(collectionID),
-				storage.WithDownloader(binlogIO.Download),
-				storage.WithVersion(s.StorageVersion),
-				storage.WithStorageConfig(compactionParams.StorageConfig),
-			)
-		} else {
-			reader, err = storage.NewBinlogRecordReader(ctx,
-				s.GetFieldBinlogs(),
-				plan.GetSchema(),
-				storage.WithCollectionID(collectionID),
-				storage.WithDownloader(binlogIO.Download),
-				storage.WithVersion(s.StorageVersion),
-				storage.WithStorageConfig(compactionParams.StorageConfig),
-			)
-		}
+		reader, existingFields, err := newCompactionSegmentRecordReader(ctx, s, plan.GetSchema(), compactionParams.StorageConfig,
+			storage.WithCollectionID(collectionID),
+			storage.WithDownloader(binlogIO.Download),
+			storage.WithVersion(s.StorageVersion),
+			storage.WithStorageConfig(compactionParams.StorageConfig),
+		)
 		if err != nil {
 			return nil, err
 		}
+		materializer, err := NewRecordMaterializer(writerSchema, writerSchema.GetFunctions(), existingFields)
+		if err != nil {
+			reader.Close()
+			return nil, err
+		}
+		reader = newMaterializedRecordReader(reader, materializer)
 		segmentReaders[i] = wrapReaderWithTimestampOverwrite(reader, s.GetCommitTimestamp())
 		delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField.DataType, s,
 			storage.WithDownloader(binlogIO.Download),
@@ -97,12 +97,6 @@ func mergeSortMultipleSegments(ctx context.Context,
 		}
 		segmentFilters[i] = compaction.NewEntityFilter(delta, collectionTTL, currentTime, s.GetCommitTimestamp())
 	}
-
-	defer func() {
-		for _, r := range segmentReaders {
-			r.Close()
-		}
-	}()
 
 	var predicate func(r storage.Record, ri, i int) bool
 	switch pkField.DataType {

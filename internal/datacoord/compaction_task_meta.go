@@ -91,18 +91,14 @@ func (csm *compactionTaskMeta) reloadFromKV() error {
 		// here we just mark the task as failed and wait for the compaction trigger to generate a new one.
 		//
 		// NOTE:
-		// - Only compaction tasks that require pre-allocated segment IDs (clustering/mix/sort, etc.)
-		//   should be marked as failed when PreAllocatedSegmentIDs is nil.
+		// - Only compaction tasks that require pre-allocated segment IDs should be marked
+		//   as failed when PreAllocatedSegmentIDs is nil.
 		// - Level0DeleteCompaction tasks never use PreAllocatedSegmentIDs and must be ignored here,
 		//   otherwise unfinished L0 delete compaction tasks created before upgrade will be
 		//   incorrectly marked as failed on reload.
-		// - BackfillCompaction is an in-place update of the original segment — no new segment
-		//   ID is allocated. Without this exception, an in-progress backfill task would be killed
-		//   on every datacoord restart, preventing backfill from ever completing under restart loops.
 		if !isCompactionTaskFinished(task) &&
 			task.PreAllocatedSegmentIDs == nil &&
-			task.GetType() != datapb.CompactionType_Level0DeleteCompaction &&
-			task.GetType() != datapb.CompactionType_BackfillCompaction {
+			task.GetType() != datapb.CompactionType_Level0DeleteCompaction {
 			log.Warn("PreAllocatedSegmentIDs is nil, mark the task as failed",
 				zap.Int64("taskID", task.GetPlanID()),
 				zap.String("type", task.GetType().String()),

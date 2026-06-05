@@ -1547,6 +1547,24 @@ func (c *Client) ListImports(ctx context.Context, in *internalpb.ListImportsRequ
 	})
 }
 
+func (c *Client) CommitImport(ctx context.Context, req *datapb.CommitImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.CommitImport(ctx, req)
+	})
+}
+
+func (c *Client) AbortImport(ctx context.Context, req *datapb.AbortImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.AbortImport(ctx, req)
+	})
+}
+
+func (c *Client) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCommitVchannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.HandleCommitVchannel(ctx, req)
+	})
+}
+
 func (c *Client) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest, opts ...grpc.CallOption) (*indexpb.ListIndexesResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*indexpb.ListIndexesResponse, error) {
 		return client.ListIndexes(ctx, in)
@@ -1826,6 +1844,17 @@ func (c *Client) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRe
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*querypb.ListQueryNodeResponse, error) {
 		return client.ListQueryNode(ctx, req)
+	})
+}
+
+func (c *Client) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*internalpb.ClearReadTaskQueueResponse, error) {
+		return client.RootCoordClient.ClearReadTaskQueue(ctx, req)
 	})
 }
 

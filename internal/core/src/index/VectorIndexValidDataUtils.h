@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstddef>
+#include "common/FastMem.h"
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -51,8 +52,7 @@ ContainsOnlyValidData(const BinarySet& binary_set) {
 
 inline bool
 IsAllNullNullable(const OffsetMapping& offset_mapping) {
-    return offset_mapping.IsEnabled() && offset_mapping.GetTotalCount() > 0 &&
-           offset_mapping.GetValidCount() == 0;
+    return offset_mapping.IsEnabled() && offset_mapping.GetValidCount() == 0;
 }
 
 inline size_t
@@ -116,13 +116,14 @@ AppendValidDataToBinarySet(const OffsetMapping& offset_mapping,
     auto count = static_cast<size_t>(offset_mapping.GetTotalCount());
     auto wire_count = ToValidDataCount(count);
     std::shared_ptr<uint8_t[]> count_buf(new uint8_t[sizeof(uint64_t)]);
-    std::memcpy(count_buf.get(), &wire_count, sizeof(uint64_t));
+    milvus::fastmem::FastMemcpy(count_buf.get(), &wire_count, sizeof(uint64_t));
     binary_set.Append(VALID_DATA_COUNT_KEY, count_buf, sizeof(uint64_t));
 
     auto packed_data = PackValidDataBitmap(offset_mapping);
     std::shared_ptr<uint8_t[]> data(new uint8_t[packed_data.size()]);
     if (!packed_data.empty()) {
-        std::memcpy(data.get(), packed_data.data(), packed_data.size());
+        milvus::fastmem::FastMemcpy(
+            data.get(), packed_data.data(), packed_data.size());
     }
     binary_set.Append(VALID_DATA_KEY, data, packed_data.size());
 }
@@ -142,7 +143,8 @@ LoadValidDataFromBinarySet(const BinarySet& binary_set,
     AssertInfo(count_ptr != nullptr && count_ptr->size == sizeof(uint64_t),
                "nullable vector index valid_data count file is invalid");
     uint64_t wire_count = 0;
-    std::memcpy(&wire_count, count_ptr->data.get(), sizeof(uint64_t));
+    milvus::fastmem::FastMemcpy(
+        &wire_count, count_ptr->data.get(), sizeof(uint64_t));
     auto count = FromValidDataCount(wire_count);
 
     auto data_ptr = binary_set.GetByName(VALID_DATA_KEY);
