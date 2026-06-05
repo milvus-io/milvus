@@ -11837,7 +11837,9 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         )
         source_by_id.update(import_source_by_id)
 
-        remote_files = self.upload_import_rows(collection_name, import_rows, file_format, row_group_size=import_entities)
+        remote_files = self.upload_import_rows(
+            collection_name, import_rows, file_format, row_group_size=import_entities
+        )
         self.call_bulkinsert(collection_name, remote_files)
 
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
@@ -11877,9 +11879,7 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         assert check
 
         source_by_id = {}
-        old_rows = self.gen_rows_without_struct(
-            0, old_entities, "old_target_partition_row", source_by_id=source_by_id
-        )
+        old_rows = self.gen_rows_without_struct(0, old_entities, "old_target_partition_row", source_by_id=source_by_id)
         res, check = self.insert(client, collection_name, old_rows, partition_name=partition_a)
         assert check
         assert res["insert_count"] == old_entities
@@ -11906,7 +11906,9 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         )
         source_by_id.update(import_source_by_id)
 
-        remote_files = self.upload_import_rows(collection_name, import_rows, file_format, row_group_size=import_entities)
+        remote_files = self.upload_import_rows(
+            collection_name, import_rows, file_format, row_group_size=import_entities
+        )
         self.call_bulkinsert(collection_name, remote_files, partition_name=partition_a)
 
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
@@ -12034,9 +12036,7 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         assert check
 
         source_by_id = {}
-        old_rows = self.gen_rows_without_struct(
-            0, old_entities, "old_target_partition_row", source_by_id=source_by_id
-        )
+        old_rows = self.gen_rows_without_struct(0, old_entities, "old_target_partition_row", source_by_id=source_by_id)
         res, check = self.insert(client, collection_name, old_rows, partition_name=partition_a)
         assert check
         assert res["insert_count"] == old_entities
