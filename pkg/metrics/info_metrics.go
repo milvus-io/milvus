@@ -48,7 +48,7 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Name:      "thread_cpu_active_num_by_pool",
-			Help:      "the approximate active thread number of milvus process by named OS thread pool CPU time delta",
+			Help:      "the approximate active thread number of milvus process by named OS thread pool, including threads with CPU time delta, runnable state, or uninterruptible-sleep state",
 		},
 		[]string{
 			"thread_pool",

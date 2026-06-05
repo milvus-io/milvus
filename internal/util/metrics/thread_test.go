@@ -71,8 +71,9 @@ func TestClassifyThreadName(t *testing.T) {
 }
 
 func TestParseThreadStat(t *testing.T) {
-	state, cpu, err := parseThreadStat("123 (knowhere search) R 1 2 3 4 5 6 7 8 9 10 34 56 0 0 0")
+	name, state, cpu, err := parseThreadStat("123 (knowhere search) R 1 2 3 4 5 6 7 8 9 10 34 56 0 0 0")
 	require.NoError(t, err)
+	require.Equal(t, "knowhere search", name)
 	require.Equal(t, byte('R'), state)
 	require.Equal(t, uint64(90), cpu)
 }

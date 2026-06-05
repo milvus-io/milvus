@@ -163,6 +163,8 @@ func collectActiveThreadGroups(current []threadStat, previous map[int32]threadSa
 		if !existed {
 			continue
 		}
+		// Treat runnable and uninterruptible-sleep threads as active even
+		// without a CPU-time delta, so blocked I/O work is still visible.
 		if previousSample.group == group && (stat.cpu > previousSample.cpu || stat.state == 'R' || stat.state == 'D') {
 			activeByGroup[group]++
 		}
@@ -187,21 +189,17 @@ func collectNamedThreadStats() ([]threadStat, error) {
 			continue
 		}
 		tid := int32(tid64)
-		nameBytes, err := os.ReadFile(filepath.Join(taskDir, entry.Name(), "comm"))
-		if err != nil {
-			continue
-		}
 		statBytes, err := os.ReadFile(filepath.Join(taskDir, entry.Name(), "stat"))
 		if err != nil {
 			continue
 		}
-		state, cpu, err := parseThreadStat(string(statBytes))
+		name, state, cpu, err := parseThreadStat(string(statBytes))
 		if err != nil {
 			continue
 		}
 		stats = append(stats, threadStat{
 			tid:   tid,
-			name:  strings.TrimSpace(string(nameBytes)),
+			name:  name,
 			state: state,
 			cpu:   cpu,
 		})
@@ -209,25 +207,27 @@ func collectNamedThreadStats() ([]threadStat, error) {
 	return stats, nil
 }
 
-func parseThreadStat(stat string) (byte, uint64, error) {
+func parseThreadStat(stat string) (string, byte, uint64, error) {
+	startComm := strings.IndexByte(stat, '(')
 	endComm := strings.LastIndexByte(stat, ')')
-	if endComm < 0 || endComm+2 >= len(stat) {
-		return 0, 0, strconv.ErrSyntax
+	if startComm < 0 || startComm >= endComm || endComm+2 >= len(stat) {
+		return "", 0, 0, strconv.ErrSyntax
 	}
+	name := stat[startComm+1 : endComm]
 
 	fields := strings.Fields(stat[endComm+2:])
 	if len(fields) <= 12 || len(fields[0]) == 0 {
-		return 0, 0, strconv.ErrSyntax
+		return "", 0, 0, strconv.ErrSyntax
 	}
 	utime, err := strconv.ParseUint(fields[11], 10, 64)
 	if err != nil {
-		return 0, 0, err
+		return "", 0, 0, err
 	}
 	stime, err := strconv.ParseUint(fields[12], 10, 64)
 	if err != nil {
-		return 0, 0, err
+		return "", 0, 0, err
 	}
-	return fields[0][0], utime + stime, nil
+	return name, fields[0][0], utime + stime, nil
 }
 
 func classifyThreadName(name string) (string, bool) {
