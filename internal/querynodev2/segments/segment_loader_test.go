@@ -1148,6 +1148,32 @@ func (suite *SegmentLoaderSuite) TestLoadSingleBloomFilterSetExternalRealPKUsesE
 	suite.True(bfs.MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(1))))
 }
 
+func (suite *SegmentLoaderSuite) TestLoadSingleBloomFilterSetExternalRealPKIgnoresBloomFilterDisable() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.BloomFilterEnabled.Key)
+
+	ctx := context.Background()
+	loadInfo, externalStatsPaths, payload := suite.makeExternalRealPKBFLoadInfo(ctx)
+
+	readCalls := atomic.NewInt32(0)
+	var gotPaths []string
+	patchRead := mockey.Mock(packed.ReadFileWithExternalSpec).
+		To(func(sc *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
+			readCalls.Inc()
+			gotPaths = append(gotPaths, filePath)
+			return payload, nil
+		}).Build()
+	defer patchRead.UnPatch()
+
+	bfs, err := suite.loader.(*segmentLoader).loadSingleBloomFilterSet(ctx, suite.collectionID, loadInfo, SegmentTypeSealed)
+
+	suite.NoError(err)
+	suite.EqualValues(2, readCalls.Load())
+	suite.Equal(externalStatsPaths, gotPaths)
+	suite.True(bfs.PkCandidateExist())
+	suite.True(bfs.MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(1))))
+}
+
 func (suite *SegmentLoaderSuite) TestLoadBloomFilterSetExternalRealPKUsesExternalStats() {
 	ctx := context.Background()
 	loadInfo, externalStatsPaths, payload := suite.makeExternalRealPKBFLoadInfo(ctx)
@@ -1161,6 +1187,33 @@ func (suite *SegmentLoaderSuite) TestLoadBloomFilterSetExternalRealPKUsesExterna
 			suite.Equal(suite.collectionID, extfs.CollectionID)
 			suite.Equal(suite.schema.GetExternalSource(), extfs.Source)
 			suite.Equal(suite.schema.GetExternalSpec(), extfs.Spec)
+			return payload, nil
+		}).Build()
+	defer patchRead.UnPatch()
+
+	bfs, err := suite.loader.LoadBloomFilterSet(ctx, suite.collectionID, loadInfo)
+
+	suite.NoError(err)
+	suite.Len(bfs, 1)
+	suite.EqualValues(2, readCalls.Load())
+	suite.Equal(externalStatsPaths, gotPaths)
+	suite.True(bfs[0].PkCandidateExist())
+	suite.True(bfs[0].MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(1))))
+}
+
+func (suite *SegmentLoaderSuite) TestLoadBloomFilterSetExternalRealPKIgnoresBloomFilterDisable() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.BloomFilterEnabled.Key)
+
+	ctx := context.Background()
+	loadInfo, externalStatsPaths, payload := suite.makeExternalRealPKBFLoadInfo(ctx)
+
+	readCalls := atomic.NewInt32(0)
+	var gotPaths []string
+	patchRead := mockey.Mock(packed.ReadFileWithExternalSpec).
+		To(func(sc *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
+			readCalls.Inc()
+			gotPaths = append(gotPaths, filePath)
 			return payload, nil
 		}).Build()
 	defer patchRead.UnPatch()

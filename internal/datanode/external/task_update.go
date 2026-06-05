@@ -188,15 +188,14 @@ func (t *RefreshExternalCollectionTask) PreExecute(ctx context.Context) error {
 		return merr.Wrap(err, "failed to parse external spec")
 	}
 	t.parsedSpec = spec
-	schema := t.req.GetSchema()
-	if schema != nil {
-		if schema.GetExternalSource() == "" {
-			schema.ExternalSource = t.req.GetExternalSource()
-		}
-		if schema.GetExternalSpec() == "" {
-			schema.ExternalSpec = t.req.GetExternalSpec()
-		}
+	schema := proto.Clone(t.req.GetSchema()).(*schemapb.CollectionSchema)
+	if schema.GetExternalSource() == "" {
+		schema.ExternalSource = t.req.GetExternalSource()
 	}
+	if schema.GetExternalSpec() == "" {
+		schema.ExternalSpec = t.req.GetExternalSpec()
+	}
+	t.req.Schema = schema
 	t.columns = packed.GetColumnNamesFromSchema(schema)
 
 	return nil

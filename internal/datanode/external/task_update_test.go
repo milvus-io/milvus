@@ -146,6 +146,38 @@ func (s *RefreshExternalCollectionTaskSuite) TestTaskLifecycle() {
 	s.Equal(int64(1), task.GetSlot())
 }
 
+func (s *RefreshExternalCollectionTaskSuite) TestPreExecuteClonesSchemaBeforeFillingExternalMetadata() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sourceSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id", ExternalField: "id"},
+		},
+	}
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:   s.collectionID,
+		TaskID:         s.taskID,
+		ExternalSource: "s3://bucket/data/",
+		ExternalSpec:   `{"format":"parquet"}`,
+		Schema:         sourceSchema,
+		StorageConfig: &indexpb.StorageConfig{
+			StorageType: "local",
+		},
+	}
+
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	err := task.PreExecute(ctx)
+
+	s.NoError(err)
+	s.Empty(sourceSchema.GetExternalSource())
+	s.Empty(sourceSchema.GetExternalSpec())
+	s.NotSame(sourceSchema, task.req.GetSchema())
+	s.Equal(req.GetExternalSource(), task.req.GetSchema().GetExternalSource())
+	s.Equal(req.GetExternalSpec(), task.req.GetSchema().GetExternalSpec())
+	s.Equal([]string{"id"}, task.columns)
+}
+
 func (s *RefreshExternalCollectionTaskSuite) TestPreExecuteWithNilRequest() {
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is deferred below
 	defer cancel()

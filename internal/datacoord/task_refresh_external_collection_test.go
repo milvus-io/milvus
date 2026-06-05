@@ -583,14 +583,10 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 		}
 
 		task := createTestRefreshTaskWithMetaAndStubs(t, 1001, 1, 100, mt, refreshMeta)
+		updated := newTestExternalRefreshSegment(1, 100, 500)
+		updated.ManifestPath = "new-manifest"
 		resp := &datapb.RefreshExternalCollectionTaskResponse{
-			UpdatedSegments: []*datapb.SegmentInfo{{
-				ID:             1,
-				CollectionID:   100,
-				NumOfRows:      500,
-				ManifestPath:   "new-manifest",
-				StorageVersion: 3,
-			}},
+			UpdatedSegments: []*datapb.SegmentInfo{updated},
 		}
 
 		err = task.SetJobInfo(ctx, resp)

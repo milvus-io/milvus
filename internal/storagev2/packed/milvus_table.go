@@ -81,7 +81,7 @@ func resolveMilvusTableSnapshotMetadataPath(externalSource, externalSpec string)
 func buildMilvusTableFileInfosFromSnapshotMetadata(
 	metadataBytes []byte,
 	getSegmentDescription func(string, int32) (*datapb.SegmentDescription, error),
-	resolveManifestPaths ...func(string) (string, error),
+	resolveManifestPath func(string) (string, error),
 ) ([]FileInfo, error) {
 	metadata, err := snapshotio.ParseSnapshotMetadataWithVersionCheck(metadataBytes)
 	if err != nil {
@@ -91,11 +91,10 @@ func buildMilvusTableFileInfosFromSnapshotMetadata(
 	if len(manifestList) == 0 {
 		return nil, ErrMilvusTableStorageV2ManifestListMissing
 	}
-	resolveManifestPath := func(manifestPath string) (string, error) {
-		return manifestPath, nil
-	}
-	if len(resolveManifestPaths) > 0 && resolveManifestPaths[0] != nil {
-		resolveManifestPath = resolveManifestPaths[0]
+	if resolveManifestPath == nil {
+		resolveManifestPath = func(manifestPath string) (string, error) {
+			return manifestPath, nil
+		}
 	}
 
 	if getSegmentDescription == nil {

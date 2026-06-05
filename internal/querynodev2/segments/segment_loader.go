@@ -364,17 +364,15 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			if isExternalCollection {
 				var candidate pkoracle.Candidate
 				if isMilvusTableRealPK {
-					if paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() {
-						bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type())
-						if err != nil {
-							return merr.Wrap(err, "At LoadBloomFilter")
-						}
-						if bfs.PkCandidateExist() {
-							segment.SetPKCandidate(bfs)
-							bfs.Charge()
-							mlog.Info(context.TODO(), "using external real-PK bloom filter candidate",
-								mlog.Int64("segmentID", loadInfo.GetSegmentID()))
-						}
+					bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type())
+					if err != nil {
+						return merr.Wrap(err, "At LoadBloomFilter")
+					}
+					if bfs.PkCandidateExist() {
+						segment.SetPKCandidate(bfs)
+						bfs.Charge()
+						mlog.Info(context.TODO(), "using external real-PK bloom filter candidate",
+							mlog.Int64("segmentID", loadInfo.GetSegmentID()))
 					}
 					if !segment.PkCandidateExist() {
 						return errors.New("milvus-table real-PK segment missing bloom filter stats")
@@ -649,18 +647,12 @@ func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, colle
 	segmentID := loadInfo.SegmentID
 	bfs := pkoracle.NewBloomFilterSet(segmentID, partitionID, segtype)
 
-	if !paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() {
-		mlog.Info(context.TODO(), "skip loading bloom filter for remote segment because bloom filter is disabled")
-		return bfs, nil
-	}
-
 	collection := loader.manager.Collection.Get(collectionID)
 	if collection == nil {
 		err := merr.WrapErrCollectionNotFound(collectionID)
 		mlog.Warn(context.TODO(), "failed to get collection while loading segment", mlog.Err(err))
 		return nil, err
 	}
-	pkField := GetPkField(collection.Schema())
 
 	mlog.Info(context.TODO(), "start loading remote...", mlog.Int("segmentNum", 1))
 
@@ -668,11 +660,16 @@ func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, colle
 	isExternalCollection := typeutil.IsExternalCollection(schema)
 	isMilvusTableRealPK := typeutil.NewStorageColumnResolver(schema).IsMilvusTable() &&
 		HasExternalPrimaryKey(schema)
+	if !paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() && !isMilvusTableRealPK {
+		mlog.Info(context.TODO(), "skip loading bloom filter for remote segment because bloom filter is disabled")
+		return bfs, nil
+	}
 	if isExternalCollection && !isMilvusTableRealPK {
 		mlog.Debug(context.TODO(), "virtual-PK external collection: returning empty bloom filter set")
 		return bfs, nil
 	}
 
+	pkField := GetPkField(schema)
 	mlog.Info(context.TODO(), "loading bloom filter for remote...")
 	pkStatsBinlogs, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BloomFilterPaths(pkField.GetFieldID())
 	if err != nil {
@@ -709,31 +706,35 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 		bfSets[i] = pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
 	}
 
-	// Phase 2: load BF stats into the stubs (skip when disabled or external collection).
-	if !paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() {
-		mlog.Info(context.TODO(), "bloom filter disabled: returning metadata-only stubs")
-		return bfSets, nil
-	}
-
 	collection := loader.manager.Collection.Get(collectionID)
 	if collection == nil {
 		err := merr.WrapErrCollectionNotFound(collectionID)
 		mlog.Warn(context.TODO(), "failed to get collection while loading segment", mlog.Err(err))
 		return nil, err
 	}
-	pkField := GetPkField(collection.Schema())
-	pkFieldID := pkField.GetFieldID()
 
 	schema := collection.Schema()
 	isExternalCollection := typeutil.IsExternalCollection(schema)
 	isMilvusTableRealPK := typeutil.NewStorageColumnResolver(schema).IsMilvusTable() &&
 		HasExternalPrimaryKey(schema)
 
+	// Phase 2: load BF stats into the stubs. Milvus-table real-PK correctness
+	// depends on source bloom filters, so that path ignores the global BF
+	// disable switch; other collections keep the historical metadata-only
+	// behavior when BloomFilterEnabled=false.
+	if !paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() && !isMilvusTableRealPK {
+		mlog.Info(context.TODO(), "bloom filter disabled: returning metadata-only stubs")
+		return bfSets, nil
+	}
+
 	// Virtual-PK external collections use ExternalSegmentCandidate and have no
 	// reusable source-side PK stats.
 	if isExternalCollection && !isMilvusTableRealPK {
 		return bfSets, nil
 	}
+
+	pkField := GetPkField(schema)
+	pkFieldID := pkField.GetFieldID()
 
 	// Calculate total memory size needed for bloom filters (PK stats)
 	var totalMemorySize int64

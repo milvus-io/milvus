@@ -28,9 +28,11 @@ package typeutil
 // of re-deriving the bit layout.
 
 // GetVirtualPK generates a virtual primary key from segmentID and offset.
-// Only the lower 32 bits of segmentID are preserved. Milvus segment IDs are
-// TSO-allocated 64-bit values that typically exceed 32 bits, so truncation is
-// expected. Use IsVirtualPKFromSegment for safe comparison.
+// Only the lower 32 bits of segmentID and offset are preserved. Milvus segment
+// IDs are TSO-allocated 64-bit values that typically exceed 32 bits, so segment
+// truncation is expected. Offsets are constrained by practical segment row-count
+// limits; a single segment above 2^32 rows would collide. Use
+// IsVirtualPKFromSegment for safe segment comparison.
 func GetVirtualPK(segmentID int64, offset int64) int64 {
 	return ((segmentID & 0xFFFFFFFF) << 32) | (offset & 0xFFFFFFFF)
 }

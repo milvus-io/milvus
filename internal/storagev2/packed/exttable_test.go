@@ -1243,7 +1243,7 @@ func TestBuildMilvusTableFileInfosFromSnapshotMetadata(t *testing.T) {
 	fileInfos, err := buildMilvusTableFileInfosFromSnapshotMetadata(metadataBytes, func(manifestPath string, formatVersion int32) (*datapb.SegmentDescription, error) {
 		require.Equal(t, int32(2), formatVersion)
 		return segments[manifestPath], nil
-	})
+	}, nil)
 
 	require.NoError(t, err)
 	require.Equal(t, []FileInfo{
@@ -1308,7 +1308,7 @@ func TestBuildMilvusTableFileInfosFromSnapshotMetadata_NoStorageV2(t *testing.T)
 	metadataBytes, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(&datapb.SnapshotMetadata{})
 	require.NoError(t, err)
 
-	_, err = buildMilvusTableFileInfosFromSnapshotMetadata(metadataBytes, nil)
+	_, err = buildMilvusTableFileInfosFromSnapshotMetadata(metadataBytes, nil, nil)
 
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrMilvusTableStorageV2ManifestListMissing))
@@ -1339,7 +1339,7 @@ func TestBuildMilvusTableFileInfosFromSnapshotMetadata_SourceSegmentDeltalogsSki
 			NumOfRows:    100,
 			Deltalogs:    expected,
 		}, nil
-	})
+	}, nil)
 
 	require.NoError(t, err)
 	require.Len(t, fileInfos, 1)
@@ -1383,7 +1383,7 @@ func TestBuildMilvusTableFileInfosFromSnapshotMetadata_L0Deltalogs(t *testing.T)
 		default:
 			return nil, fmt.Errorf("unexpected manifest path %s", manifestPath)
 		}
-	})
+	}, nil)
 
 	require.NoError(t, err)
 	require.Len(t, fileInfos, 1)
@@ -1438,6 +1438,7 @@ func TestBuildMilvusTableFileInfosFromSnapshotMetadata_DeltalogsBySegmentLevel(t
 						return nil, fmt.Errorf("unexpected manifest path %s", manifestPath)
 					}
 				},
+				nil,
 			)
 
 			require.NoError(t, err)
