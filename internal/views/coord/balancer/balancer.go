@@ -2,9 +2,10 @@ package balancer
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 )
@@ -155,5 +156,9 @@ func (b *DefaultBalancer) apply(ctx context.Context, plan *BalancePlan) error {
 			errs = append(errs, err)
 		}
 	}
-	return errors.Join(errs...)
+	var err error
+	for _, e := range errs {
+		err = errors.CombineErrors(err, e)
+	}
+	return err
 }
