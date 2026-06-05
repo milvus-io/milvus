@@ -59,13 +59,12 @@ const (
 // Fragment represents a data fragment from an external data source.
 // A large file (e.g., 10M rows) can be split into multiple fragments.
 type Fragment struct {
-	FragmentID      int64                 // Unique fragment identifier
-	FilePath        string                // File path
-	StartRow        int64                 // Start row index within the file (inclusive)
-	EndRow          int64                 // End row index within the file (exclusive)
-	RowCount        int64                 // Number of rows (EndRow - StartRow)
-	SourceSegmentID int64                 // Source Milvus segment ID for milvus-table fragments
-	Deltalogs       []*datapb.FieldBinlog // Source delete logs for milvus-table fragments
+	FragmentID int64                 // Unique fragment identifier
+	FilePath   string                // File path
+	StartRow   int64                 // Start row index within the file (inclusive)
+	EndRow     int64                 // End row index within the file (exclusive)
+	RowCount   int64                 // Number of rows (EndRow - StartRow)
+	Deltalogs  []*datapb.FieldBinlog // Source delete logs for milvus-table fragments
 }
 
 type manifestColumnGroup struct {
@@ -217,6 +216,9 @@ func CreateMilvusTableManifestFromSegmentManifests(
 ) (string, error) {
 	if len(fragments) == 0 {
 		return "", fmt.Errorf("fragments cannot be empty")
+	}
+	if len(fragments) != 1 {
+		return "", fmt.Errorf("milvus-table requires exactly one source fragment per target segment, got %d", len(fragments))
 	}
 	if len(columns) == 0 {
 		return "", fmt.Errorf("columns cannot be empty")
@@ -378,6 +380,8 @@ func createColumnGroups(
 	return outColumnGroups, nil
 }
 
+// GetManifestFieldIDs reads numeric field IDs stored as column names in a
+// StorageV3 manifest.
 func GetManifestFieldIDs(manifestPath string, storageConfig *indexpb.StorageConfig) (map[int64]struct{}, error) {
 	manifest, err := GetManifestHandle(manifestPath, storageConfig)
 	if err != nil {
@@ -567,6 +571,10 @@ func readColumnGroupsFromManifest(
 	defer C.loon_manifest_destroy(manifest)
 
 	cgroups := &manifest.column_groups
+	manifestDeltalogs, err := deltaLogsFromManifest(manifest)
+	if err != nil {
+		return nil, fmt.Errorf("read delta logs from manifest %s: %w", manifestPath, err)
+	}
 	if cgroups.column_group_array == nil && cgroups.num_of_column_groups > 0 {
 		return nil, merr.WrapErrServiceInternalMsg("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
 	}
@@ -574,7 +582,6 @@ func readColumnGroupsFromManifest(
 		return nil, nil
 	}
 
-	manifestDeltalogs := deltaLogsFromManifest(manifest)
 	groups := make([]manifestColumnGroup, 0, int(cgroups.num_of_column_groups))
 	cgArray := unsafe.Slice(cgroups.column_group_array, int(cgroups.num_of_column_groups))
 	for i := range cgArray {
@@ -661,15 +668,16 @@ func readColumnGroupsFromManifest(
 	return groups, nil
 }
 
-func deltaLogsFromManifest(manifest *C.LoonManifest) []*datapb.FieldBinlog {
+func deltaLogsFromManifest(manifest *C.LoonManifest) ([]*datapb.FieldBinlog, error) {
 	if manifest == nil {
-		return nil
+		return nil, nil
 	}
 	numDeltaLogs := int(manifest.delta_logs.num_delta_logs)
-	if numDeltaLogs == 0 ||
-		manifest.delta_logs.delta_log_paths == nil ||
-		manifest.delta_logs.delta_log_num_entries == nil {
-		return nil
+	if numDeltaLogs == 0 {
+		return nil, nil
+	}
+	if manifest.delta_logs.delta_log_paths == nil || manifest.delta_logs.delta_log_num_entries == nil {
+		return nil, fmt.Errorf("manifest has %d delta logs but missing delta log paths or entry counts", numDeltaLogs)
 	}
 	cPaths := unsafe.Slice(manifest.delta_logs.delta_log_paths, numDeltaLogs)
 	cNumEntries := unsafe.Slice(manifest.delta_logs.delta_log_num_entries, numDeltaLogs)
@@ -684,9 +692,9 @@ func deltaLogsFromManifest(manifest *C.LoonManifest) []*datapb.FieldBinlog {
 		})
 	}
 	if len(binlogs) == 0 {
-		return nil
+		return nil, nil
 	}
-	return []*datapb.FieldBinlog{{Binlogs: binlogs}}
+	return []*datapb.FieldBinlog{{Binlogs: binlogs}}, nil
 }
 
 func columnGroupFileProperty(file *C.LoonColumnGroupFile, key string) string {

@@ -43,6 +43,8 @@ import (
 // safe for non-external collections.
 type ExternalReaderContext = ExternalSpecContext
 
+// NewFFIPackedReader opens a StorageV3 manifest reader with optional external
+// reader context.
 func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns []string, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, ext ExternalReaderContext) (*FFIPackedReader, error) {
 	return NewFFIPackedReaderWithExtfs(
 		manifestPath,

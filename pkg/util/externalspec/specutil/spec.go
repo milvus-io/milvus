@@ -14,6 +14,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package specutil owns the shared external_spec parser used by API validation
+// and lower storage helpers without importing the higher-level externalspec
+// package.
 package specutil
 
 import (
@@ -65,6 +68,8 @@ type ExternalSpec struct {
 	SnapshotID *int64            `json:"snapshot_id,omitempty"`
 }
 
+// UnmarshalJSON accepts snapshot_id as either a JSON number or a decimal
+// string so old clients and JSON-preserving paths parse to the same structure.
 func (s *ExternalSpec) UnmarshalJSON(data []byte) error {
 	type externalSpec ExternalSpec
 	var raw struct {
@@ -83,6 +88,8 @@ func (s *ExternalSpec) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// parseOptionalInt64 parses an optional integer that may be encoded as a JSON
+// number, string, or null.
 func parseOptionalInt64(raw json.RawMessage) (*int64, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, nil
@@ -102,6 +109,8 @@ func parseOptionalInt64(raw json.RawMessage) (*int64, error) {
 	return &parsed, nil
 }
 
+// MarshalJSON emits snapshot_id as a string to preserve int64 precision across
+// JavaScript JSON clients.
 func (s ExternalSpec) MarshalJSON() ([]byte, error) {
 	type externalSpec ExternalSpec
 	var raw struct {

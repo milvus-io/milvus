@@ -1718,7 +1718,7 @@ func TestPrepareMilvusTableSnapshotSchemaAlignsFieldIDs(t *testing.T) {
 		ExternalSpec:   `{"format":"milvus-table","extfs":{"access_key_id":"AK","access_key_value":"SK"}}`,
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
-			{FieldID: 0, Name: common.VirtualPKFieldName, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: common.VirtualPKFieldName, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 			{FieldID: 0, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "pk"},
 			{FieldID: 0, Name: "embedding", DataType: schemapb.DataType_FloatVector, ExternalField: "vec"},
 		},
@@ -1784,7 +1784,7 @@ func TestPrepareMilvusTableSnapshotSchemaAlignsTargetFunctionOutputs(t *testing.
 					{Key: common.DimKey, Value: "16"},
 				},
 			},
-			{FieldID: 0, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+			{FieldID: 101, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
 		},
 		Functions: []*schemapb.FunctionSchema{
 			{

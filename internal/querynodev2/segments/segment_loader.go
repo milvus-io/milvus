@@ -1296,6 +1296,9 @@ func (loader *segmentLoader) loadBloomFilter(
 	return loader.loadBloomFilterWithDownloader(ctx, segmentID, bfs, binlogPaths, downloader)
 }
 
+// bloomFilterDownloader returns the byte downloader used for PK bloom-filter
+// stats. Milvus-table real-PK stats live in the external source filesystem;
+// ordinary internal stats stay on the local chunk manager.
 func (loader *segmentLoader) bloomFilterDownloader(
 	collection *Collection,
 	useExternalSpec bool,
@@ -1314,6 +1317,8 @@ func (loader *segmentLoader) bloomFilterDownloader(
 	}
 }
 
+// loadBloomFilterWithDownloader merges one or more serialized PK bloom-filter
+// stats into the segment BloomFilterSet.
 func (loader *segmentLoader) loadBloomFilterWithDownloader(
 	ctx context.Context,
 	segmentID int64,
@@ -1509,6 +1514,9 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 	return nil
 }
 
+// validateMilvusTableRealPKDeltalogPaths rejects target-owned deltalogs from a
+// real-PK milvus-table manifest. Real-PK load must consume source StorageV3
+// deltas; target-owned deltas are reserved for virtual-PK translation.
 func validateMilvusTableRealPKDeltalogPaths(manifestPath string, deltaPaths []string) error {
 	basePath, _, err := packed.UnmarshalManifestPath(manifestPath)
 	if err != nil {
@@ -1529,6 +1537,8 @@ func validateMilvusTableRealPKDeltalogPaths(manifestPath string, deltaPaths []st
 	return nil
 }
 
+// readExternalFiles reads whole files through packed external-spec filesystem
+// aliases and checks ctx before each potentially large read.
 func readExternalFiles(
 	ctx context.Context,
 	storageConfig *indexpb.StorageConfig,

@@ -551,6 +551,22 @@ func TestCreateMilvusTableManifestFromSegmentManifests_RejectsMissingSourceRowCo
 	assert.Contains(t, err.Error(), "non-positive row count")
 }
 
+func TestCreateMilvusTableManifestFromSegmentManifests_RejectsMultipleSourceFragments(t *testing.T) {
+	_, err := CreateMilvusTableManifestFromSegmentManifests(
+		"target",
+		[]string{"pk"},
+		[]Fragment{
+			{FilePath: "source-manifest-1", RowCount: 1},
+			{FilePath: "source-manifest-2", RowCount: 1},
+		},
+		&indexpb.StorageConfig{},
+		ExternalSpecContext{},
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exactly one source fragment")
+}
+
 func TestReadFragmentsFromManifest_MilvusTableCarriesManifestDeltalogs(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()

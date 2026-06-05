@@ -38,6 +38,9 @@ var ErrMilvusTableStorageV2ManifestListMissing = errors.New(
 		"(enable common.storage.useLoonFFI=true before writing source data)",
 )
 
+// milvusTableExploreManifest is the Go-side explore result persisted for
+// milvus-table sources. Its FileInfo.NumRows stores source segment row counts,
+// not parquet file row counts.
 type milvusTableExploreManifest struct {
 	Format string     `json:"format"`
 	Files  []FileInfo `json:"files"`
@@ -60,6 +63,8 @@ func ValidateMilvusTableStorageV3DeltalogPath(sourcePath string) error {
 	return fmt.Errorf("milvus-table only supports StorageV3 source deltalogs under _delta, got %s", sourcePath)
 }
 
+// resolveMilvusTableSnapshotMetadataPath validates the milvus-table external
+// spec and returns the snapshot metadata JSON path carried by external_source.
 func resolveMilvusTableSnapshotMetadataPath(externalSource, externalSpec string) (string, error) {
 	if _, err := externalspec.ParseExternalSpec(externalSpec); err != nil {
 		return "", err
@@ -70,6 +75,9 @@ func resolveMilvusTableSnapshotMetadataPath(externalSource, externalSpec string)
 	return "", fmt.Errorf("milvus-table requires external_source to be a snapshot metadata JSON path")
 }
 
+// buildMilvusTableFileInfosFromSnapshotMetadata converts snapshot metadata into
+// one FileInfo per source StorageV3 segment manifest. L0 deltalogs are attached
+// to every source segment because they are snapshot-level delete overlays.
 func buildMilvusTableFileInfosFromSnapshotMetadata(
 	metadataBytes []byte,
 	getSegmentDescription func(string, int32) (*datapb.SegmentDescription, error),
@@ -144,6 +152,8 @@ func buildMilvusTableFileInfosFromSnapshotMetadata(
 	return fileInfos, nil
 }
 
+// resolveMilvusTableSourceManifestPath rewrites a source manifest base path
+// through the external-source resolver while preserving the StorageV3 version.
 func resolveMilvusTableSourceManifestPath(
 	manifestPath string,
 	resolveSourcePath func(string) (string, error),
@@ -165,6 +175,8 @@ func resolveMilvusTableSourceManifestPath(
 	return MarshalManifestPath(resolvedBasePath, version), nil
 }
 
+// resolveMilvusTableSegmentDeltalogPaths rewrites deltalog paths found in a
+// source segment manifest to the same resolved external filesystem root.
 func resolveMilvusTableSegmentDeltalogPaths(
 	segment *datapb.SegmentDescription,
 	resolveSourcePath func(string) (string, error),
@@ -187,6 +199,8 @@ func resolveMilvusTableSegmentDeltalogPaths(
 	return nil
 }
 
+// ReadMilvusTableSnapshotMetadata reads and parses the source snapshot metadata
+// using external spec filesystem aliases when the source is remote.
 func ReadMilvusTableSnapshotMetadata(
 	externalSource string,
 	externalSpec string,
@@ -228,6 +242,8 @@ func milvusTableReadFileExtfs(externalSource string, extfs ExternalSpecContext) 
 	return extfs
 }
 
+// writeMilvusTableExploreManifest persists the source manifest list that
+// DataCoord will later split across refresh tasks.
 func writeMilvusTableExploreManifest(
 	baseDir string,
 	fileInfos []FileInfo,
@@ -247,6 +263,8 @@ func writeMilvusTableExploreManifest(
 	return manifestPath, nil
 }
 
+// readMilvusTableExploreManifest reads the persisted milvus-table explore
+// result produced by writeMilvusTableExploreManifest.
 func readMilvusTableExploreManifest(manifestPath string, storageConfig *indexpb.StorageConfig) ([]FileInfo, error) {
 	data, err := ReadFile(storageConfig, manifestPath)
 	if err != nil {
@@ -262,6 +280,8 @@ func readMilvusTableExploreManifest(manifestPath string, storageConfig *indexpb.
 	return manifest.Files, nil
 }
 
+// readMilvusSnapshotSegmentManifest reads one source segment manifest and
+// includes the manifest path in parse errors for diagnostics.
 func readMilvusSnapshotSegmentManifest(
 	manifestPath string,
 	formatVersion int32,

@@ -448,6 +448,9 @@ class Schema {
     const ArrowSchemaPtr
     ConvertToLoonArrowSchema() const;
 
+    // Mirrors pkg/util/typeutil.StorageColumnResolver in Go. Keep both sides
+    // aligned when changing external physical-column rules.
+    //
     // Get the list of physical columns for external collections. Source
     // fields use their external storage column names, while Milvus-generated
     // function outputs use numeric field IDs because they are stored by
@@ -612,8 +615,9 @@ class Schema {
     std::pair<bool, std::string>
     WarmupPolicy(const FieldId& field, bool is_vector, bool is_index) const;
 
-    // True if the field is declared as a function output (derived from the
-    // FunctionSchema list on the collection proto).
+    // True if the field is declared as a function output. New schemas use the
+    // FieldSchema flag; FunctionSchema output field IDs are kept as a legacy
+    // compatibility supplement during ParseFrom.
     bool
     is_function_output(const FieldId& field_id) const {
         return function_output_field_ids_.count(field_id) > 0;

@@ -50,6 +50,8 @@ func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64,
 	return NewPackedReaderWithExtfs(filePaths, schema, bufferSize, storageConfig, storagePluginContext, ExternalReaderContext{})
 }
 
+// NewPackedReaderWithExtfs opens packed files and optionally resolves them
+// through an external filesystem alias described by extfs.
 func NewPackedReaderWithExtfs(
 	filePaths []string,
 	schema *arrow.Schema,

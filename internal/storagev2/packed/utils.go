@@ -257,13 +257,12 @@ func FetchFragmentsFromExternalSourceWithRange(
 	for i, fi := range fileInfos {
 		if isMilvusTableFormat(format) {
 			fragments = append(fragments, Fragment{
-				FragmentID:      fragmentIDGenerator(),
-				FilePath:        fi.FilePath,
-				StartRow:        0,
-				EndRow:          rowCounts[i],
-				RowCount:        rowCounts[i],
-				SourceSegmentID: fi.SourceSegmentID,
-				Deltalogs:       fi.Deltalogs,
+				FragmentID: fragmentIDGenerator(),
+				FilePath:   fi.FilePath,
+				StartRow:   0,
+				EndRow:     rowCounts[i],
+				RowCount:   rowCounts[i],
+				Deltalogs:  fi.Deltalogs,
 			})
 			continue
 		}
@@ -335,6 +334,8 @@ func CreateSegmentManifestWithBasePath(
 	return CreateSegmentManifestWithBasePathAndExtfs(ctx, basePath, format, columns, fragments, storageConfig, ExternalSpecContext{})
 }
 
+// CreateSegmentManifestWithBasePathAndExtfs creates a segment manifest and
+// injects external filesystem context when the format is milvus-table.
 func CreateSegmentManifestWithBasePathAndExtfs(
 	ctx context.Context,
 	basePath string,
@@ -373,6 +374,8 @@ func GetColumnNamesFromSchema(schema *schemapb.CollectionSchema) []string {
 	return typeutil.NewStorageColumnResolver(schema).SourceDataColumnNames()
 }
 
+// HasExternalPrimaryKey reports whether a schema uses a user-provided primary
+// key instead of the milvus-table virtual primary key.
 func HasExternalPrimaryKey(schema *schemapb.CollectionSchema) bool {
 	if schema == nil {
 		return false
@@ -385,6 +388,8 @@ func HasExternalPrimaryKey(schema *schemapb.CollectionSchema) bool {
 	return false
 }
 
+// MilvusTablePrimaryKeyModeFromSchema returns the deltalog handling mode for a
+// milvus-table schema.
 func MilvusTablePrimaryKeyModeFromSchema(schema *schemapb.CollectionSchema) MilvusTablePrimaryKeyMode {
 	if HasExternalPrimaryKey(schema) {
 		return MilvusTablePrimaryKeyModeExternal

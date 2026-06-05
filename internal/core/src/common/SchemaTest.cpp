@@ -557,7 +557,8 @@ TEST_F(SchemaTest, ConvertToLoonArrowSchemaNullableDenseVectorUsesBinary) {
     EXPECT_EQ(dim_result.ValueOrDie(), "128");
 }
 
-TEST_F(SchemaTest, ExternalFunctionOutputUsesFunctionOutputNames) {
+TEST_F(SchemaTest,
+       ExternalFunctionOutputUsesFieldFlagWithoutFunctionOutputIds) {
     milvus::proto::schema::CollectionSchema schema_proto;
     schema_proto.set_external_source("s3://bucket/path");
     schema_proto.set_external_spec(R"({"format":"parquet"})");
@@ -583,6 +584,7 @@ TEST_F(SchemaTest, ExternalFunctionOutputUsesFunctionOutputNames) {
     bm25_vector->set_name("sparse");
     bm25_vector->set_data_type(
         milvus::proto::schema::DataType::SparseFloatVector);
+    bm25_vector->set_is_function_output(true);
 
     auto* function = schema_proto.add_functions();
     function->set_type(milvus::proto::schema::BM25);

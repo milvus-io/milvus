@@ -132,7 +132,7 @@ func ReadFileWithExternalSpec(
 	var outSize C.uint64_t
 	result = C.loon_filesystem_read_file_all(fsHandle, cPath, pathLen, &outData, &outSize)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read file %s via filesystem %s: %w", normalizedFilePath, filesystemPath, err)
 	}
 	if outData == nil || outSize == 0 {
 		return nil, nil
@@ -168,8 +168,8 @@ func externalFilesystemFilePath(path string, properties *C.LoonProperties, extfs
 	}
 
 	prefix := ExtfsPrefixForCollection(extfs.CollectionID)
-	address := filesystemLoonPropertyString(properties, prefix+"address")
-	bucketName := filesystemLoonPropertyString(properties, prefix+"bucket_name")
+	address := loonPropertyString(properties, prefix+"address")
+	bucketName := loonPropertyString(properties, prefix+"bucket_name")
 	if address == "" || bucketName == "" {
 		return path, nil
 	}
@@ -196,14 +196,4 @@ func externalFilesystemFilePath(path string, properties *C.LoonProperties, extfs
 		return key, nil
 	}
 	return path, nil
-}
-
-func filesystemLoonPropertyString(properties *C.LoonProperties, key string) string {
-	cKey := C.CString(key)
-	defer C.free(unsafe.Pointer(cKey))
-	cValue := C.loon_properties_get(properties, cKey)
-	if cValue == nil {
-		return ""
-	}
-	return C.GoString(cValue)
 }

@@ -96,6 +96,10 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         auto f = FieldMeta::ParseFrom(child);
         schema->AddField(std::move(f));
 
+        if (child.is_function_output()) {
+            schema->add_function_output_field_id(field_id);
+        }
+
         if (child.is_primary_key()) {
             AssertInfo(!schema->get_primary_field_id().has_value(),
                        "repetitive primary key");
@@ -188,7 +192,9 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         schema->set_external_spec(schema_proto.external_spec());
     }
 
-    // Collect function output field IDs from FunctionSchema.
+    // Keep legacy FunctionSchema field-id metadata as a compatibility
+    // supplement. New schema normalization marks generated fields with
+    // FieldSchema::is_function_output; see typeutil.IsFunctionOutputField in Go.
     for (const auto& fn : schema_proto.functions()) {
         for (auto out_id : fn.output_field_ids()) {
             schema->add_function_output_field_id(FieldId(out_id));
@@ -323,6 +329,8 @@ Schema::GetExternalColumnNames() const {
     return columns;
 }
 
+// Mirror pkg/util/typeutil.StorageColumnResolver. Keep Go and C++ behavior
+// aligned when changing external physical-column rules.
 bool
 Schema::IsExternalDataField(FieldId field_id) const {
     auto it = fields_.find(field_id);
