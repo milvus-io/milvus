@@ -603,9 +603,9 @@ func maxAssignedFieldIDFromSchema(schema *schemapb.CollectionSchema) int64 {
 		}
 		v, err := strconv.ParseInt(kv.GetValue(), 10, 64)
 		if err != nil {
-			log.Warn("failed to parse max_field_id property, metadata may be corrupted",
-				zap.String("value", kv.GetValue()),
-				zap.Error(err),
+			mlog.Warn(context.TODO(), "failed to parse max_field_id property, metadata may be corrupted",
+				mlog.String("value", kv.GetValue()),
+				mlog.Err(err),
 			)
 		} else if v > maxFieldID {
 			maxFieldID = v
@@ -624,9 +624,9 @@ func updateMaxFieldIDProperty(properties []*commonpb.KeyValuePair, maxFieldID in
 		if kv.GetKey() == common.MaxFieldIDKey {
 			v, err := strconv.ParseInt(kv.GetValue(), 10, 64)
 			if err != nil {
-				log.Warn("failed to parse max_field_id property, metadata may be corrupted",
-					zap.String("value", kv.GetValue()),
-					zap.Error(err),
+				mlog.Warn(context.TODO(), "failed to parse max_field_id property, metadata may be corrupted",
+					mlog.String("value", kv.GetValue()),
+					mlog.Err(err),
 				)
 			} else if v > maxFieldID {
 				maxFieldID = v

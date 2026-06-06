@@ -389,7 +389,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		return nil, err
 	}
 	if skipSearch {
-		log.Warn("search bm25 from empty data, skip search", zap.String("channel", sd.vchannelName), zap.Float64("avgdl", avgdl))
+		mlog.Warn(ctx, "search bm25 from empty data, skip search", mlog.FieldVChannel(sd.vchannelName), mlog.Float64("avgdl", avgdl))
 		return []*internalpb.SearchResults{}, nil
 	}
 
@@ -1290,11 +1290,11 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		}
 	}
 	sd.functionState.swap(newFunctionState).Close()
-	log.Info("delegator finished update schema event",
-		zap.Uint64("schemaVersion", schVersion),
-		zap.Int("sealedNum", len(sealed)),
-		zap.Int("growingNum", len(growing)),
-		zap.Int("bm25FunctionNum", len(newSet)),
+	mlog.Info(ctx, "delegator finished update schema event",
+		mlog.Uint64("schemaVersion", schVersion),
+		mlog.Int("sealedNum", len(sealed)),
+		mlog.Int("growingNum", len(growing)),
+		mlog.Int("bm25FunctionNum", len(newSet)),
 	)
 	return nil
 }

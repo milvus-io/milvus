@@ -1793,7 +1793,7 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		mlog.Warn(context.TODO(), "failed to create schema helper", mlog.String("name", schema.GetName()), mlog.Err(err))
 		return nil, err
 	}
-	ctx := context.Background()
+	ctx := context.TODO()
 
 	// PART 1: calculate logical resource usage of indexes
 	for _, fieldIndexInfo := range loadInfo.IndexInfos {
@@ -1999,7 +1999,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
 			if err != nil {
 				// field might have been dropped, skip its index
-				log.Info("skip index for dropped field", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()))
+				mlog.Info(ctx, "skip index for dropped field", mlog.FieldFieldID(fieldID), mlog.String("name", schema.GetName()))
 				continue
 			}
 			indexedFields[fieldID] = struct{}{}
@@ -2082,7 +2082,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			if err != nil {
 				// field might have been dropped, skip it and continue processing
 				// other fields in the same column group
-				log.Info("skip binlog for dropped field", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()))
+				mlog.Info(ctx, "skip binlog for dropped field", mlog.FieldFieldID(fieldID), mlog.String("name", schema.GetName()))
 				continue
 			}
 			if _, ok := indexedFields[fieldID]; !ok {

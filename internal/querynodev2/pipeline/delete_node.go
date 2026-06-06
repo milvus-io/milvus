@@ -77,12 +77,13 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 	}
 
 	if nodeMsg.schema != nil {
-		if err := dNode.delegator.UpdateSchema(context.Background(), nodeMsg.schema, nodeMsg.schemaVersion); err != nil {
-			log.Warn("failed to update schema in delete node",
-				zap.Int64("collectionID", dNode.collectionID),
-				zap.String("channel", dNode.channel),
-				zap.Uint64("schemaVersion", nodeMsg.schemaVersion),
-				zap.Error(err))
+		ctx := context.TODO()
+		if err := dNode.delegator.UpdateSchema(ctx, nodeMsg.schema, nodeMsg.schemaVersion); err != nil {
+			mlog.Warn(ctx, "failed to update schema in delete node",
+				mlog.FieldCollectionID(dNode.collectionID),
+				mlog.FieldVChannel(dNode.channel),
+				mlog.Uint64("schemaVersion", nodeMsg.schemaVersion),
+				mlog.Err(err))
 		}
 	}
 
