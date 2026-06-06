@@ -227,6 +227,44 @@ TEST(CApiTest, ReduceNullResult) {
     DeleteSegment(segment);
 }
 
+TEST(CApiTest, ReduceRanksByRawDistancesBeforeRoundDecimal) {
+    auto schema = std::make_shared<Schema>();
+    query::Plan plan(schema);
+    plan.plan_node_ = std::make_unique<query::VectorPlanNode>();
+    plan.plan_node_->search_info_.round_decimal_ = 0;
+
+    SearchResult seg0;
+    seg0.total_nq_ = 1;
+    seg0.unity_topK_ = 1;
+    seg0.distances_ = {-0.49f};
+    seg0.seg_offsets_ = {10};
+    seg0.primary_keys_ = {int64_t(1)};
+    seg0.topk_per_nq_prefix_sum_ = {0, 1};
+
+    SearchResult seg1;
+    seg1.total_nq_ = 1;
+    seg1.unity_topK_ = 1;
+    seg1.distances_ = {-0.36f};
+    seg1.seg_offsets_ = {20};
+    seg1.primary_keys_ = {int64_t(2)};
+    seg1.topk_per_nq_prefix_sum_ = {0, 1};
+
+    std::vector<SearchResult*> search_results{&seg0, &seg1};
+    int64_t slice_nqs[] = {1};
+    int64_t slice_topks[] = {2};
+
+    TestReduceHelper helper(
+        search_results, &plan, nullptr, slice_nqs, slice_topks, 1, nullptr);
+    helper.ReduceResultData();
+
+    EXPECT_EQ(seg1.result_offsets_, std::vector<int64_t>({0}));
+    EXPECT_EQ(seg0.result_offsets_, std::vector<int64_t>({1}));
+    EXPECT_EQ(helper.FinalSearchRecordsForTest()[1][0],
+              std::vector<int64_t>({0}));
+    EXPECT_EQ(helper.FinalSearchRecordsForTest()[0][0],
+              std::vector<int64_t>({0}));
+}
+
 TEST(CApiTest, ReduceRemoveDuplicates) {
     auto collection = NewCollection(get_default_schema_config().c_str());
     CSegmentInterface segment;

@@ -11,9 +11,9 @@
 
 #include "Reduce.h"
 
-#include <math.h>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <future>
 #include <map>
@@ -50,6 +50,19 @@
 #include "storage/ThreadPools.h"
 
 namespace milvus::segcore {
+
+namespace {
+
+float
+RoundScore(float distance, int64_t round_decimal) {
+    if (round_decimal == -1) {
+        return distance;
+    }
+    const float multiplier = std::pow(10.0f, round_decimal);
+    return std::round(distance * multiplier) / multiplier;
+}
+
+}  // namespace
 
 void
 ReduceHelper::Initialize() {
@@ -1029,7 +1042,10 @@ ReduceHelper::GetSearchResultDataSlice(const int slice_index,
                 }
 
                 search_result_data->mutable_scores()->Set(
-                    loc, search_result->distances_[ki]);
+                    loc,
+                    RoundScore(
+                        search_result->distances_[ki],
+                        plan_->plan_node_->search_info_.round_decimal_));
 
                 if (search_result->element_level_) {
                     search_result_data->mutable_element_indices()
