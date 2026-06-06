@@ -255,7 +255,7 @@ static const auto kIndexLoadTestValues = ::testing::Values(
         {2UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, 0UL, false}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "BITMAP"}, {"mmap", "true"}, {"field_type", "array"}},
-        {1UL * 1024 * 1024 * 1024,
+        {2UL * 1024 * 1024 * 1024,
          2UL * 1024 * 1024 * 1024,
          0UL,
          1UL * 1024 * 1024 * 1024,
@@ -368,9 +368,7 @@ TEST(IndexLoadTest, ScalarSortMmapEstimateIncludesValidBitset) {
 
     auto request = EstimateLoadIndexResource(&loadIndexInfo);
     auto stream_memory_overhead = std::min<uint64_t>(
-        kIndexSize,
-        milvus::storage::TransientMemoryBudget::GetEntryStreamBudget()
-            .CapacityBytes());
+        kIndexSize, milvus::storage::EntryStreamMaxTransientBytes());
 
     ASSERT_EQ(request.final_memory_cost, kValidBitsetBytes);
     ASSERT_EQ(request.final_disk_cost, kIndexSize);
@@ -414,9 +412,7 @@ TEST(IndexLoadTest, MarisaMmapEstimateReservesLegacyCsrFallback) {
 
     auto request = EstimateLoadIndexResource(&loadIndexInfo);
     auto stream_memory_overhead = std::min<uint64_t>(
-        kIndexSize,
-        milvus::storage::TransientMemoryBudget::GetEntryStreamBudget()
-            .CapacityBytes());
+        kIndexSize, milvus::storage::EntryStreamMaxTransientBytes());
 
     ASSERT_EQ(request.final_memory_cost, kLegacyCsrResidentBytes);
     ASSERT_EQ(request.final_disk_cost, kIndexSize);
