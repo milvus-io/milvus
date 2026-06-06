@@ -41,7 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -476,10 +476,10 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 	// QueryCoord deduplicates same sealed-segment load/reopen tasks by replica, segment, and scope.
 	// This shared singleflight key only coalesces duplicate calls; it is not relied on to serialize different tasks.
 	_, err, _ := o.sf.Do(fmt.Sprintf("load_sealed_%d", segmentID), func() (any, error) {
-		logger := log.Ctx(ctx).With(zap.Int64("segmentID", segmentID))
+		logger := mlog.With(mlog.FieldSegmentID(segmentID))
 		logpaths, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BM25StatsPaths()
 		if err != nil {
-			logger.Warn("load remote segment bm25 stats for reopen failed", zap.Error(err))
+			logger.Warn(ctx, "load remote segment bm25 stats for reopen failed", mlog.Err(err))
 			return nil, err
 		}
 		if len(logpaths) == 0 {
@@ -519,7 +519,7 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 			for fieldID := range missingPaths {
 				cleanupPath := path.Join(o.dirPath, fmt.Sprintf("%d", segmentID), fmt.Sprintf("%d", fieldID))
 				if rmErr := os.RemoveAll(cleanupPath); rmErr != nil {
-					logger.Warn("failed to cleanup reopened bm25 stats field dir", zap.Error(rmErr), zap.String("path", cleanupPath))
+					logger.Warn(ctx, "failed to cleanup reopened bm25 stats field dir", mlog.Err(rmErr), mlog.String("path", cleanupPath))
 				}
 			}
 		}

@@ -1044,10 +1044,10 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 			if field == nil {
 				// Field already dropped from schema (cascade drop from DropCollectionField),
 				// skip validation and proceed with index cleanup
-				log.Info("field already dropped from schema, proceeding with index drop",
-					zap.String("indexName", req.IndexName),
-					zap.Int64("collectionID", req.GetCollectionID()),
-					zap.Int64("fieldID", index.FieldID))
+				log.Info(ctx, "field already dropped from schema, proceeding with index drop",
+					mlog.String("indexName", req.IndexName),
+					mlog.FieldCollectionID(req.GetCollectionID()),
+					mlog.FieldFieldID(index.FieldID))
 				continue
 			}
 			if typeutil.IsVectorType(field.GetDataType()) {

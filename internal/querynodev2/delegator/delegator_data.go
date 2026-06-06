@@ -436,10 +436,10 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 		info := info
 		futures = append(futures, pool.Submit(func() (any, error) {
 			if err := idfOracle.LoadSealed(ctx, info.GetSegmentID(), info, cm); err != nil {
-				log.Warn("failed to load bm25 stats for segment",
-					zap.Int64("collectionID", req.GetCollectionID()),
-					zap.Int64("segmentID", info.GetSegmentID()),
-					zap.Error(err))
+				mlog.Warn(ctx, "failed to load bm25 stats for segment",
+					mlog.FieldCollectionID(req.GetCollectionID()),
+					mlog.FieldSegmentID(info.GetSegmentID()),
+					mlog.Err(err))
 				return nil, err
 			}
 			return nil, nil
@@ -456,15 +456,15 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 
 func (sd *shardDelegator) handleReopenPostLoad(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
 	log := sd.getLogger(ctx).With(
-		zap.Int64s("segments", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })),
-		zap.String("loadScope", req.GetLoadScope().String()),
+		mlog.Int64s("segments", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })),
+		mlog.String("loadScope", req.GetLoadScope().String()),
 	)
 
 	infosWithBM25Stats := make([]*querypb.SegmentLoadInfo, 0, len(req.GetInfos()))
 	for _, info := range req.GetInfos() {
 		bm25Paths, err := packed.NewStatsResolverFromLoadInfo(info).BM25StatsPaths()
 		if err != nil {
-			log.Warn("resolve reopened bm25 stats failed", zap.Int64("segmentID", info.GetSegmentID()), zap.Error(err))
+			log.Warn(ctx, "resolve reopened bm25 stats failed", mlog.FieldSegmentID(info.GetSegmentID()), mlog.Err(err))
 			return err
 		}
 		if len(bm25Paths) > 0 {
@@ -492,11 +492,11 @@ func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*q
 		futures = append(futures, pool.Submit(func() (any, error) {
 			activateIfReadable := sd.distribution.IsReadableSealedSegment(info.GetSegmentID())
 			if err := idfOracle.LoadSealedForReopen(ctx, info.GetSegmentID(), info, cm, activateIfReadable); err != nil {
-				log.Warn("failed to load reopened bm25 stats for segment",
-					zap.Int64("collectionID", req.GetCollectionID()),
-					zap.Int64("segmentID", info.GetSegmentID()),
-					zap.Bool("activateIfReadable", activateIfReadable),
-					zap.Error(err))
+				mlog.Warn(ctx, "failed to load reopened bm25 stats for segment",
+					mlog.FieldCollectionID(req.GetCollectionID()),
+					mlog.FieldSegmentID(info.GetSegmentID()),
+					mlog.Bool("activateIfReadable", activateIfReadable),
+					mlog.Err(err))
 				return nil, err
 			}
 			return nil, nil
@@ -504,7 +504,7 @@ func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*q
 	}
 
 	if err := conc.BlockOnAll(futures...); err != nil {
-		log.Warn("failed to load reopened bm25 stats", zap.Error(err))
+		mlog.Warn(ctx, "failed to load reopened bm25 stats", mlog.Err(err))
 		return err
 	}
 	return nil
@@ -616,7 +616,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	log.Debug(ctx, "work loads segments done")
 
 	if err := sd.syncCollectionIndexMeta(ctx, req); err != nil {
-		log.Warn("failed to sync collection index meta on delegator", zap.Error(err))
+		log.Warn(ctx, "failed to sync collection index meta on delegator", mlog.Err(err))
 		return err
 	}
 
