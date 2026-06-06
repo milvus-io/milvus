@@ -299,7 +299,6 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                       KnowhereStatusString(stat));
         }
     }
-    sub_result.round_values();
     return sub_result;
 }
 
