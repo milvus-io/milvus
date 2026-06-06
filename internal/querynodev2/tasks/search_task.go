@@ -216,7 +216,7 @@ func (t *SearchTask) Execute() error {
 				},
 			}
 		}
-		log.Ctx(t.ctx).Debug("filter-only search completed", zap.Int("segments", len(segmentIDs)))
+		mlog.Debug(t.ctx, "filter-only search completed", mlog.Int("segments", len(segmentIDs)))
 		return nil
 	}
 
@@ -272,7 +272,7 @@ func (t *SearchTask) Execute() error {
 		t.originTopks,
 	)
 	if err != nil {
-		log.Ctx(t.ctx).Warn("failed to prepare search results for export", zap.Error(err))
+		mlog.Warn(t.ctx, "failed to prepare search results for export", mlog.Err(err))
 		return err
 	}
 
