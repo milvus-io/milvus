@@ -30,7 +30,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
 
@@ -496,10 +495,9 @@ func SaveBinLogWithData(ctx context.Context,
 	schema *schemapb.CollectionSchema,
 	chunkManager storage.ChunkManager,
 ) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, error) {
-	log := log.Ctx(ctx)
 	binLogs, statsLogs, err := serializeInsertData(collectionID, partitionID, segmentID, insertData, schema)
 	if err != nil {
-		log.Warn("serializeInsertData return error", zap.Error(err))
+		mlog.Warn(ctx, "serializeInsertData return error", mlog.Err(err))
 		return nil, nil, err
 	}
 
