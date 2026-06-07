@@ -388,7 +388,7 @@ func (o *idfOracle) activateExistingSealedStats(segmentID int64, stats bm25Stats
 	segStats.Lock()
 	defer segStats.Unlock()
 	if segStats.removed {
-		return false, errors.Newf("sealed bm25 stats for segment %d already removed", segmentID)
+		return false, merr.WrapErrServiceInternalMsg("sealed bm25 stats for segment %d already removed", segmentID)
 	}
 	return o.activateSealedStatsLocked(segStats, stats), nil
 }
@@ -546,7 +546,7 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 			if segStats.removed {
 				segStats.Unlock()
 				o.Unlock()
-				return nil, errors.Newf("sealed bm25 stats for segment %d already removed", segmentID)
+				return nil, merr.WrapErrServiceInternalMsg("sealed bm25 stats for segment %d already removed", segmentID)
 			}
 
 			wasActive := segStats.activate.Load()

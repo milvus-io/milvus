@@ -823,7 +823,7 @@ func pickGroupByValues(
 			return arr.(*array.String).Value(idx)
 		}, array.NewStringBuilder), nil
 	default:
-		return nil, fmt.Errorf("unsupported group-by arrow type %s at group index %d", firstArr.DataType(), groupIdx)
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported group-by arrow type %s at group index %d", firstArr.DataType(), groupIdx)
 	}
 }
 
