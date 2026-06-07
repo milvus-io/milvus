@@ -199,8 +199,8 @@ func (at *analyzeTask) updateAnalyzeInfo(req *workerpb.AnalyzeRequest) error {
 	numClusters := int64(math.Ceil(totalSegmentsRawDataSize / segmentSize))
 	maxCentroids := Params.DataCoordCfg.ClusteringCompactionMaxCentroidsPerSegment.GetAsInt64()
 	numClusters *= maxCentroids
-	if numClusters < Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64() {
-		err := fmt.Errorf("the number of clusters %d is lower than minimum %d", numClusters, Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64())
+	if segmentSize < 1.0 || numClusters < Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64() {
+		err := fmt.Errorf("The number of clusters %d is lower than minimum %d", numClusters, Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64())
 		log.Ctx(ctx).Info("data size is too small, skip analyze task", zap.Float64("raw data size", totalSegmentsRawDataSize), zap.Int64("num clusters", numClusters), zap.Int64("minimum num clusters required", Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64()))
 		at.SetState(indexpb.JobState_JobStateFinished, "")
 		return err
@@ -235,7 +235,9 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		at.SetState(indexpb.JobState_JobStateNone, "analyze task has not exist in meta table")
 		return
 	}
-
+	at.SegmentIDs = task.SegmentIDs
+	at.FieldID = task.FieldID
+	at.FieldType = task.FieldType
 	// Update task version
 	if err := at.UpdateVersion(nodeID); err != nil {
 		log.Warn(context.TODO(), "failed to update task version", mlog.Err(err))
