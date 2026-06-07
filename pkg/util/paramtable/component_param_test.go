@@ -526,8 +526,7 @@ func TestComponentParam(t *testing.T) {
 		assert.NoError(t, params.Save(Params.SchedulePolicyTaskDeadlineAdvance.Key, "100"))
 		assert.Equal(t, 100*time.Millisecond, Params.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse())
 		assert.Equal(t, 10.0, Params.CPURatio.GetAsFloat())
-		knowhereThreadPoolSize := float64(hardware.GetCPUNum()) * 4 // default queryNode.segcore.knowhereThreadPoolNumRatio
-		assert.Equal(t, uint32(knowhereThreadPoolSize), Params.KnowhereThreadPoolSize.GetAsUint32())
+		assert.Equal(t, uint32(hardware.GetCPUNum()), Params.KnowhereThreadPoolSize.GetAsUint32())
 
 		// chunk cache
 		assert.Equal(t, "willneed", Params.ReadAheadPolicy.GetValue())
