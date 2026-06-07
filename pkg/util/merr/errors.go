@@ -189,7 +189,7 @@ var (
 
 	// Parameter related
 	ErrParameterInvalid  = newMilvusError("invalid parameter", 1100, false, WithErrorType(InputError))
-	ErrParameterMissing  = newMilvusError("missing parameter", 1101, false)
+	ErrParameterMissing  = newMilvusError("missing parameter", 1101, false, WithErrorType(InputError))
 	ErrParameterTooLarge = newMilvusError("parameter too large", 1102, false)
 
 	// Metrics related

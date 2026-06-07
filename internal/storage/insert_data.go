@@ -60,7 +60,11 @@ func NewInsertDataWithFunctionOutputField(schema *schemapb.CollectionSchema) (*I
 
 func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int, withFunctionOutput bool) (*InsertData, error) {
 	if schema == nil {
-		return nil, merr.WrapErrParameterMissing("collection schema")
+		// A nil schema here is an internal invariant violation (callers within
+		// Milvus always pass a schema), not a client-supplied missing parameter.
+		// ErrParameterMissing defaults to InputError, so mark this one site as a
+		// system error to keep it out of the client-fault (fail_input) bucket.
+		return nil, merr.WrapErrAsSysError(merr.WrapErrParameterMissing("collection schema"))
 	}
 
 	idata := &InsertData{
