@@ -200,7 +200,7 @@ func (at *analyzeTask) updateAnalyzeInfo(req *workerpb.AnalyzeRequest) error {
 	maxCentroids := Params.DataCoordCfg.ClusteringCompactionMaxCentroidsPerSegment.GetAsInt64()
 	numClusters *= maxCentroids
 	if segmentSize < 1.0 || numClusters < Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64() {
-		err := fmt.Errorf("The number of clusters %d is lower than minimum %d", numClusters, Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64())
+		err := fmt.Errorf("the number of clusters %d is lower than minimum %d", numClusters, Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64())
 		log.Ctx(ctx).Info("data size is too small, skip analyze task", zap.Float64("raw data size", totalSegmentsRawDataSize), zap.Int64("num clusters", numClusters), zap.Int64("minimum num clusters required", Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64()))
 		at.SetState(indexpb.JobState_JobStateFinished, "")
 		return err
