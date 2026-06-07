@@ -263,7 +263,7 @@ func reorderArray(pool memory.Allocator, data arrow.Array, indices []int) (arrow
 func NewSortOpFromRepr(repr *OperatorRepr) (Operator, error) {
 	column, ok := repr.Params["column"].(string)
 	if !ok || column == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("sort_op: column is required")
+		return nil, merr.WrapErrParameterMissingMsg("sort_op: column is required")
 	}
 	desc := false
 	if descVal, ok := repr.Params["desc"]; ok {

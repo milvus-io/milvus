@@ -269,7 +269,7 @@ func ValidatePrivilegeGroupName(groupName string) error {
 
 func ValidateResourceGroupName(entity string) error {
 	if entity == "" {
-		return merr.WrapErrParameterInvalidMsg("resource group name couldn't be empty")
+		return merr.WrapErrParameterMissingMsg("resource group name couldn't be empty")
 	}
 
 	invalidMsg := fmt.Sprintf("Invalid resource group name %s.", entity)
@@ -476,7 +476,7 @@ func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema)
 	}
 	// if not exist type params max_length, return error
 	if !exist {
-		return merr.WrapErrParameterInvalidMsg("type param(max_length) should be specified for the field(%s) of collection %s", field.GetName(), collectionName)
+		return merr.WrapErrParameterMissingMsg("type param(max_length) should be specified for the field(%s) of collection %s", field.GetName(), collectionName)
 	}
 
 	return nil
@@ -502,7 +502,7 @@ func getMaxCapacityPerRow(collectionName string, field *schemapb.FieldSchema) (i
 	}
 	// if not exist type params max_capacity, return error
 	if !exist {
-		return 0, merr.WrapErrParameterInvalidMsg("type param(max_capacity) should be specified for array field %s of collection %s", field.GetName(), collectionName)
+		return 0, merr.WrapErrParameterMissingMsg("type param(max_capacity) should be specified for array field %s of collection %s", field.GetName(), collectionName)
 	}
 	return maxCapacityPerRow, nil
 }
@@ -524,7 +524,7 @@ func validateVectorFieldMetricType(field *schemapb.FieldSchema) error {
 			return nil
 		}
 	}
-	return merr.WrapErrParameterInvalidMsg(`index param "metric_type" is not specified for index float vector %s`, field.GetName())
+	return merr.WrapErrParameterMissingMsg(`index param "metric_type" is not specified for index float vector %s`, field.GetName())
 }
 
 func validateDuplicatedFieldName(schema *schemapb.CollectionSchema) error {
@@ -818,7 +818,7 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 	if idx == -1 {
 		// External collections may not have a primary key
 		if !typeutil.IsExternalCollection(coll) {
-			return merr.WrapErrParameterInvalidMsg("primary key is not specified")
+			return merr.WrapErrParameterMissingMsg("primary key is not specified")
 		}
 	}
 
@@ -1113,17 +1113,17 @@ func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 
 func checkFunctionBasicParams(function *schemapb.FunctionSchema) error {
 	if function.GetName() == "" {
-		return merr.WrapErrParameterInvalidMsg("function name cannot be empty")
+		return merr.WrapErrParameterMissingMsg("function name cannot be empty")
 	}
 	if len(function.GetInputFieldNames()) == 0 {
-		return merr.WrapErrParameterInvalidMsg("function input field names cannot be empty, function: %s", function.GetName())
+		return merr.WrapErrParameterMissingMsg("function input field names cannot be empty, function: %s", function.GetName())
 	}
 	if len(function.GetOutputFieldNames()) == 0 {
-		return merr.WrapErrParameterInvalidMsg("function output field names cannot be empty, function: %s", function.GetName())
+		return merr.WrapErrParameterMissingMsg("function output field names cannot be empty, function: %s", function.GetName())
 	}
 	for _, input := range function.GetInputFieldNames() {
 		if input == "" {
-			return merr.WrapErrParameterInvalidMsg("function input field name cannot be empty string, function: %s", function.GetName())
+			return merr.WrapErrParameterMissingMsg("function input field name cannot be empty string, function: %s", function.GetName())
 		}
 		// if input occurs more than once, error
 		if lo.Count(function.GetInputFieldNames(), input) > 1 {
@@ -1132,7 +1132,7 @@ func checkFunctionBasicParams(function *schemapb.FunctionSchema) error {
 	}
 	for _, output := range function.GetOutputFieldNames() {
 		if output == "" {
-			return merr.WrapErrParameterInvalidMsg("function output field name cannot be empty string, function: %s", function.GetName())
+			return merr.WrapErrParameterMissingMsg("function output field name cannot be empty string, function: %s", function.GetName())
 		}
 		if lo.Count(function.GetInputFieldNames(), output) > 0 {
 			return merr.WrapErrParameterInvalidMsg("a single field cannot be both input and output in the same function, function: %s, field: %s", function.GetName(), output)

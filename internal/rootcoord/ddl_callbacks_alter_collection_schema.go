@@ -267,7 +267,7 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId:
 		schema, properties, droppedFieldIds, err = buildSchemaForDropField(coll, "", id.FieldId)
 	default:
-		return merr.WrapErrParameterInvalidMsg("drop request must specify field_name, field_id, or function_name")
+		return merr.WrapErrParameterMissingMsg("drop request must specify field_name, field_id, or function_name")
 	}
 	if err != nil {
 		return err

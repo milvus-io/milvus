@@ -73,7 +73,7 @@ func newCohereProvider(params []*commonpb.KeyValuePair, conf map[string]string, 
 		}
 	}
 	if modelName == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("cohere rerank model name is required")
+		return nil, merr.WrapErrParameterMissingMsg("cohere rerank model name is required")
 	}
 	provider := cohereProvider{
 		baseProvider: baseProvider{batchSize: maxBatch},

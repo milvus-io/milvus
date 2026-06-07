@@ -329,7 +329,7 @@ func resolveAggregationSpec(groupBy *commonpb.SearchAggregationSpec, schema *sch
 			for _, alias := range aliases {
 				metric := spec.GetMetrics()[alias]
 				if strings.TrimSpace(alias) == "" {
-					return merr.WrapErrParameterInvalidMsg("metric alias cannot be empty")
+					return merr.WrapErrParameterMissingMsg("metric alias cannot be empty")
 				}
 				metricSpec, metricSourceFieldID, err := buildMetricSpec(metric, schema, dynamicField)
 				if err != nil {

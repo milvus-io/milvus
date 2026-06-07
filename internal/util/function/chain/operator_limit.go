@@ -109,7 +109,7 @@ func (o *LimitOp) String() string {
 func NewLimitOpFromRepr(repr *OperatorRepr) (Operator, error) {
 	limitVal, ok := repr.Params["limit"]
 	if !ok {
-		return nil, merr.WrapErrParameterInvalidMsg("limit_op: limit is required")
+		return nil, merr.WrapErrParameterMissingMsg("limit_op: limit is required")
 	}
 	var limit int64
 	switch v := limitVal.(type) {

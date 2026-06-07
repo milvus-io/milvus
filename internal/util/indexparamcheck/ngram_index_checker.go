@@ -32,7 +32,7 @@ func (c *NgramIndexChecker) CheckTrain(dataType schemapb.DataType, elementType s
 	if dataType == schemapb.DataType_JSON {
 		castType, exists := params[common.JSONCastTypeKey]
 		if !exists {
-			return merr.WrapErrParameterInvalidMsg("JSON field with ngram index must specify json_cast_type")
+			return merr.WrapErrParameterMissingMsg("JSON field with ngram index must specify json_cast_type")
 		}
 		// Normalize cast type to uppercase for comparison
 		castType = strings.ToUpper(strings.TrimSpace(castType))
@@ -44,7 +44,7 @@ func (c *NgramIndexChecker) CheckTrain(dataType schemapb.DataType, elementType s
 	minGramStr, minGramExist := params[MinGramKey]
 	maxGramStr, maxGramExist := params[MaxGramKey]
 	if !minGramExist || !maxGramExist {
-		return merr.WrapErrParameterInvalidMsg("Ngram index must specify both min_gram and max_gram")
+		return merr.WrapErrParameterMissingMsg("Ngram index must specify both min_gram and max_gram")
 	}
 
 	minGram, err := strconv.Atoi(minGramStr)

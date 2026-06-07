@@ -89,7 +89,7 @@ func (o *SelectOp) String() string {
 func NewSelectOpFromRepr(repr *OperatorRepr) (Operator, error) {
 	columnsInterface, ok := repr.Params["columns"]
 	if !ok {
-		return nil, merr.WrapErrParameterInvalidMsg("select_op: columns is required")
+		return nil, merr.WrapErrParameterMissingMsg("select_op: columns is required")
 	}
 	columns, ok := columnsInterface.([]interface{})
 	if !ok {
@@ -100,7 +100,7 @@ func NewSelectOpFromRepr(repr *OperatorRepr) (Operator, error) {
 		return nil, merr.WrapErrParameterInvalidMsg("select_op: columns must be a list")
 	}
 	if len(columns) == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("select_op: columns is required")
+		return nil, merr.WrapErrParameterMissingMsg("select_op: columns is required")
 	}
 	colsStr := make([]string, len(columns))
 	for i, col := range columns {

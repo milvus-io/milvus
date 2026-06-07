@@ -58,7 +58,7 @@ func getVarFieldLength(fieldSchema *schemapb.FieldSchema, policy getVariableFiel
 	case schemapb.DataType_VarChar:
 		maxLengthPerRowValue, ok := paramsMap[common.MaxLengthKey]
 		if !ok {
-			return 0, merr.WrapErrParameterInvalidMsg("the max_length was not specified, field type is %s", fieldSchema.DataType.String())
+			return 0, merr.WrapErrParameterMissingMsg("the max_length was not specified, field type is %s", fieldSchema.DataType.String())
 		}
 		maxLength, err = strconv.Atoi(maxLengthPerRowValue)
 		if err != nil {

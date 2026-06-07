@@ -172,7 +172,7 @@ func funcChainFromRepr(repr *ChainRepr, alloc memory.Allocator) (*FuncChain, err
 	}
 
 	if repr.Stage == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("stage is required")
+		return nil, merr.WrapErrParameterMissingMsg("stage is required")
 	}
 
 	chain := NewFuncChainWithAllocator(alloc)
@@ -209,7 +209,7 @@ func operatorFromRepr(repr *OperatorRepr) (Operator, error) {
 // FunctionFromRepr creates a FunctionExpr from a FunctionRepr.
 func FunctionFromRepr(repr *FunctionRepr) (types.FunctionExpr, error) {
 	if repr.Name == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("function name is required")
+		return nil, merr.WrapErrParameterMissingMsg("function name is required")
 	}
 
 	return types.CreateFunction(repr.Name, repr.Params)

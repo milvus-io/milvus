@@ -339,7 +339,7 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 		cp = CloudProviderMinIO
 	}
 	if cp == "" {
-		return merr.WrapErrParameterInvalidMsg("extfs.cloud_provider is required: one of [aws, gcp, aliyun, tencent, huawei, azure, minio]; inferring from URI scheme is ambiguous (e.g. s3:// matches both AWS S3 and self-hosted MinIO)")
+		return merr.WrapErrParameterMissingMsg("extfs.cloud_provider is required: one of [aws, gcp, aliyun, tencent, huawei, azure, minio]; inferring from URI scheme is ambiguous (e.g. s3:// matches both AWS S3 and self-hosted MinIO)")
 	}
 	if !validCloudProviders[cp] {
 		return merr.WrapErrParameterInvalidMsg("extfs.cloud_provider=%q is not supported: must be one of [aws, gcp, aliyun, tencent, huawei, azure, minio]", cp)
@@ -356,7 +356,7 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	hasAnonymous := extfs[ExtfsKeyAnonymous] == "true"
 
 	if hasAKOnly {
-		return merr.WrapErrParameterInvalidMsg("extfs.access_key_id and extfs.access_key_value must be set together (found one without the other)")
+		return merr.WrapErrParameterMissingMsg("extfs.access_key_id and extfs.access_key_value must be set together (found one without the other)")
 	}
 
 	modes := 0
@@ -383,7 +383,7 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	}
 
 	if awsFamilyScheme[scheme] && extfs[ExtfsKeyRegion] == "" {
-		return merr.WrapErrParameterInvalidMsg("extfs.region is required for scheme %q (AWS-family schemes need region for SigV4 signing)", scheme)
+		return merr.WrapErrParameterMissingMsg("extfs.region is required for scheme %q (AWS-family schemes need region for SigV4 signing)", scheme)
 	}
 
 	// Azure consistency: scheme=azure requires cloud_provider=azure, and

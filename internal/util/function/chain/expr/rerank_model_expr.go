@@ -51,7 +51,7 @@ func NewRerankModelExpr(provider rerank.ModelProvider, queries []string) (*Reran
 		return nil, merr.WrapErrServiceInternal("model: provider is nil")
 	}
 	if len(queries) == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("model: queries must not be empty")
+		return nil, merr.WrapErrParameterMissingMsg("model: queries must not be empty")
 	}
 	return &RerankModelExpr{
 		BaseExpr: *NewBaseExpr("model", []string{types.StageL2Rerank}),

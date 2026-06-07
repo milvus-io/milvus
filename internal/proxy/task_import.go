@@ -123,7 +123,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	var partitionIDs []int64
 	if isBackup {
 		if req.GetPartitionName() == "" {
-			return merr.WrapErrParameterInvalidMsg("partition not specified")
+			return merr.WrapErrParameterMissingMsg("partition not specified")
 		}
 		// Currently, Backup tool call import must with a partition name, each time restore a partition
 		partitionID, err := globalMetaCache.GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.GetPartitionName())

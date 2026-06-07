@@ -80,7 +80,7 @@ func newSiliconflowProvider(params []*commonpb.KeyValuePair, conf map[string]str
 		}
 	}
 	if modelName == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("siliconflow rerank model name is required")
+		return nil, merr.WrapErrParameterMissingMsg("siliconflow rerank model name is required")
 	}
 
 	provider := siliconflowProvider{

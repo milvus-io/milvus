@@ -389,7 +389,7 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 
 	// iteratorV1 and iteratorV2 should be set together for compatibility
 	if !isIterator {
-		return nil, merr.WrapErrParameterInvalidMsg("both %s and %s must be set in the SDK", IteratorField, SearchIterV2Key)
+		return nil, merr.WrapErrParameterMissingMsg("both %s and %s must be set in the SDK", IteratorField, SearchIterV2Key)
 	}
 
 	// disable groupBy when doing iteratorV2
@@ -423,7 +423,7 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 	// parse batch size, required non-zero value
 	batchSizeStr, _ := funcutil.GetAttrByKeyFromRepeatedKV(SearchIterBatchSizeKey, searchParamsPair)
 	if batchSizeStr == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("batch size is required")
+		return nil, merr.WrapErrParameterMissingMsg("batch size is required")
 	}
 	batchSize, err := strconv.ParseInt(batchSizeStr, 0, 64)
 	if err != nil {
@@ -463,7 +463,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	topKStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TopKKey, searchParamsPair)
 	if err != nil {
 		if externalLimit <= 0 {
-			return nil, merr.WrapErrParameterInvalidMsg("%s is required", TopKKey)
+			return nil, merr.WrapErrParameterMissingMsg("%s is required", TopKKey)
 		}
 		topK = externalLimit
 	} else {

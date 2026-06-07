@@ -3155,7 +3155,7 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.Error(t, merr.Error(resp.GetStatus()))
-		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrParameterInvalid))
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrParameterMissing))
 	})
 
 	t.Run("missing_collection_name", func(t *testing.T) {
@@ -3172,7 +3172,7 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.Error(t, merr.Error(resp.GetStatus()))
-		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrParameterInvalid))
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrParameterMissing))
 	})
 
 	t.Run("snapshot_not_found", func(t *testing.T) {

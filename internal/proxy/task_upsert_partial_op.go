@@ -78,7 +78,7 @@ func validateFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb
 	for _, opMsg := range fieldOps {
 		name := opMsg.GetFieldName()
 		if name == "" {
-			return false, merr.WrapErrParameterInvalidMsg("FieldPartialUpdateOp.field_name is required")
+			return false, merr.WrapErrParameterMissingMsg("FieldPartialUpdateOp.field_name is required")
 		}
 		if _, dup := seenOpFields[name]; dup {
 			return false, merr.WrapErrParameterInvalidMsg(

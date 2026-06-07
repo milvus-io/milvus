@@ -55,7 +55,7 @@ func (v *ReplicateConfigValidator) Validate() error {
 	}
 	clusters := v.incomingConfig.GetClusters()
 	if len(clusters) == 0 {
-		return merr.WrapErrParameterInvalidMsg("clusters list cannot be empty")
+		return merr.WrapErrParameterMissingMsg("clusters list cannot be empty")
 	}
 	// Perform all validation checks
 	if err := v.validateClusterBasic(clusters); err != nil {

@@ -530,7 +530,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 
 		indexType, exist := indexParamsMap[common.IndexTypeKey]
 		if !exist {
-			return merr.WrapErrParameterInvalidMsg("IndexType not specified")
+			return merr.WrapErrParameterMissingMsg("IndexType not specified")
 		}
 		//  index parameters defined in the YAML file are merged with the user-provided parameters during create stage
 		if Params.KnowhereConfig.Enable.GetAsBool() {

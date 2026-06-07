@@ -319,7 +319,7 @@ func (t *createCollectionTask) validatePartitionKey(ctx context.Context) error {
 
 	mustPartitionKey := Params.ProxyCfg.MustUsePartitionKey.GetAsBool()
 	if mustPartitionKey && idx == -1 {
-		return merr.WrapErrParameterInvalidMsg("partition key must be set when creating the collection" +
+		return merr.WrapErrParameterMissingMsg("partition key must be set when creating the collection" +
 			" because the mustUsePartitionKey config is true")
 	}
 
@@ -1095,6 +1095,8 @@ func (t *alterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 	// RootCoord enforces the same constraint (ddl_callbacks_alter_collection_schema.go);
 	// validate early at Proxy to give clearer error messages.
 	if len(funcSchemas) != 1 || funcSchemas[0] == nil {
+		// Count constraint (covers both zero and >1), not a pure missing param,
+		// so keep this as an invalid-parameter error.
 		return merr.WrapErrParameterInvalidMsg("For now, exactly one function schema is required in alter schema task")
 	}
 	functionType := funcSchemas[0].GetType()
@@ -1102,7 +1104,7 @@ func (t *alterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("For now, only BM25 and MinHash functions are supported in alter schema task")
 	}
 	if len(fieldInfos) == 0 {
-		return merr.WrapErrParameterInvalidMsg("fieldInfos is empty, function output fields are required")
+		return merr.WrapErrParameterMissingMsg("fieldInfos is empty, function output fields are required")
 	}
 
 	if len(fieldInfos) != 1 {
@@ -1187,7 +1189,7 @@ func (t *alterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
 		return validateDropField(t.oldSchema, id.FieldName)
 
 	default:
-		return merr.WrapErrParameterInvalidMsg("drop request must specify field_name, field_id, or function_name")
+		return merr.WrapErrParameterMissingMsg("drop request must specify field_name, field_id, or function_name")
 	}
 }
 

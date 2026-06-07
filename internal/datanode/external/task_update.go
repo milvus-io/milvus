@@ -235,7 +235,7 @@ func (t *RefreshExternalCollectionTask) Execute(ctx context.Context) error {
 func (t *RefreshExternalCollectionTask) fetchFragmentsFromExternalSource(ctx context.Context) ([]packed.Fragment, error) {
 	manifestPath := t.req.GetExploreManifestPath()
 	if manifestPath == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("explore manifest path is required but not provided")
+		return nil, merr.WrapErrParameterMissingMsg("explore manifest path is required but not provided")
 	}
 
 	log.Ctx(ctx).Info("reading file list from explore manifest",

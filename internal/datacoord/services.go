@@ -1627,7 +1627,7 @@ OUTER:
 						break OUTER
 					}
 				} else {
-					resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("FlushAllTss or FlushAllTs is required"))
+					resp.Status = merr.Status(merr.WrapErrParameterMissingMsg("FlushAllTss or FlushAllTs is required"))
 					return resp, nil
 				}
 			}
@@ -2481,14 +2481,14 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 
 	// Validate parameters
 	if req.GetName() == "" {
-		err := merr.WrapErrParameterInvalidMsg("snapshot name is required")
+		err := merr.WrapErrParameterMissingMsg("snapshot name is required")
 		log.Warn("invalid request", zap.Error(err))
 		return &datapb.RestoreSnapshotResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 	if req.GetTargetCollectionName() == "" {
-		err := merr.WrapErrParameterInvalidMsg("target collection name is required")
+		err := merr.WrapErrParameterMissingMsg("target collection name is required")
 		log.Warn("invalid request", zap.Error(err))
 		return &datapb.RestoreSnapshotResponse{
 			Status: merr.Status(err),

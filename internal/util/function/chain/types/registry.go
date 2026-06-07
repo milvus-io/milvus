@@ -46,7 +46,7 @@ func NewFunctionRegistry() *FunctionRegistry {
 // Returns an error if a function with the same name is already registered.
 func (r *FunctionRegistry) Register(name string, factory FunctionFactory) error {
 	if name == "" {
-		return merr.WrapErrParameterInvalidMsg("function name cannot be empty")
+		return merr.WrapErrParameterMissingMsg("function name cannot be empty")
 	}
 	if factory == nil {
 		return merr.WrapErrServiceInternal(fmt.Sprintf("function factory cannot be nil for %q", name))

@@ -252,7 +252,7 @@ func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) 
 // based on the primary key field type
 func convertIDsToSchemapbIDs(ids []interface{}, pkField *schemapb.FieldSchema) (*schemapb.IDs, error) {
 	if len(ids) == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("ids array cannot be empty")
+		return nil, merr.WrapErrParameterMissingMsg("ids array cannot be empty")
 	}
 
 	switch pkField.DataType {

@@ -1547,7 +1547,7 @@ func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnaly
 
 		analyzerNames := req.GetAnalyzerNames()
 		if len(analyzerNames) == 0 {
-			return merr.WrapErrParameterInvalidMsg("analyzer names must be set for multi analyzer")
+			return merr.WrapErrParameterMissingMsg("analyzer names must be set for multi analyzer")
 		}
 
 		if len(analyzerNames) == 1 && len(texts) > 1 {

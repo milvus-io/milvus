@@ -72,11 +72,11 @@ func NewSemanticHighlight(collSchema *schemapb.CollectionSchema, params []*commo
 	}
 
 	if len(queries) == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("queries is required")
+		return nil, merr.WrapErrParameterMissingMsg("queries is required")
 	}
 
 	if len(inputFields) == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("input_field is required")
+		return nil, merr.WrapErrParameterMissingMsg("input_field is required")
 	}
 
 	fieldIDMap := make(map[string]*schemapb.FieldSchema)

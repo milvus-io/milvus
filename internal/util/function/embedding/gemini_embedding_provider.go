@@ -80,7 +80,7 @@ func NewGeminiEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 	}
 
 	if modelName == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("model_name is required for Gemini embedding provider")
+		return nil, merr.WrapErrParameterMissingMsg("model_name is required for Gemini embedding provider")
 	}
 	modelName = strings.TrimPrefix(modelName, "models/")
 

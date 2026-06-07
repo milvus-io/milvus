@@ -76,7 +76,7 @@ func NewYCEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *s
 		}
 	}
 	if modelName == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("yc embedding model name is required")
+		return nil, merr.WrapErrParameterMissingMsg("yc embedding model name is required")
 	}
 
 	apiKey, url, err := models.ParseAKAndURL(credentials, functionSchema.Params, params, models.YandexCloudAKEnvStr, extraInfo)

@@ -61,7 +61,7 @@ func newAliProvider(params []*commonpb.KeyValuePair, conf map[string]string, cre
 		}
 	}
 	if modelName == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("ali rerank model name is required")
+		return nil, merr.WrapErrParameterMissingMsg("ali rerank model name is required")
 	}
 	provider := aliProvider{
 		baseProvider: baseProvider{batchSize: maxBatch},

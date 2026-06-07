@@ -457,7 +457,7 @@ func (o *GroupByOp) computeGroupScore(g *group) {
 func NewGroupByOpFromRepr(repr *OperatorRepr) (Operator, error) {
 	field, ok := repr.Params["field"].(string)
 	if !ok || field == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("group_by_op: field is required")
+		return nil, merr.WrapErrParameterMissingMsg("group_by_op: field is required")
 	}
 
 	groupSize, err := getInt64Param(repr.Params, "group_size")
@@ -502,7 +502,7 @@ func NewGroupByOpFromRepr(repr *OperatorRepr) (Operator, error) {
 func getInt64Param(params map[string]interface{}, key string) (int64, error) {
 	val, ok := params[key]
 	if !ok {
-		return 0, merr.WrapErrParameterInvalidMsg("%s is required", key)
+		return 0, merr.WrapErrParameterMissingMsg("%s is required", key)
 	}
 	switch v := val.(type) {
 	case int64:

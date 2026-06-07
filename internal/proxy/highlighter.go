@@ -177,7 +177,7 @@ func NewLexicalHighlighter(highlighter *commonpb.Highlighter) (*LexicalHighlight
 			return nil, merr.WrapErrParameterInvalidMsg("unmarshal pre_tags as string array failed: %v", err)
 		}
 		if len(tags) == 0 {
-			return nil, merr.WrapErrParameterInvalidMsg("pre_tags cannot be empty list")
+			return nil, merr.WrapErrParameterMissingMsg("pre_tags cannot be empty list")
 		}
 
 		h.preTags = make([][]byte, len(tags))
@@ -194,7 +194,7 @@ func NewLexicalHighlighter(highlighter *commonpb.Highlighter) (*LexicalHighlight
 			return nil, merr.WrapErrParameterInvalidMsg("unmarshal post_tags as string list failed: %v", err)
 		}
 		if len(tags) == 0 {
-			return nil, merr.WrapErrParameterInvalidMsg("post_tags cannot be empty list")
+			return nil, merr.WrapErrParameterMissingMsg("post_tags cannot be empty list")
 		}
 		h.postTags = make([][]byte, len(tags))
 		for i, tag := range tags {

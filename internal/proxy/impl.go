@@ -957,7 +957,7 @@ func (node *Proxy) BatchDescribeCollection(ctx context.Context, request *milvusp
 	collectionNames := request.GetCollectionName()
 	if len(collectionNames) == 0 {
 		return &milvuspb.BatchDescribeCollectionResponse{
-			Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection names cannot be empty")),
+			Status: merr.Status(merr.WrapErrParameterMissingMsg("collection names cannot be empty")),
 		}, nil
 	}
 
@@ -7824,7 +7824,7 @@ func (node *Proxy) GetRefreshExternalCollectionProgress(ctx context.Context, req
 	// Validate job ID
 	if req.GetJobId() == 0 {
 		return &milvuspb.GetRefreshExternalCollectionProgressResponse{
-			Status: merr.Status(merr.WrapErrParameterInvalidMsg("job_id is required")),
+			Status: merr.Status(merr.WrapErrParameterMissingMsg("job_id is required")),
 		}, nil
 	}
 

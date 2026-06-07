@@ -220,7 +220,7 @@ func (dst *dropSnapshotTask) PreExecute(ctx context.Context) error {
 	}
 
 	if dst.req.GetCollectionName() == "" {
-		return merr.WrapErrParameterInvalidMsg("collection_name is required for drop snapshot")
+		return merr.WrapErrParameterMissingMsg("collection_name is required for drop snapshot")
 	}
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, dst.req.GetDbName(), dst.req.GetCollectionName())
 	if err != nil {
@@ -315,7 +315,7 @@ func (dst *describeSnapshotTask) PreExecute(ctx context.Context) error {
 	}
 
 	if dst.req.GetCollectionName() == "" {
-		return merr.WrapErrParameterInvalidMsg("collection_name is required for describe snapshot")
+		return merr.WrapErrParameterMissingMsg("collection_name is required for describe snapshot")
 	}
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, dst.req.GetDbName(), dst.req.GetCollectionName())
 	if err != nil {
@@ -446,7 +446,7 @@ func (lst *listSnapshotsTask) PreExecute(ctx context.Context) error {
 	}
 
 	if lst.req.GetCollectionName() == "" {
-		return merr.WrapErrParameterInvalidMsg("collection_name is required for ListSnapshots")
+		return merr.WrapErrParameterMissingMsg("collection_name is required for ListSnapshots")
 	}
 
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, lst.req.GetDbName(), lst.req.GetCollectionName())
@@ -550,12 +550,12 @@ func (rst *restoreSnapshotTask) PreExecute(ctx context.Context) error {
 
 	// Validate source collection name
 	if rst.req.GetCollectionName() == "" {
-		return merr.WrapErrParameterInvalidMsg("collection_name is required for restore snapshot")
+		return merr.WrapErrParameterMissingMsg("collection_name is required for restore snapshot")
 	}
 
 	// Validate target collection name (required, cheap checks before RPC)
 	if rst.req.GetTargetCollectionName() == "" {
-		return merr.WrapErrParameterInvalidMsg("target_collection_name is required for restore snapshot")
+		return merr.WrapErrParameterMissingMsg("target_collection_name is required for restore snapshot")
 	}
 	if err := ValidateCollectionName(rst.req.GetTargetCollectionName()); err != nil {
 		return err
@@ -896,7 +896,7 @@ func (pst *pinSnapshotDataTask) PreExecute(ctx context.Context) error {
 	}
 
 	if pst.req.GetCollectionName() == "" {
-		return merr.WrapErrParameterInvalidMsg("collection_name is required for pin snapshot data")
+		return merr.WrapErrParameterMissingMsg("collection_name is required for pin snapshot data")
 	}
 
 	if pst.req.GetTtlSeconds() < 0 {
@@ -1001,7 +1001,7 @@ func (ust *unpinSnapshotDataTask) OnEnqueue() error {
 
 func (ust *unpinSnapshotDataTask) PreExecute(ctx context.Context) error {
 	if ust.req.GetPinId() == 0 {
-		return merr.WrapErrParameterInvalidMsg("pin_id is required for unpin snapshot data")
+		return merr.WrapErrParameterMissingMsg("pin_id is required for unpin snapshot data")
 	}
 	return nil
 }
