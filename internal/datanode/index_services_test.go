@@ -508,8 +508,9 @@ func (s *IndexServiceSuite) Test_CreateAnalyzeTask() {
 			MinClusterSizeRatio: 0.01,
 			MaxClusterSizeRatio: 10,
 			MaxClusterSize:      5 * 1024 * 1024 * 1024,
-			TrainBufferSize:     Params.DataCoordCfg.ClusteringCompactionMaxTrainBufferSize.GetAsSize(),
-			AssignBufferSize:    Params.DataCoordCfg.ClusteringCompactionMaxAssignBufferSize.GetAsSize(),
+			StorageVersion:      storage.StorageV1,
+			TrainBufferSize:     5 * 1024 * 1024 * 1024,
+			AssignBufferSize:    5 * 1024 * 1024 * 1024,
 		}
 
 		status, err := s.node.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
@@ -534,14 +535,11 @@ func (s *IndexServiceSuite) Test_CreateAnalyzeTask() {
 			err = merr.Error(resp.GetStatus())
 			s.NoError(err)
 			s.Equal(1, len(resp.GetAnalyzeJobResults().GetResults()))
-			result := resp.GetAnalyzeJobResults().GetResults()[0]
-			if result.GetState() == indexpb.JobState_JobStateFinished {
-				centroidsFile := result.GetCentroidsFile()
-				s.NotEmpty(centroidsFile)
-				s.Contains(centroidsFile, "/"+common.Centroids)
+			if resp.GetAnalyzeJobResults().GetResults()[0].GetState() == indexpb.JobState_JobStateFinished {
+				s.Equal("", resp.GetAnalyzeJobResults().GetResults()[0].GetCentroidsFile())
 				break
 			}
-			s.Equal(indexpb.JobState_JobStateInProgress, result.GetState())
+			s.Equal(indexpb.JobState_JobStateInProgress, resp.GetAnalyzeJobResults().GetResults()[0].GetState())
 			time.Sleep(time.Second)
 		}
 

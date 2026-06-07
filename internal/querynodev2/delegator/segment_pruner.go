@@ -332,12 +332,17 @@ func FilterSegmentsByVector(partitionStats *storage.PartitionStatsSnapshot,
 		}
 		optimizedRowCount := 0
 		added := 0
+		soFarNeededSegments := maps.Clone(neededSegments)
 		// forcing the same number of segments to search for e
 		for i := 0; i < segmentCount && added < targetSegNum; i++ {
 			seg := segmentsToSearch[i]
 
 			// deduplicate by segmentID
 			if _, ok := neededSegments[seg.segmentID]; ok {
+				_, ok = soFarNeededSegments[seg.segmentID]
+				if ok {
+					added++
+				}
 				continue
 			}
 

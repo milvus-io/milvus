@@ -140,7 +140,7 @@ const std::string LOON_FFI_PROPERTIES_KEY = "loon_ffi_properties";
 const std::string STATS_BASE_PATH_KEY = "stats_base_path";
 
 // storage version
-const int64_t STORAGE_V1 = 1;
+const int64_t STORAGE_V1 = 0;
 const int64_t STORAGE_V2 = 2;
 const int64_t STORAGE_V3 = 3;
 
