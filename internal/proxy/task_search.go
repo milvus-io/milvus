@@ -487,7 +487,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 					return merr.WrapErrParameterInvalid("", "",
 						"range search is not supported for vector array ("+searchKind+") fields in hybrid search, fieldName:"+annsField.GetName())
 				}
-				if t.rankParams.GetGroupByFieldId() > 0 || len(t.rankParams.GetGroupByFieldIds()) > 0 {
+				if t.rankParams.GetGroupByFieldId() > 0 {
 					return merr.WrapErrParameterInvalid("", "",
 						"group by search is not supported for vector array ("+searchKind+") fields in hybrid search, fieldName:"+annsField.GetName())
 				}
@@ -858,8 +858,8 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 				"legacy search iterator is not supported for element-level search on embedding list fields; use search iterator v2")
 		}
 
-		groupByFieldIDs := queryInfo.GetGroupByFieldIds()
-		if len(groupByFieldIDs) == 0 && queryInfo.GetGroupByFieldId() > 0 {
+		var groupByFieldIDs []int64
+		if queryInfo.GetGroupByFieldId() > 0 {
 			groupByFieldIDs = []int64{queryInfo.GetGroupByFieldId()}
 		}
 		if len(groupByFieldIDs) > 0 {
