@@ -675,6 +675,14 @@ func (field *FieldSchema) IsStructArrayField() bool {
 }
 
 func (field *FieldSchema) GetStructArrayProto(ctx context.Context) (*schemapb.StructArrayFieldSchema, error) {
+	if field == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("StructArray field schema is required")
+	}
+	if !field.IsStructArrayField() {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"StructArray field must use ArrayOfStruct or Array with Struct element, got dataType %s and elementDataType %s",
+			field.DataType, field.ElementDataType)
+	}
 	typeParams := make(map[string]interface{}, len(field.TypeParams)+len(field.ElementTypeParams))
 	for key, param := range field.ElementTypeParams {
 		typeParams[key] = param

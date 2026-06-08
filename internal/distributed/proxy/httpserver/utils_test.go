@@ -3872,11 +3872,13 @@ func TestIsEmbeddingListData(t *testing.T) {
 
 func TestPrintStructArrayFieldsV2(t *testing.T) {
 	schema := buildStructArrayTestSchema()
+	schema.GetStructArrayFields()[0].Nullable = true
 	printed := printStructArrayFieldsV2(schema.GetStructArrayFields())
 	require.Len(t, printed, 1)
 	entry := printed[0]
 	assert.Equal(t, "my_struct", entry[HTTPReturnFieldName])
 	assert.Equal(t, schemapb.DataType_ArrayOfStruct.String(), entry[HTTPReturnFieldType])
+	assert.Equal(t, true, entry[HTTPReturnFieldNullable])
 	subs, ok := entry["fields"].([]gin.H)
 	require.True(t, ok)
 	require.Len(t, subs, 2)

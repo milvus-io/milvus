@@ -3665,6 +3665,26 @@ func (s *AddCollectionFieldSuite) TestAddCollectionStructFieldNormal() {
 }
 
 func (s *AddCollectionFieldSuite) TestAddCollectionStructFieldFail() {
+	s.Run("reject_non_struct_array_schema", func() {
+		requestBody := []byte(`{"collectionName": "book", "schema": {
+			"fieldName": "bad_scalar",
+			"dataType": "Int64",
+			"fields": [
+				{"fieldName": "tag", "dataType": "Array", "elementDataType": "VarChar", "elementTypeParams": {"max_length": 64}}
+			]
+		}}`)
+
+		req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionStructFieldCategory, AddAction), bytes.NewReader(requestBody))
+		w := httptest.NewRecorder()
+		s.testEngine.ServeHTTP(w, req)
+		s.Equal(http.StatusOK, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		s.NoError(err)
+		s.Equal(merr.Code(merr.ErrParameterInvalid), returnBody.Code)
+		s.Contains(returnBody.Message, "must use ArrayOfStruct or Array with Struct element")
+	})
+
 	s.Run("invalid_struct_schema", func() {
 		requestBody := []byte(`{"collectionName": "book", "schema": {
 			"fieldName": "clips",
