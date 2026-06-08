@@ -812,6 +812,7 @@ dataCoord:
   snapshot:
     pendingTimeout: 60 # Timeout in minutes for pending snapshots before GC cleanup
     maxCompactionProtectionSeconds: 604800 # Maximum allowed compaction protection duration in seconds (default 604800 = 7 days)
+    crossBucketEndpointAllowlist: "" # Comma/space separated custom endpoint host[:port] allowlist for snapshot cross-bucket storage specs.
   enableActiveStandby: false
   brokerTimeout: 5000 # 5000ms, dataCoord broker rpc timeout
   autoBalance: true # Enable auto balance

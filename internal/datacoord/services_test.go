@@ -2620,6 +2620,50 @@ func TestServer_CreateSnapshot_DuplicateName(t *testing.T) {
 	})
 }
 
+func TestServer_ExportSnapshot_ForwardsForeignStorageFields(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedCollectionID int64
+	var capturedSnapshotName string
+	var capturedTargetS3Path string
+	var capturedExternalSpec string
+	mockExport := mockey.Mock((*snapshotManager).ExportSnapshot).To(
+		func(
+			_ *snapshotManager,
+			_ context.Context,
+			collectionID int64,
+			snapshotName string,
+			targetS3Path string,
+			externalSpec string,
+		) (string, error) {
+			capturedCollectionID = collectionID
+			capturedSnapshotName = snapshotName
+			capturedTargetS3Path = targetS3Path
+			capturedExternalSpec = externalSpec
+			return "s3://foreign-bucket/export-root/snapshots/100/metadata/1.json", nil
+		}).Build()
+	defer mockExport.UnPatch()
+
+	server := &Server{
+		snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.ExportSnapshot(ctx, &datapb.ExportSnapshotRequest{
+		Name:         "snapshot-1",
+		CollectionId: 100,
+		TargetS3Path: "s3://foreign-bucket/export-root",
+		ExternalSpec: `{"extfs":{"region":"us-west-2"}}`,
+	})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(resp.GetStatus()))
+	assert.Equal(t, "s3://foreign-bucket/export-root/snapshots/100/metadata/1.json", resp.GetSnapshotMetadataUri())
+	assert.Equal(t, int64(100), capturedCollectionID)
+	assert.Equal(t, "snapshot-1", capturedSnapshotName)
+	assert.Equal(t, "s3://foreign-bucket/export-root", capturedTargetS3Path)
+	assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, capturedExternalSpec)
+}
+
 // --- Test rollbackRestoreSnapshot ---
 // Note: The actual DropCollection RPC is tested in internal/datacoord/broker/coordinator_broker_test.go
 

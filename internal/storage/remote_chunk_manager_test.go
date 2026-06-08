@@ -76,6 +76,85 @@ func TestInitRemoteChunkManager(t *testing.T) {
 	assert.NotNil(t, client)
 }
 
+func TestRemoteChunkManagerImplementsCrossBucketCopier(t *testing.T) {
+	var _ CrossBucketCopier = (*RemoteChunkManager)(nil)
+}
+
+func TestRemoteChunkManagerCopyCrossBucket(t *testing.T) {
+	ctx := context.Background()
+	copyErr := errors.New("copy failed")
+
+	t.Run("copy object across buckets successfully", func(t *testing.T) {
+		client := &recordingObjectStorage{}
+		mcm := &RemoteChunkManager{client: client}
+
+		err := mcm.CopyCrossBucket(ctx, "src-bucket", "src-object", "dst-bucket", "dst-object")
+		require.NoError(t, err)
+		require.Len(t, client.copyCrossBucketCalls, 1)
+		assert.Equal(t, remoteCopyCrossBucketCall{
+			srcBucket: "src-bucket",
+			srcObject: "src-object",
+			dstBucket: "dst-bucket",
+			dstObject: "dst-object",
+		}, client.copyCrossBucketCalls[0])
+	})
+
+	t.Run("return copy error", func(t *testing.T) {
+		client := &recordingObjectStorage{copyCrossBucketErr: copyErr}
+		mcm := &RemoteChunkManager{client: client}
+
+		err := mcm.CopyCrossBucket(ctx, "src-bucket", "src-object", "dst-bucket", "dst-object")
+		require.ErrorIs(t, err, copyErr)
+		require.Len(t, client.copyCrossBucketCalls, 1)
+	})
+}
+
+type remoteCopyCrossBucketCall struct {
+	srcBucket string
+	srcObject string
+	dstBucket string
+	dstObject string
+}
+
+type recordingObjectStorage struct {
+	copyCrossBucketCalls []remoteCopyCrossBucketCall
+	copyCrossBucketErr   error
+}
+
+func (r *recordingObjectStorage) GetObject(ctx context.Context, bucketName, objectName string, offset int64, size int64) (FileReader, error) {
+	return nil, nil
+}
+
+func (r *recordingObjectStorage) PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error {
+	return nil
+}
+
+func (r *recordingObjectStorage) StatObject(ctx context.Context, bucketName, objectName string) (int64, error) {
+	return 0, nil
+}
+
+func (r *recordingObjectStorage) WalkWithObjects(ctx context.Context, bucketName string, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) error {
+	return nil
+}
+
+func (r *recordingObjectStorage) RemoveObject(ctx context.Context, bucketName, objectName string) error {
+	return nil
+}
+
+func (r *recordingObjectStorage) CopyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error {
+	return nil
+}
+
+func (r *recordingObjectStorage) CopyObjectCrossBucket(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string) error {
+	r.copyCrossBucketCalls = append(r.copyCrossBucketCalls, remoteCopyCrossBucketCall{
+		srcBucket: srcBucket,
+		srcObject: srcObjectName,
+		dstBucket: dstBucket,
+		dstObject: dstObjectName,
+	})
+	return r.copyCrossBucketErr
+}
+
 func TestMinioChunkManager(t *testing.T) {
 	testBucket := Params.MinioCfg.BucketName.GetValue()
 

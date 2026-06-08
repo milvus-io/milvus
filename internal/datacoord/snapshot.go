@@ -102,6 +102,9 @@ type SnapshotData struct {
 	// Each buildID uniquely identifies an index build task, enabling GC to check
 	// if specific index files are referenced by a snapshot without path parsing.
 	BuildIDs []int64
+	// Layout describes whether the snapshot references existing cluster data or
+	// is a self-contained external bundle.
+	Layout datapb.SnapshotLayout
 }
 
 // =============================================================================
@@ -239,6 +242,15 @@ func GetSegmentManifestPath(manifestDir string, segmentID int64) string {
 //   - string: Path to metadata file (to be stored in SnapshotInfo.S3Location)
 //   - error: Any write failure (partial writes may exist and need GC cleanup)
 func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (string, error) {
+	return w.save(ctx, snapshot, w.chunkManager.RootPath(), datapb.SnapshotLayout_SnapshotLayoutReferenced)
+}
+
+// SaveToRoot saves snapshot data under a caller-provided root path.
+func (w *SnapshotWriter) SaveToRoot(ctx context.Context, snapshot *SnapshotData, rootPath string, layout datapb.SnapshotLayout) (string, error) {
+	return w.save(ctx, snapshot, rootPath, layout)
+}
+
+func (w *SnapshotWriter) save(ctx context.Context, snapshot *SnapshotData, rootPath string, layout datapb.SnapshotLayout) (string, error) {
 	// Validate input parameters
 	if snapshot == nil {
 		return "", merr.WrapErrServiceInternalMsg("snapshot cannot be nil")
@@ -258,7 +270,11 @@ func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (stri
 	if snapshotID <= 0 {
 		return "", merr.WrapErrServiceInternalMsg("invalid snapshot ID: %d", snapshotID)
 	}
-	manifestDir, metadataPath := GetSnapshotPaths(w.chunkManager.RootPath(), collectionID, snapshotID)
+	if layout == datapb.SnapshotLayout_SnapshotLayoutUnknown {
+		layout = datapb.SnapshotLayout_SnapshotLayoutReferenced
+	}
+	snapshot.Layout = layout
+	manifestDir, metadataPath := GetSnapshotPaths(rootPath, collectionID, snapshotID)
 
 	// Step 1: Write each segment to a separate manifest file
 	// Each segment gets its own Avro file for fine-grained control and GC
@@ -345,6 +361,7 @@ func (w *SnapshotWriter) writeMetadataFile(ctx context.Context, metadataPath str
 		Storagev2ManifestList: storagev2Manifests,
 		SegmentIds:            snapshot.SegmentIDs,
 		BuildIds:              snapshot.BuildIDs,
+		Layout:                snapshot.Layout,
 	}
 
 	// Use protojson for serialization to correctly handle protobuf oneof fields
@@ -423,7 +440,7 @@ func (w *SnapshotWriter) Drop(ctx context.Context, metadataFilePath string) erro
 // This is a helper method used by Drop to discover manifest files.
 func (w *SnapshotWriter) readMetadataFile(ctx context.Context, filePath string) (*datapb.SnapshotMetadata, error) {
 	// Read raw JSON content from object storage
-	data, err := w.chunkManager.Read(ctx, filePath)
+	data, err := w.chunkManager.Read(ctx, normalizeSnapshotObjectPath(w.chunkManager, filePath))
 	if err != nil {
 		return nil, merr.WrapErrServiceInternalErr(err, "failed to read metadata file")
 	}
@@ -497,6 +514,25 @@ func (r *SnapshotReader) ReadSnapshot(ctx context.Context, metadataFilePath stri
 		return nil, merr.WrapErrServiceInternalErr(err, "failed to read metadata file")
 	}
 
+	var oldRoot, newRoot string
+	shouldRebase := false
+	if metadata.GetLayout() == datapb.SnapshotLayout_SnapshotLayoutSelfContained {
+		newRoot = deriveSnapshotRootPath(metadataFilePath)
+		if newRoot == "" {
+			return nil, fmt.Errorf("invalid self-contained snapshot: %w", fmt.Errorf("cannot derive snapshot root from metadata path %q", metadataFilePath))
+		}
+		if metadata.GetSnapshotInfo() == nil {
+			return nil, fmt.Errorf("invalid self-contained snapshot: %w", fmt.Errorf("self-contained snapshot info cannot be nil"))
+		}
+		oldRoot = deriveSnapshotRootPath(metadata.GetSnapshotInfo().GetS3Location())
+		shouldRebase = oldRoot != "" && newRoot != "" && oldRoot != newRoot
+		if shouldRebase {
+			if err := RebaseSelfContainedSnapshotMetadata(r.chunkManager, metadata, oldRoot, newRoot); err != nil {
+				return nil, fmt.Errorf("failed to rebase snapshot metadata: %w", err)
+			}
+		}
+	}
+
 	// Step 2: Optionally read segment details from manifest files
 	var allSegments []*datapb.SegmentDescription
 	if includeSegments {
@@ -532,6 +568,19 @@ func (r *SnapshotReader) ReadSnapshot(ctx context.Context, metadataFilePath stri
 		// Pre-computed ID lists available even without full segment loading
 		SegmentIDs: metadata.GetSegmentIds(),
 		BuildIDs:   metadata.GetBuildIds(),
+		Layout:     metadata.GetLayout(),
+	}
+
+	if metadata.GetLayout() == datapb.SnapshotLayout_SnapshotLayoutSelfContained {
+		if shouldRebase {
+			if err := RebaseSelfContainedSnapshotData(r.chunkManager, snapshotData, oldRoot, newRoot); err != nil {
+				return nil, fmt.Errorf("failed to rebase snapshot data: %w", err)
+			}
+		}
+		snapshotData.SnapshotInfo.S3Location = metadataFilePath
+		if err := validateSelfContainedSnapshotMetadata(r.chunkManager, metadataFilePath, metadata, snapshotData.Segments); err != nil {
+			return nil, fmt.Errorf("invalid self-contained snapshot: %w", err)
+		}
 	}
 
 	return snapshotData, nil
@@ -541,7 +590,7 @@ func (r *SnapshotReader) ReadSnapshot(ctx context.Context, metadataFilePath stri
 // Helper method used by ReadSnapshot.
 func (r *SnapshotReader) readMetadataFile(ctx context.Context, filePath string) (*datapb.SnapshotMetadata, error) {
 	// Read raw JSON content from object storage
-	data, err := r.chunkManager.Read(ctx, filePath)
+	data, err := r.chunkManager.Read(ctx, normalizeSnapshotObjectPath(r.chunkManager, filePath))
 	if err != nil {
 		return nil, merr.WrapErrServiceInternalErr(err, "failed to read metadata file")
 	}
@@ -563,7 +612,7 @@ func (r *SnapshotReader) readMetadataFile(ctx context.Context, filePath string) 
 //   - error: Any read or parse failure
 func (r *SnapshotReader) readManifestFile(ctx context.Context, filePath string, formatVersion int) ([]*datapb.SegmentDescription, error) {
 	// Read raw Avro content from object storage
-	data, err := r.chunkManager.Read(ctx, filePath)
+	data, err := r.chunkManager.Read(ctx, normalizeSnapshotObjectPath(r.chunkManager, filePath))
 	if err != nil {
 		return nil, merr.WrapErrServiceInternalErr(err, "failed to read manifest file")
 	}

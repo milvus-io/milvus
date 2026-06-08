@@ -36,7 +36,10 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/util/snapshotstorage"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -2913,6 +2916,76 @@ func TestSnapshotManager_DropSnapshotsByCollection_NoSnapshots(t *testing.T) {
 
 	err := sm.DropSnapshotsByCollection(ctx, 999)
 	assert.NoError(t, err)
+}
+
+func TestSnapshotManager_ExportSnapshot_ResolvesForeignStorageAndUsesTargetManager(t *testing.T) {
+	ctx := context.Background()
+	sourceCM := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	targetCM := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	copier := &recordingCrossBucketCopier{sourceCM: sourceCM, targetCM: targetCM}
+	snapshotData := createTestSnapshotData()
+
+	var capturedDirection snapshotstorage.Direction
+	var capturedURI string
+	var capturedSpec string
+	mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).To(
+		func(
+			_ context.Context,
+			_ *objectstorage.Config,
+			direction snapshotstorage.Direction,
+			foreignURI string,
+			externalSpec string,
+		) (*snapshotstorage.ResolvedForeignStorage, error) {
+			capturedDirection = direction
+			capturedURI = foreignURI
+			capturedSpec = externalSpec
+			return &snapshotstorage.ResolvedForeignStorage{
+				ForeignBucket: "foreign-bucket",
+				ForeignCM:     targetCM,
+				Copier:        copier,
+			}, nil
+		}).Build()
+	defer mockResolve.UnPatch()
+
+	mockReadSnapshot := mockey.Mock((*snapshotManager).ReadSnapshotData).To(
+		func(_ *snapshotManager, _ context.Context, collectionID int64, snapshotName string) (*SnapshotData, error) {
+			assert.Equal(t, int64(100), collectionID)
+			assert.Equal(t, "snapshot-1", snapshotName)
+			return snapshotData, nil
+		}).Build()
+	defer mockReadSnapshot.UnPatch()
+
+	mockExport := mockey.Mock((*snapshotExporter).Export).To(
+		func(exporter *snapshotExporter, _ context.Context, gotSnapshot *SnapshotData, targetPath string) (string, error) {
+			assert.Same(t, sourceCM, exporter.sourceCM)
+			assert.Same(t, targetCM, exporter.targetCM)
+			assert.Same(t, copier, exporter.copier)
+			assert.Equal(t, Params.MinioCfg.BucketName.GetValue(), exporter.sourceBucket)
+			assert.Equal(t, "foreign-bucket", exporter.targetBucket)
+			assert.Same(t, snapshotData, gotSnapshot)
+			assert.Equal(t, "s3://foreign-bucket/export-root", targetPath)
+			return "s3://foreign-bucket/export-root/snapshots/100/metadata/1.json", nil
+		}).Build()
+	defer mockExport.UnPatch()
+
+	sm := &snapshotManager{
+		snapshotMeta: &snapshotMeta{
+			reader: NewSnapshotReader(sourceCM),
+		},
+	}
+
+	metadataURI, err := sm.ExportSnapshot(
+		ctx,
+		100,
+		"snapshot-1",
+		"s3://foreign-bucket/export-root",
+		`{"extfs":{"region":"us-west-2"}}`,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "s3://foreign-bucket/export-root/snapshots/100/metadata/1.json", metadataURI)
+	assert.Equal(t, snapshotstorage.Export, capturedDirection)
+	assert.Equal(t, "s3://foreign-bucket/export-root", capturedURI)
+	assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, capturedSpec)
 }
 
 // --- Test getDBCollectionIDs ---

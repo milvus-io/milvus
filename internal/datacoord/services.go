@@ -2454,11 +2454,45 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 }
 
 func (s *Server) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotRequest) (*datapb.ExportSnapshotResponse, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("snapshot", req.GetName()),
+		zap.Int64("collectionID", req.GetCollectionId()),
+		zap.String("targetS3Path", redactSnapshotObjectPath(req.GetTargetS3Path())),
+		zap.Bool("externalSpecSet", req.GetExternalSpec() != ""),
+	)
+
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
 	}
+	log.Info("receive ExportSnapshot request")
+
+	if req.GetName() == "" {
+		err := merr.WrapErrParameterInvalidMsg("snapshot name is required")
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	if req.GetCollectionId() == 0 {
+		err := merr.WrapErrParameterInvalidMsg("collection_id is required")
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	if req.GetTargetS3Path() == "" {
+		err := merr.WrapErrParameterInvalidMsg("target_s3_path is required")
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+
+	metadataURI, err := s.snapshotManager.ExportSnapshot(
+		ctx,
+		req.GetCollectionId(),
+		req.GetName(),
+		req.GetTargetS3Path(),
+		req.GetExternalSpec(),
+	)
+	if err != nil {
+		log.Warn("export snapshot failed", zap.Error(err))
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
 	return &datapb.ExportSnapshotResponse{
-		Status: merr.Status(merr.WrapErrServiceUnimplemented(errors.New("ExportSnapshot is not implemented"))),
+		Status:              merr.Success(),
+		SnapshotMetadataUri: metadataURI,
 	}, nil
 }
 

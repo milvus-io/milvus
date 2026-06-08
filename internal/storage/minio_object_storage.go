@@ -29,6 +29,8 @@ import (
 
 var _ ObjectStorage = (*MinioObjectStorage)(nil)
 
+const minioSingleCopyObjectMaxSize = 5 * 1024 * 1024 * 1024
+
 type MinioObjectStorage struct {
 	*minio.Client
 }
@@ -122,5 +124,26 @@ func (minioObjectStorage *MinioObjectStorage) CopyObject(ctx context.Context, bu
 		Object: dstObjectName,
 	}
 	_, err := minioObjectStorage.Client.CopyObject(ctx, dstOpts, srcOpts)
+	return mapObjectStorageError(srcObjectName, err)
+}
+
+func (minioObjectStorage *MinioObjectStorage) CopyObjectCrossBucket(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string) error {
+	srcOpts := minio.CopySrcOptions{
+		Bucket: srcBucket,
+		Object: srcObjectName,
+	}
+	dstOpts := minio.CopyDestOptions{
+		Bucket: dstBucket,
+		Object: dstObjectName,
+	}
+	srcInfo, err := minioObjectStorage.Client.StatObject(ctx, srcBucket, srcObjectName, minio.StatObjectOptions{})
+	if err != nil {
+		return mapObjectStorageError(srcObjectName, err)
+	}
+	if srcInfo.Size <= minioSingleCopyObjectMaxSize {
+		_, err = minioObjectStorage.Client.CopyObject(ctx, dstOpts, srcOpts)
+		return mapObjectStorageError(srcObjectName, err)
+	}
+	_, err = minioObjectStorage.ComposeObject(ctx, dstOpts, srcOpts)
 	return mapObjectStorageError(srcObjectName, err)
 }

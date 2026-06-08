@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/snapshotstorage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -203,6 +204,8 @@ type SnapshotManager interface {
 		rollback RollbackFunc,
 		validateResources ValidateResourcesFunc,
 	) (int64, error)
+
+	ExportSnapshot(ctx context.Context, collectionID int64, snapshotName string, targetS3Path string, externalSpec string) (string, error)
 
 	// RestoreCollection creates a new collection and its user partitions based on snapshot data.
 	// It marshals the schema, sets preserve field IDs property, calls RootCoord to create collection,
@@ -783,6 +786,59 @@ func (sm *snapshotManager) RestoreSnapshot(
 
 	mlog.Info(context.TODO(), "restore snapshot completed", mlog.Int64("collectionID", collectionID), mlog.Int64("jobID", jobID))
 	return jobID, nil
+}
+
+func (sm *snapshotManager) ExportSnapshot(
+	ctx context.Context,
+	collectionID int64,
+	snapshotName string,
+	targetS3Path string,
+	externalSpec string,
+) (string, error) {
+	logger := mlog.With(
+		zap.Int64("collectionID", collectionID),
+		zap.String("snapshotName", snapshotName),
+		zap.String("targetS3Path", redactSnapshotObjectPath(targetS3Path)),
+		zap.Bool("externalSpecSet", externalSpec != ""),
+	)
+	logger.Info(ctx, "export snapshot request received")
+
+	if targetS3Path == "" {
+		return "", merr.WrapErrParameterInvalidMsg("target_s3_path is required")
+	}
+	instanceCfg := snapshotstorage.InstanceConfigFromParamtable(Params)
+	resolved, err := snapshotstorage.ResolveForeignStorage(
+		ctx,
+		instanceCfg,
+		snapshotstorage.Export,
+		targetS3Path,
+		externalSpec,
+	)
+	if err != nil {
+		return "", err
+	}
+	if err := validateSnapshotObjectPathForBucket(resolved.ForeignCM, "target_s3_path", targetS3Path, resolved.ForeignBucket); err != nil {
+		return "", merr.WrapErrParameterInvalidMsg("%s", err.Error())
+	}
+	snapshotData, err := sm.ReadSnapshotData(ctx, collectionID, snapshotName)
+	if err != nil {
+		logger.Warn(ctx, "failed to read snapshot data for export", zap.Error(err))
+		return "", err
+	}
+
+	metadataURI, err := newSnapshotExporter(
+		sm.snapshotMeta.reader.chunkManager,
+		resolved.ForeignCM,
+		resolved.Copier,
+		instanceCfg.BucketName,
+		resolved.ForeignBucket,
+	).Export(ctx, snapshotData, targetS3Path)
+	if err != nil {
+		logger.Warn(ctx, "failed to export snapshot", zap.Error(err))
+		return "", err
+	}
+	logger.Info(ctx, "export snapshot completed", zapSnapshotMetadataURI(metadataURI))
+	return metadataURI, nil
 }
 
 // RestoreCollection creates a new collection and its user partitions based on snapshot data.
