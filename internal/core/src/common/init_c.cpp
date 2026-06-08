@@ -18,11 +18,16 @@
 #include <mutex>
 
 #include <arrow/io/interfaces.h>
+#include <arrow/io/type_fwd.h>
+#include <arrow/util/thread_pool.h>
 #include <openssl/evp.h>
 #include "common/init_c.h"
 #include "common/Common.h"
 #include "common/Tracer.h"
 #include "common/init_c.h"
+#include "monitor/Monitor.h"
+#include "log/Log.h"
+#include "storage/ThreadPool.h"
 #include "exec/expression/ExprCache.h"
 #include "log/Log.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
@@ -136,6 +141,23 @@ SetArrowIOThreadPoolCapacity(int threads) {
         return;
     }
     LOG_INFO("arrow io thread pool capacity set to {}", threads);
+    UpdateArrowIOThreadPoolMetrics();
+}
+
+void
+UpdateArrowIOThreadPoolMetrics() {
+    auto capacity = arrow::io::GetIOThreadPoolCapacity();
+    milvus::monitor::internal_arrow_io_pool_capacity_all.Set(capacity);
+
+    auto* executor = arrow::io::default_io_context().executor();
+    auto* thread_pool = dynamic_cast<arrow::internal::ThreadPool*>(executor);
+    if (thread_pool == nullptr) {
+        milvus::monitor::internal_arrow_io_pool_tasks_total_all.Set(-1);
+        return;
+    }
+
+    auto tasks = thread_pool->GetNumTasks();
+    milvus::monitor::internal_arrow_io_pool_tasks_total_all.Set(tasks);
 }
 
 void

@@ -117,6 +117,26 @@ DECLARE_PROMETHEUS_COUNTER_FAMILY(internal_storage_pool_task_completed_total);
 DECLARE_PROMETHEUS_COUNTER(internal_storage_pool_task_completed_total_high);
 DECLARE_PROMETHEUS_COUNTER(internal_storage_pool_task_completed_total_middle);
 DECLARE_PROMETHEUS_COUNTER(internal_storage_pool_task_completed_total_low);
+DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(
+    internal_storage_pool_queue_duration_seconds);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_storage_pool_queue_duration_seconds_high);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_storage_pool_queue_duration_seconds_middle);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_storage_pool_queue_duration_seconds_low);
+DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(
+    internal_storage_pool_execute_duration_seconds);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_storage_pool_execute_duration_seconds_high);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_storage_pool_execute_duration_seconds_middle);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_storage_pool_execute_duration_seconds_low);
+
+// arrow io thread pool metrics
+DECLARE_PROMETHEUS_GAUGE_FAMILY(internal_arrow_io_pool_capacity);
+DECLARE_PROMETHEUS_GAUGE(internal_arrow_io_pool_capacity_all);
+DECLARE_PROMETHEUS_GAUGE_FAMILY(internal_arrow_io_pool_tasks_total);
+DECLARE_PROMETHEUS_GAUGE(internal_arrow_io_pool_tasks_total_all);
 
 // json stats metrics
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_json_stats_latency);
