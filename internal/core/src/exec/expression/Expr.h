@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <type_traits>
 
@@ -2243,16 +2244,16 @@ class SegmentExpr : public Expr {
     PrefetchAsync(const std::shared_ptr<folly::CPUThreadPoolExecutor>
                       prefetch_pool) override {
         auto self = std::static_pointer_cast<SegmentExpr>(shared_from_this());
-        prefetch_future_ = folly::via(prefetch_pool.get(), [self]() {
+        prefetch_future_.emplace(folly::via(prefetch_pool.get(), [self]() {
             if (self->op_ctx_ != nullptr &&
                 self->op_ctx_->cancellation_token.isCancellationRequested()) {
                 return;
             }
             self->EnsureExecPathDetermined();
             if (self->exec_path_ == ExprExecPath::RawData) {
-                self->PrefetchRawData(self->field_id_);
+                self->PrefetchRawData();
             }
-        });
+        }));
     }
 
     virtual void
@@ -2267,8 +2268,9 @@ class SegmentExpr : public Expr {
 
     void
     WaitPrefetch() override {
-        if (prefetch_future_.valid()) {
-            std::move(prefetch_future_).wait();
+        if (prefetch_future_.has_value()) {
+            std::move(*prefetch_future_).wait();
+            prefetch_future_.reset();
             return;
         }
         EnsureExecPathDetermined();
@@ -2340,7 +2342,7 @@ class SegmentExpr : public Expr {
     double json_filter_stats_latency_us_{0.0};
     double json_stats_shredding_latency_us_{0.0};
     double json_stats_shared_latency_us_{0.0};
-    folly::Future<folly::Unit> prefetch_future_;
+    std::optional<folly::Future<folly::Unit>> prefetch_future_;
 };
 
 bool
