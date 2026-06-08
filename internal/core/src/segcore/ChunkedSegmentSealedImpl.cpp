@@ -1378,7 +1378,7 @@ ChunkedSegmentSealedImpl::prefetch_chunks(milvus::OpContext* op_ctx,
         auto num_chunks = column->num_chunks();
         std::vector<int64_t> ids(num_chunks);
         std::iota(ids.begin(), ids.end(), 0);
-        prefetch_chunks(op_ctx, field_id, ids);
+        column->PrefetchChunks(op_ctx, ids);
     }
 }
 
@@ -6697,7 +6697,7 @@ ChunkedSegmentSealedImpl::prefetch_vector(milvus::OpContext* op_ctx,
         auto cache_index = field_indexing->indexing_;
         SemiInlineGet(cache_index->PinCells(op_ctx, {0}));
     } else {
-        SegmentInternalInterface::prefetch_chunks(op_ctx, field_id);
+        this->prefetch_chunks(op_ctx, field_id);
     }
 }
 }  // namespace milvus::segcore
