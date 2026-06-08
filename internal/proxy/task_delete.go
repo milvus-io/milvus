@@ -128,7 +128,7 @@ func (dt *deleteTask) getChannels() []pChan {
 }
 
 func (dt *deleteTask) PreExecute(ctx context.Context) error {
-	if dt.req.GetNamespace() == nil {
+	if dt.req.Namespace == nil {
 		return nil
 	}
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
