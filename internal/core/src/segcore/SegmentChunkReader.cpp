@@ -99,6 +99,7 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
     auto chunk_valid_data = chunk_info.valid_data();
     auto current_chunk_size = segment_->chunk_size(field_id, current_chunk_id);
     return [=,
+            this,
             pw = std::move(pw),
             &current_chunk_id,
             &current_chunk_pos]() mutable -> const data_access_type {
@@ -208,6 +209,7 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
         auto current_chunk_size =
             segment_->chunk_size(field_id, current_chunk_id);
         return [=,
+                this,
                 pw = std::move(pw),
                 &current_chunk_id,
                 &current_chunk_pos]() mutable -> const data_access_type {
@@ -282,8 +284,10 @@ ChunkDataAccessor
 SegmentChunkReader::GetChunkDataAccessor(FieldId field_id,
                                          int chunk_id,
                                          PinnedIndexView pinned_index) const {
-    auto [index, base_offset] =
+    auto index_and_base_offset =
         GetIndexAndBaseOffset(segment_, field_id, chunk_id, pinned_index);
+    auto index = index_and_base_offset.first;
+    auto base_offset = index_and_base_offset.second;
     auto index_ptr = dynamic_cast<const index::ScalarIndex<T>*>(index);
     if (index_ptr != nullptr && index_ptr->HasRawData()) {
         return
@@ -317,8 +321,10 @@ template <>
 ChunkDataAccessor
 SegmentChunkReader::GetChunkDataAccessor<std::string>(
     FieldId field_id, int chunk_id, PinnedIndexView pinned_index) const {
-    auto [index, base_offset] =
+    auto index_and_base_offset =
         GetIndexAndBaseOffset(segment_, field_id, chunk_id, pinned_index);
+    auto index = index_and_base_offset.first;
+    auto base_offset = index_and_base_offset.second;
     auto index_ptr =
         dynamic_cast<const index::ScalarIndex<std::string>*>(index);
     if (index_ptr != nullptr && index_ptr->HasRawData()) {
