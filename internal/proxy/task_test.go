@@ -8281,7 +8281,7 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 		assert.Contains(t, err.Error(), "action is nil")
 	})
 
-	t.Run("empty add request fails validation", func(t *testing.T) {
+	t.Run("nil add request fails validation", func(t *testing.T) {
 		task := &alterCollectionSchemaTask{
 			ctx:       ctx,
 			oldSchema: baseSchema,
@@ -8294,7 +8294,7 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 		}
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "exactly one function schema is required")
+		assert.Contains(t, err.Error(), "add_request is nil")
 	})
 
 	t.Run("drop by field_name - validation error", func(t *testing.T) {

@@ -151,7 +151,7 @@ func (suite *SearchSuite) TestSearchSealed() {
 	searchReq, err := mock_segcore.GenSearchPlanAndRequests(suite.collection.GetCCollection(), []int64{suite.sealed.ID()}, mock_segcore.IndexFaissIDMap, nq)
 	suite.NoError(err)
 
-	_, segments, err := SearchHistorical(ctx, suite.manager, searchReq, suite.collectionID, nil, []int64{suite.sealed.ID()})
+	_, segments, err := SearchHistorical(ctx, suite.manager, searchReq, nil, suite.collectionID, nil, []int64{suite.sealed.ID()})
 	suite.NoError(err)
 	suite.manager.Segment.Unpin(segments)
 }
@@ -160,7 +160,7 @@ func (suite *SearchSuite) TestSearchGrowing() {
 	searchReq, err := mock_segcore.GenSearchPlanAndRequests(suite.collection.GetCCollection(), []int64{suite.growing.ID()}, mock_segcore.IndexFaissIDMap, 1)
 	suite.NoError(err)
 
-	res, segments, err := SearchStreaming(context.TODO(), suite.manager, searchReq,
+	res, segments, err := SearchStreaming(context.TODO(), suite.manager, searchReq, nil,
 		suite.collectionID,
 		[]int64{suite.partitionID},
 		[]int64{suite.growing.ID()},
@@ -229,7 +229,7 @@ func (suite *SearchSuite) TestSearchWithFilter() {
 		searchReq, err := mock_segcore.GenSearchPlanAndRequests(suite.collection.GetCCollection(), segIDs, mock_segcore.IndexFaissIDMap, 1)
 		suite.NoError(err)
 
-		res, segments, err := SearchHistorical(ctx, suite.manager, searchReq,
+		res, segments, err := SearchHistorical(ctx, suite.manager, searchReq, nil,
 			suite.collectionID,
 			[]int64{suite.partitionID},
 			segIDs,
@@ -301,7 +301,7 @@ func (suite *SearchSuite) TestSearchStreamingWithFilterDoesNotPruneGrowing() {
 	searchReq, err := mock_segcore.GenSearchPlanAndRequests(suite.collection.GetCCollection(), growingSegIDs, mock_segcore.IndexFaissIDMap, 1)
 	suite.NoError(err)
 
-	res, segments, err := SearchStreaming(ctx, suite.manager, searchReq,
+	res, segments, err := SearchStreaming(ctx, suite.manager, searchReq, nil,
 		suite.collectionID,
 		[]int64{suite.partitionID},
 		growingSegIDs,

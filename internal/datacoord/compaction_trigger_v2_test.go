@@ -59,6 +59,20 @@ func (stubDispatchableView) ForceTrigger() (CompactionView, string)      { retur
 func (stubDispatchableView) ForceTriggerAll() ([]CompactionView, string) { return nil, "" }
 func (stubDispatchableView) GetTriggerID() int64                         { return 0 }
 
+type panicAllocator struct{}
+
+func (panicAllocator) AllocTimestamp(context.Context) (typeutil.Timestamp, error) {
+	panic("unexpected AllocTimestamp")
+}
+
+func (panicAllocator) AllocID(context.Context) (typeutil.UniqueID, error) {
+	panic("unexpected AllocID")
+}
+
+func (panicAllocator) AllocN(int64) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	panic("unexpected AllocN")
+}
+
 type CompactionTriggerManagerSuite struct {
 	suite.Suite
 
@@ -451,8 +465,9 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 
 	s.Run("AllocN fails", func() {
 		s.SetupTest()
+		ctx := context.Background()
 		handler := NewNMockHandler(s.T())
-		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+		handler.EXPECT().GetCollection(ctx, s.testLabel.CollectionID).
 			Return(&collectionInfo{
 				ID:     s.testLabel.CollectionID,
 				Schema: collectionSchema,
@@ -461,7 +476,7 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 		s.mockAlloc.EXPECT().AllocN(int64(2)).Return(int64(0), int64(0), errors.New("alloc error")).Once()
 		view := makeBumpSchemaVersionView(111)
 		// Should return early with no panic before enqueueing compaction.
-		s.triggerManager.SubmitBumpSchemaVersionViewToScheduler(context.Background(), view)
+		s.triggerManager.SubmitBumpSchemaVersionViewToScheduler(ctx, view)
 	})
 
 	s.Run("GetCollection fails", func() {
@@ -488,10 +503,10 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 
 	s.Run("collection is external", func() {
 		s.SetupTest()
-		strictAlloc := allocator.NewMockAllocator(s.T())
-		s.triggerManager.allocator = strictAlloc
+		ctx := context.Background()
+		s.triggerManager.allocator = panicAllocator{}
 		handler := NewNMockHandler(s.T())
-		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+		handler.EXPECT().GetCollection(ctx, s.testLabel.CollectionID).
 			Return(&collectionInfo{
 				ID: s.testLabel.CollectionID,
 				// IsExternal() checks for fields with ExternalField set, not Schema.ExternalSource.
@@ -504,7 +519,7 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 		s.triggerManager.handler = handler
 
 		view := makeBumpSchemaVersionView(111)
-		s.triggerManager.SubmitBumpSchemaVersionViewToScheduler(context.Background(), view)
+		s.triggerManager.SubmitBumpSchemaVersionViewToScheduler(ctx, view)
 	})
 
 	s.Run("view is not BumpSchemaVersionView", func() {

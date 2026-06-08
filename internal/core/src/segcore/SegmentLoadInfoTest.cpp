@@ -3179,6 +3179,22 @@ TEST_F(SegmentLoadInfoTest,
 }
 
 TEST_F(SegmentLoadInfoTest,
+       ExternalCollectionDoesNotComputeDefaultFieldsForAddedSchemaField) {
+    auto current_schema = MakeSchemaWithFieldIds({100});
+    current_schema->set_external_source("s3://external-bucket/table");
+    auto new_schema = MakeSchemaWithFieldIds({100, 101});
+    new_schema->set_external_source("s3://external-bucket/table");
+
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/v1"),
+                                 current_schema);
+    SegmentLoadInfo new_info(MakeManifestProto("/manifest/v1"), new_schema);
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.fields_to_fill_default.empty());
+}
+
+TEST_F(SegmentLoadInfoTest,
        ComputeDiffColumnGroupSameIndexDifferentFilesTriggersReplace) {
     // Two column groups with identical shape {105,106} at index 0, but the
     // new manifest points at different parquet files. The pk (100) is in

@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -51,6 +52,16 @@ type SegmentCheckerTestSuite struct {
 	broker    *meta.MockBroker
 	nodeMgr   *session.NodeManager
 	scheduler *task.MockScheduler
+}
+
+type captureScheduler struct {
+	task.Scheduler
+	addedTasks []task.Task
+}
+
+func (s *captureScheduler) Add(t task.Task) error {
+	s.addedTasks = append(s.addedTasks, t)
+	return nil
 }
 
 func (suite *SegmentCheckerTestSuite) SetupSuite() {
@@ -1342,6 +1353,82 @@ func (suite *SegmentCheckerTestSuite) TestReopenOnStaleDataVersion() {
 	tasks = checker.Check(context.TODO())
 	suite.Len(tasks, 0)
 	suite.Len(addedTasks, 0)
+}
+
+func (suite *SegmentCheckerTestSuite) TestReopenOnStaleManifestPath() {
+	ctx := context.Background()
+	checker := suite.checker
+	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	checker.meta.HandleNodeUp(ctx, 1)
+	checker.meta.HandleNodeUp(ctx, 2)
+
+	basePath := "/external/collections/1/segments/1"
+	oldManifest := packed.MarshalManifestPath(basePath, 1)
+	newManifest := packed.MarshalManifestPath(basePath, 2)
+	segments := []*datapb.SegmentInfo{
+		{
+			ID:            1,
+			PartitionID:   1,
+			InsertChannel: "test-insert-channel",
+			ManifestPath:  newManifest,
+		},
+	}
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(ctx, int64(1)).Return(
+		channels, segments, nil)
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
+
+	distSegment := utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel")
+	distSegment.ManifestPath = oldManifest
+	checker.dist.SegmentDistManager.Update(2, distSegment)
+	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 1,
+		View:    &meta.LeaderView{ID: 2, CollectionID: 1, Channel: "test-insert-channel", Version: 1, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+	})
+
+	capturedScheduler := &captureScheduler{Scheduler: suite.scheduler}
+	checker.scheduler = capturedScheduler
+
+	tasks := checker.Check(ctx)
+	suite.Len(tasks, 0)
+	suite.Len(capturedScheduler.addedTasks, 1)
+	suite.Len(capturedScheduler.addedTasks[0].Actions(), 1)
+	action, ok := capturedScheduler.addedTasks[0].Actions()[0].(*task.SegmentAction)
+	suite.True(ok)
+	suite.EqualValues(1, capturedScheduler.addedTasks[0].ReplicaID())
+	suite.Equal(task.ActionTypeReopen, action.Type())
+	suite.EqualValues(1, action.GetSegmentID())
+	suite.EqualValues(2, action.Node())
+
+	capturedScheduler.addedTasks = nil
+	distSegment.ManifestPath = newManifest
+	checker.dist.SegmentDistManager.Update(2, distSegment)
+	delete(checker.versionCache, int64(1))
+	tasks = checker.Check(ctx)
+	suite.Len(tasks, 0)
+	suite.Len(capturedScheduler.addedTasks, 0)
 }
 
 func TestSegmentCheckerSuite(t *testing.T) {

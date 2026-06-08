@@ -28,6 +28,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -57,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
@@ -487,6 +489,142 @@ func TestServer_CreateIndex(t *testing.T) {
 		assert.Equal(t, 1, len(indexes))
 		assert.NotEqual(t, int64(0), indexes[0].IndexID)
 	})
+}
+
+type createIndexTestBroker struct {
+	collectionID UniqueID
+	schema       *schemapb.CollectionSchema
+}
+
+func (b *createIndexTestBroker) DescribeCollectionInternal(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+	if collectionID != b.collectionID {
+		return nil, errors.Errorf("unexpected collectionID: %d", collectionID)
+	}
+	return &milvuspb.DescribeCollectionResponse{
+		Status:              merr.Success(),
+		Schema:              b.schema,
+		CollectionID:        b.collectionID,
+		CollectionName:      b.schema.GetName(),
+		DbName:              "default",
+		VirtualChannelNames: []string{"vchan1"},
+	}, nil
+}
+
+func (b *createIndexTestBroker) DescribeCollectionByName(ctx context.Context, dbName, collectionName string) (*milvuspb.DescribeCollectionResponse, error) {
+	return nil, errors.New("unexpected DescribeCollectionByName")
+}
+
+func (b *createIndexTestBroker) ShowPartitionsInternal(ctx context.Context, collectionID int64) ([]int64, error) {
+	return nil, errors.New("unexpected ShowPartitionsInternal")
+}
+
+func (b *createIndexTestBroker) ShowCollections(ctx context.Context, dbName string) (*milvuspb.ShowCollectionsResponse, error) {
+	return nil, errors.New("unexpected ShowCollections")
+}
+
+func (b *createIndexTestBroker) ShowCollectionIDs(ctx context.Context, dbNames ...string) (*rootcoordpb.ShowCollectionIDsResponse, error) {
+	return nil, errors.New("unexpected ShowCollectionIDs")
+}
+
+func (b *createIndexTestBroker) ListDatabases(ctx context.Context) (*milvuspb.ListDatabasesResponse, error) {
+	return nil, errors.New("unexpected ListDatabases")
+}
+
+func (b *createIndexTestBroker) HasCollection(ctx context.Context, collectionID int64) (bool, error) {
+	return false, errors.New("unexpected HasCollection")
+}
+
+func (b *createIndexTestBroker) ShowPartitions(ctx context.Context, collectionID int64) (*milvuspb.ShowPartitionsResponse, error) {
+	return nil, errors.New("unexpected ShowPartitions")
+}
+
+func (b *createIndexTestBroker) CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest) error {
+	return errors.New("unexpected CreateCollection")
+}
+
+func (b *createIndexTestBroker) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) error {
+	return errors.New("unexpected CreatePartition")
+}
+
+func (b *createIndexTestBroker) DropCollection(ctx context.Context, dbName, collectionName string) error {
+	return errors.New("unexpected DropCollection")
+}
+
+func (b *createIndexTestBroker) DescribeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error) {
+	return nil, errors.New("unexpected DescribeDatabase")
+}
+
+func TestCreateIndexRejectsUnmaterializedExternalField(t *testing.T) {
+	initStreamingSystem(t)
+
+	const (
+		collID  = UniqueID(100)
+		fieldID = UniqueID(101)
+	)
+	schema := &schemapb.CollectionSchema{
+		Name: "ext",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			{
+				FieldID:       fieldID,
+				Name:          "vec",
+				DataType:      schemapb.DataType_FloatVector,
+				ExternalField: "vec",
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		},
+	}
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	indexMeta := newSegmentIndexMeta(catalog)
+
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(collID, &collectionInfo{
+		ID:     collID,
+		Schema: schema,
+	})
+	server := &Server{
+		meta: &meta{
+			catalog:     catalog,
+			collections: collections,
+			segments:    NewSegmentsInfo(),
+			indexMeta:   indexMeta,
+		},
+		allocator:       newMockAllocator(t),
+		notifyIndexChan: make(chan UniqueID, 1),
+		broker:          &createIndexTestBroker{collectionID: collID, schema: schema},
+	}
+	RegisterDDLCallbacks(server)
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.meta.segments.SetSegment(10, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           10,
+		CollectionID: collID,
+		State:        commonpb.SegmentState_Flushed,
+		Level:        datapb.SegmentLevel_L1,
+		ManifestPath: `{"base_path":"seg10","ver":1}`,
+		Binlogs: []*datapb.FieldBinlog{{
+			FieldID:     0,
+			ChildFields: []int64{100},
+		}},
+	}))
+
+	status, err := server.CreateIndex(context.Background(), &indexpb.CreateIndexRequest{
+		CollectionID: collID,
+		FieldID:      fieldID,
+		IndexName:    "_default_idx",
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "128"},
+		},
+		IndexParams: []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: indexparamcheck.AutoIndex},
+		},
+	})
+	require.NoError(t, err)
+	require.Error(t, merr.Error(status))
+	require.Contains(t, status.GetReason(), "not materialized")
+	require.Contains(t, status.GetReason(), "RefreshExternalCollection")
 }
 
 func TestServer_AlterIndex(t *testing.T) {

@@ -356,6 +356,50 @@ func (suite *IndexCheckerSuite) TestCreateNewIndex() {
 	suite.Equal(tasks[0].Actions()[0].(*task.SegmentAction).Type(), task.ActionTypeReopen)
 }
 
+func (suite *IndexCheckerSuite) TestExternalUnmaterializedIndexDoesNotScheduleReopen() {
+	checker := suite.checker
+	ctx := context.Background()
+
+	coll := utils.CreateTestCollection(1, 1)
+	coll.FieldIndexID = map[int64]int64{101: 1000}
+	coll.Schema = &schemapb.CollectionSchema{
+		Name: "external",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64, Name: "id", ExternalField: "id"},
+			{FieldID: 101, DataType: schemapb.DataType_FloatVector, Name: "vec", ExternalField: "vec"},
+		},
+	}
+	checker.meta.PutCollection(ctx, coll)
+	checker.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	checker.meta.HandleNodeUp(ctx, 1)
+
+	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel"))
+	suite.targetMgr.ExpectedCalls = nil
+	suite.targetMgr.EXPECT().GetSealedSegment(ctx, int64(1), int64(2), meta.CurrentTargetFirst).Return(&datapb.SegmentInfo{
+		ID:           2,
+		CollectionID: 1,
+		ManifestPath: `{"base_path":"seg2","ver":1}`,
+		Binlogs: []*datapb.FieldBinlog{{
+			FieldID:     0,
+			ChildFields: []int64{100},
+		}},
+	}).Maybe()
+	suite.broker.EXPECT().ListIndexes(ctx, int64(1)).Return([]*indexpb.IndexInfo{
+		{
+			FieldID: 101,
+			IndexID: 1000,
+		},
+	}, nil)
+
+	tasks := checker.Check(ctx)
+	suite.Require().Len(tasks, 0)
+}
+
 func TestRemoveRedundantIndex(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()

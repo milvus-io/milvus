@@ -62,8 +62,10 @@
 #include "mmap/ChunkedColumn.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
+#include "pb/segcore.pb.h"
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
+#include "query/PlanImpl.h"
 #include "query/SearchOnSealed.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegcoreConfig.h"
@@ -94,6 +96,28 @@ struct DeferRelease {
 };
 
 using namespace milvus;
+
+namespace {
+
+milvus::proto::segcore::SegmentLoadInfo
+BuildExternalLoadInfoWithChildFields(const std::vector<int64_t>& field_ids) {
+    milvus::proto::segcore::SegmentLoadInfo info;
+    info.set_segmentid(kSegmentID);
+    info.set_partitionid(kPartitionID);
+    info.set_collectionid(kCollectionID);
+    info.set_num_of_rows(1);
+    info.set_manifest_path(R"({"base_path":"seg10","ver":1})");
+
+    auto* field = info.add_binlog_paths();
+    field->set_fieldid(0);
+    for (auto field_id : field_ids) {
+        field->add_child_fields(field_id);
+    }
+    return info;
+}
+
+}  // namespace
+
 TEST(test_chunk_segment, TestSearchOnSealed) {
     int dim = 16;
     int chunk_num = 3;
@@ -771,6 +795,40 @@ TEST(test_chunk_segment, TestSearchIteratorOnSealedWithPartialNullVectors) {
         EXPECT_EQ(search_result.seg_offsets_[i], bf_result.seg_offsets_[i])
             << "Mismatch at index " << i;
     }
+}
+
+TEST(test_chunk_segment, ExternalMissingFieldDoesNotReturnNull) {
+    auto schema = std::make_shared<Schema>();
+    schema->set_external_source("s3://external-bucket/table");
+    schema->set_external_spec(R"({"format":"parquet"})");
+    schema->AddField(FieldMeta(FieldName("id"),
+                               FieldId(100),
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "id"));
+    schema->AddField(FieldMeta(FieldName("score"),
+                               FieldId(101),
+                               DataType::DOUBLE,
+                               true,
+                               std::nullopt,
+                               "score"));
+    schema->set_primary_field_id(FieldId(100));
+
+    auto segment = segcore::CreateSealedSegment(
+        schema, nullptr, -1, segcore::SegcoreConfig::default_config(), true);
+    segment->SetLoadInfo(BuildExternalLoadInfoWithChildFields({100}));
+
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
+    plan->field_ids_ = {FieldId(101)};
+    int64_t offsets[] = {0};
+
+    EXPECT_THROW(
+        {
+            auto ignored = segment->Retrieve(
+                nullptr, plan.get(), offsets, 1, folly::CancellationToken());
+        },
+        std::exception);
 }
 
 class TestChunkSegment : public testing::TestWithParam<bool> {

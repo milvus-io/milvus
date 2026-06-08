@@ -359,6 +359,65 @@ func (sd *shardDelegator) executeSearchSubTasks(
 	return results, nil
 }
 
+func (sd *shardDelegator) validateExternalSearchMaterialized(req *querypb.SearchRequest, sealed []SnapshotItem, growing []SegmentEntry) error {
+	if sd.collection == nil {
+		return nil
+	}
+	if segments.AllowUnmaterializedExternalFieldAccess() {
+		return nil
+	}
+
+	return segments.ValidateExternalMaterializedFields(
+		sd.collection.Schema(),
+		sd.searchSegmentLoadInfos(sealed, growing),
+		segments.SearchRequiredFieldIDs(nil, req),
+	)
+}
+
+func (sd *shardDelegator) searchSegmentLoadInfos(sealed []SnapshotItem, growing []SegmentEntry) []*querypb.SegmentLoadInfo {
+	loadInfos := make([]*querypb.SegmentLoadInfo, 0, len(growing))
+
+	for _, entry := range growing {
+		if loadInfo := sd.segmentEntryLoadInfo(entry, segments.SegmentTypeGrowing); loadInfo != nil {
+			loadInfos = append(loadInfos, loadInfo)
+		}
+	}
+
+	for _, item := range sealed {
+		for _, entry := range item.Segments {
+			if loadInfo := sd.segmentEntryLoadInfo(entry, segments.SegmentTypeSealed); loadInfo != nil {
+				loadInfos = append(loadInfos, loadInfo)
+			}
+		}
+	}
+
+	return loadInfos
+}
+
+func (sd *shardDelegator) segmentEntryLoadInfo(entry SegmentEntry, segmentType segments.SegmentType) *querypb.SegmentLoadInfo {
+	if entry.LoadInfo != nil {
+		return entry.LoadInfo
+	}
+
+	if sd.segmentManager != nil {
+		if segment := sd.segmentManager.GetWithType(entry.SegmentID, segmentType); segment != nil {
+			return segment.LoadInfo()
+		}
+	}
+
+	if entry.SegmentID <= 0 {
+		return nil
+	}
+
+	return &querypb.SegmentLoadInfo{
+		SegmentID:     entry.SegmentID,
+		CollectionID:  sd.collectionID,
+		PartitionID:   entry.PartitionID,
+		InsertChannel: sd.vchannelName,
+		Level:         entry.Level,
+	}
+}
+
 // Search preforms search operation on shard.
 func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest, sealed []SnapshotItem, growing []SegmentEntry, sealedRowCount map[int64]int64) ([]*internalpb.SearchResults, error) {
 	log := sd.getLogger(ctx)
@@ -383,6 +442,10 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 			req.GetReq().GetCollectionID(),
 			metrics.SearchLabel,
 		)
+	}
+
+	if err := sd.validateExternalSearchMaterialized(req, sealed, growing); err != nil {
+		return nil, err
 	}
 
 	avgdl, skipSearch, err := sd.prepareSearchFunction(ctx, req.GetReq())
