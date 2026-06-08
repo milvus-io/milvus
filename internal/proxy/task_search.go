@@ -1177,11 +1177,6 @@ func isEmbeddingListPlaceholderType(pt commonpb.PlaceholderType) bool {
 	}
 }
 
-func isPlainVectorPlaceholderType(pt commonpb.PlaceholderType) bool {
-	_, ok := placeholderTypeToDataType[pt]
-	return ok
-}
-
 func validateElementFilterVectorSearch(plan *planpb.PlanNode, schema *schemapb.CollectionSchema, fieldID int64, placeholderType commonpb.PlaceholderType) error {
 	anns := plan.GetVectorAnns()
 	if anns == nil {
@@ -1194,11 +1189,12 @@ func validateElementFilterVectorSearch(plan *planpb.PlanNode, schema *schemapb.C
 
 	field := typeutil.GetField(schema, fieldID)
 	parentStructName, isStructSubField := getStructParentFieldName(schema, fieldID)
+	_, isPlainVectorPlaceholderType := placeholderTypeToDataType[placeholderType]
 	if field != nil &&
 		field.GetDataType() == schemapb.DataType_ArrayOfVector &&
 		isStructSubField &&
 		parentStructName == elementFilter.GetStructName() &&
-		isPlainVectorPlaceholderType(placeholderType) {
+		isPlainVectorPlaceholderType {
 		return nil
 	}
 
