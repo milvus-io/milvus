@@ -7386,10 +7386,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(
-        reason="issue: https://github.com/milvus-io/milvus/issues/50333 - "
-        "element_filter on a dynamically added nullable StructArray can trigger ASAN heap-buffer-overflow"
-    )
     def test_add_scalar_struct_array_field_insert_omit_empty_non_empty_rows(self):
         """
         target: test insert omitted, empty, and non-empty rows after dynamically adding a scalar-only struct array
