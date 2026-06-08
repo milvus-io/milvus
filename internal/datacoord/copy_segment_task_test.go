@@ -25,6 +25,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -35,7 +36,10 @@ import (
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/snapshotstorage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -1209,7 +1213,15 @@ func TestAssembleCopySegmentRequest_MarksExternalCollection(t *testing.T) {
 			},
 		},
 		Segments: []*datapb.SegmentDescription{
-			{SegmentId: 1, PartitionId: 10},
+			{
+				SegmentId:   1,
+				PartitionId: 10,
+				IndexFiles: []*indexpb.IndexFilePathInfo{{
+					IndexFilePaths: []string{
+						"source-root/files/files/index_files/1001/2001/3001/index",
+					},
+				}},
+			},
 		},
 	}
 
@@ -1235,6 +1247,158 @@ func TestAssembleCopySegmentRequest_MarksExternalCollection(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, req.GetSources(), 1)
 	assert.True(t, req.GetSources()[0].GetIsExternalCollection())
+}
+
+func TestAssembleCopySegmentRequest_ExternalSnapshotRootRemap(t *testing.T) {
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Id:           1,
+			CollectionId: 100,
+			Name:         "test_snapshot",
+		},
+		Segments: []*datapb.SegmentDescription{
+			{SegmentId: 1, PartitionId: 10},
+		},
+	}
+
+	sm := &snapshotMeta{}
+	sourceCM := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{
+		ForeignBucket: "bucket",
+		ForeignCM:     sourceCM,
+	}, nil).Build()
+	defer mockResolve.UnPatch()
+	mockReadExternal := mockey.Mock((*snapshotMeta).ReadExternalSnapshotDataWithChunkManager).To(
+		func(_ *snapshotMeta, _ context.Context, gotCM storage.ChunkManager, snapshotS3Location string, includeSegments bool) (*SnapshotData, error) {
+			assert.Same(t, sourceCM, gotCM)
+			assert.Equal(t, "s3://bucket/source-root/snapshots/meta.json", snapshotS3Location)
+			assert.True(t, includeSegments)
+			return snapshotData, nil
+		}).Build()
+	defer mockReadExternal.UnPatch()
+	mockReadLocal := mockey.Mock((*snapshotMeta).ReadSnapshotData).Return(nil, errors.New("must not read local snapshot")).Build()
+	defer mockReadLocal.UnPatch()
+	mockStorage := mockey.Mock(createStorageConfig).Return(&indexpb.StorageConfig{RootPath: "target-root"}).Build()
+	defer mockStorage.UnPatch()
+
+	task := &copySegmentTask{
+		snapshotMeta: sm,
+		tr:           timerecord.NewTimeRecorder("test"),
+		times:        taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        100,
+		CollectionId: 200,
+		IdMappings: []*datapb.CopySegmentIDMapping{
+			{SourceSegmentId: 1, TargetSegmentId: 2001, PartitionId: 20},
+		},
+	})
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:              100,
+			CollectionId:       200,
+			SnapshotName:       "test_snapshot",
+			External:           true,
+			SnapshotS3Location: "s3://bucket/source-root/snapshots/meta.json",
+		},
+		tr: timerecord.NewTimeRecorder("test_job"),
+	}
+
+	req, err := AssembleCopySegmentRequest(task, job)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, req)
+	assert.Len(t, req.Sources, 1)
+	assert.Len(t, req.Targets, 1)
+	assert.Equal(t, "source-root/files/files", req.Sources[0].GetSourceRootPath())
+	assert.Equal(t, "target-root", req.Targets[0].GetTargetRootPath())
+}
+
+func TestAssembleCopySegmentRequest_ExternalSnapshotCarriesForeignSpecAndRef(t *testing.T) {
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Id:           1,
+			CollectionId: 100,
+			Name:         "test_snapshot",
+		},
+		Segments: []*datapb.SegmentDescription{
+			{
+				SegmentId:   1,
+				PartitionId: 10,
+				IndexFiles: []*indexpb.IndexFilePathInfo{{
+					IndexFilePaths: []string{
+						"source-root/files/files/index_files/1001/2001/3001/index",
+					},
+				}},
+			},
+		},
+	}
+
+	sm := &snapshotMeta{}
+	sourceCM := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).To(
+		func(
+			_ context.Context,
+			_ *objectstorage.Config,
+			direction snapshotstorage.Direction,
+			foreignURI string,
+			externalSpec string,
+		) (*snapshotstorage.ResolvedForeignStorage, error) {
+			assert.Equal(t, snapshotstorage.Restore, direction)
+			assert.Equal(t, "s3://bucket/source-root/snapshots/meta.json", foreignURI)
+			assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, externalSpec)
+			return &snapshotstorage.ResolvedForeignStorage{
+				ForeignBucket: "bucket",
+				ForeignCM:     sourceCM,
+			}, nil
+		}).Build()
+	defer mockResolve.UnPatch()
+	mockReadExternal := mockey.Mock((*snapshotMeta).ReadExternalSnapshotDataWithChunkManager).To(
+		func(_ *snapshotMeta, _ context.Context, gotCM storage.ChunkManager, snapshotS3Location string, includeSegments bool) (*SnapshotData, error) {
+			assert.Same(t, sourceCM, gotCM)
+			assert.Equal(t, "s3://bucket/source-root/snapshots/meta.json", snapshotS3Location)
+			assert.True(t, includeSegments)
+			return snapshotData, nil
+		}).Build()
+	defer mockReadExternal.UnPatch()
+	mockStorage := mockey.Mock(createStorageConfig).Return(&indexpb.StorageConfig{RootPath: "target-root"}).Build()
+	defer mockStorage.UnPatch()
+
+	task := &copySegmentTask{
+		snapshotMeta: sm,
+		tr:           timerecord.NewTimeRecorder("test"),
+		times:        taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        100,
+		CollectionId: 200,
+		IdMappings: []*datapb.CopySegmentIDMapping{
+			{SourceSegmentId: 1, TargetSegmentId: 2001, PartitionId: 20},
+		},
+	})
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:              100,
+			CollectionId:       200,
+			SnapshotName:       "test_snapshot",
+			External:           true,
+			SnapshotS3Location: "s3://bucket/source-root/snapshots/meta.json",
+			ExternalSpec:       `{"extfs":{"region":"us-west-2"}}`,
+		},
+		tr: timerecord.NewTimeRecorder("test_job"),
+	}
+
+	req, err := AssembleCopySegmentRequest(task, job)
+
+	require.NoError(t, err)
+	require.NotNil(t, req)
+	assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, req.GetExternalSpec())
+	require.Len(t, req.GetSources(), 1)
+	assert.Equal(t, "source-root/files/files", req.GetSources()[0].GetSourceRootPath())
 }
 
 func TestAssembleCopySegmentRequest_AllocatesTextAndJsonBuildIDs(t *testing.T) {

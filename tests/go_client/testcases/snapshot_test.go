@@ -313,6 +313,76 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 	common.CheckErr(t, err, true)
 }
 
+func TestSnapshotRestoreExternal(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	insertBatchSize := 1000
+	collName := common.GenRandomString(snapshotPrefix, 6)
+	schema := client.SimpleCreateCollectionOptions(collName, common.DefaultDim)
+	schema.WithAutoID(false)
+	err := mc.CreateCollection(ctx, schema)
+	common.CheckErr(t, err, true)
+
+	collectionsToClean := []string{collName}
+	t.Cleanup(func() {
+		for _, c := range collectionsToClean {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(c))
+		}
+	})
+
+	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	common.CheckErr(t, err, true)
+
+	insertOpt := hp.TNewDataOption().TWithNb(insertBatchSize)
+	_, insertRes := hp.CollPrepare.InsertData(ctx, t, mc, hp.NewInsertParams(coll.Schema), insertOpt)
+	require.Equal(t, insertBatchSize, insertRes.IDs.Len())
+
+	err = flushWithRetry(ctx, mc, collName)
+	common.CheckErr(t, err, true)
+	err = waitForAllIndexesBuilt(ctx, mc, collName, 2*time.Minute)
+	common.CheckErr(t, err, true)
+
+	snapshotName := fmt.Sprintf("external_restore_snapshot_%s", common.GenRandomString(snapshotPrefix, 6))
+	err = mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, collName).
+		WithDescription("Snapshot for external restore testing"))
+	common.CheckErr(t, err, true)
+
+	snapshotInfo, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(snapshotName, collName))
+	common.CheckErr(t, err, true)
+	require.Equal(t, snapshotName, snapshotInfo.GetName())
+	require.NotEmpty(t, snapshotInfo.GetS3Location())
+
+	restoredCollName := fmt.Sprintf("restored_external_%s", collName)
+	collectionsToClean = append(collectionsToClean, restoredCollName)
+	jobID, err := mc.RestoreExternalSnapshot(ctx,
+		client.NewRestoreExternalSnapshotOption(restoredCollName, snapshotInfo.GetS3Location()))
+	common.CheckErr(t, err, true)
+
+	_, err = waitForRestoreComplete(ctx, mc, jobID, 1*time.Minute)
+	common.CheckErr(t, err, true)
+
+	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(restoredCollName))
+	common.CheckErr(t, err, true)
+	require.True(t, has)
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(restoredCollName).WithReplica(1))
+	common.CheckErr(t, err, true)
+	err = loadTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	queryRes, err := mc.Query(ctx,
+		client.NewQueryOption(restoredCollName).
+			WithOutputFields(common.QueryCountFieldName).
+			WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	count, _ := queryRes.Fields[0].GetAsInt64(0)
+	require.Equal(t, int64(insertBatchSize), count)
+
+	err = mc.DropSnapshot(ctx, client.NewDropSnapshotOption(snapshotName, collName))
+	common.CheckErr(t, err, true)
+}
+
 // TestSnapshotRestoreWithMultiShardMultiPartition tests the complete snapshot restore workflow with data operations
 func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 	t.Parallel()

@@ -123,6 +123,9 @@ type CopySegmentJob interface {
 	GetSnapshotName() string
 	GetSourceCollectionId() int64
 	GetPinId() int64
+	GetExternal() bool
+	GetSnapshotS3Location() string
+	GetExternalSpec() string
 	GetTR() *timerecord.TimeRecorder
 	Clone() CopySegmentJob
 }

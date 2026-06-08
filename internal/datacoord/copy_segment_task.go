@@ -19,6 +19,9 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"path"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -28,6 +31,8 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/snapshotstorage"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -520,11 +525,35 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 	ctx := context.Background()
 
 	// Read complete snapshot data from S3 to retrieve source segment binlogs
-	snapshotData, err := t.snapshotMeta.ReadSnapshotData(ctx, job.GetSourceCollectionId(), job.GetSnapshotName(), true)
+	var (
+		snapshotData *SnapshotData
+		err          error
+	)
+	if job.GetExternal() {
+		resolved, resolveErr := snapshotstorage.ResolveForeignStorage(
+			ctx,
+			snapshotstorage.InstanceConfigFromParamtable(Params),
+			snapshotstorage.Restore,
+			job.GetSnapshotS3Location(),
+			job.GetExternalSpec(),
+		)
+		if resolveErr != nil {
+			err = resolveErr
+		} else {
+			snapshotData, err = t.snapshotMeta.ReadExternalSnapshotDataWithChunkManager(ctx, resolved.ForeignCM, job.GetSnapshotS3Location(), true)
+		}
+	} else {
+		snapshotData, err = t.snapshotMeta.ReadSnapshotData(ctx, job.GetSourceCollectionId(), job.GetSnapshotName(), true)
+	}
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to read snapshot data for copy segment task",
 			append(WrapCopySegmentTaskLog(task), mlog.Err(err))...)
 		return nil, err
+	}
+	storageConfig := createStorageConfig()
+	sourceRootPath := ""
+	if job.GetExternal() {
+		sourceRootPath = deriveSnapshotSourceRootURI(job.GetSnapshotS3Location(), snapshotData)
 	}
 
 	// Build source segment map for quick lookup
@@ -570,6 +599,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			ManifestPath:         sourceSegDesc.GetManifestPath(),      // manifest path for StorageV3+
 			StorageVersion:       sourceSegDesc.GetStorageVersion(),    // storage version for binlog format decision
 			IsExternalCollection: isExternalCollection,
+			SourceRootPath:       sourceRootPath,
 		}
 		sources = append(sources, source)
 
@@ -608,10 +638,11 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		}
 		// Build target with IDs and buildID mappings
 		target := &datapb.CopySegmentTarget{
-			CollectionId: job.GetCollectionId(),
-			PartitionId:  partitionID,
-			SegmentId:    targetSegID,
-			NewBuildIds:  newBuildIDs,
+			CollectionId:   job.GetCollectionId(),
+			PartitionId:    partitionID,
+			SegmentId:      targetSegID,
+			NewBuildIds:    newBuildIDs,
+			TargetRootPath: storageConfig.GetRootPath(),
 		}
 		mlog.Info(ctx, "prepare copy segment source and target",
 			WrapCopySegmentTaskLog(task,
@@ -633,9 +664,120 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		TaskID:        task.GetTaskId(),
 		Sources:       sources,
 		Targets:       targets,
-		StorageConfig: createStorageConfig(),
+		StorageConfig: storageConfig,
 		TaskSlot:      task.GetTaskSlot(),
+		ExternalSpec:  job.GetExternalSpec(),
 	}, nil
+}
+
+func deriveSnapshotRootURI(snapshotS3Location string) string {
+	root := deriveSnapshotRootPath(snapshotS3Location)
+	if root == "" {
+		return ""
+	}
+	parsed, err := url.Parse(snapshotS3Location)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return root
+	}
+	parsed.Path = "/" + strings.TrimPrefix(root, "/")
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return strings.TrimSuffix(parsed.String(), "/")
+}
+
+func deriveSnapshotSourceRootURI(snapshotS3Location string, snapshotData *SnapshotData) string {
+	bundleRoot := deriveSnapshotRootPath(snapshotS3Location)
+	for _, dataPath := range snapshotDataFilePaths(snapshotData) {
+		sourceRoot := deriveDataRootFromObjectPath(dataPath)
+		if sourceRoot == "" {
+			continue
+		}
+		if bundleRoot == "" || sourceRoot == bundleRoot || strings.HasPrefix(sourceRoot, bundleRoot+"/") {
+			return sourceRoot
+		}
+	}
+	rootURI := deriveSnapshotRootURI(snapshotS3Location)
+	if rootURI == "" {
+		return ""
+	}
+	return joinSnapshotURI(rootURI, exportedSnapshotFilesPath)
+}
+
+func snapshotDataFilePaths(snapshotData *SnapshotData) []string {
+	if snapshotData == nil {
+		return nil
+	}
+	paths := make([]string, 0)
+	addFieldBinlogs := func(fieldBinlogs []*datapb.FieldBinlog) {
+		for _, fieldBinlog := range fieldBinlogs {
+			for _, binlog := range fieldBinlog.GetBinlogs() {
+				if binlog.GetLogPath() != "" {
+					paths = append(paths, binlog.GetLogPath())
+				}
+			}
+		}
+	}
+	for _, segment := range snapshotData.Segments {
+		if segment == nil {
+			continue
+		}
+		if basePath, _, err := packed.UnmarshalManifestPath(segment.GetManifestPath()); err == nil && basePath != "" {
+			paths = append(paths, basePath)
+		}
+		addFieldBinlogs(segment.GetBinlogs())
+		addFieldBinlogs(segment.GetStatslogs())
+		addFieldBinlogs(segment.GetDeltalogs())
+		addFieldBinlogs(segment.GetBm25Statslogs())
+		for _, indexFile := range segment.GetIndexFiles() {
+			paths = append(paths, indexFile.GetIndexFilePaths()...)
+		}
+		for _, textIndex := range segment.GetTextIndexFiles() {
+			paths = append(paths, textIndex.GetFiles()...)
+		}
+		for _, jsonIndex := range segment.GetJsonKeyIndexFiles() {
+			paths = append(paths, jsonIndex.GetFiles()...)
+		}
+	}
+	return paths
+}
+
+func deriveDataRootFromObjectPath(objectPath string) string {
+	normalizedPath := normalizeSnapshotDataObjectPath(objectPath)
+	if normalizedPath == "" {
+		return ""
+	}
+	parts := strings.Split(normalizedPath, "/")
+	for i, part := range parts {
+		if snapshotDataRootAnchors[part] && i > 0 {
+			return path.Join(parts[:i]...)
+		}
+	}
+	return ""
+}
+
+func normalizeSnapshotDataObjectPath(objectPath string) string {
+	objectPath = strings.TrimSuffix(objectPath, "/")
+	parsed, err := url.Parse(objectPath)
+	if err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		return strings.Trim(strings.TrimPrefix(parsed.Path, "/"), "/")
+	}
+	return strings.Trim(objectPath, "/")
+}
+
+var snapshotDataRootAnchors = map[string]bool{
+	"insert_log":         true,
+	"delta_log":          true,
+	"stats_log":          true,
+	"bm25_stats":         true,
+	"bm25_stats_log":     true,
+	"index_files":        true,
+	"index_v1":           true,
+	"text_log":           true,
+	"text_index":         true,
+	"json_key_index_log": true,
+	"json_key_index":     true,
+	"json_stats":         true,
+	"json_index":         true,
 }
 
 // ===========================================================================================

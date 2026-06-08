@@ -18,13 +18,14 @@ package importv2
 
 import (
 	"context"
+	"fmt"
+	"net/url"
 	"path"
 	"strconv"
 	"strings"
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -139,9 +140,16 @@ func listAllFiles(ctx context.Context, cm storage.ChunkManager, basePath string)
 	return files, nil
 }
 
-// copyFile copies a single file from src to dst using the chunk manager.
-func copyFile(ctx context.Context, cm storage.ChunkManager, src, dst string) error {
-	return cm.Copy(ctx, src, dst)
+// copyFile copies a single file from src to dst through the provider-side copier.
+func copyFile(
+	ctx context.Context,
+	copier storage.CrossBucketCopier,
+	sourceBucket string,
+	targetBucket string,
+	src string,
+	dst string,
+) error {
+	return copier.CopyCrossBucket(ctx, sourceBucket, src, targetBucket, dst)
 }
 
 // extractFromPb extracts file paths from FieldBinlog list (insert/delta/stats/bm25).
@@ -217,7 +225,8 @@ func extractJSONFiles(jsonIndexInfos map[int64]*datapb.JsonKeyStats) ([]string, 
 // For other 7 types: always from pb (not yet in manifest).
 func collectSegmentFiles(
 	ctx context.Context,
-	cm storage.ChunkManager,
+	sourceCM storage.ChunkManager,
+	sourceStorageConfig *indexpb.StorageConfig,
 	source *datapb.CopySegmentSource,
 ) (*SegmentFiles, error) {
 	files := &SegmentFiles{}
@@ -235,7 +244,7 @@ func collectSegmentFiles(
 			return nil, merr.Wrapf(err, "failed to unmarshal manifest path %q for segment %d", manifestPath, source.GetSegmentId())
 		}
 
-		allFiles, listErr := listAllFiles(ctx, cm, basePath)
+		allFiles, listErr := listAllFiles(ctx, sourceCM, basePath)
 		if listErr != nil {
 			return nil, merr.Wrapf(listErr, "failed to list files from manifest base path %q for segment %d", basePath, source.GetSegmentId())
 		}
@@ -252,8 +261,7 @@ func collectSegmentFiles(
 		// but multiple segments share that directory. We must only copy the files
 		// referenced by this segment's manifest to preserve the invariant that
 		// each LOB file belongs to exactly one segment.
-		storageConfig := compaction.CreateStorageConfig()
-		lobFileInfos, lobErr := packed.GetManifestLobFiles(manifestPath, storageConfig)
+		lobFileInfos, lobErr := packed.GetManifestLobFiles(manifestPath, sourceStorageConfig)
 		if lobErr != nil {
 			mlog.Debug(context.TODO(), "no LOB files found in manifest (may not have TEXT fields)",
 				mlog.String("manifestPath", manifestPath),
@@ -361,11 +369,23 @@ func generateMappingsFromFiles(
 
 func CopySegmentAndIndexFiles(
 	ctx context.Context,
-	cm storage.ChunkManager,
+	sourceCM storage.ChunkManager,
+	targetCM storage.ChunkManager,
+	sourceStorageConfig *indexpb.StorageConfig,
+	copier storage.CrossBucketCopier,
+	sourceBucket string,
+	targetBucket string,
 	source *datapb.CopySegmentSource,
 	target *datapb.CopySegmentTarget,
 	logFields []mlog.Field,
 ) (*datapb.CopySegmentResult, []string, error) {
+	if targetCM == nil {
+		return nil, nil, fmt.Errorf("target chunk manager is nil")
+	}
+	if copier == nil {
+		return nil, nil, fmt.Errorf("cross-bucket copier is nil")
+	}
+
 	segmentID := source.GetSegmentId()
 	useManifest := source.GetStorageVersion() >= storage.StorageV3
 
@@ -376,7 +396,7 @@ func CopySegmentAndIndexFiles(
 		mlog.Bool("isExternalCollection", source.GetIsExternalCollection()))
 
 	// Step 1: Collect all files to copy
-	files, err := collectSegmentFiles(ctx, cm, source)
+	files, err := collectSegmentFiles(ctx, sourceCM, sourceStorageConfig, source)
 	if err != nil {
 		return nil, nil, merr.Wrap(err, "failed to collect segment files")
 	}
@@ -394,7 +414,7 @@ func CopySegmentAndIndexFiles(
 			mlog.String("src", src),
 			mlog.String("dst", dst))
 
-		if err := copyFile(ctx, cm, src, dst); err != nil {
+		if err := copyFile(ctx, copier, sourceBucket, targetBucket, src, dst); err != nil {
 			fields := make([]mlog.Field, 0, len(logFields)+3)
 			fields = append(fields, logFields...)
 			fields = append(fields, mlog.String("src", src), mlog.String("dst", dst), mlog.Err(err))
@@ -611,10 +631,37 @@ func generateSegmentInfoFromSource(
 	return segmentInfo, nil
 }
 
+func remapSourceRootPath(sourcePath string, source *datapb.CopySegmentSource, target *datapb.CopySegmentTarget) string {
+	sourceRootPath := normalizeCopySegmentObjectPath(source.GetSourceRootPath())
+	targetRootPath := strings.TrimSuffix(target.GetTargetRootPath(), "/")
+	if sourceRootPath == "" || targetRootPath == "" {
+		return sourcePath
+	}
+	normalizedSourcePath := normalizeCopySegmentObjectPath(sourcePath)
+	if normalizedSourcePath == sourceRootPath {
+		return targetRootPath
+	}
+	if strings.HasPrefix(normalizedSourcePath, sourceRootPath+"/") {
+		return targetRootPath + strings.TrimPrefix(normalizedSourcePath, sourceRootPath)
+	}
+	return sourcePath
+}
+
+func normalizeCopySegmentObjectPath(objectPath string) string {
+	objectPath = strings.TrimSuffix(objectPath, "/")
+	parsed, err := url.Parse(objectPath)
+	if err == nil && parsed.Scheme == "s3" && parsed.Host != "" {
+		return strings.TrimSuffix(strings.TrimPrefix(parsed.Path, "/"), "/")
+	}
+	return objectPath
+}
+
 // generateTargetPath converts source file path to target path by replacing collection/partition/segment IDs
 // Binlog path format: {rootPath}/{log_type}/{collectionID}/{partitionID}/{segmentID}/{fieldID}/{logID}
 // Example: files/insert_log/111/222/333/444/555.log -> files/insert_log/aaa/bbb/ccc/444/555.log
 func generateTargetPath(sourcePath string, source *datapb.CopySegmentSource, target *datapb.CopySegmentTarget) (string, error) {
+	sourcePath = remapSourceRootPath(sourcePath, source, target)
+
 	// Convert IDs to strings for replacement
 	targetCollectionIDStr := strconv.FormatInt(target.GetCollectionId(), 10)
 	targetPartitionIDStr := strconv.FormatInt(target.GetPartitionId(), 10)
@@ -653,6 +700,8 @@ func generateTargetPath(sourcePath string, source *datapb.CopySegmentSource, tar
 // LOB path structure: {root}/insert_log/{coll}/{part}/lobs/{field}/_data/{file}.vx
 // Unlike segment paths, LOB paths have no segment ID component.
 func generateTargetLOBPath(sourcePath string, source *datapb.CopySegmentSource, target *datapb.CopySegmentTarget) (string, error) {
+	sourcePath = remapSourceRootPath(sourcePath, source, target)
+
 	parts := strings.Split(sourcePath, "/")
 
 	logTypeIndex := -1
@@ -871,6 +920,8 @@ func generateTargetIndexPath(
 	indexType string,
 	pathVersion indexpb.IndexStorePathVersion,
 ) (string, error) {
+	sourcePath = remapSourceRootPath(sourcePath, source, target)
+
 	// Split path into parts
 	parts := strings.Split(sourcePath, "/")
 

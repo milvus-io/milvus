@@ -5327,6 +5327,72 @@ func TestServer_RestoreSnapshot_SourceCollectionID(t *testing.T) {
 	})
 }
 
+func TestServer_RestoreSnapshot_External(t *testing.T) {
+	t.Run("missing_snapshot_s3_location", func(t *testing.T) {
+		ctx := context.Background()
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
+			External:             true,
+			TargetDbName:         "default",
+			TargetCollectionName: "restored_collection",
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrParameterInvalid))
+	})
+
+	t.Run("delegates_to_external_restore", func(t *testing.T) {
+		ctx := context.Background()
+
+		var capturedLocation, capturedTargetCollName, capturedTargetDbName string
+		var capturedExternalSpec string
+		mockRestore := mockey.Mock((*snapshotManager).RestoreExternalSnapshot).To(
+			func(
+				sm *snapshotManager,
+				ctx context.Context,
+				snapshotS3Location string,
+				targetCollectionName string,
+				targetDbName string,
+				externalSpec string,
+				startExternalRestoreLock StartExternalRestoreLockFunc,
+				startBroadcaster StartBroadcasterFunc,
+				rollback RollbackFunc,
+				validateResources ValidateResourcesFunc,
+			) (int64, error) {
+				capturedLocation = snapshotS3Location
+				capturedTargetCollName = targetCollectionName
+				capturedTargetDbName = targetDbName
+				capturedExternalSpec = externalSpec
+				return 10001, nil
+			}).Build()
+		defer mockRestore.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
+			External:             true,
+			SnapshotS3Location:   "s3://bucket/files/snapshots/meta.json",
+			TargetDbName:         "target_db",
+			TargetCollectionName: "restored_collection",
+			ExternalSpec:         `{"extfs":{"region":"us-west-2"}}`,
+		})
+
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, int64(10001), resp.GetJobId())
+		assert.Equal(t, "s3://bucket/files/snapshots/meta.json", capturedLocation)
+		assert.Equal(t, "restored_collection", capturedTargetCollName)
+		assert.Equal(t, "target_db", capturedTargetDbName)
+		assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, capturedExternalSpec)
+	})
+}
+
 // --- Test PinSnapshotData ---
 
 func TestPinSnapshotData(t *testing.T) {

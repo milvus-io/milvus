@@ -132,6 +132,41 @@ func createTestSnapshotMeta(t *testing.T) *snapshotMeta {
 	}
 }
 
+func TestDeriveSnapshotRootPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		location string
+		want     string
+	}{
+		{
+			name:     "s3 uri",
+			location: "s3://bucket/files/snapshots/meta.json",
+			want:     "files",
+		},
+		{
+			name:     "relative path",
+			location: "files/snapshots/meta.json",
+			want:     "files",
+		},
+		{
+			name:     "root snapshots",
+			location: "snapshots/meta.json",
+			want:     "",
+		},
+		{
+			name:     "no snapshot marker",
+			location: "s3://bucket/files/meta.json",
+			want:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, deriveSnapshotRootPath(tt.location))
+		})
+	}
+}
+
 // createTestSnapshotMetaLoaded creates a snapshotMeta for tests that don't call reload().
 // Same as createTestSnapshotMeta since RefIndex state is now per-snapshot.
 func createTestSnapshotMetaLoaded(t *testing.T) *snapshotMeta {
