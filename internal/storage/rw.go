@@ -544,3 +544,98 @@ func NewDeltalogReader(
 		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
 	}
 }
+
+// NewDeltalogReaderFromBinlogs opens StorageV2/V3 deltalogs while preserving
+// each binlog's EntriesNum. StorageV3 FFI readers need those row counts to
+// build column groups with stable start/end row offsets.
+func NewDeltalogReaderFromBinlogs(
+	pkType schemapb.DataType,
+	binlogs []*datapb.Binlog,
+	option ...RwOption,
+) (RecordReader, error) {
+	rwOptions := DefaultReaderOptions()
+	for _, opt := range option {
+		opt(rwOptions)
+	}
+	if err := rwOptions.validate(); err != nil {
+		return nil, err
+	}
+
+	pkField := &schemapb.FieldSchema{
+		FieldID:      0,
+		DataType:     pkType,
+		IsPrimaryKey: true,
+	}
+
+	switch rwOptions.version {
+	case StorageV1:
+		paths := make([]string, 0, len(binlogs))
+		for _, binlog := range binlogs {
+			if binlog == nil || binlog.GetLogPath() == "" {
+				continue
+			}
+			paths = append(paths, binlog.GetLogPath())
+		}
+		return NewLegacyDeltalogReader(pkField, rwOptions.downloader, paths)
+	case StorageV2, StorageV3:
+		fragments, err := buildDeltalogFragmentsFromBinlogs(binlogs)
+		if err != nil {
+			return nil, err
+		}
+		if len(fragments) == 0 {
+			return &IterativeRecordReader{
+				iterate: func() (RecordReader, error) {
+					return nil, io.EOF
+				},
+			}, nil
+		}
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				pkField,
+				{
+					FieldID:  common.TimeStampField,
+					Name:     "ts",
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		}
+		return newFFIPackedRecordReaderFromFragments(
+			fragments,
+			"parquet",
+			schema,
+			rwOptions.bufferSize,
+			rwOptions.storageConfig,
+			nil,
+			rwOptions.externalReader,
+		)
+	default:
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
+	}
+}
+
+func buildDeltalogFragmentsFromBinlogs(binlogs []*datapb.Binlog) ([]packed.Fragment, error) {
+	fragments := make([]packed.Fragment, 0, len(binlogs))
+	var offset int64
+	for _, binlog := range binlogs {
+		if binlog == nil {
+			continue
+		}
+		path := binlog.GetLogPath()
+		if path == "" {
+			return nil, merr.WrapErrServiceInternal("deltalog binlog path is empty")
+		}
+		entriesNum := binlog.GetEntriesNum()
+		if entriesNum <= 0 {
+			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("deltalog %s has non-positive entries num %d", path, entriesNum))
+		}
+		end := offset + entriesNum
+		fragments = append(fragments, packed.Fragment{
+			FilePath: path,
+			StartRow: offset,
+			EndRow:   end,
+			RowCount: entriesNum,
+		})
+		offset = end
+	}
+	return fragments, nil
+}

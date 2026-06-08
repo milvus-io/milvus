@@ -130,12 +130,27 @@ func TestLoadDeltalogsExternalRealPKManifestReadsSourceDeltas(t *testing.T) {
 		Build()
 	defer patchManifest.UnPatch()
 
+	patchSourceDeltalogs := mockey.Mock(packed.GetDeltaLogsFromManifestWithExtfs).
+		Return([]*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{{
+				LogPath:    sourceDeltaPath,
+				EntriesNum: 1,
+			}},
+		}}, nil).
+		Build()
+	defer patchSourceDeltalogs.UnPatch()
+
 	readerCalled := atomic.NewInt32(0)
 	var gotPathSets [][]string
-	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
-		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+	patchReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).To(
+		func(pkType schemapb.DataType, binlogs []*datapb.Binlog, option ...storage.RwOption) (storage.RecordReader, error) {
 			readerCalled.Inc()
-			gotPathSets = append(gotPathSets, append([]string(nil), paths...))
+			gotPaths := make([]string, 0, len(binlogs))
+			for _, binlog := range binlogs {
+				gotPaths = append(gotPaths, binlog.GetLogPath())
+				assert.EqualValues(t, 1, binlog.GetEntriesNum())
+			}
+			gotPathSets = append(gotPathSets, gotPaths)
 			return eofRecordReader{}, nil
 		},
 	).Build()
@@ -184,8 +199,8 @@ func TestLoadDeltalogsExternalRealPKManifestRejectsTargetDeltas(t *testing.T) {
 	defer patchManifest.UnPatch()
 
 	readerCalled := atomic.NewInt32(0)
-	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
-		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+	patchReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).To(
+		func(pkType schemapb.DataType, binlogs []*datapb.Binlog, option ...storage.RwOption) (storage.RecordReader, error) {
 			readerCalled.Inc()
 			return eofRecordReader{}, nil
 		},
@@ -910,7 +925,7 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV3PlaceholderSkipsPathRead() {
 		"NewDeltalogReader must not be called when manifest returns no paths")
 }
 
-func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestStorageV3DeltasUsePackedReader() {
+func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestStorageV3DeltasUseFFIReader() {
 	ctx := context.Background()
 
 	msgLength := 4
@@ -957,12 +972,32 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestStorageV
 	).Build()
 	defer patchManifest.UnPatch()
 
+	sourceDeltalogsCalled := atomic.NewInt32(0)
+	patchSourceDeltalogs := mockey.Mock(packed.GetDeltaLogsFromManifestWithExtfs).To(
+		func(gotManifestPath string, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) ([]*datapb.FieldBinlog, error) {
+			sourceDeltalogsCalled.Inc()
+			suite.Equal(manifestPath, gotManifestPath)
+			suite.Equal(suite.collectionID, extfs.CollectionID)
+			suite.Equal(suite.schema.GetExternalSource(), extfs.Source)
+			suite.Equal(suite.schema.GetExternalSpec(), extfs.Spec)
+			return []*datapb.FieldBinlog{{
+				Binlogs: []*datapb.Binlog{{
+					LogPath:    sourceDeltaPath,
+					EntriesNum: 1,
+				}},
+			}}, nil
+		},
+	).Build()
+	defer patchSourceDeltalogs.UnPatch()
+
 	readerCalled := atomic.NewInt32(0)
-	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
-		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+	patchReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).To(
+		func(pkType schemapb.DataType, binlogs []*datapb.Binlog, option ...storage.RwOption) (storage.RecordReader, error) {
 			readerCalled.Inc()
 			suite.Equal(schemapb.DataType_Int64, pkType)
-			suite.Equal([]string{sourceDeltaPath}, paths)
+			suite.Require().Len(binlogs, 1)
+			suite.Equal(sourceDeltaPath, binlogs[0].GetLogPath())
+			suite.EqualValues(1, binlogs[0].GetEntriesNum())
 			return eofRecordReader{}, nil
 		},
 	).Build()
@@ -978,6 +1013,7 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestStorageV
 
 	suite.NoError(err)
 	suite.EqualValues(1, manifestCalled.Load())
+	suite.EqualValues(1, sourceDeltalogsCalled.Load())
 	suite.EqualValues(1, readerCalled.Load())
 }
 
@@ -1024,8 +1060,8 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestRejectsL
 	defer patchManifest.UnPatch()
 
 	readerCalled := atomic.NewInt32(0)
-	patchReader := mockey.Mock(storage.NewDeltalogReader).
-		To(func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+	patchReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).
+		To(func(pkType schemapb.DataType, binlogs []*datapb.Binlog, option ...storage.RwOption) (storage.RecordReader, error) {
 			readerCalled.Inc()
 			return eofRecordReader{}, nil
 		}).Build()

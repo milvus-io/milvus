@@ -2,6 +2,7 @@ package storage
 
 import (
 	"io"
+	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -27,6 +28,13 @@ type packedRecordReader struct {
 
 var _ RecordReader = (*packedRecordReader)(nil)
 
+type ffiPackedRecordReader struct {
+	reader    *packed.FFIPackedReader
+	field2Col map[FieldID]int
+}
+
+var _ RecordReader = (*ffiPackedRecordReader)(nil)
+
 func (pr *packedRecordReader) Next() (Record, error) {
 	rec, err := pr.reader.ReadNext()
 	if err != nil {
@@ -36,6 +44,21 @@ func (pr *packedRecordReader) Next() (Record, error) {
 }
 
 func (pr *packedRecordReader) Close() error {
+	if pr.reader != nil {
+		return pr.reader.Close()
+	}
+	return nil
+}
+
+func (pr *ffiPackedRecordReader) Next() (Record, error) {
+	rec, err := pr.reader.ReadNext()
+	if err != nil {
+		return nil, err
+	}
+	return NewSimpleArrowRecord(rec, pr.field2Col), nil
+}
+
+func (pr *ffiPackedRecordReader) Close() error {
 	if pr.reader != nil {
 		return pr.reader.Close()
 	}
@@ -64,6 +87,46 @@ func newPackedRecordReader(
 		return nil, err
 	}
 	return &packedRecordReader{
+		reader:    reader,
+		field2Col: field2Col,
+	}, nil
+}
+
+func newFFIPackedRecordReaderFromFragments(
+	fragments []packed.Fragment,
+	format string,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+	externalReader packed.ExternalReaderContext,
+) (*ffiPackedRecordReader, error) {
+	arrowSchema, err := ConvertToArrowSchema(schema, true)
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
+	}
+	field2Col := make(map[FieldID]int)
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	columns := make([]string, 0, len(allFields))
+	for i, field := range allFields {
+		field2Col[field.FieldID] = i
+		columns = append(columns, strconv.FormatInt(field.FieldID, 10))
+	}
+	reader, err := packed.NewFFIPackedReaderWithFragments(
+		columns,
+		format,
+		fragments,
+		arrowSchema,
+		columns,
+		bufferSize,
+		storageConfig,
+		storagePluginContext,
+		externalReader,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &ffiPackedRecordReader{
 		reader:    reader,
 		field2Col: field2Col,
 	}, nil
