@@ -423,6 +423,43 @@ func TestDeleteMsg_Unmarshal_IllegalParameter(t *testing.T) {
 	assert.Nil(t, tsMsg)
 }
 
+func TestDeleteMsg_CheckAligned_PredicateDelete(t *testing.T) {
+	newPredicateDeleteMsg := func() *DeleteMsg {
+		return &DeleteMsg{
+			DeleteRequest: &msgpb.DeleteRequest{
+				CollectionName:     "test_collection",
+				ShardName:          "test-channel",
+				SerializedExprPlan: []byte{1, 2, 3},
+				Timestamps:         []uint64{100},
+			},
+		}
+	}
+
+	t.Run("valid predicate delete", func(t *testing.T) {
+		assert.NoError(t, newPredicateDeleteMsg().CheckAligned())
+	})
+
+	t.Run("more than one timestamp", func(t *testing.T) {
+		msg := newPredicateDeleteMsg()
+		msg.Timestamps = []uint64{100, 101}
+		assert.Error(t, msg.CheckAligned())
+	})
+
+	t.Run("no timestamp", func(t *testing.T) {
+		msg := newPredicateDeleteMsg()
+		msg.Timestamps = nil
+		assert.Error(t, msg.CheckAligned())
+	})
+
+	t.Run("carries primary keys", func(t *testing.T) {
+		msg := newPredicateDeleteMsg()
+		msg.PrimaryKeys = &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}},
+		}
+		assert.Error(t, msg.CheckAligned())
+	})
+}
+
 func TestTimeTickMsg(t *testing.T) {
 	timeTickMsg := &TimeTickMsg{
 		BaseMsg: generateBaseMsg(),

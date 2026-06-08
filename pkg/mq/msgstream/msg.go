@@ -427,6 +427,19 @@ func (dt *DeleteMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 }
 
 func (dt *DeleteMsg) CheckAligned() error {
+	// A predicate delete carries a delete expression plan and a single MVCC delete
+	// timestamp but no primary keys; it is not a per-row (pk, ts) delete, so validate
+	// that shape instead of the per-row pk/ts alignment.
+	if len(dt.GetSerializedExprPlan()) != 0 {
+		if len(dt.GetTimestamps()) != 1 {
+			return merr.WrapErrDataIntegrityMsg("predicate delete must carry exactly one delete timestamp, got %d", len(dt.GetTimestamps()))
+		}
+		if numPks := int64(typeutil.GetSizeOfIDs(dt.PrimaryKeys)); numPks != 0 {
+			return merr.WrapErrDataIntegrityMsg("predicate delete must not carry primary keys, got %d", numPks)
+		}
+		return nil
+	}
+
 	numRows := dt.GetNumRows()
 
 	if numRows != int64(len(dt.GetTimestamps())) {
