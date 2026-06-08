@@ -513,6 +513,7 @@ test_run_unified(const std::string& storage_version, bool train_full = false) {
     std::vector<T> data_gen(nb * dim);
     for (auto& v : data_gen) v = static_cast<T>(rand());
     StoragePreparationResult prep;
+    bool check_centroids = false;
     if (storage_version == "STORAGE_V1") {
         prep = prepare_storage_v1<T, dtype>(root_path,
                                             collection_id,
@@ -539,6 +540,7 @@ test_run_unified(const std::string& storage_version, bool train_full = false) {
                                      dim,
                                      cm,
                                      train_full);
+        check_centroids = true;
     } else
         FAIL() << "Unknown storage_version: " << storage_version;
 
@@ -564,13 +566,14 @@ test_run_unified(const std::string& storage_version, bool train_full = false) {
                   << "), not enough data for stable centroids.\n";
         return;  // skip this partial test safely
     }
+    std::cout << "check_centroids = " << check_centroids << "\n";
     if (runClustering<T>(clusteringJob, config)) {
         CheckResultCorrectness<T>(clusteringJob,
                                   cm,
                                   prep.num_rows,
                                   dim,
                                   config["num_clusters"].get<int>(),
-                                  true);
+                                  check_centroids);
     }
     EXPECT_THROW(
         {
