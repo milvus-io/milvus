@@ -592,6 +592,11 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			t.hybridSubSearchInfos[index].Collapse = defaultElementCollapseConfig()
 		}
 	}
+	if t.hybridElementLevel {
+		if err := t.useElementLevelHybridFunctionScore(); err != nil {
+			return err
+		}
+	}
 
 	if embedding.HasNonBM25Functions(t.schema.Functions, queryFieldIDs) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AdvancedSearch-call-function-udf")
@@ -615,6 +620,39 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (t *searchTask) useElementLevelHybridFunctionScore() error {
+	rerankSchema := elementLevelHybridRerankSchema(t.schema.CollectionSchema)
+	extraInfo := &models.ModelExtraInfo{
+		ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
+		DBName:    t.request.GetDbName(),
+	}
+
+	var err error
+	if t.request.FunctionScore != nil {
+		t.functionScore, err = rerank.NewFunctionScore(rerankSchema, t.request.FunctionScore, extraInfo)
+	} else {
+		t.functionScore, err = rerank.NewFunctionScoreWithlegacy(rerankSchema, t.request.GetSearchParams())
+	}
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func elementLevelHybridRerankSchema(collSchema *schemapb.CollectionSchema) *schemapb.CollectionSchema {
+	cloned, ok := proto.Clone(collSchema).(*schemapb.CollectionSchema)
+	if !ok || cloned == nil {
+		return collSchema
+	}
+	for _, field := range cloned.GetFields() {
+		if field.GetIsPrimaryKey() {
+			field.DataType = schemapb.DataType_VarChar
+			break
+		}
+	}
+	return cloned
 }
 
 func (t *searchTask) fillResult() {

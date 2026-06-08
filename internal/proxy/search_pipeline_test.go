@@ -513,6 +513,54 @@ func (s *SearchPipelineSuite) TestElementLevelHybridPrepareAndRestoreKeys() {
 	s.Equal([]float32{0.99, 0.88}, restored.GetResults().GetScores())
 }
 
+func (s *SearchPipelineSuite) TestElementLevelHybridRerankAcceptsSyntheticStringKeysForInt64PK() {
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
+	}
+	functionScore, err := rerank.NewFunctionScoreWithlegacy(elementLevelHybridRerankSchema(schema), nil)
+	s.Require().NoError(err)
+
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{10, 10, 20}},
+				},
+			},
+			Scores:         []float32{0.8, 0.9, 0.7},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0, 2, 1}},
+		},
+	}
+	prepared, err := prepareElementLevelHybridResult(input)
+	s.Require().NoError(err)
+
+	op := &rerankOperator{
+		nq:            1,
+		topK:          2,
+		offset:        0,
+		roundDecimal:  -1,
+		functionScore: functionScore,
+	}
+	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{prepared}, []string{"IP"})
+	s.Require().NoError(err)
+
+	rankResult := out[0].(*milvuspb.SearchResults)
+	s.Require().NotNil(rankResult.GetResults().GetIds().GetStrId())
+
+	restored, err := restoreElementLevelHybridRankResult(rankResult)
+	s.Require().NoError(err)
+	s.Equal([]int64{10, 10}, restored.GetResults().GetIds().GetIntId().GetData())
+	s.Equal([]int64{0, 2}, restored.GetResults().GetElementIndices().GetData())
+}
+
 func (s *SearchPipelineSuite) TestElementBestCollapseOpRejectsEmptyMetricForElementLevelResult() {
 	input := &milvuspb.SearchResults{
 		Status: merr.Success(),
