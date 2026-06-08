@@ -1520,7 +1520,10 @@ class InsertRecordGrowing {
             pk2offset_->clear();
         }
         reserved = 0;
-        data_.clear();
+        {
+            std::unique_lock<std::shared_mutex> lck(field_map_mutex_);
+            data_.clear();
+        }
         ack_responder_.clear();
     }
 
@@ -1689,6 +1692,9 @@ class InsertRecordGrowing {
     // get data without knowing the type
     VectorBase*
     get_data_base(FieldId field_id) const {
+        // Guard the field map against concurrent structural modification
+        // (e.g. append_field_meta during schema evolution rehashing data_).
+        std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
         AssertInfo(data_.find(field_id) != data_.end(),
                    "Cannot find field_data with field_id: " +
                        std::to_string(field_id.get()));
@@ -1719,6 +1725,9 @@ class InsertRecordGrowing {
 
     ThreadSafeValidDataPtr
     get_valid_data(FieldId field_id) const {
+        // Guard the field map against concurrent structural modification
+        // (e.g. append_field_meta during schema evolution rehashing valid_data_).
+        std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
         AssertInfo(valid_data_.find(field_id) != valid_data_.end(),
                    "Cannot find valid_data with field_id: " +
                        std::to_string(field_id.get()));
@@ -1729,11 +1738,13 @@ class InsertRecordGrowing {
 
     bool
     is_data_exist(FieldId field_id) const {
+        std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
         return data_.find(field_id) != data_.end();
     }
 
     bool
     is_valid_data_exist(FieldId field_id) const {
+        std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
         return valid_data_.find(field_id) != valid_data_.end();
     }
 
@@ -1755,7 +1766,9 @@ class InsertRecordGrowing {
     // append a column of scalar type
     void
     append_valid_data(FieldId field_id) {
-        valid_data_.emplace(field_id, std::make_shared<ThreadSafeValidData>());
+        auto valid_data = std::make_shared<ThreadSafeValidData>();
+        std::unique_lock<std::shared_mutex> lck(field_map_mutex_);
+        valid_data_.emplace(field_id, std::move(valid_data));
     }
 
     // append a column of vector type
@@ -1767,14 +1780,16 @@ class InsertRecordGrowing {
                 const storage::MmapChunkDescriptorPtr mmap_descriptor) {
         static_assert(std::is_base_of_v<VectorTrait, VectorType>);
         bool use_mapping_storage = is_valid_data_exist(field_id);
-        data_.emplace(
-            field_id,
-            std::make_unique<ConcurrentVector<VectorType>>(
-                dim,
-                size_per_chunk,
-                mmap_descriptor,
-                use_mapping_storage ? get_valid_data(field_id) : nullptr,
-                use_mapping_storage));
+        // Resolve valid_data and build the column before taking the write lock
+        // so the shared-lock readers above are not nested inside the unique lock.
+        auto column = std::make_unique<ConcurrentVector<VectorType>>(
+            dim,
+            size_per_chunk,
+            mmap_descriptor,
+            use_mapping_storage ? get_valid_data(field_id) : nullptr,
+            use_mapping_storage);
+        std::unique_lock<std::shared_mutex> lck(field_map_mutex_);
+        data_.emplace(field_id, std::move(column));
     }
 
     // append a column of scalar or sparse float vector type
@@ -1785,26 +1800,28 @@ class InsertRecordGrowing {
                 const storage::MmapChunkDescriptorPtr mmap_descriptor) {
         static_assert(IsScalar<Type> || IsSparse<Type>);
         bool use_mapping_storage = is_valid_data_exist(field_id);
+        // Resolve valid_data and build the column before taking the write lock
+        // so the shared-lock readers above are not nested inside the unique lock.
+        std::unique_ptr<ConcurrentVector<Type>> column;
         if constexpr (IsSparse<Type>) {
-            data_.emplace(
-                field_id,
-                std::make_unique<ConcurrentVector<Type>>(
-                    size_per_chunk,
-                    mmap_descriptor,
-                    use_mapping_storage ? get_valid_data(field_id) : nullptr,
-                    use_mapping_storage));
+            column = std::make_unique<ConcurrentVector<Type>>(
+                size_per_chunk,
+                mmap_descriptor,
+                use_mapping_storage ? get_valid_data(field_id) : nullptr,
+                use_mapping_storage);
         } else {
-            data_.emplace(
-                field_id,
-                std::make_unique<ConcurrentVector<Type>>(
-                    size_per_chunk,
-                    mmap_descriptor,
-                    use_mapping_storage ? get_valid_data(field_id) : nullptr));
+            column = std::make_unique<ConcurrentVector<Type>>(
+                size_per_chunk,
+                mmap_descriptor,
+                use_mapping_storage ? get_valid_data(field_id) : nullptr);
         }
+        std::unique_lock<std::shared_mutex> lck(field_map_mutex_);
+        data_.emplace(field_id, std::move(column));
     }
 
     void
     drop_field_data(FieldId field_id) {
+        std::unique_lock<std::shared_mutex> lck(field_map_mutex_);
         data_.erase(field_id);
         valid_data_.erase(field_id);
     }
@@ -1833,6 +1850,12 @@ class InsertRecordGrowing {
     std::unordered_map<FieldId, std::unique_ptr<VectorBase>> data_{};
     std::unordered_map<FieldId, ThreadSafeValidDataPtr> valid_data_{};
     mutable std::shared_mutex shared_mutex_{};
+    // Protects the structure of data_ / valid_data_ against concurrent
+    // rehash: structural writes (append_*/drop/clear during schema evolution)
+    // take it unique, lookups (get_data_base/get_valid_data/...) take it shared.
+    // Kept separate from shared_mutex_ so frequent reads do not contend with
+    // pk inserts.
+    mutable std::shared_mutex field_map_mutex_{};
 };
 
 // Keep the original template API via alias
