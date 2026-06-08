@@ -771,6 +771,42 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		assert.Contains(t, metaTask.GetFailReason(), "collection 100 not found")
 	})
 
+	t.Run("schema_version_changed_before_worker_dispatch", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
+		assert.NoError(t, err)
+
+		protoTask := &datapb.ExternalCollectionRefreshTask{
+			TaskId:         1001,
+			JobId:          1,
+			CollectionId:   100,
+			State:          indexpb.JobState_JobStateInit,
+			SchemaVersion:  3,
+			ExternalSource: "s3://bucket/path",
+			ExternalSpec:   "iceberg",
+		}
+		err = refreshMeta.AddTask(protoTask)
+		assert.NoError(t, err)
+
+		segments := NewSegmentsInfo()
+		mt := &meta{
+			segments:    segments,
+			collections: newTestCollections(100),
+		}
+		collection := mt.GetCollection(100)
+		assert.NotNil(t, collection)
+		collection.Schema = &schemapb.CollectionSchema{Version: 4}
+
+		alloc := &stubAllocator{nextID: 99999}
+		task := newRefreshExternalCollectionTask(protoTask, refreshMeta, mt, alloc)
+		cluster := &stubCluster{}
+		task.CreateTaskOnWorker(1, cluster)
+
+		metaTask := refreshMeta.GetTask(1001)
+		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
+		assert.Contains(t, metaTask.GetFailReason(), "schema changed during refresh")
+	})
+
 	t.Run("create_task_on_worker_failed", func(t *testing.T) {
 		catalog := &stubCatalog{}
 		refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
@@ -1525,6 +1561,13 @@ func TestApplyExternalCollectionSegmentUpdate_UpsertExistingSegment(t *testing.T
 			LogSize:    1400,
 		}},
 	}}
+	patched.Bm25Statslogs = []*datapb.FieldBinlog{{
+		FieldID: 103,
+		Binlogs: []*datapb.Binlog{{
+			LogID:   11,
+			LogPath: "bm25/103/0",
+		}},
+	}}
 
 	err := applyExternalCollectionSegmentUpdate(
 		ctx,
@@ -1544,6 +1587,7 @@ func TestApplyExternalCollectionSegmentUpdate_UpsertExistingSegment(t *testing.T
 	assert.Equal(t, `{"base_path":"old","ver":2}`, got.GetManifestPath())
 	assert.Equal(t, int32(4), got.GetSchemaVersion())
 	assert.ElementsMatch(t, []int64{100, 101, 102, 103}, got.GetBinlogs()[0].GetChildFields())
+	assert.Equal(t, patched.GetBm25Statslogs(), got.GetBm25Statslogs())
 }
 
 func TestApplyExternalCollectionSegmentUpdate_RejectPatchRowCountChange(t *testing.T) {

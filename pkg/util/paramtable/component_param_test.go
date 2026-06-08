@@ -64,6 +64,13 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, "queryNode.search.enableResultZeroCopy", params.QueryNodeCfg.EnableResultZeroCopy.Key)
 	})
 
+	t.Run("query node external unmaterialized field access config", func(t *testing.T) {
+		assert.Equal(t,
+			"queryNode.externalCollection.allowUnmaterializedFieldAccess",
+			params.QueryNodeCfg.ExternalCollectionAllowUnmaterializedFieldAccess.Key)
+		assert.False(t, params.QueryNodeCfg.ExternalCollectionAllowUnmaterializedFieldAccess.GetAsBool())
+	})
+
 	t.Run("test commonConfig", func(t *testing.T) {
 		Params := &params.CommonCfg
 

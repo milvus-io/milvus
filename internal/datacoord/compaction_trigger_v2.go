@@ -654,11 +654,6 @@ func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx co
 			zap.String("actualType", fmt.Sprintf("%T", view)))
 		return
 	}
-	planID, endID, err := m.allocator.AllocN(2)
-	if err != nil {
-		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
-		return
-	}
 	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
 	if err != nil {
 		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.Error(err))
@@ -670,6 +665,11 @@ func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx co
 	}
 	if collection.IsExternal() {
 		log.Info("skip submitting schema bump compaction for external collection", zap.Int64("collectionID", collection.ID))
+		return
+	}
+	planID, endID, err := m.allocator.AllocN(2)
+	if err != nil {
+		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
 		return
 	}
 	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)

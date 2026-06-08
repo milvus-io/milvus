@@ -572,6 +572,7 @@ func applyExternalRefreshPatch(oldSeg *SegmentInfo, incoming *datapb.SegmentInfo
 	cloned.ManifestPath = incoming.GetManifestPath()
 	cloned.SchemaVersion = incoming.GetSchemaVersion()
 	cloned.Binlogs = incoming.GetBinlogs()
+	cloned.Bm25Statslogs = incoming.GetBm25Statslogs()
 	if incoming.GetStorageVersion() != 0 {
 		cloned.StorageVersion = incoming.GetStorageVersion()
 	}
@@ -660,16 +661,16 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 		zap.Int64("idEnd", idEnd),
 		zap.Int64("count", idEnd-idBegin))
 
-	// Use the current collection schema as this task's snapshot. There is no
-	// job/task-level schema-version gate for the current additive-only refresh
-	// scope: if AddField races after this request is built, the task may finish
-	// with the older schema and skip the new field, and a later refresh will
-	// self-heal it through missing-column detection. Drop, rename, or type
-	// changes must reintroduce stronger schema coordination, such as a gate or
-	// lock, before they are supported.
+	// Use the task schema as the worker snapshot. If the collection schema has
+	// moved on before dispatch, fail this refresh task and let the caller retry
+	// with a fresh task built from the new schema.
 	collInfo := t.mt.GetCollection(t.GetCollectionId())
 	if collInfo == nil {
 		err = merr.WrapErrServiceInternalMsg("collection %d not found in meta", t.GetCollectionId())
+		return
+	}
+	if collInfo.Schema.GetVersion() != t.GetSchemaVersion() {
+		err = fmt.Errorf("external collection schema changed during refresh; rerun refresh")
 		return
 	}
 	if len(collInfo.Partitions) != 1 {

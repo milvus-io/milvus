@@ -905,6 +905,7 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			PartitionID:    t.req.GetPartitionID(),
 			NumOfRows:      work.rowCount,
 			ManifestPath:   manifestPaths[i],
+			SchemaVersion:  t.req.GetSchema().GetVersion(),
 			StorageVersion: storage.StorageV3,
 			// Fake binlog so downstream treats external segments like normal
 			// StorageV3 segments. MemorySize is pre-computed from Take sampling

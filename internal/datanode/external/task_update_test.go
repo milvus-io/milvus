@@ -246,6 +246,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Sing
 		ExternalSource:         "s3://bucket/data/",
 		ExternalSpec:           `{"format":"parquet"}`,
 		Schema: &schemapb.CollectionSchema{
+			Version: 4,
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "text", ExternalField: "text_col"},
 				{FieldID: 101, Name: "vec", ExternalField: "vec_col"},
@@ -276,6 +277,8 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Sing
 	s.NoError(err)
 	s.Len(result, 1)
 	s.Equal(int64(500), result[0].GetNumOfRows())
+	s.Equal(int32(4), result[0].GetSchemaVersion(),
+		"new external segments should use the request schema version")
 	s.Equal(storage.StorageV3, result[0].GetStorageVersion(),
 		"external segments should have StorageVersion=V3")
 

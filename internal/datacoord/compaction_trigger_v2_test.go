@@ -451,16 +451,21 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 
 	s.Run("AllocN fails", func() {
 		s.SetupTest()
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(&collectionInfo{
+				ID:     s.testLabel.CollectionID,
+				Schema: collectionSchema,
+			}, nil).Once()
+		s.triggerManager.handler = handler
 		s.mockAlloc.EXPECT().AllocN(int64(2)).Return(int64(0), int64(0), errors.New("alloc error")).Once()
 		view := makeBumpSchemaVersionView(111)
-		// Should return early with no panic — no other mock calls expected.
+		// Should return early with no panic before enqueueing compaction.
 		s.triggerManager.SubmitBumpSchemaVersionViewToScheduler(context.Background(), view)
 	})
 
 	s.Run("GetCollection fails", func() {
 		s.SetupTest()
-		const planID = int64(500)
-		s.mockAlloc.EXPECT().AllocN(int64(2)).Return(planID, planID+2, nil).Once()
 		handler := NewNMockHandler(s.T())
 		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
 			Return(nil, errors.New("get collection error")).Once()
@@ -472,8 +477,6 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 
 	s.Run("collection is nil", func() {
 		s.SetupTest()
-		const planID = int64(501)
-		s.mockAlloc.EXPECT().AllocN(int64(2)).Return(planID, planID+2, nil).Once()
 		handler := NewNMockHandler(s.T())
 		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
 			Return(nil, nil).Once()
@@ -485,8 +488,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 
 	s.Run("collection is external", func() {
 		s.SetupTest()
-		const planID = int64(502)
-		s.mockAlloc.EXPECT().AllocN(int64(2)).Return(planID, planID+2, nil).Once()
+		strictAlloc := allocator.NewMockAllocator(s.T())
+		s.triggerManager.allocator = strictAlloc
 		handler := NewNMockHandler(s.T())
 		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
 			Return(&collectionInfo{

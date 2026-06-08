@@ -590,6 +590,8 @@ queryNode:
     topKMergeRatio: 20
   search:
     enableResultZeroCopy: false # When true, delegator passes reduced SearchResultData directly instead of re-marshaling to SlicedBlob. Toggle at runtime for instant fallback.
+  externalCollection:
+    allowUnmaterializedFieldAccess: false # When true, QueryNode skips the external materialization gate for search/query and lets unmaterialized external fields fall through to the storage path.
   levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
   streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]
   forwardBatchSize: 4194304 # the batch size delegator uses for forwarding stream delete in loading procedure

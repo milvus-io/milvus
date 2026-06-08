@@ -3682,11 +3682,12 @@ type queryNodeConfig struct {
 	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
 
 	// output fields take
-	InternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
-	ExternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
-	ExternalCollectionSamplePerSegment ParamItem `refreshable:"true"`
-	ExternalCollectionSampleRows       ParamItem `refreshable:"true"`
-	ExternalCollectionRawDataFactor    ParamItem `refreshable:"true"`
+	InternalCollectionUseTakeForOutput               ParamItem `refreshable:"true"`
+	ExternalCollectionUseTakeForOutput               ParamItem `refreshable:"true"`
+	ExternalCollectionAllowUnmaterializedFieldAccess ParamItem `refreshable:"true"`
+	ExternalCollectionSamplePerSegment               ParamItem `refreshable:"true"`
+	ExternalCollectionSampleRows                     ParamItem `refreshable:"true"`
+	ExternalCollectionRawDataFactor                  ParamItem `refreshable:"true"`
 }
 
 func formatDurationWithMillisecondFallback(v string) string {
@@ -4987,6 +4988,15 @@ user-task-polling:
 		Export:       false,
 	}
 	p.ExternalCollectionUseTakeForOutput.Init(base.mgr)
+
+	p.ExternalCollectionAllowUnmaterializedFieldAccess = ParamItem{
+		Key:          "queryNode.externalCollection.allowUnmaterializedFieldAccess",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "When true, QueryNode skips the external materialization gate for search/query and lets unmaterialized external fields fall through to the storage path.",
+		Export:       true,
+	}
+	p.ExternalCollectionAllowUnmaterializedFieldAccess.Init(base.mgr)
 
 	p.ExternalCollectionSamplePerSegment = ParamItem{
 		Key:          "queryNode.externalCollection.samplePerSegment",
