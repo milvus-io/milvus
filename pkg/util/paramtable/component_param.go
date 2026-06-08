@@ -5108,6 +5108,7 @@ type dataCoordConfig struct {
 	MaxFilesPerImportReq            ParamItem `refreshable:"true"`
 	MaxImportJobNum                 ParamItem `refreshable:"true"`
 	WaitForIndex                    ParamItem `refreshable:"true"`
+	ImportInReplicatingCluster      ParamItem `refreshable:"true"`
 	ImportPreAllocIDExpansionFactor ParamItem `refreshable:"true"`
 	ImportFileNumPerSlot            ParamItem `refreshable:"true"`
 	ImportMemoryLimitPerSlot        ParamItem `refreshable:"true"`
@@ -6299,6 +6300,16 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 		Export:       true,
 	}
 	p.WaitForIndex.Init(base.mgr)
+
+	p.ImportInReplicatingCluster = ParamItem{
+		Key:          "dataCoord.import.enableInReplicatingCluster",
+		Version:      "2.7.0",
+		Doc:          "Whether to allow import in a replicating cluster. When enabled, only auto_commit=false imports are accepted.",
+		DefaultValue: "false",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportInReplicatingCluster.Init(base.mgr)
 
 	p.ImportPreAllocIDExpansionFactor = ParamItem{
 		Key:          "dataCoord.import.preAllocateIDExpansionFactor",

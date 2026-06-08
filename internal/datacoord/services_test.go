@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
@@ -5409,4 +5410,61 @@ func TestHandleCommitVchannelRPC(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.True(t, merr.Ok(resp))
+}
+
+func TestHandleCommitVchannelRPC_StoresCommitTimestamp(t *testing.T) {
+	ctx := context.Background()
+
+	importMetaMock := NewMockImportMeta(t)
+	importMetaMock.EXPECT().HandleCommitVchannel(mock.Anything, int64(3001), "vchan-0", mock.AnythingOfType("func() error")).
+		RunAndReturn(func(ctx context.Context, jobID int64, vchannel string, callback func() error) error {
+			return callback()
+		})
+
+	segIDs := []int64{10, 20}
+	getSegIDsMock := mockey.Mock((*Server).getImportSegmentIDsByVchannel).
+		Return(segIDs).Build()
+	defer getSegIDsMock.UnPatch()
+
+	segments := NewSegmentsInfo()
+	for _, segID := range segIDs {
+		segments.SetSegment(segID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            segID,
+			CollectionID:  100,
+			PartitionID:   10,
+			InsertChannel: "vchan-0",
+			State:         commonpb.SegmentState_Flushed,
+			IsImporting:   true,
+			Binlogs: []*datapb.FieldBinlog{{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{{
+					LogID:       segID,
+					TimestampTo: 100,
+				}},
+			}},
+		}})
+	}
+
+	server := &Server{
+		importMeta: importMetaMock,
+		meta: &meta{
+			catalog:  &datacoordkv.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segments,
+		},
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.HandleCommitVchannel(ctx, &datapb.HandleCommitVchannelRequest{
+		JobId:           3001,
+		Vchannel:        "vchan-0",
+		CommitTimestamp: 500,
+	})
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(resp))
+	for _, segID := range segIDs {
+		seg := server.meta.GetSegment(ctx, segID)
+		require.NotNil(t, seg)
+		assert.EqualValues(t, 500, seg.GetCommitTimestamp())
+		assert.False(t, seg.GetIsImporting())
+	}
 }

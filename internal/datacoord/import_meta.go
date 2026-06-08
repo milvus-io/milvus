@@ -353,11 +353,22 @@ func (m *importMeta) HandleCommitVchannel(ctx context.Context, jobID int64, vcha
 			return nil
 		}
 	}
-	// Callback first, persist second.
-	// If callback fails, we return error without persisting — the caller retries
-	// and the callback will be invoked again. This avoids the scenario where persist
-	// succeeds but callback fails, causing the idempotency check to skip the callback
-	// on retry (data stays invisible forever).
+	if job.GetState() == internalpb.ImportJobState_Uncommitted {
+		updatedJob := job.Clone()
+		updatedJob.(*importJob).State = internalpb.ImportJobState_Committing
+		if err := m.catalog.SaveImportJob(ctx, updatedJob.(*importJob).ImportJob); err != nil {
+			return err
+		}
+		m.jobs[jobID] = updatedJob
+		job = updatedJob
+	}
+	// Move the job into commit phase before making any segment visible, then
+	// execute the callback before persisting the committed vchannel.
+	// If callback fails, we return error without persisting committed_vchannels;
+	// the caller retries and the callback will be invoked again. This avoids the
+	// scenario where committed_vchannels is persisted but callback fails, causing
+	// the idempotency check to skip the callback on retry (data stays invisible
+	// forever).
 	// The callback (setting is_importing=false) is idempotent, so re-execution on
 	// retry after a persist failure is safe.
 	//
