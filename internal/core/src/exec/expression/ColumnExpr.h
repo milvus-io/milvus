@@ -164,7 +164,7 @@ class PhyColumnExpr : public Expr {
     }
 
     segcore::PinnedIndexView
-    PinnedIndexForRead() const {
+    PinnedIndexForRawLookup() const {
         if (!use_index_data_) {
             return {};
         }

@@ -261,7 +261,7 @@ class PhyCompareFilterExpr : public Expr {
 
  private:
     segcore::PinnedIndexView
-    LeftPinnedIndexForRead() const {
+    LeftPinnedIndexForRawLookup() const {
         if (!left_use_index_data_) {
             return {};
         }
@@ -269,7 +269,7 @@ class PhyCompareFilterExpr : public Expr {
     }
 
     segcore::PinnedIndexView
-    RightPinnedIndexForRead() const {
+    RightPinnedIndexForRawLookup() const {
         if (!right_use_index_data_) {
             return {};
         }

@@ -114,7 +114,6 @@ class SegmentChunkReader {
     GetChunkDataAccessor(DataType data_type,
                          FieldId field_id,
                          int chunk_id,
-                         int data_barrier,
                          PinnedIndexView pinned_index) const;
 
     void
@@ -186,7 +185,6 @@ class SegmentChunkReader {
     ChunkDataAccessor
     GetChunkDataAccessor(FieldId field_id,
                          int chunk_id,
-                         int data_barrier,
                          PinnedIndexView pinned_index) const;
 
     const int64_t size_per_chunk_;
