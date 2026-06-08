@@ -278,8 +278,18 @@ DispatchBruteForceIteratorByDataType(const knowhere::DataSetPtr& base_dataset,
                                      const knowhere::Json& config,
                                      const BitsetView& bitset,
                                      milvus::DataType data_type) {
-    AssertInfo(data_type != DataType::VECTOR_ARRAY,
-               "VECTOR_ARRAY is not supported for brute force iterator");
+    // emb_list (VECTOR_ARRAY) search_iterator is supported only on the sealed
+    // vector-index path (knowhere's emblist AnnIterator). The brute-force /
+    // growing-segment iterator path does not support it yet (R9, deferred to v2):
+    // knowhere's BruteForce::AnnIterator has no emb_list overload. Surface a clean,
+    // typed Unsupported error here rather than tripping the bare assert below, so a
+    // search_iterator over a collection with growing / un-indexed segments returns a
+    // graceful "not supported" instead of an opaque internal assertion failure.
+    if (data_type == DataType::VECTOR_ARRAY) {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "search_iterator over emb_list (vector array) fields is not "
+                  "supported on brute-force / growing segments");
+    }
 
     switch (data_type) {
         case DataType::VECTOR_FLOAT:

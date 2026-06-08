@@ -189,9 +189,14 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         }
 
         if (info.iterator_v2_info_.has_value()) {
-            AssertInfo(data_type != DataType::VECTOR_ARRAY,
-                       "vector array(embedding list) is not supported for "
-                       "vector iterator");
+            // R9: emblist search_iterator is supported only on the sealed
+            // vector-index path; fail growing segments gracefully (typed
+            // Unsupported), not via a bare assert deep in segcore.
+            if (data_type == DataType::VECTOR_ARRAY) {
+                ThrowInfo(ErrorCode::Unsupported,
+                          "search_iterator over emb_list (vector array) fields "
+                          "is not supported on brute-force / growing segments");
+            }
 
             CachedSearchIterator cached_iter(search_dataset,
                                              vec_ptr,
@@ -286,9 +291,14 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             auto search_data_type =
                 element_level_search ? element_type : data_type;
             if (milvus::exec::UseVectorIterator(info)) {
-                AssertInfo(search_data_type != DataType::VECTOR_ARRAY,
-                           "vector array(embedding list) is not supported for "
-                           "vector iterator");
+                // R9: graceful typed failure for the emblist iterator on a
+                // growing segment (see note above), not a bare assert.
+                if (search_data_type == DataType::VECTOR_ARRAY) {
+                    ThrowInfo(ErrorCode::Unsupported,
+                              "search_iterator over emb_list (vector array) "
+                              "fields is not supported on brute-force / growing "
+                              "segments");
+                }
 
                 if (buf != nullptr) {
                     search_result.chunk_buffers_.emplace_back(std::move(buf));

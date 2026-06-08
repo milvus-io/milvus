@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <limits>
 #include <memory>
 #include <random>
 #include <unordered_set>
@@ -21,6 +22,7 @@
 #include "index/Index.h"
 #include "knowhere/comp/index_param.h"
 #include "query/CachedSearchIterator.h"
+#include "query/SearchBruteForce.h"
 #include "index/VectorIndex.h"
 #include "index/IndexFactory.h"
 #include "knowhere/dataset.h"
@@ -926,3 +928,172 @@ INSTANTIATE_TEST_SUITE_P(
         }
         return constructor_type_str;
     });
+
+// PR 3 — emblist (MAX_SIM) iterator enablement.
+// Before the nq_ fix in the sealed-index constructor, an emblist query (whose
+// dataset is a flat run of vectors with EMB_LIST_OFFSET) made nq_ = the vector
+// count, so CachedSearchIterator::Init threw "Number of queries is greater than
+// 1". nq_ is now the query emb_list count, matching the iterators knowhere's
+// emblist AnnIterator returns.
+TEST(CachedSearchIteratorEmbListTest, EmbListNextBatch) {
+    constexpr int64_t kElDim = 16;
+    constexpr int64_t kNumEmbLists = 200;
+    constexpr int64_t kElBatch = 50;
+    const MetricType metric = knowhere::metric::MAX_SIM_COSINE;
+
+    // variable-length emb_lists (1..5 vectors each) exercise the offset logic
+    std::vector<size_t> offsets{0};
+    for (int64_t i = 0; i < kNumEmbLists; ++i) {
+        offsets.push_back(offsets.back() + static_cast<size_t>(i % 5) + 1);
+    }
+    const int64_t total_vectors = static_cast<int64_t>(offsets.back());
+
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    std::vector<float> base(total_vectors * kElDim);
+    for (auto& v : base) {
+        v = dist(rng);
+    }
+
+    auto build_ds = knowhere::GenDataSet(total_vectors, kElDim, base.data());
+    build_ds->Set(knowhere::meta::EMB_LIST_OFFSET,
+                  const_cast<const size_t*>(offsets.data()));
+
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = DataType::VECTOR_ARRAY;
+    create_index_info.metric_type = metric;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    // a VECTOR_ARRAY (emb_list) index dispatches on the inner element type,
+    // which IndexFactory reads from the field schema
+    milvus::storage::FileManagerContext file_manager_context;
+    file_manager_context.fieldDataMeta.field_schema.set_data_type(
+        static_cast<proto::schema::DataType>(DataType::VECTOR_ARRAY));
+    file_manager_context.fieldDataMeta.field_schema.set_element_type(
+        static_cast<proto::schema::DataType>(DataType::VECTOR_FLOAT));
+    auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager_context);
+    auto build_conf = knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, metric},
+        {knowhere::meta::DIM, std::to_string(kElDim)},
+        {knowhere::indexparam::M, std::to_string(24)},
+        {knowhere::indexparam::EFCONSTRUCTION, std::to_string(360)}};
+    index->BuildWithDataset(build_ds, build_conf);
+    auto* vec_index = dynamic_cast<milvus::index::VectorIndex*>(index.get());
+    ASSERT_NE(vec_index, nullptr);
+
+    // a single query emb_list of 4 vectors
+    std::vector<float> q(4 * kElDim);
+    for (auto& v : q) {
+        v = dist(rng);
+    }
+    auto query_ds = knowhere::GenDataSet(4, kElDim, q.data());
+    std::vector<size_t> q_offsets{0, 4};
+    query_ds->Set(knowhere::meta::EMB_LIST_OFFSET,
+                  const_cast<const size_t*>(q_offsets.data()));
+
+    SearchInfo search_info;
+    search_info.topk_ = kElBatch;
+    search_info.round_decimal_ = -1;
+    search_info.metric_type_ = metric;
+    search_info.search_params_ = {
+        {knowhere::indexparam::EF, std::to_string(128)}};
+    search_info.iterator_v2_info_ =
+        SearchIteratorV2Info{.batch_size = kElBatch};
+
+    auto iterator = std::make_unique<CachedSearchIterator>(
+        *vec_index, query_ds, search_info, nullptr);
+    SearchResult search_result;
+    iterator->NextBatch(search_info, search_result);
+
+    // one query emb_list -> one result row of kElBatch chunk-level results
+    EXPECT_EQ(search_result.total_nq_, 1);
+    EXPECT_EQ(search_result.seg_offsets_.size(), kElBatch);
+    EXPECT_EQ(search_result.distances_.size(), kElBatch);
+
+    // emitted ids are valid chunk (emb_list) ids, deduplicated, descending score
+    std::unordered_set<int64_t> seen;
+    float prev = std::numeric_limits<float>::max();
+    size_t emitted = 0;
+    for (int64_t i = 0; i < kElBatch; ++i) {
+        const auto id = search_result.seg_offsets_[i];
+        if (id == -1) {
+            continue;  // batch padding
+        }
+        EXPECT_GE(id, 0);
+        EXPECT_LT(id, kNumEmbLists);
+        EXPECT_TRUE(seen.insert(id).second) << "duplicate chunk id " << id;
+        EXPECT_LE(search_result.distances_[i], prev);  // MAX_SIM: descending
+        prev = search_result.distances_[i];
+        ++emitted;
+    }
+    EXPECT_GT(emitted, 0u);
+
+    // a second batch, bounded by the first batch's worst score, must not repeat
+    search_info.iterator_v2_info_->last_bound = prev;
+    SearchResult second;
+    iterator->NextBatch(search_info, second);
+    for (int64_t i = 0; i < kElBatch; ++i) {
+        const auto id = second.seg_offsets_[i];
+        if (id == -1) {
+            continue;
+        }
+        EXPECT_TRUE(seen.insert(id).second)
+            << "chunk id " << id << " repeated across batches";
+    }
+}
+
+// R9 / #15: emb_list (VECTOR_ARRAY) search_iterator is supported only on the sealed
+// vector-index path (knowhere's emblist AnnIterator, exercised by EmbListNextBatch
+// above). The brute-force / growing-segment iterator path has no emblist support, so
+// it must fail with a clean, typed Unsupported error -- not a bare assertion failure
+// deep in segcore. This guards the graceful behaviour lifted into the proxy by PR 4.
+TEST(CachedSearchIteratorEmbListTest, BruteForceIteratorRejectsEmbListGracefully) {
+    constexpr int64_t kDim = 4;
+    // one emb_list of two vectors; raw/query data is a flat run of vectors keyed by
+    // EMB_LIST_OFFSET (offsets length = num emb_lists + 1).
+    std::vector<float> base(2 * kDim, 0.1f);
+    std::vector<size_t> base_offsets{0, 2};
+    std::vector<float> query(2 * kDim, 0.2f);
+    std::vector<size_t> query_offsets{0, 2};
+
+    dataset::RawDataset raw_ds{
+        .dim = kDim,
+        .num_raw_data = 1,
+        .raw_data = base.data(),
+        .raw_data_offsets = base_offsets.data(),
+    };
+    dataset::SearchDataset query_ds{
+        .metric_type = knowhere::metric::MAX_SIM_COSINE,
+        .num_queries = 1,
+        .topk = 10,
+        .round_decimal = -1,
+        .dim = kDim,
+        .query_data = query.data(),
+        .query_offsets = query_offsets.data(),
+    };
+    SearchInfo search_info{
+        .topk_ = 10,
+        .round_decimal_ = -1,
+        .metric_type_ = knowhere::metric::MAX_SIM_COSINE,
+        .iterator_v2_info_ = SearchIteratorV2Info{.batch_size = 10},
+    };
+    std::map<std::string, std::string> index_info;
+    BitsetView bitset;
+
+    try {
+        GetBruteForceSearchIterators(query_ds,
+                                     raw_ds,
+                                     search_info,
+                                     index_info,
+                                     bitset,
+                                     DataType::VECTOR_ARRAY);
+        FAIL() << "expected emb_list brute-force search_iterator to be rejected";
+    } catch (const SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), ErrorCode::Unsupported);
+        EXPECT_NE(std::string(e.what()).find("brute-force / growing"),
+                  std::string::npos)
+            << "unexpected error message: " << e.what();
+    }
+}

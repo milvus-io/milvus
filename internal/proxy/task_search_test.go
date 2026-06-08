@@ -3721,7 +3721,9 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			assert.Contains(t, err.Error(), "embeddings_list")
 		})
 
-		t.Run("vector array with iterator", func(t *testing.T) {
+		t.Run("vector array with iterator should succeed", func(t *testing.T) {
+			// PR 4: search_iterator over an emb_list field is supported via the
+			// stateless Iterator-v2 path; the proxy no longer rejects it.
 			schema := createSchemaWithVectorArray("embeddings_list")
 			params := createSearchParams("embeddings_list")
 
@@ -3732,14 +3734,14 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			})
 
 			searchInfo, err := parseSearchInfo(params, schema, nil, false)
-			assert.Error(t, err)
-			assert.Nil(t, searchInfo)
-			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-			assert.Contains(t, err.Error(), "search iterator is not supported for vector array (embedding list) fields")
-			assert.Contains(t, err.Error(), "embeddings_list")
+			assert.NoError(t, err)
+			assert.NotNil(t, searchInfo)
+			assert.NotNil(t, searchInfo.planInfo)
+			assert.True(t, searchInfo.isIterator)
 		})
 
-		t.Run("vector array with iterator v2", func(t *testing.T) {
+		t.Run("vector array with iterator v2 should succeed", func(t *testing.T) {
+			// PR 4: emb_list + Iterator v2 reaches segcore's CachedSearchIterator.
 			schema := createSchemaWithVectorArray("embeddings_list")
 			params := createSearchParams("embeddings_list")
 
@@ -3760,11 +3762,10 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			)
 
 			searchInfo, err := parseSearchInfo(params, schema, nil, false)
-			assert.Error(t, err)
-			assert.Nil(t, searchInfo)
-			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-			assert.Contains(t, err.Error(), "search iterator is not supported for vector array (embedding list) fields")
-			assert.Contains(t, err.Error(), "embeddings_list")
+			assert.NoError(t, err)
+			assert.NotNil(t, searchInfo)
+			assert.NotNil(t, searchInfo.planInfo)
+			assert.NotNil(t, searchInfo.planInfo.SearchIteratorV2Info)
 		})
 
 		t.Run("normal search on vector array should succeed", func(t *testing.T) {

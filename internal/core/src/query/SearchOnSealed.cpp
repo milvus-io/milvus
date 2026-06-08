@@ -200,9 +200,14 @@ SearchOnSealedColumn(const Schema& schema,
     }
 
     if (search_info.iterator_v2_info_.has_value()) {
-        AssertInfo(data_type != DataType::VECTOR_ARRAY,
-                   "vector array(embedding list) is not supported for "
-                   "vector iterator");
+        // R9: emblist search_iterator is supported only on the sealed
+        // vector-index path; fail an un-indexed (brute-force) sealed column
+        // gracefully (typed Unsupported), not via a bare assert.
+        if (data_type == DataType::VECTOR_ARRAY) {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "search_iterator over emb_list (vector array) fields is "
+                      "not supported on brute-force / growing segments");
+        }
 
         CachedSearchIterator cached_iter(column,
                                          query_dataset,
@@ -266,9 +271,13 @@ SearchOnSealedColumn(const Schema& schema,
         }
 
         if (use_vector_iterator) {
-            AssertInfo(data_type != DataType::VECTOR_ARRAY,
-                       "vector array(embedding list) is not supported for "
-                       "vector iterator");
+            // R9: graceful typed failure for the emblist iterator on a
+            // brute-force sealed column (see note above), not a bare assert.
+            if (data_type == DataType::VECTOR_ARRAY) {
+                ThrowInfo(ErrorCode::Unsupported,
+                          "search_iterator over emb_list (vector array) fields "
+                          "is not supported on brute-force / growing segments");
+            }
             auto sub_qr =
                 PackBruteForceSearchIteratorsIntoSubResult(query_dataset,
                                                            raw_dataset,

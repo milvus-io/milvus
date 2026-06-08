@@ -310,11 +310,9 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 				return nil, merr.WrapErrParameterInvalid("", "",
 					"group by search is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
 			}
-
-			if isIterator {
-				return nil, merr.WrapErrParameterInvalid("", "",
-					"search iterator is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
-			}
+			// search_iterator over an emb_list field is supported via the
+			// stateless Iterator-v2 path (SPEC 6.3): segcore's CachedSearchIterator
+			// drives knowhere's emblist AnnIterator -- no proxy-side rejection.
 		}
 	}
 
