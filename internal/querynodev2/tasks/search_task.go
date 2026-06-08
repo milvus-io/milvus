@@ -291,7 +291,9 @@ func (t *SearchTask) Execute() error {
 		}
 	}()
 
-	// TODO: if L0 rerank is configured, run rerank chain on segDFs here
+	if err := t.applyBoostScores(segDFs, searchedSegments, searchReq); err != nil {
+		return err
+	}
 
 	if err := t.executeGoReduce(segDFs, results, searchReq, metricType, tr, relatedDataSize, allSearchCount); err != nil {
 		return err
