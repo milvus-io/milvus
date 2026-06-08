@@ -100,7 +100,10 @@ PhySearchGroupByNode::GetOutput() {
                                     *segment_,
                                     search_result.seg_offsets_,
                                     search_result.distances_,
-                                    search_result.topk_per_nq_prefix_sum_);
+                                    search_result.topk_per_nq_prefix_sum_,
+                                    search_result.element_level_
+                                        ? &search_result.element_indices_
+                                        : nullptr);
         search_result.composite_group_by_values_ =
             std::move(composite_group_by_values);
         search_result.group_size_ = search_info_.group_size_;
@@ -110,14 +113,17 @@ PhySearchGroupByNode::GetOutput() {
                    "size:{} is not equal to search_result.seg_offsets.size:{}",
                    search_result.composite_group_by_values_.value().size(),
                    search_result.seg_offsets_.size());
+        if (search_result.element_level_) {
+            AssertInfo(search_result.seg_offsets_.size() ==
+                           search_result.element_indices_.size(),
+                       "Wrong state! search_result element_indices size:{} is "
+                       "not equal to search_result.seg_offsets size:{}",
+                       search_result.element_indices_.size(),
+                       search_result.seg_offsets_.size());
+        }
     }
     tracer::AddEvent(
         fmt::format("grouped_results: {}", search_result.seg_offsets_.size()));
-
-    // When group by is used with element-level search, the result is row-level
-    // because group by operates on rows, not elements.
-    search_result.element_level_ = false;
-    search_result.element_indices_.clear();
 
     query_context_->set_search_result(std::move(search_result));
     std::chrono::high_resolution_clock::time_point vector_end =
