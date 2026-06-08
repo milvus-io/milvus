@@ -43,12 +43,13 @@ type SegmentInfo struct {
 	level            datapb.SegmentLevel
 	syncingTasks     int32
 	storageVersion   int64
-	binlogs          []*datapb.FieldBinlog
-	statslogs        []*datapb.FieldBinlog
-	deltalogs        []*datapb.FieldBinlog
-	bm25logs         []*datapb.FieldBinlog
-	currentSplit     []storagecommon.ColumnGroup
-	manifestPath     string
+	binlogs            []*datapb.FieldBinlog
+	statslogs          []*datapb.FieldBinlog
+	deltalogs          []*datapb.FieldBinlog
+	predicateDeltalogs []*datapb.FieldBinlog
+	bm25logs           []*datapb.FieldBinlog
+	currentSplit       []storagecommon.ColumnGroup
+	manifestPath       string
 }
 
 func (s *SegmentInfo) SegmentID() int64 {
@@ -126,6 +127,10 @@ func (s *SegmentInfo) Deltalogs() []*datapb.FieldBinlog {
 	return s.deltalogs
 }
 
+func (s *SegmentInfo) PredicateDeltalogs() []*datapb.FieldBinlog {
+	return s.predicateDeltalogs
+}
+
 func (s *SegmentInfo) Bm25logs() []*datapb.FieldBinlog {
 	return s.bm25logs
 }
@@ -136,26 +141,27 @@ func (s *SegmentInfo) ManifestPath() string {
 
 func (s *SegmentInfo) Clone() *SegmentInfo {
 	return &SegmentInfo{
-		segmentID:        s.segmentID,
-		partitionID:      s.partitionID,
-		state:            s.state,
-		startPosition:    s.startPosition,
-		checkpoint:       s.checkpoint,
-		startPosRecorded: s.startPosRecorded,
-		flushedRows:      s.flushedRows,
-		bufferRows:       s.bufferRows,
-		syncingRows:      s.syncingRows,
-		bfs:              s.bfs,
-		level:            s.level,
-		syncingTasks:     s.syncingTasks,
-		bm25stats:        s.bm25stats,
-		storageVersion:   s.storageVersion,
-		binlogs:          s.binlogs,
-		statslogs:        s.statslogs,
-		deltalogs:        s.deltalogs,
-		bm25logs:         s.bm25logs,
-		currentSplit:     s.currentSplit,
-		manifestPath:     s.manifestPath,
+		segmentID:          s.segmentID,
+		partitionID:        s.partitionID,
+		state:              s.state,
+		startPosition:      s.startPosition,
+		checkpoint:         s.checkpoint,
+		startPosRecorded:   s.startPosRecorded,
+		flushedRows:        s.flushedRows,
+		bufferRows:         s.bufferRows,
+		syncingRows:        s.syncingRows,
+		bfs:                s.bfs,
+		level:              s.level,
+		syncingTasks:       s.syncingTasks,
+		bm25stats:          s.bm25stats,
+		storageVersion:     s.storageVersion,
+		binlogs:            s.binlogs,
+		statslogs:          s.statslogs,
+		deltalogs:          s.deltalogs,
+		predicateDeltalogs: s.predicateDeltalogs,
+		bm25logs:           s.bm25logs,
+		currentSplit:       s.currentSplit,
+		manifestPath:       s.manifestPath,
 	}
 }
 
@@ -189,12 +195,13 @@ func NewSegmentInfo(info *datapb.SegmentInfo, bfs pkoracle.PkStat, bm25Stats *Se
 		level:            level,
 		bfs:              bfs,
 		bm25stats:        bm25Stats,
-		storageVersion:   info.GetStorageVersion(),
-		binlogs:          info.GetBinlogs(),
-		statslogs:        info.GetStatslogs(),
-		deltalogs:        info.GetDeltalogs(),
-		bm25logs:         info.GetBm25Statslogs(),
-		currentSplit:     currentSplit,
-		manifestPath:     info.GetManifestPath(),
+		storageVersion:     info.GetStorageVersion(),
+		binlogs:            info.GetBinlogs(),
+		statslogs:          info.GetStatslogs(),
+		deltalogs:          info.GetDeltalogs(),
+		predicateDeltalogs: info.GetPredicateDeltalogs(),
+		bm25logs:           info.GetBm25Statslogs(),
+		currentSplit:       currentSplit,
+		manifestPath:       info.GetManifestPath(),
 	}
 }

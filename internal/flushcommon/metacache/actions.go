@@ -156,6 +156,12 @@ func UpdateDeltalogs(deltalogs []*datapb.FieldBinlog) SegmentAction {
 	}
 }
 
+func UpdatePredicateDeltalogs(predicateDeltalogs []*datapb.FieldBinlog) SegmentAction {
+	return func(info *SegmentInfo) {
+		info.predicateDeltalogs = predicateDeltalogs
+	}
+}
+
 func UpdateBm25logs(bm25logs []*datapb.FieldBinlog) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.bm25logs = bm25logs

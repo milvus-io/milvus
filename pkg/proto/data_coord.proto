@@ -463,6 +463,11 @@ message SegmentInfo {
   // type rewrites row timestamps — stale rows always need commit_ts protection
   // until TTL naturally expires using max(row_ts, commit_ts).
   uint64 commit_timestamp = 36;
+
+  // predicate_deltalogs stores predicate-delete delta log summaries.
+  // The L0 segment's partitionID remains the scheduling scope; this field only
+  // separates predicate deltalogs from primary-key deltalogs in etcd metadata.
+  repeated FieldBinlog predicate_deltalogs = 37;
 }
 
 message SegmentStartPosition {
@@ -489,6 +494,7 @@ message SaveBinlogPathsRequest {
   repeated FieldBinlog field2Bm25logPaths = 16;
   bool with_full_binlogs = 17; // report with full data for verification.
   string manifest_path = 18; //
+  repeated FieldBinlog predicate_deltalogs = 19;
 }
 
 message CheckPoint {

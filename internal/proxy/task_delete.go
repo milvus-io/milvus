@@ -365,12 +365,20 @@ func (dr *deleteRunner) Run(ctx context.Context) error {
 			return err
 		}
 	} else {
-		// if get complex delete expr
-		// need query from querynode before delete
-		err := dr.complexDelete(ctx, dr.plan)
-		if err != nil {
-			log.Ctx(ctx).Warn("complex delete failed,but delete some data", zap.Int64("count", dr.result.DeleteCnt), zap.String("expr", dr.req.GetExpr()))
-			return err
+		if paramtable.Get().CommonCfg.EnablePredicateDelete.GetAsBool() {
+			err := dr.predicateDelete(ctx, dr.plan)
+			if err != nil {
+				log.Ctx(ctx).Warn("predicate delete failed", zap.String("expr", dr.req.GetExpr()), zap.Error(err))
+				return err
+			}
+		} else {
+			// if get complex delete expr
+			// need query from querynode before delete
+			err := dr.complexDelete(ctx, dr.plan)
+			if err != nil {
+				log.Ctx(ctx).Warn("complex delete failed,but delete some data", zap.Int64("count", dr.result.DeleteCnt), zap.String("expr", dr.req.GetExpr()))
+				return err
+			}
 		}
 	}
 	return nil
@@ -534,15 +542,22 @@ func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 }
 
 func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode) error {
-	rc := timerecord.NewTimeRecorder("QueryStreamDelete")
 	var err error
-
-	dr.msgID, err = dr.idAllocator.AllocOne()
+	dr.ts, err = dr.tsoAllocatorIns.AllocOne(ctx)
 	if err != nil {
 		return err
 	}
 
-	dr.ts, err = dr.tsoAllocatorIns.AllocOne(ctx)
+	return dr.complexDeleteWithQueryTimestamp(ctx, plan)
+}
+
+// complexDeleteWithQueryTimestamp reuses dr.ts as the QueryNode MVCC timestamp.
+// The PK-delete WAL messages still go through the normal delete task queue.
+func (dr *deleteRunner) complexDeleteWithQueryTimestamp(ctx context.Context, plan *planpb.PlanNode) error {
+	rc := timerecord.NewTimeRecorder("QueryStreamDelete")
+	var err error
+
+	dr.msgID, err = dr.idAllocator.AllocOne()
 	if err != nil {
 		return err
 	}
@@ -566,6 +581,125 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 
 	log.Ctx(ctx).Info("complex delete finished", zap.Int64("deleteCnt", dr.result.GetDeleteCnt()), zap.Duration("interval", rc.ElapseSpan()))
 	return nil
+}
+
+func (dr *deleteRunner) predicateDelete(ctx context.Context, plan *planpb.PlanNode) error {
+	var err error
+	dr.ts, err = dr.tsoAllocatorIns.AllocOne(ctx)
+	if err != nil {
+		return err
+	}
+
+	matchedCount, err := dr.countPredicateDeleteHits(ctx, plan)
+	if err != nil {
+		return err
+	}
+	threshold := paramtable.Get().CommonCfg.PredicateDeleteHitCountThreshold.GetAsInt64()
+	if matchedCount <= threshold {
+		log.Ctx(ctx).Info("predicate delete falls back to pk delete",
+			zap.Int64("matchedCount", matchedCount),
+			zap.Int64("threshold", threshold),
+			zap.String("expr", dr.req.GetExpr()))
+		return dr.complexDeleteWithQueryTimestamp(ctx, plan)
+	}
+
+	serializedPlan, err := proto.Marshal(plan)
+	if err != nil {
+		return err
+	}
+
+	partitionID := UniqueID(common.AllPartitionsID)
+	if len(dr.partitionIDs) == 1 {
+		partitionID = dr.partitionIDs[0]
+	}
+
+	sessionTS, err := appendPredicateDeleteMessages(
+		ctx,
+		dr.collectionID,
+		dr.req.GetCollectionName(),
+		partitionID,
+		dr.req.GetPartitionName(),
+		dr.req.GetDbName(),
+		dr.vChannels,
+		dr.idAllocator,
+		dr.ts,
+		serializedPlan,
+	)
+	if err != nil {
+		return err
+	}
+
+	dr.result.DeleteCnt = 0
+	dr.result.Timestamp = sessionTS
+	return nil
+}
+
+func (dr *deleteRunner) countPredicateDeleteHits(ctx context.Context, plan *planpb.PlanNode) (int64, error) {
+	countPlan, ok := proto.Clone(plan).(*planpb.PlanNode)
+	if !ok {
+		return 0, errors.New("failed to clone delete plan for predicate delete count")
+	}
+	queryPlan := countPlan.GetQuery()
+	if queryPlan == nil {
+		return 0, errors.New("predicate delete count requires a query plan")
+	}
+	queryPlan.IsCount = true
+
+	serializedPlan, err := proto.Marshal(countPlan)
+	if err != nil {
+		return 0, err
+	}
+
+	msgID, err := dr.idAllocator.AllocOne()
+	if err != nil {
+		return 0, err
+	}
+
+	var matchedCount atomic.Int64
+	err = dr.lb.Execute(ctx, shardclient.CollectionWorkLoad{
+		Db:             dr.req.GetDbName(),
+		CollectionName: dr.req.GetCollectionName(),
+		CollectionID:   dr.collectionID,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
+			result, err := qn.Query(ctx, &querypb.QueryRequest{
+				Req: &internalpb.RetrieveRequest{
+					Base: commonpbutil.NewMsgBase(
+						commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
+						commonpbutil.WithMsgID(msgID),
+						commonpbutil.WithSourceID(paramtable.GetNodeID()),
+						commonpbutil.WithTargetID(nodeID),
+					),
+					MvccTimestamp:      dr.ts,
+					ReqID:              paramtable.GetNodeID(),
+					DbID:               0, // TODO
+					CollectionID:       dr.collectionID,
+					PartitionIDs:       dr.partitionIDs,
+					SerializedExprPlan: serializedPlan,
+					GuaranteeTimestamp: parseGuaranteeTsFromConsistency(dr.ts, dr.ts, dr.req.GetConsistencyLevel()),
+					QueryLabel:         metrics.DeleteQueryLabel,
+					IsCount:            true,
+				},
+				DmlChannels: []string{channel},
+				Scope:       querypb.DataScope_All,
+			})
+			if err != nil {
+				return err
+			}
+			if result == nil {
+				return errors.New("predicate delete count query returned nil result")
+			}
+			if err := merr.Error(result.GetStatus()); err != nil {
+				return err
+			}
+			matchedCount.Add(result.GetAllRetrieveCount())
+			return nil
+		},
+	})
+	if err != nil {
+		return 0, err
+	}
+	return matchedCount.Load(), nil
 }
 
 func (dr *deleteRunner) simpleDelete(ctx context.Context, pk *schemapb.IDs, numRow int64) error {

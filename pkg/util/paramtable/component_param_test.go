@@ -100,6 +100,16 @@ func TestComponentParam(t *testing.T) {
 		params.Save(Params.GracefulStopTimeout.Key, "50")
 		assert.Equal(t, Params.GracefulStopTimeout.GetAsInt64(), int64(50))
 
+		assert.False(t, Params.EnablePredicateDelete.GetAsBool())
+		params.Save(Params.EnablePredicateDelete.Key, "true")
+		assert.True(t, Params.EnablePredicateDelete.GetAsBool())
+		params.Reset(Params.EnablePredicateDelete.Key)
+
+		assert.Equal(t, int64(1024), Params.PredicateDeleteHitCountThreshold.GetAsInt64())
+		params.Save(Params.PredicateDeleteHitCountThreshold.Key, "2048")
+		assert.Equal(t, int64(2048), Params.PredicateDeleteHitCountThreshold.GetAsInt64())
+		params.Reset(Params.PredicateDeleteHitCountThreshold.Key)
+
 		// -- rootcoord --
 		assert.Equal(t, Params.RootCoordTimeTick.GetValue(), "by-dev-rootcoord-timetick")
 		t.Logf("rootcoord timetick channel = %s", Params.RootCoordTimeTick.GetValue())
