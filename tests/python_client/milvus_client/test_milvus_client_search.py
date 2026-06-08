@@ -329,10 +329,6 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(
-        reason="issue: https://github.com/milvus-io/milvus/issues/50333 - "
-        "nullable valid data can be misaligned and trigger ASAN heap-buffer-overflow"
-    )
     @pytest.mark.parametrize("nullable", [True, False])
     def test_milvus_client_search_null_expr_json_key(self, nullable):
         """
