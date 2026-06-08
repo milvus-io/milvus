@@ -536,7 +536,7 @@ func (s *IndexServiceSuite) Test_CreateAnalyzeTask() {
 			s.NoError(err)
 			s.Equal(1, len(resp.GetAnalyzeJobResults().GetResults()))
 			if resp.GetAnalyzeJobResults().GetResults()[0].GetState() == indexpb.JobState_JobStateFinished {
-				s.Equal("", resp.GetAnalyzeJobResults().GetResults()[0].GetCentroidsFile())
+				s.NotEqual("", resp.GetAnalyzeJobResults().GetResults()[0].GetCentroidsFile())
 				break
 			}
 			s.Equal(indexpb.JobState_JobStateInProgress, resp.GetAnalyzeJobResults().GetResults()[0].GetState())
