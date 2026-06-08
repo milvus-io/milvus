@@ -715,6 +715,10 @@ SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
             continue;
         }
 
+        if (new_info.schema_->is_function_output(field_id)) {
+            continue;
+        }
+
         diff.fields_to_fill_default.push_back(field_id);
     }
 }

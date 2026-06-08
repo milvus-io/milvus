@@ -72,10 +72,12 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                     PositivelyRelated(search_info.metric_type_);
                 // Element-level search skips row-level mapping (element IDs
                 // are not row-aligned); see ChunkMergeIterator ctor.
+                const auto& offset_mapping = index.GetOffsetMapping();
                 const milvus::OffsetMapping* iter_offset_mapping =
-                    search_info.array_offsets_ != nullptr
+                    (search_info.array_offsets_ != nullptr ||
+                     !offset_mapping.IsEnabled())
                         ? nullptr
-                        : &index.GetOffsetMapping();
+                        : &offset_mapping;
                 search_result.AssembleChunkVectorIterators(
                     nq,
                     1,

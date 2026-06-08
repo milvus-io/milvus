@@ -727,6 +727,191 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_AddSegmentIndexError(
 	s.Contains(syncErr.Error(), "catalog error")
 }
 
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ClearsImportingFlagOnCompletion() {
+	collectionID := int64(1)
+	segmentID := int64(100)
+
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segs []*datapb.SegmentInfo, _ ...metastore.BinlogsIncrement) error {
+		s.Require().Len(segs, 1)
+		seg := segs[0]
+		assert.Equal(s.T(), segmentID, seg.GetID())
+		assert.Equal(s.T(), commonpb.SegmentState_Flushed, seg.GetState())
+		assert.False(s.T(), seg.GetIsImporting())
+		return nil
+	}).Once()
+	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
+	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            segmentID,
+		CollectionID:  collectionID,
+		PartitionID:   10,
+		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Importing,
+		IsImporting:   true,
+	}))
+
+	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
+	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	copyMeta, err := NewCopySegmentMeta(context.Background(), copyCatalog, nil, nil, nil)
+	s.Require().NoError(err)
+
+	result := &datapb.QueryCopySegmentResponse{
+		State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		SegmentResults: []*datapb.CopySegmentResult{{
+			SegmentId: segmentID,
+			Binlogs: []*datapb.FieldBinlog{{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{{LogID: 1, LogPath: "files/binlog/1"}},
+			}},
+		}},
+	}
+	task := createTestCopyTask(collectionID, segmentID)
+
+	err = SyncCopySegmentTask(task, result, copyMeta, mt)
+	s.Require().NoError(err)
+	updated := mt.GetSegment(context.Background(), segmentID)
+	s.Require().NotNil(updated)
+	s.Equal(commonpb.SegmentState_Flushed, updated.GetState())
+	s.False(updated.GetIsImporting())
+}
+
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_EmptyManifestStillClearsImportingFlag() {
+	collectionID := int64(1)
+	segmentID := int64(101)
+
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
+	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		CollectionID:   collectionID,
+		PartitionID:    10,
+		InsertChannel:  "ch1",
+		State:          commonpb.SegmentState_Importing,
+		IsImporting:    true,
+		StorageVersion: 3,
+	}))
+
+	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
+	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	copyMeta, err := NewCopySegmentMeta(context.Background(), copyCatalog, nil, nil, nil)
+	s.Require().NoError(err)
+
+	result := &datapb.QueryCopySegmentResponse{
+		State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		SegmentResults: []*datapb.CopySegmentResult{{
+			SegmentId:    segmentID,
+			ManifestPath: "",
+			Binlogs: []*datapb.FieldBinlog{{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{{LogID: 2, LogPath: "files/binlog/2"}},
+			}},
+		}},
+	}
+	task := createTestCopyTask(collectionID, segmentID)
+
+	err = SyncCopySegmentTask(task, result, copyMeta, mt)
+	s.Require().NoError(err)
+	updated := mt.GetSegment(context.Background(), segmentID)
+	s.Require().NotNil(updated)
+	s.Equal(commonpb.SegmentState_Flushed, updated.GetState())
+	s.False(updated.GetIsImporting())
+	s.Empty(updated.GetManifestPath())
+}
+
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImportingFlag() {
+	collectionID := int64(1)
+	segmentID := int64(102)
+	manifestPath := `{"ver":3,"base_path":"files/insert_log/1/10/102"}`
+
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
+	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		CollectionID:   collectionID,
+		PartitionID:    10,
+		InsertChannel:  "ch1",
+		State:          commonpb.SegmentState_Importing,
+		IsImporting:    true,
+		StorageVersion: 3,
+	}))
+
+	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
+	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	copyMeta, err := NewCopySegmentMeta(context.Background(), copyCatalog, nil, nil, nil)
+	s.Require().NoError(err)
+
+	result := &datapb.QueryCopySegmentResponse{
+		State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		SegmentResults: []*datapb.CopySegmentResult{{
+			SegmentId:    segmentID,
+			ManifestPath: manifestPath,
+			Binlogs: []*datapb.FieldBinlog{{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{{LogID: 3, LogPath: "files/binlog/3"}},
+			}},
+		}},
+	}
+	task := createTestCopyTask(collectionID, segmentID)
+
+	err = SyncCopySegmentTask(task, result, copyMeta, mt)
+	s.Require().NoError(err)
+	updated := mt.GetSegment(context.Background(), segmentID)
+	s.Require().NotNil(updated)
+	s.Equal(commonpb.SegmentState_Flushed, updated.GetState())
+	s.False(updated.GetIsImporting())
+	s.Equal(manifestPath, updated.GetManifestPath())
+}
+
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PreservesImportingFlagOnFailure() {
+	collectionID := int64(1)
+	segmentID := int64(103)
+
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("alter failed")).Once()
+	catalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
+	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
+	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            segmentID,
+		CollectionID:  collectionID,
+		PartitionID:   10,
+		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Importing,
+		IsImporting:   true,
+	}))
+	copyMeta, err := NewCopySegmentMeta(context.Background(), catalog, nil, nil, nil)
+	s.Require().NoError(err)
+
+	result := &datapb.QueryCopySegmentResponse{
+		State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		SegmentResults: []*datapb.CopySegmentResult{{
+			SegmentId: segmentID,
+			Binlogs: []*datapb.FieldBinlog{{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{{LogID: 4, LogPath: "files/binlog/4"}},
+			}},
+		}},
+	}
+	task := createTestCopyTask(collectionID, segmentID)
+
+	err = SyncCopySegmentTask(task, result, copyMeta, mt)
+	s.Require().Error(err)
+	updated := mt.GetSegment(context.Background(), segmentID)
+	s.Require().NotNil(updated)
+	s.Equal(commonpb.SegmentState_Importing, updated.GetState())
+	s.True(updated.GetIsImporting())
+}
+
 func TestAssembleCopySegmentRequest_SourceSegmentNotFound(t *testing.T) {
 	// Arrange: snapshot data has segment 1, but task maps from segment 999 which doesn't exist
 	snapshotData := &SnapshotData{

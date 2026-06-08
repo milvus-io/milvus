@@ -892,6 +892,41 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFieldsBasic) {
     EXPECT_EQ(actual_fields, expected_fields);
 }
 
+TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFieldsSkipsFunctionOutput) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("pk", DataType::INT64);
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+    schema->AddDebugField(
+        "sparse_out", DataType::VECTOR_SPARSE_U32_F32, 0, std::nullopt);
+    schema->set_primary_field_id(FieldId(100));
+    const FieldId sparse_field_id = FieldId(102);
+    schema->add_function_output_field_id(sparse_field_id);
+
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(100);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/pk_binlog");
+    log->set_entries_num(1000);
+
+    SegmentLoadInfo empty_info(milvus::proto::segcore::SegmentLoadInfo(),
+                               schema);
+    SegmentLoadInfo new_info(proto, schema);
+    auto diff = empty_info.ComputeDiff(new_info);
+
+    for (const auto& field_id : diff.fields_to_fill_default) {
+        EXPECT_NE(field_id, sparse_field_id);
+    }
+    EXPECT_NE(std::find(diff.fields_to_fill_default.begin(),
+                        diff.fields_to_fill_default.end(),
+                        FieldId(101)),
+              diff.fields_to_fill_default.end());
+}
+
 TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFieldsSkipAlreadyFilled) {
     // Test that fields already filled with default values are skipped
     // on subsequent ComputeDiff calls

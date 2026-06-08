@@ -488,6 +488,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     bool
     HasIndex(FieldId field_id) const override {
+        if (!is_field_exist(field_id)) {
+            return false;
+        }
         auto& field_meta = schema_->operator[](field_id);
         if ((IsVectorDataType(field_meta.get_data_type()) ||
              IsGeometryType(field_meta.get_data_type())) &&
@@ -532,7 +535,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     bool
     HasFieldData(FieldId field_id) const override {
-        return true;
+        if (SystemProperty::Instance().IsSystem(field_id)) {
+            return insert_record_.row_count() > 0;
+        }
+        if (!insert_record_.is_data_exist(field_id)) {
+            return false;
+        }
+        return !insert_record_.get_data_base(field_id)->empty();
     }
 
     bool

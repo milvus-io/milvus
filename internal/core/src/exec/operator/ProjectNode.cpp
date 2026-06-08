@@ -93,12 +93,11 @@ MakeInt64Column(const std::vector<int64_t>& values) {
 }
 
 ColumnVectorPtr
-MakeElementIndexColumn(const std::vector<int32_t>& element_indices,
-                       size_t selected_count) {
+MakeElementIndexColumn(const std::vector<int32_t>& element_indices) {
+    auto selected_count = element_indices.size();
     FixedVector<int64_t> output(selected_count);
     for (size_t i = 0; i < selected_count; i++) {
-        output[i] = i < element_indices.size() ? element_indices[i]
-                                               : INVALID_ARRAY_INDEX;
+        output[i] = element_indices[i];
     }
     auto field_data = std::make_shared<FieldData<int64_t>>(
         DataType::INT64, false, std::move(output));
@@ -183,8 +182,13 @@ PhyProjectNode::GetOutput() {
         }
 
         if (field_id == ElementIndexFieldID) {
-            column_vectors.emplace_back(MakeElementIndexColumn(
-                selected_element_indices, selected_count));
+            AssertInfo(selected_element_indices.size() == selected_count,
+                       "element indices size ({}) must match selected row "
+                       "count ({})",
+                       selected_element_indices.size(),
+                       selected_count);
+            column_vectors.emplace_back(
+                MakeElementIndexColumn(selected_element_indices));
             continue;
         }
 
