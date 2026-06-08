@@ -190,7 +190,7 @@ var (
 	// Parameter related
 	ErrParameterInvalid  = newMilvusError("invalid parameter", 1100, false, WithErrorType(InputError))
 	ErrParameterMissing  = newMilvusError("missing parameter", 1101, false, WithErrorType(InputError))
-	ErrParameterTooLarge = newMilvusError("parameter too large", 1102, false)
+	ErrParameterTooLarge = newMilvusError("parameter too large", 1102, false, WithErrorType(InputError))
 
 	// Metrics related
 	ErrMetricNotFound = newMilvusError("metric not found", 1200, false)
@@ -206,8 +206,8 @@ var (
 	// this operation is denied because the user not authorized, user need to login in first
 	ErrPrivilegeNotAuthenticated = newMilvusError("not authenticated", 1400, false, WithErrorType(InputError))
 	// this operation is denied because the user has no permission to do this, user need higher privilege
-	ErrPrivilegeNotPermitted     = newMilvusError("privilege not permitted", 1401, false)
-	ErrPrivilegeGroupInvalidName = newMilvusError("invalid privilege group name", 1402, false)
+	ErrPrivilegeNotPermitted     = newMilvusError("privilege not permitted", 1401, false, WithErrorType(InputError))
+	ErrPrivilegeGroupInvalidName = newMilvusError("invalid privilege group name", 1402, false, WithErrorType(InputError))
 
 	// Alias related
 	ErrAliasNotFound               = newMilvusError("alias not found", 1600, false)
@@ -220,11 +220,11 @@ var (
 	ErrFieldInvalidName = newMilvusError("field name invalid", 1701, false)
 
 	// high-level restful api related
-	ErrNeedAuthenticate          = newMilvusError("user hasn't authenticated", 1800, false)
-	ErrIncorrectParameterFormat  = newMilvusError("can only accept json format request", 1801, false)
-	ErrMissingRequiredParameters = newMilvusError("missing required parameters", 1802, false)
+	ErrNeedAuthenticate          = newMilvusError("user hasn't authenticated", 1800, false, WithErrorType(InputError))
+	ErrIncorrectParameterFormat  = newMilvusError("can only accept json format request", 1801, false, WithErrorType(InputError))
+	ErrMissingRequiredParameters = newMilvusError("missing required parameters", 1802, false, WithErrorType(InputError))
 	ErrMarshalCollectionSchema   = newMilvusError("fail to marshal collection schema", 1803, false)
-	ErrInvalidInsertData         = newMilvusError("fail to deal the insert data", 1804, false)
+	ErrInvalidInsertData         = newMilvusError("fail to deal the insert data", 1804, false, WithErrorType(InputError))
 	ErrInvalidSearchResult       = newMilvusError("fail to parse search result", 1805, false)
 	ErrCheckPrimaryKey           = newMilvusError("please check the primary key and its' type can only in [int, string]", 1806, false)
 	ErrHTTPRateLimit             = newMilvusError("request is rejected by limiter", 1807, true)

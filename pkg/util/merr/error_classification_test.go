@@ -97,3 +97,44 @@ func TestErrorTypeMarker(t *testing.T) {
 	assert.Nil(t, WrapErrAsInputError(nil))
 	assert.Nil(t, WrapErrAsSysError(nil))
 }
+
+// TestSentinelErrorTypeClassification guards the input/system split that the
+// proxy fail_input/fail_system alerting relies on. A sentinel silently losing
+// (or gaining) WithErrorType(InputError) flips which party an alert blames.
+func TestSentinelErrorTypeClassification(t *testing.T) {
+	// The request's own fault -> InputError (and therefore non-retriable).
+	inputSentinels := map[string]error{
+		"ParameterInvalid":          ErrParameterInvalid,
+		"ParameterMissing":          ErrParameterMissing,
+		"ParameterTooLarge":         ErrParameterTooLarge,
+		"CollectionNotFound":        ErrCollectionNotFound,
+		"CollectionLoaded":          ErrCollectionLoaded,
+		"DatabaseNotFound":          ErrDatabaseNotFound,
+		"ResourceGroupNotFound":     ErrResourceGroupNotFound,
+		"IndexDuplicate":            ErrIndexDuplicate,
+		"PrivilegeNotPermitted":     ErrPrivilegeNotPermitted,
+		"PrivilegeGroupInvalidName": ErrPrivilegeGroupInvalidName,
+		"NeedAuthenticate":          ErrNeedAuthenticate,
+		"IncorrectParameterFormat":  ErrIncorrectParameterFormat,
+		"MissingRequiredParameters": ErrMissingRequiredParameters,
+		"InvalidInsertData":         ErrInvalidInsertData,
+	}
+	for name, err := range inputSentinels {
+		assert.Equal(t, InputError, GetErrorType(err), "%s should be InputError", name)
+	}
+
+	// Topology / internal conditions stay SystemError (not the user's fault):
+	// re-resolving the shard map or a node coming back is the system's job.
+	systemSentinels := map[string]error{
+		"ServiceInternal":     ErrServiceInternal,
+		"ChannelNotFound":     ErrChannelNotFound,
+		"SegmentNotFound":     ErrSegmentNotFound,
+		"NodeNotFound":        ErrNodeNotFound,
+		"ReplicaNotFound":     ErrReplicaNotFound,
+		"PartitionNotFound":   ErrPartitionNotFound,
+		"CollectionNotLoaded": ErrCollectionNotLoaded,
+	}
+	for name, err := range systemSentinels {
+		assert.Equal(t, SystemError, GetErrorType(err), "%s should stay SystemError", name)
+	}
+}
