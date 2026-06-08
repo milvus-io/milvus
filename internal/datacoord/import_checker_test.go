@@ -285,6 +285,8 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 			IndexName:    "import_idx",
 		},
 	}
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.WaitForIndex.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.WaitForIndex.Key)
 	drainBuildIndexChForTest()
 	s.checker.checkIndexBuildingJob(job)
 	assertBuildIndexEvents(s.T(), targetSegmentIDs...)

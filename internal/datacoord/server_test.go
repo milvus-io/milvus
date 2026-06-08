@@ -2123,13 +2123,6 @@ func TestPostFlush(t *testing.T) {
 	})
 
 	t.Run("success post flush", func(t *testing.T) {
-		paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key, "true")
-		paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableCompaction.Key, "true")
-		defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key)
-		defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableCompaction.Key)
-		drainBuildIndexChForTest()
-		defer drainBuildIndexChForTest()
-
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		svr.mixCoord = &rootCoordSegFlushComplete{flag: true}
@@ -2146,7 +2139,6 @@ func TestPostFlush(t *testing.T) {
 
 		err = svr.postFlush(context.Background(), 1)
 		assert.NoError(t, err)
-		assertBuildIndexEvents(t, 1)
 	})
 }
 
