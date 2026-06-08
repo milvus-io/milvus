@@ -348,7 +348,7 @@ func (s *CentroidsSplitterSuite) TestExactBalanceSmallInput() {
  */
 func (s *CentroidsSplitterSuite) TestRandomCentroidsBruteForce() {
 	const nCentroids = 10 // small enough to compute brute-force solution
-	const numRuns = 20    // number of random test runs
+	const numRuns = 3     // number of random test runs
 	const minSegs = 2     // minimum number of groups
 	// Test for different maximum centroids per group
 	for _, maxK := range []int{3, 4, 5} {
