@@ -5826,6 +5826,7 @@ func TestSearchTask_StructHybridElementScopeValidation(t *testing.T) {
 		params     string
 		phType     commonpb.PlaceholderType
 		metricType string
+		omitMetric bool
 	}
 	makeTask := func(specs ...subSpec) *searchTask {
 		subReqs := make([]*milvuspb.SubSearchRequest, 0, len(specs))
@@ -5834,15 +5835,18 @@ func TestSearchTask_StructHybridElementScopeValidation(t *testing.T) {
 			if metricType == "" {
 				metricType = metric.L2
 			}
+			searchParams := []*commonpb.KeyValuePair{
+				{Key: ParamsKey, Value: spec.params},
+				{Key: AnnsFieldKey, Value: spec.annsField},
+				{Key: TopKKey, Value: "10"},
+			}
+			if !spec.omitMetric {
+				searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.MetricTypeKey, Value: metricType})
+			}
 			subReqs = append(subReqs, &milvuspb.SubSearchRequest{
 				PlaceholderGroup: makePlaceholderGroup(spec.phType),
 				Nq:               1,
-				SearchParams: []*commonpb.KeyValuePair{
-					{Key: common.MetricTypeKey, Value: metricType},
-					{Key: ParamsKey, Value: spec.params},
-					{Key: AnnsFieldKey, Value: spec.annsField},
-					{Key: TopKKey, Value: "10"},
-				},
+				SearchParams:     searchParams,
 			})
 		}
 		return &searchTask{
@@ -5906,6 +5910,18 @@ func TestSearchTask_StructHybridElementScopeValidation(t *testing.T) {
 		assert.False(t, task.hybridElementLevel)
 		assert.Equal(t, elementCollapseTopKSum, task.hybridSubSearchInfos[0].Collapse.Strategy)
 		assert.Equal(t, 2, task.hybridSubSearchInfos[0].Collapse.TopK)
+	})
+
+	t.Run("accepts sum collapse with omitted metric type", func(t *testing.T) {
+		task := makeTask(
+			subSpec{annsField: "a_vec", params: topKScope, phType: commonpb.PlaceholderType_FloatVector, omitMetric: true},
+			subSpec{annsField: "regular_vec", params: noScope, phType: commonpb.PlaceholderType_FloatVector},
+		)
+		require.NoError(t, task.initAdvancedSearchRequest(ctx))
+		require.Len(t, task.hybridSubSearchInfos, 2)
+		assert.False(t, task.hybridElementLevel)
+		assert.Equal(t, elementCollapseTopKSum, task.hybridSubSearchInfos[0].Collapse.Strategy)
+		assert.Empty(t, task.queryInfos[0].GetMetricType())
 	})
 
 	t.Run("rejects sum collapse on negative metric", func(t *testing.T) {
