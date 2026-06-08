@@ -115,6 +115,7 @@ func (t *RefreshExternalCollectionTask) addMilvusTableL0DeltalogsToManifest(
 type milvusTableDeltalogRef struct {
 	sourcePath string
 	logID      int64
+	numEntries int64
 }
 
 // milvusTableSourcePKOffset records where a source PK lands in the target
@@ -294,6 +295,7 @@ func collectMilvusTableDeltalogRefs(fragments []packed.Fragment) ([]milvusTableD
 				refs = append(refs, milvusTableDeltalogRef{
 					sourcePath: sourcePath,
 					logID:      binlog.GetLogID(),
+					numEntries: binlog.GetEntriesNum(),
 				})
 			}
 		}
@@ -510,9 +512,13 @@ func (t *RefreshExternalCollectionTask) loadMilvusTableSourceDeltalogDeletes(
 		if ref.logID == 0 {
 			return nil, nil, fmt.Errorf("milvus-table source deltalog %s has no allocated log ID", ref.sourcePath)
 		}
-		reader, err := storage.NewDeltalogReader(
+		reader, err := storage.NewDeltalogReaderFromBinlogs(
 			sourcePKType,
-			[]string{ref.sourcePath},
+			[]*datapb.Binlog{{
+				LogPath:    ref.sourcePath,
+				LogID:      ref.logID,
+				EntriesNum: ref.numEntries,
+			}},
 			storage.WithVersion(storage.StorageV3),
 			storage.WithStorageConfig(t.req.GetStorageConfig()),
 			storage.WithExternalReaderContext(t.milvusTableExternalSpecContext()),

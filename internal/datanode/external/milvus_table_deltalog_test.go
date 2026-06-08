@@ -311,10 +311,12 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_Milvus
 		[]storage.Timestamp{100},
 	)
 	s.Require().NoError(err)
-	mockDeltalogReader := mockey.Mock(storage.NewDeltalogReader).
-		To(func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+	mockDeltalogReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).
+		To(func(pkType schemapb.DataType, binlogs []*datapb.Binlog, option ...storage.RwOption) (storage.RecordReader, error) {
 			s.Equal(schemapb.DataType_Int64, pkType)
-			s.Equal([]string{sourceDeltalogPath}, paths)
+			s.Require().Len(binlogs, 1)
+			s.Equal(sourceDeltalogPath, binlogs[0].GetLogPath())
+			s.EqualValues(1, binlogs[0].GetEntriesNum())
 			return &fakeMilvusTableDeltalogReader{records: []storage.Record{record}}, nil
 		}).Build()
 	defer mockDeltalogReader.UnPatch()
@@ -361,8 +363,9 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_Milvus
 		Deltalogs: []*datapb.FieldBinlog{{
 			FieldID: 100,
 			Binlogs: []*datapb.Binlog{{
-				LogPath: sourceDeltalogPath,
-				LogID:   9001,
+				LogPath:    sourceDeltalogPath,
+				LogID:      9001,
+				EntriesNum: 1,
 			}},
 		}},
 	}})
@@ -845,7 +848,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 		ExternalSpec:   `{"format":"milvus-table"}`,
 		StorageConfig:  &indexpb.StorageConfig{StorageType: "local"},
 	})
-	ref := milvusTableDeltalogRef{sourcePath: "source/_delta/1", logID: 1}
+	ref := milvusTableDeltalogRef{sourcePath: "source/_delta/1", logID: 1, numEntries: 2}
 
 	s.Run("success", func() {
 		record, _, _, err := storage.BuildDeleteRecord(
@@ -854,10 +857,12 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 		)
 		s.Require().NoError(err)
 		reader := &fakeMilvusTableDeltalogReader{records: []storage.Record{record}}
-		mockReader := mockey.Mock(storage.NewDeltalogReader).
-			To(func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+		mockReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).
+			To(func(pkType schemapb.DataType, binlogs []*datapb.Binlog, option ...storage.RwOption) (storage.RecordReader, error) {
 				s.Equal(schemapb.DataType_Int64, pkType)
-				s.Equal([]string{ref.sourcePath}, paths)
+				s.Require().Len(binlogs, 1)
+				s.Equal(ref.sourcePath, binlogs[0].GetLogPath())
+				s.Equal(ref.numEntries, binlogs[0].GetEntriesNum())
 				return reader, nil
 			}).Build()
 		defer mockReader.UnPatch()
@@ -880,7 +885,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 
 	s.Run("open error", func() {
 		expectedErr := fmt.Errorf("open failed")
-		mockReader := mockey.Mock(storage.NewDeltalogReader).
+		mockReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).
 			Return(nil, expectedErr).Build()
 		defer mockReader.UnPatch()
 
@@ -896,7 +901,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 	s.Run("next error", func() {
 		expectedErr := fmt.Errorf("next failed")
 		reader := &fakeMilvusTableDeltalogReader{nextErr: expectedErr}
-		mockReader := mockey.Mock(storage.NewDeltalogReader).
+		mockReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).
 			Return(reader, nil).Build()
 		defer mockReader.UnPatch()
 
@@ -916,7 +921,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 		)
 		s.Require().NoError(err)
 		reader := &fakeMilvusTableDeltalogReader{records: []storage.Record{record}}
-		mockReader := mockey.Mock(storage.NewDeltalogReader).
+		mockReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).
 			Return(reader, nil).Build()
 		defer mockReader.UnPatch()
 
@@ -933,7 +938,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 	s.Run("close error", func() {
 		expectedErr := fmt.Errorf("close failed")
 		reader := &fakeMilvusTableDeltalogReader{closeErr: expectedErr}
-		mockReader := mockey.Mock(storage.NewDeltalogReader).
+		mockReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).
 			Return(reader, nil).Build()
 		defer mockReader.UnPatch()
 
@@ -948,7 +953,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 
 	s.Run("context canceled", func() {
 		reader := &fakeMilvusTableDeltalogReader{}
-		mockReader := mockey.Mock(storage.NewDeltalogReader).
+		mockReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).
 			Return(reader, nil).Build()
 		defer mockReader.UnPatch()
 		ctx, cancel := context.WithCancel(context.Background())

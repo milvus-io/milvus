@@ -1517,9 +1517,21 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 				return err
 			}
 			if len(paths) > 0 {
-				reader, err := storage.NewDeltalogReader(
+				sourceDeltalogs, err := packed.GetDeltaLogsFromManifestWithExtfs(
+					manifestPath,
+					createStorageConfig(),
+					extfs,
+				)
+				if err != nil {
+					return err
+				}
+				sourceBinlogs := make([]*datapb.Binlog, 0)
+				for _, deltalog := range sourceDeltalogs {
+					sourceBinlogs = append(sourceBinlogs, lo.Filter(deltalog.GetBinlogs(), valid)...)
+				}
+				reader, err := storage.NewDeltalogReaderFromBinlogs(
 					pkField.DataType,
-					paths,
+					sourceBinlogs,
 					storage.WithVersion(storage.StorageV3),
 					storage.WithStorageConfig(createStorageConfig()),
 					storage.WithExternalReaderContext(extfs),

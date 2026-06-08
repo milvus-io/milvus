@@ -20,8 +20,10 @@
 #include <algorithm>
 #include <cstring>
 #include <functional>
+#include <memory>
 #include <numeric>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -35,11 +37,93 @@
 #include "fmt/format.h"
 #include "log/Log.h"
 #include "milvus-storage/column_groups.h"
-#include "milvus-storage/manifest.h"
+#include "milvus-storage/ffi_internal/bridge.h"
+#include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
+#include "nlohmann/json.hpp"
 #include "pb/schema.pb.h"
 #include "storage/Util.h"
-#include "storage/loon_ffi/util.h"
+
+namespace {
+
+void
+ThrowIfFFIError(LoonFFIResult result, const std::string& context) {
+    if (loon_ffi_is_success(&result) != 0) {
+        loon_ffi_free_result(&result);
+        return;
+    }
+
+    const char* msg = loon_ffi_get_errmsg(&result);
+    std::string detail = msg != nullptr ? msg : "unknown error";
+    loon_ffi_free_result(&result);
+    throw std::runtime_error(context + ": " + detail);
+}
+
+struct TransactionGuard {
+    LoonTransactionHandle handle = 0;
+
+    ~TransactionGuard() {
+        if (handle != 0) {
+            loon_transaction_destroy(handle);
+        }
+    }
+
+    TransactionGuard() = default;
+    TransactionGuard(const TransactionGuard&) = delete;
+    TransactionGuard&
+    operator=(const TransactionGuard&) = delete;
+};
+
+struct ManifestGuard {
+    LoonManifest* manifest = nullptr;
+
+    ~ManifestGuard() {
+        if (manifest != nullptr) {
+            loon_manifest_destroy(manifest);
+        }
+    }
+
+    ManifestGuard() = default;
+    ManifestGuard(const ManifestGuard&) = delete;
+    ManifestGuard&
+    operator=(const ManifestGuard&) = delete;
+};
+
+std::shared_ptr<milvus_storage::api::ColumnGroups>
+ReadManifestColumnGroupsWithFFI(const char* manifest_path,
+                                const LoonProperties* properties) {
+    auto j = nlohmann::json::parse(manifest_path);
+    auto base_path = j.at("base_path").get<std::string>();
+    auto version = j.at("ver").get<int64_t>();
+
+    TransactionGuard transaction;
+    ThrowIfFFIError(loon_transaction_begin(base_path.c_str(),
+                                           properties,
+                                           version,
+                                           LOON_TRANSACTION_RESOLVE_FAIL,
+                                           1,
+                                           &transaction.handle),
+                    "open external segment manifest transaction");
+
+    ManifestGuard manifest;
+    ThrowIfFFIError(
+        loon_transaction_get_manifest(transaction.handle, &manifest.manifest),
+        "get external segment manifest");
+    if (manifest.manifest == nullptr) {
+        throw std::runtime_error("external segment manifest is nil");
+    }
+
+    auto cgs = std::make_shared<milvus_storage::api::ColumnGroups>();
+    auto status = milvus_storage::column_groups_import(
+        &manifest.manifest->column_groups, cgs.get());
+    if (!status.ok()) {
+        throw std::runtime_error("import external segment column groups: " +
+                                 status.ToString());
+    }
+    return cgs;
+}
+
+}  // namespace
 
 static CStatus
 MakeCStatusError(const char* msg) {
@@ -77,10 +161,7 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
         }
 
         // 2. Read manifest → ColumnGroups
-        auto loon_manifest =
-            GetLoonManifest(std::string(manifest_path), properties);
-        auto cgs = std::make_shared<milvus_storage::api::ColumnGroups>(
-            loon_manifest->columnGroups());
+        auto cgs = ReadManifestColumnGroupsWithFFI(manifest_path, c_properties);
 
         // 3. Determine total rows from column group files
         int64_t total_rows = 0;
