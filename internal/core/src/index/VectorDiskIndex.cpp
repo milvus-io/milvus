@@ -92,6 +92,8 @@ ResolveDiskAnnLoadIndexPrefix(const Config& config,
 
     auto index_prefix = GetDiskAnnFilePrefix(index_files->front());
 
+    // DiskANN stores the files for one built index in a flat directory and
+    // reconstructs file names from a single prefix during stream load.
     for (const auto& index_file : index_files.value()) {
         auto file_prefix = GetDiskAnnFilePrefix(index_file);
         AssertInfo(file_prefix == index_prefix,

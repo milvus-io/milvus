@@ -340,15 +340,13 @@ class FileManagerImpl : public milvus::FileManager {
             return false;
         }
 
-        if (!boost::filesystem::path(filename).is_absolute()) {
-            return false;
-        }
-
         return IsLocalIndexCachePath(filename);
     }
 
-    // A local cache path is only valid after downloading index files to disk.
-    // Remote streams must not treat it as an object-store key.
+    // Best-effort guard: a local cache path is only valid after downloading
+    // index files to disk. Remote streams must not treat it as an object-store
+    // key. The local chunk root is configurable and may be missed when changed,
+    // so this check is fail-open; reuse the stable index-files constant.
     static bool
     IsLocalIndexCachePath(const std::string& filename) {
         if (!boost::filesystem::path(filename).is_absolute()) {
@@ -356,8 +354,9 @@ class FileManagerImpl : public milvus::FileManager {
         }
 
         auto normalized = NormalizePath(filename);
-        return normalized.find("/local_chunk/index_files/") !=
-               std::string::npos;
+        const auto index_cache_path =
+            "/local_chunk/" + std::string(INDEX_ROOT_PATH) + "/";
+        return normalized.find(index_cache_path) != std::string::npos;
     }
 
     bool
