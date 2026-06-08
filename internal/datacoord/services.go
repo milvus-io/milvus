@@ -2520,6 +2520,15 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 	}, nil
 }
 
+func (s *Server) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotRequest) (*datapb.ExportSnapshotResponse, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	return &datapb.ExportSnapshotResponse{
+		Status: merr.Status(merr.WrapErrServiceUnavailable("ExportSnapshot is not implemented")),
+	}, nil
+}
+
 // rollbackRestoreSnapshot drops the newly created collection when restore fails.
 func (s *Server) rollbackRestoreSnapshot(ctx context.Context, dbName, collectionName string) error {
 	log := log.Ctx(ctx).With(

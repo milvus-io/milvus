@@ -287,6 +287,25 @@ type JobIDReq struct {
 
 func (req *JobIDReq) GetJobID() string { return req.JobID }
 
+type RestoreExternalSnapshotReq struct {
+	DbName               string `json:"dbName"`
+	TargetCollectionName string `json:"targetCollectionName" binding:"required"`
+	SnapshotMetadataURI  string `json:"snapshotMetadataURI" binding:"required"`
+	ExternalSpec         string `json:"externalSpec"`
+}
+
+func (req *RestoreExternalSnapshotReq) GetDbName() string { return req.DbName }
+
+type ExportSnapshotReq struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName" binding:"required"`
+	Name           string `json:"snapshotName" binding:"required"`
+	TargetS3Path   string `json:"targetS3Path" binding:"required"`
+	ExternalSpec   string `json:"externalSpec"`
+}
+
+func (req *ExportSnapshotReq) GetDbName() string { return req.DbName }
+
 type QueryReqV2 struct {
 	DbName           string                 `json:"dbName"`
 	CollectionName   string                 `json:"collectionName" binding:"required"`
