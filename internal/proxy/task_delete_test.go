@@ -138,6 +138,19 @@ func TestDeleteTask_GetChannels(t *testing.T) {
 	assert.ElementsMatch(t, channels, dt.pChannels)
 }
 
+func TestDeleteTask_PreExecuteSkipsNamespaceValidationWhenUnset(t *testing.T) {
+	cache := globalMetaCache
+	globalMetaCache = nil
+	defer func() {
+		globalMetaCache = cache
+	}()
+
+	dt := deleteTask{
+		req: &milvuspb.DeleteRequest{},
+	}
+	assert.NoError(t, dt.PreExecute(context.Background()))
+}
+
 func TestDeleteTask_Execute(t *testing.T) {
 	collectionName := "test_delete"
 	collectionID := int64(111)
