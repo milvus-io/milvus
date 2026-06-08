@@ -328,6 +328,13 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			log.Warn("search/query channel failed",
 				zap.Int64("nodeID", targetNode.NodeID),
 				zap.Error(err))
+			// An input error is the request's own fault: re-dispatching it to
+			// other replicas cannot make it succeed, and blacklisting the
+			// (healthy) serving node would penalize it for a bad request. Abort
+			// immediately without retrying or touching the blacklist.
+			if merr.GetErrorType(err) == merr.InputError {
+				return false, err
+			}
 			if merr.IsRetryableErr(err) {
 				requestExcludedNodes.Insert(targetNode.NodeID)
 			} else {

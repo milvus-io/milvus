@@ -173,11 +173,13 @@ func StatusWithErrorCode(err error, code commonpb.ErrorCode) *commonpb.Status {
 		return &commonpb.Status{}
 	}
 
-	return &commonpb.Status{
-		Code:      Code(err),
-		Reason:    err.Error(),
-		ErrorCode: code,
-	}
+	// Reuse Status so Retriable / Detail / the is_input_error flag are populated
+	// (and Retriable forced false for input errors). Otherwise the ~31 rootcoord
+	// RBAC/credential callers would round-trip genuine input errors as system.
+	// Only override the explicit wire ErrorCode the caller asked for.
+	st := Status(err)
+	st.ErrorCode = code
+	return st
 }
 
 func oldCode(code int32) commonpb.ErrorCode {
