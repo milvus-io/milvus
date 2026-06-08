@@ -44,6 +44,7 @@ const (
 	FailInputLabel      = "fail_input"
 	FailSystemLabel     = "fail_system"
 	RejectedSystemLabel = "rejected_system"
+	RejectedUserLabel   = "rejected_user"
 
 	HybridSearchLabel = "hybrid_search"
 

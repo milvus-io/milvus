@@ -19,6 +19,9 @@
 package requestutil
 
 import (
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -221,10 +224,17 @@ var retryableCode typeutil.Set[int32] = typeutil.NewSet(
 // multiplicative). Retryability takes priority over classification.
 func ParseMetricLabel(resp any, err error) string {
 	// err is only returned by interceptors (context cancellation, flow
-	// control, transport issues). These are immediate rejections, classified
-	// as a system-side rejection.
+	// control, transport issues, auth/privilege rejection). The auth/privilege
+	// interceptors deliberately return raw gRPC codes (not merr, to keep SDK
+	// retry behavior correct); those are the caller's fault, so bucket them as a
+	// user-side rejection. Everything else is a system-side rejection.
 	if err != nil {
-		return metrics.RejectedSystemLabel
+		switch status.Code(err) {
+		case codes.Unauthenticated, codes.PermissionDenied, codes.InvalidArgument:
+			return metrics.RejectedUserLabel
+		default:
+			return metrics.RejectedSystemLabel
+		}
 	}
 
 	// check response status code

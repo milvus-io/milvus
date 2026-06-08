@@ -134,8 +134,8 @@ func TestSegcoreCodeTableCoverage(t *testing.T) {
 
 	// Regression guard: the codes we classified on purpose must stay registered
 	// with the intended property.
-	wantInput := []int32{2020, 2023, 2025, 2026, 2028, 2031, 2032, 2042}
-	wantRetriable := []int32{2012, 2014, 2015, 2018, 2027, 2034, 2036, 2037, 2040, 2043}
+	wantInput := []int32{2007, 2020, 2021, 2022, 2023, 2025, 2026, 2028, 2031, 2032, 2042}
+	wantRetriable := []int32{2012, 2013, 2014, 2015, 2018, 2027, 2034, 2036, 2037, 2040, 2043}
 	for _, c := range wantInput {
 		cls, ok := segcoreCodeTable[c]
 		assert.True(t, ok && cls.inputError, "code %d must stay registered as inputError", c)
@@ -145,14 +145,16 @@ func TestSegcoreCodeTableCoverage(t *testing.T) {
 		assert.True(t, ok && cls.retriable, "code %d must stay registered as retriable", c)
 	}
 
-	// Drift report: C++ codes that fall back to the generic ErrSegcore.
+	// Drift guard: every C++ ErrorCode must be classified explicitly. A new
+	// enum value added on the C++ side without a segcoreCodeTable entry fails
+	// here, forcing the author to decide input/retriable/system instead of
+	// silently degrading to the generic non-retriable ErrSegcore fallback.
 	var unregistered []int32
 	for _, c := range cppCodes {
 		if _, ok := segcoreCodeTable[c]; !ok {
 			unregistered = append(unregistered, c)
 		}
 	}
-	if len(unregistered) > 0 {
-		t.Logf("segcore C++ codes not registered in segcoreCodeTable (fall back to generic ErrSegcore, non-retriable): %v", unregistered)
-	}
+	assert.Empty(t, unregistered, "segcore C++ codes not classified in segcoreCodeTable; "+
+		"register each explicitly (input / retriable / system) in pkg/util/merr/segcore.go: %v", unregistered)
 }

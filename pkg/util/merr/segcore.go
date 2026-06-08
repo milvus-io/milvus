@@ -117,6 +117,25 @@ var segcoreCodeTable = map[int32]segcoreClass{
 	2004: {sentinel: ErrSegcore}, // IndexBuildError: build failed (bad data / permanent)
 	2016: {sentinel: ErrSegcore}, // BucketInvalid: misconfigured bucket (same on every replica)
 	2017: {sentinel: ErrSegcore}, // ObjectNotExist: object missing in shared storage (reroute won't help)
+
+	// Previously-unclassified C++ codes registered explicitly (review §2): an
+	// unknown code still falls back to non-retriable ErrSegcore, but registering
+	// them lets the drift-guard test fail on any genuinely new/unmapped code and
+	// fixes the wrong-class fallback for the caller-input ones.
+	2007: {sentinel: ErrSegcore, inputError: true}, // DataTypeInvalid: caller data type wrong
+	2021: {sentinel: ErrSegcore, inputError: true}, // FieldAlreadyExist: caller adds a duplicate field
+	2022: {sentinel: ErrSegcore, inputError: true}, // OpTypeInvalid: caller op type invalid
+	2013: {sentinel: ErrSegcore, retriable: true},  // FileCreateFailed: transient IO (sibling of 2012/2014/2015)
+	2005: {sentinel: ErrSegcore},                   // IndexAlreadyBuild: internal state (proxy already dedups)
+	2006: {sentinel: ErrSegcore},                   // ConfigInvalid: mixed user/server config; default system, split later
+	2009: {sentinel: ErrSegcore},                   // PathInvalid (storage; classify with storage PR)
+	2010: {sentinel: ErrSegcore},                   // PathAlreadyExist (storage)
+	2011: {sentinel: ErrSegcore},                   // PathNotExist (storage)
+	2019: {sentinel: ErrSegcore},                   // RetrieveError: generic retrieve failure
+	2024: {sentinel: ErrSegcore},                   // DataFormatBroken: data corruption (permanent)
+	2030: {sentinel: ErrSegcore},                   // UnistdError: syscall failure
+	2035: {sentinel: ErrSegcore},                   // MemAllocateSizeNotMatch: size logic bug (not OOM)
+	2041: {sentinel: ErrSegcore},                   // TextIndexNotFound
 }
 
 // classifySegcoreError converts a C++ segcore error code + message into a
