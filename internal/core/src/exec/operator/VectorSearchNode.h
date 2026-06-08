@@ -19,6 +19,7 @@
 #include <folly/futures/Future.h>
 #include <stdint.h>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "common/Promise.h"
@@ -82,7 +83,7 @@ class PhyVectorSearchNode : public Operator {
                       prefetch_pool) override {
         auto self =
             std::static_pointer_cast<PhyVectorSearchNode>(shared_from_this());
-        prefetch_future_ = folly::via(prefetch_pool.get(), [self]() {
+        prefetch_future_.emplace(folly::via(prefetch_pool.get(), [self]() {
             auto* op_ctx = self->query_context_->get_op_context();
             if (op_ctx != nullptr &&
                 op_ctx->cancellation_token.isCancellationRequested()) {
@@ -90,13 +91,14 @@ class PhyVectorSearchNode : public Operator {
             }
             self->segment_->prefetch_vector(op_ctx,
                                             self->search_info_.field_id_);
-        });
+        }));
     }
 
     void
     WaitPrefetch() override {
-        if (prefetch_future_.valid()) {
-            std::move(prefetch_future_).wait();
+        if (prefetch_future_.has_value()) {
+            std::move(*prefetch_future_).wait();
+            prefetch_future_.reset();
         }
     }
 
@@ -110,7 +112,7 @@ class PhyVectorSearchNode : public Operator {
     const milvus::query::PlaceholderGroup* placeholder_group_;
     milvus::SearchInfo search_info_;
 
-    folly::Future<folly::Unit> prefetch_future_;
+    std::optional<folly::Future<folly::Unit>> prefetch_future_;
 };
 }  // namespace exec
 }  // namespace milvus
