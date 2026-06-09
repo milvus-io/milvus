@@ -76,7 +76,7 @@ func (o *LimitOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame,
 			dataChunk := col.Chunk(chunkIdx)
 			sliced, err := sliceArray(dataChunk, int(start), int(end))
 			if err != nil {
-				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("limit_op: column %s: %v", colName, err))
+				return nil, merr.WrapErrServiceInternalMsg("limit_op: column %s: %v", colName, err)
 			}
 			collector.Set(colName, chunkIdx, sliced)
 		}
@@ -90,7 +90,7 @@ func (o *LimitOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame,
 
 	for _, colName := range colNames {
 		if err := builder.AddColumnFromChunks(colName, collector.Consume(colName)); err != nil {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("limit_op: %v", err))
+			return nil, merr.WrapErrServiceInternalMsg("limit_op: %v", err)
 		}
 		builder.CopyFieldMetadata(input, colName)
 	}

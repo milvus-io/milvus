@@ -87,7 +87,7 @@ func NewContext(
 		}
 		plans, err := compileMetricPlans(levels[i].Metrics)
 		if err != nil {
-			return nil, merr.WrapErrParameterInvalidMsg("level %d metric compile failed: %v", i, err)
+			return nil, merr.Wrapf(err, "level %d metric compile failed", i)
 		}
 		levels[i].metricPlans = plans
 	}
@@ -132,7 +132,7 @@ func compileMetricPlans(metrics map[string]MetricSpec) ([]metricPlan, error) {
 	for _, alias := range aliases {
 		plan, err := buildMetricPlan(alias, metrics[alias])
 		if err != nil {
-			return nil, merr.WrapErrParameterInvalidMsg("metric %q: %v", alias, err)
+			return nil, merr.Wrapf(err, "metric %q", alias)
 		}
 		plans = append(plans, plan)
 	}
@@ -293,7 +293,7 @@ func resolveAggregationSpec(groupBy *commonpb.SearchAggregationSpec, schema *sch
 		for _, fieldName := range spec.GetFields() {
 			fieldID, err := resolveFieldID(fieldName, schema, dynamicField)
 			if err != nil {
-				return merr.WrapErrParameterInvalidMsg("invalid group_by field %q: %v", fieldName, err)
+				return merr.Wrapf(err, "invalid group_by field %q", fieldName)
 			}
 			field, err := validateSearchAggregationFieldSupport(fieldName, fieldID, schema, "group_by field")
 			if err != nil {
@@ -333,11 +333,11 @@ func resolveAggregationSpec(groupBy *commonpb.SearchAggregationSpec, schema *sch
 				}
 				metricSpec, metricSourceFieldID, err := buildMetricSpec(metric, schema, dynamicField)
 				if err != nil {
-					return merr.WrapErrParameterInvalidMsg("invalid metric %q: %v", alias, err)
+					return merr.Wrapf(err, "invalid metric %q", alias)
 				}
 				plan, err := buildMetricPlan(alias, metricSpec)
 				if err != nil {
-					return merr.WrapErrParameterInvalidMsg("invalid metric %q: %v", alias, err)
+					return merr.Wrapf(err, "invalid metric %q", alias)
 				}
 				level.Metrics[alias] = metricSpec
 				level.metricPlans = append(level.metricPlans, plan)
@@ -443,7 +443,7 @@ func buildTopHitsConfig(topHits *commonpb.TopHitsSpec, schema *schemapb.Collecti
 
 		direction, err := normalizeDirection(sortSpec.GetDirection(), "desc")
 		if err != nil {
-			return nil, nil, merr.WrapErrParameterInvalidMsg("invalid top_hits.sort direction for %q: %v", fieldName, err)
+			return nil, nil, merr.Wrapf(err, "invalid top_hits.sort direction for %q", fieldName)
 		}
 
 		if fieldName == "_score" {
@@ -457,7 +457,7 @@ func buildTopHitsConfig(topHits *commonpb.TopHitsSpec, schema *schemapb.Collecti
 
 		fieldID, err := resolveFieldID(fieldName, schema, dynamicField)
 		if err != nil {
-			return nil, nil, merr.WrapErrParameterInvalidMsg("invalid top_hits.sort field %q: %v", fieldName, err)
+			return nil, nil, merr.Wrapf(err, "invalid top_hits.sort field %q", fieldName)
 		}
 		if _, err := validateSearchAggregationFieldSupport(fieldName, fieldID, schema, "top_hits.sort field"); err != nil {
 			return nil, nil, err
@@ -493,7 +493,7 @@ func buildOrderCriteria(orderSpecs []*commonpb.OrderSpec, metrics map[string]Met
 
 		direction, err := normalizeDirection(orderSpec.GetDirection(), "desc")
 		if err != nil {
-			return nil, merr.WrapErrParameterInvalidMsg("invalid order direction for key %q: %v", key, err)
+			return nil, merr.Wrapf(err, "invalid order direction for key %q", key)
 		}
 		// ES bucket order has no null placement option; OrderSpec.NullFirst is ignored intentionally.
 		order = append(order, OrderCriterion{Key: key, Dir: direction})

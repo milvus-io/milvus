@@ -4149,14 +4149,14 @@ func (t *RunAnalyzerTask) PreExecute(ctx context.Context) error {
 
 	collID, err := globalMetaCache.GetCollectionID(ctx, t.dbName, t.GetCollectionName())
 	if err != nil { // err is not nil if collection not exists
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+		return err
 	}
 
 	t.collectionID = collID
 
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, t.dbName, t.GetCollectionName())
 	if err != nil { // err is not nil if collection not exists
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+		return err
 	}
 
 	fieldId, ok := schema.MapFieldID(t.GetFieldName())

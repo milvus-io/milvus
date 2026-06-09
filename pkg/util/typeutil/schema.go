@@ -107,7 +107,7 @@ func HasTextField(schema *schemapb.CollectionSchema) bool {
 
 func ValidateTextRequiresStorageV3(schema *schemapb.CollectionSchema, storageV3Enabled bool) error {
 	if HasTextField(schema) && !storageV3Enabled {
-		return fmt.Errorf("TEXT field requires StorageV3; enable common.storage.useLoonFFI")
+		return merr.WrapErrParameterInvalidMsg("TEXT field requires StorageV3; enable common.storage.useLoonFFI")
 	}
 	return nil
 }

@@ -17,7 +17,6 @@
 package storage
 
 import (
-	"fmt"
 	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -259,7 +258,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (arrow.Array, error) {
 	// if not nullable, return error
 	if !schema.GetNullable() {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("missing field data %s", schema.Name))
+		return nil, merr.WrapErrServiceInternalMsg("missing field data %s", schema.Name)
 	}
 	dim, _ := typeutil.GetDim(schema)
 
@@ -327,7 +326,7 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 				lo.RepeatBy(numRows, func(_ int) []byte { return schema.GetDefaultValue().GetBytesData() }),
 				nil)
 		default:
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("Unexpected default value type: %s", schema.GetDataType().String()))
+			return nil, merr.WrapErrServiceInternalMsg("Unexpected default value type: %s", schema.GetDataType().String())
 		}
 	} else {
 		builder.AppendNulls(numRows)

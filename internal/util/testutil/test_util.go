@@ -132,7 +132,7 @@ func CreateInsertData(schema *schemapb.CollectionSchema, rows int, nullPercent .
 					validData[i] = true
 				}
 			} else {
-				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support the number of nullPercent(%d)", nullPercent))
+				return nil, merr.WrapErrParameterInvalidMsg("not support the number of nullPercent(%d)", nullPercent)
 			}
 			validDataMap[f.FieldID] = validData
 		}

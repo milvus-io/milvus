@@ -193,9 +193,9 @@ func (t *PreImportTask) readFileStat(reader importutilv2.Reader, fileIdx int) er
 	}
 	maxSize := paramtable.Get().DataNodeCfg.MaxImportFileSizeInGB.GetAsFloat() * 1024 * 1024 * 1024
 	if fileSize > int64(maxSize) {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf(
+		return merr.WrapErrParameterInvalidMsg(
 			"The import file size has reached the maximum limit allowed for importing, "+
-				"fileSize=%d, maxSize=%d", fileSize, int64(maxSize)))
+				"fileSize=%d, maxSize=%d", fileSize, int64(maxSize))
 	}
 
 	totalRows := 0

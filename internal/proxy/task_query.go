@@ -676,7 +676,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn("Failed to get collection id.", zap.String("collectionName", collectionName), zap.Error(err))
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+		return err
 	}
 	t.CollectionID = collID
 
@@ -684,7 +684,11 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		log.Warn("Failed to get collection info.", zap.String("collectionName", collectionName),
 			zap.Int64("collectionID", t.CollectionID), zap.Error(err))
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+		// The name was already resolved above (GetCollectionID succeeded), so a
+		// not-found here means the collection was concurrently dropped between the
+		// two lookups — a TOCTOU race, not the caller's input error. Leave it as the
+		// default SystemError; do not stamp InputError.
+		return err
 	}
 	log.Debug("Get collection ID by name", zap.Int64("collectionID", t.CollectionID))
 
@@ -888,7 +892,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime, 0)
 		// preventing overflow, abort
 		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
-			return merr.WrapErrServiceInternal(fmt.Sprintf("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL))
+			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL)
 		}
 	}
 	deadline, ok := t.TraceCtx().Deadline()

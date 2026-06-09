@@ -1054,7 +1054,7 @@ func (h *HandlersV2) waitForFlush(ctx context.Context, dbName string, collection
 	segmentIDs := flushResp.GetCollSegIDs()[collectionName].GetData()
 	flushTs, ok := flushResp.GetCollFlushTs()[collectionName]
 	if !ok {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("failed to get flush timestamp for collection %s", collectionName))
+		return merr.WrapErrServiceInternalMsg("failed to get flush timestamp for collection %s", collectionName)
 	}
 
 	ticker := time.NewTicker(500 * time.Millisecond)

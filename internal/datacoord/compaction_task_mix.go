@@ -411,7 +411,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 			return nil, merr.WrapErrSegmentNotFound(segID)
 		}
 		if taskSchemaVersion < segInfo.GetSchemaVersion() {
-			return nil, merr.WrapErrIllegalCompactionPlan(fmt.Sprintf("compaction task schema version %d is older than input segment %d schema version %d", taskSchemaVersion, segInfo.GetID(), segInfo.GetSchemaVersion()))
+			return nil, merr.WrapErrIllegalCompactionPlanMsg("compaction task schema version %d is older than input segment %d schema version %d", taskSchemaVersion, segInfo.GetID(), segInfo.GetSchemaVersion())
 		}
 		plan.SegmentBinlogs = append(plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
 			SegmentID:           segID,

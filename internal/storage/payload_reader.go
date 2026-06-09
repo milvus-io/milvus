@@ -3,7 +3,6 @@ package storage
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"strconv"
 	"time"
 
@@ -1342,7 +1341,7 @@ func ReadData[T any, E interface {
 			reader, ok := chunk.(E)
 			if !ok {
 				log.Warn("the column data in parquet is not equal to field", zap.String("fieldName", field.Name), zap.String("actual type", chunk.DataType().Name()))
-				return -1, merr.WrapErrImportFailed(fmt.Sprintf("the column data in parquet is not equal to field: %s, but: %s", field.Name, chunk.DataType().Name()))
+				return -1, merr.WrapErrImportFailedMsg("the column data in parquet is not equal to field: %s, but: %s", field.Name, chunk.DataType().Name())
 			}
 			nullBitset := bytesToBoolArray(dataNums, reader.NullBitmapBytes())
 			for i := 0; i < dataNums; i++ {

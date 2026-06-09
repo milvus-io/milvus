@@ -48,7 +48,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 	for _, collName := range t.CollectionNames {
 		collID, err := globalMetaCache.GetCollectionID(t.ctx, t.DbName, collName)
 		if err != nil {
-			return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+			return err
 		}
 
 		vchannels, err := t.chMgr.getVChannels(collID)

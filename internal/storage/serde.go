@@ -1337,7 +1337,7 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.Coll
 		}
 
 		if fieldData.RowNum() == 0 {
-			return merr.WrapErrServiceInternal(fmt.Sprintf("row num is 0 for field %s", field.Name))
+			return merr.WrapErrServiceInternalMsg("row num is 0 for field %s", field.Name)
 		}
 
 		// Get element type for ArrayOfVector, otherwise use None

@@ -66,18 +66,25 @@ type segcoreClass struct {
 //
 // They are mutually exclusive: a code is either the caller's fault (then a retry
 // of the same request is pointless) or a server-side condition that is either
-// transient (retriable) or permanent (neither flag). Codes whose single C++
-// value still mixes user-input and internal semantics (DataTypeInvalid 2007,
-// OpTypeInvalid 2022, ConfigInvalid 2006 — a server-side yaml/config error, not
-// the API caller's fault) are left as plain system errors until the C++ source
-// splits them.
+// transient (retriable) or permanent (neither flag). ConfigInvalid (2006) is a
+// server-side yaml/config error (not the API caller's fault), so it is left as a
+// plain system error until the C++ source splits its mixed user/server semantics.
 var segcoreCodeTable = map[int32]segcoreClass{
 	// Already-named segcore sentinels (identity preserved).
 	2000: {sentinel: ErrSegcore},
-	2001: {sentinel: ErrSegcoreUnsupported},                          // C++ UnexpectedError (sentinel name is legacy)
-	2002: {sentinel: ErrSegcorePretendFinished, signal: true},        // C++ NotImplemented (legacy pretend-finished signal mapping)
+	// C++ UnexpectedError(2001) is the generic catch-all the C++ core throws for
+	// any unclassified std::exception (EasyAssert.h default). It must stay generic
+	// ErrSegcore so the index/analyze scheduler retries it (master parity), NOT
+	// ErrSegcoreUnsupported — whose merr-code 2001 only coincides and would make
+	// scheduler.go fail the task permanently. The real C++ Unsupported is 2003.
+	2001: {sentinel: ErrSegcore},
+	// C++ NotImplemented(2002) is a real build/runtime failure, not a signal.
+	// ErrSegcorePretendFinished's merr-code 2002 only coincides; the real
+	// pretend-finished code is C++ ClusterSkip 2033. Keep generic so a failed
+	// build retries instead of being reported as JobStateFinished.
+	2002: {sentinel: ErrSegcore},
 	2037: {sentinel: ErrSegcoreFollyOtherException, retriable: true}, // FollyOtherException (folly async failure; retry/reroute)
-	2038: {sentinel: ErrSegcoreFollyCancel, signal: true},            // FollyCancel (converted to ctx error upstream)
+	2038: {sentinel: ErrSegcoreFollyCancel},                          // FollyCancel (cancellation; not a pretend-finished signal — sentinel identity preserved, scheduler retries)
 	2039: {sentinel: ErrSegcoreOutOfRange},                           // OutOfRange (internal bounds bug, not a signal)
 	2040: {sentinel: ErrSegcoreGCPNativeError, retriable: true},      // GcpNativeError (object storage; transient)
 	2099: {sentinel: KnowhereError},                                  // KnowhereError

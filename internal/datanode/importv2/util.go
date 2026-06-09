@@ -50,7 +50,7 @@ import (
 )
 
 func WrapTaskNotFoundError(taskID int64) error {
-	return merr.WrapErrImportFailed(fmt.Sprintf("cannot find import task with id %d", taskID))
+	return merr.WrapErrImportSysFailedMsg("cannot find import task with id %d", taskID)
 }
 
 func NewSyncTask(ctx context.Context,
@@ -409,7 +409,7 @@ func FillDynamicData(schema *schemapb.CollectionSchema, data *storage.InsertData
 	}
 	dynamicField := typeutil.GetDynamicField(schema)
 	if dynamicField == nil {
-		return merr.WrapErrImportFailed("collection schema is illegal, enable_dynamic_field is true but the dynamic field doesn't exist")
+		return merr.WrapErrImportSysFailed("collection schema is illegal, enable_dynamic_field is true but the dynamic field doesn't exist")
 	}
 
 	tempData, ok := data.Data[dynamicField.GetFieldID()]

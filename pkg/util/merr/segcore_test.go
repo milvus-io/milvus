@@ -27,13 +27,24 @@ func TestSegcoreErrorClassification(t *testing.T) {
 	// Sentinel identity must be preserved for the codes datanode/index
 	// scheduler relies on via errors.Is.
 	t.Run("pretend_finished_signal", func(t *testing.T) {
-		// ClusterSkip(2033) and NotImplemented(2002) both surface as
-		// pretend-finished; scheduler.go matches errors.Is on it.
-		for _, code := range []int32{2002, 2033} {
-			err := SegcoreError(code, "msg")
-			assert.ErrorIs(t, err, ErrSegcorePretendFinished, "code %d", code)
-			assert.True(t, IsSegcoreSignal(code), "code %d should be a signal", code)
-		}
+		// Only C++ ClusterSkip(2033) is the pretend-finished signal scheduler.go
+		// matches via errors.Is.
+		err := SegcoreError(2033, "msg")
+		assert.ErrorIs(t, err, ErrSegcorePretendFinished)
+		assert.True(t, IsSegcoreSignal(2033))
+	})
+
+	t.Run("not_implemented_is_not_pretend_finished", func(t *testing.T) {
+		// C++ NotImplemented(2002) must NOT map to the pretend-finished signal:
+		// ErrSegcorePretendFinished's merr-code 2002 only coincides, but C++
+		// NotImplemented is a real build failure. It must stay generic ErrSegcore
+		// (system, non-signal) so getStateFromError retries it instead of
+		// reporting JobStateFinished.
+		err := SegcoreError(2002, "msg")
+		assert.ErrorIs(t, err, ErrSegcore)
+		assert.NotErrorIs(t, err, ErrSegcorePretendFinished)
+		assert.False(t, IsSegcoreSignal(2002))
+		assert.Equal(t, SystemError, GetErrorType(err))
 	})
 
 	t.Run("unsupported_identity", func(t *testing.T) {
@@ -42,6 +53,18 @@ func TestSegcoreErrorClassification(t *testing.T) {
 		err := SegcoreError(2003, "msg")
 		assert.ErrorIs(t, err, ErrSegcoreUnsupported)
 		assert.False(t, IsSegcoreSignal(2003))
+	})
+
+	t.Run("unexpected_error_is_not_unsupported", func(t *testing.T) {
+		// C++ UnexpectedError(2001) is the generic catch-all the C++ core throws
+		// for any unclassified exception; it must stay generic ErrSegcore (->
+		// scheduler retry), NOT ErrSegcoreUnsupported (whose merr-code 2001 only
+		// coincides and would make scheduler.go fail the task permanently).
+		err := SegcoreError(2001, "msg")
+		assert.ErrorIs(t, err, ErrSegcore)
+		assert.NotErrorIs(t, err, ErrSegcoreUnsupported)
+		assert.False(t, IsSegcoreSignal(2001))
+		assert.Equal(t, SystemError, GetErrorType(err))
 	})
 
 	t.Run("named_sentinels", func(t *testing.T) {

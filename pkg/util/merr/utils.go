@@ -420,8 +420,34 @@ func WrapErrServiceNotReady(role string, sessionID int64, state string, msg ...s
 	return err
 }
 
+// formatMsg renders a WrapErr* message. When no args are supplied the format is
+// used verbatim (no Sprintf), so a '%' in dynamic content — e.g.
+// WrapErrServiceInternalMsg(err.Error()) where the message contains "50%" — is
+// not misinterpreted as a printf verb and rendered as "%!s(MISSING)" garbage.
+// With args it formats as usual.
+func formatMsg(format string, args ...any) string {
+	if len(args) == 0 {
+		return format
+	}
+	return fmt.Sprintf(format, args...)
+}
+
+// wrapMsg attaches a (safely rendered) message to a sentinel for the
+// WrapErr*Msg factories. When no args are supplied the format is used verbatim
+// (errors.Wrap, no Sprintf), so a '%' in dynamic content — e.g.
+// WrapErrServiceInternalMsg(err.Error()) where the message contains "50%" — is
+// not misinterpreted as a printf verb. The args path uses errors.Wrapf rather
+// than fmt.Sprintf so `go vet` does not classify the WrapErr*Msg helpers as
+// printf wrappers and flag every non-constant-format callsite.
+func wrapMsg(err error, format string, args ...any) error {
+	if len(args) == 0 {
+		return errors.Wrap(err, format)
+	}
+	return errors.Wrapf(err, format, args...)
+}
+
 func WrapErrServiceNotReadyMsg(fmt string, args ...any) error {
-	return errors.Wrapf(ErrServiceNotReady, fmt, args...)
+	return wrapMsg(ErrServiceNotReady, fmt, args...)
 }
 
 func WrapErrServiceUnavailable(reason string, msg ...string) error {
@@ -433,7 +459,7 @@ func WrapErrServiceUnavailable(reason string, msg ...string) error {
 }
 
 func WrapErrServiceUnavailableMsg(fmt string, args ...any) error {
-	return errors.Wrapf(ErrServiceUnavailable, fmt, args...)
+	return wrapMsg(ErrServiceUnavailable, fmt, args...)
 }
 
 func WrapErrServiceMemoryLimitExceeded(predict, limit float32, msg ...string) error {
@@ -469,11 +495,11 @@ func WrapErrServiceInternalErr(err error, format string, args ...any) error {
 	if err == nil {
 		return WrapErrServiceInternalMsg(format, args...)
 	}
-	return wrapInner(ErrServiceInternal, fmt.Sprintf(format, args...), err)
+	return wrapInner(ErrServiceInternal, formatMsg(format, args...), err)
 }
 
 func WrapErrServiceInternalMsg(fmt string, args ...any) error {
-	return errors.Wrapf(ErrServiceInternal, fmt, args...)
+	return wrapMsg(ErrServiceInternal, fmt, args...)
 }
 
 func WrapErrServiceCrossClusterRouting(expectedCluster, actualCluster string, msg ...string) error {
@@ -515,7 +541,7 @@ func WrapErrServiceQuotaExceeded(reason string, msg ...string) error {
 }
 
 func WrapErrServiceQuotaExceededMsg(fmt string, args ...any) error {
-	return errors.Wrapf(ErrServiceQuotaExceeded, fmt, args...)
+	return wrapMsg(ErrServiceQuotaExceeded, fmt, args...)
 }
 
 func WrapErrServiceUnimplemented(grpcErr error) error {
@@ -1046,8 +1072,7 @@ func WrapErrNodeNotMatch(expectedNodeID, actualNodeID int64, msg ...string) erro
 // rows mismatch in payload reader, type mismatch when reading a column from
 // the wrong DataType).
 func WrapErrSerializationFailedMsg(format string, args ...any) error {
-	detail := fmt.Sprintf(format, args...)
-	return errors.Wrap(ErrSerializationFailed, detail)
+	return wrapMsg(ErrSerializationFailed, format, args...)
 }
 
 // WrapErrSerializationFailed wraps an existing underlying error 'err' with
@@ -1058,7 +1083,7 @@ func WrapErrSerializationFailed(err error, format string, args ...any) error {
 	if err == nil {
 		return WrapErrSerializationFailedMsg(format, args...)
 	}
-	return wrapInner(ErrSerializationFailed, fmt.Sprintf(format, args...), err)
+	return wrapInner(ErrSerializationFailed, formatMsg(format, args...), err)
 }
 
 // WrapErrDataIntegrityMsg creates a new ErrDataIntegrity (code 1009) with a
@@ -1067,8 +1092,7 @@ func WrapErrSerializationFailed(err error, format string, args ...any) error {
 // unparseable stats buffer) — i.e. the stored data itself is corrupt, not the
 // (de)serialization step.
 func WrapErrDataIntegrityMsg(format string, args ...any) error {
-	detail := fmt.Sprintf(format, args...)
-	return errors.Wrap(ErrDataIntegrity, detail)
+	return wrapMsg(ErrDataIntegrity, format, args...)
 }
 
 // WrapErrDataIntegrity wraps an existing underlying error with ErrDataIntegrity
@@ -1079,7 +1103,7 @@ func WrapErrDataIntegrity(err error, format string, args ...any) error {
 	if err == nil {
 		return WrapErrDataIntegrityMsg(format, args...)
 	}
-	return wrapInner(ErrDataIntegrity, fmt.Sprintf(format, args...), err)
+	return wrapInner(ErrDataIntegrity, formatMsg(format, args...), err)
 }
 
 // WrapErrStorageMsg creates a new ErrStorage (code 1008) with a detail message.
@@ -1087,8 +1111,7 @@ func WrapErrDataIntegrity(err error, format string, args ...any) error {
 // state, corrupted data structure check, nil data) and there is no underlying
 // Go error to wrap.
 func WrapErrStorageMsg(format string, args ...any) error {
-	detail := fmt.Sprintf(format, args...)
-	return errors.Wrap(ErrStorage, detail)
+	return wrapMsg(ErrStorage, format, args...)
 }
 
 // WrapErrStorage wraps an existing underlying error 'err' with ErrStorage
@@ -1106,7 +1129,7 @@ func WrapErrStorage(err error, format string, args ...any) error {
 	if err == nil {
 		return WrapErrStorageMsg(format, args...)
 	}
-	return wrapInner(ErrStorage, fmt.Sprintf(format, args...), err)
+	return wrapInner(ErrStorage, formatMsg(format, args...), err)
 }
 
 // WrapErrFunctionFailedMsg creates a new ErrFunctionFailed (code 2400) with a
@@ -1114,8 +1137,7 @@ func WrapErrStorage(err error, format string, args ...any) error {
 // returns a malformed output (wrong type, empty, unexpected shape) and there
 // is no underlying Go error to wrap.
 func WrapErrFunctionFailedMsg(format string, args ...any) error {
-	detail := fmt.Sprintf(format, args...)
-	return errors.Wrap(ErrFunctionFailed, detail)
+	return wrapMsg(ErrFunctionFailed, format, args...)
 }
 
 // WrapErrFunctionFailed wraps an existing underlying error 'err' with
@@ -1133,7 +1155,7 @@ func WrapErrFunctionFailed(err error, format string, args ...any) error {
 	if err == nil {
 		return WrapErrFunctionFailedMsg(format, args...)
 	}
-	return wrapInner(ErrFunctionFailed, fmt.Sprintf(format, args...), err)
+	return wrapInner(ErrFunctionFailed, formatMsg(format, args...), err)
 }
 
 // IO related
@@ -1161,7 +1183,7 @@ func WrapErrIoFailedReason(reason string, msg ...string) error {
 }
 
 func WrapErrIoFailedMsg(fmt string, args ...any) error {
-	return errors.Wrapf(ErrIoFailed, fmt, args...)
+	return wrapMsg(ErrIoFailed, fmt, args...)
 }
 
 func WrapErrIoUnexpectEOF(key string, err error) error {
@@ -1240,7 +1262,7 @@ func WrapErrParameterInvalidErr(err error, format string, args ...any) error {
 	if err == nil {
 		return WrapErrParameterInvalidMsg(format, args...)
 	}
-	return wrapInner(ErrParameterInvalid, fmt.Sprintf(format, args...), err)
+	return wrapInner(ErrParameterInvalid, formatMsg(format, args...), err)
 }
 
 func WrapErrParameterInvalidRange[T any](lower, upper, actual T, msg ...string) error {
@@ -1254,7 +1276,7 @@ func WrapErrParameterInvalidRange[T any](lower, upper, actual T, msg ...string) 
 }
 
 func WrapErrParameterInvalidMsg(fmt string, args ...any) error {
-	return errors.Wrapf(ErrParameterInvalid, fmt, args...)
+	return wrapMsg(ErrParameterInvalid, fmt, args...)
 }
 
 func WrapErrParameterMissing[T any](param T, msg ...string) error {
@@ -1268,7 +1290,7 @@ func WrapErrParameterMissing[T any](param T, msg ...string) error {
 }
 
 func WrapErrParameterMissingMsg(fmt string, args ...any) error {
-	return errors.Wrapf(ErrParameterMissing, fmt, args...)
+	return wrapMsg(ErrParameterMissing, fmt, args...)
 }
 
 func WrapErrParameterTooLarge(name string, msg ...string) error {
@@ -1319,16 +1341,16 @@ func WrapErrMqInternal(err error, msg ...string) error {
 // WrapErrMqInternalMsg creates a new ErrMqInternal (code 1302) with a detail
 // message. Use this when there is no underlying Go error to wrap.
 func WrapErrMqInternalMsg(format string, args ...any) error {
-	return errors.Wrapf(ErrMqInternal, format, args...)
+	return wrapMsg(ErrMqInternal, format, args...)
 }
 
 func WrapErrPrivilegeNotAuthenticated(fmt string, args ...any) error {
-	err := errors.Wrapf(ErrPrivilegeNotAuthenticated, fmt, args...)
+	err := wrapMsg(ErrPrivilegeNotAuthenticated, fmt, args...)
 	return err
 }
 
 func WrapErrPrivilegeNotPermitted(fmt string, args ...any) error {
-	err := errors.Wrapf(ErrPrivilegeNotPermitted, fmt, args...)
+	err := wrapMsg(ErrPrivilegeNotPermitted, fmt, args...)
 	return err
 }
 
@@ -1338,7 +1360,7 @@ func WrapErrPrivilegeNotPermitted(fmt string, args ...any) error {
 // SegcoreError(code, msg) instead, which classifies the code via the shared
 // segcore code table (see segcore.go).
 func WrapErrSegcoreMsg(format string, args ...any) error {
-	return errors.Wrap(ErrSegcore, fmt.Sprintf(format, args...))
+	return wrapMsg(ErrSegcore, format, args...)
 }
 
 // Deprecated: segcore error classification is now driven by the shared code
@@ -1445,6 +1467,30 @@ func WrapErrImportFailed(msg ...string) error {
 	return err
 }
 
+// WrapErrImportFailedMsg is the formatted variant of WrapErrImportFailed,
+// matching the standard merr Msg-factory convention (errors.Wrapf) so callers
+// pass a format string + args instead of an inline fmt.Sprintf.
+func WrapErrImportFailedMsg(fmt string, args ...any) error {
+	return wrapMsg(ErrImportFailed, fmt, args...)
+}
+
+// WrapErrImportSysFailed wraps ErrImportSysFailed: the server-side / object-IO
+// import failures (job orchestration, backpressure, reader open/read) that are
+// the operator's concern, not the caller's. Use it instead of
+// WrapErrImportFailed wherever the failure is not caused by malformed user data.
+func WrapErrImportSysFailed(msg ...string) error {
+	err := error(ErrImportSysFailed)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+// WrapErrImportSysFailedMsg is the formatted variant of WrapErrImportSysFailed.
+func WrapErrImportSysFailedMsg(fmt string, args ...any) error {
+	return wrapMsg(ErrImportSysFailed, fmt, args...)
+}
+
 func WrapErrInconsistentRequery(msg ...string) error {
 	err := error(ErrInconsistentRequery)
 	if len(msg) > 0 {
@@ -1457,8 +1503,7 @@ func WrapErrInconsistentRequery(msg ...string) error {
 // message. Use this when query plan parsing/validation fails and there is no
 // underlying Go error to wrap.
 func WrapErrQueryPlanMsg(format string, args ...any) error {
-	detail := fmt.Sprintf(format, args...)
-	return errors.Wrap(ErrQueryPlan, detail)
+	return wrapMsg(ErrQueryPlan, format, args...)
 }
 
 // WrapErrQueryPlan wraps an existing underlying error with ErrQueryPlan
@@ -1468,7 +1513,7 @@ func WrapErrQueryPlan(err error, format string, args ...any) error {
 	if err == nil {
 		return WrapErrQueryPlanMsg(format, args...)
 	}
-	return wrapInner(ErrQueryPlan, fmt.Sprintf(format, args...), err)
+	return wrapInner(ErrQueryPlan, formatMsg(format, args...), err)
 }
 
 func WrapErrKMSKeyRevoked(dbID int64, reason string) error {
@@ -1494,9 +1539,7 @@ func WrapErrIllegalCompactionPlan(msg ...string) error {
 }
 
 func WrapErrIllegalCompactionPlanMsg(format string, args ...any) error {
-	detail := fmt.Sprintf(format, args...)
-	// Since this is the message-only path, we wrap the constant error with the formatted message.
-	return errors.Wrap(ErrIllegalCompactionPlan, detail)
+	return wrapMsg(ErrIllegalCompactionPlan, format, args...)
 }
 
 func WrapErrCompactionPlanConflict(msg ...string) error {
@@ -1643,7 +1686,7 @@ func WrapErrSnapshotPinned(name any, msg ...string) error {
 // This is the primary replacement for fmt.Errorf/errors.New for operations that are
 // currently not supported by the system.
 func WrapErrOperationNotSupportedMsg(format string, args ...any) error {
-	return errors.Wrapf(ErrOperationNotSupported, format, args...)
+	return wrapMsg(ErrOperationNotSupported, format, args...)
 }
 
 // WrapErrOperationNotSupported wraps an existing error 'err' with ErrOperationNotSupported (Code 3000).
@@ -1651,5 +1694,5 @@ func WrapErrOperationNotSupported(err error, format string, args ...any) error {
 	if err == nil {
 		return WrapErrOperationNotSupportedMsg(format, args...)
 	}
-	return wrapInner(ErrOperationNotSupported, fmt.Sprintf(format, args...), err)
+	return wrapInner(ErrOperationNotSupported, formatMsg(format, args...), err)
 }

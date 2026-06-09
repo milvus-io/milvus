@@ -77,7 +77,7 @@ func parseAndRemoveElementScope(searchParamStr string) (elementCollapseConfig, b
 	delete(root, elementScopeKey)
 	sanitized, err := json.Marshal(root)
 	if err != nil {
-		return elementCollapseConfig{}, false, "", merr.WrapErrServiceInternal(fmt.Sprintf("failed to rewrite search params without %s: %v", elementScopeKey, err))
+		return elementCollapseConfig{}, false, "", merr.WrapErrServiceInternalMsg("failed to rewrite search params without %s: %v", elementScopeKey, err)
 	}
 	return cfg, true, string(sanitized), nil
 }

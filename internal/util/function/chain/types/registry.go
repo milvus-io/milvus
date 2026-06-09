@@ -49,14 +49,14 @@ func (r *FunctionRegistry) Register(name string, factory FunctionFactory) error 
 		return merr.WrapErrParameterMissingMsg("function name cannot be empty")
 	}
 	if factory == nil {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("function factory cannot be nil for %q", name))
+		return merr.WrapErrServiceInternalMsg("function factory cannot be nil for %q", name)
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if _, exists := r.factories[name]; exists {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("function %q already registered", name))
+		return merr.WrapErrServiceInternalMsg("function %q already registered", name)
 	}
 	r.factories[name] = factory
 	return nil

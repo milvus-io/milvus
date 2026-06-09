@@ -576,7 +576,16 @@ func (m *MetaCache) UpdateByName(ctx context.Context, database, collectionName s
 	collection, err, _ := m.sfGlobal.Do(buildSfKeyByName(database, collectionName), func() (*collectionInfo, error) {
 		return m.update(ctx, database, collectionName, 0)
 	})
-	return collection, err
+	// Name resolution failed -> the caller named a collection/db that does not
+	// exist, which is the user's input error, not a system fault. Mark it here,
+	// the single name-resolution chokepoint shared by every name-based
+	// GetCollection* path (data-plane and control-plane proxy tasks), so the
+	// error_type is Input. The id-based UpdateByID path is deliberately left as
+	// SystemError: a by-id lookup miss is an internal/component query (e.g.
+	// rootcoord answering another component by collectionID), not user input.
+	// The sentinel itself stays SystemError so datacoord's internal retry.Do
+	// recovery loops still retry a transient not-found.
+	return collection, merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 }
 
 func (m *MetaCache) UpdateByID(ctx context.Context, database string, collectionID UniqueID) (*collectionInfo, error) {
@@ -869,7 +878,12 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, database, collectionNa
 	if ok && entry.state == EntryStateActive && entry.value != nil {
 		return entry.value, nil
 	}
-	return nil, merr.WrapErrPartitionNotFound(partitionName)
+	// partitionName is caller-supplied; a failed name resolution is the user's
+	// input error, not a system fault. Mark it here, the single partition-name
+	// chokepoint (GetPartitionID also routes through here), so the proxy reports
+	// InputError without per-task wrappers. ErrPartitionNotFound stays
+	// SystemError by default so id-based lookups (GetPartitionName) are unaffected.
+	return nil, merr.WrapErrAsInputError(merr.WrapErrPartitionNotFound(partitionName))
 }
 
 func (m *MetaCache) GetPartitionsIndex(ctx context.Context, database, collectionName string) ([]string, error) {
@@ -1182,7 +1196,13 @@ func (m *MetaCache) GetDatabaseInfo(ctx context.Context, database string) (*data
 		return dbInfo, nil
 	})
 
-	return dbInfo, err
+	// Symmetric with UpdateByName: a failed database-name resolution means the
+	// caller named a database that does not exist — the user's input error, not a
+	// system fault. Mark it here, the single database-name chokepoint, so every
+	// caller (data-plane and control-plane proxy tasks) gets InputError without a
+	// per-callsite wrapper. The sentinel stays SystemError so internal id-based
+	// lookups and retry loops elsewhere are unaffected.
+	return dbInfo, merr.WrapErrAsInputErrorWhen(err, merr.ErrDatabaseNotFound)
 }
 
 func (m *MetaCache) safeGetDBInfo(database string) *databaseInfo {

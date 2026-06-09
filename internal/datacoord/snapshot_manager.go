@@ -1330,7 +1330,7 @@ func (sm *snapshotManager) GetRestoreState(ctx context.Context, jobID int64) (*d
 	// Get job
 	job := sm.copySegmentMeta.GetJob(ctx, jobID)
 	if job == nil {
-		err := merr.WrapErrImportFailed(fmt.Sprintf("restore job not found: jobID=%d", jobID))
+		err := merr.WrapErrImportFailedMsg("restore job not found: jobID=%d", jobID)
 		log.Warn("restore job not found")
 		return nil, err
 	}

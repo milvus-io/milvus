@@ -18,7 +18,6 @@ package storage
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"google.golang.org/protobuf/proto"
 
@@ -73,17 +72,17 @@ func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int, withFuncti
 
 	appendField := func(field *schemapb.FieldSchema) error {
 		if field.IsPrimaryKey && field.GetNullable() {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("primary key field should not be nullable (field: %s)", field.Name))
+			return merr.WrapErrParameterInvalidMsg("primary key field should not be nullable (field: %s)", field.Name)
 		}
 		if field.IsPartitionKey && field.GetNullable() {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("partition key field should not be nullable (field: %s)", field.Name))
+			return merr.WrapErrParameterInvalidMsg("partition key field should not be nullable (field: %s)", field.Name)
 		}
 		if field.IsFunctionOutput {
 			if field.IsPrimaryKey || field.IsPartitionKey {
-				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("function output field should not be primary key or partition key (field: %s)", field.Name))
+				return merr.WrapErrParameterInvalidMsg("function output field should not be primary key or partition key (field: %s)", field.Name)
 			}
 			if field.GetNullable() {
-				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("function output field should not be nullable (field: %s)", field.Name))
+				return merr.WrapErrParameterInvalidMsg("function output field should not be nullable (field: %s)", field.Name)
 			}
 			if !withFunctionOutput {
 				return nil
@@ -157,7 +156,7 @@ func (i *InsertData) Append(row map[FieldID]interface{}) error {
 		}
 
 		if err := field.AppendRow(v); err != nil {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("append data for field %d failed, err=%s", fID, err.Error()))
+			return merr.WrapErrParameterInvalidMsg("append data for field %d failed, err=%s", fID, err.Error())
 		}
 	}
 

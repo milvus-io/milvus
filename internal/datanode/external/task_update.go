@@ -882,9 +882,9 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			if strings.Contains(rootCause, "not found in schema") {
 				hint = "; check external_field mappings in collection schema against actual parquet columns"
 			}
-			return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf(
+			return nil, merr.WrapErrParameterInvalidMsg(
 				"external field size sampling failed for all %d segment(s): %s%s",
-				len(manifestPaths), rootCause, hint))
+				len(manifestPaths), rootCause, hint)
 		}
 		// Fill any zero slots (sampling failed mid-loop) with the first
 		// successful average so every segment gets a non-zero MemorySize.

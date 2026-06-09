@@ -273,13 +273,13 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 
 	db, err := globalMetaCache.GetDatabaseInfo(ctx, dr.req.GetDbName())
 	if err != nil {
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrDatabaseNotFound)
+		return err
 	}
 	dr.dbID = db.dbID
 
 	dr.collectionID, err = globalMetaCache.GetCollectionID(ctx, dr.req.GetDbName(), collName)
 	if err != nil {
-		return ErrWithLog(log, "Failed to get collection id", merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound))
+		return ErrWithLog(log, "Failed to get collection id", err)
 	}
 
 	dr.schema, err = globalMetaCache.GetCollectionSchema(ctx, dr.req.GetDbName(), collName)

@@ -1199,7 +1199,7 @@ func (w *NativePayloadWriter) AddVectorArrayFieldDataToPayload(data *VectorArray
 	case schemapb.DataType_Int8Vector:
 		return w.addInt8VectorArrayToPayload(builder, data)
 	default:
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("unsupported element type in VectorArray: %s", data.ElementType.String()))
+		return merr.WrapErrParameterInvalidMsg("unsupported element type in VectorArray: %s", data.ElementType.String())
 	}
 }
 

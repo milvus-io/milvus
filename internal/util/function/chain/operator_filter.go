@@ -52,10 +52,10 @@ func NewFilterOp(function types.FunctionExpr, inputCols []string) (*FilterOp, er
 	outputTypes := function.OutputDataTypes()
 	if outputTypes != nil {
 		if len(outputTypes) != 1 {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("filter_op: function must return exactly 1 output, got %d", len(outputTypes)))
+			return nil, merr.WrapErrServiceInternalMsg("filter_op: function must return exactly 1 output, got %d", len(outputTypes))
 		}
 		if outputTypes[0].ID() != arrow.BOOL {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("filter_op: function must return boolean type, got %s", outputTypes[0].Name()))
+			return nil, merr.WrapErrServiceInternalMsg("filter_op: function must return boolean type, got %s", outputTypes[0].Name())
 		}
 	}
 

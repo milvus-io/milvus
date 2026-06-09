@@ -32,10 +32,10 @@ func (p *releaseManualFlushPreparer) PrepareReleaseManualFlush(ctx context.Conte
 		return false, status.NewInner("write buffer manager is not initialized")
 	}
 	if vchannel == "" {
-		return false, status.NewInvaildArgument("vchannel is empty")
+		return false, status.NewInvalidArgument("vchannel is empty")
 	}
 	if collectionID == 0 {
-		return false, status.NewInvaildArgument("collection id is empty")
+		return false, status.NewInvalidArgument("collection id is empty")
 	}
 	if len(releaseSegmentIDs) == 0 {
 		return false, nil

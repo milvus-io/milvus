@@ -536,7 +536,7 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 	}
 	expectedRows := t.targetOffset - segment.FlushedRows()
 	if expectedRows < 0 {
-		return errors.Errorf("growing source target offset is behind flushed rows, flushedRows=%d targetOffset=%d segmentID=%d",
+		return merr.WrapErrServiceInternalMsg("growing source target offset is behind flushed rows, flushedRows=%d targetOffset=%d segmentID=%d",
 			segment.FlushedRows(), t.targetOffset, t.segmentID)
 	}
 	if t.committedManifestPath != "" {
@@ -546,10 +546,10 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 		t.manifestPath = segment.ManifestPath()
 	} else {
 		if t.source == nil {
-			return errors.New("growing flush source is nil")
+			return merr.WrapErrServiceInternalMsg("growing flush source is nil")
 		}
 		if t.source.CurrentOffset() < t.targetOffset {
-			return errors.Errorf("growing flush source is behind target offset, current=%d target=%d", t.source.CurrentOffset(), t.targetOffset)
+			return merr.WrapErrServiceInternalMsg("growing flush source is behind target offset, current=%d target=%d", t.source.CurrentOffset(), t.targetOffset)
 		}
 		config, err := t.buildFlushConfig(segment)
 		if err != nil {
@@ -560,10 +560,10 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 			return errors.Wrap(err, "flush growing source data")
 		}
 		if result == nil || result.ManifestPath == "" {
-			return errors.New("growing source flush returned empty manifest")
+			return merr.WrapErrDataIntegrityMsg("growing source flush returned empty manifest")
 		}
 		if result.NumRows != expectedRows {
-			return errors.Errorf("growing source flush row count mismatch, expected=%d actual=%d flushedRows=%d targetOffset=%d segmentID=%d",
+			return merr.WrapErrDataIntegrityMsg("growing source flush row count mismatch, expected=%d actual=%d flushedRows=%d targetOffset=%d segmentID=%d",
 				expectedRows, result.NumRows, segment.FlushedRows(), t.targetOffset, t.segmentID)
 		}
 		t.manifestPath = result.ManifestPath

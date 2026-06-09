@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"fmt"
 	"io"
 	"strconv"
 
@@ -334,7 +333,7 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 				nRows = int(r.NumRows())
 			}
 			if nRows != int(r.NumRows()) {
-				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("number of rows mismatch for field %d", f.FieldID))
+				return nil, merr.WrapErrServiceInternalMsg("number of rows mismatch for field %d", f.FieldID)
 			}
 		} else {
 			nonExistingFields = append(nonExistingFields, f)

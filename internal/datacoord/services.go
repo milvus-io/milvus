@@ -2081,7 +2081,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 
 	job := s.importMeta.GetJob(ctx, jobID)
 	if job == nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("import job does not exist, jobID=%d", jobID)))
+		resp.Status = merr.Status(merr.WrapErrImportFailedMsg("import job does not exist, jobID=%d", jobID))
 		return resp, nil
 	}
 	progress, state, importedRows, totalRows, reason := GetJobProgress(ctx, jobID, s.importMeta, s.meta)
@@ -2887,7 +2887,7 @@ func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *dat
 func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob) error {
 	vchannels := job.GetVchannels()
 	if len(vchannels) == 0 {
-		return merr.WrapErrImportFailed(fmt.Sprintf("job %d has no vchannels", job.GetJobID()))
+		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID())
 	}
 
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
@@ -2914,7 +2914,7 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJob) error {
 	vchannels := job.GetVchannels()
 	if len(vchannels) == 0 {
-		return merr.WrapErrImportFailed(fmt.Sprintf("job %d has no vchannels", job.GetJobID()))
+		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID())
 	}
 
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
@@ -2949,7 +2949,7 @@ func (s *Server) validateAndExecuteImportAction(
 	}
 	job := s.importMeta.GetJob(ctx, jobID)
 	if job == nil {
-		return merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("job %d not found", jobID))), nil
+		return merr.Status(merr.WrapErrImportFailedMsg("job %d not found", jobID)), nil
 	}
 	if st := validateState(job); st != nil {
 		return st, nil

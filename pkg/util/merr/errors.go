@@ -68,7 +68,7 @@ var (
 	ErrServiceResourceInsufficient = newMilvusError("service resource insufficient", 12, true)
 
 	// Collection related
-	ErrCollectionNotFound                      = newMilvusError("collection not found", 100, false, WithErrorType(InputError))
+	ErrCollectionNotFound                      = newMilvusError("collection not found", 100, false) // SystemError by default: internal retry.Do paths (datacoord handler/recovery) must keep retrying through a transient not-found; the proxy boundary stamps it InputError for users via WrapErrAsInputErrorWhen.
 	ErrCollectionNotLoaded                     = newMilvusError("collection not loaded", 101, false)
 	ErrCollectionNumLimitExceeded              = newMilvusError("exceeded the limit number of collections", 102, false, WithErrorType(InputError))
 	ErrCollectionNotFullyLoaded                = newMilvusError("collection not fully loaded", 103, true)
@@ -82,7 +82,7 @@ var (
 	ErrCollectionSchemaVersionNotReady = newMilvusError("collection schema version not ready", 110, true)
 
 	// Partition related
-	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false)
+	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false) // SystemError by default; the proxy GetPartitionInfo name chokepoint stamps InputError for user-supplied partition names, while id-based lookups stay system.
 	ErrPartitionNotLoaded      = newMilvusError("partition not loaded", 201, false)
 	ErrPartitionNotFullyLoaded = newMilvusError("partition not fully loaded", 202, true)
 
@@ -138,7 +138,7 @@ var (
 	ErrTaskDuplicate     = newMilvusError("task duplicates", 703, false)
 
 	// Database related
-	ErrDatabaseNotFound         = newMilvusError("database not found", 800, false, WithErrorType(InputError))
+	ErrDatabaseNotFound         = newMilvusError("database not found", 800, false) // SystemError by default (same reason as ErrCollectionNotFound); proxy boundary marks it InputError for users via WrapErrAsInputErrorWhen.
 	ErrDatabaseNumLimitExceeded = newMilvusError("exceeded the limit number of database", 801, false, WithErrorType(InputError))
 	ErrDatabaseInvalidName      = newMilvusError("invalid database name", 802, false, WithErrorType(InputError))
 
@@ -210,13 +210,13 @@ var (
 	ErrPrivilegeGroupInvalidName = newMilvusError("invalid privilege group name", 1402, false, WithErrorType(InputError))
 
 	// Alias related
-	ErrAliasNotFound               = newMilvusError("alias not found", 1600, false)
+	ErrAliasNotFound               = newMilvusError("alias not found", 1600, false) // SystemError by default; the proxy alias tasks (Describe/Drop/Alter) stamp InputError for user-supplied alias names.
 	ErrAliasCollectionNameConfilct = newMilvusError("alias and collection name conflict", 1601, false)
 	ErrAliasAlreadyExist           = newMilvusError("alias already exist", 1602, false)
-	ErrCollectionIDOfAliasNotFound = newMilvusError("collection id of alias not found", 1603, false)
+	ErrCollectionIDOfAliasNotFound = newMilvusError("collection id of alias not found", 1603, false) // Genuinely SystemError: an existing alias whose target collection id cannot be resolved is an internal mapping inconsistency, not user input — left unmarked.
 
 	// field related
-	ErrFieldNotFound    = newMilvusError("field not found", 1700, false)
+	ErrFieldNotFound    = newMilvusError("field not found", 1700, false) // SystemError by default; proxy boundaries stamp InputError where the field name is user-supplied (e.g. group_by/anns field), while result-assembly lookups stay system.
 	ErrFieldInvalidName = newMilvusError("field name invalid", 1701, false)
 
 	// high-level restful api related
@@ -250,7 +250,18 @@ var (
 	errUnexpected = newMilvusError("unexpected error", (1<<16)-1, false)
 
 	// import
+	// ErrImportFailed is InputError by default: the import data layer
+	// (internal/util/importutilv2) parses the caller's files and the vast
+	// majority of its failures are malformed user data (bad JSON/CSV/Parquet,
+	// type/dim/schema mismatch). Server-side import orchestration and object-IO
+	// failures use ErrImportSysFailed instead.
 	ErrImportFailed = newMilvusError("importing data failed", 2100, false, WithErrorType(InputError))
+	// ErrImportSysFailed is the server-side counterpart of ErrImportFailed:
+	// import job orchestration (job not found / no vchannels / restore /
+	// job-count backpressure) and object-storage IO failures in the readers.
+	// These are the operator's concern, not the caller's, so they stay
+	// SystemError and must not be bucketed as fail_input.
+	ErrImportSysFailed = newMilvusError("importing data failed on server side", 2101, false)
 
 	// Search/Query related
 	ErrInconsistentRequery = newMilvusError("inconsistent requery result", 2200, true)

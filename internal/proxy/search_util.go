@@ -851,7 +851,7 @@ func parseGroupByField(groupByFieldName string, schema *schemapb.CollectionSchem
 				jsonPath = groupByFieldName
 			} else {
 				// Case 2.3: Field not found and no dynamic field
-				return -1, "", merr.WrapErrFieldNotFound(groupByFieldName, "groupBy field not found in schema")
+				return -1, "", merr.WrapErrAsInputError(merr.WrapErrFieldNotFound(groupByFieldName, "groupBy field not found in schema"))
 			}
 		}
 	} else {
@@ -866,7 +866,7 @@ func parseGroupByField(groupByFieldName string, schema *schemapb.CollectionSchem
 				jsonPath = groupByFieldName
 			} else {
 				// Case 2.3: Field not found and no dynamic field
-				return -1, "", merr.WrapErrFieldNotFound(groupByFieldName, "groupBy field not found in schema")
+				return -1, "", merr.WrapErrAsInputError(merr.WrapErrFieldNotFound(groupByFieldName, "groupBy field not found in schema"))
 			}
 		}
 	}

@@ -19,7 +19,6 @@ package json
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"strings"
 
@@ -129,7 +128,7 @@ func (j *reader) Init() error {
 	//  ]
 	t, err := j.dec.Token()
 	if err != nil {
-		return merr.WrapErrImportFailed(fmt.Sprintf("init failed, failed to decode JSON, error: %v", err))
+		return merr.WrapErrImportFailedMsg("init failed, failed to decode JSON, error: %v", err)
 	}
 	if t != json.Delim('{') && t != json.Delim('[') {
 		return merr.WrapErrImportFailed("invalid JSON format, the content should be started with '{' or '['")
@@ -176,19 +175,19 @@ func (j *reader) readNormalJSON(insertData *storage.InsertData) error {
 		// read the key
 		t, err := j.dec.Token()
 		if err != nil {
-			return merr.WrapErrImportFailed(fmt.Sprintf("failed to decode the JSON file, error: %v", err))
+			return merr.WrapErrImportFailedMsg("failed to decode the JSON file, error: %v", err)
 		}
 		key := t.(string)
 		keyLower := strings.ToLower(key)
 		// the root key should be RowRootNode
 		if keyLower != RowRootNode {
-			return merr.WrapErrImportFailed(fmt.Sprintf("invalid JSON format, the root key should be '%s', but get '%s'", RowRootNode, key))
+			return merr.WrapErrImportFailedMsg("invalid JSON format, the root key should be '%s', but get '%s'", RowRootNode, key)
 		}
 
 		// started by '['
 		t, err = j.dec.Token()
 		if err != nil {
-			return merr.WrapErrImportFailed(fmt.Sprintf("failed to decode the JSON file, error: %v", err))
+			return merr.WrapErrImportFailedMsg("failed to decode the JSON file, error: %v", err)
 		}
 
 		if t != json.Delim('[') {
@@ -206,7 +205,7 @@ func (j *reader) readNormalJSON(insertData *storage.InsertData) error {
 	if !j.dec.More() {
 		t, err := j.dec.Token()
 		if err != nil {
-			return merr.WrapErrImportFailed(fmt.Sprintf("failed to decode JSON, error: %v", err))
+			return merr.WrapErrImportFailedMsg("failed to decode JSON, error: %v", err)
 		}
 		if t != json.Delim(']') {
 			return merr.WrapErrImportFailed("invalid JSON format, rows list should end with ']'")
@@ -231,16 +230,16 @@ func (j *reader) readJSONLines(insertData *storage.InsertData) error {
 	for j.dec.More() {
 		var value any
 		if err := j.dec.Decode(&value); err != nil {
-			return merr.WrapErrImportFailed(fmt.Sprintf("failed to decode row, error: %v", err))
+			return merr.WrapErrImportFailedMsg("failed to decode row, error: %v", err)
 		}
 
 		row, err := j.parser.Parse(value)
 		if err != nil {
-			return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse row, error: %v", err))
+			return merr.WrapErrImportFailedMsg("failed to parse row, error: %v", err)
 		}
 		err = insertData.Append(row)
 		if err != nil {
-			return merr.WrapErrImportFailed(fmt.Sprintf("failed to append row, err=%s", err.Error()))
+			return merr.WrapErrImportFailedMsg("failed to append row, err=%s", err.Error())
 		}
 		cnt++
 		if cnt >= j.count {

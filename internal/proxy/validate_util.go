@@ -572,7 +572,7 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 		if field.Type == schemapb.DataType_ArrayOfVector {
 			vectorArray := field.GetVectors().GetVectorArray()
 			if vectorArray == nil {
-				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("array of vector data is nil, field: %s", field.GetFieldName()))
+				return merr.WrapErrParameterInvalidMsg("array of vector data is nil, field: %s", field.GetFieldName())
 			}
 			expanded, err := fillVectorArrayNullValueImpl(vectorArray.GetData(), field.GetValidData(), vectorArray.GetDim(), vectorArray.GetElementType())
 			if err != nil {

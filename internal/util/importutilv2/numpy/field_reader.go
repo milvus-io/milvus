@@ -325,7 +325,7 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		}
 		c.readPosition += int(readCount)
 	default:
-		return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type: %s", dt.String()))
+		return nil, nil, merr.WrapErrImportFailedMsg("unsupported data type: %s", dt.String())
 	}
 	return data, validData, nil
 }
@@ -358,7 +358,7 @@ func (c *FieldReader) readFP16BF16Vector(readCount int64) ([]byte, error) {
 		}
 		return typeutil.ConvertFloat32ToFP16BF16Bytes(floatData, c.field.GetDataType())
 	default:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported numpy element type %s for field '%s'", elementType.String(), c.field.GetName()))
+		return nil, merr.WrapErrImportFailedMsg("unsupported numpy element type %s for field '%s'", elementType.String(), c.field.GetName())
 	}
 }
 
@@ -407,7 +407,7 @@ func (c *FieldReader) ReadString(count int64) ([]string, error) {
 			// for non-ascii characters, the unicode could be 1 ~ 4 bytes, each character occupies 4 bytes, too
 			raw, err := io.ReadAll(io.LimitReader(c.reader, utf8.UTFMax*int64(maxLen)))
 			if err != nil {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read utf32 bytes from numpy file, error: %v", err))
+				return nil, merr.WrapErrImportFailedMsg("failed to read utf32 bytes from numpy file, error: %v", err)
 			}
 			str, err := decodeUtf32(raw, c.order)
 			if c.field.DataType == schemapb.DataType_VarChar {
@@ -416,7 +416,7 @@ func (c *FieldReader) ReadString(count int64) ([]string, error) {
 				}
 			}
 			if err != nil {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to decode utf32 bytes, error: %v", err))
+				return nil, merr.WrapErrImportFailedMsg("failed to decode utf32 bytes, error: %v", err)
 			}
 			data = append(data, str)
 		} else {
@@ -424,7 +424,7 @@ func (c *FieldReader) ReadString(count int64) ([]string, error) {
 			// bytes.Index(buf, []byte{0}) tell us which position is the end of the string
 			buf, err := io.ReadAll(io.LimitReader(c.reader, int64(maxLen)))
 			if err != nil {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read ascii bytes from numpy file, error: %v", err))
+				return nil, merr.WrapErrImportFailedMsg("failed to read ascii bytes from numpy file, error: %v", err)
 			}
 			n := bytes.Index(buf, []byte{0})
 			if n > 0 {

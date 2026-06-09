@@ -455,7 +455,7 @@ func buildL0V3DeltaLogEntries(segmentID int64, deltalogs []*datapb.FieldBinlog) 
 		for _, binlog := range fieldBinlog.GetBinlogs() {
 			path := binlog.GetLogPath()
 			if path == "" {
-				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("L0 V3 compaction result missing deltalog path for segment %d, logID %d", segmentID, binlog.GetLogID()))
+				return nil, merr.WrapErrServiceInternalMsg("L0 V3 compaction result missing deltalog path for segment %d, logID %d", segmentID, binlog.GetLogID())
 			}
 			entries = append(entries, packed.DeltaLogEntry{
 				Path:       path,

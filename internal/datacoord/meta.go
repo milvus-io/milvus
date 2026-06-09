@@ -1223,7 +1223,7 @@ func updateManifestPathIfNewer(segment *SegmentInfo, manifestPath string) error 
 		return err
 	}
 	if currentBase != incomingBase {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("manifest base path mismatch for segment %d: current %s, incoming %s", segment.GetID(), currentBase, incomingBase))
+		return merr.WrapErrServiceInternalMsg("manifest base path mismatch for segment %d: current %s, incoming %s", segment.GetID(), currentBase, incomingBase)
 	}
 	if incomingVersion > currentVersion {
 		segment.ManifestPath = manifestPath
@@ -2287,7 +2287,7 @@ func validateCompactionFallbackStartPosition(compactFromSegInfos []*SegmentInfo,
 	if maxCommitTs == 0 || fallbackStart.GetTimestamp() >= maxCommitTs {
 		return nil
 	}
-	return errors.Errorf(
+	return merr.WrapErrServiceInternalMsg(
 		"compaction fallback start position timestamp %d is earlier than max input commit timestamp %d",
 		fallbackStart.GetTimestamp(),
 		maxCommitTs)
@@ -3331,7 +3331,7 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	if currentManifest != resultManifest {
 		manifestCompare, err := packed.CompareManifestPath(resultManifest, currentManifest)
 		if err != nil {
-			return nil, nil, merr.WrapErrIllegalCompactionPlan(fmt.Sprintf("schema bump compaction result manifest is not comparable with current manifest: %v", err))
+			return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump compaction result manifest is not comparable with current manifest: %v", err)
 		}
 		if manifestCompare <= 0 {
 			return nil, nil, merr.WrapErrIllegalCompactionPlan("schema bump compaction result manifest is not newer than current manifest")
@@ -3392,7 +3392,7 @@ func (m *meta) completeBumpSchemaVersionReplacementMutation(
 ) ([]*SegmentInfo, *segMetricMutation, error) {
 	idRange := t.GetPreAllocatedSegmentIDs()
 	if idRange == nil || idRange.GetBegin()+1 != idRange.GetEnd() || resultSegment.GetSegmentID() != idRange.GetBegin() {
-		return nil, nil, merr.WrapErrIllegalCompactionPlan(fmt.Sprintf("schema bump replacement result segment ID %d does not match the pre-allocated segment ID", resultSegment.GetSegmentID()))
+		return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump replacement result segment ID %d does not match the pre-allocated segment ID", resultSegment.GetSegmentID())
 	}
 
 	dropped := oldSegment.Clone()

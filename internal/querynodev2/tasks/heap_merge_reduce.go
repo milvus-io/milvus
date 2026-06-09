@@ -287,7 +287,7 @@ func validateUniqueOutputColumns(outCols []string) error {
 	seen := make(map[string]struct{}, len(outCols))
 	for _, name := range outCols {
 		if _, ok := seen[name]; ok {
-			return merr.WrapErrServiceInternal(fmt.Sprintf("column %s already exists", name))
+			return merr.WrapErrServiceInternalMsg("column %s already exists", name)
 		}
 		seen[name] = struct{}{}
 	}

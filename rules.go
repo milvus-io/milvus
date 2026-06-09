@@ -423,22 +423,37 @@ func badlock(m dsl.Matcher) {
 // merr.Status. Test files, the cmd/ and tests/ trees, codegen and the walimpls
 // harness run outside the request path and are exempt.
 func rawmerrerror(m dsl.Matcher) {
+	// fmt.Errorf resolves unambiguously to the stdlib, so the literal selector matches.
 	m.Match(
-		`return errors.New($*_)`,
-		`return $*_, errors.New($*_)`,
-		`return errors.New($*_), $*_`,
 		`return fmt.Errorf($*_)`,
 		`return $*_, fmt.Errorf($*_)`,
 		`return fmt.Errorf($*_), $*_`,
-		`return errors.Errorf($*_)`,
-		`return $*_, errors.Errorf($*_)`,
-		`return errors.Errorf($*_), $*_`,
 	).
 		Where(!m.File().Name.Matches(`_test\.go$`) &&
 			!m.File().Name.Matches(`test_streaming\.go$`) &&
 			!m.File().PkgPath.Matches(`/milvus/cmd/`) &&
 			!m.File().PkgPath.Matches(`/milvus/tests/`) &&
 			!m.File().PkgPath.Matches(`codegen`) &&
-			!m.File().PkgPath.Matches(`walimplstest`)).
+			!m.File().PkgPath.Matches(`walimplstest`) &&
+			!m.File().PkgPath.Matches(`/mocks/`)).
+		Report(`raw error returned from function body; originate through the merr framework (merr.WrapErr*/merr.Wrap) instead of fmt.Errorf/errors.New/errors.Errorf`)
+
+	// errors.New/Newf/Errorf: the repo uses github.com/cockroachdb/errors, not the
+	// stdlib, so a literal `errors.New` selector — which ruleguard type-resolves to
+	// the stdlib package — never matches. Match by the function name instead, limited
+	// to the raw constructors; errors.Wrap/Wrapf/Is/As/Cause are intentionally allowed.
+	m.Match(
+		`return errors.$fn($*_)`,
+		`return $*_, errors.$fn($*_)`,
+		`return errors.$fn($*_), $*_`,
+	).
+		Where(m["fn"].Text.Matches(`^(New|Newf|Errorf)$`) &&
+			!m.File().Name.Matches(`_test\.go$`) &&
+			!m.File().Name.Matches(`test_streaming\.go$`) &&
+			!m.File().PkgPath.Matches(`/milvus/cmd/`) &&
+			!m.File().PkgPath.Matches(`/milvus/tests/`) &&
+			!m.File().PkgPath.Matches(`codegen`) &&
+			!m.File().PkgPath.Matches(`walimplstest`) &&
+			!m.File().PkgPath.Matches(`/mocks/`)).
 		Report(`raw error returned from function body; originate through the merr framework (merr.WrapErr*/merr.Wrap) instead of fmt.Errorf/errors.New/errors.Errorf`)
 }

@@ -117,7 +117,7 @@ func (fc *FuncChain) addWithError(op Operator, err error) *FuncChain {
 func (fc *FuncChain) Validate() error {
 	// Check for errors accumulated during fluent API calls
 	if fc.buildError != nil {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("chain build error: %v", fc.buildError))
+		return merr.WrapErrServiceInternalMsg("chain build error: %v", fc.buildError)
 	}
 
 	// Stage is required
@@ -134,13 +134,13 @@ func (fc *FuncChain) Validate() error {
 func (fc *FuncChain) validateOperators(stage string) error {
 	for i, op := range fc.operators {
 		if op == nil {
-			return merr.WrapErrServiceInternal(fmt.Sprintf("operator[%d] is nil", i))
+			return merr.WrapErrServiceInternalMsg("operator[%d] is nil", i)
 		}
 
 		// Validate MapOp
 		if mapOp, ok := op.(*MapOp); ok {
 			if mapOp.function == nil {
-				return merr.WrapErrServiceInternal(fmt.Sprintf("operator[%d] MapOp has nil function", i))
+				return merr.WrapErrServiceInternalMsg("operator[%d] MapOp has nil function", i)
 			}
 			if !mapOp.function.IsRunnable(stage) {
 				return merr.WrapErrParameterInvalidMsg("operator[%d] function %q does not support stage %q",
@@ -151,7 +151,7 @@ func (fc *FuncChain) validateOperators(stage string) error {
 		// Validate FilterOp
 		if filterOp, ok := op.(*FilterOp); ok {
 			if filterOp.function == nil {
-				return merr.WrapErrServiceInternal(fmt.Sprintf("operator[%d] FilterOp has nil function", i))
+				return merr.WrapErrServiceInternalMsg("operator[%d] FilterOp has nil function", i)
 			}
 			if !filterOp.function.IsRunnable(stage) {
 				return merr.WrapErrParameterInvalidMsg("operator[%d] filter function %q does not support stage %q",

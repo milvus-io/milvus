@@ -198,13 +198,13 @@ func (op *MergeOp) ExecuteMulti(ctx *types.FuncContext, inputs []*DataFrame) (*D
 
 	// Validate scoreNormFuncs count matches inputs count (when present)
 	if len(op.scoreNormFuncs) > 0 && len(op.scoreNormFuncs) != len(inputs) {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: scoreNormFuncs count %d != inputs count %d", len(op.scoreNormFuncs), len(inputs)))
+		return nil, merr.WrapErrServiceInternalMsg("merge_op: scoreNormFuncs count %d != inputs count %d", len(op.scoreNormFuncs), len(inputs))
 	}
 
 	// Validate weights for weighted strategy
 	if op.strategy == MergeStrategyWeighted {
 		if len(op.weights) != len(inputs) {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: weights count %d != inputs count %d", len(op.weights), len(inputs)))
+			return nil, merr.WrapErrServiceInternalMsg("merge_op: weights count %d != inputs count %d", len(op.weights), len(inputs))
 		}
 	}
 
@@ -221,7 +221,7 @@ func (op *MergeOp) ExecuteMulti(ctx *types.FuncContext, inputs []*DataFrame) (*D
 	case MergeStrategyAvg:
 		return op.mergeScoreCombine(ctx, inputs, avgMergeFunc)
 	default:
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: unsupported strategy %s", op.strategy))
+		return nil, merr.WrapErrServiceInternalMsg("merge_op: unsupported strategy %s", op.strategy)
 	}
 }
 
@@ -817,7 +817,7 @@ func (op *MergeOp) buildFieldArray(ctx *types.FuncContext, colName string, locs 
 				return buildEmptyArray(ctx.Pool(), col.DataType())
 			}
 		}
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: cannot determine type for column %s", colName))
+		return nil, merr.WrapErrServiceInternalMsg("merge_op: cannot determine type for column %s", colName)
 	}
 
 	// Find the data type from first input that has this column
@@ -830,7 +830,7 @@ func (op *MergeOp) buildFieldArray(ctx *types.FuncContext, colName string, locs 
 	}
 
 	if dataType == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: column %s not found in any input", colName))
+		return nil, merr.WrapErrServiceInternalMsg("merge_op: column %s not found in any input", colName)
 	}
 
 	return buildArrayFromLocations(ctx.Pool(), colName, locs, inputs, dataType, chunkIdx)
@@ -872,7 +872,7 @@ func buildEmptyArray(pool memory.Allocator, dt arrow.DataType) (arrow.Array, err
 		defer b.Release()
 		return b.NewArray(), nil
 	default:
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported type: %s", dt.Name()))
+		return nil, merr.WrapErrServiceInternalMsg("unsupported type: %s", dt.Name())
 	}
 }
 
@@ -896,7 +896,7 @@ func buildArrayFromLocations(pool memory.Allocator, colName string, locs []idLoc
 	case arrow.STRING:
 		return buildTypedArrayFromLocations[string](pool, colName, locs, inputs, array.NewStringBuilder(pool), chunkIdx)
 	default:
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported type: %s", dt.Name()))
+		return nil, merr.WrapErrServiceInternalMsg("unsupported type: %s", dt.Name())
 	}
 }
 

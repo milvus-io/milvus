@@ -783,7 +783,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 				if !containsString(fieldNames, mapKey) {
 					if collSchema.EnableDynamicField {
 						if mapKey == common.MetaFieldName {
-							return nil, nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("use the invalid field name(%s) when enable dynamicField", mapKey))
+							return nil, nil, merr.WrapErrParameterInvalidMsg("use the invalid field name(%s) when enable dynamicField", mapKey)
 						}
 						mapValueStr := mapValue.String()
 						switch mapValue.Type {
@@ -1835,7 +1835,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 					continue
 				}
 				if !allowInsertAutoID {
-					return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("no need to pass pk field(%s) when autoid==true in insert", field.Name))
+					return nil, merr.WrapErrParameterInvalidMsg("no need to pass pk field(%s) when autoid==true in insert", field.Name)
 				}
 			}
 			if (field.Nullable || field.DefaultValue != nil) && !ok {
@@ -1892,7 +1892,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 					vec := typeutil.Float32ArrayToFloat16Bytes(candi.v.Interface().([]float32))
 					nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), vec)
 				default:
-					return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid type(%v) of field(%v) ", field.DataType, field.Name))
+					return nil, merr.WrapErrParameterInvalidMsg("invalid type(%v) of field(%v) ", field.DataType, field.Name)
 				}
 			case schemapb.DataType_BFloat16Vector:
 				switch candi.v.Interface().(type) {
@@ -1902,7 +1902,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 					vec := typeutil.Float32ArrayToBFloat16Bytes(candi.v.Interface().([]float32))
 					nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), vec)
 				default:
-					return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid type(%v) of field(%v) ", field.DataType, field.Name))
+					return nil, merr.WrapErrParameterInvalidMsg("invalid type(%v) of field(%v) ", field.DataType, field.Name)
 				}
 			case schemapb.DataType_SparseFloatVector:
 				content := candi.v.Interface().([]byte)
@@ -2985,7 +2985,7 @@ func convertConsistencyLevel(reqConsistencyLevel string) (commonpb.ConsistencyLe
 	if reqConsistencyLevel != "" {
 		level, ok := commonpb.ConsistencyLevel_value[reqConsistencyLevel]
 		if !ok {
-			return 0, false, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("parameter:'%s' is incorrect, please check it", reqConsistencyLevel))
+			return 0, false, merr.WrapErrParameterInvalidMsg("parameter:'%s' is incorrect, please check it", reqConsistencyLevel)
 		}
 		return commonpb.ConsistencyLevel(level), false, nil
 	}
@@ -3095,7 +3095,7 @@ func convertDefaultValue(value interface{}, dataType schemapb.DataType) (*schema
 		}
 		return data, nil
 	default:
-		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("Unexpected default value type: %s", dataType.String()))
+		return nil, merr.WrapErrParameterInvalidMsg("Unexpected default value type: %s", dataType.String())
 	}
 }
 
@@ -3490,7 +3490,7 @@ func generateSearchParams(reqSearchParams map[string]interface{}) ([]*commonpb.K
 	for key, value := range reqSearchParams {
 		if val, ok := paramsMap[key]; ok {
 			if !deepEqual(val, value) {
-				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("ambiguous parameter: %s, in search_param: %v, in search_param.params: %v", key, value, val))
+				return nil, merr.WrapErrParameterInvalidMsg("ambiguous parameter: %s, in search_param: %v, in search_param.params: %v", key, value, val)
 			}
 		} else if key != Params {
 			paramsMap[key] = value

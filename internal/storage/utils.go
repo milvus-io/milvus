@@ -1819,7 +1819,7 @@ func fillMissingFields(schema *schemapb.CollectionSchema, insertData *InsertData
 			// Create default field data if not found
 			fieldData, err := NewFieldData(field.DataType, field, int(batchRows))
 			if err != nil {
-				return merr.WrapErrServiceInternal(fmt.Sprintf("failed to create default field data for field %s: %v", field.Name, err))
+				return merr.WrapErrServiceInternalMsg("failed to create default field data for field %s: %v", field.Name, err)
 			}
 
 			if field.GetDefaultValue() != nil { // Fill with default value
@@ -1827,17 +1827,17 @@ func fillMissingFields(schema *schemapb.CollectionSchema, insertData *InsertData
 
 				for j := 0; j < int(batchRows); j++ {
 					if err := fieldData.AppendRow(defaultValue); err != nil {
-						return merr.WrapErrServiceInternal(fmt.Sprintf("failed to append default value for field %s: %v", field.Name, err))
+						return merr.WrapErrServiceInternalMsg("failed to append default value for field %s: %v", field.Name, err)
 					}
 				}
 			} else if field.GetNullable() { // Fill with null values
 				for j := 0; j < int(batchRows); j++ {
 					if err := fieldData.AppendRow(nil); err != nil {
-						return merr.WrapErrServiceInternal(fmt.Sprintf("failed to append null value for field %s: %v", field.Name, err))
+						return merr.WrapErrServiceInternalMsg("failed to append null value for field %s: %v", field.Name, err)
 					}
 				}
 			} else {
-				return merr.WrapErrServiceInternal(fmt.Sprintf("field %s is not nullable and has no default value", field.Name))
+				return merr.WrapErrServiceInternalMsg("field %s is not nullable and has no default value", field.Name)
 			}
 			insertData.Data[field.GetFieldID()] = fieldData
 		}
@@ -1875,7 +1875,7 @@ func VectorArrayToArrowType(elementType schemapb.DataType, dim int) (arrow.DataT
 	case schemapb.DataType_Int8Vector:
 		return &arrow.FixedSizeBinaryType{ByteWidth: dim}, nil
 	default:
-		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("unsupported element type in VectorArray: %s", elementType.String()))
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported element type in VectorArray: %s", elementType.String())
 	}
 }
 

@@ -1210,7 +1210,7 @@ func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.Sear
 
 	holder := pb.Placeholders[0]
 	if holder.Type != commonpb.PlaceholderType_VarChar {
-		return 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("please provide varchar/text for BM25 Function based search, got %s", holder.Type.String()))
+		return 0, merr.WrapErrParameterInvalidMsg("please provide varchar/text for BM25 Function based search, got %s", holder.Type.String())
 	}
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
@@ -1295,7 +1295,7 @@ func (sd *shardDelegator) parseMinHash(ctx context.Context, req *internalpb.Sear
 
 	holder := pb.Placeholders[0]
 	if holder.Type != commonpb.PlaceholderType_VarChar {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("please provide varchar/text for MinHash Function based search, got %s", holder.Type.String()))
+		return merr.WrapErrParameterInvalidMsg("please provide varchar/text for MinHash Function based search, got %s", holder.Type.String())
 	}
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)

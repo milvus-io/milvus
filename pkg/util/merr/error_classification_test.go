@@ -107,9 +107,7 @@ func TestSentinelErrorTypeClassification(t *testing.T) {
 		"ParameterInvalid":          ErrParameterInvalid,
 		"ParameterMissing":          ErrParameterMissing,
 		"ParameterTooLarge":         ErrParameterTooLarge,
-		"CollectionNotFound":        ErrCollectionNotFound,
 		"CollectionLoaded":          ErrCollectionLoaded,
-		"DatabaseNotFound":          ErrDatabaseNotFound,
 		"ResourceGroupNotFound":     ErrResourceGroupNotFound,
 		"IndexDuplicate":            ErrIndexDuplicate,
 		"PrivilegeNotPermitted":     ErrPrivilegeNotPermitted,
@@ -125,6 +123,9 @@ func TestSentinelErrorTypeClassification(t *testing.T) {
 
 	// Topology / internal conditions stay SystemError (not the user's fault):
 	// re-resolving the shard map or a node coming back is the system's job.
+	// Collection/Database NotFound also stay SystemError at the sentinel level so
+	// datacoord's retry.Do recovery loops keep retrying a transient not-found; the
+	// proxy boundary stamps them InputError for users via WrapErrAsInputErrorWhen.
 	systemSentinels := map[string]error{
 		"ServiceInternal":     ErrServiceInternal,
 		"ChannelNotFound":     ErrChannelNotFound,
@@ -133,6 +134,8 @@ func TestSentinelErrorTypeClassification(t *testing.T) {
 		"ReplicaNotFound":     ErrReplicaNotFound,
 		"PartitionNotFound":   ErrPartitionNotFound,
 		"CollectionNotLoaded": ErrCollectionNotLoaded,
+		"CollectionNotFound":  ErrCollectionNotFound,
+		"DatabaseNotFound":    ErrDatabaseNotFound,
 	}
 	for name, err := range systemSentinels {
 		assert.Equal(t, SystemError, GetErrorType(err), "%s should stay SystemError", name)

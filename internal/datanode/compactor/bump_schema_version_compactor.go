@@ -243,10 +243,10 @@ func validateSupportedMissingFunctionMaterialization(functionSchema *schemapb.Fu
 		return nil
 	case schemapb.FunctionType_MinHash:
 		if len(functionSchema.GetInputFieldIds()) == 0 {
-			return errors.New("minhash function should have input fields")
+			return merr.WrapErrFunctionFailedMsg("minhash function should have input fields")
 		}
 		if len(functionSchema.GetOutputFieldIds()) == 0 {
-			return errors.New("minhash function should have output fields")
+			return merr.WrapErrFunctionFailedMsg("minhash function should have output fields")
 		}
 		return nil
 	default:
@@ -262,7 +262,7 @@ func validateMaterializationInputField(functionSchema *schemapb.FunctionSchema, 
 		}
 	case schemapb.FunctionType_MinHash:
 		if field.GetDataType() != schemapb.DataType_VarChar && field.GetDataType() != schemapb.DataType_Text {
-			return errors.New("input field data type must be varchar or text for minhash materialization")
+			return merr.WrapErrFunctionFailedMsg("input field data type must be varchar or text for minhash materialization")
 		}
 	}
 	return nil
@@ -276,7 +276,7 @@ func validateMaterializationOutputField(functionSchema *schemapb.FunctionSchema,
 		}
 	case schemapb.FunctionType_MinHash:
 		if field.GetDataType() != schemapb.DataType_BinaryVector {
-			return errors.New("output field data type must be binary vector for minhash materialization")
+			return merr.WrapErrFunctionFailedMsg("output field data type must be binary vector for minhash materialization")
 		}
 	}
 	return nil
@@ -783,7 +783,7 @@ func (t *bumpSchemaVersionCompactionTask) preserveDeltaLogsV3(segment *datapb.Co
 		deltaSummaries = append(deltaSummaries, fieldBinlog.GetBinlogs()...)
 	}
 	if len(deltaSummaries) != len(deltaPaths) {
-		return "", merr.WrapErrServiceInternal(fmt.Sprintf("V3 delta manifest path count %d does not match segment delta summary count %d", len(deltaPaths), len(deltaSummaries)))
+		return "", merr.WrapErrServiceInternalMsg("V3 delta manifest path count %d does not match segment delta summary count %d", len(deltaPaths), len(deltaSummaries))
 	}
 
 	basePath, _, err := packed.UnmarshalManifestPath(manifestPath)
@@ -922,7 +922,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 			if outputCol == nil {
 				releaseWrappedRecord(wrapped, record)
 				span.End()
-				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("output field %d not found in materialized record", outputFieldID))
+				return nil, merr.WrapErrServiceInternalMsg("output field %d not found in materialized record", outputFieldID)
 			}
 			batchMemSize := arrowArrayMemorySize(outputCol)
 			if stats, ok := statsByField[outputFieldID]; ok {

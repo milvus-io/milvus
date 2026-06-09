@@ -407,3 +407,41 @@ func badlock(m dsl.Matcher) {
 	m.Match(`$mu.Lock(); defer $mu.RUnlock()`).Report(`maybe $mu.RLock() was intended?`)
 	m.Match(`$mu.RLock(); defer $mu.Unlock()`).Report(`maybe $mu.Lock() was intended?`)
 }
+
+// rawmerrerror forbids returning a raw error from a function body — originate
+// through merr (merr.WrapErr*/merr.Wrap) instead. Mirrors the core module rule.
+func rawmerrerror(m dsl.Matcher) {
+	// fmt.Errorf resolves unambiguously to the stdlib, so the literal selector matches.
+	m.Match(
+		`return fmt.Errorf($*_)`,
+		`return $*_, fmt.Errorf($*_)`,
+		`return fmt.Errorf($*_), $*_`,
+	).
+		Where(!m.File().Name.Matches(`_test\.go$`) &&
+			!m.File().Name.Matches(`test_streaming\.go$`) &&
+			!m.File().PkgPath.Matches(`/milvus/cmd/`) &&
+			!m.File().PkgPath.Matches(`/milvus/tests/`) &&
+			!m.File().PkgPath.Matches(`codegen`) &&
+			!m.File().PkgPath.Matches(`walimplstest`) &&
+			!m.File().PkgPath.Matches(`/mocks/`)).
+		Report(`raw error returned from function body; originate through the merr framework (merr.WrapErr*/merr.Wrap) instead of fmt.Errorf/errors.New/errors.Errorf`)
+
+	// errors.New/Newf/Errorf: the repo uses github.com/cockroachdb/errors, not the
+	// stdlib, so a literal `errors.New` selector — which ruleguard type-resolves to
+	// the stdlib package — never matches. Match by the function name instead, limited
+	// to the raw constructors; errors.Wrap/Wrapf/Is/As/Cause are intentionally allowed.
+	m.Match(
+		`return errors.$fn($*_)`,
+		`return $*_, errors.$fn($*_)`,
+		`return errors.$fn($*_), $*_`,
+	).
+		Where(m["fn"].Text.Matches(`^(New|Newf|Errorf)$`) &&
+			!m.File().Name.Matches(`_test\.go$`) &&
+			!m.File().Name.Matches(`test_streaming\.go$`) &&
+			!m.File().PkgPath.Matches(`/milvus/cmd/`) &&
+			!m.File().PkgPath.Matches(`/milvus/tests/`) &&
+			!m.File().PkgPath.Matches(`codegen`) &&
+			!m.File().PkgPath.Matches(`walimplstest`) &&
+			!m.File().PkgPath.Matches(`/mocks/`)).
+		Report(`raw error returned from function body; originate through the merr framework (merr.WrapErr*/merr.Wrap) instead of fmt.Errorf/errors.New/errors.Errorf`)
+}
