@@ -1502,45 +1502,66 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 
 	if manifestPath := loadInfo.GetManifestPath(); manifestPath != "" && !useExplicitDeltalogs {
 		if isMilvusTableRealPK {
-			// Real-PK milvus-table manifests keep source StorageV3 deltalogs.
-			// Target-owned deltalogs are only valid for virtual-PK translation.
+			// Real-PK milvus-table manifests keep source deltalogs. Target-owned
+			// deltalogs are only valid for virtual-PK translation.
 			extfs := packed.ExternalSpecContext{
 				CollectionID: collection.ID(),
 				Source:       schema.GetExternalSource(),
 				Spec:         schema.GetExternalSpec(),
 			}
-			paths, err := packed.GetDeltaLogPathsFromManifest(manifestPath, createStorageConfig())
+			sourceDeltalogs, err := packed.GetDeltaLogsFromManifestWithExtfs(
+				manifestPath,
+				createStorageConfig(),
+				extfs,
+			)
 			if err != nil {
 				return err
 			}
-			if err := validateMilvusTableRealPKDeltalogPaths(manifestPath, paths); err != nil {
+			if err := validateMilvusTableRealPKDeltalogPaths(manifestPath, milvusTableDeltalogPaths(sourceDeltalogs)); err != nil {
 				return err
 			}
-			if len(paths) > 0 {
-				sourceDeltalogs, err := packed.GetDeltaLogsFromManifestWithExtfs(
-					manifestPath,
-					createStorageConfig(),
-					extfs,
-				)
-				if err != nil {
-					return err
-				}
-				sourceBinlogs := make([]*datapb.Binlog, 0)
+			if len(sourceDeltalogs) > 0 {
+				storageV3Paths := make([]string, 0)
+				legacyPaths := make([]string, 0)
 				for _, deltalog := range sourceDeltalogs {
-					sourceBinlogs = append(sourceBinlogs, lo.Filter(deltalog.GetBinlogs(), valid)...)
+					for _, binlog := range lo.Filter(deltalog.GetBinlogs(), valid) {
+						if packed.IsMilvusTableStorageV3DeltalogPath(binlog.GetLogPath()) {
+							storageV3Paths = append(storageV3Paths, binlog.GetLogPath())
+						} else {
+							legacyPaths = append(legacyPaths, binlog.GetLogPath())
+						}
+					}
 				}
-				reader, err := storage.NewDeltalogReaderFromBinlogs(
-					pkField.DataType,
-					sourceBinlogs,
-					storage.WithVersion(storage.StorageV3),
-					storage.WithStorageConfig(createStorageConfig()),
-					storage.WithExternalReaderContext(extfs),
-				)
-				if err != nil {
-					return err
+				if len(storageV3Paths) > 0 {
+					reader, err := storage.NewDeltalogReader(
+						pkField.DataType,
+						storageV3Paths,
+						storage.WithVersion(storage.StorageV3),
+						storage.WithStorageConfig(createStorageConfig()),
+						storage.WithExternalReaderContext(extfs),
+					)
+					if err != nil {
+						return err
+					}
+					if err := readDeltaRecords(reader); err != nil {
+						return err
+					}
 				}
-				if err := readDeltaRecords(reader); err != nil {
-					return err
+				if len(legacyPaths) > 0 {
+					reader, err := storage.NewDeltalogReader(
+						pkField.DataType,
+						legacyPaths,
+						storage.WithVersion(storage.StorageV1),
+						storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+							return readExternalFiles(ctx, createStorageConfig(), extfs, paths)
+						}),
+					)
+					if err != nil {
+						return err
+					}
+					if err := readDeltaRecords(reader); err != nil {
+						return err
+					}
 				}
 			}
 		} else {
@@ -1584,9 +1605,22 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 	return nil
 }
 
+func milvusTableDeltalogPaths(deltaLogs []*datapb.FieldBinlog) []string {
+	paths := make([]string, 0)
+	for _, deltaLog := range deltaLogs {
+		for _, binlog := range deltaLog.GetBinlogs() {
+			if binlog.GetLogPath() != "" {
+				paths = append(paths, binlog.GetLogPath())
+			}
+		}
+	}
+	return paths
+}
+
 // validateMilvusTableRealPKDeltalogPaths rejects target-owned deltalogs from a
-// real-PK milvus-table manifest. Real-PK load must consume source StorageV3
-// deltas; target-owned deltas are reserved for virtual-PK translation.
+// real-PK milvus-table manifest. Real-PK load may consume source StorageV3
+// deltas and legacy snapshot L0 deltas; target-owned deltas are reserved for
+// virtual-PK translation.
 func validateMilvusTableRealPKDeltalogPaths(manifestPath string, deltaPaths []string) error {
 	basePath, _, err := packed.UnmarshalManifestPath(manifestPath)
 	if err != nil {
@@ -1600,7 +1634,7 @@ func validateMilvusTableRealPKDeltalogPaths(manifestPath string, deltaPaths []st
 		if strings.HasPrefix(deltaPath, targetDeltaPrefix) {
 			return fmt.Errorf("milvus-table real-PK manifest must not contain target-owned deltalog %s", deltaPath)
 		}
-		if err := packed.ValidateMilvusTableStorageV3DeltalogPath(deltaPath); err != nil {
+		if err := packed.ValidateMilvusTableSourceDeltalogPath(deltaPath); err != nil {
 			return err
 		}
 	}

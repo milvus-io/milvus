@@ -202,13 +202,13 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_Milvus
 	s.Equal([]int64{100, 100}, tss)
 }
 
-func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_MilvusTableVirtualPKRejectsLegacyDeltalogs() {
+func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_MilvusTableVirtualPKRejectsUnsupportedDeltalogs() {
 	ctx := context.Background()
 	paramtable.Init()
 	dir := s.T().TempDir()
 	storageConfig := &indexpb.StorageConfig{RootPath: dir, StorageType: "local"}
 	metadataPath := filepath.Join(dir, "snapshots/10/metadata/20.json")
-	sourceDeltalogPath := filepath.Join(dir, "files/delta_log/10/20/30/9002")
+	sourceDeltalogPath := filepath.Join(dir, "files/not_delta_log/10/20/30/9002")
 
 	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID:   s.collectionID,
@@ -258,7 +258,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_Milvus
 	}})
 	s.Empty(manifestPath)
 	s.Error(err)
-	s.Contains(err.Error(), "only supports StorageV3 source deltalogs")
+	s.Contains(err.Error(), "only supports StorageV3 source deltalogs under _delta or legacy L0 deltalogs under delta_log")
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_MilvusTableVirtualPKReadsSourcePKWithExtfs() {
@@ -311,12 +311,10 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_Milvus
 		[]storage.Timestamp{100},
 	)
 	s.Require().NoError(err)
-	mockDeltalogReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).
-		To(func(pkType schemapb.DataType, binlogs []*datapb.Binlog, option ...storage.RwOption) (storage.RecordReader, error) {
+	mockDeltalogReader := mockey.Mock(storage.NewDeltalogReader).
+		To(func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			s.Equal(schemapb.DataType_Int64, pkType)
-			s.Require().Len(binlogs, 1)
-			s.Equal(sourceDeltalogPath, binlogs[0].GetLogPath())
-			s.EqualValues(1, binlogs[0].GetEntriesNum())
+			s.Equal([]string{sourceDeltalogPath}, paths)
 			return &fakeMilvusTableDeltalogReader{records: []storage.Record{record}}, nil
 		}).Build()
 	defer mockDeltalogReader.UnPatch()
@@ -460,7 +458,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestAddMilvusTableL0DeltalogsToMani
 	s.Contains(err.Error(), "has no allocated log ID")
 }
 
-func (s *RefreshExternalCollectionTaskSuite) TestAddMilvusTableL0DeltalogsToManifest_RejectsLegacyDeltalogs() {
+func (s *RefreshExternalCollectionTaskSuite) TestAddMilvusTableL0DeltalogsToManifest_AllowsLegacyL0Deltalogs() {
 	task := &RefreshExternalCollectionTask{
 		req: &datapb.RefreshExternalCollectionTaskRequest{
 			CollectionID:   s.collectionID,
@@ -469,22 +467,33 @@ func (s *RefreshExternalCollectionTaskSuite) TestAddMilvusTableL0DeltalogsToMani
 			StorageConfig:  &indexpb.StorageConfig{StorageType: "local"},
 		},
 	}
+	mockAdd := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).
+		To(func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+			s.Equal("manifest.json", manifestPath)
+			s.Equal([]packed.DeltaLogEntry{{
+				Path:       "files/delta_log/100",
+				NumEntries: 10,
+			}}, deltaLogs)
+			return "manifest-with-delta.json", nil
+		}).Build()
+	defer mockAdd.UnPatch()
+
 	manifest, err := task.addMilvusTableL0DeltalogsToManifest(
 		context.Background(),
 		"manifest.json",
 		[]packed.Fragment{{
 			Deltalogs: []*datapb.FieldBinlog{{
 				Binlogs: []*datapb.Binlog{{
-					LogPath: "files/delta_log/100",
-					LogID:   100,
+					LogPath:    "files/delta_log/100",
+					LogID:      100,
+					EntriesNum: 10,
 				}},
 			}},
 		}},
 	)
 
-	s.Empty(manifest)
-	s.Error(err)
-	s.Contains(err.Error(), "only supports StorageV3 source deltalogs")
+	s.NoError(err)
+	s.Equal("manifest-with-delta.json", manifest)
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestAddMilvusTableL0DeltalogsToManifest_NoDeltalogs() {
@@ -857,12 +866,10 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 		)
 		s.Require().NoError(err)
 		reader := &fakeMilvusTableDeltalogReader{records: []storage.Record{record}}
-		mockReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).
-			To(func(pkType schemapb.DataType, binlogs []*datapb.Binlog, option ...storage.RwOption) (storage.RecordReader, error) {
+		mockReader := mockey.Mock(storage.NewDeltalogReader).
+			To(func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 				s.Equal(schemapb.DataType_Int64, pkType)
-				s.Require().Len(binlogs, 1)
-				s.Equal(ref.sourcePath, binlogs[0].GetLogPath())
-				s.Equal(ref.numEntries, binlogs[0].GetEntriesNum())
+				s.Equal([]string{ref.sourcePath}, paths)
 				return reader, nil
 			}).Build()
 		defer mockReader.UnPatch()
@@ -883,9 +890,33 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 		}, deletes[0].events)
 	})
 
+	s.Run("legacy_l0_success", func() {
+		legacyRef := milvusTableDeltalogRef{sourcePath: "files/delta_log/1/2/3/10", logID: 10, numEntries: 2}
+		reader := &fakeMilvusTableDeltalogReader{}
+		mockReader := mockey.Mock(storage.NewDeltalogReader).
+			To(func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+				s.Equal(schemapb.DataType_Int64, pkType)
+				s.Equal([]string{legacyRef.sourcePath}, paths)
+				return reader, nil
+			}).Build()
+		defer mockReader.UnPatch()
+
+		deletes, keys, err := task.loadMilvusTableSourceDeltalogDeletes(
+			context.Background(),
+			[]milvusTableDeltalogRef{legacyRef},
+			schemapb.DataType_Int64,
+		)
+
+		s.NoError(err)
+		s.Empty(keys)
+		s.Require().Len(deletes, 1)
+		s.Equal(legacyRef, deletes[0].ref)
+		s.Empty(deletes[0].events)
+	})
+
 	s.Run("open error", func() {
 		expectedErr := fmt.Errorf("open failed")
-		mockReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).
+		mockReader := mockey.Mock(storage.NewDeltalogReader).
 			Return(nil, expectedErr).Build()
 		defer mockReader.UnPatch()
 
@@ -901,7 +932,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 	s.Run("next error", func() {
 		expectedErr := fmt.Errorf("next failed")
 		reader := &fakeMilvusTableDeltalogReader{nextErr: expectedErr}
-		mockReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).
+		mockReader := mockey.Mock(storage.NewDeltalogReader).
 			Return(reader, nil).Build()
 		defer mockReader.UnPatch()
 
@@ -921,7 +952,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 		)
 		s.Require().NoError(err)
 		reader := &fakeMilvusTableDeltalogReader{records: []storage.Record{record}}
-		mockReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).
+		mockReader := mockey.Mock(storage.NewDeltalogReader).
 			Return(reader, nil).Build()
 		defer mockReader.UnPatch()
 
@@ -938,7 +969,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 	s.Run("close error", func() {
 		expectedErr := fmt.Errorf("close failed")
 		reader := &fakeMilvusTableDeltalogReader{closeErr: expectedErr}
-		mockReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).
+		mockReader := mockey.Mock(storage.NewDeltalogReader).
 			Return(reader, nil).Build()
 		defer mockReader.UnPatch()
 
@@ -953,7 +984,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 
 	s.Run("context canceled", func() {
 		reader := &fakeMilvusTableDeltalogReader{}
-		mockReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).
+		mockReader := mockey.Mock(storage.NewDeltalogReader).
 			Return(reader, nil).Build()
 		defer mockReader.UnPatch()
 		ctx, cancel := context.WithCancel(context.Background())

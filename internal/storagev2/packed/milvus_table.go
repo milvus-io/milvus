@@ -50,17 +50,35 @@ func isMilvusTableFormat(format string) bool {
 	return format == externalspec.FormatMilvusTable
 }
 
-func isMilvusTableStorageV3DeltalogPath(sourcePath string) bool {
+// IsMilvusTableStorageV3DeltalogPath reports whether the path points to a
+// StorageV3 packed deltalog under a segment manifest base path.
+func IsMilvusTableStorageV3DeltalogPath(sourcePath string) bool {
 	return strings.Contains(sourcePath, "/_delta/") || strings.HasPrefix(sourcePath, "_delta/")
+}
+
+// IsMilvusTableLegacyL0DeltalogPath reports whether the path points to a
+// legacy L0 deltalog produced by the streaming delete flush path.
+func IsMilvusTableLegacyL0DeltalogPath(sourcePath string) bool {
+	return strings.Contains(sourcePath, "/delta_log/") || strings.HasPrefix(sourcePath, "delta_log/")
 }
 
 // ValidateMilvusTableStorageV3DeltalogPath rejects legacy source deltalogs in
 // milvus-table snapshots. The format requires StorageV3 packed deltalogs.
 func ValidateMilvusTableStorageV3DeltalogPath(sourcePath string) error {
-	if isMilvusTableStorageV3DeltalogPath(sourcePath) {
+	if IsMilvusTableStorageV3DeltalogPath(sourcePath) {
 		return nil
 	}
 	return fmt.Errorf("milvus-table only supports StorageV3 source deltalogs under _delta, got %s", sourcePath)
+}
+
+// ValidateMilvusTableSourceDeltalogPath accepts the two deltalog shapes a
+// StorageV3 milvus-table snapshot can currently expose: StorageV3 segment
+// deltas under _delta and legacy L0 delete overlays under delta_log.
+func ValidateMilvusTableSourceDeltalogPath(sourcePath string) error {
+	if IsMilvusTableStorageV3DeltalogPath(sourcePath) || IsMilvusTableLegacyL0DeltalogPath(sourcePath) {
+		return nil
+	}
+	return fmt.Errorf("milvus-table only supports StorageV3 source deltalogs under _delta or legacy L0 deltalogs under delta_log, got %s", sourcePath)
 }
 
 // resolveMilvusTableSnapshotMetadataPath validates the milvus-table external

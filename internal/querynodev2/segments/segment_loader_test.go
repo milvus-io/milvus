@@ -125,11 +125,6 @@ func TestLoadDeltalogsExternalRealPKManifestReadsSourceDeltas(t *testing.T) {
 	sourceDeltaPath := "s3://source-bucket/files/insert_log/1/_delta/100"
 	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 1)
 
-	patchManifest := mockey.Mock(packed.GetDeltaLogPathsFromManifest).
-		Return([]string{sourceDeltaPath}, nil).
-		Build()
-	defer patchManifest.UnPatch()
-
 	patchSourceDeltalogs := mockey.Mock(packed.GetDeltaLogsFromManifestWithExtfs).
 		Return([]*datapb.FieldBinlog{{
 			Binlogs: []*datapb.Binlog{{
@@ -142,15 +137,10 @@ func TestLoadDeltalogsExternalRealPKManifestReadsSourceDeltas(t *testing.T) {
 
 	readerCalled := atomic.NewInt32(0)
 	var gotPathSets [][]string
-	patchReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).To(
-		func(pkType schemapb.DataType, binlogs []*datapb.Binlog, option ...storage.RwOption) (storage.RecordReader, error) {
+	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
+		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			readerCalled.Inc()
-			gotPaths := make([]string, 0, len(binlogs))
-			for _, binlog := range binlogs {
-				gotPaths = append(gotPaths, binlog.GetLogPath())
-				assert.EqualValues(t, 1, binlog.GetEntriesNum())
-			}
-			gotPathSets = append(gotPathSets, gotPaths)
+			gotPathSets = append(gotPathSets, append([]string(nil), paths...))
 			return eofRecordReader{}, nil
 		},
 	).Build()
@@ -193,14 +183,19 @@ func TestLoadDeltalogsExternalRealPKManifestRejectsTargetDeltas(t *testing.T) {
 	targetDeltaPath := "files/insert_log/100/200/300/_delta/88"
 	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 1)
 
-	patchManifest := mockey.Mock(packed.GetDeltaLogPathsFromManifest).
-		Return([]string{targetDeltaPath}, nil).
+	patchSourceDeltalogs := mockey.Mock(packed.GetDeltaLogsFromManifestWithExtfs).
+		Return([]*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{{
+				LogPath:    targetDeltaPath,
+				EntriesNum: 1,
+			}},
+		}}, nil).
 		Build()
-	defer patchManifest.UnPatch()
+	defer patchSourceDeltalogs.UnPatch()
 
 	readerCalled := atomic.NewInt32(0)
-	patchReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).To(
-		func(pkType schemapb.DataType, binlogs []*datapb.Binlog, option ...storage.RwOption) (storage.RecordReader, error) {
+	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
+		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			readerCalled.Inc()
 			return eofRecordReader{}, nil
 		},
@@ -962,16 +957,6 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestStorageV
 	sourceDeltaPath := "s3://source-bucket/files/insert_log/1/_delta/100"
 	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 1)
 
-	manifestCalled := atomic.NewInt32(0)
-	patchManifest := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(
-		func(gotManifestPath string, storageConfig *indexpb.StorageConfig) ([]string, error) {
-			manifestCalled.Inc()
-			suite.Equal(manifestPath, gotManifestPath)
-			return []string{sourceDeltaPath}, nil
-		},
-	).Build()
-	defer patchManifest.UnPatch()
-
 	sourceDeltalogsCalled := atomic.NewInt32(0)
 	patchSourceDeltalogs := mockey.Mock(packed.GetDeltaLogsFromManifestWithExtfs).To(
 		func(gotManifestPath string, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) ([]*datapb.FieldBinlog, error) {
@@ -991,13 +976,11 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestStorageV
 	defer patchSourceDeltalogs.UnPatch()
 
 	readerCalled := atomic.NewInt32(0)
-	patchReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).To(
-		func(pkType schemapb.DataType, binlogs []*datapb.Binlog, option ...storage.RwOption) (storage.RecordReader, error) {
+	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
+		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			readerCalled.Inc()
 			suite.Equal(schemapb.DataType_Int64, pkType)
-			suite.Require().Len(binlogs, 1)
-			suite.Equal(sourceDeltaPath, binlogs[0].GetLogPath())
-			suite.EqualValues(1, binlogs[0].GetEntriesNum())
+			suite.Equal([]string{sourceDeltaPath}, paths)
 			return eofRecordReader{}, nil
 		},
 	).Build()
@@ -1012,12 +995,11 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestStorageV
 	})
 
 	suite.NoError(err)
-	suite.EqualValues(1, manifestCalled.Load())
 	suite.EqualValues(1, sourceDeltalogsCalled.Load())
 	suite.EqualValues(1, readerCalled.Load())
 }
 
-func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestRejectsLegacyDeltalogs() {
+func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestLegacyL0UsesLegacyReader() {
 	ctx := context.Background()
 
 	msgLength := 4
@@ -1054,15 +1036,22 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestRejectsL
 	sourceDeltaPath := "s3://source-bucket/files/delta_log/1/2/3/100"
 	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 1)
 
-	patchManifest := mockey.Mock(packed.GetDeltaLogPathsFromManifest).
-		Return([]string{sourceDeltaPath}, nil).
+	patchSourceDeltalogs := mockey.Mock(packed.GetDeltaLogsFromManifestWithExtfs).
+		Return([]*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{{
+				LogPath:    sourceDeltaPath,
+				EntriesNum: 1,
+			}},
+		}}, nil).
 		Build()
-	defer patchManifest.UnPatch()
+	defer patchSourceDeltalogs.UnPatch()
 
-	readerCalled := atomic.NewInt32(0)
-	patchReader := mockey.Mock(storage.NewDeltalogReaderFromBinlogs).
-		To(func(pkType schemapb.DataType, binlogs []*datapb.Binlog, option ...storage.RwOption) (storage.RecordReader, error) {
-			readerCalled.Inc()
+	legacyReaderCalled := atomic.NewInt32(0)
+	patchReader := mockey.Mock(storage.NewDeltalogReader).
+		To(func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+			legacyReaderCalled.Inc()
+			suite.Equal(schemapb.DataType_Int64, pkType)
+			suite.Equal([]string{sourceDeltaPath}, paths)
 			return eofRecordReader{}, nil
 		}).Build()
 	defer patchReader.UnPatch()
@@ -1075,9 +1064,8 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestRejectsL
 		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 	})
 
-	suite.Error(err)
-	suite.Contains(err.Error(), "only supports StorageV3 source deltalogs")
-	suite.EqualValues(0, readerCalled.Load())
+	suite.NoError(err)
+	suite.EqualValues(1, legacyReaderCalled.Load())
 }
 
 func TestReadExternalFiles(t *testing.T) {
