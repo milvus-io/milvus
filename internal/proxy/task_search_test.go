@@ -5562,27 +5562,36 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 	const rangeParams = `{"nprobe": 10, "radius": 0.2}`
 	const plainParams = `{"nprobe": 10}`
 
-	t.Run("element-level range search should succeed", func(t *testing.T) {
+	t.Run("element-level range search should fail", func(t *testing.T) {
 		task := makeTask("emb_vec", commonpb.PlaceholderType_FloatVector, rangeParams, false, false, "")
-		assert.NoError(t, task.initSearchRequest(ctx))
+		err := task.initSearchRequest(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "range search is not supported for vector array fields")
 	})
 
-	t.Run("element-level legacy iterator should fail", func(t *testing.T) {
+	t.Run("element-level iterator should fail", func(t *testing.T) {
 		task := makeTask("emb_vec", commonpb.PlaceholderType_FloatVector, plainParams, true, false, "")
 		err := task.initSearchRequest(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "legacy search iterator is not supported for element-level search")
+		assert.Contains(t, err.Error(), "search iterator is not supported for vector array fields")
 	})
 
-	t.Run("element-level iterator v2 should succeed", func(t *testing.T) {
+	t.Run("element-level iterator v2 should fail", func(t *testing.T) {
 		task := makeTask("emb_vec", commonpb.PlaceholderType_FloatVector, plainParams, true, true, "")
-		assert.NoError(t, task.initSearchRequest(ctx))
+		err := task.initSearchRequest(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "search iterator is not supported for vector array fields")
 	})
 
-	t.Run("element-level group by pk should succeed", func(t *testing.T) {
+	t.Run("element-level group by pk should fail", func(t *testing.T) {
 		task := makeTask("emb_vec", commonpb.PlaceholderType_FloatVector, plainParams, false, false, "pk")
-		assert.NoError(t, task.initSearchRequest(ctx))
+		err := task.initSearchRequest(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "group by search is not supported for vector array fields")
 	})
 
 	t.Run("element-level group by non-pk should fail", func(t *testing.T) {
@@ -5590,7 +5599,7 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 		err := task.initSearchRequest(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "only group by primary key is supported")
+		assert.Contains(t, err.Error(), "group by search is not supported for vector array fields")
 	})
 
 	t.Run("emblist range search should fail", func(t *testing.T) {
@@ -5798,6 +5807,9 @@ func TestSearchTask_StructHybridElementScopeValidation(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
 
+	indexMetricParams := func(metricType string) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{{Key: common.MetricTypeKey, Value: metricType}}
+	}
 	schema := &schemapb.CollectionSchema{
 		Name: "test_collection",
 		Fields: []*schemapb.FieldSchema{
@@ -5809,15 +5821,15 @@ func TestSearchTask_StructHybridElementScopeValidation(t *testing.T) {
 				FieldID: 200,
 				Name:    "struct_a",
 				Fields: []*schemapb.FieldSchema{
-					{FieldID: 201, Name: "a_vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
-					{FieldID: 202, Name: "a_text_vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+					{FieldID: 201, Name: "a_vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}, IndexParams: indexMetricParams(metric.IP)},
+					{FieldID: 202, Name: "a_text_vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}, IndexParams: indexMetricParams(metric.IP)},
 				},
 			},
 			{
 				FieldID: 300,
 				Name:    "struct_b",
 				Fields: []*schemapb.FieldSchema{
-					{FieldID: 301, Name: "b_vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+					{FieldID: 301, Name: "b_vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}, IndexParams: indexMetricParams(metric.L2)},
 				},
 			},
 		},
@@ -5937,6 +5949,17 @@ func TestSearchTask_StructHybridElementScopeValidation(t *testing.T) {
 		assert.False(t, task.hybridElementLevel)
 		assert.Equal(t, elementCollapseTopKSum, task.hybridSubSearchInfos[0].Collapse.Strategy)
 		assert.Empty(t, task.queryInfos[0].GetMetricType())
+	})
+
+	t.Run("rejects sum collapse with omitted negative index metric", func(t *testing.T) {
+		task := makeTask(
+			subSpec{annsField: "b_vec", params: topKScope, phType: commonpb.PlaceholderType_FloatVector, omitMetric: true},
+			subSpec{annsField: "regular_vec", params: noScope, phType: commonpb.PlaceholderType_FloatVector},
+		)
+		err := task.initAdvancedSearchRequest(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "only supported for positively related metrics")
 	})
 
 	t.Run("rejects sum collapse on negative metric", func(t *testing.T) {
