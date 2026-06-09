@@ -101,7 +101,7 @@ func (s *NamespaceCompactorTestSuite) setupSortedSegments() {
 		rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
 		cm := storage.NewLocalChunkManager(objectstorage.RootPath(rootPath))
 		bfs := pkoracle.NewBloomFilterSet()
-		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
+		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil, metacache.NewEmptySegmentStats())
 		metacache.UpdateNumOfRows(int64(rows))(seg)
 		mc := metacache.NewMockMetaCache(s.T())
 		mc.EXPECT().Collection().Return(collectionID).Maybe()
@@ -117,7 +117,7 @@ func (s *NamespaceCompactorTestSuite) setupSortedSegments() {
 			StorageType: "local",
 			RootPath:    rootPath,
 		}, columnGroups)
-		inserts, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+		inserts, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 		s.Require().NoError(err)
 		s.sortedSegments = append(s.sortedSegments, &datapb.CompactionSegmentBinlogs{
 			SegmentID:           int64(i),

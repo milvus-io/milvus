@@ -86,7 +86,7 @@ func TestGrowingSourceSyncTaskBuildFlushConfigBM25(t *testing.T) {
 		ID:           segmentID,
 		PartitionID:  2,
 		ManifestPath: `{"ver":7,"base_path":"/root/insert_log/3/2/1"}`,
-	}, pkoracle.NewBloomFilterSet(), nil)
+	}, pkoracle.NewBloomFilterSet(), nil, nil)
 
 	task := NewGrowingSourceSyncTask().
 		WithCollectionID(3).
@@ -113,7 +113,7 @@ func TestGrowingSourceSyncTaskBuildFlushConfigStartsFromEarliestManifest(t *test
 	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:          1,
 		PartitionID: 2,
-	}, pkoracle.NewBloomFilterSet(), nil)
+	}, pkoracle.NewBloomFilterSet(), nil, nil)
 
 	task := NewGrowingSourceSyncTask().
 		WithCollectionID(3).
@@ -135,7 +135,7 @@ func TestGrowingSourceSyncTaskBuildFlushConfigBM25AllocatorError(t *testing.T) {
 	}
 	cm := mock_storage.NewMockChunkManager(t)
 	cm.EXPECT().RootPath().Return("/root").Maybe()
-	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1}, pkoracle.NewBloomFilterSet(), nil)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1}, pkoracle.NewBloomFilterSet(), nil, nil)
 	task := NewGrowingSourceSyncTask().
 		WithCollectionID(3).
 		WithPartitionID(2).
@@ -157,7 +157,7 @@ func TestGrowingSourceSyncTaskBuildFlushConfigBM25RequiresAllocator(t *testing.T
 	}
 	cm := mock_storage.NewMockChunkManager(t)
 	cm.EXPECT().RootPath().Return("/root").Maybe()
-	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1}, pkoracle.NewBloomFilterSet(), nil)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1}, pkoracle.NewBloomFilterSet(), nil, nil)
 	task := NewGrowingSourceSyncTask().
 		WithCollectionID(3).
 		WithPartitionID(2).
@@ -177,7 +177,7 @@ func TestGrowingSourceSyncTaskCommitRetainedSourceOnlyOnFinalization(t *testing.
 			ID:           segmentID,
 			PartitionID:  2,
 			ManifestPath: "manifest",
-		}, pkoracle.NewBloomFilterSet(), nil)
+		}, pkoracle.NewBloomFilterSet(), nil, nil)
 		metacache.UpdateNumOfRows(10)(segment)
 		source := &fakeCommitGrowingFlushSource{}
 
@@ -256,7 +256,7 @@ func TestGrowingSourceSyncTaskMergesReturnedBM25Stats(t *testing.T) {
 		ID:          segmentID,
 		PartitionID: 2,
 		State:       commonpb.SegmentState_Growing,
-	}, pkoracle.NewBloomFilterSet(), nil)
+	}, pkoracle.NewBloomFilterSet(), nil, nil)
 
 	mc.EXPECT().GetSegmentByID(segmentID).Return(segment, true)
 	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {

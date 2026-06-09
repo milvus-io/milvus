@@ -30,7 +30,6 @@ import (
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -181,7 +180,20 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 			for _, f := range typeutil.GetAllFieldSchemas(collectionInfo.Schema) {
 				if f.FieldID == fieldID {
 					if f.GetNullable() && typeutil.IsVectorType(f.GetDataType()) {
-						effectiveRows = segmentutil.CalcValidRowCountFromFieldBinLog(segment.SegmentInfo, fieldID)
+						// Derive valid rows from the persisted Statistics NullCounts
+						// instead of iterating field binlogs.
+						nullCount, ok := segment.EnsureStats().GetNullCounts()[fieldID]
+						if !ok {
+							// NullCounts carries an entry for every field present
+							// in the segment's data (zero included). A missing key
+							// means the field was added to the schema after this
+							// segment was flushed: every row reads as null, so
+							// there is nothing to index.
+							log.Info(ctx, "field has no NullCounts entry, treating all rows as null",
+								mlog.Int64("fieldID", fieldID))
+							nullCount = segIndex.NumRows
+						}
+						effectiveRows = segIndex.NumRows - nullCount
 					}
 					isVectorArrayIndex = typeutil.IsVectorArrayType(f.GetDataType())
 					isEmbeddingListIndex = isVectorArrayIndex && isEmbeddingListMetric(indexParams)

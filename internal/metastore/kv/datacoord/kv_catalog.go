@@ -298,9 +298,11 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 		cloned := proto.Clone(segment).(*datapb.SegmentInfo)
 		resetBinlogFields(cloned)
 
-		rowCount := segmentutil.CalcRowCountFromBinLog(segment)
-		if rowCount > 0 && cloned.GetNumOfRows() != rowCount {
-			cloned.NumOfRows = rowCount
+		// Row-count reconciliation from binlog arrays is V2-only. V3
+		// segments' arrays may be empty (post-cleanup) and their
+		// authoritative row count lives on Stats / NumOfRows already.
+		if !isV3Segment(segment) {
+			segmentutil.ReCalcRowCount(segment, cloned)
 		}
 
 		if segment.GetState() == commonpb.SegmentState_Dropped {
@@ -321,6 +323,13 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 	var removals []string
 	for _, b := range binlogs {
 		segment := b.Segment
+
+		// V3 segments persist paths via the LOON manifest — skip writing the
+		// per-FieldBinlog KVs entirely. DataCoord scheduling reads
+		// SegmentInfo.Stats instead of iterating these arrays.
+		if isV3Segment(segment) {
+			continue
+		}
 
 		binlogKvs, err := buildBinlogKvsWithLogID(
 			segment.GetCollectionID(),
@@ -364,6 +373,11 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 }
 
 func (kc *Catalog) handleDroppedSegment(ctx context.Context, segment *datapb.SegmentInfo) (kvs map[string]string, err error) {
+	// V3 segments' GC walks the LOON manifest, not the per-FieldBinlog KVs,
+	// so the legacy compatibility write-on-drop has no consumer for them.
+	if isV3Segment(segment) {
+		return nil, nil
+	}
 	var has bool
 	has, err = kc.hasBinlogPrefix(ctx, segment)
 	if err != nil {

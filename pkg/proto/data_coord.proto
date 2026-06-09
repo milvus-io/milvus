@@ -463,6 +463,60 @@ message SegmentInfo {
   // timestamps to commit_timestamp, then clears this field back to 0. L0 delete
   // compaction is excluded because it only compacts delete logs.
   uint64 commit_timestamp = 36;
+
+  // Aggregate metrics extracted at data-generation time. Populated for all
+  // segments regardless of storage version. DataCoord reads these directly
+  // instead of iterating Binlogs/Statslogs/Deltalogs for scheduling
+  // decisions (compaction, load balancing, GC). See message Statistics.
+  Statistics stats = 37;
+}
+
+// Statistics carries aggregate metrics for a segment so DataCoord can make
+// scheduling decisions without iterating the FieldBinlog arrays or reading
+// the LOON manifest. Populated by the flush path (DataNode side) and by
+// compaction; backfilled on load for segments persisted before this proto
+// existed. V2 segments derive every field from their FieldBinlog arrays;
+// V3 segments derive insert/delta fields from the cumulative arrays the
+// metawriter still ships, and stats_binlog_size from the manifest the
+// writer just committed.
+message Statistics {
+  // Insert/stats/delta sizes are summed over the cumulative FieldBinlog
+  // arrays. Insert row count is intentionally absent — SegmentInfo.num_of_rows
+  // is the authoritative segment row count (computed from binlogs[0] in V2 /
+  // reported by the writer in V3); summing EntriesNum across all field
+  // binlogs would overcount by a factor of the field/group count.
+  int64 insert_binlog_size = 1;   // sum of MemorySize across insert binlogs
+  int64 stats_binlog_size = 2;    // sum of MemorySize across stats binlogs
+  int64 delta_binlog_size = 3;    // sum of MemorySize across delta binlogs
+  int64 delete_num_rows = 4;      // sum of EntriesNum across delta binlogs
+  int64 insert_binlog_count = 5;  // number of insert binlog files
+  int64 delta_binlog_count = 6;   // number of delta binlog files
+  reserved 7;                     // was stats_memory_size; dropped — no consumer
+  // timestamp_quantiles are the 20/40/60/80/100 percentile values of insert
+  // row write timestamps, sorted ascending (5 elements). Used by the
+  // opportunistic TTL ratio + size path in the compaction trigger
+  // (SingleCompactionRatioThreshold / SingleCompactionExpiredLogMaxSize) —
+  // its 20% bucket granularity is acceptable for ratio decisions. For
+  // precise min/max comparisons use timestamp_from / timestamp_to. Empty
+  // on segments with no insert data.
+  repeated int64 timestamp_quantiles = 8;
+  // Exact min(TimestampFrom) and max(TimestampTo) across all insert
+  // binlogs. Used by GetEarliestTs (needs exact min for ordering / TTL
+  // strict-tolerance) and by the "entire segment expired" short-circuit
+  // in the compaction trigger (needs exact max). Zero on segments with
+  // no insert data.
+  uint64 timestamp_from = 9;
+  uint64 timestamp_to = 10;
+  // Exact min(TimestampFrom) and max(TimestampTo) across all delta
+  // binlogs. Used by L0 import to determine the timestamp range covered
+  // by the delete records. Zero on segments with no delta data.
+  uint64 delta_timestamp_from = 11;
+  uint64 delta_timestamp_to = 12;
+  // Per-field null-row counts, summed across all binlogs of that field.
+  // Populated only for nullable fields. Used by task_index to compute
+  // the effective (non-null) row count for vector index build decisions
+  // on nullable vector fields.
+  map<int64, int64> null_counts = 13;
 }
 
 message SegmentStartPosition {
@@ -489,6 +543,13 @@ message SaveBinlogPathsRequest {
   repeated FieldBinlog field2Bm25logPaths = 16;
   bool with_full_binlogs = 17; // report with full data for verification.
   string manifest_path = 18; //
+
+  // V3 stats live in the manifest, not in the statslogs FieldBinlog array,
+  // so the writer ships the cumulative stats footprint here. The handler
+  // overlays these onto the segment Statistics after computing insert/delta
+  // from the cumulative arrays. Nil / zero for V2 flushes — V2 stats come
+  // from req.Field2StatslogPaths via the iteration helper.
+  Statistics stats = 19;
 }
 
 message CheckPoint {
@@ -783,6 +844,14 @@ message CompactionSegment {
   string manifest = 12;
   repeated int64 expirQuantiles = 13;
   bool is_sorted_by_namespace = 14;
+  // Aggregate footprint of this compaction output. Populated by the
+  // compactor (mix / sort / bump-schema / L0) at write completion and
+  // copied verbatim onto SegmentInfo.Stats by the DataCoord receiver,
+  // so the receiver never recomputes from FieldBinlog arrays for
+  // compaction results. For V3 outputs whose stats blob lives in the
+  // manifest, this is the only authoritative source for
+  // stats_binlog_size.
+  Statistics stats = 15;
 }
 
 message CompactionPlanResult {
@@ -1026,6 +1095,10 @@ message ImportSegmentInfo {
   repeated FieldBinlog deltalogs = 5;
   repeated FieldBinlog bm25logs = 6;
   string manifest_path = 7;
+  // Writer-built segment Statistics. DataCoord persists it onto
+  // SegmentInfo.stats directly; when absent (rolling upgrade) DataCoord
+  // falls back to reconstructing from the FieldBinlog arrays.
+  Statistics stats = 8;
 }
 
 message QueryImportResponse {
