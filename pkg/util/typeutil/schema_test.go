@@ -5571,10 +5571,12 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 			}
 			err := NormalizeAndValidateExternalCollectionSchema(schema)
 			assert.NoError(t, err, "expected no error for type %s", tc.dt.String())
+			assert.True(t, schema.GetFields()[0].GetNullable(), "base vector field should be nullable")
+			assert.True(t, schema.GetFields()[1].GetNullable(), "field type %s should be nullable", tc.dt.String())
 		}
 	})
 
-	t.Run("user scalar fields forced nullable but vector fields unchanged", func(t *testing.T) {
+	t.Run("user fields forced nullable", func(t *testing.T) {
 		schema := buildSchema()
 		for _, f := range schema.GetFields() {
 			assert.False(t, f.GetNullable())
@@ -5582,7 +5584,7 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.NoError(t, err)
 		assert.True(t, schema.GetFields()[0].GetNullable(), "scalar field should be nullable")
-		assert.False(t, schema.GetFields()[1].GetNullable(), "vector field should remain non-nullable")
+		assert.True(t, schema.GetFields()[1].GetNullable(), "vector field should be nullable")
 	})
 
 	t.Run("virtual pk stays non-nullable", func(t *testing.T) {
@@ -5601,7 +5603,7 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 			case common.VirtualPKFieldName:
 				assert.False(t, f.GetNullable(), "virtual PK should remain non-nullable")
 			case "vec":
-				assert.False(t, f.GetNullable(), "vector field should remain non-nullable")
+				assert.True(t, f.GetNullable(), "vector field should be nullable")
 			default:
 				assert.True(t, f.GetNullable())
 			}
