@@ -309,41 +309,51 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 
 			// Check if this is a manifest segment
 			if segment.GetManifest() != "" {
+				deltalogs := []*datapb.FieldBinlog{{
+					Binlogs: []*datapb.Binlog{{
+						LogID:         logID,
+						LogPath:       path,
+						EntriesNum:    int64(len(deletes.pks)),
+						MemorySize:    int64(writer.GetWrittenUncompressed()),
+						TimestampFrom: tsFrom,
+						TimestampTo:   tsTo,
+					}},
+				}}
 				return &datapb.CompactionSegment{
 					SegmentID: segmentID,
 					Channel:   t.plan.GetChannel(),
 					NumOfRows: int64(len(deletes.pks)),
 					// Delta summary for compaction trigger decisions and datacoord manifest commit.
-					Deltalogs: []*datapb.FieldBinlog{{
-						Binlogs: []*datapb.Binlog{{
-							LogID:      logID,
-							LogPath:    path,
-							EntriesNum: int64(len(deletes.pks)),
-							MemorySize: int64(writer.GetWrittenUncompressed()),
-						}},
-					}},
+					Deltalogs: deltalogs,
+					// L0 output: only delta side has data; no stats blobs
+					// are written so statsBlobSize is 0. Insert aggregates
+					// are zero by construction since insertLogs is nil.
+					Stats: buildCompactionOutputStats(nil, deltalogs, 0),
 				}, nil
 			}
 			// V1: Return deltalog in FieldBinlog format
-			return &datapb.CompactionSegment{
-				SegmentID: segmentID,
-				Channel:   t.plan.GetChannel(),
-				Deltalogs: []*datapb.FieldBinlog{
-					{
-						Binlogs: []*datapb.Binlog{
-							{
-								LogPath:       path,
-								LogID:         logID,
-								LogSize:       int64(writer.GetWrittenUncompressed()),
-								MemorySize:    int64(writer.GetWrittenUncompressed()),
-								EntriesNum:    int64(len(deletes.pks)),
-								TimestampFrom: tsFrom,
-								TimestampTo:   tsTo,
-							},
+			deltalogs := []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{
+							LogPath:       path,
+							LogID:         logID,
+							LogSize:       int64(writer.GetWrittenUncompressed()),
+							MemorySize:    int64(writer.GetWrittenUncompressed()),
+							EntriesNum:    int64(len(deletes.pks)),
+							TimestampFrom: tsFrom,
+							TimestampTo:   tsTo,
 						},
 					},
 				},
+			}
+			return &datapb.CompactionSegment{
+				SegmentID: segmentID,
+				Channel:   t.plan.GetChannel(),
+				Deltalogs: deltalogs,
 				NumOfRows: int64(len(deletes.pks)),
+				// L0 output: only delta side has data; no stats blobs.
+				Stats: buildCompactionOutputStats(nil, deltalogs, 0),
 			}, nil
 		}()
 		if err != nil {

@@ -306,7 +306,7 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 
 		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 2,
-		}, nil, nil)
+		}, nil, nil, metacache.NewEmptySegmentStats())
 		s.metacache.EXPECT().GetSegmentByID(int64(2)).Return(segment, true)
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.MatchedBy(func(task syncmgr.Task) bool {
@@ -347,7 +347,7 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 			ID:          1001,
 			PartitionID: 10,
 			Level:       datapb.SegmentLevel_L0,
-		}, nil, nil)
+		}, nil, nil, metacache.NewEmptySegmentStats())
 		s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(l0Segment, true).Maybe()
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Maybe()
 

@@ -341,7 +341,7 @@ func (s *MixCompactionTaskStorageV1Suite) prepareCompactTwoToOneSegments() {
 		PartitionID:  PartitionID,
 		ID:           99999,
 		NumOfRows:    0,
-	}, pkoracle.NewBloomFilterSet(), nil)
+	}, pkoracle.NewBloomFilterSet(), nil, metacache.NewEmptySegmentStats())
 
 	s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
 		CollectionID: 1,
@@ -394,7 +394,7 @@ func (s *MixCompactionTaskStorageV1Suite) prepareCompactTwoToOneWithBM25Segments
 		PartitionID:  PartitionID,
 		ID:           99999,
 		NumOfRows:    0,
-	}, pkoracle.NewBloomFilterSet(), nil)
+	}, pkoracle.NewBloomFilterSet(), nil, metacache.NewEmptySegmentStats())
 
 	s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
 		CollectionID: 1,

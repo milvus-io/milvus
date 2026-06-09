@@ -374,6 +374,106 @@ func (s *indexTaskSuite) TestDropTaskOnWorker() {
 	})
 }
 
+func (s *indexTaskSuite) TestCreateTaskOnWorkerNullableVectorEffectiveRows() {
+	const numRows = int64(65535)
+	newHandler := func() *NMockHandler {
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+			ID: s.collID,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:     "field1",
+						FieldID:  s.fieldID,
+						DataType: schemapb.DataType_FloatVector,
+						Nullable: true,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: "dim", Value: "128"},
+						},
+					},
+				},
+			},
+			Partitions: []int64{s.partID},
+		}, nil)
+		return handler
+	}
+	newTask := func() *indexBuildTask {
+		t := &model.SegmentIndex{
+			CollectionID: s.collID,
+			PartitionID:  s.partID,
+			SegmentID:    s.segID,
+			IndexID:      s.indexID,
+			BuildID:      s.taskID,
+			IndexState:   commonpb.IndexState_Unissued,
+			NumRows:      numRows,
+		}
+		s.mt.indexMeta.segmentBuildInfo.buildID2SegmentIndex.Insert(s.taskID, t)
+		cm := mocks.NewChunkManager(s.T())
+		cm.EXPECT().RootPath().Return("root").Maybe()
+		return newIndexBuildTask(t, 1, s.mt, newHandler(), cm, newIndexEngineVersionManager())
+	}
+
+	s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
+	defer func() { s.mt.segments.segments[s.segID].Stats = nil }()
+
+	cases := []struct {
+		name       string
+		nullCounts map[int64]int64
+		wantBuild  bool
+	}{
+		// Field key absent: added to schema after this segment was flushed.
+		// Every row is null for it — no data to index.
+		{
+			name:       "field absent from NullCounts skips build",
+			nullCounts: map[int64]int64{},
+			wantBuild:  false,
+		},
+		// Field present with zero nulls: all rows valid, full build.
+		{
+			name:       "field present zero nulls builds",
+			nullCounts: map[int64]int64{s.fieldID: 0},
+			wantBuild:  true,
+		},
+		// Field present, almost all null: effectiveRows below threshold.
+		{
+			name:       "field mostly null skips build",
+			nullCounts: map[int64]int64{s.fieldID: numRows - 100},
+			wantBuild:  false,
+		},
+	}
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			s.mt.segments.segments[s.segID].Stats = &datapb.Statistics{
+				NullCounts: tc.nullCounts,
+			}
+			catalogMock := catalogmocks.NewDataCoordCatalog(s.T())
+			catalogMock.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+			s.mt.indexMeta.catalog = catalogMock
+
+			cluster := session.NewMockCluster(s.T())
+			if tc.wantBuild {
+				cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil)
+			}
+			// No CreateIndex expectation for skip cases:
+			// mockery will fail the test if it is called unexpectedly.
+
+			it := newTask()
+			it.CreateTaskOnWorker(1, cluster)
+			if tc.wantBuild {
+				s.Equal(
+					indexpb.JobState_JobStateInProgress,
+					indexpb.JobState(it.IndexState),
+				)
+			} else {
+				s.Equal(
+					indexpb.JobState_JobStateFinished,
+					indexpb.JobState(it.IndexState),
+				)
+			}
+		})
+	}
+}
+
 func (s *indexTaskSuite) TestSetJobInfo() {
 	t := &model.SegmentIndex{
 		CollectionID: s.collID,

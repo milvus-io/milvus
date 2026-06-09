@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -76,6 +77,14 @@ type BulkPackWriterV3 struct {
 	// so merged-stats computation can include this batch without requiring
 	// the metaCache to be updated yet.
 	singlePKStats *storage.PrimaryKeyStats
+
+	// statsBlobSize tracks THIS SYNC's newly-written bloom-filter / BM25 blob
+	// bytes — the per-sync delta the StatisticsCollector accumulates, NOT the
+	// cumulative footprint. The merged PK/BM25 blob is written only at flush and
+	// per-sync batch blobs use unique keys, so the sum of these per-sync deltas
+	// over the segment's life equals the manifest's final cumulative memory_size.
+	// Reset at the top of Write and fed into the StatisticsCollector Digest.
+	statsBlobSize int64
 }
 
 func NewBulkPackWriterV3(metaCache metacache.MetaCache, schema *schemapb.CollectionSchema, chunkManager storage.ChunkManager,
@@ -111,10 +120,12 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	bm25Stats map[int64]*datapb.FieldBinlog,
 	manifest string,
 	size int64,
+	segmentStats *datapb.Statistics,
 	err error,
 ) {
 	log := log.Ctx(ctx)
 	bw.initialManifestPath = bw.manifestPath
+	bw.statsBlobSize = 0
 
 	// Drain deferred metaCache actions on successful Write only. If we
 	// return an error we leave the metaCache untouched, so a failed sync
@@ -156,7 +167,7 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 		log.Warn("failed to write insert data", zap.Error(err))
 		return
 	}
-	if stats, statEntries, err = bw.writeStats(ctx, pack, basePath); err != nil {
+	if statEntries, err = bw.writeStats(ctx, pack, basePath); err != nil {
 		log.Warn("failed to process stats blob", zap.Error(err))
 		return
 	}
@@ -164,7 +175,7 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 		log.Warn("failed to process delta blob", zap.Error(err))
 		return
 	}
-	if bm25Stats, bm25Entries, err = bw.writeBM25Stasts(ctx, pack, basePath); err != nil {
+	if bm25Entries, err = bw.writeBM25Stasts(ctx, pack, basePath); err != nil {
 		log.Warn("failed to process bm25 stats blob", zap.Error(err))
 		return
 	}
@@ -192,8 +203,41 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 		return
 	}
 
+	// Digest this sync's writes into the growing segment's cumulative
+	// StatisticsCollector. The digest is DEFERRED like RollStats /
+	// MergeBm25Stats so it commits atomically with the manifest on a
+	// successful Write — the metaCache is only mutated by the success defer at
+	// the top of Write. V3 feeds the tracked statsBlobSize instead of summing
+	// a stats array (it returns no stats array).
+	digested := len(inserts) > 0 || bw.statsBlobSize > 0 || len(deltas.GetBinlogs()) > 0
+	if digested {
+		bw.pendingMetaCacheActions = append(bw.pendingMetaCacheActions,
+			metacache.MergeStatistics(inserts, deltas, bw.statsBlobSize, pack.batchRows, pack.tsFrom, pack.tsTo))
+	}
+
 	manifest = bw.manifestPath
 	size = bw.sizeWritten
+
+	// Publish the segment's cumulative Statistics. No scaling — the value
+	// reflects exactly the syncs the collector has digested so far.
+	//
+	// The MergeStatistics digest above is deferred and has NOT been applied to
+	// the metaCache yet (the success defer runs after this Write body returns).
+	// To publish a value that includes THIS sync we clone the segment's
+	// collector, fold this sync's writes into the clone, and publish the
+	// clone — leaving the metaCache untouched until the deferred commit. This
+	// mirrors how V3 includes the current batch in merged PK stats via
+	// serializeMergedPkStatsWith before RollStats is applied.
+	seg, ok := bw.metaCache.GetSegmentByID(pack.segmentID)
+	if !ok {
+		err = merr.WrapErrSegmentNotFound(pack.segmentID)
+		return
+	}
+	clone := seg.Statistics().Clone()
+	if digested {
+		clone.Digest(inserts, deltas, bw.statsBlobSize, pack.batchRows, pack.tsFrom, pack.tsTo)
+	}
+	segmentStats = clone.Publish()
 	return
 }
 
@@ -295,6 +339,8 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 	logs = make(map[int64]*datapb.FieldBinlog)
 	for _, columnGroup := range bw.columnGroups {
 		columnGroupID := columnGroup.GroupID
+		memSize := int64(w.GetColumnGroupWrittenUncompressed(columnGroup.GroupID))
+		nullCounts := getFieldNullCounts(columnGroup)
 		logs[columnGroupID] = &datapb.FieldBinlog{
 			FieldID:     columnGroupID,
 			ChildFields: columnGroup.Fields,
@@ -302,12 +348,12 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 			Binlogs: []*datapb.Binlog{
 				{
 					LogSize:         int64(w.GetColumnGroupWrittenCompressed(columnGroup.GroupID)),
-					MemorySize:      int64(w.GetColumnGroupWrittenUncompressed(columnGroup.GroupID)),
+					MemorySize:      memSize,
 					LogPath:         w.GetWrittenPaths(columnGroupID),
 					EntriesNum:      w.GetWrittenRowNum(),
 					TimestampFrom:   tsFrom,
 					TimestampTo:     tsTo,
-					FieldNullCounts: getFieldNullCounts(columnGroup),
+					FieldNullCounts: nullCounts,
 				},
 			},
 		}
@@ -364,7 +410,7 @@ func (bw *BulkPackWriterV3) writeDelta(ctx context.Context, pack *SyncPack, base
 		return nil, nil, fmt.Errorf("failed to create deltalog writer: %w", err)
 	}
 
-	record, _, _, err := storage.BuildDeleteRecord(pack.deltaData.Pks, pack.deltaData.Tss)
+	record, tsFrom, tsTo, err := storage.BuildDeleteRecord(pack.deltaData.Pks, pack.deltaData.Tss)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to build delete record: %w", err)
 	}
@@ -378,12 +424,15 @@ func (bw *BulkPackWriterV3) writeDelta(ctx context.Context, pack *SyncPack, base
 	}
 
 	bw.sizeWritten += pack.deltaData.Size()
+	deltaMemSize := int64(writer.GetWrittenUncompressed())
 
 	summary := &datapb.FieldBinlog{
 		Binlogs: []*datapb.Binlog{{
-			LogID:      logID,
-			EntriesNum: pack.deltaData.RowCount,
-			MemorySize: int64(writer.GetWrittenUncompressed()),
+			LogID:         logID,
+			EntriesNum:    pack.deltaData.RowCount,
+			MemorySize:    deltaMemSize,
+			TimestampFrom: tsFrom,
+			TimestampTo:   tsTo,
 		}},
 	}
 	return summary, []packed.DeltaLogEntry{{Path: deltaPath, NumEntries: pack.deltaData.RowCount}}, nil
@@ -392,18 +441,18 @@ func (bw *BulkPackWriterV3) writeDelta(ctx context.Context, pack *SyncPack, base
 // writeStats writes bloom filter stat blobs under basePath/_stats and
 // returns the resulting StatEntry list. The caller folds the entries into
 // a ManifestUpdates that commits atomically with inserts / delta / bm25.
-func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack, basePath string) (map[int64]*datapb.FieldBinlog, []packed.StatEntry, error) {
+func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack, basePath string) ([]packed.StatEntry, error) {
 	if len(pack.insertData) == 0 {
-		return make(map[int64]*datapb.FieldBinlog), nil, nil
+		return nil, nil
 	}
 
 	serializer, err := NewStorageSerializer(bw.metaCache, bw.schema)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	singlePKStats, batchStatsBlob, err := serializer.serializeStatslog(pack)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	bw.singlePKStats = singlePKStats
 
@@ -419,6 +468,10 @@ func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack, base
 
 	var files []string
 	var memorySize int64
+	// newBlobBytes is only the blob bytes WRITTEN this sync (NOT the preserved
+	// existing footprint). The collector accumulates these per-sync deltas; the
+	// merged blob writes only at flush so Σ(newBlobBytes) == final memory_size.
+	var newBlobBytes int64
 
 	// Preserve existing bloom filter files from previous batches.
 	// loon_transaction_update_stat uses replace semantics, so we must
@@ -438,15 +491,16 @@ func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack, base
 	// Write batch stats blob via filesystem FFI.
 	id, err := bw.allocator.AllocOne()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	relPath := fmt.Sprintf("_stats/bloom_filter.%d/%d", pkFieldID, id)
 	fullPath := path.Join(basePath, relPath)
 	if err := packed.WriteFile(bw.storageConfig, fullPath, batchStatsBlob.Value); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	bw.sizeWritten += int64(len(batchStatsBlob.Value))
 	memorySize += int64(len(batchStatsBlob.Value))
+	newBlobBytes += int64(len(batchStatsBlob.Value))
 	files = append(files, fullPath)
 
 	// Write merged stats on flush
@@ -455,43 +509,45 @@ func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack, base
 		// since the corresponding RollStats has been deferred above.
 		mergedStatsBlob, err := serializer.serializeMergedPkStatsWith(pack, singlePKStats)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		mergedRelPath := fmt.Sprintf("_stats/bloom_filter.%d/%d", pkFieldID, int64(storage.CompoundStatsType))
 		mergedFullPath := path.Join(basePath, mergedRelPath)
 		if err := packed.WriteFile(bw.storageConfig, mergedFullPath, mergedStatsBlob.Value); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		bw.sizeWritten += int64(len(mergedStatsBlob.Value))
 		memorySize += int64(len(mergedStatsBlob.Value))
+		newBlobBytes += int64(len(mergedStatsBlob.Value))
 		files = append(files, mergedFullPath)
 	}
 
-	entries := []packed.StatEntry{{
+	// Feed the collector only THIS SYNC's newly-written blob bytes; memorySize
+	// stays cumulative for the manifest StatEntry below.
+	bw.statsBlobSize += newBlobBytes
+
+	return []packed.StatEntry{{
 		Key:      statKey,
 		Files:    files,
 		Metadata: map[string]string{"memory_size": fmt.Sprintf("%d", memorySize)},
-	}}
-
-	// Return empty map - stats are embedded in the manifest, not separate binlogs
-	return make(map[int64]*datapb.FieldBinlog), entries, nil
+	}}, nil
 }
 
 // writeBM25Stasts writes BM25 stat blobs under basePath/_stats and returns
 // the resulting StatEntry list. The caller folds the entries into a
 // ManifestUpdates that commits atomically with inserts / delta / stats.
-func (bw *BulkPackWriterV3) writeBM25Stasts(ctx context.Context, pack *SyncPack, basePath string) (map[int64]*datapb.FieldBinlog, []packed.StatEntry, error) {
+func (bw *BulkPackWriterV3) writeBM25Stasts(ctx context.Context, pack *SyncPack, basePath string) ([]packed.StatEntry, error) {
 	if len(pack.bm25Stats) == 0 {
-		return make(map[int64]*datapb.FieldBinlog), nil, nil
+		return nil, nil
 	}
 
 	serializer, err := NewStorageSerializer(bw.metaCache, bw.schema)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	bm25Blobs, err := serializer.serializeBM25Stats(pack)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Track per-field files and memory sizes, then build stat entries at the end
@@ -500,6 +556,12 @@ func (bw *BulkPackWriterV3) writeBM25Stasts(ctx context.Context, pack *SyncPack,
 		memorySize int64
 	}
 	fieldMap := make(map[int64]*fieldStats)
+
+	// newBlobBytes is only the BM25 blob bytes WRITTEN this sync across all
+	// fields (NOT the preserved existing footprint). The collector accumulates
+	// these per-sync deltas; the merged blob writes only at flush and per-sync
+	// blobs use unique keys, so Σ(newBlobBytes) == final cumulative memory_size.
+	var newBlobBytes int64
 
 	// Preserve existing BM25 stat files from previous batches.
 	existingStats, err := packed.GetManifestStats(bw.initialManifestPath, bw.storageConfig)
@@ -520,13 +582,13 @@ func (bw *BulkPackWriterV3) writeBM25Stasts(ctx context.Context, pack *SyncPack,
 	for fieldID, blob := range bm25Blobs {
 		id, err := bw.allocator.AllocOne()
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
 		relPath := fmt.Sprintf("_stats/bm25.%d/%d", fieldID, id)
 		fullPath := path.Join(basePath, relPath)
 		if err := packed.WriteFile(bw.storageConfig, fullPath, blob.Value); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		bw.sizeWritten += int64(len(blob.Value))
 
@@ -537,6 +599,7 @@ func (bw *BulkPackWriterV3) writeBM25Stasts(ctx context.Context, pack *SyncPack,
 		}
 		fs.files = append(fs.files, fullPath)
 		fs.memorySize += int64(len(blob.Value))
+		newBlobBytes += int64(len(blob.Value))
 	}
 
 	// DEFERRED: do NOT apply MergeBm25Stats to the metaCache here. Stash the
@@ -552,13 +615,13 @@ func (bw *BulkPackWriterV3) writeBM25Stasts(ctx context.Context, pack *SyncPack,
 		// since the corresponding MergeBm25Stats has been deferred above.
 		mergedBM25Blob, err := serializer.serializeMergedBM25StatsWith(pack, pack.bm25Stats)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		for fieldID, blob := range mergedBM25Blob {
 			mergedRelPath := fmt.Sprintf("_stats/bm25.%d/%d", fieldID, int64(storage.CompoundStatsType))
 			mergedFullPath := path.Join(basePath, mergedRelPath)
 			if err := packed.WriteFile(bw.storageConfig, mergedFullPath, blob.Value); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 			bw.sizeWritten += int64(len(blob.Value))
 
@@ -569,6 +632,7 @@ func (bw *BulkPackWriterV3) writeBM25Stasts(ctx context.Context, pack *SyncPack,
 			}
 			fs.files = append(fs.files, mergedFullPath)
 			fs.memorySize += int64(len(blob.Value))
+			newBlobBytes += int64(len(blob.Value))
 		}
 	}
 
@@ -581,8 +645,11 @@ func (bw *BulkPackWriterV3) writeBM25Stasts(ctx context.Context, pack *SyncPack,
 		})
 	}
 
-	// Return empty map - stats are embedded in the manifest, not separate binlogs
-	return make(map[int64]*datapb.FieldBinlog), entries, nil
+	// Feed the collector only THIS SYNC's newly-written BM25 blob bytes (summed
+	// across all fields); fs.memorySize stays cumulative for the StatEntry above.
+	bw.statsBlobSize += newBlobBytes
+
+	return entries, nil
 }
 
 // buildTextColumnConfigs builds TextColumnConfig for all TEXT fields in the schema.
