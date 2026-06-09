@@ -416,19 +416,33 @@ func (s *SearchPipelineSuite) TestElementBestCollapseOp_AllowsEmptyElementLevelR
 		},
 	}
 
-	op := &elementBestCollapseOperator{}
-	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{""})
-	s.Require().NoError(err)
+	tests := []struct {
+		name   string
+		config elementCollapseConfig
+	}{
+		{name: "default max"},
+		{name: "topk sum", config: elementCollapseConfig{Strategy: elementCollapseTopKSum, TopK: 2}},
+	}
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			op := &elementBestCollapseOperator{}
+			if test.config.Strategy != "" {
+				op.configs = []elementCollapseConfig{test.config}
+			}
+			out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{""})
+			s.Require().NoError(err)
 
-	results := out[0].([]*milvuspb.SearchResults)
-	result := results[0].GetResults()
+			results := out[0].([]*milvuspb.SearchResults)
+			result := results[0].GetResults()
 
-	s.Nil(result.GetElementIndices())
-	s.Equal(int64(1), result.GetNumQueries())
-	s.Equal(int64(0), result.GetTopK())
-	s.Equal([]int64{0}, result.GetTopks())
-	s.Empty(result.GetScores())
-	s.Equal(int64(10), result.GetAllSearchCount())
+			s.Nil(result.GetElementIndices())
+			s.Equal(int64(1), result.GetNumQueries())
+			s.Equal(int64(0), result.GetTopK())
+			s.Equal([]int64{0}, result.GetTopks())
+			s.Empty(result.GetScores())
+			s.Equal(int64(10), result.GetAllSearchCount())
+		})
+	}
 }
 
 func (s *SearchPipelineSuite) TestElementBestCollapseOp_DeduplicatesEqualScoreElementsByRowID() {
