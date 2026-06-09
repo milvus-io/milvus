@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -110,7 +111,7 @@ func (t *addCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	}
 	newColl := proto.Clone(coll.schema.CollectionSchema).(*schemapb.CollectionSchema)
 	newColl.Functions = append(coll.schema.Functions, t.FunctionSchema)
-	if err := validateFunction(newColl, t.FunctionSchema.Name, false); err != nil {
+	if err := validator.ValidateFunction(newColl, t.FunctionSchema.Name, false); err != nil {
 		return err
 	}
 	return nil
@@ -219,7 +220,7 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 
 	newColl := proto.Clone(coll.schema.CollectionSchema).(*schemapb.CollectionSchema)
 	newColl.Functions = newFunctions
-	if err := validateFunction(newColl, t.FunctionName, false); err != nil {
+	if err := validator.ValidateFunction(newColl, t.FunctionName, false); err != nil {
 		return err
 	}
 	return nil

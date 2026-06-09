@@ -27,9 +27,14 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/util/function/validator"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -73,114 +78,49 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 // broadcastAlterCollectionSchemaAdd handles AddRequest: adding function fields.
 func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaster broadcaster.BroadcastAPI, coll *model.Collection, req *milvuspb.AlterCollectionSchemaRequest) error {
 	addRequest := req.GetAction().GetAddRequest()
-	if addRequest == nil {
-		return merr.WrapErrParameterInvalidMsg("add_request is nil")
-	}
-
-	fieldInfos := addRequest.GetFieldInfos()
-	funcSchemas := addRequest.GetFuncSchema()
-	if len(funcSchemas) != 1 || funcSchemas[0] == nil {
-		return merr.WrapErrParameterInvalidMsg("For now, exactly one function schema is supported in alter schema task")
-	}
-	functionSchema := funcSchemas[0]
-	if err := checkAlterSchemaFunctionAllowed(functionSchema); err != nil {
+	plan, err := schemautil.ParseAlterSchemaAddRequest(addRequest)
+	if err != nil {
 		return err
 	}
-	if err := validateAlterSchemaFunctionInputOutput(functionSchema); err != nil {
+	if plan.HasField() {
+		if err := prepareAlterSchemaAddField(coll, plan); err != nil {
+			return err
+		}
+		fieldNames := typeutil.NewSet[string]()
+		for _, field := range coll.Fields {
+			fieldNames.Insert(field.Name)
+		}
+		for _, structField := range coll.StructArrayFields {
+			fieldNames.Insert(structField.Name)
+			for _, field := range structField.Fields {
+				fieldNames.Insert(field.Name)
+				fieldNames.Insert(storedRootStructSubFieldName(structField.Name, field.Name))
+			}
+		}
+		if fieldNames.Contain(plan.Field.GetName()) {
+			return merr.WrapErrParameterInvalidMsg("field already exists, name: %s", plan.Field.GetName())
+		}
+	}
+	if plan.HasFunction() {
+		if err := schemautil.ValidateAlterSchemaAddFunctionPlan(plan); err != nil {
+			return err
+		}
+		for _, function := range coll.Functions {
+			if function.Name == plan.Function.GetName() {
+				return merr.WrapErrParameterInvalidMsg("function already exists, name: %s", plan.Function.GetName())
+			}
+		}
+	}
+
+	schema, properties, err := buildAlterSchemaAddSchema(coll, plan)
+	if err != nil {
 		return err
 	}
-
-	if len(fieldInfos) == 0 {
-		return merr.WrapErrParameterInvalidMsg("fieldInfos is empty")
-	}
-
-	// Check field schemas.
-	fieldSchemas := make([]*schemapb.FieldSchema, 0, len(fieldInfos))
-	for _, fieldInfo := range fieldInfos {
-		fieldSchema := fieldInfo.GetFieldSchema()
-		if fieldSchema == nil {
-			return merr.WrapErrParameterInvalidMsg("fieldSchema is nil in fieldInfos")
-		}
-		fieldSchemas = append(fieldSchemas, fieldSchema)
-	}
-	if err := checkFieldSchema(fieldSchemas); err != nil {
-		return merr.Wrap(err, "failed to check field schema")
-	}
-	newFieldNames := make(map[string]struct{}, len(fieldSchemas))
-	for _, fieldSchema := range fieldSchemas {
-		newFieldNames[fieldSchema.GetName()] = struct{}{}
-	}
-	for _, outputFieldName := range functionSchema.GetOutputFieldNames() {
-		if _, ok := newFieldNames[outputFieldName]; !ok {
-			return merr.WrapErrParameterInvalidMsg("function output field %q must be one of the newly-added fields", outputFieldName)
+	if plan.HasFunction() {
+		if err := validator.ValidateFunction(schema, plan.Function.GetName(), true); err != nil {
+			return merr.Wrap(err, "invalid function schema")
 		}
 	}
-
-	// Check fields don't already exist.
-	fieldNameSet := make(map[string]struct{})
-	for _, field := range coll.Fields {
-		fieldNameSet[field.Name] = struct{}{}
-	}
-	for _, fieldSchema := range fieldSchemas {
-		if _, ok := fieldNameSet[fieldSchema.GetName()]; ok {
-			return merr.WrapErrParameterInvalidMsg("field already exists, name: %s", fieldSchema.GetName())
-		}
-		fieldNameSet[fieldSchema.Name] = struct{}{}
-	}
-	outputFieldNames := typeutil.NewSet[string](functionSchema.GetOutputFieldNames()...)
-	for _, fieldSchema := range fieldSchemas {
-		if outputFieldNames.Contain(fieldSchema.GetName()) && fieldSchema.GetNullable() {
-			return merr.WrapErrParameterInvalidMsg("function output field cannot be nullable: function %s, field %s", functionSchema.GetName(), fieldSchema.GetName())
-		}
-	}
-
-	// Check function doesn't already exist.
-	for _, function := range coll.Functions {
-		if function.Name == functionSchema.GetName() {
-			return merr.WrapErrParameterInvalidMsg("function already exists, name: %s", functionSchema.GetName())
-		}
-	}
-
-	// Build new collection schema.
-	schema := coll.ToCollectionSchemaPB()
-
-	// Assign new field and function IDs.
-	fieldIDStart := maxAssignedFieldIDFromSchema(schema) + 1
-	for i, fieldSchema := range fieldSchemas {
-		fieldSchema.FieldID = fieldIDStart + int64(i)
-	}
-	functionSchema.Id = nextFunctionID(coll)
-	name2id := make(map[string]int64)
-	for _, field := range coll.Fields {
-		name2id[field.Name] = field.FieldID
-	}
-	for _, fieldSchema := range fieldSchemas {
-		name2id[fieldSchema.Name] = fieldSchema.FieldID
-	}
-
-	functionSchema.InputFieldIds = make([]int64, len(functionSchema.InputFieldNames))
-	for idx, name := range functionSchema.InputFieldNames {
-		fieldID, ok := name2id[name]
-		if !ok {
-			return merr.WrapErrParameterInvalidMsg("input field %s of function %s not found", name, functionSchema.GetName())
-		}
-		functionSchema.InputFieldIds[idx] = fieldID
-	}
-
-	functionSchema.OutputFieldIds = make([]int64, len(functionSchema.OutputFieldNames))
-	for idx, name := range functionSchema.OutputFieldNames {
-		fieldID, ok := name2id[name]
-		if !ok {
-			return merr.WrapErrParameterInvalidMsg("output field %s of function %s not found", name, functionSchema.GetName())
-		}
-		functionSchema.OutputFieldIds[idx] = fieldID
-	}
-
-	schema.Version = coll.SchemaVersion + 1
-	schema.Fields = append(schema.Fields, fieldSchemas...)
-	schema.Functions = append(schema.Functions, functionSchema)
-	properties := updateMaxFieldIDProperty(coll.Properties, maxAssignedFieldIDFromSchema(schema))
-	schema.Properties = properties
 	if err := typeutil.ValidateExternalCollectionResolvedSchema(schema); err != nil {
 		return err
 	}
@@ -220,31 +160,92 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 	return nil
 }
 
-func checkAlterSchemaFunctionAllowed(functionSchema *schemapb.FunctionSchema) error {
-	switch functionSchema.GetType() {
-	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
+func prepareAlterSchemaAddField(coll *model.Collection, plan *schemautil.AlterSchemaAddPlan) error {
+	if !plan.HasField() {
 		return nil
-	default:
-		return merr.WrapErrParameterInvalidMsg("For now, only BM25 and MinHash functions are supported in alter schema task")
 	}
+
+	fieldSchema := plan.Field
+	if err := checkFieldSchema([]*schemapb.FieldSchema{fieldSchema}); err != nil {
+		return merr.Wrap(err, "failed to check field schema")
+	}
+	if fieldSchema.GetDataType() == schemapb.DataType_Timestamptz {
+		timezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, coll.Properties)
+		if !exist {
+			timezone = common.DefaultTimezone
+		}
+		if err := timestamptz.CheckAndRewriteTimestampTzDefaultValueForFieldSchema(fieldSchema, timezone); err != nil {
+			return merr.WrapErrParameterInvalidMsg("invalid default value of field, name: %s, err: %w", fieldSchema.Name, err)
+		}
+	}
+
+	return nil
 }
 
-func validateAlterSchemaFunctionInputOutput(functionSchema *schemapb.FunctionSchema) error {
-	switch functionSchema.GetType() {
-	case schemapb.FunctionType_BM25:
-		inputCount := len(functionSchema.GetInputFieldNames())
-		if (inputCount != 1 && inputCount != 2) || len(functionSchema.GetOutputFieldNames()) != 1 {
-			return merr.WrapErrParameterInvalidMsg("BM25 function should have one or two input fields and exactly one output field")
-		}
-		return nil
-	case schemapb.FunctionType_MinHash:
-		if len(functionSchema.GetInputFieldNames()) != 1 || len(functionSchema.GetOutputFieldNames()) != 1 {
-			return merr.WrapErrParameterInvalidMsg("MinHash function should have exactly one input field and exactly one output field")
-		}
-		return nil
-	default:
-		return merr.WrapErrParameterInvalidMsg("unsupported function type in alter schema task: %s", functionSchema.GetType().String())
+func buildAlterSchemaAddSchema(coll *model.Collection, plan *schemautil.AlterSchemaAddPlan) (*schemapb.CollectionSchema, []*commonpb.KeyValuePair, error) {
+	schema := coll.ToCollectionSchemaPB()
+	name2id := make(map[string]int64, len(coll.Fields)+1)
+	for _, field := range coll.Fields {
+		name2id[field.Name] = field.FieldID
 	}
+
+	if plan.HasField() {
+		plan.Field.FieldID = maxAssignedFieldIDFromSchema(schema) + 1
+		name2id[plan.Field.GetName()] = plan.Field.GetFieldID()
+	}
+	if plan.HasFunction() {
+		function := plan.Function
+		function.Id = nextFunctionID(coll)
+		function.InputFieldIds = make([]int64, len(function.InputFieldNames))
+		for idx, name := range function.InputFieldNames {
+			fieldID, ok := name2id[name]
+			if !ok {
+				return nil, nil, merr.WrapErrParameterInvalidMsg("input field %s of function %s not found", name, function.GetName())
+			}
+			function.InputFieldIds[idx] = fieldID
+		}
+
+		function.OutputFieldIds = make([]int64, len(function.OutputFieldNames))
+		for idx, name := range function.OutputFieldNames {
+			fieldID, ok := name2id[name]
+			if !ok {
+				return nil, nil, merr.WrapErrParameterInvalidMsg("output field %s of function %s not found", name, function.GetName())
+			}
+			if plan.Kind == schemautil.AlterSchemaAddFunction {
+				for _, field := range coll.Fields {
+					if field.Name == name && field.IsFunctionOutput {
+						return nil, nil, merr.WrapErrParameterInvalidMsg("function output field %s is already of other functions", name)
+					}
+				}
+			}
+			function.OutputFieldIds[idx] = fieldID
+		}
+		schema.Functions = append(schema.Functions, function)
+	}
+
+	schema.Version = coll.SchemaVersion + 1
+	switch plan.Kind {
+	case schemautil.AlterSchemaAddField:
+		plan.Field.IsFunctionOutput = false
+	case schemautil.AlterSchemaAddFunctionField:
+		plan.Field.IsFunctionOutput = true
+	case schemautil.AlterSchemaAddFunction:
+		for _, outputFieldName := range plan.Function.GetOutputFieldNames() {
+			for _, field := range schema.Fields {
+				if field.GetName() == outputFieldName {
+					field.IsFunctionOutput = true
+					break
+				}
+			}
+		}
+	}
+
+	if plan.HasField() {
+		schema.Fields = append(schema.Fields, plan.Field)
+	}
+	properties := updateMaxFieldIDProperty(coll.Properties, maxAssignedFieldIDFromSchema(schema))
+	schema.Properties = properties
+	return schema, properties, nil
 }
 
 // broadcastAlterCollectionSchemaDrop handles DropRequest: dropping fields or functions.
