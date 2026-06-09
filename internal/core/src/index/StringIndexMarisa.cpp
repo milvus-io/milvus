@@ -154,74 +154,6 @@ ValidateMarisaEntryElementSize(const char* entry_name,
                bytes);
 }
 
-bool
-IsStoredMarisaNull(size_t str_id) {
-    return str_id == MARISA_NULL_KEY_ID || str_id == MARISA_INVALID_KEY_ID;
-}
-
-void
-ValidateMarisaStrIds(const int64_t* str_ids, size_t count, size_t num_keys) {
-    for (size_t i = 0; i < count; i++) {
-        auto raw_id = static_cast<size_t>(str_ids[i]);
-        if (IsStoredMarisaNull(raw_id)) {
-            continue;
-        }
-        AssertInfo(str_ids[i] >= 0 && raw_id < num_keys,
-                   "invalid marisa str id at offset {}: {}, num_keys {}",
-                   i,
-                   str_ids[i],
-                   num_keys);
-    }
-}
-
-void
-ValidateMarisaCsr(const uint32_t* csr_index,
-                  size_t csr_index_count,
-                  const uint32_t* csr_offsets,
-                  size_t csr_offsets_count,
-                  size_t num_keys,
-                  size_t num_rows) {
-    AssertInfo(csr_index_count == num_keys + 1,
-               "invalid marisa CSR index count: expected {}, got {}",
-               num_keys + 1,
-               csr_index_count);
-    AssertInfo(csr_offsets_count <= num_rows,
-               "invalid marisa CSR offsets count: expected at most {}, got {}",
-               num_rows,
-               csr_offsets_count);
-    AssertInfo(csr_index[0] == 0,
-               "invalid marisa CSR index: first offset must be 0, got {}",
-               csr_index[0]);
-
-    uint32_t previous = 0;
-    for (size_t i = 1; i < csr_index_count; i++) {
-        auto current = csr_index[i];
-        AssertInfo(current >= previous,
-                   "invalid marisa CSR index at {}: {} < {}",
-                   i,
-                   current,
-                   previous);
-        AssertInfo(current <= csr_offsets_count,
-                   "invalid marisa CSR index at {}: {} exceeds offsets {}",
-                   i,
-                   current,
-                   csr_offsets_count);
-        previous = current;
-    }
-    AssertInfo(csr_index[num_keys] == csr_offsets_count,
-               "invalid marisa CSR index terminal offset: expected {}, got {}",
-               csr_offsets_count,
-               csr_index[num_keys]);
-
-    for (size_t i = 0; i < csr_offsets_count; i++) {
-        AssertInfo(csr_offsets[i] < num_rows,
-                   "invalid marisa CSR row offset at {}: {} >= {}",
-                   i,
-                   csr_offsets[i],
-                   num_rows);
-    }
-}
-
 void
 StringIndexMarisa::Build(const Config& config) {
     if (built_) {
@@ -395,7 +327,6 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
         str_ids_.data(), str_ids->data.get(), str_ids_len);
     str_ids_ptr_ = str_ids_.data();
     str_ids_size_ = str_ids_.size();
-    ValidateMarisaStrIds(str_ids_ptr_, str_ids_size_, trie_.num_keys());
 
     fill_offsets();
     built_ = true;
@@ -1034,7 +965,6 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
         str_ids_ptr_ = str_ids_.data();
         str_ids_size_ = str_ids_.size();
     }
-    ValidateMarisaStrIds(str_ids_ptr_, str_ids_size_, trie_.num_keys());
 
     // Load persisted CSR or rebuild from str_ids
     auto has_csr_index = reader.HasEntry(MARISA_CSR_INDEX);
@@ -1176,12 +1106,6 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
             csr_index_ptr_ = csr_index_.data();
             csr_offsets_ptr_ = csr_offsets_.data();
         }
-        ValidateMarisaCsr(csr_index_ptr_,
-                          idx_bytes / sizeof(uint32_t),
-                          csr_offsets_ptr_,
-                          csr_offsets_count,
-                          csr_num_keys_,
-                          str_ids_size_);
     } else {
         // Backward compat: rebuild CSR from str_ids
         fill_offsets();

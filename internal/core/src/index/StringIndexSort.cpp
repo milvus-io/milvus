@@ -58,6 +58,23 @@
 
 namespace milvus::index {
 
+namespace {
+
+void
+SetIdxToOffset(std::vector<int32_t>& idx_to_offsets,
+               uint32_t row_id,
+               uint32_t unique_idx) {
+    if (static_cast<size_t>(row_id) >= idx_to_offsets.size()) {
+        ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                  fmt::format("row_id {} exceeds idx_to_offsets size {}",
+                              row_id,
+                              idx_to_offsets.size()));
+    }
+    idx_to_offsets[row_id] = unique_idx;
+}
+
+}  // namespace
+
 StringIndexSortImpl::ParsedData
 StringIndexSortImpl::ParseBinaryData(const uint8_t* data, size_t data_size) {
     ParsedData result;
@@ -998,14 +1015,7 @@ StringIndexSortMemoryImpl::LoadFromData(const uint8_t* data,
             posting_list.push_back(row_id);
 
             // Map each row_id to its unique value index
-            if (static_cast<size_t>(row_id) >= idx_to_offsets.size()) {
-                ThrowInfo(
-                    milvus::ErrorCode::UnexpectedError,
-                    fmt::format("row_id {} exceeds idx_to_offsets size {}",
-                                row_id,
-                                idx_to_offsets.size()));
-            }
-            idx_to_offsets[row_id] = unique_idx;
+            SetIdxToOffset(idx_to_offsets, row_id, unique_idx);
         }
 
         unique_values_.push_back(std::move(value));
@@ -1454,7 +1464,7 @@ StringIndexSortMmapImpl::LoadFromBuffer(std::vector<uint8_t>&& buffer,
     for (uint32_t unique_idx = 0; unique_idx < unique_count_; ++unique_idx) {
         MmapEntry entry = GetEntry(unique_idx);
         entry.for_each_row_id([&idx_to_offsets, unique_idx](uint32_t row_id) {
-            idx_to_offsets[row_id] = unique_idx;
+            SetIdxToOffset(idx_to_offsets, row_id, unique_idx);
         });
     }
 }
@@ -1499,7 +1509,7 @@ StringIndexSortMmapImpl::MmapAndParse(size_t data_size,
             MmapEntry entry = GetEntry(unique_idx);
             entry.for_each_row_id(
                 [&idx_to_offsets, unique_idx](uint32_t row_id) {
-                    idx_to_offsets[row_id] = unique_idx;
+                    SetIdxToOffset(idx_to_offsets, row_id, unique_idx);
                 });
         }
     }

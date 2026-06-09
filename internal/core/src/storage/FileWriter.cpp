@@ -521,15 +521,10 @@ PositionedFileWriter::WriteAt(size_t file_offset,
                size,
                file_size_);
 
-    try {
-        if (use_direct_io_) {
-            WriteDirectAlignedAt(file_offset, data, size);
-        } else {
-            WriteBufferedAt(file_offset, data, size);
-        }
-    } catch (...) {
-        Cleanup();
-        throw;
+    if (use_direct_io_) {
+        WriteDirectAlignedAt(file_offset, data, size);
+    } else {
+        WriteBufferedAt(file_offset, data, size);
     }
 }
 

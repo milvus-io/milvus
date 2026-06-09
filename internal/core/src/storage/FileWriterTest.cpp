@@ -461,6 +461,31 @@ TEST_F(FileWriterTest, PositionedWriterDirectIORejectsMiddleUnalignedWrite) {
                  std::runtime_error);
 }
 
+TEST_F(FileWriterTest, PositionedWriterKeepsFileOpenAfterWriteAtError) {
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
+
+    std::string filename =
+        (test_dir_ / "positioned_direct_error_recovery.txt").string();
+    std::vector<char> data(kBufferSize * 2);
+    std::generate(data.begin(), data.end(), std::rand);
+
+    {
+        PositionedFileWriter writer(filename, data.size());
+        EXPECT_THROW(writer.WriteAt(kBufferSize, data.data(), 17),
+                     std::runtime_error);
+        writer.WriteAt(0, data.data(), kBufferSize);
+        writer.WriteAt(kBufferSize, data.data() + kBufferSize, kBufferSize);
+        writer.Finish();
+    }
+
+    std::ifstream file(filename, std::ios::binary);
+    std::vector<char> read_data((std::istreambuf_iterator<char>(file)),
+                                std::istreambuf_iterator<char>());
+    ASSERT_EQ(read_data.size(), data.size());
+    EXPECT_EQ(read_data, data);
+}
+
 TEST_F(FileWriterTest, PositionedWriterDirectIOSupportsConcurrentWrites) {
     FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
     FileWriter::SetBufferSize(kBufferSize);
