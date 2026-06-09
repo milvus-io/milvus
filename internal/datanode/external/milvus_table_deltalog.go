@@ -77,7 +77,7 @@ func (t *RefreshExternalCollectionTask) addMilvusTableL0DeltalogsToManifest(
 					continue
 				}
 				seen[sourcePath] = struct{}{}
-				if err := packed.ValidateMilvusTableStorageV3DeltalogPath(sourcePath); err != nil {
+				if err := packed.ValidateMilvusTableSourceDeltalogPath(sourcePath); err != nil {
 					return "", err
 				}
 				logID := binlog.GetLogID()
@@ -160,6 +160,9 @@ func (t *RefreshExternalCollectionTask) getMilvusTableSourceManifestDeltalogs(
 	if err != nil {
 		return nil, fmt.Errorf("read milvus-table source manifest deltalogs %s: %w", manifestPath, err)
 	}
+	if err := validateMilvusTableStorageV3Deltalogs(deltalogs); err != nil {
+		return nil, err
+	}
 	if err := populateDeltalogIDsFromPath(deltalogs); err != nil {
 		return nil, err
 	}
@@ -174,9 +177,23 @@ func (t *RefreshExternalCollectionTask) getMilvusTableSourceManifestDeltalogs(
 	return deltalogs, nil
 }
 
-// populateDeltalogIDsFromPath fills missing source LogID values from StorageV3
-// _delta/<logID> paths. The parsed ID is stable across refresh rounds; invalid
-// paths are rejected instead of assigning a synthetic target-side ID.
+func validateMilvusTableStorageV3Deltalogs(binlogs []*datapb.FieldBinlog) error {
+	for _, fieldBinlog := range binlogs {
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			if binlog.GetLogPath() == "" {
+				continue
+			}
+			if err := packed.ValidateMilvusTableStorageV3DeltalogPath(binlog.GetLogPath()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// populateDeltalogIDsFromPath fills missing source LogID values from stable
+// deltalog path basenames. StorageV3 segment deltas use _delta/<logID>; snapshot
+// L0 delete overlays may still use legacy delta_log/.../<logID>.
 func populateDeltalogIDsFromPath(binlogs []*datapb.FieldBinlog) error {
 	for _, fieldBinlog := range binlogs {
 		for _, binlog := range fieldBinlog.GetBinlogs() {
@@ -197,15 +214,15 @@ func populateDeltalogIDsFromPath(binlogs []*datapb.FieldBinlog) error {
 }
 
 // parseMilvusTableDeltalogIDFromPath extracts the numeric log ID from a
-// StorageV3 source deltalog path.
+// milvus-table source deltalog path.
 func parseMilvusTableDeltalogIDFromPath(logPath string) (int64, error) {
-	if err := packed.ValidateMilvusTableStorageV3DeltalogPath(logPath); err != nil {
+	if err := packed.ValidateMilvusTableSourceDeltalogPath(logPath); err != nil {
 		return 0, err
 	}
 	logName := path.Base(strings.TrimRight(logPath, "/"))
 	logID, err := strconv.ParseInt(logName, 10, 64)
 	if err != nil || logID <= 0 {
-		return 0, fmt.Errorf("milvus-table StorageV3 deltalog path %s must end with a positive numeric log ID", logPath)
+		return 0, fmt.Errorf("milvus-table deltalog path %s must end with a positive numeric log ID", logPath)
 	}
 	return logID, nil
 }
@@ -288,7 +305,7 @@ func collectMilvusTableDeltalogRefs(fragments []packed.Fragment) ([]milvusTableD
 				if _, ok := seen[sourcePath]; ok {
 					continue
 				}
-				if err := packed.ValidateMilvusTableStorageV3DeltalogPath(sourcePath); err != nil {
+				if err := packed.ValidateMilvusTableSourceDeltalogPath(sourcePath); err != nil {
 					return nil, err
 				}
 				seen[sourcePath] = struct{}{}
@@ -512,17 +529,7 @@ func (t *RefreshExternalCollectionTask) loadMilvusTableSourceDeltalogDeletes(
 		if ref.logID == 0 {
 			return nil, nil, fmt.Errorf("milvus-table source deltalog %s has no allocated log ID", ref.sourcePath)
 		}
-		reader, err := storage.NewDeltalogReaderFromBinlogs(
-			sourcePKType,
-			[]*datapb.Binlog{{
-				LogPath:    ref.sourcePath,
-				LogID:      ref.logID,
-				EntriesNum: ref.numEntries,
-			}},
-			storage.WithVersion(storage.StorageV3),
-			storage.WithStorageConfig(t.req.GetStorageConfig()),
-			storage.WithExternalReaderContext(t.milvusTableExternalSpecContext()),
-		)
+		reader, err := t.newMilvusTableSourceDeltalogReader(ctx, ref, sourcePKType)
 		if err != nil {
 			return nil, nil, fmt.Errorf("read milvus-table source deltalog %s: %w", ref.sourcePath, err)
 		}
@@ -559,6 +566,49 @@ func (t *RefreshExternalCollectionTask) loadMilvusTableSourceDeltalogDeletes(
 		deltalogDeletes = append(deltalogDeletes, deletes)
 	}
 	return deltalogDeletes, deletedSourcePKKeys, nil
+}
+
+func (t *RefreshExternalCollectionTask) newMilvusTableSourceDeltalogReader(
+	ctx context.Context,
+	ref milvusTableDeltalogRef,
+	sourcePKType schemapb.DataType,
+) (storage.RecordReader, error) {
+	if packed.IsMilvusTableStorageV3DeltalogPath(ref.sourcePath) {
+		return storage.NewDeltalogReader(
+			sourcePKType,
+			[]string{ref.sourcePath},
+			storage.WithVersion(storage.StorageV3),
+			storage.WithStorageConfig(t.req.GetStorageConfig()),
+			storage.WithExternalReaderContext(t.milvusTableExternalSpecContext()),
+		)
+	}
+	if err := packed.ValidateMilvusTableSourceDeltalogPath(ref.sourcePath); err != nil {
+		return nil, err
+	}
+	return storage.NewDeltalogReader(
+		sourcePKType,
+		[]string{ref.sourcePath},
+		storage.WithVersion(storage.StorageV1),
+		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+			return t.readMilvusTableSourceFiles(ctx, paths)
+		}),
+	)
+}
+
+func (t *RefreshExternalCollectionTask) readMilvusTableSourceFiles(ctx context.Context, paths []string) ([][]byte, error) {
+	extfs := t.milvusTableExternalSpecContext()
+	files := make([][]byte, 0, len(paths))
+	for _, filePath := range paths {
+		if err := ensureContext(ctx); err != nil {
+			return nil, err
+		}
+		data, err := packed.ReadFileWithExternalSpec(t.req.GetStorageConfig(), filePath, extfs)
+		if err != nil {
+			return nil, fmt.Errorf("read milvus-table source file %s: %w", filePath, err)
+		}
+		files = append(files, data)
+	}
+	return files, nil
 }
 
 // appendMilvusTableSourceDeleteEventsFromRecord decodes one deltalog batch into

@@ -28,6 +28,7 @@
 
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/ffi_internal/result.h"
+#include "milvus-storage/filesystem/fs.h"
 
 using json = nlohmann::json;
 
@@ -169,47 +170,6 @@ DupString(const std::string& value) {
     return copied;
 }
 
-struct UriParts {
-    std::string scheme;
-    std::string host;
-    std::string path;
-};
-
-bool
-HasUriScheme(const std::string& path) {
-    return path.find("://") != std::string::npos;
-}
-
-UriParts
-ParseUri(const std::string& uri) {
-    auto scheme_end = uri.find("://");
-    if (scheme_end == std::string::npos) {
-        throw std::runtime_error("URI missing scheme: " + uri);
-    }
-    auto rest = uri.substr(scheme_end + 3);
-    auto slash_pos = rest.find('/');
-    UriParts parts;
-    parts.scheme = uri.substr(0, scheme_end);
-    parts.host =
-        slash_pos == std::string::npos ? rest : rest.substr(0, slash_pos);
-    parts.path =
-        slash_pos == std::string::npos ? "" : rest.substr(slash_pos + 1);
-    if (parts.host.empty()) {
-        throw std::runtime_error("URI has empty host: " + uri);
-    }
-    return parts;
-}
-
-std::string
-FirstPathSegment(const std::string& path) {
-    auto trimmed = path;
-    while (!trimmed.empty() && trimmed.front() == '/') {
-        trimmed.erase(trimmed.begin());
-    }
-    auto slash = trimmed.find('/');
-    return slash == std::string::npos ? trimmed : trimmed.substr(0, slash);
-}
-
 std::string
 TrimSlashes(std::string value) {
     while (!value.empty() && value.front() == '/') {
@@ -219,19 +179,6 @@ TrimSlashes(std::string value) {
         value.pop_back();
     }
     return value;
-}
-
-std::string
-JoinUriPath(const std::string& left, const std::string& right) {
-    auto lhs = TrimSlashes(left);
-    auto rhs = TrimSlashes(right);
-    if (lhs.empty()) {
-        return rhs;
-    }
-    if (rhs.empty()) {
-        return lhs;
-    }
-    return lhs + "/" + rhs;
 }
 
 std::string
@@ -255,34 +202,74 @@ FindExtfsProperty(const LoonProperties* properties, const std::string& suffix) {
 }
 
 std::string
-AddressHost(std::string address) {
-    auto scheme_end = address.find("://");
-    if (scheme_end != std::string::npos) {
-        address = address.substr(scheme_end + 3);
+MakeStorageUri(const milvus_storage::StorageUri& uri, bool include_address) {
+    auto result = milvus_storage::StorageUri::Make(uri, include_address);
+    if (!result.ok()) {
+        throw std::runtime_error("make storage URI: " +
+                                 result.status().ToString());
     }
-    auto slash = address.find('/');
-    if (slash != std::string::npos) {
-        address = address.substr(0, slash);
+    return result.ValueOrDie();
+}
+
+milvus_storage::StorageUri
+ParseStorageUri(const std::string& uri, bool include_address) {
+    auto result = milvus_storage::StorageUri::Parse(uri, include_address);
+    if (!result.ok()) {
+        throw std::runtime_error("parse storage URI " + uri + ": " +
+                                 result.status().ToString());
     }
-    return address;
+    return result.ValueOrDie();
+}
+
+bool
+TryParseStorageUri(const std::string& uri,
+                   bool include_address,
+                   milvus_storage::StorageUri& parsed) {
+    auto result = milvus_storage::StorageUri::Parse(uri, include_address);
+    if (!result.ok()) {
+        return false;
+    }
+    parsed = result.ValueOrDie();
+    return true;
+}
+
+std::string
+NormalizeExtfsAddress(const std::string& address) {
+    if (address.empty()) {
+        return "";
+    }
+    // StorageUri normalizes HTTP(S) addresses while building a URI; dummy
+    // bucket/key let us reuse that behavior for the endpoint-only extfs address.
+    milvus_storage::StorageUri uri;
+    uri.scheme = "s3";
+    uri.address = address;
+    uri.bucket_name = "__bucket__";
+    uri.key = "__key__";
+    auto normalized_uri = ParseStorageUri(MakeStorageUri(uri, true), true);
+    return normalized_uri.address;
 }
 
 std::string
 NormalizeExternalPathForStorage(const std::string& source_path,
                                 const LoonProperties* properties) {
-    if (!HasUriScheme(source_path) || properties == nullptr) {
-        return source_path;
-    }
-    auto uri = ParseUri(source_path);
-    auto bucket_name = FindExtfsProperty(properties, ".bucket_name");
-    auto address_host = AddressHost(FindExtfsProperty(properties, ".address"));
-    if (bucket_name.empty() || address_host.empty() ||
-        uri.host != bucket_name || address_host == uri.host) {
+    if (properties == nullptr) {
         return source_path;
     }
 
-    return uri.scheme + "://" + address_host + "/" +
-           JoinUriPath(bucket_name, uri.path);
+    auto uri = ParseStorageUri(source_path, false);
+    if (uri.IsRelativeUri()) {
+        return source_path;
+    }
+    auto bucket_name = FindExtfsProperty(properties, ".bucket_name");
+    auto address_host =
+        NormalizeExtfsAddress(FindExtfsProperty(properties, ".address"));
+    if (bucket_name.empty() || address_host.empty() ||
+        uri.bucket_name != bucket_name || address_host == uri.bucket_name) {
+        return source_path;
+    }
+
+    uri.address = address_host;
+    return MakeStorageUri(uri, true);
 }
 
 std::string
@@ -292,7 +279,8 @@ MakeExternalUriForSourcePath(const std::string& source_path,
     if (source_path.empty()) {
         return source_path;
     }
-    if (HasUriScheme(source_path)) {
+    auto path_uri = ParseStorageUri(source_path, false);
+    if (path_uri.IsAbsoluteUri()) {
         return NormalizeExternalPathForStorage(source_path, properties);
     }
     if (std::filesystem::path(source_path).is_absolute()) {
@@ -305,33 +293,45 @@ MakeExternalUriForSourcePath(const std::string& source_path,
             source_path);
     }
 
-    auto source = ParseUri(external_source);
+    auto source = ParseStorageUri(external_source, false);
+    if (source.IsRelativeUri()) {
+        throw std::runtime_error(
+            "milvus-table external_source must be a storage URI: " +
+            std::string(external_source));
+    }
     auto bucket_name = FindExtfsProperty(properties, ".bucket_name");
     if (bucket_name.empty()) {
         throw std::runtime_error(
             "milvus-table relative source path requires extfs bucket_name: " +
             source_path);
     }
-    auto address_host = AddressHost(FindExtfsProperty(properties, ".address"));
+    auto address_host =
+        NormalizeExtfsAddress(FindExtfsProperty(properties, ".address"));
 
-    UriParts resolved;
+    milvus_storage::StorageUri resolved;
     resolved.scheme = source.scheme;
-    resolved.host = source.host;
-    std::string relative_path = TrimSlashes(source_path);
+    resolved.bucket_name = bucket_name;
+    resolved.key = TrimSlashes(source_path);
     if (!address_host.empty()) {
-        resolved.host = address_host;
-        resolved.path = JoinUriPath(bucket_name, relative_path);
-    } else if (source.host == bucket_name) {
-        resolved.path = relative_path;
-    } else if (FirstPathSegment(source.path) == bucket_name) {
-        resolved.path = JoinUriPath(bucket_name, relative_path);
-    } else {
-        resolved.path = relative_path;
+        resolved.address = address_host;
+        return MakeStorageUri(resolved, true);
     }
 
-    return NormalizeExternalPathForStorage(
-        resolved.scheme + "://" + resolved.host + "/" + resolved.path,
-        properties);
+    if (source.bucket_name == bucket_name) {
+        return MakeStorageUri(resolved, false);
+    }
+
+    milvus_storage::StorageUri source_with_address;
+    if (TryParseStorageUri(external_source, true, source_with_address) &&
+        source_with_address.IsAbsoluteUri() &&
+        source_with_address.bucket_name == bucket_name &&
+        !source_with_address.address.empty()) {
+        resolved.address = source_with_address.address;
+        return MakeStorageUri(resolved, true);
+    }
+
+    resolved.bucket_name = source.bucket_name;
+    return MakeStorageUri(resolved, false);
 }
 
 uint32_t
