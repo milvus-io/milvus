@@ -220,10 +220,10 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 
 func checkAlterSchemaFunctionAllowed(functionSchema *schemapb.FunctionSchema) error {
 	switch functionSchema.GetType() {
-	case schemapb.FunctionType_BM25:
+	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
 		return nil
 	default:
-		return merr.WrapErrParameterInvalidMsg("For now, only BM25 function is supported in alter schema task")
+		return merr.WrapErrParameterInvalidMsg("For now, only BM25 and MinHash functions are supported in alter schema task")
 	}
 }
 
@@ -233,6 +233,11 @@ func validateAlterSchemaFunctionInputOutput(functionSchema *schemapb.FunctionSch
 		inputCount := len(functionSchema.GetInputFieldNames())
 		if (inputCount != 1 && inputCount != 2) || len(functionSchema.GetOutputFieldNames()) != 1 {
 			return merr.WrapErrParameterInvalidMsg("BM25 function should have one or two input fields and exactly one output field")
+		}
+		return nil
+	case schemapb.FunctionType_MinHash:
+		if len(functionSchema.GetInputFieldNames()) != 1 || len(functionSchema.GetOutputFieldNames()) != 1 {
+			return merr.WrapErrParameterInvalidMsg("MinHash function should have exactly one input field and exactly one output field")
 		}
 		return nil
 	default:

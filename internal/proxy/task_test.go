@@ -7256,6 +7256,13 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		Name:     "sparse_bm25",
 		DataType: schemapb.DataType_SparseFloatVector,
 	}
+	minHashOutputField := &schemapb.FieldSchema{
+		Name:     "minhash_binary",
+		DataType: schemapb.DataType_BinaryVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "32"},
+		},
+	}
 
 	// BM25 function schema: input "text", output "sparse_bm25".
 	functionSchema := &schemapb.FunctionSchema{
@@ -7265,7 +7272,9 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		OutputFieldNames: []string{"sparse_bm25"},
 	}
 
-	buildValidRequest := func() *milvuspb.AlterCollectionSchemaRequest {
+	buildAddFunctionRequest := func(field *schemapb.FieldSchema, function *schemapb.FunctionSchema) *milvuspb.AlterCollectionSchemaRequest {
+		field = proto.Clone(field).(*schemapb.FieldSchema)
+		function = proto.Clone(function).(*schemapb.FunctionSchema)
 		return &milvuspb.AlterCollectionSchemaRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
@@ -7273,13 +7282,17 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
 					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
 						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
-							{FieldSchema: sparseOutputField},
+							{FieldSchema: field},
 						},
-						FuncSchema: []*schemapb.FunctionSchema{functionSchema},
+						FuncSchema: []*schemapb.FunctionSchema{function},
 					},
 				},
 			},
 		}
+	}
+
+	buildValidRequest := func() *milvuspb.AlterCollectionSchemaRequest {
+		return buildAddFunctionRequest(sparseOutputField, functionSchema)
 	}
 
 	buildTask := func(req *milvuspb.AlterCollectionSchemaRequest, schema *schemapb.CollectionSchema) *alterCollectionSchemaTask {
@@ -7500,18 +7513,30 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
-	t.Run("PreExecute rejects non-BM25 function", func(t *testing.T) {
+	t.Run("PreExecute happy path for MinHash", func(t *testing.T) {
+		functionSchema := &schemapb.FunctionSchema{
+			Name:             "minhash_func",
+			Type:             schemapb.FunctionType_MinHash,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"minhash_binary"},
+		}
+		task := buildTask(buildAddFunctionRequest(minHashOutputField, functionSchema), oldSchema)
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("PreExecute rejects unsupported function", func(t *testing.T) {
 		req := buildValidRequest()
 		addRequest := req.GetAction().GetAddRequest()
 		functionSchema := proto.Clone(addRequest.GetFuncSchema()[0]).(*schemapb.FunctionSchema)
-		functionSchema.Type = schemapb.FunctionType_MinHash
+		functionSchema.Type = schemapb.FunctionType_TextEmbedding
 		addRequest.FuncSchema = []*schemapb.FunctionSchema{functionSchema}
 
 		task := buildTask(req, oldSchema)
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.ErrorContains(t, err, "only BM25 function is supported")
+		assert.ErrorContains(t, err, "only BM25 and MinHash functions are supported")
 	})
 
 	t.Run("PreExecute ignores legacy DoPhysicalBackfill", func(t *testing.T) {
