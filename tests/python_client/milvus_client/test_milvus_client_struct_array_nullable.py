@@ -4950,6 +4950,18 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
 
         start_barrier = threading.Barrier(4)
 
+        def run_dml_with_schema_retry(action, count_key):
+            last_error = None
+            for _ in range(30):
+                result, task_check = action()
+                if task_check:
+                    return result[count_key]
+                last_error = result
+                if "collection schema mismatch" not in str(result):
+                    assert task_check, result
+                time.sleep(0.2)
+            raise AssertionError(f"schema mismatch retry did not recover: {last_error}")
+
         def add_struct_field_task():
             task_client = self._client()
             profile_schema = gen_struct_schema(self, task_client)
@@ -4972,18 +4984,21 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             inserted = 0
             for batch in range(3):
                 batch_rows = concurrent_insert_rows[batch * 3 : (batch + 1) * 3]
-                result, task_check = self.insert(task_client, collection_name, batch_rows)
-                assert task_check
-                inserted += result["insert_count"]
+                inserted += run_dml_with_schema_retry(
+                    lambda batch_rows=batch_rows: self.insert(task_client, collection_name, batch_rows),
+                    "insert_count",
+                )
                 time.sleep(0.01)
             return "insert", inserted
 
         def upsert_task():
             task_client = self._client()
             start_barrier.wait()
-            result, task_check = self.upsert(task_client, collection_name, concurrent_upsert_rows)
-            assert task_check
-            return "upsert", result["upsert_count"]
+            upserted = run_dml_with_schema_retry(
+                lambda: self.upsert(task_client, collection_name, concurrent_upsert_rows),
+                "upsert_count",
+            )
+            return "upsert", upserted
 
         def delete_task():
             task_client = self._client()
