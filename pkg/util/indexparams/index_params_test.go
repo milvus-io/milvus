@@ -121,6 +121,57 @@ func TestDiskIndexParams(t *testing.T) {
 		buildNumThreadsRatio, err := strconv.ParseFloat(indexParams[NumBuildThreadRatioKey], 64)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, buildNumThreadsRatio)
+
+		indexParams = make(map[string]string)
+		indexParams[common.IndexTypeKey] = "DISKANN"
+		str, err = json.Marshal(indexParams)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
+		err = FillDiskIndexParams(&params, indexParams)
+		assert.Error(t, err)
+		indexParams[common.IndexTypeKey] = "AISAQ"
+		str, err = json.Marshal(indexParams)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
+		err = FillDiskIndexParams(&params, indexParams)
+		assert.Error(t, err)
+		indexParams[common.IndexTypeKey] = "AISAQ"
+		indexParams["max_degree"] = "56"
+		str, err = json.Marshal(indexParams)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
+		err = FillDiskIndexParams(&params, indexParams)
+		assert.Error(t, err)
+		indexParams[common.IndexTypeKey] = "AISAQ"
+		indexParams["max_degree"] = "56"
+		indexParams["search_list_size"] = "100"
+		str, err = json.Marshal(indexParams)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
+		params.Save(params.AutoIndexConfig.ExtraParams.Key, "")
+		err = FillDiskIndexParams(&params, indexParams)
+		assert.Error(t, err)
+		indexParams["max_degree"] = "56"
+		indexParams["search_list_size"] = "100"
+		str, err = json.Marshal(indexParams)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
+		str2, err2 := json.Marshal(mapString)
+		assert.NoError(t, err2)
+		params.Save(params.AutoIndexConfig.ExtraParams.Key, string(str2))
+		err = FillDiskIndexParams(&params, indexParams)
+		assert.Error(t, err)
+		indexParams["max_degree"] = "56"
+		indexParams["search_list_size"] = "100"
+		indexParams["pq_cache_size"] = "xxx"
+		str, err = json.Marshal(indexParams)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
+		str2, err2 = json.Marshal(mapString)
+		assert.NoError(t, err2)
+		params.Save(params.AutoIndexConfig.ExtraParams.Key, string(str2))
+		err = FillDiskIndexParams(&params, indexParams)
+		assert.Error(t, err)
 	})
 
 	t.Run("fill AISAQ index params with auto index", func(t *testing.T) {
@@ -316,6 +367,39 @@ func TestDiskIndexParams(t *testing.T) {
 		indexParams, err = UpdateDiskIndexBuildParams(&params, indexParams)
 		assert.NoError(t, err)
 		assert.True(t, len(indexParams) == 2)
+
+		indexParams = make([]*commonpb.KeyValuePair, 0, 3)
+		indexParams = append(indexParams,
+			&commonpb.KeyValuePair{
+				Key:   common.IndexTypeKey,
+				Value: "DISKANN",
+			})
+
+		params.Save(params.AutoIndexConfig.Enable.Key, "true")
+		params.Save(params.AutoIndexConfig.ExtraParams.Key, "")
+		indexParams, err = UpdateDiskIndexBuildParams(&params, indexParams)
+		assert.Error(t, err)
+
+		newJSONStr = `
+				{
+					"build_ratio": "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1}",
+					"prepare_ratio": "{\"search_cache_budget_gb\": 0.325, \"num_threads\": 8}",
+					"beamwidth_ratio": "8.0"
+				}
+			`
+		params.Save(params.AutoIndexConfig.Enable.Key, "false")
+		params.Save(params.AutoIndexConfig.ExtraParams.Key, newJSONStr)
+		params.Save(params.CommonCfg.SearchCacheBudgetGBRatio.Key, "")
+		indexParams, err = UpdateDiskIndexBuildParams(&params, indexParams)
+		assert.Error(t, err)
+
+		indexParams = append(indexParams,
+			&commonpb.KeyValuePair{
+				Key:   SearchCacheBudgetRatioKey,
+				Value: "aaa",
+			})
+		indexParams, err = UpdateDiskIndexBuildParams(&params, indexParams)
+		assert.Error(t, err)
 	})
 
 	t.Run("set disk index build params", func(t *testing.T) {
@@ -356,6 +440,8 @@ func TestDiskIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_SparseFloatVector)
 		assert.Error(t, err)
+		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_None)
+		assert.NoError(t, err)
 		indexParams = make(map[string]string)
 		indexParams[DiskPQCodeBudgetRatioKey] = "0.2"
 		indexParams[PQCodeBudgetRatioKey] = "0.125"
@@ -364,6 +450,26 @@ func TestDiskIndexParams(t *testing.T) {
 		indexParams[common.DimKey] = "128"
 		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
 		assert.NoError(t, err)
+
+		indexParams[PQCodeBudgetRatioKey] = "bbb"
+		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
+		assert.Error(t, err)
+		indexParams = make(map[string]string)
+		indexParams[PQCodeBudgetRatioKey] = "0.125"
+		indexParams[NumBuildThreadRatioKey] = "1.0"
+		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
+		assert.Error(t, err)
+		indexParams[DiskPQCodeBudgetRatioKey] = "ccc"
+		indexParams[common.IndexTypeKey] = "AISAQ"
+		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
+		assert.Error(t, err)
+		indexParams[DiskPQCodeBudgetRatioKey] = "0.2"
+		indexParams[common.IndexTypeKey] = "AISAQ"
+		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
+		assert.Error(t, err)
+		indexParams[common.DimKey] = "ddd"
+		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
+		assert.Error(t, err)
 	})
 
 	t.Run("set disk index load params without auto index param", func(t *testing.T) {
@@ -512,6 +618,14 @@ func TestDiskIndexParams(t *testing.T) {
 		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
 
 		indexParams = make(map[string]string)
+		err = SetDiskIndexLoadParams(&params, indexParams, 100)
+		assert.Error(t, err)
+
+		indexParams = make(map[string]string)
+		indexParams[common.DimKey] = "eee"
+		err = SetDiskIndexLoadParams(&params, indexParams, 100)
+		assert.Error(t, err)
+		indexParams[common.DimKey] = "128"
 		err = SetDiskIndexLoadParams(&params, indexParams, 100)
 		assert.Error(t, err)
 	})
