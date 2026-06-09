@@ -24,14 +24,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -97,7 +97,7 @@ func TestProxy_GetReplicateInfo_GetSalvageCheckpointUnimplemented(t *testing.T) 
 	replicateService.EXPECT().GetReplicateCheckpoint(mock.Anything, "test-pchannel").
 		Return(&utility.ReplicateCheckpoint{ClusterID: "cluster-a", PChannel: "test-pchannel", TimeTick: 100}, nil)
 	replicateService.EXPECT().GetSalvageCheckpoint(mock.Anything, "test-pchannel").
-		Return(nil, status.Error(codes.Unimplemented, "method GetSalvageCheckpoint not implemented"))
+		Return(nil, grpcstatus.Error(codes.Unimplemented, "method GetSalvageCheckpoint not implemented"))
 
 	mockWAL := mock_streaming.NewMockWALAccesser(t)
 	mockWAL.EXPECT().Replicate().Return(replicateService)
@@ -247,7 +247,7 @@ func TestProxy_GetReplicateInfo_ReplicateViolation_ReturnsSalvageCheckpoint(t *t
 	}
 	replicateService := mock_streaming.NewMockReplicateService(t)
 	replicateService.EXPECT().GetReplicateCheckpoint(mock.Anything, "test-pchannel").
-		Return(nil, status.NewReplicateViolation("wal is not a secondary cluster in replicating topology"))
+		Return(nil, streamingstatus.NewReplicateViolation("wal is not a secondary cluster in replicating topology"))
 	replicateService.EXPECT().GetSalvageCheckpoint(mock.Anything, "test-pchannel").
 		Return(salvageCPs, nil)
 
