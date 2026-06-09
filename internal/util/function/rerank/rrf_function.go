@@ -39,8 +39,8 @@ type RRFFunction[T PKType] struct {
 	k float32
 }
 
-func newRRFFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema) (Reranker, error) {
-	base, err := newRerankBase(collSchema, funcSchema, RRFName, true)
+func newRRFFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema, pkTypeOverride ...schemapb.DataType) (Reranker, error) {
+	base, err := newRerankBase(collSchema, funcSchema, RRFName, true, pkTypeOverride...)
 	if err != nil {
 		return nil, err
 	}

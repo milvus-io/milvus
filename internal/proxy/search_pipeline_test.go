@@ -521,7 +521,7 @@ func (s *SearchPipelineSuite) TestElementLevelHybridRerankAcceptsSyntheticString
 			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector},
 		},
 	}
-	functionScore, err := rerank.NewFunctionScoreWithlegacy(elementLevelHybridRerankSchema(schema), nil)
+	functionScore, err := rerank.NewFunctionScoreWithlegacyAndPKType(schema, nil, schemapb.DataType_VarChar)
 	s.Require().NoError(err)
 
 	input := &milvuspb.SearchResults{
@@ -559,6 +559,79 @@ func (s *SearchPipelineSuite) TestElementLevelHybridRerankAcceptsSyntheticString
 	s.Require().NoError(err)
 	s.Equal([]int64{10, 10}, restored.GetResults().GetIds().GetIntId().GetData())
 	s.Equal([]int64{0, 2}, restored.GetResults().GetElementIndices().GetData())
+}
+
+func (s *SearchPipelineSuite) TestElementLevelHybridDecayRerankAcceptsInt64PKInputField() {
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
+	}
+	functionSchema := &schemapb.FunctionSchema{
+		Name:             "test_decay",
+		Type:             schemapb.FunctionType_Rerank,
+		InputFieldNames:  []string{"pk"},
+		OutputFieldNames: []string{},
+		Params: []*commonpb.KeyValuePair{
+			{Key: "reranker", Value: "decay"},
+			{Key: "origin", Value: "10"},
+			{Key: "scale", Value: "4"},
+			{Key: "offset", Value: "0"},
+			{Key: "decay", Value: "0.5"},
+			{Key: "function", Value: "gauss"},
+		},
+	}
+	functionScore, err := rerank.NewFunctionScoreWithPKType(schema, &schemapb.FunctionScore{
+		Functions: []*schemapb.FunctionSchema{functionSchema},
+	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"}, schemapb.DataType_VarChar)
+	s.Require().NoError(err)
+
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{10, 10, 20}},
+				},
+			},
+			FieldsData: []*schemapb.FieldData{{
+				FieldName: "pk",
+				FieldId:   100,
+				Type:      schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{Data: []int64{10, 10, 20}},
+						},
+					},
+				},
+			}},
+			Scores:         []float32{0.8, 0.9, 0.7},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0, 2, 1}},
+		},
+	}
+	prepared, err := prepareElementLevelHybridResult(input)
+	s.Require().NoError(err)
+
+	op := &rerankOperator{
+		nq:            1,
+		topK:          2,
+		offset:        0,
+		roundDecimal:  -1,
+		functionScore: functionScore,
+	}
+	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{prepared}, []string{"IP"})
+	s.Require().NoError(err)
+
+	rankResult := out[0].(*milvuspb.SearchResults)
+	s.Require().NotNil(rankResult.GetResults().GetIds().GetStrId())
+	_, err = restoreElementLevelHybridRankResult(rankResult)
+	s.Require().NoError(err)
 }
 
 func (s *SearchPipelineSuite) TestElementBestCollapseOpRejectsEmptyMetricForElementLevelResult() {

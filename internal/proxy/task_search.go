@@ -623,7 +623,6 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 }
 
 func (t *searchTask) useElementLevelHybridFunctionScore() error {
-	rerankSchema := elementLevelHybridRerankSchema(t.schema.CollectionSchema)
 	extraInfo := &models.ModelExtraInfo{
 		ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 		DBName:    t.request.GetDbName(),
@@ -631,28 +630,14 @@ func (t *searchTask) useElementLevelHybridFunctionScore() error {
 
 	var err error
 	if t.request.FunctionScore != nil {
-		t.functionScore, err = rerank.NewFunctionScore(rerankSchema, t.request.FunctionScore, extraInfo)
+		t.functionScore, err = rerank.NewFunctionScoreWithPKType(t.schema.CollectionSchema, t.request.FunctionScore, extraInfo, schemapb.DataType_VarChar)
 	} else {
-		t.functionScore, err = rerank.NewFunctionScoreWithlegacy(rerankSchema, t.request.GetSearchParams())
+		t.functionScore, err = rerank.NewFunctionScoreWithlegacyAndPKType(t.schema.CollectionSchema, t.request.GetSearchParams(), schemapb.DataType_VarChar)
 	}
 	if err != nil {
 		return err
 	}
 	return nil
-}
-
-func elementLevelHybridRerankSchema(collSchema *schemapb.CollectionSchema) *schemapb.CollectionSchema {
-	cloned, ok := proto.Clone(collSchema).(*schemapb.CollectionSchema)
-	if !ok || cloned == nil {
-		return collSchema
-	}
-	for _, field := range cloned.GetFields() {
-		if field.GetIsPrimaryKey() {
-			field.DataType = schemapb.DataType_VarChar
-			break
-		}
-	}
-	return cloned
 }
 
 func (t *searchTask) fillResult() {

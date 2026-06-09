@@ -128,7 +128,7 @@ type FunctionScore struct {
 	reranker Reranker
 }
 
-func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema, extraInfo *models.ModelExtraInfo) (Reranker, error) {
+func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema, extraInfo *models.ModelExtraInfo, pkTypeOverride ...schemapb.DataType) (Reranker, error) {
 	if funcSchema.GetType() != schemapb.FunctionType_Rerank {
 		return nil, fmt.Errorf("%s is not rerank function", funcSchema.GetType().String())
 	}
@@ -141,13 +141,13 @@ func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.
 	var newRerankErr error
 	switch rerankerName {
 	case DecayFunctionName:
-		rerankFunc, newRerankErr = newDecayFunction(collSchema, funcSchema)
+		rerankFunc, newRerankErr = newDecayFunction(collSchema, funcSchema, pkTypeOverride...)
 	case ModelFunctionName:
-		rerankFunc, newRerankErr = newModelFunction(collSchema, funcSchema, extraInfo)
+		rerankFunc, newRerankErr = newModelFunction(collSchema, funcSchema, extraInfo, pkTypeOverride...)
 	case RRFName:
-		rerankFunc, newRerankErr = newRRFFunction(collSchema, funcSchema)
+		rerankFunc, newRerankErr = newRRFFunction(collSchema, funcSchema, pkTypeOverride...)
 	case WeightedName:
-		rerankFunc, newRerankErr = newWeightedFunction(collSchema, funcSchema)
+		rerankFunc, newRerankErr = newWeightedFunction(collSchema, funcSchema, pkTypeOverride...)
 	case BoostName:
 		return nil, nil
 	default:
@@ -161,10 +161,18 @@ func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.
 }
 
 func NewFunctionScore(collSchema *schemapb.CollectionSchema, funcScoreSchema *schemapb.FunctionScore, extraInfo *models.ModelExtraInfo) (*FunctionScore, error) {
+	return newFunctionScore(collSchema, funcScoreSchema, extraInfo)
+}
+
+func NewFunctionScoreWithPKType(collSchema *schemapb.CollectionSchema, funcScoreSchema *schemapb.FunctionScore, extraInfo *models.ModelExtraInfo, pkType schemapb.DataType) (*FunctionScore, error) {
+	return newFunctionScore(collSchema, funcScoreSchema, extraInfo, pkType)
+}
+
+func newFunctionScore(collSchema *schemapb.CollectionSchema, funcScoreSchema *schemapb.FunctionScore, extraInfo *models.ModelExtraInfo, pkTypeOverride ...schemapb.DataType) (*FunctionScore, error) {
 	funcScore := &FunctionScore{}
 
 	for _, function := range funcScoreSchema.Functions {
-		reranker, err := createFunction(collSchema, function, extraInfo)
+		reranker, err := createFunction(collSchema, function, extraInfo, pkTypeOverride...)
 		if err != nil {
 			return nil, err
 		}
@@ -186,6 +194,14 @@ func NewFunctionScore(collSchema *schemapb.CollectionSchema, funcScoreSchema *sc
 }
 
 func NewFunctionScoreWithlegacy(collSchema *schemapb.CollectionSchema, rankParams []*commonpb.KeyValuePair) (*FunctionScore, error) {
+	return newFunctionScoreWithlegacy(collSchema, rankParams)
+}
+
+func NewFunctionScoreWithlegacyAndPKType(collSchema *schemapb.CollectionSchema, rankParams []*commonpb.KeyValuePair, pkType schemapb.DataType) (*FunctionScore, error) {
+	return newFunctionScoreWithlegacy(collSchema, rankParams, pkType)
+}
+
+func newFunctionScoreWithlegacy(collSchema *schemapb.CollectionSchema, rankParams []*commonpb.KeyValuePair, pkTypeOverride ...schemapb.DataType) (*FunctionScore, error) {
 	var params map[string]interface{}
 	rankTypeStr, err := funcutil.GetAttrByKeyFromRepeatedKV(legacyRankTypeKey, rankParams)
 	if err != nil {
@@ -241,7 +257,7 @@ func NewFunctionScoreWithlegacy(collSchema *schemapb.CollectionSchema, rankParam
 		return nil, fmt.Errorf("unsupported rank type %s", rankTypeStr)
 	}
 	funcScore := &FunctionScore{}
-	if funcScore.reranker, err = createFunction(collSchema, &fSchema, &models.ModelExtraInfo{}); err != nil {
+	if funcScore.reranker, err = createFunction(collSchema, &fSchema, &models.ModelExtraInfo{}, pkTypeOverride...); err != nil {
 		return nil, err
 	}
 	return funcScore, nil

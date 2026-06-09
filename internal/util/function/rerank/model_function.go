@@ -109,8 +109,8 @@ type ModelFunction[T PKType] struct {
 	queries  []string
 }
 
-func newModelFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema, extraInfo *models.ModelExtraInfo) (Reranker, error) {
-	base, err := newRerankBase(collSchema, funcSchema, DecayFunctionName, true)
+func newModelFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema, extraInfo *models.ModelExtraInfo, pkTypeOverride ...schemapb.DataType) (Reranker, error) {
+	base, err := newRerankBase(collSchema, funcSchema, DecayFunctionName, true, pkTypeOverride...)
 	if err != nil {
 		return nil, err
 	}
