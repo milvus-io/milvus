@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <boost/iterator/counting_iterator.hpp>
+#include "common/FastMem.h"
 #include <cxxabi.h>
 #include <algorithm>
 #include <cstring>
@@ -577,6 +578,14 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         if (field_id_to_offset.count(field_id) > 0) {
             continue;
         }
+        if (schema_->is_function_output(field_id)) {
+            LOG_INFO(
+                "schema newer than insert data found for segment {}, skip "
+                "bulk fill for function output field {}",
+                id_,
+                field_id.get());
+            continue;
+        }
         LOG_INFO(
             "schema newer than insert data found for segment {}, attach empty "
             "field data"
@@ -605,8 +614,12 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         if (field_id.get() < START_USER_FIELDID) {
             continue;
         }
-        AssertInfo(field_id_to_offset.count(field_id),
-                   fmt::format("can't find field {}", field_id.get()));
+        if (field_id_to_offset.count(field_id) == 0) {
+            AssertInfo(schema_->is_function_output(field_id),
+                       "field {} missing from insert without bulk fill",
+                       field_id.get());
+            continue;
+        }
         auto data_offset = field_id_to_offset[field_id];
         if (field_meta.is_nullable()) {
             insert_record_.get_valid_data(field_id)->set_data_raw(
@@ -778,6 +791,15 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
     auto reserved_offset = PreInsert(num_rows);
     for (auto& [id, info] : infos.field_infos) {
         auto field_id = FieldId(id);
+
+        // Skip fields that have been dropped from schema (except system fields)
+        if (!SystemProperty::Instance().IsSystem(field_id) &&
+            !schema_->has_field(field_id)) {
+            LOG_INFO("growing segment skips dropped field {} during load",
+                     field_id.get());
+            continue;
+        }
+
         auto insert_files = info.insert_files;
         storage::SortByPath(insert_files);
 
@@ -847,6 +869,14 @@ SegmentGrowingImpl::load_field_data_common(
     if (field_id == RowFieldID) {
         insert_record_.row_ids_.set_data_raw(reserved_offset, field_data);
         stats_.mem_size += storage::GetByteSizeOfFieldDatas(field_data);
+        return;
+    }
+
+    // Skip if field has been dropped from schema
+    if (!schema_->has_field(field_id)) {
+        LOG_INFO(
+            "growing segment skips dropped field {} in load_field_data_common",
+            field_id.get());
         return;
     }
 
@@ -1017,6 +1047,16 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                        ->metadata()
                                        ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
                                        ->data());
+
+                    // Skip if field has been dropped from schema
+                    if (!schema_->has_field(FieldId(field_id))) {
+                        LOG_INFO(
+                            "growing segment skips dropped field {} in column "
+                            "group",
+                            field_id);
+                        continue;
+                    }
+
                     for (auto& field : schema_->get_fields()) {
                         if (field.second.get_id().get() != field_id) {
                             continue;
@@ -1711,7 +1751,7 @@ SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
                 auto dst = output_base + i * element_sizeof;
                 auto offset = seg_offsets[i];
                 auto src = (const uint8_t*)vec.get_physical_element(offset);
-                memcpy(dst, src, element_sizeof);
+                milvus::fastmem::FastMemcpy(dst, src, element_sizeof);
             }
             return;
         }
@@ -2166,6 +2206,9 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
         auto absent_fields = sch->AbsentFields(*schema_);
 
         for (const auto& field_meta : *absent_fields) {
+            if (sch->is_function_output(field_meta.get_id())) {
+                continue;
+            }
             fill_empty_field(field_meta);
         }
 
@@ -2173,6 +2216,9 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
 
         auto row_count = insert_record_.row_count();
         for (const auto& field_meta : *absent_fields) {
+            if (sch->is_function_output(field_meta.get_id())) {
+                continue;
+            }
             EnsureArrayOffsetsForStructField(field_meta, row_count);
         }
     }
@@ -2254,6 +2300,9 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx,
 
     for (const auto& [field_id, field_meta] : schema_->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
+            continue;
+        }
+        if (schema_->is_function_output(field_id)) {
             continue;
         }
         // append_data is called according to schema before
@@ -2601,19 +2650,11 @@ SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
 
         if (vec_index != nullptr && vec_index->HasValidData()) {
             result.valid_data = std::make_unique<bool[]>(count);
-            result.valid_offsets.reserve(count);
-
-            for (int64_t i = 0; i < count; ++i) {
-                bool is_valid = vec_index->IsRowValid(seg_offsets[i]);
-                result.valid_data[i] = is_valid;
-                if (is_valid) {
-                    int64_t physical_offset =
-                        vec_index->GetPhysicalOffset(seg_offsets[i]);
-                    if (physical_offset >= 0) {
-                        result.valid_offsets.push_back(physical_offset);
-                    }
-                }
-            }
+            vec_index->GetOffsetMapping().FilterValidLogicalOffsets(
+                seg_offsets,
+                count,
+                result.valid_data.get(),
+                result.valid_offsets);
             result.valid_count = result.valid_offsets.size();
         }
     } else {
@@ -2623,23 +2664,22 @@ SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
             bool is_mapping_storage = vec_base->is_mapping_storage();
             if (!valid_data_vec.empty()) {
                 result.valid_data = std::make_unique<bool[]>(count);
-                result.valid_offsets.reserve(count);
 
-                for (int64_t i = 0; i < count; ++i) {
-                    auto offset = seg_offsets[i];
-                    bool is_valid =
-                        offset >= 0 &&
-                        offset < static_cast<int64_t>(valid_data_vec.size()) &&
-                        valid_data_vec[offset];
-                    result.valid_data[i] = is_valid;
-                    if (is_valid) {
-                        if (is_mapping_storage) {
-                            int64_t physical_offset =
-                                vec_base->get_physical_offset(offset);
-                            if (physical_offset >= 0) {
-                                result.valid_offsets.push_back(physical_offset);
-                            }
-                        }
+                if (is_mapping_storage) {
+                    vec_base->get_offset_mapping().FilterValidLogicalOffsets(
+                        seg_offsets,
+                        count,
+                        result.valid_data.get(),
+                        result.valid_offsets);
+                } else {
+                    result.valid_offsets.reserve(count);
+                    for (int64_t i = 0; i < count; ++i) {
+                        auto offset = seg_offsets[i];
+                        bool is_valid = offset >= 0 &&
+                                        offset < static_cast<int64_t>(
+                                                     valid_data_vec.size()) &&
+                                        valid_data_vec[offset];
+                        result.valid_data[i] = is_valid;
                     }
                 }
                 result.valid_count = result.valid_offsets.size();

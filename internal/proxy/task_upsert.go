@@ -1161,6 +1161,11 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		log.Warn("fill field properties failed when upsert", zap.Error(err))
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
 	}
+	err = normalizeFP32ToFP16BF16VectorFieldData(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema)
+	if err != nil {
+		log.Warn("normalize fp32 to fp16/bf16 vector field data failed when upsert", zap.Error(err))
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
+	}
 
 	if it.partitionKeyMode {
 		fieldSchema, _ := typeutil.GetPartitionKeyFieldSchema(it.schema.CollectionSchema)

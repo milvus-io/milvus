@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -161,6 +162,12 @@ func (pw *packedBinlogRecordWriterBase) GetLogs() (
 
 func (pw *packedBinlogRecordWriterBase) GetRowNum() int64 {
 	return pw.rowNum
+}
+
+func (pw *packedBinlogRecordWriterBase) fillV3ColumnGroupFormats() (string, []string) {
+	writerFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
+	pw.columnGroups = storagecommon.FillColumnGroupFormats(pw.columnGroups, writerFormat)
+	return writerFormat, storagecommon.ColumnGroupFormats(pw.columnGroups, writerFormat)
 }
 
 func (pw *packedBinlogRecordWriterBase) FlushChunk() error {
@@ -425,11 +432,12 @@ func (pw *PackedManifestRecordWriter) initWriters(r Record) error {
 			allFields := typeutil.GetAllFieldSchemas(pw.schema)
 			pw.columnGroups = storagecommon.SplitColumns(allFields, pw.getColumnStatsFromRecord(r, allFields), storagecommon.DefaultPolicies()...)
 		}
+		writerFormat, schemaBasedFormats := pw.fillV3ColumnGroupFormats()
 
 		var err error
 		k := metautil.JoinIDPath(pw.collectionID, pw.partitionID, pw.segmentID)
 		pw.basePath = path.Join(pw.storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
-		pw.writer, err = NewPackedRecordBatchWriter(pw.basePath, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext)
+		pw.writer, err = NewPackedRecordBatchWriter(pw.basePath, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext, writerFormat, schemaBasedFormats)
 		if err != nil {
 			return merr.WrapErrServiceInternal(fmt.Sprintf("can not new packed record writer %s", err.Error()))
 		}
@@ -451,6 +459,7 @@ func (pw *PackedManifestRecordWriter) finalizeBinlogs() {
 			pw.fieldBinlogs[columnGroupID] = &datapb.FieldBinlog{
 				FieldID:     columnGroupID,
 				ChildFields: columnGroup.Fields,
+				Format:      columnGroup.Format,
 			}
 		}
 		pw.fieldBinlogs[columnGroupID].Binlogs = append(pw.fieldBinlogs[columnGroupID].Binlogs, &datapb.Binlog{
@@ -643,11 +652,12 @@ func (pw *PackedTextManifestRecordWriter) initWriters(r Record) error {
 			allFields := typeutil.GetAllFieldSchemas(pw.schema)
 			pw.columnGroups = storagecommon.SplitColumns(allFields, pw.getColumnStatsFromRecord(r, allFields), storagecommon.DefaultPolicies()...)
 		}
+		writerFormat, schemaBasedFormats := pw.fillV3ColumnGroupFormats()
 
 		var err error
 		k := metautil.JoinIDPath(pw.collectionID, pw.partitionID, pw.segmentID)
 		pw.basePath = path.Join(pw.storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
-		pw.writer, err = NewPackedTextBatchWriter(pw.storageConfig.GetBucketName(), pw.basePath, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.textColumnConfigs)
+		pw.writer, err = NewPackedTextBatchWriter(pw.storageConfig.GetBucketName(), pw.basePath, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.textColumnConfigs, writerFormat, schemaBasedFormats)
 		if err != nil {
 			return merr.WrapErrServiceInternal(fmt.Sprintf("can not new packed text writer %s", err.Error()))
 		}
@@ -669,6 +679,7 @@ func (pw *PackedTextManifestRecordWriter) finalizeBinlogs() {
 			pw.fieldBinlogs[columnGroupID] = &datapb.FieldBinlog{
 				FieldID:     columnGroupID,
 				ChildFields: columnGroup.Fields,
+				Format:      columnGroup.Format,
 			}
 		}
 		pw.fieldBinlogs[columnGroupID].Binlogs = append(pw.fieldBinlogs[columnGroupID].Binlogs, &datapb.Binlog{

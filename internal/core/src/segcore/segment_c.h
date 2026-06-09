@@ -300,9 +300,10 @@ ExprResCacheEraseSegment(int64_t segment_id);
  * @brief Configuration for flushing growing segment data to storage.
  */
 typedef struct CFlushConfig {
-    const char* segment_path;  // base path for segment manifest and data
-    int64_t read_version;      // version to read (-1 = latest)
-    uint32_t retry_limit;      // retry limit for commit
+    const char* segment_path;   // base path for segment manifest and data
+    int64_t read_version;       // version to read (-1 = latest)
+    uint32_t retry_limit;       // retry limit for commit
+    const char* writer_format;  // writer.format
     // TEXT column configurations
     int64_t* text_field_ids;      // array of TEXT field IDs
     const char** text_lob_paths;  // array of LOB paths for each TEXT field

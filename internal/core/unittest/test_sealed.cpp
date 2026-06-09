@@ -490,6 +490,121 @@ TEST(Sealed, with_predicate_filter_all) {
     EXPECT_EQ(sr2->get_total_result_count(), 0);
 }
 
+TEST(Sealed, SegmentInterfaceIsIndexRefineEnabledPropagatesOpContext) {
+    auto dim = 4;
+    auto N = ROW_COUNT;
+    auto metric_type = knowhere::metric::L2;
+    auto schema = std::make_shared<Schema>();
+    auto fake_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+
+    auto dataset = DataGen(schema, N);
+    auto vec_col = dataset.get_col<float>(fake_id);
+
+    auto create_index_info = milvus::index::CreateIndexInfo{};
+    create_index_info.field_type = DataType::VECTOR_FLOAT;
+    create_index_info.metric_type = knowhere::metric::L2;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, milvus::storage::FileManagerContext());
+    auto build_conf =
+        knowhere::Json{{knowhere::meta::DIM, std::to_string(dim)},
+                       {knowhere::indexparam::HNSW_M, "16"},
+                       {knowhere::indexparam::EFCONSTRUCTION, "200"},
+                       {knowhere::indexparam::EF, "200"},
+                       {knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
+    auto database = knowhere::GenDataSet(N, dim, vec_col.data());
+    indexing->BuildWithDataset(database, build_conf);
+    auto expected_refine_enabled =
+        dynamic_cast<index::VectorIndex*>(indexing.get())
+            ->IsIndexRefineEnabled();
+
+    milvus::OpContext* observed_ctx = nullptr;
+    LoadIndexInfo load_info;
+    load_info.field_id = fake_id.get();
+    load_info.index_params = GenIndexParams(indexing.get());
+    load_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing), &observed_ctx);
+    load_info.index_params["metric_type"] = "L2";
+
+    auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    sealed_segment->DropFieldData(fake_id);
+    sealed_segment->LoadIndex(load_info);
+
+    auto* segment_interface =
+        static_cast<SegmentInterface*>(sealed_segment.get());
+    folly::CancellationSource source;
+    milvus::OpContext op_context(source.getToken());
+
+    EXPECT_EQ(segment_interface->IsIndexRefineEnabled(&op_context, fake_id),
+              expected_refine_enabled);
+    EXPECT_EQ(observed_ctx, &op_context);
+}
+
+TEST(Sealed, SegmentInterfaceCalcDistByIDsPropagatesOpContext) {
+    auto dim = 4;
+    auto N = ROW_COUNT;
+    auto metric_type = knowhere::metric::L2;
+    auto schema = std::make_shared<Schema>();
+    auto fake_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+
+    auto dataset = DataGen(schema, N);
+    auto vec_col = dataset.get_col<float>(fake_id);
+
+    auto create_index_info = milvus::index::CreateIndexInfo{};
+    create_index_info.field_type = DataType::VECTOR_FLOAT;
+    create_index_info.metric_type = knowhere::metric::L2;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, milvus::storage::FileManagerContext());
+    auto build_conf =
+        knowhere::Json{{knowhere::meta::DIM, std::to_string(dim)},
+                       {knowhere::indexparam::HNSW_M, "16"},
+                       {knowhere::indexparam::EFCONSTRUCTION, "200"},
+                       {knowhere::indexparam::EF, "200"},
+                       {knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
+    auto database = knowhere::GenDataSet(N, dim, vec_col.data());
+    indexing->BuildWithDataset(database, build_conf);
+
+    milvus::OpContext* observed_ctx = nullptr;
+    LoadIndexInfo load_info;
+    load_info.field_id = fake_id.get();
+    load_info.index_params = GenIndexParams(indexing.get());
+    load_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing), &observed_ctx);
+    load_info.index_params["metric_type"] = "L2";
+
+    auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    sealed_segment->DropFieldData(fake_id);
+    sealed_segment->LoadIndex(load_info);
+
+    auto* segment_interface =
+        static_cast<SegmentInterface*>(sealed_segment.get());
+    auto query_dataset = knowhere::GenDataSet(1, dim, vec_col.data());
+    auto seg_offsets = std::array<int64_t, 1>{0};
+    auto distances = std::array<float, 1>{0.0F};
+    folly::CancellationSource source;
+    milvus::OpContext op_context(source.getToken());
+
+    EXPECT_TRUE(segment_interface->CalcDistByIDs(&op_context,
+                                                 fake_id,
+                                                 query_dataset,
+                                                 seg_offsets.data(),
+                                                 seg_offsets.size(),
+                                                 false,
+                                                 distances.data()));
+    EXPECT_EQ(observed_ctx, &op_context);
+}
+
 TEST(Sealed, LoadFieldData) {
     auto dim = 4;
     auto N = ROW_COUNT;

@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "instruction_set.h"
+#include "common/FastMem.h"
 
 #include <cpuid.h>
 #include <cstring>
@@ -96,9 +97,11 @@ InstructionSet::InstructionSet()
 
     // Interpret CPU brand string if reported
     if (nExIds_ >= static_cast<int>(0x80000004)) {
-        memcpy(brand, extdata_[2].data(), sizeof(cpui));
-        memcpy(brand + 16, extdata_[3].data(), sizeof(cpui));
-        memcpy(brand + 32, extdata_[4].data(), sizeof(cpui));
+        milvus::fastmem::FastMemcpy(brand, extdata_[2].data(), sizeof(cpui));
+        milvus::fastmem::FastMemcpy(
+            brand + 16, extdata_[3].data(), sizeof(cpui));
+        milvus::fastmem::FastMemcpy(
+            brand + 32, extdata_[4].data(), sizeof(cpui));
         brand_ = brand;
     }
 };

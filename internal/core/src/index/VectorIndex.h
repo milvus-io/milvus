@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstring>
+#include "common/FastMem.h"
 #include <map>
 #include <memory>
 #include <string>
@@ -46,7 +47,9 @@ class VectorIndex : public IndexBase {
  public:
     explicit VectorIndex(const IndexType& index_type,
                          const MetricType& metric_type)
-        : IndexBase(index_type), metric_type_(metric_type) {
+        : IndexBase(index_type),
+          offset_mapping_(std::make_unique<milvus::GrowingOffsetMapping>()),
+          metric_type_(metric_type) {
     }
 
  public:
@@ -185,48 +188,51 @@ class VectorIndex : public IndexBase {
 
     void
     UpdateValidData(const bool* valid_data, int64_t count) {
-        offset_mapping_.Append(valid_data,
-                               count,
-                               offset_mapping_.GetTotalCount(),
-                               offset_mapping_.GetValidCount());
+        auto* growing_mapping =
+            dynamic_cast<milvus::GrowingOffsetMapping*>(offset_mapping_.get());
+        AssertInfo(growing_mapping != nullptr,
+                   "cannot update growing valid data from sealed mapping");
+        growing_mapping->Append(valid_data, count);
     }
 
     void
     BuildValidData(const bool* valid_data, int64_t total_count) {
-        offset_mapping_.Build(valid_data, total_count);
+        auto sealed_mapping = std::make_unique<milvus::SealedOffsetMapping>();
+        sealed_mapping->Build(valid_data, total_count);
+        offset_mapping_ = std::move(sealed_mapping);
     }
 
     bool
     IsRowValid(int64_t logical_offset) const {
-        if (!offset_mapping_.IsEnabled()) {
+        if (!offset_mapping_->IsEnabled()) {
             return true;
         }
-        return offset_mapping_.IsValid(logical_offset);
+        return offset_mapping_->IsValid(logical_offset);
     }
 
     bool
     HasValidData() const {
-        return offset_mapping_.IsEnabled();
+        return offset_mapping_->IsEnabled();
     }
 
     int64_t
     GetValidCount() const {
-        return offset_mapping_.GetValidCount();
+        return offset_mapping_->GetValidCount();
     }
 
     int64_t
     GetPhysicalOffset(int64_t logical_offset) const {
-        return offset_mapping_.GetPhysicalOffset(logical_offset);
+        return offset_mapping_->GetPhysicalOffset(logical_offset);
     }
 
     int64_t
     GetLogicalOffset(int64_t physical_offset) const {
-        return offset_mapping_.GetLogicalOffset(physical_offset);
+        return offset_mapping_->GetLogicalOffset(physical_offset);
     }
 
     const milvus::OffsetMapping&
     GetOffsetMapping() const {
-        return offset_mapping_;
+        return *offset_mapping_;
     }
 
  protected:
@@ -239,7 +245,7 @@ class VectorIndex : public IndexBase {
         size_t data_size =
             static_cast<size_t>(milvus::GetVecRowSize<T>(dim)) * row_num;
         std::vector<uint8_t> raw_data(data_size);
-        std::memcpy(raw_data.data(), tensor, data_size);
+        milvus::fastmem::FastMemcpy(raw_data.data(), tensor, data_size);
         return raw_data;
     }
 
@@ -258,13 +264,13 @@ class VectorIndex : public IndexBase {
         size_t data_size =
             static_cast<size_t>(milvus::GetVecRowSize<T>(dim)) * total_vecs;
         std::vector<uint8_t> raw_data(data_size);
-        std::memcpy(raw_data.data(), tensor, data_size);
+        milvus::fastmem::FastMemcpy(raw_data.data(), tensor, data_size);
 
         std::vector<size_t> offsets(offsets_ptr, offsets_ptr + num_el_ids + 1);
         return {std::move(raw_data), std::move(offsets)};
     }
 
-    milvus::OffsetMapping offset_mapping_;
+    std::unique_ptr<milvus::OffsetMapping> offset_mapping_;
 
  private:
     MetricType metric_type_;

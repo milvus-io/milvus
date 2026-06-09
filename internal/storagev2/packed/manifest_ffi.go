@@ -27,7 +27,9 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
+	"strings"
 	"unsafe"
 
 	"go.uber.org/zap"
@@ -49,6 +51,7 @@ type Fragment struct {
 type manifestColumnGroup struct {
 	Columns   []string
 	Fragments []Fragment
+	Format    string
 }
 
 func fragmentIdentity(f Fragment) string {
@@ -348,6 +351,59 @@ func ManifestHasColumns(
 	return len(required) == 0, nil
 }
 
+// ResolveManifestSingleWriterFormat returns the single-policy writer format
+// constrained by an existing manifest. When no committed manifest column group
+// overlaps columns, fallbackFormat is returned.
+func ResolveManifestSingleWriterFormat(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	columns []string,
+	fallbackFormat string,
+) (string, error) {
+	if manifestPath == "" {
+		return fallbackFormat, nil
+	}
+	_, version, err := UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return "", err
+	}
+	if version == ManifestEarliest {
+		return fallbackFormat, nil
+	}
+
+	columnSet := make(map[string]struct{}, len(columns))
+	for _, column := range columns {
+		columnSet[column] = struct{}{}
+	}
+
+	groups, err := readColumnGroupsFromManifest(manifestPath, storageConfig)
+	if err != nil {
+		return "", err
+	}
+
+	formats := make(map[string]struct{})
+	for _, group := range groups {
+		if len(group.Fragments) == 0 {
+			continue
+		}
+		if len(columnSet) > 0 && !manifestColumnGroupHasAnyColumn(group, columnSet) {
+			continue
+		}
+		formats[group.Format] = struct{}{}
+	}
+	if len(formats) == 0 {
+		return fallbackFormat, nil
+	}
+	if len(formats) > 1 {
+		return "", fmt.Errorf("mixed writer formats: single writer columns %v overlap mixed formats in manifest %s: %s",
+			columns, manifestPath, formatSetString(formats))
+	}
+	for format := range formats {
+		return format, nil
+	}
+	return fallbackFormat, nil
+}
+
 func manifestColumnGroupHasAnyColumn(group manifestColumnGroup, columns map[string]struct{}) bool {
 	for _, column := range group.Columns {
 		if _, ok := columns[column]; ok {
@@ -420,6 +476,15 @@ func readColumnGroupsFromManifest(
 
 		if cg.files == nil && cg.num_of_files > 0 {
 			return nil, fmt.Errorf("files array is nil but num_of_files is %d in column group %d", cg.num_of_files, i)
+		}
+		if cg.num_of_files > 0 {
+			if cg.format == nil {
+				return nil, fmt.Errorf("manifest column group %d has files but nil format", i)
+			}
+			group.Format = C.GoString(cg.format)
+			if group.Format == "" {
+				return nil, fmt.Errorf("manifest column group %d has files but empty format", i)
+			}
 		}
 		if cg.files != nil {
 			fileArray := unsafe.Slice(cg.files, int(cg.num_of_files))
@@ -511,4 +576,13 @@ func AppendSegmentManifestColumns(
 	return CommitManifestUpdates(basePath, version, storageConfig, &ManifestUpdates{
 		NewFiles: newFiles,
 	})
+}
+
+func formatSetString(formats map[string]struct{}) string {
+	values := make([]string, 0, len(formats))
+	for format := range formats {
+		values = append(values, format)
+	}
+	sort.Strings(values)
+	return strings.Join(values, ",")
 }

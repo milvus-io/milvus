@@ -22,7 +22,6 @@ package segments
 #include "futures/future_c.h"
 #include "segcore/collection_c.h"
 #include "segcore/plan_c.h"
-#include "segcore/reduce_c.h"
 #include "segcore/segment_c.h"
 #include "common/init_c.h"
 */
@@ -663,6 +662,40 @@ func (s *LocalSegment) ResetIndexesLazyLoad(lazyState bool) {
 	for _, indexInfo := range s.Indexes() {
 		indexInfo.IsLoaded = lazyState
 	}
+}
+
+func (s *LocalSegment) syncFieldIndexes(indexInfos []*querypb.FieldIndexInfo) {
+	isLoadedByIndexID := make(map[int64]bool)
+	loadedForNewIndex := !s.IsLazyLoad()
+	for _, index := range s.Indexes() {
+		isLoadedByIndexID[index.IndexInfo.GetIndexID()] = index.IsLoaded
+	}
+
+	indexIDs := typeutil.NewSet[int64]()
+	for _, indexInfo := range indexInfos {
+		indexID := indexInfo.GetIndexID()
+		indexIDs.Insert(indexID)
+		isLoaded, ok := isLoadedByIndexID[indexID]
+		if !ok {
+			isLoaded = loadedForNewIndex
+		}
+		s.fieldIndexes.Insert(indexID, &IndexedFieldInfo{
+			FieldBinlog: &datapb.FieldBinlog{
+				FieldID: indexInfo.GetFieldID(),
+			},
+			IndexInfo: indexInfo,
+			IsLoaded:  isLoaded,
+		})
+	}
+
+	// QueryCoord builds reopen LoadInfo from DataCoord's full finished-index list for this segment.
+	// Treat absent index IDs as stale local metadata.
+	s.fieldIndexes.Range(func(indexID int64, _ *IndexedFieldInfo) bool {
+		if !indexIDs.Contain(indexID) {
+			s.fieldIndexes.Remove(indexID)
+		}
+		return true
+	})
 }
 
 // Search executes a search on the segment.
@@ -1402,6 +1435,7 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 	if err != nil {
 		return err
 	}
+	s.syncFieldIndexes(newLoadInfo.GetIndexInfos())
 	s.loadInfo.Store(newLoadInfo)
 	s.syncFieldJSONStatsFromLoadInfo(ctx, newLoadInfo)
 	return nil
@@ -1590,6 +1624,12 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 
 	cConfig.read_version = C.int64_t(config.ReadVersion)
 	cConfig.retry_limit = C.uint32_t(3)
+	writerFormat := config.WriterFormat
+	if writerFormat != "" {
+		cWriterFormat := C.CString(writerFormat)
+		defer C.free(unsafe.Pointer(cWriterFormat))
+		cConfig.writer_format = cWriterFormat
+	}
 
 	// populate TEXT column configs
 	// All arrays must be C-allocated to avoid "Go pointer to unpinned Go pointer" panic

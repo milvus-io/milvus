@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <errno.h>
+#include "common/FastMem.h"
 #include <fcntl.h>
 #include <folly/Try.h>
 #include <folly/futures/Future.h>
@@ -177,7 +178,8 @@ FileWriter::WriteInternal(const void* data, size_t nbyte) {
     // we should fill and handle the cached aligned buffer first
     if (offset_ != 0) {
         size_t cpy_size = capacity_ - offset_;
-        memcpy(static_cast<char*>(aligned_buf_) + offset_, src, cpy_size);
+        milvus::fastmem::FastMemcpy(
+            static_cast<char*>(aligned_buf_) + offset_, src, cpy_size);
         PositionedWriteWithCheck(aligned_buf_, capacity_, file_size_);
         file_size_ += capacity_;
         left_size -= cpy_size;
@@ -202,7 +204,8 @@ FileWriter::WriteInternal(const void* data, size_t nbyte) {
     // finally, handle the left unaligned data by the aligned buffer
     while (left_size >= capacity_) {
         size_t copy_size = capacity_ - offset_;
-        memcpy(static_cast<char*>(aligned_buf_) + offset_, src, copy_size);
+        milvus::fastmem::FastMemcpy(
+            static_cast<char*>(aligned_buf_) + offset_, src, copy_size);
         PositionedWriteWithCheck(aligned_buf_, capacity_, file_size_);
         file_size_ += capacity_;
         offset_ = 0;
@@ -212,7 +215,8 @@ FileWriter::WriteInternal(const void* data, size_t nbyte) {
 
     // save the tail to the aligned buffer
     if (left_size > 0) {
-        memcpy(static_cast<char*>(aligned_buf_) + offset_, src, left_size);
+        milvus::fastmem::FastMemcpy(
+            static_cast<char*>(aligned_buf_) + offset_, src, left_size);
         offset_ += left_size;
         src += left_size;
     }
@@ -225,7 +229,8 @@ FileWriter::Write(const void* data, size_t nbyte) {
     // if the data can fit in the aligned buffer, we can just copy it to the aligned buffer
     if (nbyte <= capacity_ - offset_) {
         const char* src = static_cast<const char*>(data);
-        memcpy(static_cast<char*>(aligned_buf_) + offset_, src, nbyte);
+        milvus::fastmem::FastMemcpy(
+            static_cast<char*>(aligned_buf_) + offset_, src, nbyte);
         offset_ += nbyte;
         return;
     }

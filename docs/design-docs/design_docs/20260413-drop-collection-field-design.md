@@ -2,8 +2,8 @@
 
 **Branch**: `feat/drop-collection-field`
 **Author**: sijie-ni-0214
-**Date**: April 2026
-**Scope**: 30 files, +2,182/-600 lines
+**Date**: May 2026
+**Scope**: 40 files, +3,852/-1,067 lines
 
 ---
 
@@ -21,7 +21,7 @@ This feature enables users to dynamically drop fields and functions from existin
 2. **Backward compatibility**: Existing segments with dropped-field data must remain loadable and queryable
 3. **Cascade cleanup**: Indexes on dropped fields must be automatically removed
 4. **Field ID safety**: Dropped field IDs must never be reused to prevent data corruption
-5. **Concurrency safety**: Reuse the existing `AlterCollectionSchema` mutual exclusion and schema version consistency gateway
+5. **Concurrency safety**: Use the existing schema DDL execution path
 6. **Unified API**: Integrate into the existing `AlterCollectionSchema` RPC rather than introducing a separate RPC
 
 ### 1.3 Design Principles
@@ -45,8 +45,6 @@ This feature enables users to dynamically drop fields and functions from existin
                                         v
 +------------------------------------------------------------------------------+
 |                                   PROXY                                      |
-|  * Mutual exclusion: alterSchemaInFlight (one schema change per collection)  |
-|  * Schema version consistency check (all segments aligned)                   |
 |  * Validate drop constraints (not PK, not partition key, not last vector...) |
 |  * Forward to RootCoord via MixCoord                                         |
 +------------------------------------------------------------------------------+
@@ -77,7 +75,7 @@ This feature enables users to dynamically drop fields and functions from existin
 
 | Component | Responsibility |
 |-----------|----------------|
-| **Proxy** | Request validation, concurrency control, schema version consistency gate |
+| **Proxy** | Request validation and DDL scheduling |
 | **RootCoord** | Schema construction, field ID management, WAL broadcast, cascade index deletion |
 | **QueryNode (Go)** | Filter dropped-field binlogs and indexes during segment loading |
 | **Segcore (C++)** | Schema-driven field filtering in `ComputeDiff*`, `LoadFieldData`, column group loading |
@@ -89,7 +87,6 @@ The drop field feature reuses the existing `AlterCollectionSchema` infrastructur
 
 - **Streaming/WAL layer**: No new message types; uses existing `AlterCollectionMessage`
 - **DataNode**: No backfill; dropped-field binlogs are left in place
-- **Schema version consistency**: Reuses the existing gateway from add-field (DataCoord reports consistent/total segment counts)
 
 ---
 
@@ -133,10 +130,10 @@ message AlterCollectionSchemaRequest {
 #### AlterCollectionMessage Extension
 
 ```protobuf
-// messages.proto - AlterCollectionMessageBody.Updates
-message Updates {
-    // ... existing fields (schema, properties, etc.)
-    repeated int64 dropped_field_ids = 9;  // Field IDs removed from schema,
+// messages.proto - AlterCollectionMessageHeader
+message AlterCollectionMessageHeader {
+    // ... existing fields (db_id, collection_id, update_mask, etc.)
+    repeated int64 dropped_field_ids = 6;  // Field IDs removed from schema,
                                             // used to cascade-delete indexes
                                             // in ack callback
 }
@@ -146,10 +143,10 @@ message Updates {
 
 | Operation | UpdateMask Fields |
 |-----------|-------------------|
-| **Add** (field/function) | `schema` only |
+| **Add** (field/function) | `schema` + `properties` |
 | **Drop** (field/function) | `schema` + `properties` |
 
-Drop requires updating `properties` because it must persist `max_field_id` to prevent field ID reuse.
+Schema mutations update `properties` because they maintain `max_field_id` to prevent field ID reuse.
 
 ### 3.3 Client SDK (pymilvus)
 
@@ -178,33 +175,27 @@ def alter_collection_schema(
 
 **Files**: `internal/proxy/impl.go`, `internal/proxy/task.go`
 
-#### Concurrency Control (Inherited from Add-Field)
+#### Scheduling and Validation
 
-Drop operations share the same concurrency safeguards as add operations:
+Drop operations use the standard Proxy DDL path:
 
-1. **`alterSchemaInFlight`** (`sync.Map`): Ensures only one `AlterCollectionSchema` request per collection at a time. Key is `dbName/collectionName`.
+1. **Current schema validation**: Proxy calls `DescribeCollection` and passes the current schema into `alterCollectionSchemaTask` for local validation.
 
-2. **Schema Version Consistency Gate**: Before any schema change, the proxy queries DataCoord for segment schema version statistics:
-   ```
-   consistentSegments == totalSegments  -->  proceed
-   consistentSegments != totalSegments  -->  reject (previous schema change still propagating)
-   ```
-
-3. **DDL Queue**: Tasks execute serially within the DDL queue, preventing race conditions.
+2. **DDL Queue**: The task is enqueued on `ddQueue`.
 
 #### PreExecute: Drop Validation
 
 ```go
 func (t *alterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
-    dropReq := t.req.GetAction().GetOp().(*milvuspb.AlterSchemaAction_DropRequest).DropRequest
+    dropReq := t.GetAction().GetDropRequest()
 
     switch id := dropReq.GetIdentifier().(type) {
     case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FunctionName:
         return validateDropFunction(t.oldSchema, id.FunctionName)
     case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId:
-        // Resolve field ID to field name, then validate
-        fieldName := resolveFieldName(t.oldSchema, id.FieldId)
-        return validateDropField(t.oldSchema, fieldName)
+        // Resolve field ID across top-level fields and struct array fields.
+        // Struct sub-field drops are rejected.
+        return validateDropFieldByID(t.oldSchema, id.FieldId)
     case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName:
         return validateDropField(t.oldSchema, id.FieldName)
     }
@@ -215,16 +206,16 @@ func (t *alterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
 
 | Constraint | Error Message |
 |-----------|---------------|
-| Field name is empty | `field name cannot be empty` |
+| Field name is empty | `field name is empty` |
 | Field not found in schema | `field not found: {name}` |
 | System field (`$rowid`, `$timestamp`, `$meta`, `$namespace`) | `cannot drop system field: {name}` |
 | Primary key field | `cannot drop primary key field: {name}` |
 | Partition key field | `cannot drop partition key field: {name}` |
 | Clustering key field | `cannot drop clustering key field: {name}` |
-| Dynamic field (`IsDynamic=true`) | `cannot drop dynamic field directly, use AlterCollection to disable` |
+| Dynamic field (`IsDynamic=true`) | `cannot drop dynamic field: {name}, use AlterCollection to disable dynamic schema instead` |
 | Last vector field in schema | `cannot drop the last vector field: {name}` |
 | Field is function input | `field is referenced by function {fn} as input` |
-| Field is function output | `field is referenced by function {fn} as output, drop the function instead` |
+| Field is function output | `field is referenced by function {fn} as output, drop function first` |
 | Target is a sub-field of a struct array field | `cannot drop sub-field of struct array field: {struct}.{sub}` |
 | Dropping whole struct array field would leave no vector | `cannot drop struct array field {name}: it would leave no vector field in the collection` |
 
@@ -451,7 +442,7 @@ func broadcastDisableDynamicField(ctx context.Context, coll *model.Collection) e
 }
 ```
 
-**Proxy-side gate coverage**: Enabling/disabling the dynamic field mutates the schema and bumps `SchemaVersion + 1`, so it must respect the same concurrency invariants as `AlterCollectionSchema` (see §6.1). The `AlterCollection` handler inspects `request.Properties` and, when `dynamicfield.enabled` is present, routes the request through the same `alterSchemaInFlight` + `checkSchemaVersionConsistency` gates as `AlterCollectionSchema`, sharing the same `sync.Map` so the two handlers are mutually exclusive per collection. Requests that only alter unrelated properties (e.g. `collection.ttl.seconds`, `mmap.enabled`) bypass the gate and keep their existing lightweight path.
+Requests that alter unrelated properties (e.g., `collection.ttl.seconds`, `mmap.enabled`) keep the existing property-only path.
 
 ### 4.6 Segcore (C++) Layer
 
@@ -519,29 +510,29 @@ if err != nil {
 | **Index cascade** | Drops indexes on the field | Drops indexes on all output fields |
 | **Validation** | Cannot drop if referenced by a function | No restriction (output fields cascade) |
 
-### Difference from DropCollectionFunction (Existing API)
+### Drop Function Cascade Contract
 
-| Aspect | DropCollectionFunction (existing) | AlterCollectionSchema Drop Function (this feature) |
-|--------|----------------------------------|-----------------------------------------------------|
-| Output fields | Preserved, marked `IsFunctionOutput=false` | **Cascade deleted** from schema |
-| Indexes | Not touched | Cascade deleted |
-| Field ID protection | No `max_field_id` update | `max_field_id` updated |
+Dropping a function through `AlterCollectionSchema.DropRequest` applies the same schema-removal contract to the function and its output fields:
+
+- The target function is removed from `schema.Functions`.
+- Every output field of the function is removed from `schema.Fields`.
+- Input fields are preserved.
+- Indexes on output fields are cascade-deleted through `DroppedFieldIds`.
+- `max_field_id` remains pinned to the historical high-water mark.
 
 ---
 
 ## 6. Concurrency and Consistency
 
-### 6.1 Three Layers of Protection
+### 6.1 Schema Mutation Ordering
 
-Drop operations inherit the same concurrency model as add operations through the unified `AlterCollectionSchema` entry point:
+Drop operations use the existing schema DDL ordering:
 
-1. **`alterSchemaInFlight` Mutex** (`sync.Map`): Only one schema modification per collection at a time. A second request immediately receives an error response.
+1. **Proxy DDL queue**: `AlterCollectionSchema` tasks are enqueued on `ddQueue`.
 
-2. **DDL Queue Serial Execution**: All DDL tasks (including schema changes) execute serially within the proxy's DDL queue.
+2. **Collection broadcast lock**: RootCoord broadcasts the schema mutation under the collection resource key.
 
-3. **Schema Version Consistency Gate**: The proxy checks DataCoord's segment statistics before allowing any schema change. If a previous change (e.g., add-field backfill) hasn't propagated to all segments, the new request is rejected.
-
-**Coverage across RPC entry points**: Because the proxy rootcoord lock serializes concurrent *writes* but not *writer-vs-in-flight-backfill*, layers (1) and (3) must guard every RPC entry that mutates the schema. In this PR, both `AlterCollectionSchema` and the dynamic-field branch of `AlterCollection` go through the same two gates and share the same `alterSchemaInFlight` `sync.Map`, so any two schema mutations targeting the same collection — regardless of which RPC they arrived on — are mutually exclusive, and neither can begin until the previous mutation's backfill has reached 100% of segments.
+3. **Schema-drop readiness**: Field/function drops and dynamic-field disable call `waitUntilSchemaDropReady` before broadcasting the schema change.
 
 ### 6.2 Ack Callback Idempotency
 
@@ -591,7 +582,7 @@ Requests that do not reference the dropped field pass through unaffected — pla
 | 2. Cross-version (narrow) | stale (N) | new schema (N+1), segment reloaded without the field | plan compiles against schema N, reaches querynode; segcore's `chunk_data_impl`/`chunk_array_view_impl` check `field_data_ready_bitset_`, the bit is 0 for the dropped field, `AssertInfo` raises `SegcoreError` — surfaced to the client as an error status |
 | 3. No race | stale or new | still has the field | executes normally |
 
-Cases 1 and 2 both return a clear error to the client; **neither aborts or corrupts state**. Case 2 is bounded in time by the proxy cache invalidation latency (rootcoord broadcast → per-proxy cache invalidate, milliseconds to seconds in practice), and further bounded by the schema-version-consistency gate in §6.1: a second schema mutation cannot begin until the previous one has propagated, so the cross-version window is always tied to a single in-flight mutation and never accumulates.
+Cases 1 and 2 both return a clear error to the client; **neither aborts or corrupts state**. Case 2 is bounded in time by the proxy cache invalidation latency (rootcoord broadcast → per-proxy cache invalidate, milliseconds to seconds in practice).
 
 SDKs cache collection schema in a process-wide `GlobalCache`. `add_collection_field` and `add_collection_function` previously did not invalidate this cache, relying on `@retry_on_schema_mismatch` on `insert_rows` / `upsert_rows` to recover from staleness on the write path.
 
@@ -611,12 +602,6 @@ Client              Proxy           RootCoord        WAL/Streaming      QueryNod
   | AlterCollectionSchema               |                |                    |
   | (DropRequest: field_name="vec2")    |                |                    |
   |------------------>|                 |                |                    |
-  |                   |                 |                |                    |
-  |                   | alterSchemaInFlight.LoadOrStore  |                    |
-  |                   | (check no concurrent schema op) |                    |
-  |                   |                 |                |                    |
-  |                   | checkSchemaVersionConsistency   |                    |
-  |                   | (all segments aligned?)         |                    |
   |                   |                 |                |                    |
   |                   | validateDropField               |                    |
   |                   | (not PK, not last vector, etc.) |                    |
@@ -690,7 +675,7 @@ Client              Proxy           RootCoord        WAL/Streaming      QueryNod
 **Decision**: Use `AlterCollectionSchema` with `DropRequest` instead of a dedicated `DropCollectionField` RPC.
 
 **Rationale**:
-- Inherits all existing concurrency controls (mutual exclusion, version consistency gate)
+- Reuses the existing schema evolution entry point
 - Single API surface for all schema evolution operations
 - Consistent with the Add/Drop symmetry pattern
 - Simplifies client SDK and documentation
@@ -738,7 +723,7 @@ Client              Proxy           RootCoord        WAL/Streaming      QueryNod
 | 10 | Drop BM25 function | Function + output fields + indexes all removed, input preserved |
 | 11 | Drop function input field | Rejected (must drop function first) |
 | 12 | Field ID reuse prevention | Drop + Add same-name different-type, search old data no crash |
-| 13 | Add + Drop serial interaction | Schema version consistency gate works |
+| 13 | Add + Drop serial interaction | Schema remains valid after sequential operations |
 
 ---
 

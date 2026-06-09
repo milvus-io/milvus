@@ -67,15 +67,17 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 		return err
 	}
 
-	fieldIDStart := nextFieldID(coll)
+	schema := coll.ToCollectionSchemaPB()
+	fieldIDStart := maxAssignedFieldIDFromSchema(schema) + 1
 	structArrayField.FieldID = fieldIDStart
 	for i, field := range structArrayField.GetFields() {
 		field.FieldID = fieldIDStart + int64(i) + 1
 	}
 
-	schema := coll.ToCollectionSchemaPB()
 	schema.Version = coll.SchemaVersion + 1
 	schema.StructArrayFields = append(schema.StructArrayFields, structArrayField)
+	properties := updateMaxFieldIDProperty(coll.Properties, maxAssignedFieldIDFromSchema(schema))
+	schema.Properties = properties
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
@@ -90,13 +92,14 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 			DbId:         coll.DBID,
 			CollectionId: coll.CollectionID,
 			UpdateMask: &fieldmaskpb.FieldMask{
-				Paths: []string{message.FieldMaskCollectionSchema},
+				Paths: []string{message.FieldMaskCollectionSchema, message.FieldMaskCollectionProperties},
 			},
 			CacheExpirations: cacheExpirations,
 		}).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
-				Schema: schema,
+				Schema:     schema,
+				Properties: properties,
 			},
 		}).
 		WithBroadcast(channels).

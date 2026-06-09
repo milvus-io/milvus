@@ -390,19 +390,35 @@ AsyncSearch(CTraceContext c_trace,
 
             auto span = milvus::tracer::StartSpan("SegCoreSearch", &trace_ctx);
             milvus::tracer::SetRootSpan(span);
+            AssertInfo(phg_ptr != nullptr && !phg_ptr->empty(),
+                       "search requires non-empty placeholder group");
+            const int64_t num_queries = milvus::query::GetNumOfQueries(phg_ptr);
+            auto target_vector_field_id =
+                plan->plan_node_->search_info_.field_id_;
 
             milvus::OpContext op_ctx(cancel_token);
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
-
-            auto search_result = segment->Search(plan,
-                                                 phg_ptr,
-                                                 timestamp,
-                                                 cancel_token,
-                                                 consistency_level,
-                                                 collection_ttl,
-                                                 entity_ttl_physical_time_us,
-                                                 filter_only,
-                                                 enable_expr_cache);
+            auto internal_segment =
+                static_cast<milvus::segcore::SegmentInternalInterface*>(
+                    segment);
+            std::unique_ptr<milvus::SearchResult> search_result;
+            if (!filter_only &&
+                !internal_segment->FieldAccessible(target_vector_field_id)) {
+                search_result = std::make_unique<milvus::SearchResult>();
+                search_result->total_nq_ = num_queries;
+                search_result->unity_topK_ = 0;
+                search_result->total_data_cnt_ = 0;
+            } else {
+                search_result = segment->Search(plan,
+                                                phg_ptr,
+                                                timestamp,
+                                                cancel_token,
+                                                consistency_level,
+                                                collection_ttl,
+                                                entity_ttl_physical_time_us,
+                                                filter_only,
+                                                enable_expr_cache);
+            }
             if (!filter_only &&
                 !milvus::PositivelyRelated(
                     plan->plan_node_->search_info_.metric_type_)) {
@@ -1642,8 +1658,11 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         // use single column group policy (all columns in one group)
         writer_config.properties[PROPERTY_WRITER_POLICY] =
             std::string(LOON_COLUMN_GROUP_POLICY_SINGLE);
-        writer_config.properties[PROPERTY_WRITER_FORMAT] =
-            std::string(LOON_FORMAT_PARQUET);
+        auto writer_format =
+            config->writer_format && config->writer_format[0] != '\0'
+                ? std::string(config->writer_format)
+                : std::string(LOON_FORMAT_PARQUET);
+        writer_config.properties[PROPERTY_WRITER_FORMAT] = writer_format;
 
         // add TEXT column configs
         for (size_t i = 0; i < config->num_text_columns; i++) {

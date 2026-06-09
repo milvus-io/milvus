@@ -153,6 +153,10 @@ type FlushConfig struct {
 	// ReadVersion is the manifest version to read from.
 	// Must be set to the last version acknowledged by DataCoord (via SaveBinlogPaths).
 	ReadVersion int64
+	// WriterFormat is passed as writer.format. For incremental growing flushes,
+	// it may be resolved from the acknowledged manifest to keep appends
+	// compatible with existing column groups.
+	WriterFormat string
 }
 
 // FlushResult contains the result of flushing segment data.

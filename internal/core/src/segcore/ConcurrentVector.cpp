@@ -11,6 +11,7 @@
 
 #include "segcore/ConcurrentVector.h"
 
+#include <algorithm>
 #include <cstdint>
 
 #include "common/Types.h"

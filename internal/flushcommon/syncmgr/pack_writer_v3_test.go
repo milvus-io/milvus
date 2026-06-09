@@ -168,15 +168,129 @@ func (s *PackWriterV3Suite) TestPackWriterV3_Write() {
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, s.schema)).WithDeleteData(deletes)
 
-	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
+	parquetSplit := storagecommon.FillColumnGroupFormats(s.currentSplit, "parquet")
+	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, parquetSplit, manifestPath)
 
 	gotInserts, _, _, _, writtenManifestPath, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
 	s.Equal(gotInserts[0].Binlogs[0].GetEntriesNum(), int64(rows))
+	s.Equal("parquet", gotInserts[0].GetFormat())
 	writtenBasePath, revision, err := packed.UnmarshalManifestPath(writtenManifestPath)
 	s.NoError(err)
 	s.Equal(basePath, writtenBasePath)
 	s.Greater(revision, int64(0))
+}
+
+func (s *PackWriterV3Suite) TestPackWriterV3_UsesManifestFormatAfterConfigSwitch() {
+	params := paramtable.Get()
+	s.Require().NoError(params.Save(params.DataNodeCfg.StorageFormat.Key, "parquet"))
+	s.T().Cleanup(func() {
+		_ = params.Reset(params.DataNodeCfg.StorageFormat.Key)
+	})
+
+	collectionID := int64(123)
+	partitionID := int64(456)
+	segmentID := int64(789)
+	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
+
+	bfs := pkoracle.NewBloomFilterSet()
+	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
+	basePath := path.Join(common.SegmentInsertLogPath, k)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
+
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ManifestPath: manifestPath,
+	}, bfs, nil)
+	metacache.UpdateNumOfRows(1000)(seg)
+	mc := metacache.NewMockMetaCache(s.T())
+	mc.EXPECT().Collection().Return(collectionID).Maybe()
+	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
+	mc.EXPECT().GetSegmentByID(segmentID).Return(seg, true).Maybe()
+	mc.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg}).Maybe()
+	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
+		action(seg)
+	}).Return().Maybe()
+
+	parquetSplit := storagecommon.FillColumnGroupFormats(s.currentSplit, "parquet")
+	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, parquetSplit, manifestPath)
+
+	firstPack := new(SyncPack).
+		WithCollectionID(collectionID).
+		WithPartitionID(partitionID).
+		WithSegmentID(segmentID).
+		WithChannelName(channelName).
+		WithInsertData(genInsertData(5, s.schema))
+	_, _, _, _, firstManifestPath, _, err := bw.Write(context.Background(), firstPack)
+	s.Require().NoError(err)
+
+	format, err := packed.ResolveManifestSingleWriterFormat(firstManifestPath, s.storageConfig, nil, "")
+	s.Require().NoError(err)
+	s.Equal("parquet", format)
+
+	s.Require().NoError(params.Save(params.DataNodeCfg.StorageFormat.Key, "vortex"))
+	bw.initialManifestPath = firstManifestPath
+	writerFormat, schemaBasedFormats, err := bw.resolveInsertWriterFormats()
+	s.Require().NoError(err)
+	s.Equal("vortex", writerFormat)
+	s.Require().Len(schemaBasedFormats, len(parquetSplit))
+	for _, schemaBasedFormat := range schemaBasedFormats {
+		s.Equal("parquet", schemaBasedFormat)
+	}
+
+	secondPack := new(SyncPack).
+		WithCollectionID(collectionID).
+		WithPartitionID(partitionID).
+		WithSegmentID(segmentID).
+		WithChannelName(channelName).
+		WithInsertData(genInsertData(5, s.schema))
+	_, _, _, _, secondManifestPath, _, err := bw.Write(context.Background(), secondPack)
+	s.Require().NoError(err)
+
+	format, err = packed.ResolveManifestSingleWriterFormat(secondManifestPath, s.storageConfig, nil, "")
+	s.Require().NoError(err)
+	s.Equal("parquet", format)
+}
+
+func (s *PackWriterV3Suite) TestResolveInsertWriterFormatsUsesColumnGroupFormatsWithoutReadingManifest() {
+	params := paramtable.Get()
+	s.Require().NoError(params.Save(params.DataNodeCfg.StorageFormat.Key, "vortex"))
+	s.T().Cleanup(func() {
+		_ = params.Reset(params.DataNodeCfg.StorageFormat.Key)
+	})
+
+	columnGroups := []storagecommon.ColumnGroup{
+		{GroupID: 0, Columns: []int{0, 2}, Fields: []int64{common.RowIDField, 100}, Format: "parquet"},
+		{GroupID: 101, Columns: []int{1}, Fields: []int64{101}, Format: "vortex"},
+	}
+	bw := NewBulkPackWriterV3(nil, s.schema, s.cm, s.logIDAlloc,
+		packed.DefaultWriteBufferSize, 0, s.storageConfig, columnGroups,
+		packed.MarshalManifestPath("files/missing-manifest-segment", 42))
+	bw.initialManifestPath = bw.manifestPath
+
+	writerFormat, schemaBasedFormats, err := bw.resolveInsertWriterFormats()
+	s.Require().NoError(err)
+	s.Equal("vortex", writerFormat)
+	s.Equal([]string{"parquet", "vortex"}, schemaBasedFormats)
+}
+
+func (s *PackWriterV3Suite) TestResolveInsertWriterFormatsRequiresFormatsForExistingManifest() {
+	params := paramtable.Get()
+	s.Require().NoError(params.Save(params.DataNodeCfg.StorageFormat.Key, "vortex"))
+	s.T().Cleanup(func() {
+		_ = params.Reset(params.DataNodeCfg.StorageFormat.Key)
+	})
+
+	columnGroups := []storagecommon.ColumnGroup{
+		{GroupID: 0, Columns: []int{0, 2}, Fields: []int64{common.RowIDField, 100}},
+	}
+	bw := NewBulkPackWriterV3(nil, s.schema, s.cm, s.logIDAlloc,
+		packed.DefaultWriteBufferSize, 0, s.storageConfig, columnGroups,
+		packed.MarshalManifestPath("files/existing-manifest-segment", 42))
+	bw.initialManifestPath = bw.manifestPath
+
+	_, _, err := bw.resolveInsertWriterFormats()
+	s.Require().Error(err)
+	s.Contains(err.Error(), "missing format")
 }
 
 func (s *PackWriterV3Suite) TestWriteEmptyInsertData() {
@@ -433,6 +547,7 @@ func (s *PackWriterV3Suite) TestMultiBatchStatsAccumulation() {
 	bw1 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
 	_, _, _, _, manifest1, _, err := bw1.Write(context.Background(), pack1)
 	s.Require().NoError(err)
+	currentSplit := storagecommon.FillColumnGroupFormats(s.currentSplit, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 
 	stats1, err := packed.GetManifestStats(manifest1, s.storageConfig)
 	s.Require().NoError(err)
@@ -448,7 +563,7 @@ func (s *PackWriterV3Suite) TestMultiBatchStatsAccumulation() {
 		WithInsertData(genInsertDataWithPKOffset(batchRows, batchRows, s.schema)).
 		WithBatchRows(int64(batchRows))
 
-	bw2 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifest1)
+	bw2 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, currentSplit, manifest1)
 	_, _, _, _, manifest2, _, err := bw2.Write(context.Background(), pack2)
 	s.Require().NoError(err)
 
@@ -466,7 +581,7 @@ func (s *PackWriterV3Suite) TestMultiBatchStatsAccumulation() {
 		WithInsertData(genInsertDataWithPKOffset(batchRows, batchRows*2, s.schema)).
 		WithBatchRows(int64(batchRows))
 
-	bw3 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifest2)
+	bw3 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, currentSplit, manifest2)
 	_, _, _, _, manifest3, _, err := bw3.Write(context.Background(), pack3)
 	s.Require().NoError(err)
 
@@ -527,6 +642,7 @@ func (s *PackWriterV3Suite) TestMultiBatchBM25StatsAccumulation() {
 	bw1 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
 	_, _, _, _, manifest1, _, err := bw1.Write(context.Background(), pack1)
 	s.Require().NoError(err)
+	currentSplit := storagecommon.FillColumnGroupFormats(s.currentSplit, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 
 	stats1, err := packed.GetManifestStats(manifest1, s.storageConfig)
 	s.Require().NoError(err)
@@ -543,7 +659,7 @@ func (s *PackWriterV3Suite) TestMultiBatchBM25StatsAccumulation() {
 		WithBatchRows(int64(batchRows)).
 		WithBM25Stats(makeBM25Stats())
 
-	bw2 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifest1)
+	bw2 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, currentSplit, manifest1)
 	_, _, _, _, manifest2, _, err := bw2.Write(context.Background(), pack2)
 	s.Require().NoError(err)
 

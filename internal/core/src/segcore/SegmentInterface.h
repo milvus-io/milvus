@@ -268,7 +268,8 @@ class SegmentInterface {
     // Compute exact distances from the index for given query vectors and candidate IDs.
     // Used for refine step in reduce phase. Returns false if not supported (e.g., no index).
     virtual bool
-    CalcDistByIDs(FieldId field_id,
+    CalcDistByIDs(milvus::OpContext* op_ctx,
+                  FieldId field_id,
                   const knowhere::DataSetPtr& query_dataset,
                   const int64_t* seg_offsets,
                   size_t count,
@@ -278,8 +279,29 @@ class SegmentInterface {
     }
 
     virtual bool
-    IsIndexRefineEnabled(FieldId field_id) const {
+    CalcDistByIDs(FieldId field_id,
+                  const knowhere::DataSetPtr& query_dataset,
+                  const int64_t* seg_offsets,
+                  size_t count,
+                  bool is_cosine,
+                  float* distances) const {
+        return CalcDistByIDs(nullptr,
+                             field_id,
+                             query_dataset,
+                             seg_offsets,
+                             count,
+                             is_cosine,
+                             distances);
+    }
+
+    virtual bool
+    IsIndexRefineEnabled(milvus::OpContext* op_ctx, FieldId field_id) const {
         return false;
+    }
+
+    virtual bool
+    IsIndexRefineEnabled(FieldId field_id) const {
+        return IsIndexRefineEnabled(nullptr, field_id);
     }
 
     virtual void
@@ -477,6 +499,11 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual bool
     HasIndex(FieldId field_id) const = 0;
+
+    bool
+    FieldAccessible(FieldId field_id) const {
+        return HasFieldData(field_id) || HasIndex(field_id);
+    }
 
     // JSON indexes (JsonFlatIndex + JSON-cast scalar) live in a separate
     // per-segment container from the scalar/vector/binlog index bitsets, so

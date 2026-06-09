@@ -202,12 +202,16 @@ func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
 			Binlogs: []*datapb.Binlog{{LogID: 1}, {LogID: 2}},
 		}}
 		newLogs := []*datapb.FieldBinlog{{
-			FieldID: 102,
-			Binlogs: []*datapb.Binlog{{LogID: 2}, {LogID: 3}}, // 2 dup, 3 new
+			FieldID:     102,
+			ChildFields: []int64{102, 103},
+			Format:      "parquet",
+			Binlogs:     []*datapb.Binlog{{LogID: 2}, {LogID: 3}}, // 2 dup, 3 new
 		}}
 		result := filterDuplicateFieldBinlogs(existing, newLogs)
 		suite.Equal(1, len(result))
 		suite.Equal(int64(102), result[0].FieldID)
+		suite.ElementsMatch([]int64{102, 103}, result[0].GetChildFields())
+		suite.Equal("parquet", result[0].GetFormat())
 		suite.Equal(1, len(result[0].Binlogs))
 		suite.Equal(int64(3), result[0].Binlogs[0].LogID)
 	})
@@ -267,4 +271,24 @@ func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
 		suite.NotNil(fb104)
 		suite.Equal(1, len(fb104.Binlogs))
 	})
+}
+
+func (suite *UtilSuite) TestMergeFieldBinlogsPreservesColumnGroupMetadata() {
+	current := []*datapb.FieldBinlog{{
+		FieldID: 102,
+		Binlogs: []*datapb.Binlog{{LogID: 1}},
+	}}
+	newLogs := []*datapb.FieldBinlog{{
+		FieldID:     102,
+		ChildFields: []int64{102, 103},
+		Format:      "parquet",
+		Binlogs:     []*datapb.Binlog{{LogID: 2}},
+	}}
+
+	result := mergeFieldBinlogs(current, newLogs)
+
+	suite.Len(result, 1)
+	suite.Equal([]int64{102, 103}, result[0].GetChildFields())
+	suite.Equal("parquet", result[0].GetFormat())
+	suite.Len(result[0].GetBinlogs(), 2)
 }

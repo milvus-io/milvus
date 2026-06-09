@@ -314,6 +314,19 @@ func (d *distribution) PeekSegments(readable bool, partitions ...int64) (sealed 
 	return
 }
 
+// IsReadableSealedSegment reuses PeekSegments(readable=true) semantics for Reopen activation.
+func (d *distribution) IsReadableSealedSegment(segmentID int64) bool {
+	sealed, _ := d.PeekSegments(true)
+	for _, item := range sealed {
+		for _, entry := range item.Segments {
+			if entry.SegmentID == segmentID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Unpin notifies snapshot one reference is released.
 func (d *distribution) Unpin(version int64) {
 	snapshot, ok := d.snapshots.Get(version)

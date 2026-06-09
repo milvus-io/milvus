@@ -26,6 +26,7 @@
 #include "common/BitsetView.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/FastMem.h"
 #include "common/FieldMeta.h"
 #include "common/IndexMeta.h"
 #include "common/OffsetMapping.h"
@@ -184,15 +185,24 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         const bool is_element_level_search =
             data_type == DataType::VECTOR_ARRAY &&
             info.array_offsets_ != nullptr;
+        const auto has_offset_mapping =
+            offset_mapping.IsEnabled() && !is_element_level_search;
 
         TargetBitmap transformed_bitset;
         BitsetView search_bitset = bitset;
-        if (offset_mapping.IsEnabled() && !is_element_level_search &&
-            !bitset.empty()) {
-            transformed_bitset = TransformBitset(bitset, offset_mapping);
+        if (has_offset_mapping && !bitset.empty()) {
+            auto status =
+                offset_mapping.TransformBitset(bitset, transformed_bitset);
+            if (status == OffsetMapping::BitsetTransformStatus::AllFiltered) {
+                FillEmptySearchResult(search_result, num_queries, info.topk_);
+                return;
+            }
+            if (status == OffsetMapping::BitsetTransformStatus::NoFilter) {
+                search_bitset = BitsetView{};
+            }
         }
 
-        auto active_count = offset_mapping.IsEnabled()
+        auto active_count = has_offset_mapping
                                 ? offset_mapping.GetValidCount()
                                 : std::min(int64_t(bitset.size()),
                                            segment.get_active_count(timestamp));
@@ -200,15 +210,11 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         // Check for nullable vector field with all null values
         if (active_count == 0) {
             // All vectors are null, return empty result
-            auto total_num = num_queries * info.topk_;
-            search_result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
-            search_result.distances_.resize(total_num, 0.0f);
-            search_result.total_nq_ = num_queries;
-            search_result.unity_topK_ = info.topk_;
+            FillEmptySearchResult(search_result, num_queries, info.topk_);
             return;
         }
-        if (offset_mapping.IsEnabled() && !is_element_level_search &&
-            !bitset.empty()) {
+        if (has_offset_mapping && !bitset.empty() &&
+            !transformed_bitset.empty()) {
             search_bitset =
                 search_result.PinBitset(std::move(transformed_bitset));
         }
@@ -281,7 +287,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                     auto count = 0;
                     auto ptr = buf.get();
                     for (int i = 0; i < size_per_chunk; ++i) {
-                        memcpy(ptr, vec_ptr[i].data(), vec_ptr[i].byte_size());
+                        milvus::fastmem::FastMemcpy(
+                            ptr, vec_ptr[i].data(), vec_ptr[i].byte_size());
                         ptr += vec_ptr[i].byte_size();
                         count += vec_ptr[i].length();
                     }
@@ -296,7 +303,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                     auto offset = 0;
                     auto ptr = buf.get();
                     for (int i = 0; i < size_per_chunk; ++i) {
-                        memcpy(ptr, vec_ptr[i].data(), vec_ptr[i].byte_size());
+                        milvus::fastmem::FastMemcpy(
+                            ptr, vec_ptr[i].data(), vec_ptr[i].byte_size());
                         ptr += vec_ptr[i].byte_size();
 
                         offset += vec_ptr[i].length();
@@ -344,7 +352,9 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             // Element-level search skips row-level mapping (element IDs are
             // not row-aligned); see ChunkMergeIterator ctor.
             const milvus::OffsetMapping* iter_offset_mapping =
-                is_element_level_search ? nullptr : &offset_mapping;
+                (is_element_level_search || !has_offset_mapping)
+                    ? nullptr
+                    : &offset_mapping;
             search_result.AssembleChunkVectorIterators(
                 num_queries,
                 max_chunk,
@@ -361,8 +371,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 search_result.seg_offsets_ = std::move(seg_offsets);
                 search_result.element_indices_ = std::move(elem_indicies);
             } else {
-                if (offset_mapping.IsEnabled()) {
-                    TransformOffset(final_qr.mutable_offsets(), offset_mapping);
+                if (has_offset_mapping) {
+                    offset_mapping.TransformOffsets(final_qr.mutable_offsets());
                 }
                 search_result.seg_offsets_ =
                     std::move(final_qr.mutable_offsets());

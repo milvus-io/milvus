@@ -143,8 +143,13 @@ export CFLAGS="-Wno-error=address -Wno-error=deprecated-declarations"
 # macOS SDK headers to exclude macOS-specific APIs (SecImportExport, SCPreferences, etc.).
 # This fixes aws-c-cal, c-ares, and other packages that depend on macOS Security/SystemConfig APIs.
 if [[ "$(uname -s)" == "Darwin" ]]; then
-    export CFLAGS="${CFLAGS} -DTARGET_OS_OSX=1"
-    export CXXFLAGS="${CXXFLAGS} -DTARGET_OS_OSX=1"
+    arm_crypto_flags=""
+    if [[ "$(uname -m)" == "arm64" ]]; then
+        # Homebrew LLVM needs ARM crypto enabled for libsodium armcrypto sources on macOS arm64.
+        arm_crypto_flags=" -march=armv8-a+crypto"
+    fi
+    export CFLAGS="${CFLAGS} -DTARGET_OS_OSX=1${arm_crypto_flags}"
+    export CXXFLAGS="${CXXFLAGS} -DTARGET_OS_OSX=1${arm_crypto_flags}"
 fi
 # Allow CMake 4.x to build packages with old cmake_minimum_required versions (< 3.5)
 export CMAKE_POLICY_VERSION_MINIMUM=3.5
@@ -211,7 +216,7 @@ case "${unameOut}" in
     export CMAKE_CXX_COMPILER_LAUNCHER=ccache
     echo "Using CXX: $CXX"
     echo "Using CC: $CC"
-    CONAN_ARGS="--output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=17 -u"
+    CONAN_ARGS="--output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=20 -u"
 
     # On macOS, Conan packages with shared libraries (protobuf, grpc) produce
     # binaries (protoc, grpc_cpp_plugin) whose install rpaths don't include
@@ -275,9 +280,9 @@ HOOK_EOF
     export CPU_TARGET=avx
     GCC_VERSION=`gcc -dumpversion`
     if [[ `gcc -v 2>&1 | sed -n 's/.*\(--with-default-libstdcxx-abi\)=\(\w*\).*/\2/p'` == "gcc4" ]]; then
-      "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.cppstd=17 || { echo 'conan install failed'; exit 1; }
+      "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.cppstd=20 -s:b compiler.cppstd=20 || { echo 'conan install failed'; exit 1; }
     else
-      "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -s compiler.cppstd=17 || { echo 'conan install failed'; exit 1; }
+      "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -s compiler.cppstd=20 -s:b compiler.cppstd=20 || { echo 'conan install failed'; exit 1; }
     fi
     ;;
   *)

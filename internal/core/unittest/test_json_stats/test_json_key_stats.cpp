@@ -419,9 +419,8 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
 
         Config config;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
-        if (lack_binlog_rows > 0) {
-            config["lack_binlog_rows"] = lack_binlog_rows;
-        }
+        config[INDEX_NUM_ROWS_KEY] =
+            static_cast<int64_t>(data_.size()) + lack_binlog_rows;
 
         build_index_ = std::make_shared<JsonKeyStats>(ctx, false);
         build_index_->Build(config);

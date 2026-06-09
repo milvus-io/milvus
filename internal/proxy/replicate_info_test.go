@@ -23,6 +23,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -87,6 +89,32 @@ func TestProxy_GetReplicateInfo_GetSalvageCheckpointError(t *testing.T) {
 	})
 	assert.EqualError(t, err, "salvage error")
 	assert.Nil(t, resp)
+}
+
+func TestProxy_GetReplicateInfo_GetSalvageCheckpointUnimplemented(t *testing.T) {
+	replicateService := mock_streaming.NewMockReplicateService(t)
+	replicateService.EXPECT().GetReplicateCheckpoint(mock.Anything, "test-pchannel").
+		Return(&utility.ReplicateCheckpoint{ClusterID: "cluster-a", PChannel: "test-pchannel", TimeTick: 100}, nil)
+	replicateService.EXPECT().GetSalvageCheckpoint(mock.Anything, "test-pchannel").
+		Return(nil, status.Error(codes.Unimplemented, "method GetSalvageCheckpoint not implemented"))
+
+	mockWAL := mock_streaming.NewMockWALAccesser(t)
+	mockWAL.EXPECT().Replicate().Return(replicateService)
+	prevWAL := streaming.WAL()
+	streaming.SetWALForTest(mockWAL)
+	defer streaming.SetWALForTest(prevWAL)
+
+	node := &Proxy{}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	resp, err := node.GetReplicateInfo(context.Background(), &milvuspb.GetReplicateInfoRequest{
+		TargetPchannel:  "test-pchannel",
+		SourceClusterId: "source-cluster",
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.Equal(t, "cluster-a", resp.GetCheckpoint().GetClusterId())
+	assert.Nil(t, resp.GetSalvageCheckpoint())
 }
 
 func TestProxy_GetReplicateInfo_Success_NoSalvageCheckpoints(t *testing.T) {

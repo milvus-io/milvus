@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstring>
+#include "common/FastMem.h"
 #include <map>
 #include <optional>
 #include <set>
@@ -73,7 +74,7 @@ UnescapeJsonString(const std::string& escaped) {
         std::string quoted;
         quoted.resize(escaped.size() + 2);
         quoted[0] = '"';
-        std::memcpy(&quoted[1], escaped.data(), escaped.size());
+        milvus::fastmem::FastMemcpy(&quoted[1], escaped.data(), escaped.size());
         quoted[quoted.size() - 1] = '"';
         simdjson::dom::element elem = parser.parse(quoted);
         if (elem.type() != simdjson::dom::element_type::STRING) {

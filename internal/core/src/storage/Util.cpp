@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <memory>
+#include "common/FastMem.h"
 
 #include "arrow/array/builder_binary.h"
 #include "arrow/array/builder_nested.h"
@@ -1934,9 +1935,9 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                                i);
                     ValidateNoNullValuesInRange(
                         values, offset, offset + actual_length, "vector list");
-                    memcpy(dst + i * byte_width,
-                           raw + offset * elem_byte_size,
-                           byte_width);
+                    milvus::fastmem::FastMemcpy(dst + i * byte_width,
+                                                raw + offset * elem_byte_size,
+                                                byte_width);
                 }
             }
         } else if (type_id == arrow::Type::FIXED_SIZE_LIST) {
@@ -1966,9 +1967,9 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                                                 offset,
                                                 offset + expected_list_length,
                                                 "vector list");
-                    memcpy(dst + i * byte_width,
-                           raw + offset * elem_byte_size,
-                           byte_width);
+                    milvus::fastmem::FastMemcpy(dst + i * byte_width,
+                                                raw + offset * elem_byte_size,
+                                                byte_width);
                 }
             }
         } else {
@@ -2029,7 +2030,7 @@ ConvertFixedSizeBinaryToBinary(const arrow::ArrayVector& arrays) {
         auto* dst = data_buf->mutable_data();
         for (int64_t i = 0; i < n; i++) {
             if (fsb->IsValid(i)) {
-                memcpy(dst, fsb->Value(i), byte_width);
+                milvus::fastmem::FastMemcpy(dst, fsb->Value(i), byte_width);
                 dst += byte_width;
             }
         }

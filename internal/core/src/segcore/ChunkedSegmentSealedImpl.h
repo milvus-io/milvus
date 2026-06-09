@@ -187,10 +187,33 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                   const int64_t* seg_offsets,
                   size_t count,
                   bool is_cosine,
+                  float* distances) const override {
+        return CalcDistByIDs(nullptr,
+                             field_id,
+                             query_dataset,
+                             seg_offsets,
+                             count,
+                             is_cosine,
+                             distances);
+    }
+
+    bool
+    CalcDistByIDs(milvus::OpContext* op_ctx,
+                  FieldId field_id,
+                  const knowhere::DataSetPtr& query_dataset,
+                  const int64_t* seg_offsets,
+                  size_t count,
+                  bool is_cosine,
                   float* distances) const override;
 
     bool
-    IsIndexRefineEnabled(FieldId field_id) const override;
+    IsIndexRefineEnabled(FieldId field_id) const override {
+        return IsIndexRefineEnabled(nullptr, field_id);
+    }
+
+    bool
+    IsIndexRefineEnabled(milvus::OpContext* op_ctx,
+                         FieldId field_id) const override;
 
     DataType
     GetFieldDataType(FieldId fieldId) const override;
@@ -1130,10 +1153,16 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     };
 
     ValidResult
-    FilterVectorValidOffsets(milvus::OpContext* op_ctx,
-                             FieldId field_id,
-                             const int64_t* seg_offsets,
-                             int64_t count) const;
+    FilterVectorValidOffsetsFromIndex(milvus::OpContext* op_ctx,
+                                      FieldId field_id,
+                                      const int64_t* seg_offsets,
+                                      int64_t count) const;
+
+    ValidResult
+    FilterVectorValidOffsetsFromColumn(milvus::OpContext* op_ctx,
+                                       const ChunkedColumnInterface* column,
+                                       const int64_t* seg_offsets,
+                                       int64_t count) const;
 
     void
     update_row_count(int64_t row_count) {
@@ -1177,7 +1206,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadIndex(LoadIndexInfo& info, bool is_replace);
 
     bool
-    generate_interim_index(const FieldId field_id, int64_t num_rows);
+    generate_interim_index(const FieldId field_id,
+                           int64_t num_rows,
+                           milvus::OpContext* op_ctx);
 
     void
     fill_empty_field(const FieldMeta& field_meta);

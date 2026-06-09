@@ -449,6 +449,9 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
                 query_context->set_enable_sub_expr_cache_write(false);
             }
 
+            auto op_context = milvus::OpContext(cancel_token_);
+            query_context->set_op_context(&op_context);
+
             auto result = ExecuteTask(plan_fragment, query_context);
 
             if (result != nullptr && !result->childrens().empty()) {
