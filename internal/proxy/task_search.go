@@ -840,7 +840,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 			}
 		} else if t.isIterator && queryInfo.GetSearchIteratorV2Info() == nil {
 			return merr.WrapErrParameterInvalid("", "",
-				"legacy search iterator is not supported for element-level search on embedding list fields; use search iterator v2")
+				"legacy search iterator is not supported for element-level search; use search iterator v2")
 		}
 
 		var groupByFieldIDs []int64
@@ -856,7 +856,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 			for _, groupByFieldID := range groupByFieldIDs {
 				if pkField == nil || groupByFieldID != pkField.GetFieldID() {
 					return merr.WrapErrParameterInvalid("", "",
-						"only group by primary key is supported for element-level search on embedding list fields")
+						"only group by primary key is supported for element-level search")
 				}
 			}
 		}

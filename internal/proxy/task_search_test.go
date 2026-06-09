@@ -5618,8 +5618,23 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 	})
 
 	t.Run("regular vector advanced controls should succeed", func(t *testing.T) {
-		task := makeTask("regular_vec", commonpb.PlaceholderType_FloatVector, rangeParams, true, false, "scalar_field")
-		assert.NoError(t, task.initSearchRequest(ctx))
+		tests := []struct {
+			name           string
+			paramsJSON     string
+			withIterator   bool
+			withIteratorV2 bool
+			groupByField   string
+		}{
+			{name: "range", paramsJSON: rangeParams},
+			{name: "iterator", paramsJSON: plainParams, withIterator: true},
+			{name: "group by", paramsJSON: plainParams, groupByField: "scalar_field"},
+		}
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				task := makeTask("regular_vec", commonpb.PlaceholderType_FloatVector, test.paramsJSON, test.withIterator, test.withIteratorV2, test.groupByField)
+				assert.NoError(t, task.initSearchRequest(ctx))
+			})
+		}
 	})
 }
 
