@@ -635,7 +635,7 @@ TEST_P(TestChunkSegmentStorageV2,
     exec::OffsetVector offsets;
     offsets.push_back(7);
     offsets.push_back(7000);
-    exec::EvalCtx eval_context(&exec_context, &offsets);
+    exec::EvalCtx eval_context(&exec_context, &expr_set, &offsets);
 
     std::vector<VectorPtr> results;
     expr_set.Eval(eval_context, results);
@@ -678,7 +678,7 @@ TEST_P(TestChunkSegmentStorageV2,
 
     exec::OffsetVector offsets;
     offsets.push_back(0);
-    exec::EvalCtx eval_context(&exec_context, &offsets);
+    exec::EvalCtx eval_context(&exec_context, &expr_set, &offsets);
 
     std::vector<VectorPtr> results;
     EXPECT_THROW(expr_set.Eval(eval_context, results), SegcoreError);
