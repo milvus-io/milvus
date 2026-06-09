@@ -26,6 +26,7 @@
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
+#include "query/PlanProto.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -367,7 +368,7 @@ TEST(QueryOrderByElementLevel, RestoresElementIndicesAfterSorting) {
     order_by->set_ascending(true);
     order_by->set_nulls_first(false);
 
-    auto parser = ProtoParser(schema);
+    auto parser = milvus::query::ProtoParser(schema);
     auto plan = parser.CreateRetrievePlan(plan_node);
     auto results = segment->Retrieve(
         nullptr, plan.get(), MAX_TIMESTAMP, DEFAULT_MAX_OUTPUT_SIZE, false);
@@ -395,10 +396,9 @@ TEST(QueryOrderByElementLevel, RestoresElementIndicesAfterSorting) {
         EXPECT_EQ(results->offset(i), 0);
         ASSERT_EQ(results->element_indices(i).indices_size(), 1);
     }
-    std::set<int32_t> rank20_indices{
-        results->element_indices(1).indices(0),
-        results->element_indices(2).indices(0),
-    };
+    std::set<int32_t> rank20_indices;
+    rank20_indices.insert(results->element_indices(1).indices(0));
+    rank20_indices.insert(results->element_indices(2).indices(0));
     EXPECT_EQ(rank20_indices, (std::set<int32_t>{0, 2}));
 
     for (int i : {3, 4}) {
@@ -407,10 +407,9 @@ TEST(QueryOrderByElementLevel, RestoresElementIndicesAfterSorting) {
         EXPECT_EQ(results->offset(i), 2);
         ASSERT_EQ(results->element_indices(i).indices_size(), 1);
     }
-    std::set<int32_t> rank30_indices{
-        results->element_indices(3).indices(0),
-        results->element_indices(4).indices(0),
-    };
+    std::set<int32_t> rank30_indices;
+    rank30_indices.insert(results->element_indices(3).indices(0));
+    rank30_indices.insert(results->element_indices(4).indices(0));
     EXPECT_EQ(rank30_indices, (std::set<int32_t>{0, 1}));
 }
 

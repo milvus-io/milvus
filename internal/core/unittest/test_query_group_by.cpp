@@ -25,6 +25,7 @@
 #include "pb/plan.pb.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
+#include "query/PlanProto.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -822,7 +823,7 @@ TEST(QueryAggElementLevel, CountStarUsesMatchingElements) {
     aggregate->set_op(proto::plan::count);
     aggregate->set_field_id(0);
 
-    auto parser = ProtoParser(schema);
+    auto parser = milvus::query::ProtoParser(schema);
     auto plan = parser.CreateRetrievePlan(plan_node);
     auto retrieve_results = segment->Retrieve(
         nullptr, plan.get(), MAX_TIMESTAMP, DEFAULT_MAX_OUTPUT_SIZE, false);
@@ -854,7 +855,7 @@ TEST(QueryAggElementLevel, GroupByPkCountStarUsesLogicalRows) {
     aggregate->set_op(proto::plan::count);
     aggregate->set_field_id(0);
 
-    auto parser = ProtoParser(schema);
+    auto parser = milvus::query::ProtoParser(schema);
     auto plan = parser.CreateRetrievePlan(plan_node);
     auto retrieve_results = segment->Retrieve(
         nullptr, plan.get(), MAX_TIMESTAMP, DEFAULT_MAX_OUTPUT_SIZE, false);
