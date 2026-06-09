@@ -550,7 +550,6 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
     rc.RecordSection("training done");
     buf.reset();
     auto centroids_res = cluster_node.GetCentroids();
-    centroids_res.value()->SetIsOwner(false);
     auto centroids =
         reinterpret_cast<const T*>(centroids_res.value()->GetTensor());
     auto centroid_stats = CentroidsToPB<T>(centroids, num_clusters, dim);
