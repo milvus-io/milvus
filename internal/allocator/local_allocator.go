@@ -19,7 +19,11 @@ package allocator
 import (
 	"fmt"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 )
+
+var ErrIDExhausted = errors.New("ID is exhausted")
 
 // localAllocator implements the Interface.
 // It is constructed from a range of IDs.
@@ -45,7 +49,7 @@ func (a *localAllocator) Alloc(count uint32) (int64, int64, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.idStart+cnt > a.idEnd {
-		return 0, 0, fmt.Errorf("ID is exhausted, start=%d, end=%d, count=%d", a.idStart, a.idEnd, cnt)
+		return 0, 0, fmt.Errorf("%w, start=%d, end=%d, count=%d", ErrIDExhausted, a.idStart, a.idEnd, cnt)
 	}
 	start := a.idStart
 	a.idStart += cnt

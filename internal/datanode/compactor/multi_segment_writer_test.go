@@ -56,9 +56,10 @@ type MultiSegmentWriterSuite struct {
 }
 
 type testCompactionAllocator struct {
-	next           int64
-	allocOneCalls  int
-	failAllocOneAt int
+	next            int64
+	allocOneCalls   int
+	failAllocOneAt  int
+	failAllocOneErr error
 }
 
 type closeErrSerializeWriter struct {
@@ -86,7 +87,10 @@ func (a *testCompactionAllocator) Alloc(count uint32) (int64, int64, error) {
 func (a *testCompactionAllocator) AllocOne() (int64, error) {
 	a.allocOneCalls++
 	if a.failAllocOneAt > 0 && a.allocOneCalls == a.failAllocOneAt {
-		return 0, errors.New("ID is exhausted")
+		if a.failAllocOneErr != nil {
+			return 0, a.failAllocOneErr
+		}
+		return 0, allocator.ErrIDExhausted
 	}
 	a.next++
 	return a.next, nil
@@ -385,9 +389,42 @@ func (s *MultiSegmentWriterSuite) TestSegmentRotation() {
 	s.GreaterOrEqual(len(finalSegments), 2)
 }
 
-func (s *MultiSegmentWriterSuite) TestCloseAfterRotateAllocFailureDoesNotRecloseClosedWriter() {
+func (s *MultiSegmentWriterSuite) TestSegmentIDExhaustionGrowsCurrentSegment() {
 	schema := s.genSimpleSchema()
-	segmentAlloc := &testCompactionAllocator{next: 1000, failAllocOneAt: 2}
+	segmentAlloc := allocator.NewLocalAllocator(1000, 1001)
+	logAlloc := allocator.NewLocalAllocator(2000, 3000)
+	allocator := NewCompactionAllocator(segmentAlloc, logAlloc)
+
+	writer, err := NewMultiSegmentWriter(
+		context.Background(),
+		s.mockBinlogIO,
+		allocator,
+		1,
+		schema,
+		s.params,
+		1000,
+		s.partitionID,
+		s.collectionID,
+		s.channel,
+		1,
+		storage.WithStorageConfig(s.params.StorageConfig),
+	)
+	s.Require().NoError(err)
+
+	s.Require().NoError(writer.WriteValue(s.genTestValue(1)))
+	s.Require().NoError(writer.WriteValue(s.genTestValue(2)))
+	s.Require().NoError(writer.Close())
+
+	segments := writer.GetCompactionSegments()
+	s.Require().Len(segments, 1)
+	s.EqualValues(1000, segments[0].SegmentID)
+	s.EqualValues(2, segments[0].NumOfRows)
+}
+
+func (s *MultiSegmentWriterSuite) TestRotateAllocFailureKeepsCurrentWriterOpen() {
+	schema := s.genSimpleSchema()
+	allocErr := errors.New("rootcoord unavailable")
+	segmentAlloc := &testCompactionAllocator{next: 1000, failAllocOneAt: 2, failAllocOneErr: allocErr}
 	logAlloc := &testCompactionAllocator{next: 2000}
 	allocator := NewCompactionAllocator(segmentAlloc, logAlloc)
 
@@ -410,10 +447,9 @@ func (s *MultiSegmentWriterSuite) TestCloseAfterRotateAllocFailureDoesNotReclose
 	err = writer.WriteValue(s.genTestValue(1))
 	s.Require().NoError(err)
 	err = writer.WriteValue(s.genTestValue(2))
-	s.Require().Error(err)
-	s.Contains(err.Error(), "ID is exhausted")
-	s.Nil(writer.writer)
-	s.Len(writer.GetCompactionSegments(), 1)
+	s.ErrorIs(err, allocErr)
+	s.NotNil(writer.writer)
+	s.Empty(writer.GetCompactionSegments())
 
 	err = writer.Close()
 	s.NoError(err)

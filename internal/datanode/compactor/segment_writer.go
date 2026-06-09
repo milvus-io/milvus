@@ -151,15 +151,14 @@ func (w *MultiSegmentWriter) closeWriter() error {
 }
 
 func (w *MultiSegmentWriter) rotateWriter() error {
-	if err := w.closeWriter(); err != nil {
-		return err
-	}
-
 	newSegmentID, err := w.allocator.allocSegmentID()
 	if err != nil {
 		return err
 	}
-	w.currentSegmentID = newSegmentID
+
+	if err := w.closeWriter(); err != nil {
+		return err
+	}
 
 	chunkSize := w.binLogMaxSize
 
@@ -176,7 +175,34 @@ func (w *MultiSegmentWriter) rotateWriter() error {
 		return err
 	}
 
+	w.currentSegmentID = newSegmentID
 	w.writer = storage.NewBinlogValueWriter(rw, w.batchSize)
+	return nil
+}
+
+func (w *MultiSegmentWriter) rotateWriterOrGrowCurrent() error {
+	if w.writer == nil {
+		return w.rotateWriter()
+	}
+	if w.writer.GetWrittenUncompressed() < uint64(w.segmentSize) {
+		return nil
+	}
+
+	if err := w.rotateWriter(); err != nil {
+		if !errors.Is(err, allocator.ErrIDExhausted) {
+			return err
+		}
+
+		writtenUncompressed := w.writer.GetWrittenUncompressed()
+		log.Warn("pre-allocated compaction segment IDs exhausted, continue writing current segment",
+			zap.Int64("collectionID", w.collectionID),
+			zap.Int64("partitionID", w.partitionID),
+			zap.String("channel", w.channel),
+			zap.Int64("segmentID", w.currentSegmentID),
+			zap.Uint64("currentSize", writtenUncompressed),
+			zap.Int64("expectedSegmentSize", w.segmentSize),
+			zap.Error(err))
+	}
 	return nil
 }
 
@@ -199,19 +225,15 @@ func (w *MultiSegmentWriter) GetCompactionSegments() []*datapb.CompactionSegment
 }
 
 func (w *MultiSegmentWriter) Write(r storage.Record) error {
-	if w.writer == nil || w.writer.GetWrittenUncompressed() >= uint64(w.segmentSize) {
-		if err := w.rotateWriter(); err != nil {
-			return err
-		}
+	if err := w.rotateWriterOrGrowCurrent(); err != nil {
+		return err
 	}
 	return w.writer.Write(r)
 }
 
 func (w *MultiSegmentWriter) WriteValue(v *storage.Value) error {
-	if w.writer == nil || w.writer.GetWrittenUncompressed() >= uint64(w.segmentSize) {
-		if err := w.rotateWriter(); err != nil {
-			return err
-		}
+	if err := w.rotateWriterOrGrowCurrent(); err != nil {
+		return err
 	}
 
 	return w.writer.WriteValue(v)
