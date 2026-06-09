@@ -149,7 +149,7 @@ func (s *PackWriterV3Suite) TestPackWriterV3_Write() {
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 		ManifestPath: manifestPath,
-	}, bfs, nil)
+	}, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().Collection().Return(collectionID).Maybe()
@@ -172,7 +172,7 @@ func (s *PackWriterV3Suite) TestPackWriterV3_Write() {
 	parquetSplit := storagecommon.FillColumnGroupFormats(s.currentSplit, "parquet")
 	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, parquetSplit, manifestPath)
 
-	gotInserts, _, _, _, writtenManifestPath, _, err := bw.Write(context.Background(), pack)
+	gotInserts, _, _, _, writtenManifestPath, _, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
 	s.Equal(gotInserts[0].Binlogs[0].GetEntriesNum(), int64(rows))
 	s.Equal("parquet", gotInserts[0].GetFormat())
@@ -201,7 +201,7 @@ func (s *PackWriterV3Suite) TestPackWriterV3_UsesManifestFormatAfterConfigSwitch
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 		ManifestPath: manifestPath,
-	}, bfs, nil)
+	}, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().Collection().Return(collectionID).Maybe()
@@ -221,7 +221,7 @@ func (s *PackWriterV3Suite) TestPackWriterV3_UsesManifestFormatAfterConfigSwitch
 		WithSegmentID(segmentID).
 		WithChannelName(channelName).
 		WithInsertData(genInsertData(5, s.schema))
-	_, _, _, _, firstManifestPath, _, err := bw.Write(context.Background(), firstPack)
+	_, _, _, _, firstManifestPath, _, _, err := bw.Write(context.Background(), firstPack)
 	s.Require().NoError(err)
 
 	format, err := packed.ResolveManifestSingleWriterFormat(firstManifestPath, s.storageConfig, nil, "")
@@ -244,7 +244,7 @@ func (s *PackWriterV3Suite) TestPackWriterV3_UsesManifestFormatAfterConfigSwitch
 		WithSegmentID(segmentID).
 		WithChannelName(channelName).
 		WithInsertData(genInsertData(5, s.schema))
-	_, _, _, _, secondManifestPath, _, err := bw.Write(context.Background(), secondPack)
+	_, _, _, _, secondManifestPath, _, _, err := bw.Write(context.Background(), secondPack)
 	s.Require().NoError(err)
 
 	format, err = packed.ResolveManifestSingleWriterFormat(secondManifestPath, s.storageConfig, nil, "")
@@ -300,17 +300,21 @@ func (s *PackWriterV3Suite) TestWriteEmptyInsertData() {
 	partitionID := int64(456)
 	segmentID := int64(789)
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
-	mc := metacache.NewMockMetaCache(s.T())
-	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 	basePath := path.Join(common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
+	bfs := pkoracle.NewBloomFilterSet()
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ManifestPath: manifestPath}, bfs, nil, metacache.NewEmptySegmentStats())
+	mc := metacache.NewMockMetaCache(s.T())
+	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
+	mc.EXPECT().GetSegmentByID(segmentID).Return(seg, true).Maybe()
+
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName)
 	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
 
-	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
 }
 
@@ -344,7 +348,7 @@ func (s *PackWriterV3Suite) TestNoPkField() {
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData([]*storage.InsertData{buf})
 	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
 
-	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)
 }
 
@@ -370,7 +374,7 @@ func (s *PackWriterV3Suite) TestWriteInsertDataError() {
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData([]*storage.InsertData{buf})
 	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
 
-	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)
 }
 
@@ -391,7 +395,7 @@ func (s *PackWriterV3Suite) TestInvalidManifestPath() {
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, s.schema))
 	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, invalidManifestPath)
 
-	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)
 }
 
@@ -410,7 +414,7 @@ func (s *PackWriterV3Suite) TestWriteWithDeleteData() {
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 		ManifestPath: manifestPath,
-	}, bfs, nil)
+	}, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().Collection().Return(collectionID).Maybe()
@@ -433,7 +437,7 @@ func (s *PackWriterV3Suite) TestWriteWithDeleteData() {
 
 	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
 
-	gotInserts, gotDeletes, _, _, writtenManifestPath, _, err := bw.Write(context.Background(), pack)
+	gotInserts, gotDeletes, _, _, writtenManifestPath, _, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
 	s.Equal(0, len(gotInserts)) // No insert binlogs when only deletes
 	// For V3, delta summary is returned for compaction trigger (no path, only stats)
@@ -523,7 +527,7 @@ func (s *PackWriterV3Suite) TestMultiBatchStatsAccumulation() {
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 		ManifestPath: manifestPath,
-	}, bfs, nil)
+	}, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().Collection().Return(collectionID).Maybe()
@@ -546,7 +550,7 @@ func (s *PackWriterV3Suite) TestMultiBatchStatsAccumulation() {
 		WithBatchRows(int64(batchRows))
 
 	bw1 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
-	_, _, _, _, manifest1, _, err := bw1.Write(context.Background(), pack1)
+	_, _, _, _, manifest1, _, _, err := bw1.Write(context.Background(), pack1)
 	s.Require().NoError(err)
 	currentSplit := storagecommon.FillColumnGroupFormats(s.currentSplit, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 
@@ -565,7 +569,7 @@ func (s *PackWriterV3Suite) TestMultiBatchStatsAccumulation() {
 		WithBatchRows(int64(batchRows))
 
 	bw2 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, currentSplit, manifest1)
-	_, _, _, _, manifest2, _, err := bw2.Write(context.Background(), pack2)
+	_, _, _, _, manifest2, _, _, err := bw2.Write(context.Background(), pack2)
 	s.Require().NoError(err)
 
 	stats2, err := packed.GetManifestStats(manifest2, s.storageConfig)
@@ -583,7 +587,7 @@ func (s *PackWriterV3Suite) TestMultiBatchStatsAccumulation() {
 		WithBatchRows(int64(batchRows))
 
 	bw3 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, currentSplit, manifest2)
-	_, _, _, _, manifest3, _, err := bw3.Write(context.Background(), pack3)
+	_, _, _, _, manifest3, _, _, err := bw3.Write(context.Background(), pack3)
 	s.Require().NoError(err)
 
 	stats3, err := packed.GetManifestStats(manifest3, s.storageConfig)
@@ -591,6 +595,32 @@ func (s *PackWriterV3Suite) TestMultiBatchStatsAccumulation() {
 	count3 := len(stats3[bfKey].Paths)
 	s.Greater(count3, count2, "batch 3 should accumulate more bloom filter files than batch 2")
 	s.NotEmpty(stats3[bfKey].Metadata["memory_size"], "memory_size metadata should be set")
+}
+
+// TestPerBatchStatPathsExcludesCompound guards the flush-merge fix: when a
+// segment in Flushing state flushes over more than one sync, the pre-commit
+// manifest already holds the prior flush's compound (merged) blob. That compound
+// must be excluded when assembling the prior-stats-for-merge, otherwise the PK
+// merge short-circuits on it (DeserializeBloomFilterStats) and the BM25 merge
+// additively re-counts it (double-count). perBatchStatPaths keeps only per-batch
+// blobs, which are the complete, non-redundant set.
+func (s *PackWriterV3Suite) TestPerBatchStatPathsExcludesCompound() {
+	base := "files/insert_log/1/10/200/_stats/bloom_filter.100"
+	// Per-batch ids are allocator-assigned (large); use values that cannot
+	// collide with CompoundStatsType.LogIdx() (== "1").
+	perBatch1 := base + "/10"
+	perBatch2 := base + "/20"
+	compound := base + "/" + storage.CompoundStatsType.LogIdx()
+	s.Require().NotEqual(perBatch1, compound)
+
+	// Compound dropped, per-batch order preserved.
+	s.Equal([]string{perBatch1, perBatch2}, perBatchStatPaths([]string{perBatch1, compound, perBatch2}))
+	// Compound-only input yields nothing to merge from.
+	s.Empty(perBatchStatPaths([]string{compound}))
+	// Per-batch-only input is unchanged (the normal first-flush case).
+	s.Equal([]string{perBatch1}, perBatchStatPaths([]string{perBatch1}))
+	// Empty input.
+	s.Empty(perBatchStatPaths(nil))
 }
 
 // TestMultiBatchBM25StatsAccumulation verifies that BM25 stat files from
@@ -610,7 +640,7 @@ func (s *PackWriterV3Suite) TestMultiBatchBM25StatsAccumulation() {
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 		ManifestPath: manifestPath,
-	}, bfs, nil)
+	}, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().Collection().Return(collectionID).Maybe()
@@ -641,7 +671,7 @@ func (s *PackWriterV3Suite) TestMultiBatchBM25StatsAccumulation() {
 		WithBM25Stats(makeBM25Stats())
 
 	bw1 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
-	_, _, _, _, manifest1, _, err := bw1.Write(context.Background(), pack1)
+	_, _, _, _, manifest1, _, _, err := bw1.Write(context.Background(), pack1)
 	s.Require().NoError(err)
 	currentSplit := storagecommon.FillColumnGroupFormats(s.currentSplit, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 
@@ -661,7 +691,7 @@ func (s *PackWriterV3Suite) TestMultiBatchBM25StatsAccumulation() {
 		WithBM25Stats(makeBM25Stats())
 
 	bw2 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, currentSplit, manifest1)
-	_, _, _, _, manifest2, _, err := bw2.Write(context.Background(), pack2)
+	_, _, _, _, manifest2, _, _, err := bw2.Write(context.Background(), pack2)
 	s.Require().NoError(err)
 
 	stats2, err := packed.GetManifestStats(manifest2, s.storageConfig)
@@ -686,7 +716,7 @@ func (s *PackWriterV3Suite) TestWrite_SingleVersionBumpAcrossSections() {
 	basePath := path.Join(common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ManifestPath: manifestPath}, bfs, nil)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ManifestPath: manifestPath}, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().Collection().Return(collectionID).Maybe()
@@ -717,7 +747,7 @@ func (s *PackWriterV3Suite) TestWrite_SingleVersionBumpAcrossSections() {
 	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc,
 		packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
 
-	_, _, _, _, writtenManifestPath, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, writtenManifestPath, _, _, err := bw.Write(context.Background(), pack)
 	s.Require().NoError(err)
 	_, newVer, err := packed.UnmarshalManifestPath(writtenManifestPath)
 	s.Require().NoError(err)
@@ -761,7 +791,7 @@ func (s *PackWriterV3Suite) TestWrite_RetryDoesNotLeakVersionBumps() {
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 	basePath := path.Join(common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ManifestPath: manifestPath}, bfs, nil)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ManifestPath: manifestPath}, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().Collection().Return(collectionID).Maybe()
@@ -794,7 +824,7 @@ func (s *PackWriterV3Suite) TestWrite_RetryDoesNotLeakVersionBumps() {
 
 	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc,
 		packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
-	_, _, _, _, newManifestPath, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, newManifestPath, _, _, err := bw.Write(context.Background(), pack)
 	s.Require().NoError(err)
 	_, newVer, err := packed.UnmarshalManifestPath(newManifestPath)
 	s.Require().NoError(err)

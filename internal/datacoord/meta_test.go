@@ -3182,14 +3182,14 @@ func TestMeta_Basic(t *testing.T) {
 		// add seg0 with size0
 		segID0 := AllocID()
 		segInfo0 := buildSegment(collID, partID0, segID0, channelName)
-		segInfo0.size.Store(size0)
+		segInfo0.Stats = &datapb.Statistics{InsertBinlogSize: size0}
 		err = meta.AddSegment(context.TODO(), segInfo0)
 		assert.NoError(t, err)
 
 		// add seg1 with size1
 		segID1 := AllocID()
 		segInfo1 := buildSegment(collID, partID0, segID1, channelName)
-		segInfo1.size.Store(size1)
+		segInfo1.Stats = &datapb.Statistics{InsertBinlogSize: size1}
 		err = meta.AddSegment(context.TODO(), segInfo1)
 		assert.NoError(t, err)
 
@@ -3391,6 +3391,72 @@ func TestAddL0DeltalogsAndUpdateManifestOperator(t *testing.T) {
 	require.Empty(t, updated.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
 	require.EqualValues(t, 9001, updated.GetDeltalogs()[0].GetBinlogs()[0].GetLogID())
 	require.EqualValues(t, 3, updated.GetDeltalogs()[0].GetBinlogs()[0].GetEntriesNum())
+}
+
+// Regression for the V3 restart undercount: AlterSegments skips persisting
+// per-FieldBinlog deltalog KVs for V3, so after a DataCoord restart the
+// in-memory Deltalogs array is empty and the cumulative deltas live only in
+// the persisted Stats. An L0 delete compaction must accumulate the new batch
+// onto that persisted baseline, not recompute from the empty array.
+func TestAddL0DeltalogsAccumulatesDeltaStatsAfterRestart(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/200"
+	oldManifest := packed.MarshalManifestPath(basePath, 7)
+	newManifest := packed.MarshalManifestPath(basePath, 8)
+
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	// V3 segment as it looks post-restart: cumulative deltas persisted on
+	// Stats, but the Deltalogs array empty (its per-field KVs were never
+	// written). NewSegmentInfo keeps the non-nil Stats verbatim.
+	require.NoError(t, meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           200,
+		CollectionID: 1,
+		PartitionID:  10,
+		State:        commonpb.SegmentState_Flushed,
+		ManifestPath: oldManifest,
+		Stats: &datapb.Statistics{
+			DeltaBinlogSize:    4096,
+			DeleteNumRows:      1000,
+			DeltaBinlogCount:   10,
+			DeltaTimestampFrom: 100,
+			DeltaTimestampTo:   900,
+		},
+	})))
+
+	deltalogs := []*datapb.FieldBinlog{{
+		Binlogs: []*datapb.Binlog{{
+			LogID:         9001,
+			LogPath:       basePath + "/_delta/9001",
+			EntriesNum:    50,
+			MemorySize:    256,
+			TimestampFrom: 950,
+			TimestampTo:   1000,
+		}},
+	}}
+
+	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
+		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+			return newManifest, nil
+		},
+	).Build()
+	defer patch.UnPatch()
+
+	cache := make(map[int64]string)
+	err = meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(
+		200,
+		deltalogs,
+		&indexpb.StorageConfig{},
+		cache,
+	))
+	require.NoError(t, err)
+
+	stats := meta.GetSegment(context.TODO(), 200).GetStats()
+	// Baseline + new batch, not the new batch alone.
+	require.EqualValues(t, 1050, stats.GetDeleteNumRows())
+	require.EqualValues(t, 4096+256, stats.GetDeltaBinlogSize())
+	require.EqualValues(t, 11, stats.GetDeltaBinlogCount())
+	require.EqualValues(t, 100, stats.GetDeltaTimestampFrom())
+	require.EqualValues(t, 1000, stats.GetDeltaTimestampTo())
 }
 
 func TestAddL0DeltalogsAndUpdateManifestOperatorCommitsManifestsConcurrently(t *testing.T) {
@@ -3634,7 +3700,6 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		})
 		err = meta.AddSegment(context.TODO(), segment1)
 		assert.NoError(t, err)
-		require.EqualValues(t, -1, segment1.deltaRowcount.Load())
 		assert.EqualValues(t, 0, segment1.getDeltaCount())
 
 		err = meta.UpdateSegmentsInfo(
@@ -3652,7 +3717,6 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		updated := meta.GetHealthySegment(context.TODO(), 1)
-		assert.EqualValues(t, -1, updated.deltaRowcount.Load())
 		assert.EqualValues(t, 1, updated.getDeltaCount())
 
 		expected := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
@@ -3670,7 +3734,6 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.Equal(t, len(updated.Statslogs[0].Binlogs), len(expected.Statslogs[0].Binlogs))
 		assert.Equal(t, len(updated.Deltalogs[0].Binlogs), len(expected.Deltalogs[0].Binlogs))
 		assert.Equal(t, updated.State, expected.State)
-		assert.Equal(t, updated.size.Load(), expected.size.Load())
 		assert.Equal(t, updated.NumOfRows, expected.NumOfRows)
 	})
 
@@ -3685,7 +3748,6 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		})
 		err = meta.AddSegment(context.TODO(), segment1)
 		assert.NoError(t, err)
-		require.EqualValues(t, -1, segment1.deltaRowcount.Load())
 		assert.EqualValues(t, 0, segment1.getDeltaCount())
 
 		err = meta.UpdateSegmentsInfo(
@@ -3704,7 +3766,6 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		updated := meta.GetHealthySegment(context.TODO(), 1)
-		assert.EqualValues(t, -1, updated.deltaRowcount.Load())
 		assert.EqualValues(t, 1, updated.getDeltaCount())
 
 		assert.Equal(t, updated.StartPosition, &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}})
@@ -5740,4 +5801,298 @@ func TestUpdateChannelCheckpoints_ClampedByGrowing(t *testing.T) {
 	cp := meta.GetChannelCheckpoint(mockVChannel)
 	assert.NotNil(t, cp)
 	assert.Equal(t, uint64(300), cp.GetTimestamp())
+}
+
+func TestUpdateSegmentStatsOperator(t *testing.T) {
+	logID := int64(0)
+	mkField := func(entries, mem int64) *datapb.FieldBinlog {
+		logID++
+		return &datapb.FieldBinlog{Binlogs: []*datapb.Binlog{{LogID: logID, EntriesNum: entries, MemorySize: mem}}}
+	}
+
+	t.Run("v2 computes from arrays", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		segment := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:    1,
+			State: commonpb.SegmentState_Flushed,
+			// V2: stats are in arrays, manifest_path empty.
+			Binlogs:   []*datapb.FieldBinlog{mkField(100, 1024)},
+			Statslogs: []*datapb.FieldBinlog{mkField(0, 128)},
+			Deltalogs: []*datapb.FieldBinlog{mkField(5, 64)},
+		})
+		require.NoError(t, meta.AddSegment(context.TODO(), segment))
+
+		err = meta.UpdateSegmentsInfo(context.TODO(), UpdateSegmentStats(1, nil))
+		require.NoError(t, err)
+
+		got := meta.GetSegment(context.TODO(), 1)
+		require.NotNil(t, got)
+		stats := got.GetStats()
+		require.NotNil(t, stats)
+		assert.EqualValues(t, 1024, stats.GetInsertBinlogSize())
+		assert.EqualValues(t, 128, stats.GetStatsBinlogSize())
+		assert.EqualValues(t, 64, stats.GetDeltaBinlogSize())
+		assert.EqualValues(t, 5, stats.GetDeleteNumRows())
+		assert.EqualValues(t, 1, stats.GetInsertBinlogCount())
+		assert.EqualValues(t, 1, stats.GetDeltaBinlogCount())
+	})
+
+	// Non-nil requestStats is stored wholesale — all fields verbatim as sent
+	// by the datanode's StatisticsCollector. No per-field override or array
+	// derivation happens.
+	t.Run("non-nil request stored wholesale", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		segment := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           2,
+			State:        commonpb.SegmentState_Flushed,
+			ManifestPath: "manifest://foo",
+			Binlogs:      []*datapb.FieldBinlog{mkField(200, 2048)},
+			Statslogs:    nil,
+			Deltalogs:    []*datapb.FieldBinlog{mkField(3, 32)},
+		})
+		require.NoError(t, meta.AddSegment(context.TODO(), segment))
+
+		// Complete Statistics as shipped by the datanode.
+		req := &datapb.Statistics{
+			InsertBinlogSize:  8192,
+			StatsBinlogSize:   4096,
+			DeltaBinlogSize:   256,
+			DeleteNumRows:     7,
+			InsertBinlogCount: 3,
+			DeltaBinlogCount:  2,
+		}
+		err = meta.UpdateSegmentsInfo(context.TODO(), UpdateSegmentStats(2, req))
+		require.NoError(t, err)
+
+		got := meta.GetSegment(context.TODO(), 2)
+		require.NotNil(t, got)
+		stats := got.GetStats()
+		require.NotNil(t, stats)
+		// Wholesale: every field matches what the datanode sent, not the arrays.
+		assert.EqualValues(t, 8192, stats.GetInsertBinlogSize())
+		assert.EqualValues(t, 4096, stats.GetStatsBinlogSize())
+		assert.EqualValues(t, 256, stats.GetDeltaBinlogSize())
+		assert.EqualValues(t, 7, stats.GetDeleteNumRows())
+		assert.EqualValues(t, 3, stats.GetInsertBinlogCount())
+		assert.EqualValues(t, 2, stats.GetDeltaBinlogCount())
+	})
+
+	// Non-nil requestStats is stored wholesale regardless of storage version.
+	// Whatever the datanode sends in requestStats is the authoritative value.
+	t.Run("non-nil request StatsBinlogSize taken wholesale", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		segment := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:    10,
+			State: commonpb.SegmentState_Flushed,
+			// V2-style: no manifest_path, statslogs array carries 256 bytes.
+			Binlogs:   []*datapb.FieldBinlog{mkField(100, 1024)},
+			Statslogs: []*datapb.FieldBinlog{mkField(0, 256)},
+		})
+		require.NoError(t, meta.AddSegment(context.TODO(), segment))
+
+		// Datanode ships a complete Statistics; StatsBinlogSize=128 is taken
+		// verbatim — wholesale means no array override.
+		err = meta.UpdateSegmentsInfo(context.TODO(),
+			UpdateSegmentStats(10, &datapb.Statistics{
+				InsertBinlogSize: 1024,
+				StatsBinlogSize:  128,
+			}))
+		require.NoError(t, err)
+
+		got := meta.GetSegment(context.TODO(), 10)
+		require.NotNil(t, got)
+		stats := got.GetStats()
+		require.NotNil(t, stats)
+		assert.EqualValues(t, 128, stats.GetStatsBinlogSize(),
+			"wholesale: requestStats.StatsBinlogSize is stored verbatim")
+		assert.EqualValues(t, 1024, stats.GetInsertBinlogSize())
+	})
+
+	t.Run("missing segment returns false", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(context.TODO(), UpdateSegmentStats(999, nil))
+		// Missing-segment operator returns false; updateSegmentsInfo swallows it.
+		require.NoError(t, err)
+	})
+
+	// nil requestStats → array-derived fallback via storage.BuildStatsFromFieldBinlogs.
+	// V3 segment with no statslogs: StatsBinlogSize falls back to 0 (no
+	// array data), InsertBinlogSize is derived from Binlogs array.
+	t.Run("nil request falls back to array derivation", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		segment := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           3,
+			State:        commonpb.SegmentState_Flushed,
+			ManifestPath: "manifest://foo",
+			Binlogs:      []*datapb.FieldBinlog{mkField(50, 1024)},
+			Statslogs:    nil,
+		})
+		require.NoError(t, meta.AddSegment(context.TODO(), segment))
+
+		// nil requestStats → storage.BuildStatsFromFieldBinlogs(Binlogs, nil, nil, nil).
+		err = meta.UpdateSegmentsInfo(context.TODO(), UpdateSegmentStats(3, nil))
+		require.NoError(t, err)
+
+		got := meta.GetSegment(context.TODO(), 3)
+		require.NotNil(t, got)
+		stats := got.GetStats()
+		require.NotNil(t, stats)
+		// Derived from Binlogs array (1 file, 1024 bytes).
+		assert.EqualValues(t, 1024, stats.GetInsertBinlogSize())
+		// No statslogs array → array fallback yields 0.
+		assert.EqualValues(t, 0, stats.GetStatsBinlogSize())
+		assert.EqualValues(t, 1, stats.GetInsertBinlogCount())
+	})
+}
+
+// addDeltalogsToSegment is invoked by the L0 delete-compaction commit path:
+// it appends a deltalog to a flushed segment without re-running the full
+// stats recompute (which would zero-out V3 insert/stats fields whose arrays
+// are intentionally empty). The contract is: only delta-* fields move;
+// insert/stats fields stay put.
+func TestAddDeltalogsToSegment_PreservesInsertAndStats(t *testing.T) {
+	mkBinlog := func(logID, entries, mem int64, tsFrom, tsTo uint64) *datapb.FieldBinlog {
+		return &datapb.FieldBinlog{Binlogs: []*datapb.Binlog{{LogID: logID, EntriesNum: entries, MemorySize: mem, TimestampFrom: tsFrom, TimestampTo: tsTo}}}
+	}
+
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:           7,
+			ManifestPath: "manifest://foo",
+			Stats: &datapb.Statistics{
+				InsertBinlogSize:   1 << 20,
+				StatsBinlogSize:    1 << 14,
+				InsertBinlogCount:  3,
+				TimestampFrom:      100,
+				TimestampTo:        200,
+				TimestampQuantiles: []int64{110, 130, 150, 170, 200},
+				DeltaBinlogSize:    64,
+				DeltaBinlogCount:   1,
+				DeleteNumRows:      5,
+				// Stale delta-ts that must be refreshed from the merged array.
+				DeltaTimestampFrom: 999,
+				DeltaTimestampTo:   111,
+			},
+			Deltalogs: []*datapb.FieldBinlog{mkBinlog(1, 5, 64, 200, 300)},
+		},
+	}
+
+	modPack := &updateSegmentPack{
+		segments:   map[int64]*SegmentInfo{7: segment},
+		increments: map[int64]metastore.BinlogsIncrement{},
+	}
+	newDelta := []*datapb.FieldBinlog{mkBinlog(2, 9, 128, 150, 400)}
+
+	ok := addDeltalogsToSegment(modPack, 7, segment, newDelta)
+	require.True(t, ok)
+
+	stats := segment.GetStats()
+	// Delta-related fields refreshed from the merged delta array.
+	assert.EqualValues(t, 64+128, stats.GetDeltaBinlogSize())
+	assert.EqualValues(t, 5+9, stats.GetDeleteNumRows())
+	assert.EqualValues(t, 2, stats.GetDeltaBinlogCount())
+	// Delta timestamps recomputed (min from / max to) across both deltalogs.
+	assert.EqualValues(t, 150, stats.GetDeltaTimestampFrom())
+	assert.EqualValues(t, 400, stats.GetDeltaTimestampTo())
+	// Insert / stats fields untouched.
+	assert.EqualValues(t, 1<<20, stats.GetInsertBinlogSize())
+	assert.EqualValues(t, 1<<14, stats.GetStatsBinlogSize())
+	assert.EqualValues(t, 3, stats.GetInsertBinlogCount())
+	assert.EqualValues(t, 100, stats.GetTimestampFrom())
+	assert.EqualValues(t, 200, stats.GetTimestampTo())
+	assert.Equal(t, []int64{110, 130, 150, 170, 200}, stats.GetTimestampQuantiles())
+	// Increment recorded for the delta-only KV update.
+	inc, ok := modPack.increments[7]
+	require.True(t, ok)
+	assert.False(t, inc.UpdateMask.WithoutDeltalogs)
+	assert.True(t, inc.UpdateMask.WithoutBinlogs)
+	assert.True(t, inc.UpdateMask.WithoutStatslogs)
+}
+
+func TestAddDeltalogsToSegment_NilStatsInitializes(t *testing.T) {
+	mkBinlog := func(logID, entries, mem int64) *datapb.FieldBinlog {
+		return &datapb.FieldBinlog{Binlogs: []*datapb.Binlog{{LogID: logID, EntriesNum: entries, MemorySize: mem}}}
+	}
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{ID: 8},
+	}
+	modPack := &updateSegmentPack{
+		segments:   map[int64]*SegmentInfo{8: segment},
+		increments: map[int64]metastore.BinlogsIncrement{},
+	}
+	ok := addDeltalogsToSegment(modPack, 8, segment, []*datapb.FieldBinlog{mkBinlog(1, 7, 256)})
+	require.True(t, ok)
+	require.NotNil(t, segment.GetStats())
+	assert.EqualValues(t, 256, segment.GetStats().GetDeltaBinlogSize())
+	assert.EqualValues(t, 7, segment.GetStats().GetDeleteNumRows())
+	assert.EqualValues(t, 1, segment.GetStats().GetDeltaBinlogCount())
+}
+
+func TestAddDeltalogsToSegment_EmptyInputIsNoOp(t *testing.T) {
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{ID: 9, Stats: &datapb.Statistics{DeltaBinlogSize: 42}},
+	}
+	modPack := &updateSegmentPack{
+		segments:   map[int64]*SegmentInfo{9: segment},
+		increments: map[int64]metastore.BinlogsIncrement{},
+	}
+	ok := addDeltalogsToSegment(modPack, 9, segment, nil)
+	assert.False(t, ok)
+	// Stats untouched on no-op.
+	assert.EqualValues(t, 42, segment.GetStats().GetDeltaBinlogSize())
+	_, hasInc := modPack.increments[9]
+	assert.False(t, hasInc)
+}
+
+// UpdateBinlogsOperator fully replaces the FieldBinlog arrays AND recomputes
+// Stats from those arrays. Import / copy-segment / sort paths rely on this:
+// they don't ship a writer-side Statistics, so the Stats they get out of the
+// operator must match what the arrays imply.
+func TestUpdateBinlogsOperator_RefreshesStats(t *testing.T) {
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+
+	mkBinlog := func(logID, entries, mem int64, tsFrom, tsTo uint64) *datapb.FieldBinlog {
+		return &datapb.FieldBinlog{Binlogs: []*datapb.Binlog{{LogID: logID, EntriesNum: entries, MemorySize: mem, TimestampFrom: tsFrom, TimestampTo: tsTo}}}
+	}
+
+	// Seed with stale Stats so we can verify recomputation actually happened.
+	require.NoError(t, meta.AddSegment(context.TODO(), &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:    11,
+			State: commonpb.SegmentState_Flushed,
+			Stats: &datapb.Statistics{InsertBinlogSize: 999, DeltaBinlogSize: 999, StatsBinlogSize: 999},
+		},
+	}))
+
+	newBinlogs := []*datapb.FieldBinlog{mkBinlog(1, 100, 4096, 100, 200)}
+	newStats := []*datapb.FieldBinlog{mkBinlog(2, 0, 256, 0, 0)}
+	newDelta := []*datapb.FieldBinlog{mkBinlog(3, 5, 64, 150, 180)}
+
+	err = meta.UpdateSegmentsInfo(context.TODO(),
+		UpdateBinlogsOperator(11, newBinlogs, newStats, newDelta, nil))
+	require.NoError(t, err)
+
+	got := meta.GetSegment(context.TODO(), 11)
+	require.NotNil(t, got)
+	stats := got.GetStats()
+	require.NotNil(t, stats)
+	assert.EqualValues(t, 4096, stats.GetInsertBinlogSize())
+	assert.EqualValues(t, 256, stats.GetStatsBinlogSize())
+	assert.EqualValues(t, 64, stats.GetDeltaBinlogSize())
+	assert.EqualValues(t, 5, stats.GetDeleteNumRows())
+	assert.EqualValues(t, 1, stats.GetInsertBinlogCount())
+	assert.EqualValues(t, 1, stats.GetDeltaBinlogCount())
+	assert.EqualValues(t, 100, stats.GetTimestampFrom())
+	assert.EqualValues(t, 200, stats.GetTimestampTo())
 }

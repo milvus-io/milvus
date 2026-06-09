@@ -45,7 +45,7 @@ import (
 func TestBulkPackWriter_Write(t *testing.T) {
 	paramtable.Get().Init(paramtable.NewBaseTable())
 
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, nil, nil)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, nil, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)
 	collectionID := int64(123)
 	partitionID := int64(456)

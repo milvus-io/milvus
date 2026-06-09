@@ -91,6 +91,10 @@ func (w closeErrBinlogRecordWriter) GetWrittenUncompressed() uint64 {
 	return w.writtenUncompressed
 }
 
+func (w closeErrBinlogRecordWriter) GetStatsBlobSize() int64 {
+	return 0
+}
+
 func (w closeErrBinlogRecordWriter) Close() error {
 	return nil
 }
