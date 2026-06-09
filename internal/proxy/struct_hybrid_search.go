@@ -158,7 +158,10 @@ func isElementCollapseSumFamily(strategy string) bool {
 }
 
 func validateElementCollapseMetricType(config elementCollapseConfig, metricType string) error {
-	if config.Strategy == "" || !isElementCollapseSumFamily(config.Strategy) || metric.PositivelyRelated(metricType) {
+	if config.Strategy == "" ||
+		!isElementCollapseSumFamily(config.Strategy) ||
+		strings.TrimSpace(metricType) == "" ||
+		metric.PositivelyRelated(metricType) {
 		return nil
 	}
 	return merr.WrapErrParameterInvalidMsg(

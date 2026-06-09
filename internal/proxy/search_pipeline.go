@@ -561,7 +561,7 @@ func aggregateElementHits(hits []bestElementHit, config elementCollapseConfig, l
 		for _, hit := range hits {
 			sum += hit.score
 		}
-		selected := hits[0]
+		selected := bestHits[0]
 		selected.aggregate = sum
 		selected.groupCount = len(hits)
 		if config.Strategy == elementCollapseAvg {
