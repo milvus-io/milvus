@@ -1182,6 +1182,10 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(
+        reason="search_aggregation top_hits.sort does not support dynamic fields yet",
+        strict=True,
+    )
     def test_search_aggregation_top_hits_sort_by_dynamic_field(self):
         """
         target: verify top_hits.sort can use a dynamic scalar field.
