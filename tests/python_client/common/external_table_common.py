@@ -464,6 +464,7 @@ FULL_MATRIX_SCALAR_FIELDS = [
     ("f_inv", DataType.FLOAT, pa.float32(), {}, lambda i: float(i) * 1.5),
     ("d_inv", DataType.DOUBLE, pa.float64(), {}, lambda i: float(i) * 2.5),
     ("vc_trie", DataType.VARCHAR, pa.string(), {"max_length": 64}, lambda i: f"s_{i:05d}"),
+    ("txt", DataType.TEXT, pa.string(), {"max_length": 1024}, lambda i: f"text document {i}"),
     ("j", DataType.JSON, pa.string(), {}, lambda i: json.dumps({"k": i, "g": i % 3})),
     ("ts", DataType.TIMESTAMPTZ, pa.timestamp("us"), {}, lambda i: (1_700_000_000 + i) * 1_000_000),
 ]
@@ -478,7 +479,7 @@ FULL_MATRIX_SCALAR_INDEXES = {
     "f_inv": "INVERTED",
     "d_inv": "INVERTED",
     "vc_trie": "TRIE",
-    # j (JSON) and ts (Timestamptz) are stored without scalar index.
+    # txt (TEXT), j (JSON), and ts (Timestamptz) are stored without scalar index.
 }
 
 FULL_MATRIX_ARRAY_FIELD = ("arr_int", DataType.INT64, lambda i: [i, i + 1, i + 2])
@@ -715,7 +716,35 @@ def require_format_dependencies(fmt):
         import vortex.io as vortex_io  # noqa: F401
 
 
-def write_basic_format_dataset(fmt, minio_client, cfg, ext_url, ext_key, batches, dim=ct.default_dim):
+def _basic_format_arrow_table(num_rows, start_id, dim=ct.default_dim, include_score=False):
+    ids = list(range(start_id, start_id + num_rows))
+    vectors = _float_vectors(ids, dim)
+    columns = {
+        "id": pa.array(ids, type=pa.int64()),
+        "value": pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
+        "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
+    }
+    if include_score:
+        columns["score"] = pa.array([float(i) * 0.01 for i in ids], type=pa.float64())
+    return pa.table(columns)
+
+
+def _basic_format_table_to_parquet_bytes(table):
+    buf = io.BytesIO()
+    pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
+    return buf.getvalue()
+
+
+def write_basic_format_dataset(
+    fmt,
+    minio_client,
+    cfg,
+    ext_url,
+    ext_key,
+    batches,
+    dim=ct.default_dim,
+    include_score=False,
+):
     """Write the basic id/value/embedding dataset for one external format.
 
     Returns (external_source, external_spec). Iceberg rewrites external_source
@@ -728,29 +757,38 @@ def write_basic_format_dataset(fmt, minio_client, cfg, ext_url, ext_key, batches
                 minio_client,
                 cfg["bucket"],
                 f"{ext_key}/file_{idx:03d}.parquet",
-                gen_basic_parquet_bytes(num_rows, start_id, dim=dim),
+                gen_basic_parquet_bytes(num_rows, start_id, dim=dim)
+                if not include_score
+                else _basic_format_table_to_parquet_bytes(
+                    _basic_format_arrow_table(num_rows, start_id, dim=dim, include_score=True)
+                ),
             )
         return ext_url, build_external_spec(cfg, fmt=fmt)
 
     if fmt == "lance-table":
-        _write_lance_to_minio_batches(minio_client, cfg["bucket"], ext_key, batches, dim=dim)
+        _write_lance_to_minio_batches(
+            minio_client,
+            cfg["bucket"],
+            ext_key,
+            batches,
+            dim=dim,
+            include_score=include_score,
+        )
         return ext_url, build_external_spec(cfg, fmt=fmt)
 
     if fmt == "iceberg-table":
-        snapshot_id, iceberg_url = _build_iceberg_table_in_minio(ext_key, cfg, batches=batches, dim=dim)
+        snapshot_id, iceberg_url = _build_iceberg_table_in_minio(
+            ext_key,
+            cfg,
+            batches=batches,
+            dim=dim,
+            include_score=include_score,
+        )
         return iceberg_url, build_external_spec(cfg, fmt=fmt, snapshot_id=int(snapshot_id))
 
     if fmt == "vortex":
         for idx, (start_id, num_rows) in enumerate(batches):
-            ids = list(range(start_id, start_id + num_rows))
-            vectors = _float_vectors(ids, dim)
-            table = pa.table(
-                {
-                    "id": pa.array(ids, type=pa.int64()),
-                    "value": pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
-                    "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
-                }
-            )
+            table = _basic_format_arrow_table(num_rows, start_id, dim=dim, include_score=include_score)
             write_vortex_table(minio_client, cfg["bucket"], f"{ext_key}/file_{idx:03d}.vortex", table)
         return ext_url, build_external_spec(cfg, fmt=fmt)
 
@@ -762,7 +800,7 @@ def write_basic_format_dataset(fmt, minio_client, cfg, ext_url, ext_key, batches
 # ============================================================
 
 
-def _write_lance_to_minio_batches(minio_client, bucket, key_prefix, batches, dim=ct.default_dim):
+def _write_lance_to_minio_batches(minio_client, bucket, key_prefix, batches, dim=ct.default_dim, include_score=False):
     """Multi-fragment variant: each (start_id, count) tuple in `batches` is
     appended into the same Lance dataset, producing one fragment file per
     batch under data/. Used to exercise multi-data-file refresh.
@@ -776,18 +814,7 @@ def _write_lance_to_minio_batches(minio_client, bucket, key_prefix, batches, dim
     local_path = os.path.join(tmpdir, "dataset.lance")
     try:
         for idx, (start_id, num_rows) in enumerate(batches):
-            ids = list(range(start_id, start_id + num_rows))
-            vectors = _float_vectors(ids, dim)
-            table = pa.table(
-                {
-                    "id": pa.array(ids, type=pa.int64()),
-                    "value": pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
-                    "embedding": pa.FixedSizeListArray.from_arrays(
-                        vectors.flatten(),
-                        list_size=dim,
-                    ),
-                }
-            )
+            table = _basic_format_arrow_table(num_rows, start_id, dim=dim, include_score=include_score)
             mode = "create" if idx == 0 else "append"
             lance.write_dataset(table, local_path, mode=mode)
         for root, _dirs, files in os.walk(local_path):
@@ -815,7 +842,7 @@ def write_vortex_table(minio_client, bucket, key, table):
             pass
 
 
-def _build_iceberg_table_in_minio(prefix, cfg, batches, dim=ct.default_dim):
+def _build_iceberg_table_in_minio(prefix, cfg, batches, dim=ct.default_dim, include_score=False):
     """Create an Iceberg table whose warehouse lives directly on MinIO.
 
     Writing the warehouse to MinIO (not locally) is required because Iceberg
@@ -844,7 +871,7 @@ def _build_iceberg_table_in_minio(prefix, cfg, batches, dim=ct.default_dim):
 
     from pyiceberg.catalog.sql import SqlCatalog
     from pyiceberg.schema import Schema as IbgSchema
-    from pyiceberg.types import FixedType, FloatType, LongType, NestedField
+    from pyiceberg.types import DoubleType, FixedType, FloatType, LongType, NestedField
 
     tmp = tempfile.mkdtemp(prefix="ibg_cat_")
     try:
@@ -862,31 +889,35 @@ def _build_iceberg_table_in_minio(prefix, cfg, batches, dim=ct.default_dim):
         )
         cat.create_namespace("ext")
 
-        ibg_schema = IbgSchema(
+        ibg_fields = [
             NestedField(1, "id", LongType(), required=False),
             NestedField(2, "value", FloatType(), required=False),
             NestedField(3, "embedding", FixedType(_vector_byte_width(DataType.FLOAT_VECTOR, dim)), required=False),
-        )
-        arrow_schema = pa.schema(
-            [
-                pa.field("id", pa.int64(), nullable=True),
-                pa.field("value", pa.float32(), nullable=True),
-                pa.field("embedding", pa.binary(_vector_byte_width(DataType.FLOAT_VECTOR, dim)), nullable=True),
-            ]
-        )
+        ]
+        arrow_fields = [
+            pa.field("id", pa.int64(), nullable=True),
+            pa.field("value", pa.float32(), nullable=True),
+            pa.field("embedding", pa.binary(_vector_byte_width(DataType.FLOAT_VECTOR, dim)), nullable=True),
+        ]
+        if include_score:
+            ibg_fields.append(NestedField(4, "score", DoubleType(), required=False))
+            arrow_fields.append(pa.field("score", pa.float64(), nullable=True))
+
+        ibg_schema = IbgSchema(*ibg_fields)
+        arrow_schema = pa.schema(arrow_fields)
         tbl = cat.create_table("ext.t", schema=ibg_schema)
 
         for start_id, num_rows in batches:
             ids = list(range(start_id, start_id + num_rows))
             vec_bytes = [struct.pack(f"<{dim}f", *[float(i) * 0.1 + j for j in range(dim)]) for i in ids]
-            arrow_table = pa.table(
-                {
-                    "id": pa.array(ids, type=pa.int64()),
-                    "value": pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
-                    "embedding": pa.array(vec_bytes, type=pa.binary(_vector_byte_width(DataType.FLOAT_VECTOR, dim))),
-                },
-                schema=arrow_schema,
-            )
+            columns = {
+                "id": pa.array(ids, type=pa.int64()),
+                "value": pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
+                "embedding": pa.array(vec_bytes, type=pa.binary(_vector_byte_width(DataType.FLOAT_VECTOR, dim))),
+            }
+            if include_score:
+                columns["score"] = pa.array([float(i) * 0.01 for i in ids], type=pa.float64())
+            arrow_table = pa.table(columns, schema=arrow_schema)
             tbl.append(arrow_table)
 
         snap = tbl.current_snapshot().snapshot_id
@@ -1147,6 +1178,9 @@ def _iceberg_full_matrix_assert(ops, client, coll, expected_count):
             search_params={"metric_type": metric},
         )[0][0]
         assert len(hits) == 3, f"[{name}] search returned {len(hits)} hits"
+        top_hit = hits[0]
+        assert top_hit["id"] == 0, f"[{name}] expected exact vector id=0 as top1, got {hits}"
+        assert abs(top_hit["distance"]) < 1e-5, f"[{name}] exact vector distance mismatch: {top_hit}"
 
 
 # Smaller row count keeps full-matrix tests under ~2 min each: each test
@@ -1156,20 +1190,20 @@ FULL_MATRIX_NB = 200
 
 def _full_matrix_query_vec(vec_field, dim):
     """Build a search query vector matching the dtype of the given vector
-    field. pymilvus is dtype-strict on the wire: int8 needs np.int8,
-    bf16 needs raw bytes, etc."""
+    field and exactly matching row id=0. pymilvus is dtype-strict on the
+    wire: int8 needs np.int8, bf16 needs raw bytes, etc."""
     for name, vtype, vdim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS:
         if name != vec_field:
             continue
         if vtype == DataType.BINARY_VECTOR:
-            return [b"\x00" * (vdim // 8)]
+            return [_binary_vectors_bytes([0], vdim)[0].tobytes()]
         if vtype == DataType.INT8_VECTOR:
-            return [np.zeros(vdim, dtype=np.int8)]
+            return [_int8_vectors([0], vdim)[0]]
         if vtype == DataType.FLOAT16_VECTOR:
-            return [np.zeros(vdim, dtype=np.float16)]
+            return [_float16_vectors([0], vdim)[0]]
         if vtype == DataType.BFLOAT16_VECTOR:
-            return [bytes(vdim * 2)]
-        return [[0.0] * vdim]
+            return [_bfloat16_vectors([0], vdim)[0].tobytes()]
+        return _float_vectors([0], vdim).tolist()
     raise KeyError(vec_field)
 
 
@@ -1227,3 +1261,6 @@ def _full_matrix_assert_basic(ops, client, coll, expected_count, excluded_fields
             search_params={"metric_type": metric},
         )[0][0]
         assert len(hits) == 3, f"[{name}] search returned {len(hits)} hits"
+        top_hit = hits[0]
+        assert top_hit["id"] == 0, f"[{name}] expected exact vector id=0 as top1, got {hits}"
+        assert abs(top_hit["distance"]) < 1e-5, f"[{name}] exact vector distance mismatch: {top_hit}"
