@@ -387,11 +387,6 @@ func collapseElementLevelResult(result *milvuspb.SearchResults, largerScoreIsBet
 	if result == nil || result.GetResults() == nil || result.GetResults().GetElementIndices() == nil {
 		return result, nil
 	}
-	if isElementCollapseSumFamily(config.Strategy) && !largerScoreIsBetter {
-		return nil, merr.WrapErrParameterInvalidMsg(
-			"%s.collapse.strategy %s is only supported for positively related metrics",
-			elementScopeKey, config.Strategy)
-	}
 
 	data := result.GetResults()
 	topks := data.GetTopks()
@@ -411,6 +406,12 @@ func collapseElementLevelResult(result *milvuspb.SearchResults, largerScoreIsBet
 			PrimaryFieldName:        data.GetPrimaryFieldName(),
 			SearchIteratorV2Results: data.GetSearchIteratorV2Results(),
 		}), nil
+	}
+
+	if isElementCollapseSumFamily(config.Strategy) && !largerScoreIsBetter {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"%s.collapse.strategy %s is only supported for positively related metrics",
+			elementScopeKey, config.Strategy)
 	}
 
 	if typeutil.GetSizeOfIDs(data.GetIds()) < int(totalRows) {
