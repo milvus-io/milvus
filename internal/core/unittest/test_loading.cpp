@@ -337,10 +337,12 @@ TEST_P(IndexLoadTest, ResourceEstimate) {
     ASSERT_EQ(request.max_disk_cost, expected.max_disk_cost);
 }
 
-TEST(IndexLoadTest, ScalarSortMmapEstimateIncludesValidBitset) {
+TEST(IndexLoadTest, ScalarSortMmapEstimateReservesLegacyAux) {
     constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;
     constexpr int64_t kNumRows = 1025;
     constexpr uint64_t kValidBitsetBytes = (kNumRows + 7) / 8;
+    constexpr uint64_t kLegacyAuxBytes =
+        static_cast<uint64_t>(kNumRows) * sizeof(int32_t) + kValidBitsetBytes;
 
     milvus::segcore::LoadIndexInfo loadIndexInfo;
     loadIndexInfo.collection_id = 1;
@@ -370,11 +372,54 @@ TEST(IndexLoadTest, ScalarSortMmapEstimateIncludesValidBitset) {
     auto stream_memory_overhead = std::min<uint64_t>(
         kIndexSize, milvus::storage::EntryStreamMaxTransientBytes());
 
-    ASSERT_EQ(request.final_memory_cost, kValidBitsetBytes);
+    ASSERT_EQ(request.final_memory_cost, kLegacyAuxBytes);
     ASSERT_EQ(request.final_disk_cost, kIndexSize);
     ASSERT_EQ(request.max_memory_cost,
-              kValidBitsetBytes + stream_memory_overhead);
+              kLegacyAuxBytes + stream_memory_overhead);
     ASSERT_EQ(request.max_disk_cost, kIndexSize);
+    ASSERT_TRUE(request.has_raw_data);
+}
+
+TEST(IndexLoadTest, ScalarSortMemoryEstimateReservesLegacyAux) {
+    constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;
+    constexpr int64_t kNumRows = 1025;
+    constexpr uint64_t kValidBitsetBytes = (kNumRows + 7) / 8;
+    constexpr uint64_t kLegacyAuxBytes =
+        static_cast<uint64_t>(kNumRows) * sizeof(int32_t) + kValidBitsetBytes;
+
+    milvus::segcore::LoadIndexInfo loadIndexInfo;
+    loadIndexInfo.collection_id = 1;
+    loadIndexInfo.partition_id = 2;
+    loadIndexInfo.segment_id = 3;
+    loadIndexInfo.field_id = 4;
+    loadIndexInfo.field_type = milvus::DataType::INT64;
+    loadIndexInfo.element_type = milvus::DataType::NONE;
+    loadIndexInfo.enable_mmap = false;
+    loadIndexInfo.index_id = 5;
+    loadIndexInfo.index_build_id = 6;
+    loadIndexInfo.index_version = 1;
+    loadIndexInfo.index_params = {
+        {"index_type", "STL_SORT"},
+        {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"},
+    };
+    loadIndexInfo.index_files = {"/tmp/index/1"};
+    loadIndexInfo.index = nullptr;
+    loadIndexInfo.cache_index = nullptr;
+    loadIndexInfo.uri = "";
+    loadIndexInfo.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    loadIndexInfo.index_size = kIndexSize;
+    loadIndexInfo.num_rows = kNumRows;
+
+    auto request = EstimateLoadIndexResource(&loadIndexInfo);
+    auto stream_memory_overhead = std::min<uint64_t>(
+        kIndexSize, milvus::storage::EntryStreamMaxTransientBytes());
+
+    ASSERT_EQ(request.final_memory_cost, kIndexSize + kLegacyAuxBytes);
+    ASSERT_EQ(request.final_disk_cost, 0);
+    ASSERT_EQ(request.max_memory_cost,
+              kIndexSize + kLegacyAuxBytes + stream_memory_overhead);
+    ASSERT_EQ(request.max_disk_cost, 0);
     ASSERT_TRUE(request.has_raw_data);
 }
 

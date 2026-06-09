@@ -103,19 +103,24 @@ AlignUp(uint64_t size, uint64_t alignment) {
 }
 
 uint64_t
-SaturatingAdd(uint64_t lhs, uint64_t rhs) {
-    if (lhs > std::numeric_limits<uint64_t>::max() - rhs) {
-        return std::numeric_limits<uint64_t>::max();
-    }
-    return lhs + rhs;
-}
-
-uint64_t
 BitmapMmapFrozenBufferBytes(int64_t num_rows, uint64_t index_size_in_bytes) {
     constexpr uint64_t kBitmapFrozenAlignment = 32;
     auto dense_bitmap_bytes =
         AlignUp(BitsetBytes(num_rows), kBitmapFrozenAlignment);
     return std::max(dense_bitmap_bytes, index_size_in_bytes);
+}
+
+uint64_t
+SortLegacyAuxBytes(int64_t num_rows) {
+    if (num_rows <= 0) {
+        return 0;
+    }
+    auto rows = static_cast<uint64_t>(num_rows);
+    if (rows > (std::numeric_limits<uint64_t>::max() - BitsetBytes(num_rows)) /
+                   sizeof(int32_t)) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+    return rows * sizeof(int32_t) + BitsetBytes(num_rows);
 }
 
 uint64_t
@@ -564,20 +569,23 @@ IndexFactory::ScalarIndexLoadResource(
     request.has_raw_data = false;
 
     if (index_type == milvus::index::ASCENDING_SORT) {
+        // Old V3 sort files do not have idx_to_offsets and valid_bitset
+        // entries, so LoadEntries rebuilds them into heap memory.
+        auto legacy_aux_bytes = SortLegacyAuxBytes(num_rows);
         if (mmap_enable) {
             // V3 streaming: chunks streamed to disk + mmap. The index data is
-            // not heap-resident, but valid_bitset stays in memory.
-            auto resident_bytes = BitsetBytes(num_rows);
+            // not heap-resident, but legacy metadata may be heap-resident.
+            auto resident_bytes = legacy_aux_bytes;
             request.final_memory_cost = resident_bytes;
             request.final_disk_cost = index_size_in_bytes;
             request.max_memory_cost = resident_bytes + stream_memory_overhead;
             request.max_disk_cost = index_size_in_bytes;
         } else {
             // V3 streaming: pre-allocate target, stream into it
-            request.final_memory_cost = index_size_in_bytes;
+            request.final_memory_cost = index_size_in_bytes + legacy_aux_bytes;
             request.final_disk_cost = 0;
             request.max_memory_cost =
-                index_size_in_bytes + stream_memory_overhead;
+                request.final_memory_cost + stream_memory_overhead;
             request.max_disk_cost = 0;
         }
         request.has_raw_data = true;
@@ -624,9 +632,8 @@ IndexFactory::ScalarIndexLoadResource(
                 BitmapMmapFrozenBufferBytes(num_rows, index_size_in_bytes);
             request.final_memory_cost = resident_bytes;
             request.final_disk_cost = index_size_in_bytes;
-            request.max_memory_cost = SaturatingAdd(
-                SaturatingAdd(resident_bytes, stream_memory_overhead),
-                frozen_buffer_bytes);
+            request.max_memory_cost =
+                resident_bytes + stream_memory_overhead + frozen_buffer_bytes;
             request.max_disk_cost = 2 * index_size_in_bytes;  // temp + final
         } else {
             // V3 streaming: pre-allocate buffer + deserialize
