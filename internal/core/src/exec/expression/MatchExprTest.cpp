@@ -1626,6 +1626,34 @@ TEST_F(SealedMatchExprTestNoIndex, MatchWithOtherExpr) {
     std::cout << "==============================" << std::endl;
 }
 
+TEST_F(SealedMatchExprTestNoIndex, ConjunctSkipMovesMatchChildCursor) {
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    // Batch size is 100 in this fixture. The id predicate rejects the first two
+    // batches completely, so ConjunctExpr short-circuits and skips MatchExpr.
+    std::string predicate = "$[sub_str] == \"" + target_str +
+                            "\" && $[sub_int] > " + std::to_string(target_int);
+    std::string filter_expr =
+        "id > 199 && match_any(struct_array, " + predicate + ")";
+
+    auto result = ExecuteRetrieve(filter_expr);
+
+    std::set<int64_t> expected_rows;
+    for (size_t i = 0; i < N_; ++i) {
+        if (i > 199 && CountMatchingElements(i, target_str, target_int) > 0) {
+            expected_rows.insert(static_cast<int64_t>(i));
+        }
+    }
+
+    std::set<int64_t> actual_rows;
+    for (const auto offset : result->offset()) {
+        actual_rows.insert(offset);
+    }
+
+    EXPECT_EQ(expected_rows, actual_rows);
+}
+
 // ==================== Parameterized Test for Different Int Types ====================
 // This tests that int8_t/int16_t/int32_t are correctly handled in ProcessDataChunksForElementLevel
 
