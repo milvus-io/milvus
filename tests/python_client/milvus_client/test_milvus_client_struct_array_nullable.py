@@ -4985,7 +4985,12 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             for batch in range(3):
                 batch_rows = concurrent_insert_rows[batch * 3 : (batch + 1) * 3]
                 inserted += run_dml_with_schema_retry(
-                    lambda batch_rows=batch_rows: self.insert(task_client, collection_name, batch_rows),
+                    lambda batch_rows=batch_rows: self.insert(
+                        task_client,
+                        collection_name,
+                        batch_rows,
+                        check_task=CheckTasks.check_nothing,
+                    ),
                     "insert_count",
                 )
                 time.sleep(0.01)
@@ -4995,7 +5000,12 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             task_client = self._client()
             start_barrier.wait()
             upserted = run_dml_with_schema_retry(
-                lambda: self.upsert(task_client, collection_name, concurrent_upsert_rows),
+                lambda: self.upsert(
+                    task_client,
+                    collection_name,
+                    concurrent_upsert_rows,
+                    check_task=CheckTasks.check_nothing,
+                ),
                 "upsert_count",
             )
             return "upsert", upserted
