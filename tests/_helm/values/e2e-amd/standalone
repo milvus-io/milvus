@@ -27,11 +27,11 @@ standalone:
     enabled: true
   resources:
     limits:
-      cpu: "6"
-      memory: 12Gi
+      cpu: "8"
+      memory: 16Gi
     requests:
-      cpu: "3"
-      memory: 6Gi
+      cpu: "2"
+      memory: 8Gi
 log:
   level: debug
 extraConfigFiles:
