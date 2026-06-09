@@ -67,7 +67,7 @@ standalone:
       cpu: "8"
       memory: 16Gi
     requests:
-      cpu: "2"
+      cpu: "3"
       memory: 8Gi
   extraEnv:
   - name: ETCD_CONFIG_PATH
