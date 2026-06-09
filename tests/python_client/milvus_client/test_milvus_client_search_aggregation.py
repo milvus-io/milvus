@@ -1299,8 +1299,10 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
             client, collection_name
         )
 
-        metric_error = {ct.err_code: 999,
-                        ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation"}
+        metric_error = {
+            ct.err_code: 999,
+            ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation",
+        }
         self.search(
             client,
             collection_name,
