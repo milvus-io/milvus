@@ -398,7 +398,7 @@ func TestDiskIndexParams(t *testing.T) {
 				Key:   SearchCacheBudgetRatioKey,
 				Value: "aaa",
 			})
-		indexParams, err = UpdateDiskIndexBuildParams(&params, indexParams)
+		_, err = UpdateDiskIndexBuildParams(&params, indexParams)
 		assert.Error(t, err)
 	})
 
