@@ -1887,21 +1887,21 @@ func TestManualCompaction(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	t.Run("test manual rewrite reason returns durable reason id when guard enabled", func(t *testing.T) {
-		paramtable.Get().Save(Params.DataCoordCfg.EnableCompactionReasonRecord.Key, "true")
-		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompactionReasonRecord.Key)
+	t.Run("test manual rewrite target returns durable target id when guard enabled", func(t *testing.T) {
+		paramtable.Get().Save(Params.DataCoordCfg.EnableCompactionTargetReconcile.Key, "true")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompactionTargetReconcile.Key)
 
 		alloc := allocator.NewMockAllocator(t)
 		alloc.EXPECT().AllocID(mock.Anything).Return(int64(100), nil).Once()
 		alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(200), nil).Once()
 
-		catalog, records, _, _ := newCompactionReasonTestCatalog(t)
-		reasonMeta, err := newCompactionReasonMeta(context.Background(), catalog)
+		catalog, records, _, _ := newCompactionTargetTestCatalog(t)
+		targetMeta, err := newCompactionTargetMeta(context.Background(), catalog)
 		require.NoError(t, err)
 
 		svr := &Server{allocator: alloc}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.meta = &meta{compactionReasonMeta: reasonMeta}
+		svr.meta = &meta{compactionTargetMeta: targetMeta}
 
 		mockTrigger := NewMockTrigger(t)
 		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.Anything).Return(int64(99), nil).Maybe()
@@ -1924,15 +1924,15 @@ func TestManualCompaction(t *testing.T) {
 
 		record := records[100]
 		require.NotNil(t, record)
-		require.Equal(t, datapb.CompactionReasonType_REASON_INTENT_REWRITE, record.GetReasonType())
-		require.Equal(t, datapb.CompactionReasonState_REASON_STATE_ACTIVE, record.GetState())
+		require.Equal(t, datapb.TargetIntent_INTENT_REWRITE, record.GetIntent())
+		require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, record.GetState())
 		require.Equal(t, int32(0), record.GetTailLimit())
-		require.Equal(t, uint64(200), record.GetCreatedAtTS())
+		require.Equal(t, uint64(200), record.GetActivatedAtTS())
 		require.Equal(t, uint64(200), record.GetExpectedTS())
-		require.Equal(t, int64(1), record.GetScope().GetCollectionID())
-		require.Equal(t, int64(2), record.GetScope().GetPartitionID())
-		require.Equal(t, "ch-1", record.GetScope().GetChannel())
-		require.Equal(t, []int64{10, 20}, record.GetScope().GetSegmentIDs())
+		require.Equal(t, int64(1), record.GetCollectionID())
+		segmentIDs, ok := compactionTargetSegmentIDs(record)
+		require.True(t, ok)
+		require.Equal(t, []int64{10, 20}, segmentIDs)
 	})
 
 	t.Run("test manual compaction failure", func(t *testing.T) {

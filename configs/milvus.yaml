@@ -687,8 +687,8 @@ dataCoord:
     # Switch value to control if to enable automatic segment compaction during which data coord locates and merges compactable segments in the background.
     # This configuration takes effect only when dataCoord.enableCompaction is set as true.
     enableAutoCompaction: true
-    reasonRecord:
-      enabled: false # Switch value to control if compaction reason records are written and reconciled.
+    targetReconcile:
+      enabled: false # Whether compaction targets are recorded and reconciled.
     indexBasedCompaction: true
     # compaction task prioritizer, options: [default, level, mix].
     # default is FIFO.

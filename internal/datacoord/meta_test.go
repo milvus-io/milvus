@@ -103,7 +103,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
-		suite.catalog.EXPECT().ListCompactionReasonRecords(mock.Anything).Return(nil, nil).Maybe()
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -124,7 +124,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
-		suite.catalog.EXPECT().ListCompactionReasonRecords(mock.Anything).Return(nil, nil).Maybe()
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -137,8 +137,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 
 	suite.Run("ok", func() {
 		defer suite.resetMock()
-		paramtable.Get().Save(Params.DataCoordCfg.EnableCompactionReasonRecord.Key, "true")
-		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompactionReasonRecord.Key)
+		paramtable.Get().Save(Params.DataCoordCfg.EnableCompactionTargetReconcile.Key, "true")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompactionTargetReconcile.Key)
 
 		brk := broker.NewMockBroker(suite.T())
 		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
@@ -155,11 +155,11 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
-		suite.catalog.EXPECT().ListCompactionReasonRecords(mock.Anything).Return([]*datapb.CompactionReasonRecord{
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return([]*datapb.CompactionTarget{
 			{
-				ReasonID:   10,
-				ReasonType: datapb.CompactionReasonType_REASON_INTENT_REWRITE,
-				State:      datapb.CompactionReasonState_REASON_STATE_ACTIVE,
+				TargetID: 10,
+				Intent:   datapb.TargetIntent_INTENT_REWRITE,
+				State:    datapb.TargetState_TARGET_STATE_ACTIVE,
 			},
 		}, nil)
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
@@ -185,8 +185,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 
 		meta, err := newMeta(ctx, suite.catalog, nil, brk)
 		suite.NoError(err)
-		suite.NotNil(meta.compactionReasonMeta)
-		suite.Equal(datapb.CompactionReasonState_REASON_STATE_ACTIVE, meta.compactionReasonMeta.GetCompactionReasonRecord(10).GetState())
+		suite.NotNil(meta.compactionTargetMeta)
+		suite.Equal(datapb.TargetState_TARGET_STATE_ACTIVE, meta.compactionTargetMeta.GetCompactionTarget(10).GetState())
 
 		suite.MetricsEqual(metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushedSegmentLabel, datapb.SegmentLevel_Legacy.String(), "unsorted", "0"), 1)
 	})
@@ -199,7 +199,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
-		suite.catalog.EXPECT().ListCompactionReasonRecords(mock.Anything).Return(nil, nil).Maybe()
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -219,7 +219,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
-		suite.catalog.EXPECT().ListCompactionReasonRecords(mock.Anything).Return(nil, nil).Maybe()
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -239,7 +239,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
-		suite.catalog.EXPECT().ListCompactionReasonRecords(mock.Anything).Return(nil, nil).Maybe()
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -259,7 +259,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, errors.New("mock"))
-		suite.catalog.EXPECT().ListCompactionReasonRecords(mock.Anything).Return(nil, nil).Maybe()
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -279,7 +279,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
-		suite.catalog.EXPECT().ListCompactionReasonRecords(mock.Anything).Return(nil, nil).Maybe()
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -299,7 +299,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
-		suite.catalog.EXPECT().ListCompactionReasonRecords(mock.Anything).Return(nil, nil).Maybe()
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, errors.New("mock"))
@@ -332,7 +332,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
-		suite.catalog.EXPECT().ListCompactionReasonRecords(mock.Anything).Return(nil, nil).Maybe()
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)

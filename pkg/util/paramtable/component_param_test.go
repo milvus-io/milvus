@@ -932,21 +932,21 @@ func TestComponentParam(t *testing.T) {
 	})
 }
 
-func TestDataCoordCompactionReasonRecordConfig(t *testing.T) {
+func TestDataCoordCompactionTargetConfig(t *testing.T) {
 	base := NewBaseTable(SkipRemote(true))
 	var params ComponentParam
 	params.Init(base)
 
 	cfg := &params.DataCoordCfg
-	assert.Equal(t, "dataCoord.compaction.reasonRecord.enabled", cfg.EnableCompactionReasonRecord.Key)
-	assert.Equal(t, "3.0.0", cfg.EnableCompactionReasonRecord.Version)
-	assert.Equal(t, "false", cfg.EnableCompactionReasonRecord.DefaultValue)
-	assert.False(t, cfg.EnableCompactionReasonRecord.GetAsBool())
+	assert.Equal(t, "dataCoord.compaction.targetReconcile.enabled", cfg.EnableCompactionTargetReconcile.Key)
+	assert.Equal(t, "3.0.0", cfg.EnableCompactionTargetReconcile.Version)
+	assert.Equal(t, "false", cfg.EnableCompactionTargetReconcile.DefaultValue)
+	assert.False(t, cfg.EnableCompactionTargetReconcile.GetAsBool())
 
-	base.Save(cfg.EnableCompactionReasonRecord.Key, "true")
-	assert.True(t, cfg.EnableCompactionReasonRecord.GetAsBool())
+	base.Save(cfg.EnableCompactionTargetReconcile.Key, "true")
+	assert.True(t, cfg.EnableCompactionTargetReconcile.GetAsBool())
 
-	field, ok := reflect.TypeOf(dataCoordConfig{}).FieldByName("EnableCompactionReasonRecord")
+	field, ok := reflect.TypeOf(dataCoordConfig{}).FieldByName("EnableCompactionTargetReconcile")
 	assert.True(t, ok)
 	assert.Equal(t, "true", field.Tag.Get("refreshable"))
 }

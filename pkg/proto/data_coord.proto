@@ -1372,36 +1372,27 @@ enum CompactionTaskState {
   statistic = 10;
 }
 
-enum CompactionReasonState {
-  REASON_STATE_UNKNOWN = 0;
-  REASON_STATE_ACTIVE = 1;
-  REASON_STATE_INACTIVE = 2;
-  REASON_STATE_DONE = 3;
-  REASON_STATE_DROPPED = 4;
+enum TargetState {
+  TARGET_STATE_UNKNOWN = 0;
+  TARGET_STATE_ACTIVE = 1;
+  TARGET_STATE_INACTIVE = 2;
 }
 
-enum CompactionReasonType {
-  REASON_INTENT_UNKNOWN = 0;
-  REASON_INTENT_REWRITE = 1;
+enum TargetIntent {
+  INTENT_UNKNOWN = 0;
+  INTENT_REWRITE = 1;
 }
 
-message CompactionReasonScope {
-  int64 collectionID = 1;
-  int64 partitionID = 2;
-  string channel = 3;
-  repeated int64 segmentIDs = 4;
-}
-
-message CompactionReasonRecord {
-  int64 reasonID = 1;
-  CompactionReasonScope scope = 2;
-  CompactionReasonType reason_type = 3;
+message CompactionTarget {
+  int64 targetID = 1;
+  int64 collectionID = 2;
+  TargetIntent intent = 3;
   map<string, string> properties = 4;
   uint64 expectedTS = 5;
   int32 tail_limit = 6;
-  CompactionReasonState state = 7;
-  uint64 createdAtTS = 8;
-  uint64 droppedAtTS = 9;
+  TargetState state = 7;
+  uint64 activatedAtTS = 8;
+  uint64 inactivatedAtTS = 9;
 }
 
 message CompactionTask{

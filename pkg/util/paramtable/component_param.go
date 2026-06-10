@@ -5004,7 +5004,7 @@ type dataCoordConfig struct {
 	// compaction
 	EnableCompaction                       ParamItem `refreshable:"false"`
 	EnableAutoCompaction                   ParamItem `refreshable:"true"`
-	EnableCompactionReasonRecord           ParamItem `refreshable:"true"`
+	EnableCompactionTargetReconcile        ParamItem `refreshable:"true"`
 	IndexBasedCompaction                   ParamItem `refreshable:"true"`
 	CompactionTaskPrioritizer              ParamItem `refreshable:"true"`
 	CompactionTaskQueueCapacity            ParamItem `refreshable:"false"`
@@ -5365,14 +5365,14 @@ This configuration takes effect only when dataCoord.enableCompaction is set as t
 	}
 	p.EnableAutoCompaction.Init(base.mgr)
 
-	p.EnableCompactionReasonRecord = ParamItem{
-		Key:          "dataCoord.compaction.reasonRecord.enabled",
+	p.EnableCompactionTargetReconcile = ParamItem{
+		Key:          "dataCoord.compaction.targetReconcile.enabled",
 		Version:      "3.0.0",
 		DefaultValue: "false",
-		Doc:          "Switch value to control if compaction reason records are written and reconciled.",
+		Doc:          "Whether compaction targets are recorded and reconciled.",
 		Export:       true,
 	}
-	p.EnableCompactionReasonRecord.Init(base.mgr)
+	p.EnableCompactionTargetReconcile.Init(base.mgr)
 
 	p.IndexBasedCompaction = ParamItem{
 		Key:          "dataCoord.compaction.indexBasedCompaction",

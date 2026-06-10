@@ -105,7 +105,7 @@ type meta struct {
 	analyzeMeta                   *analyzeMeta
 	partitionStatsMeta            *partitionStatsMeta
 	compactionTaskMeta            *compactionTaskMeta
-	compactionReasonMeta          *compactionReasonMeta
+	compactionTargetMeta          *compactionTargetMeta
 	statsTaskMeta                 *statsTaskMeta
 	externalCollectionRefreshMeta *externalCollectionRefreshMeta
 
@@ -133,8 +133,8 @@ func (m *meta) GetCompactionTaskMeta() *compactionTaskMeta {
 	return m.compactionTaskMeta
 }
 
-func (m *meta) GetCompactionReasonMeta() *compactionReasonMeta {
-	return m.compactionReasonMeta
+func (m *meta) GetCompactionTargetMeta() *compactionTargetMeta {
+	return m.compactionTargetMeta
 }
 
 func (m *meta) GetSnapshotMeta() *snapshotMeta {
@@ -229,7 +229,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		am   *analyzeMeta
 		psm  *partitionStatsMeta
 		ctm  *compactionTaskMeta
-		crm  *compactionReasonMeta
+		crm  *compactionTargetMeta
 		stm  *statsTaskMeta
 		ecrm *externalCollectionRefreshMeta
 		spm  *snapshotMeta
@@ -275,10 +275,10 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		return err
 	})
 
-	if Params.DataCoordCfg.EnableCompactionReasonRecord.GetAsBool() {
+	if Params.DataCoordCfg.EnableCompactionTargetReconcile.GetAsBool() {
 		g.Go(func() error {
 			var err error
-			crm, err = newCompactionReasonMeta(ctx, catalog)
+			crm, err = newCompactionTargetMeta(ctx, catalog)
 			return err
 		})
 	}
@@ -316,7 +316,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	mt.analyzeMeta = am
 	mt.partitionStatsMeta = psm
 	mt.compactionTaskMeta = ctm
-	mt.compactionReasonMeta = crm
+	mt.compactionTargetMeta = crm
 	mt.statsTaskMeta = stm
 	mt.externalCollectionRefreshMeta = ecrm
 	mt.snapshotMeta = spm

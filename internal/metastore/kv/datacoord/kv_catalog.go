@@ -950,11 +950,11 @@ func (kc *Catalog) DropCompactionTask(ctx context.Context, task *datapb.Compacti
 	return kc.MetaKv.Remove(ctx, key)
 }
 
-func (kc *Catalog) ListCompactionReasonRecords(ctx context.Context) ([]*datapb.CompactionReasonRecord, error) {
-	records := make([]*datapb.CompactionReasonRecord, 0)
+func (kc *Catalog) ListCompactionTargets(ctx context.Context) ([]*datapb.CompactionTarget, error) {
+	records := make([]*datapb.CompactionTarget, 0)
 
 	applyFn := func(key []byte, value []byte) error {
-		record := &datapb.CompactionReasonRecord{}
+		record := &datapb.CompactionTarget{}
 		if err := proto.Unmarshal(value, record); err != nil {
 			return err
 		}
@@ -962,50 +962,50 @@ func (kc *Catalog) ListCompactionReasonRecords(ctx context.Context) ([]*datapb.C
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, CompactionReasonRecordPrefix+"/", kc.paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, CompactionTargetPrefix+"/", kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
 	return records, nil
 }
 
-func (kc *Catalog) SaveCompactionReasonRecord(ctx context.Context, record *datapb.CompactionReasonRecord) error {
+func (kc *Catalog) SaveCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error {
 	if record == nil {
 		return nil
 	}
-	cloned := proto.Clone(record).(*datapb.CompactionReasonRecord)
-	key, value, err := buildCompactionReasonRecordKV(cloned)
+	cloned := proto.Clone(record).(*datapb.CompactionTarget)
+	key, value, err := buildCompactionTargetKV(cloned)
 	if err != nil {
 		return err
 	}
 	return kc.SaveByBatch(ctx, map[string]string{key: value})
 }
 
-func (kc *Catalog) UpdateCompactionReasonRecordState(ctx context.Context, reasonID int64, state datapb.CompactionReasonState, droppedAtTS uint64) error {
-	key := buildCompactionReasonRecordPath(reasonID)
+func (kc *Catalog) UpdateCompactionTargetState(ctx context.Context, targetID int64, state datapb.TargetState, inactivatedAtTS uint64) error {
+	key := buildCompactionTargetPath(targetID)
 	value, err := kc.MetaKv.Load(ctx, key)
 	if err != nil {
 		return err
 	}
 
-	record := &datapb.CompactionReasonRecord{}
+	record := &datapb.CompactionTarget{}
 	if err := proto.Unmarshal([]byte(value), record); err != nil {
 		return err
 	}
 	record.State = state
-	if state == datapb.CompactionReasonState_REASON_STATE_DROPPED {
-		record.DroppedAtTS = droppedAtTS
+	if state == datapb.TargetState_TARGET_STATE_INACTIVE {
+		record.InactivatedAtTS = inactivatedAtTS
 	} else {
-		record.DroppedAtTS = 0
+		record.InactivatedAtTS = 0
 	}
-	return kc.SaveCompactionReasonRecord(ctx, record)
+	return kc.SaveCompactionTarget(ctx, record)
 }
 
-func (kc *Catalog) DropCompactionReasonRecord(ctx context.Context, record *datapb.CompactionReasonRecord) error {
+func (kc *Catalog) DropCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error {
 	if record == nil {
 		return nil
 	}
-	key := buildCompactionReasonRecordPath(record.GetReasonID())
+	key := buildCompactionTargetPath(record.GetTargetID())
 	return kc.MetaKv.Remove(ctx, key)
 }
 

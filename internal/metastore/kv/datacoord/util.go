@@ -260,17 +260,17 @@ func buildCompactionTaskPath(task *datapb.CompactionTask) string {
 	return fmt.Sprintf("%s/%s/%d/%d", CompactionTaskPrefix, task.GetType(), task.TriggerID, task.PlanID)
 }
 
-func buildCompactionReasonRecordKV(record *datapb.CompactionReasonRecord) (string, string, error) {
+func buildCompactionTargetKV(record *datapb.CompactionTarget) (string, string, error) {
 	valueBytes, err := proto.Marshal(record)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to marshal CompactionReasonRecord: %d/%d, err: %w", record.GetReasonID(), record.GetScope().GetCollectionID(), err)
+		return "", "", fmt.Errorf("failed to marshal CompactionTarget: %d/%d, err: %w", record.GetTargetID(), record.GetCollectionID(), err)
 	}
-	key := buildCompactionReasonRecordPath(record.GetReasonID())
+	key := buildCompactionTargetPath(record.GetTargetID())
 	return key, string(valueBytes), nil
 }
 
-func buildCompactionReasonRecordPath(reasonID int64) string {
-	return fmt.Sprintf("%s/%d", CompactionReasonRecordPrefix, reasonID)
+func buildCompactionTargetPath(targetID int64) string {
+	return fmt.Sprintf("%s/%d", CompactionTargetPrefix, targetID)
 }
 
 func buildPartitionStatsInfoKv(info *datapb.PartitionStatsInfo) (string, string, error) {

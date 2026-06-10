@@ -1334,19 +1334,19 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
-	if Params.DataCoordCfg.EnableCompactionReasonRecord.GetAsBool() &&
+	if Params.DataCoordCfg.EnableCompactionTargetReconcile.GetAsBool() &&
 		!req.GetMajorCompaction() &&
 		!req.GetL0Compaction() &&
 		req.GetTargetSize() == 0 {
-		reasonID, err := s.saveManualRewriteCompactionReason(ctx, req)
+		targetID, err := s.saveManualRewriteCompactionTarget(ctx, req)
 		if err != nil {
-			log.Error("failed to record manual rewrite compaction reason", zap.Error(err))
+			log.Error("failed to record manual rewrite compaction target", zap.Error(err))
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
-		resp.CompactionID = reasonID
+		resp.CompactionID = targetID
 		resp.CompactionPlanCount = 0
-		log.Info("success to record manual rewrite compaction reason", zap.Int64("compactionID", reasonID))
+		log.Info("success to record manual rewrite compaction target", zap.Int64("compactionID", targetID))
 		return resp, nil
 	}
 
@@ -1383,35 +1383,31 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 	return resp, nil
 }
 
-func (s *Server) saveManualRewriteCompactionReason(ctx context.Context, req *milvuspb.ManualCompactionRequest) (int64, error) {
-	reasonMeta := s.meta.GetCompactionReasonMeta()
-	if reasonMeta == nil {
-		return 0, merr.WrapErrServiceInternal("compaction reason meta is not initialized")
+func (s *Server) saveManualRewriteCompactionTarget(ctx context.Context, req *milvuspb.ManualCompactionRequest) (int64, error) {
+	targetMeta := s.meta.GetCompactionTargetMeta()
+	if targetMeta == nil {
+		return 0, merr.WrapErrServiceInternal("compaction target meta is not initialized")
 	}
 
-	reasonID, createdAtTS, err := allocCompactionReasonIdentity(ctx, s.allocator)
+	targetID, activatedAtTS, err := allocCompactionTargetIdentity(ctx, s.allocator)
 	if err != nil {
 		return 0, err
 	}
 
-	record := &datapb.CompactionReasonRecord{
-		ReasonID: reasonID,
-		Scope: &datapb.CompactionReasonScope{
-			CollectionID: req.GetCollectionID(),
-			PartitionID:  req.GetPartitionId(),
-			Channel:      req.GetChannel(),
-			SegmentIDs:   append([]int64(nil), req.GetSegmentIds()...),
-		},
-		ReasonType:  datapb.CompactionReasonType_REASON_INTENT_REWRITE,
-		ExpectedTS:  createdAtTS,
-		TailLimit:   0,
-		State:       datapb.CompactionReasonState_REASON_STATE_ACTIVE,
-		CreatedAtTS: createdAtTS,
+	record := &datapb.CompactionTarget{
+		TargetID:      targetID,
+		CollectionID:  req.GetCollectionID(),
+		Intent:        datapb.TargetIntent_INTENT_REWRITE,
+		Properties:    compactionTargetSegmentIDProperties(req.GetSegmentIds()),
+		ExpectedTS:    activatedAtTS,
+		TailLimit:     0,
+		State:         datapb.TargetState_TARGET_STATE_ACTIVE,
+		ActivatedAtTS: activatedAtTS,
 	}
-	if err := reasonMeta.SaveCompactionReasonRecord(ctx, record); err != nil {
+	if err := targetMeta.SaveCompactionTarget(ctx, record); err != nil {
 		return 0, err
 	}
-	return reasonID, nil
+	return targetID, nil
 }
 
 // GetCompactionState gets the state of a compaction
