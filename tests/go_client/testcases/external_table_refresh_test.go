@@ -23,6 +23,7 @@ import (
 	miniocreds "github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
@@ -207,6 +208,61 @@ func generateNullableFloatVectorParquetBytes() ([]byte, error) {
 	embeddingBuilder.AppendNull()
 	idBuilder.Append(2)
 	appendVector([]float32{8, 9, 10, 11})
+
+	record := builder.NewRecord()
+	defer record.Release()
+
+	if err := writer.Write(record); err != nil {
+		return nil, fmt.Errorf("write record: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("close writer: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+func generateFloat16TakeParquetBytes(numRows int64, startID int64) ([]byte, error) {
+	arrowSchema := arrow.NewSchema(
+		[]arrow.Field{
+			{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+			{Name: "embedding", Type: &arrow.FixedSizeBinaryType{ByteWidth: testVecDim * 4}},
+			{Name: "fp16_vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: testVecDim * 2}},
+		},
+		nil,
+	)
+
+	var buf bytes.Buffer
+	writer, err := pqarrow.NewFileWriter(arrowSchema, &buf, nil, pqarrow.DefaultWriterProps())
+	if err != nil {
+		return nil, fmt.Errorf("create parquet writer: %w", err)
+	}
+
+	pool := memory.NewGoAllocator()
+	builder := array.NewRecordBuilder(pool, arrowSchema)
+	defer builder.Release()
+
+	idBuilder := builder.Field(0).(*array.Int64Builder)
+	embeddingBuilder := builder.Field(1).(*array.FixedSizeBinaryBuilder)
+	fp16VecBuilder := builder.Field(2).(*array.FixedSizeBinaryBuilder)
+
+	for i := int64(0); i < numRows; i++ {
+		idx := startID + i
+		idBuilder.Append(idx)
+
+		embeddingBytes := make([]byte, testVecDim*4)
+		for d := 0; d < testVecDim; d++ {
+			value := float32(idx)*0.1 + float32(d)
+			binary.LittleEndian.PutUint32(embeddingBytes[d*4:(d+1)*4], math.Float32bits(value))
+		}
+		embeddingBuilder.Append(embeddingBytes)
+
+		fp16Bytes := make([]byte, testVecDim*2)
+		for b := range fp16Bytes {
+			fp16Bytes[b] = byte((idx + int64(b)) % 256)
+		}
+		fp16VecBuilder.Append(fp16Bytes)
+	}
 
 	record := builder.NewRecord()
 	defer record.Release()
@@ -1168,6 +1224,117 @@ func TestExternalCollectionNullableFloatVectorTakeOutput(t *testing.T) {
 	assertVector(0, []float32{0, 1, 2, 3})
 	require.True(t, rows[1].isNull, "embedding should be null for id=1")
 	assertVector(2, []float32{8, 9, 10, 11})
+}
+
+func TestExternalCollectionFloat16VectorTakeOutput(t *testing.T) {
+	t.Parallel()
+
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	require.NoError(t, err)
+
+	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
+	if err != nil || !exists {
+		t.Skipf("MinIO bucket %q not accessible (exists=%v, err=%v), skipping",
+			minioCfg.bucket, exists, err)
+	}
+
+	collName := common.GenRandomString("ext_fp16_take", 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+
+	data, err := generateFloat16TakeParquetBytes(64, 0)
+	require.NoError(t, err, "generate fp16 take parquet")
+
+	objectKey := fmt.Sprintf("%s/data.parquet", extPath)
+	uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, objectKey, data)
+
+	t.Cleanup(func() {
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket,
+			fmt.Sprintf("%s/", extPath))
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).WithExternalField("embedding")).
+		WithField(entity.NewField().WithName("fp16_vec").WithDataType(entity.FieldTypeFloat16Vector).
+			WithDim(testVecDim).WithExternalField("fp16_vec"))
+
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	refreshAndWait(ctx, t, mc, collName)
+
+	createVectorIndex := func(fieldName string) {
+		t.Helper()
+		idx := index.NewAutoIndex(entity.L2)
+		idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, fieldName, idx))
+		common.CheckErr(t, err, true)
+		err = idxTask.Await(ctx)
+		common.CheckErr(t, err, true)
+		t.Log("Vector index created on " + fieldName)
+	}
+	createVectorIndex("embedding")
+	createVectorIndex("fp16_vec")
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	err = loadTask.Await(ctx)
+	common.CheckErr(t, err, true)
+	t.Log("Collection loaded")
+
+	expectedFP16 := func(id int64) []byte {
+		out := make([]byte, testVecDim*2)
+		for i := range out {
+			out[i] = byte((id + int64(i)) % 256)
+		}
+		return out
+	}
+	assertFP16Column := func(colName string, col column.Column, row int, id int64) {
+		t.Helper()
+		require.NotNil(t, col, "%s column should be present", colName)
+		raw, err := col.Get(row)
+		require.NoError(t, err)
+		vec, ok := raw.(entity.Float16Vector)
+		require.Truef(t, ok, "%s row %d has unexpected type %T", colName, row, raw)
+		require.Equal(t, expectedFP16(id), []byte(vec))
+	}
+
+	queryRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("id == 42").
+		WithOutputFields("id", "fp16_vec"))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, queryRes.ResultCount)
+	queryID, err := queryRes.GetColumn("id").GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(42), queryID)
+	assertFP16Column("fp16_vec", queryRes.GetColumn("fp16_vec"), 0, 42)
+
+	queryVec := make([]float32, testVecDim)
+	for i := range queryVec {
+		queryVec[i] = float32(42)*0.1 + float32(i)
+	}
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(collName, 1,
+		[]entity.Vector{entity.FloatVector(queryVec)}).
+		WithConsistencyLevel(entity.ClStrong).
+		WithANNSField("embedding").
+		WithFilter("id == 42").
+		WithOutputFields("id", "fp16_vec"))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, len(searchRes))
+	require.Equal(t, 1, searchRes[0].ResultCount)
+	searchID, err := searchRes[0].GetColumn("id").GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(42), searchID)
+	assertFP16Column("fp16_vec", searchRes[0].GetColumn("fp16_vec"), 0, 42)
 }
 
 // TestExternalCollectionIncrementalRefresh tests that refreshing an external collection
