@@ -255,6 +255,8 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestSkipsCleanupBeforeQueueFull() {
 
 func (s *SchedulerSuite) TestHandleAddTaskRequestCleansTasksNearDeadlineBeforeQueueLimit() {
 	paramtable.Init()
+	metrics.QueryNodeReadTaskQueueDuration.Reset()
+	defer metrics.QueryNodeReadTaskQueueDuration.Reset()
 	old := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.SwapTempValue("50ms")
 	defer paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.SwapTempValue(old)
 
@@ -282,6 +284,8 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestCleansTasksNearDeadlineBeforeQu
 	s.NoError(<-errCh)
 	s.ErrorIs(nearDeadlineTask.Wait(), context.DeadlineExceeded)
 	s.Equal(int64(1), scheduler.GetWaitingTaskTotal())
+	s.Equal(uint64(0), readTaskQueueDurationCount(readTaskQueueOutcomeExpired))
+	s.Equal(uint64(1), readTaskQueueDurationCount(readTaskQueueOutcomeDeadlineAdvance))
 }
 
 func (s *SchedulerSuite) TestAddReturnsContextErrorWhenReceiveBlocks() {
@@ -375,6 +379,46 @@ func (s *SchedulerSuite) TestSetupExecListenerRecordsPoppedExpiredTask() {
 	s.Equal(int64(0), scheduler.GetWaitingTaskTotal())
 	s.ErrorIs(expiredTask.Wait(), context.DeadlineExceeded)
 	s.Equal(uint64(1), readTaskQueueDurationCount(readTaskQueueOutcomeExpired))
+	s.Equal(uint64(0), readTaskQueueDurationCount(readTaskQueueOutcomeDeadlineAdvance))
+	s.Equal(uint64(0), readTaskQueueDurationCount(readTaskQueueOutcomeScheduled))
+}
+
+func (s *SchedulerSuite) TestSetupExecListenerDropsPoppedTaskNearDeadline() {
+	paramtable.Init()
+	metrics.QueryNodeReadTaskQueueDuration.Reset()
+	defer metrics.QueryNodeReadTaskQueueDuration.Reset()
+	oldDeadlineAdvance := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.SwapTempValue("50ms")
+	defer paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.SwapTempValue(oldDeadlineAdvance)
+
+	now := time.Now()
+	scheduler := &scheduler{
+		policy:           newFIFOPolicy(),
+		execChan:         make(chan Task),
+		schedulerCounter: schedulerCounter{},
+	}
+
+	nearDeadlineCtx, cancelNearDeadline := context.WithDeadline(context.Background(), now.Add(30*time.Millisecond))
+	defer cancelNearDeadline()
+	nearDeadlineTask := newMockTask(mockTaskConfig{ctx: nearDeadlineCtx, nq: 1})
+	queued := newQueuedTask(nearDeadlineTask, now.Add(-time.Second))
+	added, err := scheduler.policy.Push(queued)
+	s.NoError(err)
+	scheduler.updateWaitingTaskCounter(int64(added), queued.NQ())
+
+	task, nq, execChan := scheduler.setupExecListener(nil, now)
+
+	s.False(task.valid())
+	s.Zero(nq)
+	s.Nil(execChan)
+	s.Equal(int64(0), scheduler.GetWaitingTaskTotal())
+	select {
+	case err := <-nearDeadlineTask.(*MockTask).notifier:
+		s.ErrorIs(err, context.DeadlineExceeded)
+	default:
+		s.Fail("near-deadline task was not dropped before execution")
+	}
+	s.Equal(uint64(0), readTaskQueueDurationCount(readTaskQueueOutcomeExpired))
+	s.Equal(uint64(1), readTaskQueueDurationCount(readTaskQueueOutcomeDeadlineAdvance))
 	s.Equal(uint64(0), readTaskQueueDurationCount(readTaskQueueOutcomeScheduled))
 }
 
