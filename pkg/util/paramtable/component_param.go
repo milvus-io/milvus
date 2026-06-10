@@ -2082,6 +2082,11 @@ type proxyConfig struct {
 	MaxTaskNum                        ParamItem `refreshable:"false"`
 	DDLConcurrency                    ParamItem `refreshable:"true"`
 	DCLConcurrency                    ParamItem `refreshable:"true"`
+	DQLBackpressureEnabled            ParamItem `refreshable:"true"`
+	DQLBackpressureMinConcurrency     ParamItem `refreshable:"true"`
+	DQLBackpressureReduceRatio        ParamItem `refreshable:"true"`
+	DQLBackpressureDecreaseInterval   ParamItem `refreshable:"true"`
+	DQLBackpressureRecoverInterval    ParamItem `refreshable:"true"`
 	ShardLeaderCacheInterval          ParamItem `refreshable:"false"`
 	ReplicaSelectionPolicy            ParamItem `refreshable:"false"`
 	CheckQueryNodeHealthInterval      ParamItem `refreshable:"false"`
@@ -2283,6 +2288,58 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.DCLConcurrency.Init(base.mgr)
+
+	p.DQLBackpressureEnabled = ParamItem{
+		Key:          "proxy.dqlBackpressure.enabled",
+		Version:      "2.6.17",
+		DefaultValue: "true",
+		Doc:          "Whether Proxy adaptively controls DQL task dispatch concurrency according to downstream queue-full errors.",
+		Export:       true,
+	}
+	p.DQLBackpressureEnabled.Init(base.mgr)
+
+	p.DQLBackpressureMinConcurrency = ParamItem{
+		Key:          "proxy.dqlBackpressure.minConcurrency",
+		Version:      "2.6.17",
+		DefaultValue: "4",
+		Doc:          "The minimum DQL task dispatch concurrency kept by Proxy backpressure control.",
+		Export:       true,
+	}
+	p.DQLBackpressureMinConcurrency.Init(base.mgr)
+
+	p.DQLBackpressureReduceRatio = ParamItem{
+		Key:          "proxy.dqlBackpressure.reduceRatio",
+		Version:      "2.6.17",
+		DefaultValue: "0.5",
+		Formatter: func(v string) string {
+			ratio := getAsFloat(v)
+			if ratio <= 0 || ratio >= 1 {
+				return "0.5"
+			}
+			return v
+		},
+		Doc:    "The multiplicative decrease ratio for Proxy DQL dispatch concurrency when downstream queue-full errors occur.",
+		Export: true,
+	}
+	p.DQLBackpressureReduceRatio.Init(base.mgr)
+
+	p.DQLBackpressureDecreaseInterval = ParamItem{
+		Key:          "proxy.dqlBackpressure.decreaseInterval",
+		Version:      "2.6.17",
+		DefaultValue: "1s",
+		Doc:          "The minimum interval for Proxy DQL dispatch concurrency to decrease again after downstream queue-full errors.",
+		Export:       true,
+	}
+	p.DQLBackpressureDecreaseInterval.Init(base.mgr)
+
+	p.DQLBackpressureRecoverInterval = ParamItem{
+		Key:          "proxy.dqlBackpressure.recoverInterval",
+		Version:      "2.6.17",
+		DefaultValue: "1s",
+		Doc:          "The minimum interval for Proxy DQL dispatch concurrency to recover by one after successful DQL task execution.",
+		Export:       true,
+	}
+	p.DQLBackpressureRecoverInterval.Init(base.mgr)
 
 	p.GinLogging = ParamItem{
 		Key:          "proxy.ginLogging",
