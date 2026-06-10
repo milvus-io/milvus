@@ -10,7 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <map>
 #include <set>
+#include <vector>
 #include "test_utils/DataGen.h"
 #include "segcore/SegmentSealed.h"
 #include "plan/PlanNode.h"
@@ -20,8 +22,10 @@
 #include "exec/operator/query-agg/CountAggregateBase.h"
 #include "exec/HashTable.h"
 #include "exec/VectorHasher.h"
+#include "pb/plan.pb.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
+#include "query/PlanProto.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -112,6 +116,92 @@ createRetrievePlan(SchemaPtr schema,
     retrieve_plan->plan_node_->limit_ = limit;
     return retrieve_plan;
 }
+
+namespace {
+
+void
+SetInt64FieldData(GeneratedData& raw_data,
+                  FieldId field_id,
+                  const std::vector<int64_t>& values) {
+    AssertInfo(raw_data.raw_->num_rows() == values.size(),
+               "values size must match row count");
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() != field_id.get()) {
+            continue;
+        }
+        auto* data =
+            field_data->mutable_scalars()->mutable_long_data()->mutable_data();
+        data->Clear();
+        data->Add(values.data(), values.data() + values.size());
+        return;
+    }
+    ThrowInfo(FieldIDInvalid, "field id not found");
+}
+
+void
+SetIntArrayFieldData(GeneratedData& raw_data,
+                     FieldId field_id,
+                     const std::vector<std::vector<int32_t>>& rows) {
+    AssertInfo(raw_data.raw_->num_rows() == rows.size(),
+               "array rows size must match row count");
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() != field_id.get()) {
+            continue;
+        }
+        auto* arrays =
+            field_data->mutable_scalars()->mutable_array_data()->mutable_data();
+        arrays->Clear();
+        for (const auto& row : rows) {
+            auto* array_data = arrays->Add();
+            array_data->mutable_int_data()->mutable_data()->Add(
+                row.data(), row.data() + row.size());
+        }
+        return;
+    }
+    ThrowInfo(FieldIDInvalid, "field id not found");
+}
+
+void
+AddPositiveElementFilter(proto::plan::QueryPlanNode* query,
+                         FieldId array_field_id) {
+    auto* element_filter =
+        query->mutable_predicates()->mutable_element_filter_expr();
+    element_filter->set_struct_name("structA");
+
+    auto* unary_range =
+        element_filter->mutable_element_expr()->mutable_unary_range_expr();
+    auto* column_info = unary_range->mutable_column_info();
+    column_info->set_field_id(array_field_id.get());
+    column_info->set_data_type(proto::schema::DataType::Int32);
+    column_info->set_element_type(proto::schema::DataType::Int32);
+    column_info->set_is_element_level(true);
+
+    unary_range->set_op(proto::plan::OpType::GreaterThan);
+    unary_range->mutable_value()->set_int64_val(0);
+}
+
+SegmentSealedSPtr
+CreateElementLevelQuerySegment(SchemaPtr schema,
+                               FieldId pk_fid,
+                               FieldId array_fid) {
+    constexpr size_t N = 3;
+    constexpr int array_len = 3;
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+    SetInt64FieldData(raw_data, pk_fid, {10, 20, 30});
+    SetIntArrayFieldData(raw_data,
+                         array_fid,
+                         {
+                             {1, 0, 3},
+                             {0, 5, 0},
+                             {7, 8, 0},
+                         });
+    return SegmentSealedSPtr(
+        CreateSealedWithFieldDataLoaded(schema, raw_data).release());
+}
+
+}  // namespace
 
 TEST_P(QueryAggTest, GroupFixedLengthType) {
     std::vector<milvus::plan::PlanNodePtr> sources;
@@ -711,6 +801,81 @@ TEST_P(QueryAggTest, CountStarOnlyGlobalWithProjectNode) {
     std::cout << "CountStarOnlyGlobalWithProjectNode: count=" << actual_count
               << std::endl;
     EXPECT_EQ(num_rows_, actual_count);
+}
+
+TEST(QueryAggElementLevel, CountStarUsesMatchingElements) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugVectorArrayField(
+        "structA[array_vec]", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateElementLevelQuerySegment(schema, pk_fid, array_fid);
+
+    proto::plan::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_limit(100);
+    AddPositiveElementFilter(query, array_fid);
+
+    auto* aggregate = query->add_aggregates();
+    aggregate->set_op(proto::plan::count);
+    aggregate->set_field_id(0);
+
+    auto parser = milvus::query::ProtoParser(schema);
+    auto plan = parser.CreateRetrievePlan(plan_node);
+    auto retrieve_results = segment->Retrieve(
+        nullptr, plan.get(), MAX_TIMESTAMP, DEFAULT_MAX_OUTPUT_SIZE, false);
+
+    ASSERT_EQ(retrieve_results->fields_data_size(), 1);
+    const auto& count_data = retrieve_results->fields_data(0);
+    ASSERT_EQ(count_data.scalars().long_data().data_size(), 1);
+    EXPECT_EQ(count_data.scalars().long_data().data(0), 5);
+}
+
+TEST(QueryAggElementLevel, GroupByPkCountStarUsesLogicalRows) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugVectorArrayField(
+        "structA[array_vec]", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateElementLevelQuerySegment(schema, pk_fid, array_fid);
+
+    proto::plan::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_limit(100);
+    query->add_group_by_field_ids(pk_fid.get());
+    AddPositiveElementFilter(query, array_fid);
+
+    auto* aggregate = query->add_aggregates();
+    aggregate->set_op(proto::plan::count);
+    aggregate->set_field_id(0);
+
+    auto parser = milvus::query::ProtoParser(schema);
+    auto plan = parser.CreateRetrievePlan(plan_node);
+    auto retrieve_results = segment->Retrieve(
+        nullptr, plan.get(), MAX_TIMESTAMP, DEFAULT_MAX_OUTPUT_SIZE, false);
+
+    ASSERT_EQ(retrieve_results->fields_data_size(), 2);
+
+    const auto& pk_data =
+        retrieve_results->fields_data(0).scalars().long_data().data();
+    const auto& count_data =
+        retrieve_results->fields_data(1).scalars().long_data().data();
+    ASSERT_EQ(pk_data.size(), 3);
+    ASSERT_EQ(count_data.size(), 3);
+
+    std::map<int64_t, int64_t> counts_by_pk;
+    for (int i = 0; i < pk_data.size(); i++) {
+        counts_by_pk[pk_data.Get(i)] = count_data.Get(i);
+    }
+    EXPECT_EQ(counts_by_pk.at(10), 2);
+    EXPECT_EQ(counts_by_pk.at(20), 1);
+    EXPECT_EQ(counts_by_pk.at(30), 2);
 }
 
 // Test aggregation through segment->Retrieve() API to cover

@@ -17,6 +17,7 @@
 #include "ProjectNode.h"
 
 #include <algorithm>
+#include <optional>
 #include <utility>
 
 #include "common/Consts.h"
@@ -27,11 +28,86 @@
 #include "exec/expression/Utils.h"
 #include "exec/operator/Operator.h"
 #include "plan/PlanNode.h"
+#include "segcore/InsertRecord.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
 
 namespace milvus {
 namespace exec {
+namespace {
+
+struct SelectedOffsets {
+    std::vector<int64_t> row_offsets;
+    std::vector<int32_t> element_indices;
+};
+
+SelectedOffsets
+SelectOffsets(const TargetBitmapView& raw_data_view,
+              QueryContext* query_context,
+              const segcore::SegmentInternalInterface* segment) {
+    if (!query_context->bitset_is_element_level()) {
+        auto result_pair =
+            segment->find_first_n(segcore::Unlimited, raw_data_view);
+        return {std::move(result_pair.first), {}};
+    }
+
+    auto array_offsets = query_context->get_array_offsets();
+    AssertInfo(array_offsets != nullptr,
+               "element-level ProjectNode requires array offsets");
+
+    auto [doc_offsets, element_indices_by_doc, _] =
+        segment->find_first_n_element(segcore::Unlimited,
+                                      raw_data_view,
+                                      array_offsets.get(),
+                                      std::nullopt);
+
+    size_t selected_count = 0;
+    for (const auto& element_indices : element_indices_by_doc) {
+        selected_count += element_indices.size();
+    }
+
+    SelectedOffsets selected;
+    selected.row_offsets.reserve(selected_count);
+    selected.element_indices.reserve(selected_count);
+
+    for (size_t i = 0; i < doc_offsets.size(); i++) {
+        for (auto element_index : element_indices_by_doc[i]) {
+            selected.row_offsets.emplace_back(doc_offsets[i]);
+            selected.element_indices.emplace_back(element_index);
+        }
+    }
+    return selected;
+}
+
+ColumnVectorPtr
+MakeInt64Column(const std::vector<int64_t>& values) {
+    auto selected_count = values.size();
+    FixedVector<int64_t> output(selected_count);
+    milvus::fastmem::FastMemcpy(
+        output.data(), values.data(), selected_count * sizeof(int64_t));
+    auto field_data = std::make_shared<FieldData<int64_t>>(
+        DataType::INT64, false, std::move(output));
+    auto valid_map = TargetBitmap(selected_count, true);
+    return std::make_shared<ColumnVector>(
+        std::move(field_data), std::move(valid_map), 0);
+}
+
+ColumnVectorPtr
+MakeElementIndexColumn(const std::vector<int32_t>& element_indices) {
+    auto selected_count = element_indices.size();
+    FixedVector<int64_t> output(selected_count);
+    for (size_t i = 0; i < selected_count; i++) {
+        output[i] = element_indices[i];
+    }
+    auto field_data = std::make_shared<FieldData<int64_t>>(
+        DataType::INT64, false, std::move(output));
+    auto valid_map = TargetBitmap(selected_count, true);
+    return std::make_shared<ColumnVector>(
+        std::move(field_data), std::move(valid_map), 0);
+}
+
+}  // namespace
+
 PhyProjectNode::PhyProjectNode(
     int32_t operator_id,
     milvus::exec::DriverContext* ctx,
@@ -41,10 +117,13 @@ PhyProjectNode::PhyProjectNode(
                operator_id,
                projectNode->id(),
                "Project"),
-      fields_to_project_(projectNode->FieldsToProject()) {
+      fields_to_project_(projectNode->FieldsToProject()),
+      query_context_(nullptr),
+      op_context_(nullptr) {
     auto exec_context = operator_context_->get_exec_context();
-    segment_ = exec_context->get_query_context()->get_segment();
-    op_context_ = exec_context->get_query_context()->get_op_context();
+    query_context_ = exec_context->get_query_context();
+    segment_ = query_context_->get_segment();
+    op_context_ = query_context_->get_op_context();
     AssertInfo(op_context_, "op_context_ cannot be nullptr for ProjectNode");
     AssertInfo(segment_, "segment_ cannot be nullptr for ProjectNode");
 }
@@ -63,10 +142,11 @@ PhyProjectNode::GetOutput() {
     // raw data view
     TargetBitmapView raw_data_view(col_input->GetRawData(), col_input->size());
 
-    // When no fields need to be projected (e.g., count(*) only), skip
-    // find_first and count valid rows directly from the bitmap.
-    // find_first deduplicates by PK in growing segments (OffsetOrderedMap),
-    // which would undercount rows with duplicate PKs.
+    // When no fields need to be projected (e.g., count(*) only), count valid
+    // logical rows directly from the bitmap.  For element-level bitmaps this is
+    // the matching element count. find_first deduplicates by PK in growing
+    // segments (OffsetOrderedMap), which would undercount rows with duplicate
+    // PKs.
     if (fields_to_project_.empty()) {
         auto valid_count =
             static_cast<int64_t>(col_input->size()) - raw_data_view.count();
@@ -79,8 +159,9 @@ PhyProjectNode::GetOutput() {
         return row_vector;
     }
 
-    auto result_pair = segment_->find_first_n(-1, raw_data_view);
-    auto& selected_offsets = result_pair.first;
+    auto selected = SelectOffsets(raw_data_view, query_context_, segment_);
+    auto& selected_offsets = selected.row_offsets;
+    auto& selected_element_indices = selected.element_indices;
     auto selected_count = selected_offsets.size();
     // When all rows are filtered out, return nullptr.
     // Driver requires GetOutput to return nullptr or a non-empty vector.
@@ -96,16 +177,18 @@ PhyProjectNode::GetOutput() {
         auto field_id = fields_to_project_.at(i);
 
         if (field_id == SegmentOffsetFieldID) {
-            FixedVector<int64_t> offsets(selected_count);
-            milvus::fastmem::FastMemcpy(offsets.data(),
-                                        selected_offsets.data(),
-                                        selected_count * sizeof(int64_t));
-            auto field_data = std::make_shared<FieldData<int64_t>>(
-                DataType::INT64, false, std::move(offsets));
-            auto valid_map = TargetBitmap(selected_count, true);
-            auto offset_col = std::make_shared<ColumnVector>(
-                std::move(field_data), std::move(valid_map), 0);
-            column_vectors.emplace_back(std::move(offset_col));
+            column_vectors.emplace_back(MakeInt64Column(selected_offsets));
+            continue;
+        }
+
+        if (field_id == ElementIndexFieldID) {
+            AssertInfo(selected_element_indices.size() == selected_count,
+                       "element indices size ({}) must match selected row "
+                       "count ({})",
+                       selected_element_indices.size(),
+                       selected_count);
+            column_vectors.emplace_back(
+                MakeElementIndexColumn(selected_element_indices));
             continue;
         }
 
