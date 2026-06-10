@@ -342,6 +342,13 @@ TEST_F(DiskAnnFileManagerTest, ResolveStreamLoadPrefixFromIndexFiles) {
     EXPECT_EQ(prefix, "index_v1/100/20/30/1000/1/");
     EXPECT_EQ(prefix + "_mem.index.bin",
               "index_v1/100/20/30/1000/1/_mem.index.bin");
+
+    config[milvus::index::INDEX_FILES] =
+        std::vector<std::string>{"/_mem.index.bin"};
+    prefix =
+        milvus::index::ResolveDiskAnnLoadIndexPrefix(config, local_prefix, true);
+
+    EXPECT_EQ(prefix, "/");
 }
 
 TEST_F(DiskAnnFileManagerTest, ResolveNonStreamLoadPrefixFromLocalCache) {

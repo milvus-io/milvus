@@ -65,13 +65,17 @@ namespace {
 
 std::string
 GetDiskAnnFilePrefix(const std::string& index_file) {
-    auto file_name = boost::filesystem::path(index_file).filename().string();
-    AssertInfo(!file_name.empty() && file_name.size() < index_file.size(),
+    auto path = boost::filesystem::path(index_file);
+    AssertInfo(path.has_parent_path() && !path.filename().empty(),
                "index file path has no parent path: {}",
                index_file);
     // Keep the original trailing separator. Knowhere appends fixed file names
     // such as "_mem.index.bin" directly to this prefix when stream loading.
-    return index_file.substr(0, index_file.size() - file_name.size());
+    auto prefix = path.parent_path().generic_string();
+    if (prefix.back() != '/') {
+        prefix += "/";
+    }
+    return prefix;
 }
 
 }  // namespace
