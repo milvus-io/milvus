@@ -31,7 +31,7 @@ const (
 	CopySegmentJobPrefix                = MetaPrefix + "/copy-segment-job"
 	CopySegmentTaskPrefix               = MetaPrefix + "/copy-segment-task"
 	CompactionTaskPrefix                = MetaPrefix + "/compaction-task"
-	CompactionReasonRecordPrefix        = MetaPrefix + "/compaction-reason-record"
+	CompactionTargetPrefix              = MetaPrefix + "/compaction-target"
 	AnalyzeTaskPrefix                   = MetaPrefix + "/analyze-task"
 	PartitionStatsInfoPrefix            = MetaPrefix + "/partition-stats"
 	PartitionStatsCurrentVersionPrefix  = MetaPrefix + "/current-partition-stats-version"
