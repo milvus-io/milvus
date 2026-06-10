@@ -19,6 +19,7 @@
 package fips
 
 /*
+#cgo LDFLAGS: -lcrypto
 #include <openssl/conf.h>
 #include <openssl/evp.h>
 #include <openssl/provider.h>

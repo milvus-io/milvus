@@ -228,13 +228,28 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	})
 	require.NoError(t, merr.CheckRPCCall(addFieldResp, err))
 
-	// Non-BM25 function is not supported by schema evolution backfill.
-	nonBM25Req := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_output_non_bm25", "minhash_fn")
-	nonBM25Req.GetAction().GetAddRequest().GetFuncSchema()[0].Type = schemapb.FunctionType_MinHash
-	resp, err = core.AlterCollectionSchema(ctx, nonBM25Req)
+	// MinHash happy path: add binary vector output field + MinHash function.
+	minHashReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "minhash_output", "minhash_fn")
+	minHashReq.GetAction().GetAddRequest().GetFuncSchema()[0].Type = schemapb.FunctionType_MinHash
+	minHashReq.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema().DataType = schemapb.DataType_BinaryVector
+	minHashReq.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema().TypeParams = []*commonpb.KeyValuePair{
+		{Key: common.DimKey, Value: "32"},
+	}
+	resp, err = core.AlterCollectionSchema(ctx, minHashReq)
+	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 2)
+
+	minHashBadArityReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "minhash_bad_arity", "minhash_bad_arity_fn")
+	minHashBadArityReq.GetAction().GetAddRequest().GetFuncSchema()[0].Type = schemapb.FunctionType_MinHash
+	minHashBadArityReq.GetAction().GetAddRequest().GetFuncSchema()[0].InputFieldNames = []string{"text_input", "field1"}
+	minHashBadArityReq.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema().DataType = schemapb.DataType_BinaryVector
+	minHashBadArityReq.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema().TypeParams = []*commonpb.KeyValuePair{
+		{Key: common.DimKey, Value: "32"},
+	}
+	resp, err = core.AlterCollectionSchema(ctx, minHashBadArityReq)
 	alterErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
 	require.ErrorIs(t, alterErr, merr.ErrParameterInvalid)
-	require.ErrorContains(t, alterErr, "only BM25 function is supported")
+	require.ErrorContains(t, alterErr, "MinHash function should have exactly one input field and exactly one output field")
 
 	nullableOutputReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_output_nullable", "bm25_nullable_output")
 	nullableOutputReq.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema().Nullable = true
@@ -243,22 +258,22 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	require.ErrorIs(t, alterErr, merr.ErrParameterInvalid)
 	require.ErrorContains(t, alterErr, "function output field cannot be nullable")
 
-	// happy path: add sparse vector output field + BM25 function → schema version bumps (AddCollectionField already bumped to 1, so now 2)
+	// happy path: add sparse vector output field + BM25 function → schema version bumps.
 	firstAlterReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_output", "bm25_fn")
 	resp, err = core.AlterCollectionSchema(ctx, firstAlterReq)
 	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
-	assertSchemaVersion(t, ctx, core, dbName, collectionName, 2)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 3)
 
-	// second happy path: schema version bumps to 3
+	// second happy path: schema version bumps again.
 	secondAlterReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_output2", "bm25_fn2")
 	resp, err = core.AlterCollectionSchema(ctx, secondAlterReq)
 	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
-	assertSchemaVersion(t, ctx, core, dbName, collectionName, 3)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 4)
 	updated, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	schema := updated.ToCollectionSchemaPB()
 	require.False(t, schema.GetDoPhysicalBackfill())
-	require.EqualValues(t, 3, schema.GetVersion())
+	require.EqualValues(t, 4, schema.GetVersion())
 
 	// case 9: function already exists (same name "bm25_fn")
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{

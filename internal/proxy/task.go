@@ -1080,8 +1080,9 @@ func (t *alterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 	if len(funcSchemas) != 1 || funcSchemas[0] == nil {
 		return merr.WrapErrParameterInvalidMsg("For now, exactly one function schema is required in alter schema task")
 	}
-	if funcSchemas[0].GetType() != schemapb.FunctionType_BM25 {
-		return merr.WrapErrParameterInvalidMsg("For now, only BM25 function is supported in alter schema task")
+	functionType := funcSchemas[0].GetType()
+	if functionType != schemapb.FunctionType_BM25 && functionType != schemapb.FunctionType_MinHash {
+		return merr.WrapErrParameterInvalidMsg("For now, only BM25 and MinHash functions are supported in alter schema task")
 	}
 	if len(fieldInfos) == 0 {
 		return merr.WrapErrParameterInvalidMsg("fieldInfos is empty, function output fields are required")
