@@ -62,6 +62,12 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	MessageTypeRollbackImport: {
 		ExclusiveRequired: true,
 	},
+	// SplitShard is the write fence of the source vchannel (T_switch),
+	// so it must be appended exclusively to force-fail all active txns
+	// and forbid any concurrent DML on the vchannel.
+	MessageTypeSplitShard: {
+		ExclusiveRequired: true,
+	},
 	MessageTypeBatchUpdateManifest: {},
 	MessageTypeCreateSegment: {
 		SelfControlled: true,
