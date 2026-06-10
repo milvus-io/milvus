@@ -294,7 +294,7 @@ func runInvertedIndexCase(t *testing.T, ctx CtxT, mc MC, scalarField, namePrefix
 		index.NewHNSWIndex(entity.COSINE, 16, 200)))
 	common.CheckErr(t, err, true)
 	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "structA[embedding]",
-		index.NewHNSWIndex(entity.MaxSimCosine, 16, 200)))
+		index.NewHNSWIndex(entity.COSINE, 16, 200)))
 	common.CheckErr(t, err, true)
 	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "structA["+scalarField+"]",
 		index.NewGenericIndex("inv_idx", map[string]string{"index_type": "INVERTED"})))
@@ -305,9 +305,12 @@ func runInvertedIndexCase(t *testing.T, ctx CtxT, mc MC, scalarField, namePrefix
 	common.CheckErr(t, loadTask.Await(ctx), true)
 
 	// Search using row 0's first embedding (deterministic from SeedVector).
-	queryEmb := entity.FloatVectorArray{entity.FloatVector(hp.SeedVector(0, opt.Dim))}
+	// Use a plain vector so element_filter runs as element-level search; EmbList
+	// queries are row-level and must use MATCH_ANY/MATCH_* filters instead.
+	queryEmb := entity.FloatVector(hp.SeedVector(0, opt.Dim))
 	rs, err := mc.Search(ctx, client.NewSearchOption(collName, 10, []entity.Vector{queryEmb}).
 		WithANNSField("structA[embedding]").
+		WithSearchParam("metric_type", "COSINE").
 		WithFilter(filter).
 		WithOutputFields("id").
 		WithConsistencyLevel(entity.ClStrong))
