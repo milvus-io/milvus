@@ -22,9 +22,10 @@ import (
 const (
 	maxReceiveChanBatchConsumeNum = 100
 
-	readTaskQueueOutcomeScheduled = "scheduled"
-	readTaskQueueOutcomeExpired   = "expired"
-	readTaskQueueOutcomeCleared   = "cleared"
+	readTaskQueueOutcomeScheduled       = "scheduled"
+	readTaskQueueOutcomeExpired         = "expired"
+	readTaskQueueOutcomeDeadlineAdvance = "deadline_advance"
+	readTaskQueueOutcomeCleared         = "cleared"
 )
 
 // newScheduler create a scheduler with given schedule policy.
@@ -344,14 +345,17 @@ func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time
 	nq := int64(0)
 	if !lastWaitingTask.valid() {
 		// No task is waiting to send to execChan, schedule a new one from queue.
+		deadlineAdvance := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse()
+		cleanupTime := now.Add(deadlineAdvance)
 		for {
 			lastWaitingTask = s.policy.Pop(now)
 			if !lastWaitingTask.valid() {
 				break
 			}
-			if err := lastWaitingTask.Context().Err(); err != nil {
+			if lastWaitingTask.cleanupReady(cleanupTime) {
+				err := cleanupTaskError(lastWaitingTask)
 				s.updateWaitingTaskCounter(-1, -lastWaitingTask.NQ())
-				s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeExpired)
+				s.recordReadTaskQueueDuration(lastWaitingTask, now, cleanupTaskOutcome(lastWaitingTask))
 				lastWaitingTask.Done(err)
 				lastWaitingTask = nil
 				continue
@@ -375,9 +379,16 @@ func (s *scheduler) cleanupExpiredTasks(now time.Time) {
 	tasks := s.policy.Cleanup(cleanupTime)
 	for _, task := range tasks {
 		s.updateWaitingTaskCounter(-1, -task.NQ())
-		s.recordReadTaskQueueDuration(task, now, readTaskQueueOutcomeExpired)
+		s.recordReadTaskQueueDuration(task, now, cleanupTaskOutcome(task))
 		task.Done(cleanupTaskError(task))
 	}
+}
+
+func cleanupTaskOutcome(task *queuedTask) string {
+	if err := task.Context().Err(); err != nil {
+		return readTaskQueueOutcomeExpired
+	}
+	return readTaskQueueOutcomeDeadlineAdvance
 }
 
 func (s *scheduler) clearQueuedTasks(filter TaskFilter, reason string, task *queuedTask, now time.Time) (ClearResult, *queuedTask) {
