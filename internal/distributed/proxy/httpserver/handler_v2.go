@@ -463,7 +463,7 @@ func checkAuthorizationV2(ctx context.Context, c *gin.Context, ignoreErr bool, r
 		hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(merr.ErrNeedAuthenticate), nil, c.FullPath(), hookutil.ActionAuthorize)
 		return merr.ErrNeedAuthenticate
 	}
-	_, authErr := proxy.PrivilegeInterceptor(ctx, req)
+	ctx, authErr := proxy.PrivilegeInterceptor(ctx, req)
 	if authErr != nil {
 		if !ignoreErr {
 			HTTPReturn(c, http.StatusForbidden, gin.H{HTTPReturnCode: merr.Code(authErr), HTTPReturnMessage: authErr.Error()})
@@ -472,6 +472,7 @@ func checkAuthorizationV2(ctx context.Context, c *gin.Context, ignoreErr bool, r
 		return authErr
 	}
 
+	c.Request = c.Request.WithContext(ctx)
 	return nil
 }
 
@@ -501,6 +502,7 @@ func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, ch
 		if err != nil {
 			return nil, err
 		}
+		ctx = ginCtx.Request.Context()
 	}
 	if checkLimit {
 		_, err := CheckLimiter(ctx, req, pxy)
