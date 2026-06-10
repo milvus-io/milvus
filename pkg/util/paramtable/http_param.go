@@ -23,6 +23,11 @@ type httpConfig struct {
 	AcceptTypeAllowInt64  ParamItem `refreshable:"true"`
 	EnablePprof           ParamItem `refreshable:"false"`
 	RequestTimeoutMs      ParamItem `refreshable:"true"`
+	ReadHeaderTimeout     ParamItem `refreshable:"false"`
+	ReadTimeout           ParamItem `refreshable:"false"`
+	WriteTimeout          ParamItem `refreshable:"false"`
+	IdleTimeout           ParamItem `refreshable:"false"`
+	MaxHeaderBytes        ParamItem `refreshable:"false"`
 	HSTSMaxAge            ParamItem `refreshable:"false"`
 	HSTSIncludeSubDomains ParamItem `refreshable:"false"`
 	EnableHSTS            ParamItem `refreshable:"false"`
@@ -84,6 +89,51 @@ func (p *httpConfig) init(base *BaseTable) {
 		Export:       false,
 	}
 	p.RequestTimeoutMs.Init(base.mgr)
+
+	p.ReadHeaderTimeout = ParamItem{
+		Key:          "proxy.http.readHeaderTimeout",
+		DefaultValue: "5s",
+		Version:      "2.6.0",
+		Doc:          "HTTP server timeout for reading request headers",
+		Export:       true,
+	}
+	p.ReadHeaderTimeout.Init(base.mgr)
+
+	p.ReadTimeout = ParamItem{
+		Key:          "proxy.http.readTimeout",
+		DefaultValue: "30s",
+		Version:      "2.6.0",
+		Doc:          "HTTP server timeout for reading the entire request, including the body",
+		Export:       true,
+	}
+	p.ReadTimeout.Init(base.mgr)
+
+	p.WriteTimeout = ParamItem{
+		Key:          "proxy.http.writeTimeout",
+		DefaultValue: "30s",
+		Version:      "2.6.0",
+		Doc:          "HTTP server timeout for handling requests and writing responses",
+		Export:       true,
+	}
+	p.WriteTimeout.Init(base.mgr)
+
+	p.IdleTimeout = ParamItem{
+		Key:          "proxy.http.idleTimeout",
+		DefaultValue: "300s",
+		Version:      "2.6.0",
+		Doc:          "HTTP server keep-alive idle timeout",
+		Export:       true,
+	}
+	p.IdleTimeout.Init(base.mgr)
+
+	p.MaxHeaderBytes = ParamItem{
+		Key:          "proxy.http.maxHeaderBytes",
+		DefaultValue: "1048576",
+		Version:      "2.6.0",
+		Doc:          "Maximum number of bytes the HTTP server reads from request headers",
+		Export:       true,
+	}
+	p.MaxHeaderBytes.Init(base.mgr)
 
 	p.HSTSMaxAge = ParamItem{
 		Key:          "proxy.http.hstsMaxAge",
