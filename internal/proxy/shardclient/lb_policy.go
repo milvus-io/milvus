@@ -149,6 +149,11 @@ func preferredNodeID(workload CollectionWorkLoad, channel string) int64 {
 	return nodeID
 }
 
+func isResourceInsufficientError(err error) bool {
+	return errors.Is(err, merr.ErrServiceTooManyRequests) ||
+		errors.Is(err, merr.ErrServiceResourceInsufficient)
+}
+
 // try to select the best node from the available nodes
 func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, workload ChannelWorkload, excludeNodes *typeutil.UniqueSet) (NodeInfo, bool, error) {
 	log := log.Ctx(ctx).With(
@@ -304,8 +309,11 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			if merr.GetErrorType(err) == merr.InputError {
 				return false, err
 			}
-			excludeNodes.Insert(targetNode.NodeID)
 			lastErr = errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode.NodeID, workload.Channel)
+			if isResourceInsufficientError(err) {
+				return false, lastErr
+			}
+			excludeNodes.Insert(targetNode.NodeID)
 			return true, lastErr
 		}
 
@@ -358,11 +366,11 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 		})
 	}
 
-	wg, _ := errgroup.WithContext(ctx)
-	// Launch a goroutine for each channel
+	wg, groupCtx := errgroup.WithContext(ctx)
 	for _, channel := range channelList {
+		channel := channel
 		wg.Go(func() error {
-			return lb.ExecuteWithRetry(ctx, ChannelWorkload{
+			return lb.ExecuteWithRetry(groupCtx, ChannelWorkload{
 				Db:              workload.Db,
 				CollectionName:  workload.CollectionName,
 				CollectionID:    workload.CollectionID,
