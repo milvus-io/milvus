@@ -143,6 +143,48 @@ func TestSort(t *testing.T) {
 		assert.Equal(t, 0, gotNumRows)
 		assert.Nil(t, timings)
 	})
+
+	t.Run("sort with disk merge", func(t *testing.T) {
+		oldRowLimit := runRowLimit
+		defer func() {
+			runRowLimit = oldRowLimit
+		}()
+		runRowLimit = 3
+		gotNumRows, timings, err := Sort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
+			return true
+		}, []int64{common.RowIDField})
+		assert.NoError(t, err)
+		assert.Equal(t, 6, gotNumRows)
+		assert.NotNil(t, timings)
+		assert.Equal(t, 6, timings.NumRows)
+		assert.Greater(t, timings.NumBatches, 0)
+		assert.GreaterOrEqual(t, timings.ReadCost.Nanoseconds(), int64(0))
+		assert.GreaterOrEqual(t, timings.SortCost.Nanoseconds(), int64(0))
+		assert.GreaterOrEqual(t, timings.WriteCost.Nanoseconds(), int64(0))
+		err = rw.Close()
+		assert.NoError(t, err)
+	})
+
+	t.Run("sort by string with disk merge", func(t *testing.T) {
+		oldRowLimit := runRowLimit
+		defer func() {
+			runRowLimit = oldRowLimit
+		}()
+		runRowLimit = 3
+		gotNumRows, timings, err := Sort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
+			return true
+		}, []int64{17})
+		assert.NoError(t, err)
+		assert.Equal(t, 6, gotNumRows)
+		assert.NotNil(t, timings)
+		assert.Equal(t, 6, timings.NumRows)
+		assert.Greater(t, timings.NumBatches, 0)
+		assert.GreaterOrEqual(t, timings.ReadCost.Nanoseconds(), int64(0))
+		assert.GreaterOrEqual(t, timings.SortCost.Nanoseconds(), int64(0))
+		assert.GreaterOrEqual(t, timings.WriteCost.Nanoseconds(), int64(0))
+		err = rw.Close()
+		assert.NoError(t, err)
+	})
 }
 
 func TestMergeSort(t *testing.T) {
