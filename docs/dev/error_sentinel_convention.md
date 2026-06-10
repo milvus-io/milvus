@@ -8,7 +8,7 @@ violates them.
 
 ### 1. Typed merr (wire-protocol errors)
 
-Defined in `pkg/util/merr/registry.go` (`ErrCollectionNotFound`,
+Defined in `pkg/util/merr/errors.go` (`ErrCollectionNotFound`,
 `ErrParameterInvalid`, etc.). These carry a numeric error code that is
 serialized into `commonpb.Status{ErrorCode, Reason}` and shipped to the
 client over gRPC. They are the only thing a client (or another Milvus
@@ -46,14 +46,14 @@ Why "any gRPC boundary, not just client-facing": gRPC serializes errors to
 `merr.Error(status)` reconstructs a typed merr from the numeric code; the
 sentinel chain is gone forever. So a sentinel that escapes an internal coord
 RPC is just as broken as one that escapes a user-facing RPC — only quieter,
-because no customer sees the resulting `Code=1 Unexpected`.
+because no customer sees the resulting `Code=65535 (unexpected)`.
 
 ### What breaks the invariant
 
 The `errors.Is` chain survives `return err`, `errors.Wrap(err, "...")` /
 `merr.Wrap(err, "...")` (cockroachdb thin wrap), **and**
-`merr.WrapErrServiceInternalErr(err, "...")` — `wrappedMilvusError.Unwrap()`
-returns `w.inner`, so `errors.Is(outer, innerSentinel)` stays true through any
+`merr.WrapErrServiceInternalErr(err, "...")` — `milvusError.Unwrap()`
+returns the inner error, so `errors.Is(outer, innerSentinel)` stays true through any
 of them. It is **destroyed** only by:
 
 - Putting the cause in a format argument instead of the chain:
@@ -91,10 +91,12 @@ The convention has two layers, matched to the two error categories:
 
 All errors that may cross any gRPC boundary (client-facing or
 component-to-component) must be `*merr.milvusError` defined in
-`pkg/util/merr/registry.go`. They have:
+`pkg/util/merr/errors.go`. They have:
 
-- A numeric `errorCode` registered in `pkg/util/merr/code.go`
-- A `var ErrXxx = newMilvusError(...)` declaration in `pkg/util/merr/registry.go`
+- A numeric code passed to `newMilvusError(...)`; uniqueness is enforced by
+  the init-time code registry (defining a second sentinel on an occupied code
+  panics at package init, since `milvusError.Is` matches by code alone)
+- A `var ErrXxx = newMilvusError(...)` declaration in `pkg/util/merr/errors.go`
 - An exported `WrapErrXxxMsg` / `WrapErrXxxErr` helper
 
 If an error needs to be visible to the wire, it lives here. No exceptions.
@@ -260,7 +262,7 @@ Allow/deny matrix:
   - **"unreachable" assertion** → just `panic(...)`. If caller already
     does `if err != nil { panic(err) }`, fold it into the callee.
   - **input validation / config validation** → `merr.WrapErrParameterInvalidMsg(...)`
-    or `status.NewInvaildArgument(...)` depending on layer.
+    or `status.NewInvalidArgument(...)` depending on layer.
 
 Implementation: grep version covers ~95% true violations in ~1 hour.
 AST version (go/analysis) covers the edge cases (e.g. `init()` body
