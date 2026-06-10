@@ -759,6 +759,12 @@ func (h *ServerHandler) FinishDropChannel(channel string, collectionID int64) er
 	// Channel checkpoints are cleaned up during garbage collection.
 
 	// clean collection info cache when meet drop collection info
+	if h.s.dataViewManager != nil {
+		if _, err := h.s.dataViewManager.OnDropCollection(h.s.ctx, collectionID); err != nil {
+			log.Warn("DropCollection DataView failed", zap.Int64("collectionID", collectionID), zap.Error(err))
+			return err
+		}
+	}
 	h.s.meta.DropCollection(collectionID)
 
 	return nil

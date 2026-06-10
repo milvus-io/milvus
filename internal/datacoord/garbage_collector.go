@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -61,6 +62,11 @@ type GcOption struct {
 
 	broker           broker.Broker
 	removeObjectPool *conc.Pool[struct{}]
+	dataViewRefs     DataViewReferenceChecker
+}
+
+type DataViewReferenceChecker interface {
+	ReferencedDataVersions(collectionID int64) []*viewpb.DataVersion
 }
 
 // garbageCollector handles garbage files in object storage
@@ -366,6 +372,7 @@ func (gc *garbageCollector) work(ctx context.Context) {
 	go func() {
 		defer gc.wg.Done()
 		gc.runRecycleTaskWithPauser(ctx, "meta", gc.option.checkInterval, func(ctx context.Context, signal <-chan gcCmd) {
+			gc.recycleDataViews(ctx, signal)
 			gc.recycleDroppedSegments(ctx, signal)
 			gc.recycleChannelCPMeta(ctx, signal)
 			gc.recycleUnusedIndexes(ctx, signal)
@@ -807,6 +814,37 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 		Observe(float64(cost.Milliseconds()))
 }
 
+func (gc *garbageCollector) recycleDataViews(ctx context.Context, signal <-chan gcCmd) {
+	if gc.meta == nil || gc.meta.dataViewManager == nil {
+		return
+	}
+	start := time.Now()
+	logger := log.With(zap.String("gcName", "recycleDataViews"), zap.Time("startAt", start))
+	logger.Info("start recycleDataViews")
+	defer func() { logger.Info("recycleDataViews done", zap.Duration("timeCost", time.Since(start))) }()
+
+	for _, collection := range gc.meta.GetCollections() {
+		if ctx.Err() != nil {
+			return
+		}
+		gc.ackSignal(signal)
+
+		collectionID := collection.ID
+		if gc.collectionGCPaused(collectionID) {
+			logger.Info("skip DataView GC since collection is paused", zap.Int64("collectionID", collectionID))
+			continue
+		}
+
+		var protected []*viewpb.DataVersion
+		if gc.option.dataViewRefs != nil {
+			protected = gc.option.dataViewRefs.ReferencedDataVersions(collectionID)
+		}
+		if err := gc.meta.dataViewManager.GarbageCollect(ctx, collectionID, protected, 1); err != nil {
+			logger.Warn("DataView GC failed", zap.Int64("collectionID", collectionID), zap.Error(err))
+		}
+	}
+}
+
 func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 	childSegment *SegmentInfo,
 	indexSet typeutil.UniqueSet,
@@ -922,6 +960,26 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			continue
 		}
 
+		if gc.meta.dataViewManager != nil {
+			referenced, err := gc.meta.dataViewManager.IsSegmentReferenced(ctx, segment.GetCollectionID(), segmentID)
+			if err != nil {
+				log.Warn("skip GC segment since DataView reference check failed",
+					zap.Int64("collectionID", segment.GetCollectionID()),
+					zap.Int64("partitionID", segment.GetPartitionID()),
+					zap.String("channel", segInsertChannel),
+					zap.Int64("segmentID", segmentID),
+					zap.Error(err))
+				continue
+			}
+			if referenced {
+				log.Info("skip GC segment since it is referenced by retained DataView",
+					zap.Int64("collectionID", segment.GetCollectionID()),
+					zap.Int64("partitionID", segment.GetPartitionID()),
+					zap.String("channel", segInsertChannel),
+					zap.Int64("segmentID", segmentID))
+				continue
+			}
+		}
 		// Skip segments protected by snapshot references. IsSegmentGCBlocked is O(1)
 		// and embeds the "RefIndex not loaded → fail-closed" check, so we don't need
 		// a separate loaded-state probe.

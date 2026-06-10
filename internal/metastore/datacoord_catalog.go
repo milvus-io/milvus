@@ -73,7 +73,6 @@ type DataCoordCatalog interface {
 	AddSegment(ctx context.Context, segment *datapb.SegmentInfo) error
 	// TODO Remove this later, we should update flush segments info for each segment separately, so far we still need transaction
 	AlterSegments(ctx context.Context, newSegments []*datapb.SegmentInfo, binlogs ...BinlogsIncrement) error
-	AlterSegmentsAndSaveDataView(ctx context.Context, newSegments []*datapb.SegmentInfo, collectionID int64, view *viewpb.DataViewOfCollection, binlogs ...BinlogsIncrement) error
 	// Update applies a composite set of UpdateActions as a single atomic
 	// write (or, when the op count exceeds the txn size limit, via a
 	// caller-ordered chunked fallback). See kv/txn.Commit for the exact
@@ -81,6 +80,10 @@ type DataCoordCatalog interface {
 	Update(ctx context.Context, actions ...UpdateAction) error
 	SaveDroppedSegmentsInBatch(ctx context.Context, segments []*datapb.SegmentInfo) error
 	DropSegment(ctx context.Context, segment *datapb.SegmentInfo) error
+	SaveDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection) error
+	ListDataViews(ctx context.Context, collectionID int64) ([]*viewpb.DataViewOfCollection, error)
+	DropDataView(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) error
+	DropDataViews(ctx context.Context, collectionID int64) error
 
 	// TODO: From MarkChannelAdded to DropChannel, it's totally a redundant design by now, remove it in future.
 	MarkChannelAdded(ctx context.Context, channel string) error
@@ -157,10 +160,4 @@ type DataCoordCatalog interface {
 	SaveExportSnapshotJob(ctx context.Context, job *datapb.ExportSnapshotJob) error
 	ListExportSnapshotJobs(ctx context.Context) ([]*datapb.ExportSnapshotJob, error)
 	DropExportSnapshotJob(ctx context.Context, jobID int64) error
-
-	// DataView
-	SaveDataView(ctx context.Context, collectionID int64, view *viewpb.DataViewOfCollection) error
-	ListDataViews(ctx context.Context) (map[int64][]*viewpb.DataViewOfCollection, error)
-	DropDataView(ctx context.Context, collectionID int64, version *viewpb.DataVersion) error
-	DropDataViewsByCollection(ctx context.Context, collectionID int64) error
 }

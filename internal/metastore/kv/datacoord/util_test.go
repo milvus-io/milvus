@@ -67,18 +67,3 @@ func TestBuildExternalCollectionRefreshKeyConsistency(t *testing.T) {
 	key3 := buildExternalCollectionRefreshJobKey(int64(54321))
 	assert.NotEqual(t, key1, key3)
 }
-
-func TestBuildDataViewKey(t *testing.T) {
-	key := buildDataViewKey(100, 1, 2)
-	assert.Equal(t, DataViewPrefix+"/100/1/2", key)
-
-	key2 := buildDataViewKey(100, 1, 3)
-	assert.NotEqual(t, key, key2)
-
-	assert.Equal(t, key, buildDataViewKey(100, 1, 2))
-}
-
-func TestBuildDataViewCollectionPrefix(t *testing.T) {
-	prefix := buildDataViewCollectionPrefix(100)
-	assert.Equal(t, DataViewPrefix+"/100", prefix)
-}

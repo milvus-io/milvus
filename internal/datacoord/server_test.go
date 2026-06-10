@@ -2803,6 +2803,18 @@ func Test_initGarbageCollection(t *testing.T) {
 	})
 }
 
+func TestServerGarbageCollectionReferences(t *testing.T) {
+	dataRefs := &fakeDataViewReferenceChecker{}
+	server := CreateServer(context.Background(), dependency.NewDefaultFactory(true),
+		WithDataViewReferenceChecker(dataRefs),
+	)
+
+	server.initGarbageCollection(nil)
+	defer server.garbageCollector.close()
+
+	assert.Same(t, dataRefs, server.garbageCollector.option.dataViewRefs)
+}
+
 func TestLoadCollectionFromRootCoord(t *testing.T) {
 	broker := broker.NewMockBroker(t)
 	s := &Server{

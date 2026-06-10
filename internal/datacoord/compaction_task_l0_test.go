@@ -374,6 +374,65 @@ func (s *L0CompactionTaskSuite) TestSaveSegmentMetaUsesAtomicDeltalogOperator() 
 	s.NoError(task.saveSegmentMeta(output))
 }
 
+func (s *L0CompactionTaskSuite) TestSaveSegmentMetaRefreshesDataViewAfterL0Compaction() {
+	ctx := context.Background()
+	meta, err := newMemoryMeta(s.T())
+	s.Require().NoError(err)
+	manager := &fakeGCDataViewManager{}
+	meta.dataViewManager = manager
+
+	for _, segment := range []*datapb.SegmentInfo{
+		{
+			ID:            100,
+			CollectionID:  1,
+			PartitionID:   10,
+			InsertChannel: "ch-1",
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L0,
+		},
+		{
+			ID:            101,
+			CollectionID:  1,
+			PartitionID:   10,
+			InsertChannel: "ch-1",
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L0,
+		},
+		{
+			ID:            200,
+			CollectionID:  1,
+			PartitionID:   10,
+			InsertChannel: "ch-1",
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L1,
+		},
+	} {
+		s.Require().NoError(meta.AddSegment(ctx, NewSegmentInfo(segment)))
+	}
+
+	task := newL0CompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		TriggerID:     19530,
+		CollectionID:  1,
+		PartitionID:   10,
+		Type:          datapb.CompactionType_Level0DeleteCompaction,
+		NodeID:        NullNodeID,
+		State:         datapb.CompactionTaskState_executing,
+		Channel:       "ch-1",
+		InputSegments: []int64{100, 101},
+	}, nil, meta)
+	output := []*datapb.CompactionSegment{{
+		SegmentID: 200,
+		Deltalogs: []*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: "/tmp/milvus/delta/9001", EntriesNum: 3}},
+		}},
+	}}
+
+	s.NoError(task.saveSegmentMeta(output))
+	s.Require().Len(manager.l0CompactEvents, 1)
+	s.EqualValues(1, manager.l0CompactEvents[0].CollectionID)
+}
+
 func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_NormalL0() {
 	channel := "Ch-1"
 	deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
