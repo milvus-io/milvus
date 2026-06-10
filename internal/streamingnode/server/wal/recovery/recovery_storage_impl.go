@@ -8,7 +8,9 @@ import (
 	walcheckpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/checkpoint"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/growing"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	waltransformlog "github.com/milvus-io/milvus/internal/streamingnode/server/wal/transformlog"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/transformlog"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -137,6 +139,7 @@ func (r *recoveryStorageImpl) initGrowingManager(
 	ctx context.Context,
 	vchannels map[string]*streamingpb.VChannelMeta,
 	segments map[int64]*streamingpb.SegmentAssignmentMeta,
+	transformLogMetas map[string]*streamingpb.VChannelTransformLogMeta,
 ) error {
 	coord, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
 	if err != nil {
@@ -156,10 +159,18 @@ func (r *recoveryStorageImpl) initGrowingManager(
 			idalloc.NewMAllocator(resource.Resource().IDAllocator()),
 			nil,
 		)),
+		growing.WithTransformLogStore(waltransformlog.NewObjectChunkStore(
+			resource.Resource().ChunkManager(),
+			r.channel.Name,
+		)),
+		growing.WithTransformLogMetas(transformLogMetas),
 		growing.WithRecoveryCatalog(r.channel.Name, catalog),
 		growing.WithDataBarrierUpdatedCallback(r.NotifyBarrierUpdated),
 		growing.WithModuleRuntime(r.Logger(), moduleRuntime),
 	)
+	if err := r.growingManager.RecoverTransformLogs(ctx); err != nil {
+		return err
+	}
 	r.modules = []moduleapi.Module{
 		r.growingManager,
 		newBroadcastAckModule(r.channel.Name, r.growingManager, moduleRuntime),
@@ -190,6 +201,10 @@ func (r *recoveryStorageImpl) Metrics() RecoveryMetrics {
 	return RecoveryMetrics{
 		RecoveryTimeTick: r.checkpoint.TimeTick,
 	}
+}
+
+func (r *recoveryStorageImpl) TransformLog() transformlog.Accesser {
+	return r.growingManager
 }
 
 // ObserveMessage is called when a new message is observed.

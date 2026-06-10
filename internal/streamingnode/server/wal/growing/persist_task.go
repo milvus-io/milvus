@@ -15,6 +15,8 @@ import (
 type recoveryCatalog interface {
 	SaveVChannels(ctx context.Context, pchannel string, vchannels map[string]*streamingpb.VChannelMeta) error
 	DropVChannels(ctx context.Context, pchannel string, vchannels map[string]*streamingpb.VChannelMeta) error
+	SaveTransformLogMeta(ctx context.Context, pchannel string, metas map[string]*streamingpb.VChannelTransformLogMeta) error
+	DropTransformLogMeta(ctx context.Context, pchannel string, vchannels []string) error
 	SaveSegmentAssignments(ctx context.Context, pchannel string, segments map[int64]*streamingpb.SegmentAssignmentMeta) error
 	DropSegmentAssignments(ctx context.Context, pchannel string, segmentIDs []int64) error
 }
@@ -22,21 +24,24 @@ type recoveryCatalog interface {
 type dirtySnapshot struct {
 	VChannels          map[string]*streamingpb.VChannelMeta
 	SegmentAssignments map[int64]*streamingpb.SegmentAssignmentMeta
+	TransformLogs      map[string]*streamingpb.VChannelTransformLogMeta
 	vchannelOwners     map[string]*vChannelView
 	segmentOwners      map[int64]*segmentView
+	transformLogOwners map[string]*transformLogView
 }
 
 type dirtyOwners struct {
-	vchannelOwners map[string]*vChannelView
-	segmentOwners  map[int64]*segmentView
+	vchannelOwners     map[string]*vChannelView
+	segmentOwners      map[int64]*segmentView
+	transformLogOwners map[string]*transformLogView
 }
 
 func (s *dirtySnapshot) empty() bool {
-	return s == nil || (len(s.VChannels) == 0 && len(s.SegmentAssignments) == 0)
+	return s == nil || (len(s.VChannels) == 0 && len(s.SegmentAssignments) == 0 && len(s.TransformLogs) == 0)
 }
 
 func (s *dirtyOwners) empty() bool {
-	return s == nil || (len(s.vchannelOwners) == 0 && len(s.segmentOwners) == 0)
+	return s == nil || (len(s.vchannelOwners) == 0 && len(s.segmentOwners) == 0 && len(s.transformLogOwners) == 0)
 }
 
 func (m *Manager) newPersistTask(
@@ -68,8 +73,12 @@ func (m *Manager) hasPendingPersistWork() bool {
 			return true
 		}
 	}
-	for _, vchannel := range m.vchannelViews {
-		if vchannel.HasReadyTombstoneFinalize() {
+	for vchannelName, vchannel := range m.vchannelViews {
+		transformLog := m.transformLog(vchannelName)
+		if transformLog == nil {
+			continue
+		}
+		if vchannel.HasReadyTombstoneFinalize(transformLog.DataCheckpointTimeTick()) {
 			return true
 		}
 	}
@@ -79,6 +88,7 @@ func (m *Manager) hasPendingPersistWork() bool {
 func (m *Manager) collectDirtyOwners() *dirtyOwners {
 	segmentOwners := make(map[int64]*segmentView)
 	vchannelOwners := make(map[string]*vChannelView)
+	transformLogOwners := make(map[string]*transformLogView)
 	for _, segment := range m.segmentViews {
 		if segment.HasDirty() {
 			segmentOwners[segment.ID()] = segment
@@ -89,9 +99,15 @@ func (m *Manager) collectDirtyOwners() *dirtyOwners {
 			vchannelOwners[vchannel.Name()] = vchannel
 		}
 	}
+	for vchannel, transformLog := range m.transformLogs {
+		if transformLog.log.HasDirty() {
+			transformLogOwners[vchannel] = transformLog
+		}
+	}
 	return &dirtyOwners{
-		vchannelOwners: vchannelOwners,
-		segmentOwners:  segmentOwners,
+		vchannelOwners:     vchannelOwners,
+		segmentOwners:      segmentOwners,
+		transformLogOwners: transformLogOwners,
 	}
 }
 
@@ -101,8 +117,10 @@ func (s *dirtyOwners) consumeSnapshot() *dirtySnapshot {
 	}
 	segments := make(map[int64]*streamingpb.SegmentAssignmentMeta)
 	vchannels := make(map[string]*streamingpb.VChannelMeta)
+	transformLogs := make(map[string]*streamingpb.VChannelTransformLogMeta)
 	segmentOwners := make(map[int64]*segmentView)
 	vchannelOwners := make(map[string]*vChannelView)
+	transformLogOwners := make(map[string]*transformLogView)
 	for segmentID, segment := range s.segmentOwners {
 		dirtySnapshot := segment.ConsumeDirtyAndGetSnapshot()
 		if dirtySnapshot != nil {
@@ -117,11 +135,20 @@ func (s *dirtyOwners) consumeSnapshot() *dirtySnapshot {
 			vchannelOwners[vchannelName] = vchannel
 		}
 	}
+	for vchannel, transformLog := range s.transformLogOwners {
+		dirtySnapshot := transformLog.log.ConsumeDirtyAndGetSnapshot()
+		if dirtySnapshot != nil {
+			transformLogs[vchannel] = dirtySnapshot
+			transformLogOwners[vchannel] = transformLog
+		}
+	}
 	snapshot := &dirtySnapshot{
 		VChannels:          vchannels,
 		SegmentAssignments: segments,
+		TransformLogs:      transformLogs,
 		vchannelOwners:     vchannelOwners,
 		segmentOwners:      segmentOwners,
+		transformLogOwners: transformLogOwners,
 	}
 	if snapshot.empty() {
 		return nil
@@ -141,6 +168,11 @@ func (m *Manager) markSnapshotPersisted(snapshot *dirtySnapshot) {
 	for vchannel, meta := range snapshot.VChannels {
 		if owner := snapshot.vchannelOwners[vchannel]; owner != nil {
 			owner.MarkSnapshotPersisted(meta)
+		}
+	}
+	for vchannel, meta := range snapshot.TransformLogs {
+		if owner := snapshot.transformLogOwners[vchannel]; owner != nil {
+			owner.log.MarkSnapshotPersisted(meta)
 		}
 	}
 }
@@ -181,6 +213,7 @@ func (t *persistTask) Run(ctx context.Context) error {
 		mlog.String("channel", t.channelName),
 		mlog.Int("vchannelCount", len(snapshot.VChannels)),
 		mlog.Int("segmentCount", len(snapshot.SegmentAssignments)),
+		mlog.Int("transformLogCount", len(snapshot.TransformLogs)),
 	)
 	for {
 		if err := t.persistSnapshot(ctx, logger, snapshot); err != nil {
@@ -202,6 +235,15 @@ func (t *persistTask) Run(ctx context.Context) error {
 }
 
 func (t *persistTask) persistSnapshot(ctx context.Context, logger *mlog.Logger, snapshot *dirtySnapshot) error {
+	if len(snapshot.TransformLogs) > 0 {
+		if err := retryOperationWithBackoff(ctx,
+			logger.With(mlog.String("op", "persistTransformLogs"), mlog.Strings("vchannels", lo.Keys(snapshot.TransformLogs))),
+			func(ctx context.Context) error {
+				return t.catalog.SaveTransformLogMeta(ctx, t.channelName, snapshot.TransformLogs)
+			}); err != nil {
+			return err
+		}
+	}
 	if len(snapshot.VChannels) > 0 {
 		if err := retryOperationWithBackoff(ctx,
 			logger.With(mlog.String("op", "persistVChannels"), mlog.Strings("vchannels", lo.Keys(snapshot.VChannels))),

@@ -147,7 +147,7 @@ Modules submit tasks to Scheduler for:
 Scheduler is parallel by default. Task ordering is expressed through preconditions:
 
 - Segment Data tasks are ordered per segment.
-- VChannel TransformLog tasks are ordered per vchannel.
+- TransformLog Data tasks are ordered per vchannel.
 - View persist tasks are ordered per module or per owner according to module policy.
 - Ack tasks are ordered by WAL ack order.
 - Cleanup waits for persisted physical checkpoints to pass the retained tombstone timetick.
@@ -162,16 +162,16 @@ It owns:
 
 - Views that include VChannel, schema, partition, and segment Meta.
 - Views that include Segment insert buffers and L1 Data state.
-- Views that include VChannel TransformLog buffers and L0 Data state.
+- TransformLog views that include Delete buffers, L0 Data state, and independent TransformLog meta.
 - Retained tombstone state inside Views.
 - Dirty Views.
 - Growing Data tasks and View persistence tasks.
 
 `ObserveMessage` is the only synchronous WAL consumption entry. It updates the corresponding View's Meta part and `MetaTimeTick`. It may append lightweight in-memory buffers, but it does not perform heavy durable work.
 
-Data work is asynchronous. Segment flush, TransformLog flush, lifecycle commit, and tombstone cleanup are submitted to Scheduler according to GrowingModule policy or RecoveryStorage background triggering. After a Data task completes, GrowingModule updates the corresponding View's Data state and `DataTimeTick`.
+Data work is asynchronous. Segment flush, TransformLog flush, lifecycle commit, and tombstone cleanup are submitted to Scheduler according to GrowingModule policy or RecoveryStorage background triggering. After a Data task completes, GrowingModule updates the corresponding Data owner state and `DataTimeTick`.
 
-Dirty Views are persisted asynchronously. After a dirty View snapshot is persisted to ETCD, GrowingModule updates the owner MetaBarrier and DataBarrier from the snapshot's `MetaTimeTick` and `DataTimeTick`.
+Dirty views are persisted asynchronously. After a dirty snapshot is persisted to ETCD, GrowingModule updates the owner MetaBarrier or DataBarrier from the persisted `MetaTimeTick` or `DataTimeTick`.
 
 VChannel names are not reusable. Schema history is VChannel child state. Schema changes append schema versions and retain old versions for historical `ObserveMessage` scans. Schema is not an independent tombstone key space; final VChannel cleanup removes the VChannel owner key and all schema keys under the VChannel prefix.
 
@@ -245,9 +245,9 @@ ObserveMessage(M)
   -> module submits Data task if needed
   -> Scheduler runs Data task when preconditions are ready
   -> Data task completes durable side effect
-  -> module updates View.Data and View.DataTimeTick
-  -> View becomes dirty
-  -> View persist task writes dirty View snapshot to ETCD
+  -> module updates the Data owner state and DataTimeTick
+  -> owner becomes dirty
+  -> persist task writes dirty owner snapshot to ETCD
   -> module updates DataBarrier
 ```
 
@@ -297,9 +297,9 @@ ObserveMessage must not perform object storage writes, ETCD writes, lifecycle RP
 ```
 Scheduler runs module Data task
 Task performs durable side effect
-Module updates View.Data and View.DataTimeTick
-View becomes dirty
-RecoveryStorage background or module policy triggers View persist task
+Module updates Data owner state and DataTimeTick
+Owner becomes dirty
+RecoveryStorage background or module policy triggers persist task
 ```
 
 Data task completion updates View in memory. It does not directly advance a physical checkpoint.
@@ -310,7 +310,7 @@ Data task completion updates View in memory. It does not directly advance a phys
 Scheduler runs View persist task
 Task persists dirty View snapshot to ETCD
 Module updates MetaBarrier from persisted View snapshot's MetaTimeTick
-Module updates DataBarrier from persisted View snapshot's DataTimeTick
+Module updates DataBarrier from persisted Data owner snapshot's DataTimeTick
 CheckpointManager observes that barriers disappeared
 RecoveryStorage persists new physical WALCheckpoint
 ```
@@ -365,9 +365,9 @@ This guarantees neither scanner can restart from a point that still needs the re
 
 - View is the module-owned consistency view in memory and can be persisted to ETCD when dirty.
 - Meta and Data are both parts of View.
-- Every View has `MetaTimeTick` and `DataTimeTick`.
+- Meta views have `MetaTimeTick`; Data owners such as SegmentView and TransformLog have `DataTimeTick`.
 - `ObserveMessage` synchronously updates View.Meta and `MetaTimeTick`.
-- Data tasks asynchronously update View.Data and `DataTimeTick`.
+- Data tasks asynchronously update Data owner state and `DataTimeTick`.
 - Dirty Views are persisted by module-owned asynchronous tasks.
 - MetaBarrier and DataBarrier advance only after the corresponding dirty View snapshot is persisted.
 - RecoveryStorage persists only WALCheckpoint.

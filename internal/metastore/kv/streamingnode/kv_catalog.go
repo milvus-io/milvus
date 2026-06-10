@@ -169,6 +169,62 @@ func (c *catalog) DropVChannels(ctx context.Context, pchannelName string, vchann
 	})
 }
 
+// ListTransformLogMeta lists transform log metas of the pchannel.
+func (c *catalog) ListTransformLogMeta(ctx context.Context, pchannelName string) (map[string]*streamingpb.VChannelTransformLogMeta, error) {
+	prefix := buildTransformLogPrefix(pchannelName)
+	keys, values, err := c.metaKV.LoadWithPrefix(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+	metas := make(map[string]*streamingpb.VChannelTransformLogMeta, len(values))
+	for idx, value := range values {
+		vchannel := typeutil.After(keys[idx], prefix)
+		if strings.Contains(vchannel, "/") {
+			continue
+		}
+		meta := &streamingpb.VChannelTransformLogMeta{}
+		if err := proto.Unmarshal([]byte(value), meta); err != nil {
+			return nil, errors.Wrapf(err, "unmarshal transform log meta %s failed", keys[idx])
+		}
+		metas[vchannel] = meta
+	}
+	return metas, nil
+}
+
+// SaveTransformLogMeta saves transform log metas of the pchannel.
+func (c *catalog) SaveTransformLogMeta(ctx context.Context, pchannelName string, metas map[string]*streamingpb.VChannelTransformLogMeta) error {
+	kvs := make(map[string]string, len(metas))
+	for vchannel, meta := range metas {
+		data, err := proto.Marshal(meta)
+		if err != nil {
+			return errors.Wrapf(err, "marshal transform log meta %s at pchannel %s failed", vchannel, pchannelName)
+		}
+		kvs[buildTransformLogKey(pchannelName, vchannel)] = string(data)
+	}
+	if len(kvs) == 0 {
+		return nil
+	}
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	return etcd.SaveByBatchWithLimit(kvs, maxTxnNum, func(partialKvs map[string]string) error {
+		return c.metaKV.MultiSave(ctx, partialKvs)
+	})
+}
+
+// DropTransformLogMeta drops transform log metas of the pchannel.
+func (c *catalog) DropTransformLogMeta(ctx context.Context, pchannelName string, vchannels []string) error {
+	removes := make([]string, 0, len(vchannels))
+	for _, vchannel := range vchannels {
+		removes = append(removes, buildTransformLogKey(pchannelName, vchannel))
+	}
+	if len(removes) == 0 {
+		return nil
+	}
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	return etcd.RemoveByBatchWithLimit(removes, maxTxnNum, func(partialRemoves []string) error {
+		return c.metaKV.MultiRemove(ctx, partialRemoves)
+	})
+}
+
 // getRemovalAndSaveForVChannel gets the removal and save for vchannel.
 func (c *catalog) getRemovalAndSaveForVChannel(pchannelName string, info *streamingpb.VChannelMeta) ([]string, map[string]string, error) {
 	removes := make([]string, 0, len(info.CollectionInfo.Schemas)+1)
@@ -385,6 +441,11 @@ func buildQueryViewPrefix(pChannelName string) string {
 	return buildWALPrefix(pChannelName) + DirectoryQueryView + "/"
 }
 
+// buildTransformLogPrefix returns the prefix for transform log metadata under a pchannel.
+func buildTransformLogPrefix(pChannelName string) string {
+	return buildWALPrefix(pChannelName) + DirectoryTransformLog + "/"
+}
+
 // Key functions: return exact keys for individual records.
 
 // buildVChannelKey returns the key for a specific vchannel's metadata.
@@ -436,6 +497,11 @@ func buildQueryViewKey(pChannelName string, meta *viewpb.QueryViewMeta) (string,
 		meta.GetCollectionId(), meta.GetReplicaId(), vchannelIndex,
 		dataVersion.GetStreamingVersion(), dataVersion.GetCompactVersion(), version.GetQueryVersion(),
 	), nil
+}
+
+// buildTransformLogKey returns the key for a specific transform log's metadata.
+func buildTransformLogKey(pChannelName string, vchannelName string) string {
+	return buildTransformLogPrefix(pChannelName) + vchannelName
 }
 
 // buildConsumeCheckpointKey returns the key for the consume checkpoint of a pchannel.

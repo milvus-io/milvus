@@ -12,7 +12,9 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/assignment"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
+	transformlogclient "github.com/milvus-io/milvus/internal/streamingnode/client/handler/transformlog"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/transformlog"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
@@ -106,6 +108,9 @@ type HandlerClient interface {
 	// A consumer will not share stream connection with other consumers.
 	CreateConsumer(ctx context.Context, opts *ConsumerOptions) (Consumer, error)
 
+	// ReadTransformLog creates a local or remote transform log scanner.
+	ReadTransformLog(ctx context.Context, opts transformlog.ReadOption) transformlog.Scanner
+
 	// Close closes the handler client.
 	// It will only stop the underlying service discovery, but don't stop the producer and consumer created by it.
 	// So please close Producer and Consumer created by it before close the handler client.
@@ -128,13 +133,15 @@ func NewHandlerClient(w types.AssignmentDiscoverWatcher) HandlerClient {
 	})
 	watcher := assignment.NewWatcher(rb.Resolver())
 	return &handlerClientImpl{
-		lifetime:         typeutil.NewLifetime(),
-		service:          lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingNodeHandlerServiceClient),
-		rb:               rb,
-		watcher:          watcher,
-		rebalanceTrigger: w,
-		newProducer:      producer.CreateProducer,
-		newConsumer:      consumer.CreateConsumer,
+		lifetime:              typeutil.NewLifetime(),
+		service:               lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingNodeHandlerServiceClient),
+		rb:                    rb,
+		watcher:               watcher,
+		rebalanceTrigger:      w,
+		newProducer:           producer.CreateProducer,
+		newConsumer:           consumer.CreateConsumer,
+		newTransformLogStream: transformlogclient.CreateStream,
+		transformStreams:      make(map[transformlogclient.StreamKey]*transformlogclient.Stream),
 	}
 }
 

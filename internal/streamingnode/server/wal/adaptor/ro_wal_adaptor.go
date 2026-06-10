@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/transformlog"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -53,6 +54,10 @@ func (w *roWALAdaptorImpl) Metrics() types.WALMetrics {
 
 func (w *roWALAdaptorImpl) GetLatestMVCCTimestamp(ctx context.Context, vchannel string) (uint64, error) {
 	panic("we cannot acquire lastest mvcc timestamp from a read only wal")
+}
+
+func (w *roWALAdaptorImpl) TransformLog() transformlog.Accesser {
+	return transformlog.NewErrorAccesser(status.NewOnShutdownError("read only wal does not serve transform log"))
 }
 
 func (w *roWALAdaptorImpl) GetReplicateCheckpoint() (*wal.ReplicateCheckpoint, error) {

@@ -268,6 +268,7 @@ keeps production resource policy behind those interfaces.
 | Coord | Node Manager | Service discovery, maintaining the global available QueryNode list |
 | Coord | Resource Group Manager | Resource Group partitioning, generating QueryNode-ResourceGroup grouping relationships |
 | Coord | Replica Manager | Replica assignment, generating Replica-to-available-Node relationships |
+
 | Coord | QueryView Manager | View persistence, state transitions, statistics, and reliable synchronization |
 | Streaming Node | QueryView Handler | Persistent local state machine and injected resource lifecycle interface |
 | Query Node | QueryView Handler | Stateless local state machine and injected segment lifecycle interface |

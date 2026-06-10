@@ -31,7 +31,7 @@ No GrowingModule Data task is required. AckModule returns an ack DataBarrier for
 
 ## DropCollection
 
-GrowingModule first flushes every retained segment in the target vchannel whose create timetick is older than the message timetick. It also flushes the vchannel TransformLog buffer. These operations return Data barriers owned by the affected Segment Views and VChannel View.
+GrowingModule first flushes every retained segment in the target vchannel whose create timetick is older than the message timetick. It also flushes the vchannel TransformLog buffer. These operations return Data barriers owned by the affected Segment Views and TransformLog view.
 
 After the flush work is scheduled, GrowingModule updates the VChannel View.Meta to dropped at the message timetick and marks the View dirty. The retained View remains available for historical-message filtering and later tombstone finalization.
 
@@ -99,9 +99,9 @@ This message is not a broadcast message, so AckModule does not call the coordina
 
 ## Delete
 
-GrowingModule handles Delete as vchannel-level TransformLog data. In MetaOnly mode it does not append data buffers. In MetaAndData mode it appends the delete record to the VChannel View TransformLog buffer and returns a VChannel Data barrier.
+GrowingModule handles Delete as vchannel-level TransformLog data. In MetaOnly mode it does not append data buffers. In MetaAndData mode it validates vchannel replay state through VChannelView, appends the delete record to the TransformLog buffer, and returns a TransformLog Data barrier.
 
-When the TransformLog buffer reaches policy thresholds or a later flush-style message requires it, GrowingModule submits a TransformLog task. Task completion writes L0 data, updates View.Data and `DataTimeTick`, marks the View dirty, and later View persistence advances the Data barrier.
+When the TransformLog buffer reaches policy thresholds or a later flush-style message requires it, GrowingModule submits a TransformLog task. Task completion writes L0 data, updates TransformLog meta and `DataTimeTick`, marks the TransformLog dirty, and later TransformLog meta persistence advances the Data barrier.
 
 This message is not a broadcast message, so AckModule does not call the coordinator Ack API.
 
@@ -121,7 +121,7 @@ The affected Segment Views return Meta and Data barriers according to the Flush 
 
 ## FlushAll
 
-GrowingModule flushes every retained segment on the PChannel whose create timetick is older than the message timetick. It also flushes all eligible VChannel TransformLog buffers.
+GrowingModule flushes every retained segment on the PChannel whose create timetick is older than the message timetick. It also flushes all eligible TransformLog buffers.
 
 AckModule returns an ack DataBarrier for the broadcast message. The ack precondition waits for previous ack task completion and the all-local GrowingModule Data frontier to reach the FlushAll timetick.
 
@@ -137,7 +137,7 @@ Txn is the synthetic committed transaction message delivered by the recovery str
 
 For Insert bodies, GrowingModule updates each affected Segment View once at the transaction timetick, appends the insert payload to the Segment L1 buffer in MetaAndData mode, and returns the composed Meta/Data barriers for those segments.
 
-For Delete bodies, GrowingModule groups deletes by vchannel, rewrites their effective timetick to the transaction timetick, appends them to the corresponding TransformLog buffer in MetaAndData mode, and returns VChannel Data barriers.
+For Delete bodies, GrowingModule groups deletes by vchannel, rewrites their effective timetick to the transaction timetick, appends them to the corresponding TransformLog buffer in MetaAndData mode, and returns TransformLog Data barriers.
 
 This synthetic message is not a broadcast message, so AckModule does not call the coordinator Ack API.
 
@@ -289,6 +289,6 @@ AckModule returns an ack DataBarrier for the broadcast message and calls the coo
 
 ## AlterWAL
 
-GrowingModule treats AlterWAL as a PChannel-wide flush barrier. It flushes every retained segment whose create timetick is older than the message timetick and flushes all eligible VChannel TransformLog buffers.
+GrowingModule treats AlterWAL as a PChannel-wide flush barrier. It flushes every retained segment whose create timetick is older than the message timetick and flushes all eligible TransformLog buffers.
 
 RecoveryStorage records AlterWAL information in WALCheckpoint-related state outside GrowingModule. AckModule returns an ack DataBarrier for the broadcast message. The ack precondition waits for previous ack task completion and the all-local GrowingModule Data frontier to reach the AlterWAL timetick.

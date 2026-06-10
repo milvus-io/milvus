@@ -64,7 +64,18 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 		return struct{}{}, nil
 	})
 
-	if err := conc.BlockOnAll(fVChannel, fSegment); err != nil {
+	var transformLogMetas map[string]*streamingpb.VChannelTransformLogMeta
+	fTransformLog := conc.Go(func() (struct{}, error) {
+		metas, err := catalog.ListTransformLogMeta(ctx, channelInfo.Name)
+		if err != nil {
+			return struct{}{}, errors.Wrap(err, "failed to get transform log meta from catalog")
+		}
+		transformLogMetas = metas
+		r.Logger().Info(context.TODO(), "recover transform log meta done", mlog.Int("transformLogs", len(transformLogMetas)))
+		return struct{}{}, nil
+	})
+
+	if err := conc.BlockOnAll(fVChannel, fSegment, fTransformLog); err != nil {
 		return err
 	}
 	if err := r.ensureDataCheckpoint(); err != nil {
@@ -74,7 +85,7 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 		return err
 	}
 	r.Logger().Info(context.TODO(), "recover segment info done", mlog.Int("segments", len(segmentMetas)))
-	return r.initGrowingManager(ctx, vchannelMetas, segmentMetas)
+	return r.initGrowingManager(ctx, vchannelMetas, segmentMetas, transformLogMetas)
 }
 
 func vchannelMetaMap(vchannels []*streamingpb.VChannelMeta) (map[string]*streamingpb.VChannelMeta, error) {
@@ -144,9 +155,6 @@ func validateRecoveredGrowingMeta(
 			if vchannel.GetCheckpointTimeTick() < vchannel.GetTombstoneTimeTick() {
 				return errors.Errorf("tombstoned vchannel checkpoint before tombstone timetick in recovery meta: %s", vchannelName)
 			}
-			if vchannel.GetDataCheckpointTimeTick() < vchannel.GetTombstoneTimeTick() {
-				return errors.Errorf("tombstoned vchannel data checkpoint before tombstone timetick in recovery meta: %s", vchannelName)
-			}
 		}
 		for _, partition := range vchannel.GetCollectionInfo().GetPartitions() {
 			if partition.GetPartitionId() == 0 {
@@ -167,9 +175,6 @@ func validateRecoveredGrowingMeta(
 				}
 				if vchannel.GetCheckpointTimeTick() < partition.GetTombstoneTimeTick() {
 					return errors.Errorf("tombstoned partition checkpoint before tombstone timetick in recovery meta: partition %d of vchannel %s", partition.GetPartitionId(), vchannelName)
-				}
-				if vchannel.GetDataCheckpointTimeTick() < partition.GetTombstoneTimeTick() {
-					return errors.Errorf("tombstoned partition data checkpoint before tombstone timetick in recovery meta: partition %d of vchannel %s", partition.GetPartitionId(), vchannelName)
 				}
 			default:
 				return errors.Errorf("unknown partition state in recovery meta: partition %d of vchannel %s", partition.GetPartitionId(), vchannelName)

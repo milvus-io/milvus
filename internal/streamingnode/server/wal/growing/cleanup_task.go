@@ -65,7 +65,12 @@ func (m *Manager) collectCleanupSnapshot(metaPhysicalTimeTick uint64, dataPhysic
 		return snapshot.segmentIDsToDrop[i] < snapshot.segmentIDsToDrop[j]
 	})
 	for vchannelName, vchannel := range m.vchannelViews {
-		dropSnapshot, cleanupPartitions := vchannel.TombstonedCleanupPlan(metaPhysicalTimeTick, dataPhysicalTimeTick)
+		transformLog := m.transformLog(vchannelName)
+		if transformLog == nil {
+			continue
+		}
+		persistedDataTimeTick := transformLog.log.DataBarrierTimeTick()
+		dropSnapshot, cleanupPartitions := vchannel.TombstonedCleanupPlan(metaPhysicalTimeTick, dataPhysicalTimeTick, persistedDataTimeTick)
 		if dropSnapshot != nil {
 			snapshot.vchannelsToDrop[vchannelName] = dropSnapshot
 			snapshot.vchannelOwners[vchannelName] = vchannel
@@ -119,6 +124,11 @@ func (t *cleanupTask) Run(ctx context.Context) error {
 		}
 	}
 	if len(vchannelsToDrop) > 0 {
+		if err := retryOperationWithBackoff(ctx, logger.With(mlog.String("op", "dropTransformLogs")), func(ctx context.Context) error {
+			return t.catalog.DropTransformLogMeta(ctx, t.channelName, lo.Keys(vchannelsToDrop))
+		}); err != nil {
+			return err
+		}
 		if err := retryOperationWithBackoff(ctx, logger.With(mlog.String("op", "dropVChannels")), func(ctx context.Context) error {
 			return t.catalog.DropVChannels(ctx, t.channelName, vchannelsToDrop)
 		}); err != nil {
@@ -138,7 +148,11 @@ func (t *cleanupTask) vchannelDropSnapshots() map[string]*streamingpb.VChannelMe
 		if owner == nil || owner != t.snapshot.vchannelOwners[vchannel] {
 			continue
 		}
-		dropSnapshot := owner.VChannelDropCleanupSnapshot(snapshot.GetTombstoneTimeTick())
+		transformLog := t.manager.transformLog(vchannel)
+		if transformLog == nil {
+			continue
+		}
+		dropSnapshot := owner.VChannelDropCleanupSnapshot(snapshot.GetTombstoneTimeTick(), transformLog.log.DataBarrierTimeTick())
 		if dropSnapshot == nil {
 			continue
 		}
@@ -180,6 +194,7 @@ func (t *cleanupTask) apply() bool {
 	}
 	for vchannel := range t.snapshot.vchannelsToDrop {
 		delete(t.manager.vchannelViews, vchannel)
+		delete(t.manager.transformLogs, vchannel)
 	}
 	return partitionMetaChanged
 }
