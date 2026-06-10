@@ -46,12 +46,19 @@ func newZillizProvider(params []*commonpb.KeyValuePair, conf map[string]string, 
 			if maxBatch, err = parseMaxBatch(param.Value); err != nil {
 				return nil, err
 			}
+		case models.TimeoutMsParamKey:
+			// consumed by ResolveTimeoutMs; not a model-service param
 		default:
 			modelParams[param.Key] = param.Value
 		}
 	}
 
-	c, err := zilliz.NewZilliClient(modelDeploymentID, extraInfo.ClusterID, extraInfo.DBName, conf)
+	timeoutMs, err := models.ResolveTimeoutMs(params)
+	if err != nil {
+		return nil, err
+	}
+
+	c, err := zilliz.NewZilliClient(modelDeploymentID, extraInfo.ClusterID, extraInfo.DBName, conf, timeoutMs)
 	if err != nil {
 		return nil, err
 	}

@@ -46,20 +46,20 @@ func (c *TEIClient) headers() map[string]string {
 	return headers
 }
 
-func (c *TEIClient) Embedding(texts []string, truncate bool, truncationDirection string, prompt string, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *TEIClient) Embedding(texts []string, truncate bool, truncationDirection string, prompt string, timeoutMs int64) (*EmbeddingResponse, error) {
 	embClient, err := newTEIEmbedding(c.apiKey, c.endpoint)
 	if err != nil {
 		return nil, err
 	}
-	return embClient.embedding(texts, truncate, truncationDirection, prompt, c.headers(), timeoutSec)
+	return embClient.embedding(texts, truncate, truncationDirection, prompt, c.headers(), timeoutMs)
 }
 
-func (c *TEIClient) Rerank(query string, texts []string, params map[string]any, timeoutSec int64) (*RerankResponse, error) {
+func (c *TEIClient) Rerank(query string, texts []string, params map[string]any, timeoutMs int64) (*RerankResponse, error) {
 	rerankClient, err := newTEIRerank(c.apiKey, c.endpoint)
 	if err != nil {
 		return nil, err
 	}
-	return rerankClient.rerank(query, texts, params, c.headers(), timeoutSec)
+	return rerankClient.rerank(query, texts, params, c.headers(), timeoutMs)
 }
 
 type EmbeddingRequest struct {
@@ -89,7 +89,7 @@ func newTEIEmbedding(apiKey string, endpoint string) (*teiEmbedding, error) {
 	}, nil
 }
 
-func (c *teiEmbedding) embedding(texts []string, truncate bool, truncationDirection string, prompt string, headers map[string]string, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *teiEmbedding) embedding(texts []string, truncate bool, truncationDirection string, prompt string, headers map[string]string, timeoutMs int64) (*EmbeddingResponse, error) {
 	var r EmbeddingRequest
 	if prompt != "" {
 		var newTexts []string
@@ -106,7 +106,7 @@ func (c *teiEmbedding) embedding(texts []string, truncate bool, truncationDirect
 		r.TruncationDirection = truncationDirection
 	}
 
-	res, err := models.PostRequest[EmbeddingResponse](r, c.url, headers, timeoutSec)
+	res, err := models.PostRequest[EmbeddingResponse](r, c.url, headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}
@@ -138,14 +138,14 @@ func newTEIRerank(apiKey string, endpoint string) (*teiRerank, error) {
 	}, nil
 }
 
-func (c *teiRerank) rerank(query string, texts []string, params map[string]any, headers map[string]string, timeoutSec int64) (*RerankResponse, error) {
+func (c *teiRerank) rerank(query string, texts []string, params map[string]any, headers map[string]string, timeoutMs int64) (*RerankResponse, error) {
 	r := map[string]any{
 		"query": query,
 		"texts": texts,
 	}
 	maps.Copy(r, params)
 
-	res, err := models.PostRequest[RerankResponse](r, c.url, headers, timeoutSec)
+	res, err := models.PostRequest[RerankResponse](r, c.url, headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}

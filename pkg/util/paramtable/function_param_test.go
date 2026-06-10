@@ -94,4 +94,6 @@ func TestFunctionConfig(t *testing.T) {
 	old := cfg.AnalyzerRunnerConcurrency.SwapTempValue("-1")
 	defer cfg.AnalyzerRunnerConcurrency.SwapTempValue(old)
 	assert.Equal(t, 1, cfg.GetAnalyzerRunnerConcurrency())
+
+	assert.Equal(t, 30000, cfg.ModelRequestTimeoutMs.GetAsInt())
 }

@@ -40,9 +40,9 @@ type OpenAIEmbeddingProvider struct {
 	embedDimParam int64
 	user          string
 
-	maxBatch   int
-	timeoutSec int64
-	extraInfo  *models.ModelExtraInfo
+	maxBatch  int
+	timeoutMs int64
+	extraInfo *models.ModelExtraInfo
 }
 
 func createOpenAIEmbeddingClient(apiKey string, url string) (*openai.OpenAIEmbeddingClient, error) {
@@ -123,6 +123,11 @@ func newOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		}
 	}
 
+	timeoutMs, err := models.ResolveTimeoutMs(functionSchema.Params)
+	if err != nil {
+		return nil, err
+	}
+
 	provider := OpenAIEmbeddingProvider{
 		client:        c,
 		fieldDim:      fieldDim,
@@ -130,7 +135,7 @@ func newOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		user:          user,
 		embedDimParam: dim,
 		maxBatch:      128,
-		timeoutSec:    30,
+		timeoutMs:     timeoutMs,
 		extraInfo:     extraInfo,
 	}
 	return &provider, nil
@@ -160,7 +165,7 @@ func (provider *OpenAIEmbeddingProvider) CallEmbedding(ctx context.Context, text
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), provider.user, provider.timeoutSec)
+		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), provider.user, provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}

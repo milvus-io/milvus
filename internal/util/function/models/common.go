@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type TextEmbeddingMode int
@@ -63,6 +64,7 @@ const (
 	TruncateParamKey           string = "truncate"
 	MaxClientBatchSizeParamKey string = "max_client_batch_size"
 	IntegrationIDKey           string = "integration_id"
+	TimeoutMsParamKey          string = "timeout_ms"
 )
 
 // ali text embedding
@@ -221,6 +223,32 @@ func ParseAndCheckFieldDim(dimStr string, fieldDim int64, fieldName string) (int
 	return dim, nil
 }
 
+func ParseTimeoutMs(params []*commonpb.KeyValuePair, defaultTimeoutMs int64) (int64, error) {
+	for _, param := range params {
+		if strings.ToLower(param.Key) != TimeoutMsParamKey {
+			continue
+		}
+
+		timeoutMs, err := strconv.ParseInt(param.Value, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("[%s param's value: %s] is not a valid number", TimeoutMsParamKey, param.Value)
+		}
+		if timeoutMs <= 0 {
+			return 0, fmt.Errorf("[%s param's value: %s] must be greater than 0", TimeoutMsParamKey, param.Value)
+		}
+		return timeoutMs, nil
+	}
+
+	if defaultTimeoutMs <= 0 {
+		return 30000, nil
+	}
+	return defaultTimeoutMs, nil
+}
+
+func ResolveTimeoutMs(params []*commonpb.KeyValuePair) (int64, error) {
+	return ParseTimeoutMs(params, paramtable.Get().FunctionCfg.ModelRequestTimeoutMs.GetAsInt64())
+}
+
 func GetEmbdType(dtype schemapb.DataType) EmbeddingType {
 	switch dtype {
 	case schemapb.DataType_FloatVector:
@@ -284,17 +312,17 @@ func IsEnable(conf map[string]string) bool {
 
 type Response any
 
-func PostRequest[T Response](req any, url string, headers map[string]string, timeoutSec int64) (*T, error) {
+func PostRequest[T Response](req any, url string, headers map[string]string, timeoutMs int64) (*T, error) {
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
 
-	if timeoutSec <= 0 {
-		timeoutSec = 30
+	if timeoutMs <= 0 {
+		timeoutMs = 30000
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
 
 	body, err := retrySend(ctx, data, http.MethodPost, url, headers, 3)

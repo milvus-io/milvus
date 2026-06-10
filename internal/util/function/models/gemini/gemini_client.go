@@ -43,7 +43,7 @@ func (c *GeminiClient) headers() map[string]string {
 	}
 }
 
-func (c *GeminiClient) Embedding(url string, modelName string, texts []string, dim int, taskType string, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *GeminiClient) Embedding(url string, modelName string, texts []string, dim int, taskType string, timeoutMs int64) (*EmbeddingResponse, error) {
 	modelName = strings.TrimPrefix(modelName, "models/")
 	requests := make([]BatchEmbedRequest, 0, len(texts))
 	for _, text := range texts {
@@ -66,7 +66,7 @@ func (c *GeminiClient) Embedding(url string, modelName string, texts []string, d
 		Requests: requests,
 	}
 
-	res, err := models.PostRequest[EmbeddingResponse](batchReq, url, c.headers(), timeoutSec)
+	res, err := models.PostRequest[EmbeddingResponse](batchReq, url, c.headers(), timeoutMs)
 	if err != nil {
 		return nil, err
 	}

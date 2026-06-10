@@ -42,9 +42,9 @@ type VoyageAIEmbeddingProvider struct {
 	embdType      models.EmbeddingType
 	outputType    string
 
-	maxBatch   int
-	timeoutSec int64
-	extraInfo  *models.ModelExtraInfo
+	maxBatch  int
+	timeoutMs int64
+	extraInfo *models.ModelExtraInfo
 }
 
 func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (*VoyageAIEmbeddingProvider, error) {
@@ -99,6 +99,11 @@ func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 		return "int8"
 	}()
 
+	timeoutMs, err := models.ResolveTimeoutMs(functionSchema.Params)
+	if err != nil {
+		return nil, err
+	}
+
 	provider := VoyageAIEmbeddingProvider{
 		client:        c,
 		url:           url,
@@ -109,7 +114,7 @@ func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 		embdType:      embdType,
 		outputType:    outputType,
 		maxBatch:      128,
-		timeoutSec:    30,
+		timeoutMs:     timeoutMs,
 		extraInfo:     extraInfo,
 	}
 	return &provider, nil
@@ -138,7 +143,7 @@ func (provider *VoyageAIEmbeddingProvider) CallEmbedding(ctx context.Context, te
 		if end > numRows {
 			end = numRows
 		}
-		r, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], int(provider.embedDimParam), textType, provider.outputType, provider.truncate, provider.timeoutSec)
+		r, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], int(provider.embedDimParam), textType, provider.outputType, provider.truncate, provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}
