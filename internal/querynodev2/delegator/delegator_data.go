@@ -1218,7 +1218,7 @@ func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.Sear
 	schemaVersion := sd.collection.Schema().GetVersion()
 	ok, err := function.RunWithRunner(ctx, sd.collectionID, schemaVersion, req.GetFieldId(), func(functionType schemapb.FunctionType, functionRunner function.FunctionRunner) error {
 		if functionType != schemapb.FunctionType_BM25 {
-			return fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
+			return merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
 		}
 
 		datas := []any{texts}
@@ -1303,7 +1303,7 @@ func (sd *shardDelegator) parseMinHash(ctx context.Context, req *internalpb.Sear
 	schemaVersion := sd.collection.Schema().GetVersion()
 	ok, err := function.RunWithRunner(ctx, sd.collectionID, schemaVersion, req.GetFieldId(), func(functionType schemapb.FunctionType, functionRunner function.FunctionRunner) error {
 		if functionType != schemapb.FunctionType_MinHash {
-			return fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
+			return merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
 		}
 
 		output, err := functionRunner.BatchRun(texts)
