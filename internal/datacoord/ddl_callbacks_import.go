@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // importV1AckCallback handles the ack callback for import messages.
@@ -109,22 +110,40 @@ func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.Impor
 		return err
 	}
 
-	// Validate channel assignment availability and replication configuration
+	if err := s.validateImportReplication(ctx, options); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *Server) validateImportReplication(ctx context.Context, options []*commonpb.KeyValuePair) error {
 	balancer, err := balance.GetWithContext(ctx)
 	if err != nil {
 		return err
 	}
-	channelAssignment, err := balancer.GetLatestChannelAssignment()
+	assignment, err := balancer.GetLatestChannelAssignment()
 	if err != nil {
 		return err
 	}
-
-	// Import in replicating cluster is not supported yet
-	if channelAssignment.ReplicateConfiguration != nil && len(channelAssignment.ReplicateConfiguration.GetClusters()) > 1 {
-		return merr.WrapErrImportFailed("import in replicating cluster is not supported yet")
+	if assignment == nil {
+		return nil
+	}
+	if !isReplicatingCluster(assignment.ReplicateConfiguration) {
+		return nil
 	}
 
+	if !paramtable.Get().DataCoordCfg.ImportInReplicatingCluster.GetAsBool() {
+		return merr.WrapErrImportFailed("import in replicating cluster is not supported yet")
+	}
+	if importutilv2.IsAutoCommit(options) {
+		return merr.WrapErrImportFailed("auto_commit=true import in replicating cluster is not supported")
+	}
 	return nil
+}
+
+func isReplicatingCluster(cfg *commonpb.ReplicateConfiguration) bool {
+	return cfg != nil && (len(cfg.GetCrossClusterTopology()) > 0 || len(cfg.GetClusters()) > 1)
 }
 
 // broadcastImport broadcasts the import message to all vchannels.

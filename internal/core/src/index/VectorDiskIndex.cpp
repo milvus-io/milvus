@@ -380,7 +380,8 @@ template <typename T>
 IndexStatsPtr
 VectorDiskAnnIndex<T>::Upload(const Config& config) {
     BinarySet ret;
-    if (!IsAllNullNullable(offset_mapping_) && !IsEmptyEmbListIndex()) {
+    const auto& offset_mapping = GetOffsetMapping();
+    if (!IsAllNullNullable(offset_mapping) && !IsEmptyEmbListIndex()) {
         auto stat = index_.Serialize(ret);
         if (stat != knowhere::Status::success) {
             ThrowInfo(ErrorCode::UnexpectedError,
@@ -550,11 +551,12 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
     build_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
 
+    const auto& offset_mapping = GetOffsetMapping();
     if (HasValidData() && GetValidCount() == 0 &&
-        offset_mapping_.GetTotalCount() > 0) {
+        offset_mapping.GetTotalCount() > 0) {
         auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
         WriteDiskValidData(
-            local_chunk_manager, valid_data_path, offset_mapping_);
+            local_chunk_manager, valid_data_path, offset_mapping);
         file_manager_->AddFile(valid_data_path);
         auto dim = GetValueFromConfig<int64_t>(build_config, DIM_KEY);
         if (dim.has_value()) {
@@ -659,7 +661,7 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     if (HasValidData()) {
         auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
         WriteDiskValidData(
-            local_chunk_manager, valid_data_path, offset_mapping_);
+            local_chunk_manager, valid_data_path, offset_mapping);
         file_manager_->AddFile(valid_data_path);
     }
 
@@ -684,7 +686,8 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
 
     knowhere::Json search_config = PrepareSearchParams(search_info);
 
-    if (IsAllNullNullable(offset_mapping_) || IsEmptyEmbListIndex()) {
+    const auto& offset_mapping = GetOffsetMapping();
+    if (IsAllNullNullable(offset_mapping) || IsEmptyEmbListIndex()) {
         auto offsets =
             dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
         auto num_queries = dataset->GetRows();
@@ -794,7 +797,8 @@ VectorDiskAnnIndex<T>::VectorIterators(const DatasetPtr dataset,
         return iterators;
     };
 
-    if (IsAllNullNullable(offset_mapping_) || IsEmptyEmbListIndex()) {
+    const auto& offset_mapping = GetOffsetMapping();
+    if (IsAllNullNullable(offset_mapping) || IsEmptyEmbListIndex()) {
         auto offsets =
             dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
         auto num_queries = dataset->GetRows();
@@ -819,7 +823,8 @@ VectorDiskAnnIndex<T>::VectorIterators(const DatasetPtr dataset,
 template <typename T>
 const bool
 VectorDiskAnnIndex<T>::HasRawData() const {
-    if (IsAllNullNullable(offset_mapping_) || IsEmptyEmbListIndex()) {
+    const auto& offset_mapping = GetOffsetMapping();
+    if (IsAllNullNullable(offset_mapping) || IsEmptyEmbListIndex()) {
         return true;
     }
     return index_.HasRawData(GetMetricType());
@@ -828,7 +833,8 @@ VectorDiskAnnIndex<T>::HasRawData() const {
 template <typename T>
 bool
 VectorDiskAnnIndex<T>::IsIndexRefineEnabled() const {
-    if (IsAllNullNullable(offset_mapping_) || IsEmptyEmbListIndex()) {
+    const auto& offset_mapping = GetOffsetMapping();
+    if (IsAllNullNullable(offset_mapping) || IsEmptyEmbListIndex()) {
         return false;
     }
     return index_.IsIndexRefineEnabled();

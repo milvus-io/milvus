@@ -306,6 +306,10 @@ func (t *SyncTask) IsFlush() bool {
 	return t.pack.isFlush
 }
 
+func (t *SyncTask) IsDrop() bool {
+	return t.pack.isDrop
+}
+
 func (t *SyncTask) Binlogs() (map[int64]*datapb.FieldBinlog, map[int64]*datapb.FieldBinlog, *datapb.FieldBinlog, map[int64]*datapb.FieldBinlog) {
 	return t.insertBinlogs, t.statsBinlogs, t.deltaBinlog, t.bm25Binlogs
 }

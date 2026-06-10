@@ -194,6 +194,40 @@ func TestHandlerClient_GetSalvageCheckpoint(t *testing.T) {
 	assert.Nil(t, cps)
 }
 
+func TestHandlerClient_PrepareReleaseManualFlush(t *testing.T) {
+	assignment := &types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "pchannel", Term: 1, AccessMode: types.AccessModeRO},
+		Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
+	}
+	vchannel := "pchannel_100v0"
+	releaseSegmentIDs := []int64{1001}
+
+	service := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeHandlerServiceClient](t)
+	service.EXPECT().Close().Return()
+
+	rb := mock_resolver.NewMockBuilder(t)
+	rb.EXPECT().Close().Run(func() {})
+	w := mock_assignment.NewMockWatcher(t)
+	w.EXPECT().Get(mock.Anything, "pchannel").Return(assignment)
+	w.EXPECT().Close().Run(func() {})
+
+	handler := &handlerClientImpl{
+		lifetime: typeutil.NewLifetime(),
+		service:  service,
+		rb:       rb,
+		watcher:  w,
+	}
+
+	prepared, err := handler.PrepareReleaseManualFlush(context.Background(), 100, vchannel, releaseSegmentIDs)
+	assert.NoError(t, err)
+	assert.False(t, prepared)
+
+	handler.Close()
+	prepared, err = handler.PrepareReleaseManualFlush(context.Background(), 100, vchannel, releaseSegmentIDs)
+	assert.ErrorIs(t, err, ErrClientClosed)
+	assert.False(t, prepared)
+}
+
 func TestDial(t *testing.T) {
 	paramtable.Init()
 

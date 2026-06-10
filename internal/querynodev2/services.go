@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
@@ -32,25 +33,27 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2"
+	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
+	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
+	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/internal/util/textmatch"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
@@ -63,6 +66,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type segmentDetacher interface {
+	DetachStreaming(ctx context.Context, segmentID typeutil.UniqueID) int
+}
 
 // GetComponentStates returns information about whether the node is healthy
 func (node *QueryNode) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
@@ -168,35 +175,6 @@ func (node *QueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatis
 	return ret, nil
 }
 
-func (node *QueryNode) composeIndexMeta(ctx context.Context, indexInfos []*indexpb.IndexInfo, schema *schemapb.CollectionSchema) *segcorepb.CollectionIndexMeta {
-	fieldIndexMetas := make([]*segcorepb.FieldIndexMeta, 0)
-	for _, info := range indexInfos {
-		fieldIndexMetas = append(fieldIndexMetas, &segcorepb.FieldIndexMeta{
-			CollectionID:    info.GetCollectionID(),
-			FieldID:         info.GetFieldID(),
-			IndexName:       info.GetIndexName(),
-			TypeParams:      info.GetTypeParams(),
-			IndexParams:     info.GetIndexParams(),
-			IsAutoIndex:     info.GetIsAutoIndex(),
-			UserIndexParams: info.GetUserIndexParams(),
-		})
-	}
-	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
-	maxIndexRecordPerSegment := int64(0)
-	if err != nil || sizePerRecord == 0 {
-		log.Ctx(ctx).Warn("failed to transfer segment size to collection, because failed to estimate size per record", zap.Error(err))
-	} else {
-		threshold := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024
-		proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
-		maxIndexRecordPerSegment = int64(threshold * proportion / float64(sizePerRecord))
-	}
-
-	return &segcorepb.CollectionIndexMeta{
-		IndexMetas:       fieldIndexMetas,
-		MaxIndexRowCount: maxIndexRecordPerSegment,
-	}
-}
-
 // WatchDmChannels create consumers on dmChannels to receive Incremental data，which is the important part of real-time query
 func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (status *commonpb.Status, e error) {
 	defer node.updateDistributionModifyTS()
@@ -245,7 +223,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	}
 
 	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
-		node.composeIndexMeta(ctx, req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
+		segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
 	if err != nil {
 		log.Warn("failed to ref collection", zap.Error(err))
 		return merr.Status(err), nil
@@ -392,13 +370,52 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 
 	node.unsubscribingChannels.Insert(req.GetChannelName())
 	defer node.unsubscribingChannels.Remove(req.GetChannelName())
-	delegator, ok := node.delegators.GetAndRemove(req.GetChannelName())
+	_, ok := node.delegators.Get(req.GetChannelName())
 	if ok {
-		node.pipelineManager.Remove(req.GetChannelName())
+		growingSegmentIDs := node.localGrowingSegmentIDs(req.GetChannelName(), nil)
+		prepared, err := node.prepareReleaseManualFlush(ctx, req.GetCollectionID(), req.GetChannelName(), growingSegmentIDs)
+		prepareSkipped := false
+		if err != nil {
+			if isReleaseManualFlushPrepareUnavailable(err) {
+				log.Warn("release manual flush prepare unavailable before unsubscribing channel, continue unsubscribe",
+					zap.Int64s("segmentIDs", growingSegmentIDs),
+					zap.Error(err))
+				prepared = false
+				prepareSkipped = true
+			} else {
+				log.Warn("failed to prepare release manual flush before unsubscribing channel",
+					zap.Int64s("segmentIDs", growingSegmentIDs),
+					zap.Error(err))
+				return merr.Status(err), nil
+			}
+		}
+		if prepareSkipped {
+			log.Info("release manual flush prepare skipped before unsubscribing channel",
+				zap.Int64s("segmentIDs", growingSegmentIDs),
+				zap.Bool("prepared", prepared))
+		} else {
+			log.Info("release manual flush prepare result before unsubscribing channel",
+				zap.Int64s("segmentIDs", growingSegmentIDs),
+				zap.Bool("prepared", prepared))
+		}
 
+		delegator, ok := node.delegators.GetAndRemove(req.GetChannelName())
+		if !ok {
+			log.Info("channel already unsubscribed")
+			return merr.Success(), nil
+		}
+		node.pipelineManager.Remove(req.GetChannelName())
+		preparedGrowingSourceSegments := syncmgr.DefaultGrowingSourceRegistry().ReleasePreparedSegments(req.GetChannelName())
 		// close the delegator first to block all coming query/search requests
 		delegator.Close()
 
+		if detacher, ok := node.manager.Segment.(segmentDetacher); ok {
+			for _, segmentID := range preparedGrowingSourceSegments {
+				detacher.DetachStreaming(ctx, segmentID)
+				syncmgr.DefaultGrowingSourceRegistry().MarkReleaseDetached(req.GetChannelName(), segmentID)
+				syncmgr.DefaultGrowingSourceRegistry().ClearReleasePrepared(req.GetChannelName(), segmentID)
+			}
+		}
 		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
 		node.manager.Collection.Unref(req.GetCollectionID(), 1)
 	}
@@ -505,7 +522,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	}
 
 	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
-		node.composeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
+		segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
 	if err != nil {
 		log.Warn("failed to ref collection", zap.Error(err))
 		return merr.Status(err), nil
@@ -630,7 +647,7 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 	defer node.lifetime.Done()
 
 	if req.GetNeedTransfer() {
-		delegator, ok := node.delegators.Get(req.GetShard())
+		shardDelegator, ok := node.delegators.Get(req.GetShard())
 		if !ok {
 			msg := "failed to release segment, delegator not found"
 			log.Warn(msg)
@@ -639,7 +656,7 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 		}
 
 		req.NeedTransfer = false
-		err := delegator.ReleaseSegments(ctx, req, false)
+		err := shardDelegator.ReleaseSegments(ctx, req, false)
 		if err != nil {
 			log.Warn("delegator failed to release segment", zap.Error(err))
 			return merr.Status(err), nil
@@ -657,6 +674,46 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 	node.manager.Collection.Unref(req.GetCollectionID(), uint32(sealedCount))
 
 	return merr.Success(), nil
+}
+
+func (node *QueryNode) localGrowingSegmentIDs(channel string, segmentIDs []int64) []int64 {
+	filters := []segments.SegmentFilter{
+		segments.WithChannel(channel),
+		segments.WithType(segments.SegmentTypeGrowing),
+	}
+	if len(segmentIDs) > 0 {
+		filters = append(filters, segments.WithIDs(segmentIDs...))
+	}
+	return lo.Map(node.manager.Segment.GetBy(filters...), func(segment segments.Segment, _ int) int64 {
+		return segment.ID()
+	})
+}
+
+func (node *QueryNode) prepareReleaseManualFlush(ctx context.Context, collectionID int64, channel string, segmentIDs []int64) (bool, error) {
+	segmentIDs = lo.Uniq(lo.Filter(segmentIDs, func(segmentID int64, _ int) bool {
+		return segmentID > 0 && !syncmgr.DefaultGrowingSourceRegistry().IsReleasePrepared(channel, segmentID, 0)
+	}))
+	if len(segmentIDs) == 0 {
+		return false, nil
+	}
+	wal := streaming.WAL()
+	if wal == nil {
+		return false, merr.WrapErrServiceUnavailable("streaming WAL is not initialized")
+	}
+	return wal.PrepareReleaseManualFlush(ctx, collectionID, channel, segmentIDs)
+}
+
+func isReleaseManualFlushPrepareUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, merr.ErrServiceUnavailable) ||
+		errors.Is(err, handler.ErrClientClosed) ||
+		errors.Is(err, registry.ErrNoStreamingNodeDeployed) ||
+		errors.Is(err, registry.ErrNoReleaseManualFlushPreparer) {
+		return true
+	}
+	return streamingstatus.AsStreamingError(err).IsOnShutdown()
 }
 
 // GetSegmentInfo returns segment information of the collection on the queryNode, and the information includes memSize, numRow, indexName, indexID ...

@@ -188,6 +188,10 @@ func (n *noopWALAccesser) Local() Local {
 	return &noopLocal{}
 }
 
+func (n *noopWALAccesser) PrepareReleaseManualFlush(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error) {
+	return false, getExpectErr()
+}
+
 func (n *noopWALAccesser) RawAppend(ctx context.Context, msgs message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error) {
 	if err := getExpectErr(); err != nil {
 		return nil, err

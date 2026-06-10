@@ -252,9 +252,15 @@ SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
 
     std::set<int64_t> new_index_ids;
     // Find indexes to load/replace: indexes in new_info but not in current
-    // Use converted_field_index_cache_ from new_info
+    // Only consider fields that exist in the current schema (skip dropped fields)
     for (const auto& [field_id, load_index_infos] :
          new_info.converted_field_index_cache_) {
+        // Schema-driven: skip indexes for fields not in current schema.
+        // Use new_info's schema (the latest) since this->schema_ may still
+        // contain dropped fields from a prior load.
+        if (!new_info.HasFieldInSchema(field_id)) {
+            continue;
+        }
         for (const auto& load_index_info : load_index_infos) {
             new_index_ids.insert(load_index_info.index_id);
             if (current_index_ids.find(load_index_info.index_id) ==
@@ -504,9 +510,8 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
                 // Field at same position — check if needs lazification
                 // (transitioning from no-raw-data-index to raw-data-index)
                 if (!prefer_field_data &&
-                    new_info.field_index_has_raw_data_.count(
-                        FieldId(field_id)) > 0 &&
-                    field_index_has_raw_data_.count(FieldId(field_id)) == 0) {
+                    new_info.field_index_has_raw_data_.count(fid) > 0 &&
+                    field_index_has_raw_data_.count(fid) == 0) {
                     lazy_replace_fields.emplace_back(field_id);
                 }
             }
@@ -707,6 +712,10 @@ SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
         }
 
         if (current_handled.count(field_id)) {
+            continue;
+        }
+
+        if (new_info.schema_->is_function_output(field_id)) {
             continue;
         }
 

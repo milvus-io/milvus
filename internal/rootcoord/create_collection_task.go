@@ -198,6 +198,9 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	if err := typeutil.NormalizeAndValidateExternalCollectionSchema(schema); err != nil {
 		return err
 	}
+	if err := typeutil.ValidateTextRequiresStorageV3(schema, Params.CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
+		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
+	}
 
 	// For external collections, validate the source URL scheme allowlist and
 	// the JSON spec structure (extfs allowlist + format whitelist) at the
@@ -498,7 +501,7 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	}
 
 	// Set properties for persistent
-	t.body.CollectionSchema.Properties = t.Req.GetProperties()
+	t.body.CollectionSchema.Properties = updateMaxFieldIDProperty(t.Req.GetProperties(), maxAssignedFieldIDFromSchema(t.body.CollectionSchema))
 	t.body.CollectionSchema.Version = 0
 	t.appendSysFields(t.body.CollectionSchema)
 	return nil

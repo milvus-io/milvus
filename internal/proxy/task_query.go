@@ -694,6 +694,9 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	t.schema = schema
+	if err := validateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
+		return err
+	}
 	err = common.CheckNamespace(t.schema.CollectionSchema, t.request.Namespace)
 	if err != nil {
 		return err

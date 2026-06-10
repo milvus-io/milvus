@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type SegmentLoaderSuite struct {
@@ -1054,26 +1055,26 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 	suite.Run("wait_success", func() {
 		idx := 0
 
-		var infos []*querypb.SegmentLoadInfo
-		suite.segmentManager.EXPECT().Exist(mock.Anything, mock.Anything).Return(false)
-		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).RunAndReturn(func(segmentID int64, segmentType commonpb.SegmentState) Segment {
-			defer func() { idx++ }()
-			if idx == 0 {
-				go func() {
-					<-time.After(time.Second)
-					suite.loader.notifyLoadFinish(infos...)
-				}()
-			}
-			return nil
-		})
-		suite.segmentManager.EXPECT().UpdateBy(mock.Anything, mock.Anything, mock.Anything).Return(0)
-		infos = suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
+		loadInfo := &querypb.SegmentLoadInfo{
 			SegmentID:     suite.segmentID,
 			PartitionID:   suite.partitionID,
 			CollectionID:  suite.collectionID,
 			NumOfRows:     100,
 			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		}
+		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).RunAndReturn(func(segmentID int64, segmentType commonpb.SegmentState) Segment {
+			defer func() { idx++ }()
+			if idx == 0 {
+				go func() {
+					<-time.After(time.Second)
+					suite.loader.notifyLoadFinish(loadInfo)
+				}()
+			}
+			return nil
 		})
+		suite.segmentManager.EXPECT().UpdateBy(mock.Anything, mock.Anything, mock.Anything).Return(0)
+		infos := suite.loader.prepare(context.Background(), SegmentTypeSealed, loadInfo)
+		suite.Len(infos, 1)
 
 		err := suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, []int64{suite.segmentID}, 0)
 		suite.NoError(err)
@@ -1083,26 +1084,26 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 		suite.SetupTest()
 
 		var idx int
-		var infos []*querypb.SegmentLoadInfo
-		suite.segmentManager.EXPECT().Exist(mock.Anything, mock.Anything).Return(false)
-		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).RunAndReturn(func(segmentID int64, segmentType commonpb.SegmentState) Segment {
-			defer func() { idx++ }()
-			if idx == 0 {
-				go func() {
-					<-time.After(time.Second)
-					suite.loader.unregister(infos...)
-				}()
-			}
-
-			return nil
-		})
-		infos = suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
+		loadInfo := &querypb.SegmentLoadInfo{
 			SegmentID:     suite.segmentID,
 			PartitionID:   suite.partitionID,
 			CollectionID:  suite.collectionID,
 			NumOfRows:     100,
 			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		}
+		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).RunAndReturn(func(segmentID int64, segmentType commonpb.SegmentState) Segment {
+			defer func() { idx++ }()
+			if idx == 0 {
+				go func() {
+					<-time.After(time.Second)
+					suite.loader.unregister(loadInfo)
+				}()
+			}
+
+			return nil
 		})
+		infos := suite.loader.prepare(context.Background(), SegmentTypeSealed, loadInfo)
+		suite.Len(infos, 1)
 
 		err := suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, []int64{suite.segmentID}, 0)
 		suite.Error(err)
@@ -1111,7 +1112,6 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 	suite.Run("wait_timeout", func() {
 		suite.SetupTest()
 
-		suite.segmentManager.EXPECT().Exist(mock.Anything, mock.Anything).Return(false)
 		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).RunAndReturn(func(segmentID int64, segmentType commonpb.SegmentState) Segment {
 			return nil
 		})
@@ -1130,6 +1130,32 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 		suite.Error(err)
 		suite.True(merr.IsCanceledOrTimeout(err))
 	})
+}
+
+func TestSegmentLoaderPrepareLoadsWhenSegmentIsNotActive(t *testing.T) {
+	segmentID := rand.Int63()
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:     segmentID,
+		PartitionID:   rand.Int63(),
+		CollectionID:  rand.Int63(),
+		NumOfRows:     100,
+		InsertChannel: "by-dev-rootcoord-dml_0_1v0",
+	}
+	segmentManager := NewMockSegmentManager(t)
+	loader := &segmentLoader{
+		manager: &Manager{
+			Segment: segmentManager,
+		},
+		loadingSegments: typeutil.NewConcurrentMap[int64, *loadResult](),
+	}
+
+	segmentManager.EXPECT().GetWithType(segmentID, SegmentTypeGrowing).Return(nil).Once()
+
+	infos := loader.prepare(context.Background(), SegmentTypeGrowing, loadInfo)
+
+	assert.Len(t, infos, 1)
+	assert.Equal(t, segmentID, infos[0].GetSegmentID())
+	assert.True(t, loader.loadingSegments.Contain(segmentID))
 }
 
 func TestConfigureUseTakeForOutput(t *testing.T) {
@@ -1845,6 +1871,59 @@ func (suite *ExternalSegmentEstimateSuite) TestLazyLoadSubtractsRawData() {
 
 	suite.True(lazyUsage.MemorySize <= nonLazyUsage.MemorySize,
 		"lazy load memory (%d) should be <= non-lazy (%d)", lazyUsage.MemorySize, nonLazyUsage.MemorySize)
+}
+
+func TestEstimateLoadingResourceUsage_DroppedFieldSkipped(t *testing.T) {
+	paramtable.Init()
+
+	// Schema only has fieldID=100 and 101; fieldID=999 is "dropped" (not in schema)
+	schema := &schemapb.CollectionSchema{
+		Name: "test_dropped_field",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+		},
+	}
+
+	t.Run("index on dropped field is skipped", func(t *testing.T) {
+		loadInfo := &querypb.SegmentLoadInfo{
+			SegmentID:    1,
+			CollectionID: 10,
+			NumOfRows:    100,
+			IndexInfos: []*querypb.FieldIndexInfo{
+				{
+					FieldID:        999, // dropped field
+					IndexID:        2001,
+					IndexFilePaths: []string{"index/999/file1"},
+				},
+			},
+		}
+		factor := resourceEstimateFactor{}
+		usage, err := estimateLoadingResourceUsageOfSegment(schema, loadInfo, factor)
+		assert.NoError(t, err)
+		assert.NotNil(t, usage)
+	})
+
+	t.Run("binlog with dropped field in child fields is skipped", func(t *testing.T) {
+		loadInfo := &querypb.SegmentLoadInfo{
+			SegmentID:    2,
+			CollectionID: 10,
+			NumOfRows:    100,
+			BinlogPaths: []*datapb.FieldBinlog{
+				{
+					FieldID: 888, // column group containing a dropped field
+					Binlogs: []*datapb.Binlog{
+						{LogSize: 1024},
+					},
+					ChildFields: []int64{999}, // dropped field
+				},
+			},
+		}
+		factor := resourceEstimateFactor{}
+		usage, err := estimateLoadingResourceUsageOfSegment(schema, loadInfo, factor)
+		assert.NoError(t, err)
+		assert.NotNil(t, usage)
+	})
 }
 
 func TestSegmentLoader(t *testing.T) {

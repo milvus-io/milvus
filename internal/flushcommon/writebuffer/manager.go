@@ -47,13 +47,20 @@ type BufferManager interface {
 	// NotifyCheckpointUpdated notify write buffer checkpoint updated to reset flushTs.
 	NotifyCheckpointUpdated(channel string, ts uint64)
 
-	// HasTextFields returns true if the collection on this channel has TEXT fields.
-	HasTextFields(channel string) bool
+	// UseGrowingSourceFlush returns true if the collection on this channel has growing-source fields.
+	UseGrowingSourceFlush(channel string) bool
+	// GetGrowingFlushProgress returns growing-source progress for the given channel.
+	// If segmentIDs is empty, all tracked growing-source segments are returned.
+	GetGrowingFlushProgress(ctx context.Context, channel string, segmentIDs []int64, fenceTs uint64) ([]GrowingFlushSegmentProgress, error)
 
 	// Start makes the background check start to work.
 	Start()
 	// Stop the background checker and wait for worker goroutine quit.
 	Stop()
+}
+
+type ReleaseManualFlushNeedChecker interface {
+	CheckReleaseManualFlushNeed(ctx context.Context, channel string, segmentIDs []int64) (bool, error)
 }
 
 // NewManager returns initialized manager as `Manager`
@@ -241,12 +248,41 @@ func (m *bufferManager) BufferData(channel string, insertData []*InsertData, del
 	return buf.BufferData(insertData, deleteMsgs, startPos, endPos, schemaVersion)
 }
 
-func (m *bufferManager) HasTextFields(channel string) bool {
+func (m *bufferManager) UseGrowingSourceFlush(channel string) bool {
 	buf, loaded := m.buffers.Get(channel)
 	if !loaded {
 		return false
 	}
-	return buf.HasTextFields()
+	return buf.UseGrowingSourceFlush()
+}
+
+func (m *bufferManager) CheckReleaseManualFlushNeed(ctx context.Context, channel string, segmentIDs []int64) (bool, error) {
+	buf, loaded := m.buffers.Get(channel)
+	if !loaded {
+		log.Ctx(ctx).Warn("write buffer not found when checking release manual flush",
+			zap.String("channel", channel),
+			zap.Int64s("segmentIDs", segmentIDs))
+		return true, merr.WrapErrChannelNotFound(channel)
+	}
+	checker, ok := buf.(interface {
+		CheckReleaseManualFlushNeed(segmentIDs []int64) bool
+	})
+	if !ok {
+		return true, nil
+	}
+	return checker.CheckReleaseManualFlushNeed(segmentIDs), nil
+}
+
+func (m *bufferManager) GetGrowingFlushProgress(ctx context.Context, channel string, segmentIDs []int64, fenceTs uint64) ([]GrowingFlushSegmentProgress, error) {
+	buf, loaded := m.buffers.Get(channel)
+	if !loaded {
+		log.Ctx(ctx).Warn("write buffer not found when get growing flush progress",
+			zap.String("channel", channel),
+			zap.Int64s("segmentIDs", segmentIDs),
+			zap.Uint64("fenceTs", fenceTs))
+		return nil, merr.WrapErrChannelNotFound(channel)
+	}
+	return buf.GetGrowingFlushProgress(ctx, segmentIDs, fenceTs)
 }
 
 // GetCheckpoint returns checkpoint for provided channel.

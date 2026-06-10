@@ -163,6 +163,76 @@ func (s *BulkImportSuite) TestGetImportProgress() {
 	})
 }
 
+func (s *BulkImportSuite) TestCommitImport() {
+	s.Run("normal_case", func() {
+		svr := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			authHeader := req.Header.Get("Authorization")
+			s.Equal("Bearer root:Milvus", authHeader)
+			s.True(strings.Contains(req.URL.Path, "/v2/vectordb/jobs/import/commit"))
+			rw.Write([]byte(`{"status":0, "data":{}}`))
+		}))
+		defer svr.Close()
+
+		resp, err := CommitImport(context.Background(),
+			NewCommitImportOption(svr.URL, "123").WithAPIKey("root:Milvus"))
+		s.NoError(err)
+		s.EqualValues(0, resp.Status)
+	})
+
+	s.Run("status_error", func() {
+		svr := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			s.True(strings.Contains(req.URL.Path, "/v2/vectordb/jobs/import/commit"))
+			rw.Write([]byte(`{"status":1100, "message": "commit failed"}`))
+		}))
+		defer svr.Close()
+
+		_, err := CommitImport(context.Background(), NewCommitImportOption(svr.URL, "123"))
+		s.Error(err)
+	})
+
+	s.Run("server_closed", func() {
+		svr := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {}))
+		svr.Close()
+		_, err := CommitImport(context.Background(), NewCommitImportOption(svr.URL, "123"))
+		s.Error(err)
+	})
+}
+
+func (s *BulkImportSuite) TestAbortImport() {
+	s.Run("normal_case", func() {
+		svr := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			authHeader := req.Header.Get("Authorization")
+			s.Equal("Bearer root:Milvus", authHeader)
+			s.True(strings.Contains(req.URL.Path, "/v2/vectordb/jobs/import/abort"))
+			rw.Write([]byte(`{"status":0, "data":{}}`))
+		}))
+		defer svr.Close()
+
+		resp, err := AbortImport(context.Background(),
+			NewAbortImportOption(svr.URL, "123").WithAPIKey("root:Milvus"))
+		s.NoError(err)
+		s.EqualValues(0, resp.Status)
+	})
+
+	s.Run("status_error", func() {
+		svr := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			s.True(strings.Contains(req.URL.Path, "/v2/vectordb/jobs/import/abort"))
+			rw.Write([]byte(`{"status":1100, "message": "abort failed"}`))
+		}))
+		defer svr.Close()
+
+		_, err := AbortImport(context.Background(), NewAbortImportOption(svr.URL, "123"))
+		s.Error(err)
+	})
+
+	s.Run("server_closed", func() {
+		svr := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {}))
+		svr.Close()
+		_, err := AbortImport(context.Background(), NewAbortImportOption(svr.URL, "123"))
+		s.Error(err)
+	})
+}
+
 func TestBulkImportAPIs(t *testing.T) {
 	suite.Run(t, new(BulkImportSuite))
 }

@@ -500,6 +500,11 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual bool
     HasIndex(FieldId field_id) const = 0;
 
+    bool
+    FieldAccessible(FieldId field_id) const {
+        return HasFieldData(field_id) || HasIndex(field_id);
+    }
+
     // JSON indexes (JsonFlatIndex + JSON-cast scalar) live in a separate
     // per-segment container from the scalar/vector/binlog index bitsets, so
     // they are checked via this dedicated API rather than widening HasIndex().

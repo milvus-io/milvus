@@ -157,6 +157,9 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 	it.schema = schema.CollectionSchema
 	it.schemaVersion = schema.Version
+	if err := validateTextStorageV3Enabled(it.schema); err != nil {
+		return err
+	}
 
 	if err := genFunctionFields(ctx, it.insertMsg, schema, false); err != nil {
 		return err
@@ -244,6 +247,11 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	err = fillFieldPropertiesOnly(it.insertMsg.GetFieldsData(), schema)
 	if err != nil {
 		log.Info("fill field properties failed", zap.Error(err))
+		return err
+	}
+	err = normalizeFP32ToFP16BF16VectorFieldData(it.insertMsg.GetFieldsData(), schema)
+	if err != nil {
+		log.Info("normalize fp32 to fp16/bf16 vector field data failed", zap.Error(err))
 		return err
 	}
 

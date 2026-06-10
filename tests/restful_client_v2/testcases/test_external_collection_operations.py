@@ -711,7 +711,7 @@ def _assert_describe_external_collection_response(
     collection_name,
     expected_source=None,
     expected_spec=None,
-    expected_vector_nullable=False,
+    expected_vector_nullable=True,
 ):
     assert {"code", "data"}.issubset(desc), desc
     assert set(desc).issubset({"code", "data", "message"}), desc
@@ -990,7 +990,7 @@ class TestRestExternalCollection(TestBase):
         rsp = self.index_client.index_create(payload, db_name=db_name)
         _assert_success_default_response(rsp)
 
-    def _load_and_wait(self, collection_name, db_name="default", expected_vector_nullable=False):
+    def _load_and_wait(self, collection_name, db_name="default", expected_vector_nullable=True):
         payload = {"collectionName": collection_name}
         if db_name != "default":
             payload["dbName"] = db_name

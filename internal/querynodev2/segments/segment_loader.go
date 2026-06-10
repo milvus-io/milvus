@@ -443,16 +443,19 @@ func (loader *segmentLoader) prepare(ctx context.Context, segmentType SegmentTyp
 	// filter out loaded & loading segments
 	infos := make([]*querypb.SegmentLoadInfo, 0, len(segments))
 	for _, segment := range segments {
-		// Not loaded & loading & releasing.
-		if !loader.manager.Segment.Exist(segment.GetSegmentID(), segmentType) &&
-			!loader.loadingSegments.Contain(segment.GetSegmentID()) {
+		// Only active loaded segments should be skipped here. SegmentManager.Exist()
+		// also reports detached/on-releasing segments, which are no longer active
+		// and must be allowed to load again.
+		isLoaded := loader.manager.Segment.GetWithType(segment.GetSegmentID(), segmentType) != nil
+		isLoading := loader.loadingSegments.Contain(segment.GetSegmentID())
+		if !isLoaded && !isLoading {
 			infos = append(infos, segment)
 			loader.loadingSegments.Insert(segment.GetSegmentID(), newLoadResult())
 		} else {
 			log.Info("skip loaded/loading segment",
 				zap.Int64("segmentID", segment.GetSegmentID()),
-				zap.Bool("isLoaded", len(loader.manager.Segment.GetBy(WithType(segmentType), WithID(segment.GetSegmentID()))) > 0),
-				zap.Bool("isLoading", loader.loadingSegments.Contain(segment.GetSegmentID())),
+				zap.Bool("isLoaded", isLoaded),
+				zap.Bool("isLoading", isLoading),
 			)
 		}
 	}
@@ -1997,7 +2000,9 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		if len(fieldIndexInfo.GetIndexFilePaths()) > 0 {
 			fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
 			if err != nil {
-				return nil, err
+				// field might have been dropped, skip its index
+				log.Info("skip index for dropped field", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()))
+				continue
 			}
 			indexedFields[fieldID] = struct{}{}
 
@@ -2077,8 +2082,10 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			// get field schema from fieldID
 			fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
 			if err != nil {
-				log.Warn("failed to get field schema", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()), zap.Error(err))
-				return nil, err
+				// field might have been dropped, skip it and continue processing
+				// other fields in the same column group
+				log.Info("skip binlog for dropped field", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()))
+				continue
 			}
 			if _, ok := indexedFields[fieldID]; !ok {
 				hasIndex = false

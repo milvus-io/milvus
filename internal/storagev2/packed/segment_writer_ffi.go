@@ -31,7 +31,9 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
+	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
@@ -51,6 +53,7 @@ type TextColumnConfig struct {
 type SegmentWriterConfig struct {
 	SegmentPath        string
 	TextColumns        []TextColumnConfig
+	ColumnGroups       []storagecommon.ColumnGroup
 	WriterFormat       string
 	SchemaBasedPattern string
 	SchemaBasedFormats []string
@@ -80,18 +83,7 @@ func NewFFISegmentWriter(
 		return nil, fmt.Errorf("storageConfig must not be nil")
 	}
 
-	// create properties
-	extra := map[string]string{}
-	if config != nil && config.WriterFormat != "" {
-		extra[PropertyWriterFormat] = config.WriterFormat
-	}
-	if config != nil && config.SchemaBasedPattern != "" {
-		extra[PropertyWriterPolicy] = "schema_based"
-		extra[PropertyWriterSchemaBasedPattern] = config.SchemaBasedPattern
-	}
-	if config != nil && len(config.SchemaBasedFormats) > 0 {
-		extra[PropertyWriterSchemaBasedFormats] = strings.Join(config.SchemaBasedFormats, ",")
-	}
+	extra := segmentWriterProperties(schema, config)
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, extra)
 	if err != nil {
 		return nil, err
@@ -114,6 +106,43 @@ func NewFFISegmentWriter(
 		cProperties: cProperties,
 		schema:      schema,
 	}, nil
+}
+
+func segmentWriterProperties(schema *arrow.Schema, config *SegmentWriterConfig) map[string]string {
+	extra := map[string]string{
+		PropertyWriterFormat: "parquet",
+	}
+	if config == nil {
+		extra[PropertyWriterPolicy] = "single"
+		return extra
+	}
+	if config.WriterFormat != "" {
+		extra[PropertyWriterFormat] = config.WriterFormat
+	}
+	if len(config.SchemaBasedFormats) > 0 {
+		extra[PropertyWriterSchemaBasedFormats] = strings.Join(config.SchemaBasedFormats, ",")
+	}
+	if config.SchemaBasedPattern != "" {
+		extra[PropertyWriterPolicy] = "schema_based"
+		extra[PropertyWriterSchemaBasedPattern] = config.SchemaBasedPattern
+		return extra
+	}
+
+	columnGroups := config.ColumnGroups
+	if len(columnGroups) == 0 {
+		extra[PropertyWriterPolicy] = "single"
+		return extra
+	}
+
+	pattern := strings.Join(lo.Map(columnGroups, func(columnGroup storagecommon.ColumnGroup, _ int) string {
+		return strings.Join(lo.Map(columnGroup.Columns, func(index int, _ int) string {
+			return schema.Field(index).Name
+		}), "|")
+	}), ",")
+
+	extra[PropertyWriterPolicy] = "schema_based"
+	extra[PropertyWriterSchemaBasedPattern] = pattern
+	return extra
 }
 
 // Write writes a record batch to the segment writer.

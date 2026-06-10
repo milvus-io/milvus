@@ -178,6 +178,9 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		log.Warn("get collection schema failed", zap.Error(err))
 		return err
 	}
+	if err := validateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
+		return err
+	}
 
 	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err2 != nil {
