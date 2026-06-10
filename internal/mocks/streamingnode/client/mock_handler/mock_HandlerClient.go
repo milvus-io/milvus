@@ -8,7 +8,7 @@ import (
 	consumer "github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
 
 	handler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
-
+	transformlog "github.com/milvus-io/milvus/internal/streamingnode/transformlog"
 	mock "github.com/stretchr/testify/mock"
 
 	producer "github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
@@ -118,6 +118,55 @@ func (_c *MockHandlerClient_CreateConsumer_Call) Return(_a0 consumer.Consumer, _
 }
 
 func (_c *MockHandlerClient_CreateConsumer_Call) RunAndReturn(run func(context.Context, *handler.ConsumerOptions) (consumer.Consumer, error)) *MockHandlerClient_CreateConsumer_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ReadTransformLog provides a mock function with given fields: ctx, opts
+func (_m *MockHandlerClient) ReadTransformLog(ctx context.Context, opts transformlog.ReadOption) transformlog.Scanner {
+	ret := _m.Called(ctx, opts)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReadTransformLog")
+	}
+
+	var r0 transformlog.Scanner
+	if rf, ok := ret.Get(0).(func(context.Context, transformlog.ReadOption) transformlog.Scanner); ok {
+		r0 = rf(ctx, opts)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(transformlog.Scanner)
+		}
+	}
+
+	return r0
+}
+
+// MockHandlerClient_ReadTransformLog_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReadTransformLog'
+type MockHandlerClient_ReadTransformLog_Call struct {
+	*mock.Call
+}
+
+// ReadTransformLog is a helper method to define mock.On call
+//   - ctx context.Context
+//   - opts transformlog.ReadOption
+func (_e *MockHandlerClient_Expecter) ReadTransformLog(ctx interface{}, opts interface{}) *MockHandlerClient_ReadTransformLog_Call {
+	return &MockHandlerClient_ReadTransformLog_Call{Call: _e.mock.On("ReadTransformLog", ctx, opts)}
+}
+
+func (_c *MockHandlerClient_ReadTransformLog_Call) Run(run func(ctx context.Context, opts transformlog.ReadOption)) *MockHandlerClient_ReadTransformLog_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(transformlog.ReadOption))
+	})
+	return _c
+}
+
+func (_c *MockHandlerClient_ReadTransformLog_Call) Return(_a0 transformlog.Scanner) *MockHandlerClient_ReadTransformLog_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockHandlerClient_ReadTransformLog_Call) RunAndReturn(run func(context.Context, transformlog.ReadOption) transformlog.Scanner) *MockHandlerClient_ReadTransformLog_Call {
 	_c.Call.Return(run)
 	return _c
 }

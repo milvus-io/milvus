@@ -5,9 +5,13 @@ const (
 
 	DirectoryWAL           = "wal"
 	DirectorySegmentAssign = "segment-assign"
-	DirectoryQueryView     = "qv"
-	DirectoryVChannel      = "vchannel"
-	DirectorySchema        = "schema"
+
+	DirectoryQueryView = "qv"
+
+	DirectoryTransformLog = "transform-log"
+
+	DirectoryVChannel = "vchannel"
+	DirectorySchema   = "schema"
 
 	KeyConsumeCheckpoint = "consume-checkpoint"
 	KeySalvageCheckpoint = "salvage-checkpoint"

@@ -471,6 +471,7 @@ const (
 	StreamingNodeHandlerService_GetSalvageCheckpoint_FullMethodName   = "/milvus.proto.streaming.StreamingNodeHandlerService/GetSalvageCheckpoint"
 	StreamingNodeHandlerService_Produce_FullMethodName                = "/milvus.proto.streaming.StreamingNodeHandlerService/Produce"
 	StreamingNodeHandlerService_Consume_FullMethodName                = "/milvus.proto.streaming.StreamingNodeHandlerService/Consume"
+	StreamingNodeHandlerService_SubscribeTransform_FullMethodName     = "/milvus.proto.streaming.StreamingNodeHandlerService/SubscribeTransform"
 )
 
 // StreamingNodeHandlerServiceClient is the client API for StreamingNodeHandlerService service.
@@ -498,6 +499,10 @@ type StreamingNodeHandlerServiceClient interface {
 	// log node, the RPC will return error CHANNEL_NOT_EXIST. If channel is
 	// moving away to other log node, the RPC will return error CHANNEL_FENCED.
 	Consume(ctx context.Context, opts ...grpc.CallOption) (StreamingNodeHandlerService_ConsumeClient, error)
+	// SubscribeTransform is a bi-directional streaming RPC to subscribe
+	// vchannel-level transform effects. Multiple vchannel subscriptions can be
+	// multiplexed on one stream by subscription_id.
+	SubscribeTransform(ctx context.Context, opts ...grpc.CallOption) (StreamingNodeHandlerService_SubscribeTransformClient, error)
 }
 
 type streamingNodeHandlerServiceClient struct {
@@ -588,6 +593,37 @@ func (x *streamingNodeHandlerServiceConsumeClient) Recv() (*ConsumeResponse, err
 	return m, nil
 }
 
+func (c *streamingNodeHandlerServiceClient) SubscribeTransform(ctx context.Context, opts ...grpc.CallOption) (StreamingNodeHandlerService_SubscribeTransformClient, error) {
+	stream, err := c.cc.NewStream(ctx, &StreamingNodeHandlerService_ServiceDesc.Streams[2], StreamingNodeHandlerService_SubscribeTransform_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &streamingNodeHandlerServiceSubscribeTransformClient{stream}
+	return x, nil
+}
+
+type StreamingNodeHandlerService_SubscribeTransformClient interface {
+	Send(*TransformRequest) error
+	Recv() (*TransformResponse, error)
+	grpc.ClientStream
+}
+
+type streamingNodeHandlerServiceSubscribeTransformClient struct {
+	grpc.ClientStream
+}
+
+func (x *streamingNodeHandlerServiceSubscribeTransformClient) Send(m *TransformRequest) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *streamingNodeHandlerServiceSubscribeTransformClient) Recv() (*TransformResponse, error) {
+	m := new(TransformResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // StreamingNodeHandlerServiceServer is the server API for StreamingNodeHandlerService service.
 // All implementations should embed UnimplementedStreamingNodeHandlerServiceServer
 // for forward compatibility
@@ -613,6 +649,10 @@ type StreamingNodeHandlerServiceServer interface {
 	// log node, the RPC will return error CHANNEL_NOT_EXIST. If channel is
 	// moving away to other log node, the RPC will return error CHANNEL_FENCED.
 	Consume(StreamingNodeHandlerService_ConsumeServer) error
+	// SubscribeTransform is a bi-directional streaming RPC to subscribe
+	// vchannel-level transform effects. Multiple vchannel subscriptions can be
+	// multiplexed on one stream by subscription_id.
+	SubscribeTransform(StreamingNodeHandlerService_SubscribeTransformServer) error
 }
 
 // UnimplementedStreamingNodeHandlerServiceServer should be embedded to have forward compatible implementations.
@@ -630,6 +670,9 @@ func (UnimplementedStreamingNodeHandlerServiceServer) Produce(StreamingNodeHandl
 }
 func (UnimplementedStreamingNodeHandlerServiceServer) Consume(StreamingNodeHandlerService_ConsumeServer) error {
 	return status.Errorf(codes.Unimplemented, "method Consume not implemented")
+}
+func (UnimplementedStreamingNodeHandlerServiceServer) SubscribeTransform(StreamingNodeHandlerService_SubscribeTransformServer) error {
+	return status.Errorf(codes.Unimplemented, "method SubscribeTransform not implemented")
 }
 
 // UnsafeStreamingNodeHandlerServiceServer may be embedded to opt out of forward compatibility for this service.
@@ -731,6 +774,32 @@ func (x *streamingNodeHandlerServiceConsumeServer) Recv() (*ConsumeRequest, erro
 	return m, nil
 }
 
+func _StreamingNodeHandlerService_SubscribeTransform_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(StreamingNodeHandlerServiceServer).SubscribeTransform(&streamingNodeHandlerServiceSubscribeTransformServer{stream})
+}
+
+type StreamingNodeHandlerService_SubscribeTransformServer interface {
+	Send(*TransformResponse) error
+	Recv() (*TransformRequest, error)
+	grpc.ServerStream
+}
+
+type streamingNodeHandlerServiceSubscribeTransformServer struct {
+	grpc.ServerStream
+}
+
+func (x *streamingNodeHandlerServiceSubscribeTransformServer) Send(m *TransformResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *streamingNodeHandlerServiceSubscribeTransformServer) Recv() (*TransformRequest, error) {
+	m := new(TransformRequest)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // StreamingNodeHandlerService_ServiceDesc is the grpc.ServiceDesc for StreamingNodeHandlerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -757,6 +826,12 @@ var StreamingNodeHandlerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Consume",
 			Handler:       _StreamingNodeHandlerService_Consume_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "SubscribeTransform",
+			Handler:       _StreamingNodeHandlerService_SubscribeTransform_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

@@ -7,6 +7,7 @@ import (
 
 	recovery "github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	utility "github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	transformlog "github.com/milvus-io/milvus/internal/streamingnode/transformlog"
 	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -180,6 +181,53 @@ func (_c *MockRecoveryStorage_ObserveMessage_Call) Return() *MockRecoveryStorage
 
 func (_c *MockRecoveryStorage_ObserveMessage_Call) RunAndReturn(run func(context.Context, message.ImmutableMessage)) *MockRecoveryStorage_ObserveMessage_Call {
 	_c.Run(run)
+	return _c
+}
+
+// TransformLog provides a mock function with no fields
+func (_m *MockRecoveryStorage) TransformLog() transformlog.Accesser {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for TransformLog")
+	}
+
+	var r0 transformlog.Accesser
+	if rf, ok := ret.Get(0).(func() transformlog.Accesser); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(transformlog.Accesser)
+		}
+	}
+
+	return r0
+}
+
+// MockRecoveryStorage_TransformLog_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TransformLog'
+type MockRecoveryStorage_TransformLog_Call struct {
+	*mock.Call
+}
+
+// TransformLog is a helper method to define mock.On call
+func (_e *MockRecoveryStorage_Expecter) TransformLog() *MockRecoveryStorage_TransformLog_Call {
+	return &MockRecoveryStorage_TransformLog_Call{Call: _e.mock.On("TransformLog")}
+}
+
+func (_c *MockRecoveryStorage_TransformLog_Call) Run(run func()) *MockRecoveryStorage_TransformLog_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockRecoveryStorage_TransformLog_Call) Return(_a0 transformlog.Accesser) *MockRecoveryStorage_TransformLog_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockRecoveryStorage_TransformLog_Call) RunAndReturn(run func() transformlog.Accesser) *MockRecoveryStorage_TransformLog_Call {
+	_c.Call.Return(run)
 	return _c
 }
 

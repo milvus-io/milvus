@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/transformlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/ratelimit"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -23,6 +24,9 @@ type WAL interface {
 
 	// GetLatestMVCCTimestamp get the latest mvcc timestamp of the wal at vchannel.
 	GetLatestMVCCTimestamp(ctx context.Context, vchannel string) (uint64, error)
+
+	// TransformLog returns the RecoveryStorage-owned TransformLog accesser.
+	TransformLog() transformlog.Accesser
 
 	// GetReplicateCheckpoint returns the replicate checkpoint of the wal.
 	// If the wal is not on replicating mode, it will return ReplicateViolationError.

@@ -22,6 +22,15 @@ type StreamingNodeCataLog interface {
 	// DropVChannels drops retained vchannel recovery meta on current pchannel.
 	DropVChannels(ctx context.Context, pchannelName string, vchannels map[string]*streamingpb.VChannelMeta) error
 
+	// ListTransformLogMeta lists transform log metas on current pchannel.
+	ListTransformLogMeta(ctx context.Context, pchannelName string) (map[string]*streamingpb.VChannelTransformLogMeta, error)
+
+	// SaveTransformLogMeta saves transform log metas on current pchannel.
+	SaveTransformLogMeta(ctx context.Context, pchannelName string, metas map[string]*streamingpb.VChannelTransformLogMeta) error
+
+	// DropTransformLogMeta drops transform log metas on current pchannel.
+	DropTransformLogMeta(ctx context.Context, pchannelName string, vchannels []string) error
+
 	// ListSegmentAssignment list all segment assignments for the wal.
 	ListSegmentAssignment(ctx context.Context, pChannelName string) ([]*streamingpb.SegmentAssignmentMeta, error)
 

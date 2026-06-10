@@ -67,8 +67,12 @@ func (m *Manager) finalizeTombstones() bool {
 	for _, segment := range m.segmentViews {
 		finalized = segment.TryFinalizeTombstone() || finalized
 	}
-	for _, vchannel := range m.vchannelViews {
-		finalized = vchannel.TryFinalizeTombstone() || finalized
+	for vchannelName, vchannel := range m.vchannelViews {
+		transformLog := m.transformLog(vchannelName)
+		if transformLog == nil {
+			continue
+		}
+		finalized = vchannel.TryFinalizeTombstone(transformLog.DataCheckpointTimeTick()) || finalized
 	}
 	return finalized
 }
@@ -110,7 +114,9 @@ func (m *Manager) durableFrontier(
 	owners := make(durableFrontierOwners, 0)
 	for _, vchannel := range m.vchannelViews {
 		if vchannel != nil && matchVChannel(vchannel) {
-			owners = append(owners, vchannel)
+			if transformLog := m.transformLog(vchannel.Name()); transformLog != nil {
+				owners = append(owners, transformLog)
+			}
 		}
 	}
 	for _, segment := range m.segmentViews {
@@ -150,11 +156,11 @@ func (owners durableFrontierOwners) TimeTick() uint64 {
 
 func (m *Manager) DataCheckpointTimeTick() uint64 {
 	dataTimeTick := uint64(math.MaxUint64)
-	for _, vchannel := range m.vchannelViews {
-		if vchannel == nil {
+	for _, transformLog := range m.transformLogs {
+		if transformLog == nil || !transformLog.HasDataCheckpoint() {
 			continue
 		}
-		if timetick := vchannel.DataCheckpointTimeTick(); timetick < dataTimeTick {
+		if timetick := transformLog.DataCheckpointTimeTick(); timetick < dataTimeTick {
 			dataTimeTick = timetick
 		}
 	}
@@ -249,6 +255,26 @@ func (m *Manager) Snapshot() *Snapshot {
 	}
 }
 
+func (m *Manager) RecoverTransformLogs(ctx context.Context) error {
+	for _, transformLog := range m.transformLogs {
+		if err := transformLog.Recover(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (v *transformLogView) Recover(ctx context.Context) error {
+	result, err := v.log.Recover(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if !result.Recovered {
+		return nil
+	}
+	return nil
+}
+
 func (m *Manager) NotifyCheckpointPersisted(metaTimeTick uint64, dataTimeTick uint64) {
 	task := m.newCleanupTask(
 		metaTimeTick,
@@ -261,6 +287,8 @@ func (m *Manager) NotifyCheckpointPersisted(metaTimeTick uint64, dataTimeTick ui
 	m.lastCleanupTask = m.runtime.Scheduler.Submit(task)
 }
 
-var _ moduleapi.Module = (*Manager)(nil)
-var _ moduleapi.DurableFrontierView = (*Manager)(nil)
-var _ moduleapi.DataCheckpointView = (*Manager)(nil)
+var (
+	_ moduleapi.Module              = (*Manager)(nil)
+	_ moduleapi.DurableFrontierView = (*Manager)(nil)
+	_ moduleapi.DataCheckpointView  = (*Manager)(nil)
+)

@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/transformlog"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -127,6 +128,13 @@ func (w *walAdaptorImpl) GetLatestMVCCTimestamp(ctx context.Context, vchannel st
 		resource.Resource().TimeTickInspector().TriggerSync(w.rwWALImpls.Channel(), false)
 	}
 	return currentMVCC.Timetick, nil
+}
+
+func (w *walAdaptorImpl) TransformLog() transformlog.Accesser {
+	if w.param == nil || w.param.RecoveryStorage == nil {
+		return transformlog.NewErrorAccesser(status.NewOnShutdownError("recovery storage is unavailable"))
+	}
+	return w.param.RecoveryStorage.TransformLog()
 }
 
 // GetReplicateCheckpoint returns the replicate checkpoint of the wal.

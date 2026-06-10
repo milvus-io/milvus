@@ -5,10 +5,13 @@ import (
 
 	walcheckpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/checkpoint"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	waltransformlog "github.com/milvus-io/milvus/internal/streamingnode/server/wal/transformlog"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
+	scheduler "github.com/milvus-io/milvus/pkg/v3/syncutil/preconditioned"
 )
 
 func (m *Manager) observeMessage(ctx context.Context, msg message.ImmutableMessage) moduleapi.ObserveResult {
@@ -256,18 +259,40 @@ func (m *Manager) flushRetainedPartitionSegmentsCreatedBefore(
 
 func (m *Manager) flushVChannelTransformLogBuffer(timetick uint64, vchannel string) moduleapi.ObserveResult {
 	info := m.retainedVChannel(vchannel)
-	if info == nil {
+	transformLog := m.transformLog(vchannel)
+	if info == nil || transformLog == nil {
 		return emptyObserveResult()
 	}
-	return info.FlushTransformLogBuffer(timetick)
+	info.mu.Lock()
+	if !info.canReplayAtLocked(timetick) ||
+		!info.metaAndData ||
+		info.meta.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED ||
+		(!transformLog.log.HasPendingWork() && timetick <= transformLog.log.DataCheckpointTimeTick()) {
+		info.mu.Unlock()
+		return emptyObserveResult()
+	}
+	runtime := info.runtime
+	info.mu.Unlock()
+	if task := m.startFlushTransformLogBufferTask(vchannel, timetick); task != nil {
+		runtime.Scheduler.Submit(task)
+	}
+	return dataBarrierResult(transformLog.dataBarrier())
 }
 
 func (m *Manager) flushAllTransformLogBuffers(timetick uint64) moduleapi.ObserveResult {
 	result := emptyObserveResult()
-	for _, info := range m.vchannelViews {
-		result = composeObserveResults(result, info.FlushTransformLogBuffer(timetick))
+	for vchannel := range m.vchannelViews {
+		result = composeObserveResults(result, m.flushVChannelTransformLogBuffer(timetick, vchannel))
 	}
 	return result
+}
+
+func (m *Manager) startFlushTransformLogBufferTask(vchannel string, timetick uint64) scheduler.Task {
+	transformLog := m.transformLog(vchannel)
+	if transformLog == nil {
+		return nil
+	}
+	return transformLog.startFlushTask(m, vchannel, timetick)
 }
 
 func (m *Manager) observeSegments(matches func(*segmentView) bool, observe func(*segmentView) moduleapi.ObserveResult) moduleapi.ObserveResult {
@@ -317,13 +342,13 @@ func (m *Manager) observeDeleteMessage(ctx context.Context, msg message.Immutabl
 		m.logInconsistency(msg, "delete vchannel not found", mlog.String("vchannel", msg.VChannel()))
 		return emptyObserveResult()
 	}
-	return vchannelManager.ObserveDeleteMessageV1(ctx, msg)
+	return m.observeTransformLogMessage(vchannelManager, msg)
 }
 
 func (m *Manager) observeTxnMessage(ctx context.Context, msg message.ImmutableTxnMessage) moduleapi.ObserveResult {
 	result := emptyObserveResult()
 	observedSegments := make(map[int64]struct{})
-	deletes := make(map[string][]message.ImmutableDeleteMessageV1)
+	hasDelete := false
 	timetick := msg.TimeTick()
 	msg.RangeOver(func(im message.ImmutableMessage) error {
 		var subResult moduleapi.ObserveResult
@@ -348,8 +373,7 @@ func (m *Manager) observeTxnMessage(ctx context.Context, msg message.ImmutableTx
 				subResult = composeObserveResults(subResult, segment.ObserveTxnMessage(ctx, msg))
 			}
 		case message.MessageTypeDelete:
-			deleted := message.MustAsImmutableDeleteMessageV1(im)
-			deletes[deleted.VChannel()] = append(deletes[deleted.VChannel()], deleted)
+			hasDelete = true
 		default:
 			m.logInconsistency(im, "unexpected message type in txn message", mlog.String("messageType", im.MessageType().String()))
 			return nil
@@ -357,45 +381,52 @@ func (m *Manager) observeTxnMessage(ctx context.Context, msg message.ImmutableTx
 		result = composeObserveResults(result, subResult)
 		return nil
 	})
-	for _, vchannelDeletes := range deletes {
-		result = composeObserveResults(result, m.observeTxnDeleteMessages(vchannelDeletes, timetick))
+	if hasDelete {
+		vchannelManager := m.retainedVChannel(msg.VChannel())
+		if vchannelManager == nil {
+			m.logInconsistency(msg, "txn delete vchannel not found", mlog.String("vchannel", msg.VChannel()))
+			return result
+		}
+		result = composeObserveResults(result, m.observeTransformLogMessage(vchannelManager, msg))
 	}
 	return result
 }
 
-func (m *Manager) observeTxnDeleteMessages(deletes []message.ImmutableDeleteMessageV1, timetick uint64) moduleapi.ObserveResult {
-	if !m.metaAndData || len(deletes) == 0 {
+func (m *Manager) observeTransformLogMessage(vchannel *vChannelView, msg message.ImmutableMessage) moduleapi.ObserveResult {
+	transformLog := m.transformLog(vchannel.Name())
+	if transformLog == nil {
 		return emptyObserveResult()
 	}
-	vchannelName := deletes[0].VChannel()
-	vchannelManager := m.retainedVChannel(vchannelName)
-	if vchannelManager == nil {
-		m.logInconsistency(deletes[0], "txn delete vchannel not found", mlog.String("vchannel", vchannelName))
+	var task scheduler.Task
+	vchannel.mu.Lock()
+	if !vchannel.metaAndData {
+		vchannel.mu.Unlock()
 		return emptyObserveResult()
 	}
-	filteredDeletes := make([]message.ImmutableDeleteMessageV1, 0, len(deletes))
-	for _, deleted := range deletes {
-		filteredDeletes = append(filteredDeletes, deleteMessageWithTimeTick(deleted, timetick))
-	}
-	if len(filteredDeletes) == 0 {
+	if !vchannel.canReplayAtLocked(msg.TimeTick()) ||
+		msg.TimeTick() <= transformLog.log.DataCheckpointTimeTick() {
+		vchannel.mu.Unlock()
 		return emptyObserveResult()
 	}
-	return vchannelManager.ObserveDeleteMessagesV1(filteredDeletes)
-}
-
-func deleteMessageWithTimeTick(deleted message.ImmutableDeleteMessageV1, timetick uint64) message.ImmutableDeleteMessageV1 {
-	if deleted.TimeTick() == timetick {
-		return deleted
+	appendOpt := waltransformlog.AppendOption{
+		DeleteFilter: func(partitionID int64, timetick uint64) bool {
+			return vchannel.canReplayExistingPartitionAtLocked(partitionID, timetick)
+		},
 	}
-	msg := message.NewDeleteMessageBuilderV1().
-		WithVChannel(deleted.VChannel()).
-		WithHeader(deleted.Header()).
-		WithBody(deleted.MustBody()).
-		MustBuildMutable().
-		WithTimeTick(timetick).
-		WithLastConfirmed(deleted.LastConfirmedMessageID()).
-		IntoImmutableMessage(deleted.MessageID())
-	return message.MustAsImmutableDeleteMessageV1(msg)
+	appendResult := transformLog.log.Append(msg, appendOpt)
+	runtime := vchannel.runtime
+	vchannelName := vchannel.meta.GetVchannel()
+	vchannel.mu.Unlock()
+	if !appendResult.Appended {
+		return emptyObserveResult()
+	}
+	if appendResult.ShouldFlush {
+		task = m.startFlushTransformLogBufferTask(vchannelName, appendResult.DataTimeTick)
+	}
+	if task != nil {
+		runtime.Scheduler.Submit(task)
+	}
+	return dataBarrierResult(transformLog.dataBarrier())
 }
 
 func emptyObserveResult() moduleapi.ObserveResult {
