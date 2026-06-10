@@ -1209,6 +1209,45 @@ func (v *ParserVisitor) getChildColumnInfo(identifier, child, structSubField, st
 	return v.getColumnInfoFromJSONIdentifier(child.GetText())
 }
 
+func (v *ParserVisitor) getStructArrayParentColumnInfo(fieldName string) (*planpb.ColumnInfo, bool, error) {
+	fieldName = decodeUnicode(fieldName)
+	if _, err := v.schema.GetFieldFromName(fieldName); err == nil {
+		return nil, false, nil
+	}
+
+	structField := v.schema.GetStructArrayFieldFromName(fieldName)
+	if structField == nil {
+		return nil, false, nil
+	}
+	subFields := structField.GetFields()
+	if len(subFields) == 0 {
+		return nil, true, merr.WrapErrParameterInvalidMsg(
+			"struct array field %s has no sub-fields", fieldName)
+	}
+
+	subField := subFields[0]
+	return &planpb.ColumnInfo{
+		FieldId:     subField.GetFieldID(),
+		DataType:    subField.GetDataType(),
+		ElementType: subField.GetElementType(),
+		Nullable:    structField.GetNullable() || subField.GetNullable(),
+	}, true, nil
+}
+
+func (v *ParserVisitor) getNullExprColumnInfo(identifier, child antlr.TerminalNode) (*planpb.ColumnInfo, error) {
+	if identifier != nil {
+		// try struct first
+		if columnInfo, ok, err := v.getStructArrayParentColumnInfo(identifier.GetText()); ok || err != nil {
+			return columnInfo, err
+		}
+	}
+	return v.getChildColumnInfo(identifier, child, nil, nil)
+}
+
+func isUnsupportedNullExprVectorType(dataType schemapb.DataType) bool {
+	return typeutil.IsVectorType(dataType) && !typeutil.IsVectorArrayType(dataType)
+}
+
 // VisitCall parses the expr to call plan.
 func (v *ParserVisitor) VisitCall(ctx *parser.CallContext) interface{} {
 	functionName := strings.ToLower(ctx.Identifier().GetText())
@@ -1959,12 +1998,12 @@ func (v *ParserVisitor) VisitEmptyArray(ctx *parser.EmptyArrayContext) interface
 }
 
 func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{} {
-	column, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil, nil)
+	column, err := v.getNullExprColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
 	if err != nil {
 		return err
 	}
 
-	if typeutil.IsVectorType(column.DataType) {
+	if isUnsupportedNullExprVectorType(column.DataType) {
 		return merr.WrapErrParameterInvalidMsg("IsNull/IsNotNull operations are not supported on vector fields")
 	}
 
@@ -2006,12 +2045,12 @@ func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{}
 }
 
 func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
-	column, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil, nil)
+	column, err := v.getNullExprColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
 	if err != nil {
 		return err
 	}
 
-	if typeutil.IsVectorType(column.DataType) {
+	if isUnsupportedNullExprVectorType(column.DataType) {
 		return merr.WrapErrParameterInvalidMsg("IsNull/IsNotNull operations are not supported on vector fields")
 	}
 

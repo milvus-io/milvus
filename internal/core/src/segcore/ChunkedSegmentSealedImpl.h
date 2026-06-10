@@ -498,6 +498,21 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                     FieldId field_id,
                     const std::vector<int64_t>& chunk_ids) const override;
 
+    void
+    ApplyFieldValidData(milvus::OpContext* op_ctx,
+                        FieldId field_id,
+                        int64_t chunk_id,
+                        int64_t offset,
+                        int64_t size,
+                        TargetBitmapView valid_result) const override;
+
+    void
+    ApplyFieldValidDataByOffsets(milvus::OpContext* op_ctx,
+                                 FieldId field_id,
+                                 const int64_t* offsets,
+                                 int64_t count,
+                                 TargetBitmapView valid_result) const override;
+
  protected:
     // blob and row_count
     PinWrapper<SpanBase>
