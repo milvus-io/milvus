@@ -156,6 +156,168 @@ TEST(LoadCancellationSegment, LoadExternalManifestPreCancelled) {
         SegcoreError);
 }
 
+TEST(LoadCancellationSegment, ReopenPreCancelledDoesNotPublishNewSnapshot) {
+    auto schema = std::make_shared<Schema>();
+    schema->set_schema_version(1);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto text_fid = schema->AddDebugField("text", DataType::VARCHAR);
+    schema->set_primary_field_id(pk_fid);
+    auto segment = CreateSealedSegment(
+        schema, nullptr, -1, SegcoreConfig::default_config(), true);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    milvus::proto::segcore::SegmentLoadInfo old_load_info;
+    old_load_info.set_collectionid(1);
+    old_load_info.set_partitionid(1);
+    old_load_info.set_segmentid(1);
+    old_load_info.set_num_of_rows(10);
+    old_load_info.set_use_take_for_output(false);
+    sealed->SetLoadInfo(old_load_info);
+    sealed->TestRecordTextIndexCreated(text_fid);
+    auto before = sealed->TestGetSegmentLoadInfo();
+    ASSERT_TRUE(before->HasTextIndexCreated(text_fid));
+    ASSERT_FALSE(before->GetUseTakeForOutput());
+
+    auto new_load_info = old_load_info;
+    new_load_info.set_use_take_for_output(true);
+
+    folly::CancellationSource source;
+    source.requestCancellation();
+    OpContext op_ctx(source.getToken());
+
+    EXPECT_THROW(
+        {
+            try {
+                sealed->Reopen(&op_ctx, new_load_info, schema);
+            } catch (const SegcoreError& e) {
+                EXPECT_EQ(e.get_error_code(), ErrorCode::FollyCancel);
+                throw;
+            }
+        },
+        SegcoreError);
+
+    auto after = sealed->TestGetSegmentLoadInfo();
+    EXPECT_FALSE(after->GetUseTakeForOutput());
+    EXPECT_TRUE(after->HasTextIndexCreated(text_fid));
+    EXPECT_EQ(after->GetProto().ShortDebugString(),
+              before->GetProto().ShortDebugString());
+}
+
+TEST(LoadCancellationSegment,
+     LoadPreCancelledDoesNotPublishRuntimeOnlyMarkers) {
+    auto schema = std::make_shared<Schema>();
+    schema->set_schema_version(1);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto text_fid = schema->AddDebugField("text", DataType::VARCHAR);
+    schema->set_primary_field_id(pk_fid);
+    auto segment = CreateSealedSegment(
+        schema, nullptr, -1, SegcoreConfig::default_config(), true);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    milvus::proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(1);
+    load_info.set_partitionid(1);
+    load_info.set_segmentid(1);
+    load_info.set_num_of_rows(10);
+    load_info.set_use_take_for_output(false);
+    auto* index_info = load_info.add_index_infos();
+    index_info->set_fieldid(text_fid.get());
+    sealed->SetLoadInfo(load_info);
+    auto before = sealed->TestGetSegmentLoadInfo();
+    EXPECT_FALSE(before->HasTextIndexCreated(text_fid));
+
+    folly::CancellationSource source;
+    source.requestCancellation();
+    OpContext op_ctx(source.getToken());
+    milvus::tracer::TraceContext trace_ctx;
+
+    EXPECT_THROW(
+        {
+            try {
+                sealed->Load(trace_ctx, &op_ctx);
+            } catch (const SegcoreError& e) {
+                EXPECT_EQ(e.get_error_code(), ErrorCode::FollyCancel);
+                throw;
+            }
+        },
+        SegcoreError);
+
+    auto after = sealed->TestGetSegmentLoadInfo();
+    EXPECT_FALSE(after->HasTextIndexCreated(text_fid));
+    EXPECT_EQ(after->GetProto().ShortDebugString(),
+              before->GetProto().ShortDebugString());
+}
+
+TEST(LoadCancellationSegment,
+     SchemaOnlyReopenPreCancelledDoesNotPublishNewSnapshot) {
+    auto old_schema = std::make_shared<Schema>();
+    old_schema->set_schema_version(1);
+    auto text_fid = old_schema->AddDebugField("text", DataType::VARCHAR);
+    auto pk_fid = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(pk_fid);
+    auto segment = CreateSealedSegment(
+        old_schema, nullptr, -1, SegcoreConfig::default_config(), true);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    milvus::proto::segcore::SegmentLoadInfo old_load_info;
+    old_load_info.set_collectionid(1);
+    old_load_info.set_partitionid(1);
+    old_load_info.set_segmentid(1);
+    old_load_info.set_num_of_rows(10);
+    old_load_info.set_use_take_for_output(false);
+    sealed->SetLoadInfo(old_load_info);
+    sealed->TestRecordTextIndexCreated(text_fid);
+    auto before = sealed->TestGetSegmentLoadInfo();
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->set_schema_version(2);
+    new_schema->AddField(
+        FieldName("text"), text_fid, DataType::VARCHAR, false, std::nullopt);
+    new_schema->AddField(
+        FieldName("pk"), pk_fid, DataType::INT64, false, std::nullopt);
+    new_schema->set_primary_field_id(pk_fid);
+
+    auto new_load_info = old_load_info;
+
+    folly::CancellationSource source;
+    source.requestCancellation();
+    OpContext op_ctx(source.getToken());
+
+    EXPECT_THROW(
+        {
+            try {
+                sealed->Reopen(&op_ctx, new_load_info, new_schema);
+            } catch (const SegcoreError& e) {
+                EXPECT_EQ(e.get_error_code(), ErrorCode::FollyCancel);
+                throw;
+            }
+        },
+        SegcoreError);
+
+    auto after = sealed->TestGetSegmentLoadInfo();
+    EXPECT_TRUE(after->HasTextIndexCreated(text_fid));
+    EXPECT_EQ(after->GetProto().ShortDebugString(),
+              before->GetProto().ShortDebugString());
+}
+
+TEST(LoadCancellationSegment, CreateTextIndexMarkerHelperPublishesSnapshot) {
+    auto schema = std::make_shared<Schema>();
+    auto text_fid = schema->AddDebugField("text", DataType::VARCHAR);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto segment = CreateSealedSegment(
+        schema, nullptr, -1, SegcoreConfig::default_config(), true);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    sealed->TestRecordTextIndexCreated(text_fid);
+    EXPECT_TRUE(
+        sealed->TestGetSegmentLoadInfo()->HasTextIndexCreated(text_fid));
+}
+
 // Test cancellation during loop operation
 TEST(LoadCancellationUtility, CancellationDuringLoop) {
     folly::CancellationSource source;
