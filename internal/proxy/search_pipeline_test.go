@@ -60,6 +60,14 @@ func (op searchPipelineTestOperator) run(ctx context.Context, span trace.Span, i
 	return op(ctx, span, inputs...)
 }
 
+func testSearchResultIDs(ids ...int64) *schemapb.IDs {
+	return &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{Data: ids},
+		},
+	}
+}
+
 func (s *SearchPipelineSuite) SetupTest() {
 	_, sp := otel.Tracer("test").Start(context.Background(), "Proxy-Search-PostExecute")
 	s.span = sp
@@ -1181,6 +1189,7 @@ func (s *SearchPipelineSuite) TestHighlightOp() {
 		Results: &schemapb.SearchResultData{
 			TopK:  3,
 			Topks: []int64{1},
+			Ids:   testSearchResultIDs(1),
 			FieldsData: []*schemapb.FieldData{{
 				FieldName: testVarCharField,
 				FieldId:   100,
@@ -1197,6 +1206,63 @@ func (s *SearchPipelineSuite) TestHighlightOp() {
 		},
 	})
 	s.NoError(err)
+}
+
+func (s *SearchPipelineSuite) TestLexicalHighlightOpZeroHitWithNonEmptyFieldsData() {
+	op := &lexicalHighlightOperator{
+		tasks: []*highlightTask{
+			{
+				HighlightTask: &querypb.HighlightTask{
+					Texts:     []string{"target text"},
+					FieldName: testVarCharField,
+					FieldId:   100,
+				},
+				preTags:  [][]byte{[]byte(DefaultPreTag)},
+				postTags: [][]byte{[]byte(DefaultPostTag)},
+			},
+		},
+	}
+
+	results, err := op.run(context.Background(), s.span, &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       5,
+			Topks:      []int64{0},
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId:   101,
+					FieldName: "unrelated_field",
+					Type:      schemapb.DataType_Int64,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{}},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	s.NoError(err)
+	s.Require().Len(results, 1)
+
+	result := results[0].(*milvuspb.SearchResults)
+	s.Empty(result.GetResults().GetHighlightResults())
+}
+
+func (s *SearchPipelineSuite) TestLexicalHighlightOpNonZeroHitWithEmptyFieldsData() {
+	op := &lexicalHighlightOperator{}
+	_, err := op.run(context.Background(), s.span, &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       1,
+			Topks:      []int64{1},
+			Ids:        testSearchResultIDs(1),
+		},
+	})
+	s.Error(err)
+	s.Contains(err.Error(), "field data is empty for non-empty search result")
 }
 
 func (s *SearchPipelineSuite) TestSemanticHighlightOp() {
@@ -1238,6 +1304,7 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOp() {
 			NumQueries: 1,
 			TopK:       3,
 			Topks:      []int64{3},
+			Ids:        testSearchResultIDs(1, 2, 3),
 			FieldsData: []*schemapb.FieldData{
 				{
 					FieldId:   101,
@@ -1293,6 +1360,7 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOpMissingField() {
 			NumQueries: 1,
 			TopK:       1,
 			Topks:      []int64{1},
+			Ids:        testSearchResultIDs(1),
 			FieldsData: []*schemapb.FieldData{
 				{
 					FieldId:   101,
@@ -1357,6 +1425,7 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOpMultipleFields() {
 			NumQueries: 1,
 			TopK:       2,
 			Topks:      []int64{2},
+			Ids:        testSearchResultIDs(1, 2),
 			FieldsData: []*schemapb.FieldData{
 				{
 					FieldId:   101,
@@ -1463,10 +1532,64 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOpEmptyResults() {
 
 	// Verify results
 	result := results[0].(*milvuspb.SearchResults)
-	s.NotNil(result.Results.HighlightResults)
-	s.Len(result.Results.HighlightResults, 1)
-	s.Equal(testVarCharField, result.Results.HighlightResults[0].FieldName)
-	s.Len(result.Results.HighlightResults[0].Datas, 0)
+	s.Empty(result.Results.HighlightResults)
+}
+
+func (s *SearchPipelineSuite) TestSemanticHighlightOpZeroHitWithNonEmptyFieldsData() {
+	ctx := context.Background()
+
+	mockFieldIDs := mockey.Mock((*highlight.SemanticHighlight).FieldIDs).Return([]int64{999}).Build()
+	defer mockFieldIDs.UnPatch()
+
+	op := &semanticHighlightOperator{
+		highlight: &highlight.SemanticHighlight{},
+	}
+
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       5,
+			Topks:      []int64{0},
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId:   101,
+					FieldName: testVarCharField,
+					Type:      schemapb.DataType_VarChar,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{
+								StringData: &schemapb.StringArray{Data: []string{}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	results, err := op.run(ctx, s.span, searchResults)
+	s.NoError(err)
+	s.Require().Len(results, 1)
+
+	result := results[0].(*milvuspb.SearchResults)
+	s.Empty(result.GetResults().GetHighlightResults())
+}
+
+func (s *SearchPipelineSuite) TestSemanticHighlightOpNonZeroHitWithEmptyFieldsData() {
+	op := &semanticHighlightOperator{
+		highlight: &highlight.SemanticHighlight{},
+	}
+
+	_, err := op.run(context.Background(), s.span, &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       1,
+			Topks:      []int64{1},
+			Ids:        testSearchResultIDs(1),
+		},
+	})
+	s.Error(err)
+	s.Contains(err.Error(), "field data is empty for non-empty search result")
 }
 
 func (s *SearchPipelineSuite) TestSemanticHighlightOpDynamicField() {
@@ -1508,6 +1631,7 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOpDynamicField() {
 			NumQueries: 1,
 			TopK:       2,
 			Topks:      []int64{2},
+			Ids:        testSearchResultIDs(1, 2),
 			Scores:     []float32{0.9, 0.8},
 			FieldsData: []*schemapb.FieldData{
 				{
@@ -1591,6 +1715,7 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOpMixedFields() {
 			NumQueries: 1,
 			TopK:       1,
 			Topks:      []int64{1},
+			Ids:        testSearchResultIDs(1),
 			Scores:     []float32{0.9},
 			FieldsData: []*schemapb.FieldData{
 				{
