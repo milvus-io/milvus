@@ -443,16 +443,19 @@ func (loader *segmentLoader) prepare(ctx context.Context, segmentType SegmentTyp
 	// filter out loaded & loading segments
 	infos := make([]*querypb.SegmentLoadInfo, 0, len(segments))
 	for _, segment := range segments {
-		// Not loaded & loading & releasing.
-		if !loader.manager.Segment.Exist(segment.GetSegmentID(), segmentType) &&
-			!loader.loadingSegments.Contain(segment.GetSegmentID()) {
+		// Only active loaded segments should be skipped here. SegmentManager.Exist()
+		// also reports detached/on-releasing segments, which are no longer active
+		// and must be allowed to load again.
+		isLoaded := loader.manager.Segment.GetWithType(segment.GetSegmentID(), segmentType) != nil
+		isLoading := loader.loadingSegments.Contain(segment.GetSegmentID())
+		if !isLoaded && !isLoading {
 			infos = append(infos, segment)
 			loader.loadingSegments.Insert(segment.GetSegmentID(), newLoadResult())
 		} else {
 			log.Info("skip loaded/loading segment",
 				zap.Int64("segmentID", segment.GetSegmentID()),
-				zap.Bool("isLoaded", len(loader.manager.Segment.GetBy(WithType(segmentType), WithID(segment.GetSegmentID()))) > 0),
-				zap.Bool("isLoading", loader.loadingSegments.Contain(segment.GetSegmentID())),
+				zap.Bool("isLoaded", isLoaded),
+				zap.Bool("isLoading", isLoading),
 			)
 		}
 	}

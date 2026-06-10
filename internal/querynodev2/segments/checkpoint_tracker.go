@@ -36,8 +36,8 @@ type BatchInfo struct {
 }
 
 // CheckpointTracker tracks the mapping between segment row offsets and WAL positions.
-// it is used by GrowingFlushManager to determine the correct checkpoint when flushing
-// a range of rows from a Growing Segment.
+// It is legacy QueryNode-side state kept for compatibility while TEXT flush
+// ownership moves to the WAL flusher / WriteBuffer path.
 //
 // design:
 //   - each Insert operation records a BatchInfo with (endOffset, position)

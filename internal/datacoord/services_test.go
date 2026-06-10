@@ -79,7 +79,7 @@ func (s *ServerSuite) SetupSuite() {
 		<-ctx.Done()
 		return ctx.Err()
 	})
-	b.EXPECT().GetLatestWALLocated(mock.Anything, mock.Anything).Return(0, true)
+	b.EXPECT().GetLatestWALLocated(mock.Anything, mock.Anything).Return(0, true).Maybe()
 	balance.Register(b)
 }
 
@@ -146,6 +146,21 @@ func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
 	s.EqualValues(&milvuspb.GetFlushStateResponse{
 		Status:  merr.Success(),
 		Flushed: true,
+	}, resp)
+}
+
+func (s *ServerSuite) TestGetFlushState_ByFlushTsMissingCheckpoint() {
+	s.mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:              merr.Success(),
+		CollectionID:        0,
+		VirtualChannelNames: []string{"missing-cp-channel"},
+	}, nil)
+
+	resp, err := s.testServer.GetFlushState(context.TODO(), &datapb.GetFlushStateRequest{FlushTs: 13})
+	s.NoError(err)
+	s.EqualValues(&milvuspb.GetFlushStateResponse{
+		Status:  merr.Success(),
+		Flushed: false,
 	}, resp)
 }
 
@@ -325,6 +340,91 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 			s.Equal(test.expectedState, segment.GetState())
 		})
 	}
+}
+
+func (s *ServerSuite) TestSaveBinlogPath_TextRequiresStorageV3Manifest() {
+	s.testServer.meta.AddCollection(&collectionInfo{
+		ID: 0,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, DataType: schemapb.DataType_Text},
+			},
+		},
+	})
+	err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            10,
+		CollectionID:  0,
+		PartitionID:   1,
+		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Sealed,
+		Level:         datapb.SegmentLevel_L1,
+		NumOfRows:     1,
+	}))
+	s.Require().NoError(err)
+
+	resp, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+		Base:           &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
+		SegmentID:      10,
+		CollectionID:   0,
+		PartitionID:    1,
+		Channel:        "ch1",
+		SegLevel:       datapb.SegmentLevel_L1,
+		Flushed:        true,
+		StorageVersion: storage.StorageV2,
+	})
+	s.NoError(err)
+	s.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
+
+	resp, err = s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+		Base:           &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
+		SegmentID:      10,
+		CollectionID:   0,
+		PartitionID:    1,
+		Channel:        "ch1",
+		SegLevel:       datapb.SegmentLevel_L1,
+		Flushed:        true,
+		StorageVersion: storage.StorageV3,
+	})
+	s.NoError(err)
+	s.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
+
+	resp, err = s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+		Base:           &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
+		SegmentID:      10,
+		CollectionID:   0,
+		PartitionID:    1,
+		Channel:        "ch1",
+		SegLevel:       datapb.SegmentLevel_L1,
+		Flushed:        false,
+		StorageVersion: storage.StorageV3,
+	})
+	s.NoError(err)
+	s.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
+
+	err = s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            11,
+		CollectionID:  0,
+		PartitionID:   1,
+		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Dropped,
+		Level:         datapb.SegmentLevel_L1,
+		NumOfRows:     1,
+	}))
+	s.Require().NoError(err)
+
+	resp, err = s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+		Base:           &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
+		SegmentID:      11,
+		CollectionID:   0,
+		PartitionID:    1,
+		Channel:        "ch1",
+		SegLevel:       datapb.SegmentLevel_L1,
+		Flushed:        true,
+		StorageVersion: storage.StorageV2,
+	})
+	s.NoError(err)
+	s.True(merr.Ok(resp))
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {

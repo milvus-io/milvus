@@ -2102,7 +2102,8 @@ func (suite *TaskSuite) TestExecutor_MoveSegmentTask() {
 		suite.broker,
 		suite.target,
 		suite.cluster,
-		suite.nodeMgr)
+		suite.nodeMgr,
+	)
 
 	// Verify shard leader ID was set for load action in move task
 	executor.executeSegmentAction(moveTask, 0)

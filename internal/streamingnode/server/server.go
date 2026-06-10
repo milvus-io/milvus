@@ -78,6 +78,8 @@ func (s *Server) initBasicComponent() {
 
 // initService initializes the grpc service.
 func (s *Server) initService() {
+	writeBufferManager := resource.Resource().WriteBufferManager()
+	registry.RegisterLocalReleaseManualFlushPreparer(service.NewReleaseManualFlushPreparer(s.walManager, writeBufferManager))
 	s.handlerService = service.NewHandlerService(s.walManager)
 	s.managerService = service.NewManagerService(s.walManager)
 	s.registerGRPCService(s.grpcServer)

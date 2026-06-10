@@ -1290,6 +1290,9 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	}
 	it.schema = schema
 	it.schemaVersion = schema.Version
+	if err := validateTextStorageV3Enabled(schema.CollectionSchema); err != nil {
+		return err
+	}
 
 	// Validate any FieldPartialUpdateOp directives attached to FieldData.
 	// A non-REPLACE op implicitly promotes the request to partial_update=true
