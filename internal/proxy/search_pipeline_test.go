@@ -2483,6 +2483,54 @@ func (s *SearchPipelineSuite) TestFilterFieldOperatorWithStructArrayFields() {
 	}
 }
 
+func (s *SearchPipelineSuite) TestEndOperatorRoundsScores() {
+	task := &searchTask{
+		queryInfos: []*planpb.QueryInfo{{RoundDecimal: 0}},
+		schema: &schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{},
+		},
+	}
+
+	op, err := newEndOperator(task, nil)
+	s.NoError(err)
+
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Scores: []float32{0.49, 0.36},
+		},
+	}
+
+	results, err := op.run(context.Background(), s.span, searchResults, []*milvuspb.SearchResults{{Results: &schemapb.SearchResultData{AllSearchCount: 0}}})
+	s.NoError(err)
+
+	resultData := results[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]float32{0, 0}, resultData.GetScores())
+}
+
+func (s *SearchPipelineSuite) TestEndOperatorKeepsScoresWhenRoundDecimalDisabled() {
+	task := &searchTask{
+		queryInfos: []*planpb.QueryInfo{{RoundDecimal: -1}},
+		schema: &schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{},
+		},
+	}
+
+	op, err := newEndOperator(task, nil)
+	s.NoError(err)
+
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Scores: []float32{0.49, 0.36},
+		},
+	}
+
+	results, err := op.run(context.Background(), s.span, searchResults, []*milvuspb.SearchResults{{Results: &schemapb.SearchResultData{AllSearchCount: 0}}})
+	s.NoError(err)
+
+	resultData := results[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]float32{float32(0.49), float32(0.36)}, resultData.GetScores())
+}
+
 func (s *SearchPipelineSuite) TestHybridSearchWithRequeryAndRerankByDataPipe() {
 	task := getHybridSearchTask("test_collection", [][]string{
 		{"1", "2"},
