@@ -478,8 +478,11 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	defer sd.distribution.Unpin(version)
 
 	if req.GetReq().GetIsAdvanced() {
-		futures := make([]*conc.Future[*internalpb.SearchResults], len(req.GetReq().GetSubReqs()))
+		group, groupCtx := errgroup.WithContext(ctx)
+		results := make([]*internalpb.SearchResults, len(req.GetReq().GetSubReqs()))
 		for index, subReq := range req.GetReq().GetSubReqs() {
+			index := index
+			subReq := subReq
 			newRequest := &internalpb.SearchRequest{
 				Base:                    req.GetReq().GetBase(),
 				ReqID:                   req.GetReq().GetReqID(),
@@ -509,7 +512,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				AnalyzerName:            subReq.GetAnalyzerName(),
 				PkFilter:                common.PkFilterNoPkFilter, // hybrid search sub-requests rarely have PK predicates, skip unmarshal
 			}
-			future := conc.Go(func() (*internalpb.SearchResults, error) {
+			group.Go(func() error {
 				searchReq := &querypb.SearchRequest{
 					Req:             newRequest,
 					DmlChannels:     req.GetDmlChannels(),
@@ -521,34 +524,32 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 					searchReq.GetReq().MvccTimestamp = tSafe
 				}
 				searchReq.Req.CollectionTtlTimestamps = req.GetReq().GetCollectionTtlTimestamps()
-				results, err := sd.search(ctx, searchReq, sealed, growing, sealedRowCount)
+				searchResults, err := sd.search(groupCtx, searchReq, sealed, growing, sealedRowCount)
 				if err != nil {
-					return nil, err
+					return err
 				}
-
-				return segments.ReduceSearchOnQueryNode(ctx,
-					results,
+				result, err := segments.ReduceSearchOnQueryNode(groupCtx,
+					searchResults,
 					reduce.NewReduceSearchResultInfo(searchReq.GetReq().GetNq(),
 						searchReq.GetReq().GetTopk()).WithMetricType(searchReq.GetReq().GetMetricType()).
 						WithGroupByField(searchReq.GetReq().GetGroupByFieldId()).
 						WithGroupSize(searchReq.GetReq().GetGroupSize()))
+				if err != nil {
+					return err
+				}
+				if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+					log.Debug("delegator hybrid search failed",
+						zap.String("reason", result.GetStatus().GetReason()))
+					return merr.Error(result.GetStatus())
+				}
+				results[index] = result
+				return nil
 			})
-			futures[index] = future
 		}
 
-		err = conc.AwaitAll(futures...)
+		err = group.Wait()
 		if err != nil {
 			return nil, err
-		}
-		results := make([]*internalpb.SearchResults, len(futures))
-		for i, future := range futures {
-			result := future.Value()
-			if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				log.Debug("delegator hybrid search failed",
-					zap.String("reason", result.GetStatus().GetReason()))
-				return nil, merr.Error(result.GetStatus())
-			}
-			results[i] = result
 		}
 		return results, nil
 	}

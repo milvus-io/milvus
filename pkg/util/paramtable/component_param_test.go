@@ -263,6 +263,14 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, int64(16), Params.DDLConcurrency.GetAsInt64())
 		assert.Equal(t, int64(16), Params.DCLConcurrency.GetAsInt64())
+		assert.True(t, Params.DQLBackpressureEnabled.GetAsBool())
+		assert.Equal(t, int64(4), Params.DQLBackpressureMinConcurrency.GetAsInt64())
+		assert.Equal(t, 0.5, Params.DQLBackpressureReduceRatio.GetAsFloat())
+		assert.Equal(t, time.Second, Params.DQLBackpressureDecreaseInterval.GetAsDurationByParse())
+		assert.Equal(t, time.Second, Params.DQLBackpressureRecoverInterval.GetAsDurationByParse())
+		params.Save(Params.DQLBackpressureReduceRatio.Key, "1.2")
+		assert.Equal(t, 0.5, Params.DQLBackpressureReduceRatio.GetAsFloat())
+		params.Reset(Params.DQLBackpressureReduceRatio.Key)
 
 		assert.Equal(t, 72, Params.MaxPasswordLength.GetAsInt())
 		params.Save("proxy.maxPasswordLength", "100")

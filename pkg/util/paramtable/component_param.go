@@ -2007,47 +2007,56 @@ type proxyConfig struct {
 	// Alias  string
 	SoPath ParamItem `refreshable:"false"`
 
-	TimeTickInterval               ParamItem `refreshable:"false"`
-	HealthCheckTimeout             ParamItem `refreshable:"true"`
-	MsgStreamTimeTickBufSize       ParamItem `refreshable:"true"`
-	MaxNameLength                  ParamItem `refreshable:"true"`
-	MaxCollectionDescriptionLength ParamItem `refreshable:"true"`
-	MaxUsernameLength              ParamItem `refreshable:"true"`
-	MaxUserDescriptionLength       ParamItem `refreshable:"true"`
-	MinPasswordLength              ParamItem `refreshable:"true"`
-	MaxPasswordLength              ParamItem `refreshable:"true"`
-	MaxFieldNum                    ParamItem `refreshable:"true"`
-	MaxVectorFieldNum              ParamItem `refreshable:"true"`
-	MaxShardNum                    ParamItem `refreshable:"true"`
-	MaxDimension                   ParamItem `refreshable:"true"`
-	GinLogging                     ParamItem `refreshable:"false"`
-	GinLogSkipPaths                ParamItem `refreshable:"false"`
-	MaxUserNum                     ParamItem `refreshable:"true"`
-	MaxRoleNum                     ParamItem `refreshable:"true"`
-	MaxRoleDescriptionLength       ParamItem `refreshable:"true"`
-	NameValidationAllowedChars     ParamItem `refreshable:"true"`
-	RoleNameValidationAllowedChars ParamItem `refreshable:"true"`
-	MaxTaskNum                     ParamItem `refreshable:"false"`
-	DDLConcurrency                 ParamItem `refreshable:"true"`
-	DCLConcurrency                 ParamItem `refreshable:"true"`
-	ShardLeaderCacheInterval       ParamItem `refreshable:"false"`
-	ReplicaSelectionPolicy         ParamItem `refreshable:"false"`
-	CheckQueryNodeHealthInterval   ParamItem `refreshable:"false"`
-	CostMetricsExpireTime          ParamItem `refreshable:"false"`
-	CheckWorkloadRequestNum        ParamItem `refreshable:"false"`
-	WorkloadToleranceFactor        ParamItem `refreshable:"false"`
-	RetryTimesOnReplica            ParamItem `refreshable:"true"`
-	RetryTimesOnHealthCheck        ParamItem `refreshable:"true"`
-	PartitionNameRegexp            ParamItem `refreshable:"true"`
-	MustUsePartitionKey            ParamItem `refreshable:"true"`
-	SkipAutoIDCheck                ParamItem `refreshable:"true"`
-	SkipPartitionKeyCheck          ParamItem `refreshable:"true"`
-	MaxVarCharLength               ParamItem `refreshable:"false"`
-	MaxTextLength                  ParamItem `refreshable:"false"`
-	MaxArrayCapacity               ParamItem `refreshable:"true"`
-	MaxResultEntries               ParamItem `refreshable:"true"`
-	EnableCachedServiceProvider    ParamItem `refreshable:"true"`
-	ResolveAliasForPrivilege       ParamItem `refreshable:"true"`
+	TimeTickInterval                  ParamItem `refreshable:"false"`
+	HealthCheckTimeout                ParamItem `refreshable:"true"`
+	MsgStreamTimeTickBufSize          ParamItem `refreshable:"true"`
+	MaxNameLength                     ParamItem `refreshable:"true"`
+	MaxCollectionDescriptionLength    ParamItem `refreshable:"true"`
+	MaxUsernameLength                 ParamItem `refreshable:"true"`
+	MaxUserDescriptionLength          ParamItem `refreshable:"true"`
+	MinPasswordLength                 ParamItem `refreshable:"true"`
+	MaxPasswordLength                 ParamItem `refreshable:"true"`
+	MaxFieldNum                       ParamItem `refreshable:"true"`
+	MaxVectorFieldNum                 ParamItem `refreshable:"true"`
+	MaxShardNum                       ParamItem `refreshable:"true"`
+	MaxDimension                      ParamItem `refreshable:"true"`
+	GinLogging                        ParamItem `refreshable:"false"`
+	GinLogSkipPaths                   ParamItem `refreshable:"false"`
+	MaxUserNum                        ParamItem `refreshable:"true"`
+	MaxRoleNum                        ParamItem `refreshable:"true"`
+	MaxRoleDescriptionLength          ParamItem `refreshable:"true"`
+	NameValidationAllowedChars        ParamItem `refreshable:"true"`
+	RoleNameValidationAllowedChars    ParamItem `refreshable:"true"`
+	MaxTaskNum                        ParamItem `refreshable:"false"`
+	DDLConcurrency                    ParamItem `refreshable:"true"`
+	DCLConcurrency                    ParamItem `refreshable:"true"`
+	DQLBackpressureEnabled            ParamItem `refreshable:"true"`
+	DQLBackpressureMinConcurrency     ParamItem `refreshable:"true"`
+	DQLBackpressureReduceRatio        ParamItem `refreshable:"true"`
+	DQLBackpressureDecreaseInterval   ParamItem `refreshable:"true"`
+	DQLBackpressureRecoverInterval    ParamItem `refreshable:"true"`
+	ShardLeaderCacheInterval          ParamItem `refreshable:"false"`
+	ReplicaSelectionPolicy            ParamItem `refreshable:"false"`
+	CheckQueryNodeHealthInterval      ParamItem `refreshable:"false"`
+	CostMetricsExpireTime             ParamItem `refreshable:"false"`
+	CheckWorkloadRequestNum           ParamItem `refreshable:"false"`
+	WorkloadToleranceFactor           ParamItem `refreshable:"false"`
+	RetryTimesOnReplica               ParamItem `refreshable:"true"`
+	RetryTimesOnHealthCheck           ParamItem `refreshable:"true"`
+	ReplicaBlacklistDuration          ParamItem `refreshable:"true"`
+	ReplicaBlacklistCleanupInterval   ParamItem `refreshable:"true"`
+	PartitionNameRegexp               ParamItem `refreshable:"true"`
+	MustUsePartitionKey               ParamItem `refreshable:"true"`
+	SkipAutoIDCheck                   ParamItem `refreshable:"true"`
+	SkipPartitionKeyCheck             ParamItem `refreshable:"true"`
+	ResolveAliasForPrivilege          ParamItem `refreshable:"true"`
+	MaxVarCharLength                  ParamItem `refreshable:"false"`
+	MaxTextLength                     ParamItem `refreshable:"false"`
+	MaxArrayCapacity                  ParamItem `refreshable:"true"`
+	MaxIndexParamsSize                ParamItem `refreshable:"true"`
+	MaxResultEntries                  ParamItem `refreshable:"true"`
+	EnableCachedServiceProvider       ParamItem `refreshable:"true"`
+	MaxSearchAggregationResultEntries ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -2225,6 +2234,58 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.DCLConcurrency.Init(base.mgr)
+
+	p.DQLBackpressureEnabled = ParamItem{
+		Key:          "proxy.dqlBackpressure.enabled",
+		Version:      "2.6.17",
+		DefaultValue: "true",
+		Doc:          "Whether Proxy adaptively controls DQL task dispatch concurrency according to downstream queue-full errors.",
+		Export:       true,
+	}
+	p.DQLBackpressureEnabled.Init(base.mgr)
+
+	p.DQLBackpressureMinConcurrency = ParamItem{
+		Key:          "proxy.dqlBackpressure.minConcurrency",
+		Version:      "2.6.17",
+		DefaultValue: "4",
+		Doc:          "The minimum DQL task dispatch concurrency kept by Proxy backpressure control.",
+		Export:       true,
+	}
+	p.DQLBackpressureMinConcurrency.Init(base.mgr)
+
+	p.DQLBackpressureReduceRatio = ParamItem{
+		Key:          "proxy.dqlBackpressure.reduceRatio",
+		Version:      "2.6.17",
+		DefaultValue: "0.5",
+		Formatter: func(v string) string {
+			ratio := getAsFloat(v)
+			if ratio <= 0 || ratio >= 1 {
+				return "0.5"
+			}
+			return v
+		},
+		Doc:    "The multiplicative decrease ratio for Proxy DQL dispatch concurrency when downstream queue-full errors occur.",
+		Export: true,
+	}
+	p.DQLBackpressureReduceRatio.Init(base.mgr)
+
+	p.DQLBackpressureDecreaseInterval = ParamItem{
+		Key:          "proxy.dqlBackpressure.decreaseInterval",
+		Version:      "2.6.17",
+		DefaultValue: "1s",
+		Doc:          "The minimum interval for Proxy DQL dispatch concurrency to decrease again after downstream queue-full errors.",
+		Export:       true,
+	}
+	p.DQLBackpressureDecreaseInterval.Init(base.mgr)
+
+	p.DQLBackpressureRecoverInterval = ParamItem{
+		Key:          "proxy.dqlBackpressure.recoverInterval",
+		Version:      "2.6.17",
+		DefaultValue: "1s",
+		Doc:          "The minimum interval for Proxy DQL dispatch concurrency to recover by one after successful DQL task execution.",
+		Export:       true,
+	}
+	p.DQLBackpressureRecoverInterval.Init(base.mgr)
 
 	p.GinLogging = ParamItem{
 		Key:          "proxy.ginLogging",
