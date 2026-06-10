@@ -20,6 +20,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -658,6 +659,80 @@ func (s *LBPolicySuite) TestExecuteWithRetryNonRetriableErrorReturnsLastError() 
 
 	s.ErrorIs(err, merr.ErrParameterInvalid)
 	s.Equal(2, executed)
+}
+
+func (s *LBPolicySuite) TestExecuteWithRetryResourceInsufficientStopsRetry() {
+	ctx := context.Background()
+	channel := s.channels[0]
+	nodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost:9000", Serviceable: true},
+		{NodeID: 2, Address: "localhost:9001", Serviceable: true},
+	}
+	s.lbPolicy.retryOnReplica = 2
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil)
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	executed := 0
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        channel,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			executed++
+			return errors.Wrap(merr.ErrServiceResourceInsufficient, "query node resource insufficient")
+		},
+	})
+
+	s.ErrorIs(err, merr.ErrServiceResourceInsufficient)
+	s.Equal(1, executed)
+}
+
+func (s *LBPolicySuite) TestExecuteResourceInsufficientCancelsOtherChannels() {
+	ctx := context.Background()
+	channels := []string{"channel1", "channel2"}
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShardLeaderList(mock.Anything, s.dbName, s.collectionName, s.collectionID, true).Return(channels, nil)
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, mock.Anything).Return([]NodeInfo{{NodeID: 1, Address: "localhost:9000", Serviceable: true}}, nil)
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	secondStarted := make(chan struct{})
+	secondCanceled := make(chan struct{})
+	err := s.lbPolicy.Execute(ctx, CollectionWorkLoad{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			if channel == channels[0] {
+				<-secondStarted
+				return merr.WrapErrTooManyRequests(1024)
+			}
+			close(secondStarted)
+			<-ctx.Done()
+			close(secondCanceled)
+			return ctx.Err()
+		},
+	})
+
+	s.ErrorIs(err, merr.ErrServiceTooManyRequests)
+	select {
+	case <-secondCanceled:
+	case <-time.After(time.Second):
+		s.T().Fatal("resource insufficient error should cancel other shard requests")
+	}
 }
 
 func (s *LBPolicySuite) TestExecuteOneChannel() {
