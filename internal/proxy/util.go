@@ -49,6 +49,7 @@ import (
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -3527,4 +3528,15 @@ func getBM25FunctionOfAnnsField(fieldID int64, functions []*schemapb.FunctionSch
 	return lo.Find(functions, func(function *schemapb.FunctionSchema) bool {
 		return function.GetType() == schemapb.FunctionType_BM25 && function.OutputFieldIds[0] == fieldID
 	})
+}
+
+// failMetricLabel classifies a request failure for the ProxyFunctionCall
+// metric, matching the fail_input/fail_system split that
+// requestutil.ParseMetricLabel emits at the gRPC interceptor; the legacy
+// bare "fail" value must not reappear in this metric's value domain.
+func failMetricLabel(err error) string {
+	if merr.GetErrorType(err) == merr.InputError {
+		return metrics.FailInputLabel
+	}
+	return metrics.FailSystemLabel
 }

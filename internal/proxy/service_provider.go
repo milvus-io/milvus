@@ -290,7 +290,7 @@ func (node *RemoteProxyServiceProvider) DescribeCollection(ctx context.Context,
 			zap.Uint64("EndTS", dct.EndTs()))
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-			metrics.FailLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+			failMetricLabel(err), request.GetDbName(), request.GetCollectionName()).Inc()
 
 		return nil, err
 	}
