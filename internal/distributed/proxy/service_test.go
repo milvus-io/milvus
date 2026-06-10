@@ -889,8 +889,8 @@ func Test_NewServer_HTTPServer_TimeoutDefaults(t *testing.T) {
 	startProxyHTTPServerForTest(t, server)
 
 	assert.Equal(t, 5*time.Second, server.httpServer.ReadHeaderTimeout)
-	assert.Equal(t, 30*time.Second, server.httpServer.ReadTimeout)
-	assert.Equal(t, 30*time.Second, server.httpServer.WriteTimeout)
+	assert.Equal(t, time.Duration(0), server.httpServer.ReadTimeout)
+	assert.Equal(t, time.Duration(0), server.httpServer.WriteTimeout)
 	assert.Equal(t, 300*time.Second, server.httpServer.IdleTimeout)
 	assert.Equal(t, 1<<20, server.httpServer.MaxHeaderBytes)
 }

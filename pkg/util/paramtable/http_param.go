@@ -101,18 +101,18 @@ func (p *httpConfig) init(base *BaseTable) {
 
 	p.ReadTimeout = ParamItem{
 		Key:          "proxy.http.readTimeout",
-		DefaultValue: "30s",
+		DefaultValue: "0s",
 		Version:      "2.6.0",
-		Doc:          "HTTP server timeout for reading the entire request, including the body",
+		Doc:          "HTTP server timeout for reading the entire request, including the body. 0 disables this timeout",
 		Export:       true,
 	}
 	p.ReadTimeout.Init(base.mgr)
 
 	p.WriteTimeout = ParamItem{
 		Key:          "proxy.http.writeTimeout",
-		DefaultValue: "30s",
+		DefaultValue: "0s",
 		Version:      "2.6.0",
-		Doc:          "HTTP server timeout for handling requests and writing responses",
+		Doc:          "HTTP server timeout for handling requests and writing responses. 0 disables this timeout",
 		Export:       true,
 	}
 	p.WriteTimeout.Init(base.mgr)

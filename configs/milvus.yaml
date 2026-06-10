@@ -386,8 +386,8 @@ proxy:
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
     enablePprof: true # Whether to enable pprof middleware on the metrics port
     readHeaderTimeout: 5s # HTTP server timeout for reading request headers
-    readTimeout: 30s # HTTP server timeout for reading the entire request, including the body
-    writeTimeout: 30s # HTTP server timeout for handling requests and writing responses
+    readTimeout: 0s # HTTP server timeout for reading the entire request, including the body. 0 disables this timeout
+    writeTimeout: 0s # HTTP server timeout for handling requests and writing responses. 0 disables this timeout
     idleTimeout: 300s # HTTP server keep-alive idle timeout
     maxHeaderBytes: 1048576 # Maximum number of bytes the HTTP server reads from request headers
     hstsMaxAge: 31536000 # Strict-Transport-Security max-age in seconds
