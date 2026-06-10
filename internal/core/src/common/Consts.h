@@ -129,12 +129,14 @@ const std::string DIM_KEY = "dim";
 const std::string DATA_TYPE_KEY = "data_type";
 const std::string ELEMENT_TYPE_KEY = "element_type";
 const std::string INDEX_NUM_ROWS_KEY = "index_num_rows";
+const std::string NUM_ROWS_KEY = "num_rows";
+const std::string OFFSET_KEY = "offset";
 const std::string SEGMENT_MANIFEST_KEY = "segment_manifest";
 const std::string LOON_FFI_PROPERTIES_KEY = "loon_ffi_properties";
 const std::string STATS_BASE_PATH_KEY = "stats_base_path";
 
 // storage version
-const int64_t STORAGE_V1 = 1;
+const int64_t STORAGE_V1 = 0;
 const int64_t STORAGE_V2 = 2;
 const int64_t STORAGE_V3 = 3;
 

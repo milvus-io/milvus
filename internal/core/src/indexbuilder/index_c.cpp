@@ -156,7 +156,8 @@ get_opt_field(const ::google::protobuf::RepeatedPtrField<
     return opt_fields_map;
 }
 
-milvus::SegmentInsertFiles
+namespace milvus {
+SegmentInsertFiles
 get_segment_insert_files(
     const milvus::proto::indexcgo::SegmentInsertFiles& segment_insert_files) {
     milvus::SegmentInsertFiles files;
@@ -171,6 +172,8 @@ get_segment_insert_files(
     }
     return files;
 }
+
+}  // namespace milvus
 
 milvus::Config
 get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
@@ -197,7 +200,7 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
     if (info->storage_version() == STORAGE_V2 ||
         info->storage_version() == STORAGE_V3) {
         config[SEGMENT_INSERT_FILES_KEY] =
-            get_segment_insert_files(info->segment_insert_files());
+            milvus::get_segment_insert_files(info->segment_insert_files());
         config[SEGMENT_MANIFEST_KEY] = info->manifest();
     }
     config[DIM_KEY] = info->dim();

@@ -19,7 +19,7 @@
 
 namespace milvus::clustering {
 
-void
+static void
 AddClusteringResultFiles(milvus::storage::ChunkManager* remote_chunk_manager,
                          const uint8_t* data,
                          const int64_t data_size,

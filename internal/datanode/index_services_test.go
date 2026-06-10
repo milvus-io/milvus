@@ -508,6 +508,9 @@ func (s *IndexServiceSuite) Test_CreateAnalyzeTask() {
 			MinClusterSizeRatio: 0.01,
 			MaxClusterSizeRatio: 10,
 			MaxClusterSize:      5 * 1024 * 1024 * 1024,
+			StorageVersion:      storage.StorageV1,
+			TrainBufferSize:     5 * 1024 * 1024 * 1024,
+			AssignBufferSize:    5 * 1024 * 1024 * 1024,
 		}
 
 		status, err := s.node.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
@@ -533,7 +536,7 @@ func (s *IndexServiceSuite) Test_CreateAnalyzeTask() {
 			s.NoError(err)
 			s.Equal(1, len(resp.GetAnalyzeJobResults().GetResults()))
 			if resp.GetAnalyzeJobResults().GetResults()[0].GetState() == indexpb.JobState_JobStateFinished {
-				s.NotEmpty(resp.GetAnalyzeJobResults().GetResults()[0].GetCentroidsFile())
+				s.NotEqual("", resp.GetAnalyzeJobResults().GetResults()[0].GetCentroidsFile())
 				break
 			}
 			s.Equal(indexpb.JobState_JobStateInProgress, resp.GetAnalyzeJobResults().GetResults()[0].GetState())
