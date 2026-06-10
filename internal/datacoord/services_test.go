@@ -1722,7 +1722,8 @@ func TestImportV2(t *testing.T) {
 			JobID: "-1",
 		})
 		assert.NoError(t, err)
-		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+		// job-not-found is a server-side orchestration issue, not malformed user data
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportSysFailed))
 
 		// normal case
 		var job ImportJob = &importJob{

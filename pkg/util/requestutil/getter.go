@@ -19,6 +19,9 @@
 package requestutil
 
 import (
+	"context"
+
+	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -223,12 +226,24 @@ var retryableCode typeutil.Set[int32] = typeutil.NewSet(
 // (additive cardinality) rather than a new dimension label (which would be
 // multiplicative). Retryability takes priority over classification.
 func ParseMetricLabel(resp any, err error) string {
-	// err is only returned by interceptors (context cancellation, flow
-	// control, transport issues, auth/privilege rejection). The auth/privilege
-	// interceptors deliberately return raw gRPC codes (not merr, to keep SDK
-	// retry behavior correct); those are the caller's fault, so bucket them as a
-	// user-side rejection. Everything else is a system-side rejection.
+	// err is returned by interceptors (context cancellation, flow control,
+	// transport issues, auth/privilege rejection) and by REST v2 handlers,
+	// which abort with merr-typed errors directly. Classify merr first: a merr
+	// error has no GRPCStatus(), so status.Code(err) degrades to codes.Unknown
+	// and would misbucket user input errors as system rejections. The
+	// auth/privilege interceptors deliberately return raw gRPC codes (not
+	// merr, to keep SDK retry behavior correct); those are the caller's fault,
+	// so bucket them as a user-side rejection. Everything else is a
+	// system-side rejection.
 	if err != nil {
+		// Client cancellation is neither party's failure; don't count it as a
+		// system rejection.
+		if errors.Is(err, context.Canceled) {
+			return metrics.CancelLabel
+		}
+		if merr.GetErrorType(err) == merr.InputError {
+			return metrics.RejectedUserLabel
+		}
 		switch status.Code(err) {
 		case codes.Unauthenticated, codes.PermissionDenied, codes.InvalidArgument:
 			return metrics.RejectedUserLabel

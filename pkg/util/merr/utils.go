@@ -111,8 +111,14 @@ func Status(err error) *commonpb.Status {
 	code := Code(err)
 
 	status := &commonpb.Status{
-		Code:   code,
-		Reason: previousLastError(err).Error(),
+		Code: code,
+		// Reason is the SDK/REST-visible message: the full composed chain,
+		// outermost context first ("outer context: ...: root cause"). The
+		// previous leaf-oriented heuristic (previousLastError) dropped the
+		// actionable outer context whenever the root cause was itself a
+		// nested error (e.g. strconv.NumError wrapping ErrSyntax), leaving
+		// clients with only the raw low-level cause.
+		Reason: err.Error(),
 		// Deprecated, for compatibility
 		ErrorCode: oldCode(code),
 		Retriable: IsRetryableErr(err),
@@ -129,19 +135,6 @@ func Status(err error) *commonpb.Status {
 		status.Retriable = false
 	}
 	return status
-}
-
-func previousLastError(err error) error {
-	lastErr := err
-	for {
-		nextErr := errors.Unwrap(err)
-		if nextErr == nil {
-			break
-		}
-		lastErr = err
-		err = nextErr
-	}
-	return lastErr
 }
 
 func CheckRPCCall(resp any, err error) error {

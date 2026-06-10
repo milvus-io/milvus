@@ -2080,7 +2080,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 
 	job := s.importMeta.GetJob(ctx, jobID)
 	if job == nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailedMsg("import job does not exist, jobID=%d", jobID))
+		resp.Status = merr.Status(merr.WrapErrImportSysFailedMsg("import job does not exist, jobID=%d", jobID))
 		return resp, nil
 	}
 	progress, state, importedRows, totalRows, reason := GetJobProgress(ctx, jobID, s.importMeta, s.meta)
@@ -2948,7 +2948,7 @@ func (s *Server) validateAndExecuteImportAction(
 	}
 	job := s.importMeta.GetJob(ctx, jobID)
 	if job == nil {
-		return merr.Status(merr.WrapErrImportFailedMsg("job %d not found", jobID)), nil
+		return merr.Status(merr.WrapErrImportSysFailedMsg("job %d not found", jobID)), nil
 	}
 	if st := validateState(job); st != nil {
 		return st, nil

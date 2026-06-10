@@ -19,6 +19,7 @@
 package requestutil
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
@@ -539,4 +540,20 @@ func TestParseMetricLabel(t *testing.T) {
 	// response that itself implements GetStatus
 	assert.Equal(t, metrics.FailInputLabel,
 		ParseMetricLabel(&milvuspb.BoolResponse{Status: merr.Status(inputErr)}, nil))
+
+	// merr input error through the err path (REST v2 handlers abort with merr
+	// directly; no GRPCStatus, so the gRPC switch alone would misbucket it as
+	// rejected_system) -> rejected_user
+	assert.Equal(t, metrics.RejectedUserLabel,
+		ParseMetricLabel(&commonpb.Status{}, merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("bad param"))))
+
+	// merr system error through the err path -> rejected_system
+	assert.Equal(t, metrics.RejectedSystemLabel,
+		ParseMetricLabel(&commonpb.Status{}, merr.WrapErrServiceInternalMsg("boom")))
+
+	// client cancellation through the err path -> cancel, not a system rejection
+	assert.Equal(t, metrics.CancelLabel,
+		ParseMetricLabel(&commonpb.Status{}, context.Canceled))
+	assert.Equal(t, metrics.CancelLabel,
+		ParseMetricLabel(&commonpb.Status{}, errors.Wrap(context.Canceled, "rpc aborted")))
 }
