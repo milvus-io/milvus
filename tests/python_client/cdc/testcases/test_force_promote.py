@@ -159,6 +159,23 @@ class TestCDCForcePromote(TestCDCSyncBase):
                     logger.warning(f"[CLEANUP] failed to drop {resource_name} on {client_label}: {e}")
         self.resources_to_cleanup = []
 
+    def cleanup_downstream_only_collection(self, collection_name):
+        """Drop a collection created while downstream is force-promoted primary."""
+        client = self._downstream_client
+        if client is None:
+            return
+        try:
+            if client.has_collection(collection_name):
+                logger.info(f"[CLEANUP] Cleaning up downstream-only collection: {collection_name}")
+                client.drop_collection(collection_name)
+                logger.info(f"[SUCCESS] Downstream-only collection {collection_name} cleaned up successfully")
+        except Exception as e:
+            logger.warning(f"[FAILED] Failed to cleanup downstream-only collection {collection_name}: {e}")
+        finally:
+            self.resources_to_cleanup = [
+                resource for resource in self.resources_to_cleanup if resource != ("collection", collection_name)
+            ]
+
     # ------------------------------------------------------------------
     # Tests
     # ------------------------------------------------------------------
@@ -259,6 +276,7 @@ class TestCDCForcePromote(TestCDCSyncBase):
         finally:
             logger.info("[TEARDOWN] Waiting for source pods before topology restore...")
             kubectl_helper.wait_for_pods_ready(source_cluster_id, timeout=300)
+            self.cleanup_downstream_only_collection(c_after)
             logger.info("[TEARDOWN] Restoring A→B topology...")
             try:
                 switchover_helper(source_cluster_id, target_cluster_id)
@@ -391,6 +409,7 @@ class TestCDCForcePromote(TestCDCSyncBase):
         finally:
             logger.info("[TEARDOWN] Waiting for target pods before topology restore...")
             kubectl_helper.wait_for_pods_ready(target_cluster_id, timeout=300)
+            self.cleanup_downstream_only_collection(c_after)
             logger.info("[TEARDOWN] Restoring A→B topology...")
             try:
                 switchover_helper(source_cluster_id, target_cluster_id)
@@ -523,6 +542,7 @@ class TestCDCForcePromote(TestCDCSyncBase):
         finally:
             logger.info("[TEARDOWN] Waiting for source pods before topology restore...")
             kubectl_helper.wait_for_pods_ready(source_cluster_id, timeout=300)
+            self.cleanup_downstream_only_collection(c_after)
             logger.info("[TEARDOWN] Restoring A→B topology...")
             try:
                 switchover_helper(source_cluster_id, target_cluster_id)
@@ -635,6 +655,7 @@ class TestCDCForcePromote(TestCDCSyncBase):
             res = downstream_client.query(collection_name=c_after, filter="", output_fields=["count(*)"])
             assert res and res[0]["count(*)"] >= 100, f"downstream not writable after incomplete DDL: {res}"
         finally:
+            self.cleanup_downstream_only_collection(c_after)
             logger.info("[TEARDOWN] Restoring A→B topology...")
             try:
                 switchover_helper(source_cluster_id, target_cluster_id)
@@ -799,6 +820,7 @@ class TestCDCForcePromote(TestCDCSyncBase):
                 os.unlink(chaos_path)
             # Allow partition to clear before switchover
             time.sleep(10)
+            self.cleanup_downstream_only_collection(c_after)
             logger.info("[TEARDOWN] Restoring A→B topology...")
             try:
                 switchover_helper(source_cluster_id, target_cluster_id)
