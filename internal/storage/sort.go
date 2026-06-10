@@ -44,6 +44,9 @@ type SortTimings struct {
 	NumRows    int
 }
 
+// how many rows per run we allow in memory (you requested 1,000,000)
+var runRowLimit = 1000000
+
 func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader,
 	rw RecordWriter, predicate func(r Record, ri, i int) bool, sortByFieldIDs []int64,
 ) (int, *SortTimings, error) {
@@ -61,9 +64,6 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 	}
 	// remove entire tmpDir at the end
 	defer os.RemoveAll(tmpDir)
-
-	// how many rows per run we allow in memory (you requested 1,000,000)
-	const runRowLimit = 1000000
 
 	indices := make([]*index, 0)
 
@@ -207,7 +207,7 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 		return nil
 	}
 
-	var totalRecords int64 = 0
+	totalRecords := 0
 	for _, r := range rr {
 		for {
 			rec, err := r.Next()
@@ -278,7 +278,7 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 		ReadCost:   readCost,
 		SortCost:   sortCost,
 		WriteCost:  writeCost,
-		NumBatches: int(totalRecords),
+		NumBatches: totalRecords,
 		NumRows:    numRows,
 	}
 	return numRows, timings, nil
