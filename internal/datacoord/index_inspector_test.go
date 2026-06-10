@@ -90,11 +90,10 @@ func TestIndexInspector_inspect(t *testing.T) {
 
 		inspector := newIndexInspector(ctx, notifyChan, meta, scheduler, alloc, handler, storage, versionManager)
 
-		inspector.Start()
-		defer inspector.Stop()
-
-		notifyChan <- segment.GetCollectionID()
-
+		// Register all expectations before Start(): the inspector goroutine
+		// (reloadFromMeta, the ticker, and the notify channel) may invoke the
+		// mocks immediately, and a call racing with EXPECT registration hits
+		// a no-expectation mock and silently aborts the indexing flow.
 		alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil)
 		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
 		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
@@ -110,6 +109,11 @@ func TestIndexInspector_inspect(t *testing.T) {
 			})
 			assert.NoError(t, err)
 		})
+
+		inspector.Start()
+		defer inspector.Stop()
+
+		notifyChan <- segment.GetCollectionID()
 
 		assert.Eventually(t, func() bool {
 			return !meta.indexMeta.IsUnIndexedSegment(segment.GetCollectionID(), segment.GetID())
