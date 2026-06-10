@@ -1,3 +1,4 @@
+# fmt: off
 import random
 
 import numpy as np
