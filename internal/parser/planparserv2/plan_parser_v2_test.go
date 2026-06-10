@@ -571,6 +571,7 @@ func TestExpr_TextMatch(t *testing.T) {
 
 	exprStrs := []string{
 		`text_match(VarCharField, "query")`,
+		`text_match(TextField, "query")`,
 	}
 	for _, exprStr := range exprStrs {
 		assertInvalidExpr(t, helper, exprStr)
@@ -864,6 +865,7 @@ func TestExpr_PhraseMatch(t *testing.T) {
 
 	exprStrs := []string{
 		`phrase_match(VarCharField, "phrase")`,
+		`phrase_match(TextField, "phrase")`,
 		`phrase_match(StringField, "phrase")`,
 		`phrase_match(StringField, "phrase", 1)`,
 		`phrase_match(VarCharField, "phrase", 11223)`,
@@ -907,7 +909,6 @@ func TestExpr_TextField(t *testing.T) {
 
 	invalidExprs := []string{
 		`TextField == "query"`,
-		`text_match(TextField, "query")`,
 	}
 
 	for _, exprStr := range invalidExprs {

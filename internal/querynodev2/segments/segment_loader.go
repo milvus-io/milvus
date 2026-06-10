@@ -1152,9 +1152,11 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 			if err != nil {
 				return err
 			}
-			if err := loader.loadBm25Stats(ctx, segment.ID(), segment.bm25Stats, bm25Paths); err != nil {
+			bm25Stats := make(map[int64]*storage.BM25Stats)
+			if err := loader.loadBm25Stats(ctx, segment.ID(), bm25Stats, bm25Paths); err != nil {
 				return err
 			}
+			segment.UpdateBM25Stats(bm25Stats)
 		}
 	}
 	return nil

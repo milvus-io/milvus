@@ -219,7 +219,8 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecRangeVisitorImpl<double>(context);
             break;
         }
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::TEXT: {
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()
                      .GetMmapConfig()
@@ -1916,6 +1917,7 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
             can_use = SegmentExpr::CanUseIndexForOp<double>(expr_->op_type_);
             break;
         case DataType::VARCHAR:
+        case DataType::TEXT:
             can_use =
                 SegmentExpr::CanUseIndexForOp<std::string>(expr_->op_type_);
             break;

@@ -11,7 +11,11 @@
 
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
+#include <optional>
+#include <unordered_map>
 
 #include "segcore/default_fs.h"
 #include "segcore/segment_c.h"
@@ -31,6 +35,12 @@ namespace fs = std::filesystem;
 
 class FlushGrowingSegmentTest : public ::testing::Test {
  protected:
+    struct ParsedBM25Stats {
+        std::unordered_map<uint32_t, int32_t> rows_with_token;
+        int64_t num_row = 0;
+        int64_t num_token = 0;
+    };
+
     void
     SetUp() override {
         // create a temporary directory for test output
@@ -127,6 +137,107 @@ class FlushGrowingSegmentTest : public ::testing::Test {
             EXPECT_EQ(column_group->format, format);
         }
     }
+
+    std::vector<std::string>
+    ManifestStatPaths(const std::string& segment_path,
+                      int64_t version,
+                      const std::string& stat_key) {
+        auto fs = GetDefaultArrowFileSystem();
+        EXPECT_NE(fs, nullptr);
+        if (!fs) {
+            return {};
+        }
+
+        auto txn_result = milvus_storage::api::transaction::Transaction::Open(
+            fs, segment_path, version);
+        EXPECT_TRUE(txn_result.ok()) << txn_result.status().ToString();
+        if (!txn_result.ok()) {
+            return {};
+        }
+        auto txn = std::move(txn_result).ValueOrDie();
+
+        auto manifest_result = txn->GetManifest();
+        EXPECT_TRUE(manifest_result.ok())
+            << manifest_result.status().ToString();
+        if (!manifest_result.ok()) {
+            return {};
+        }
+        auto manifest = manifest_result.ValueOrDie();
+        auto stats_it = manifest->stats().find(stat_key);
+        EXPECT_NE(stats_it, manifest->stats().end())
+            << "missing stat key " << stat_key;
+        if (stats_it == manifest->stats().end()) {
+            return {};
+        }
+        return stats_it->second.paths;
+    }
+
+    std::optional<ParsedBM25Stats>
+    ParseBM25StatsBlob(const uint8_t* data, size_t size) {
+        if (size < 20 || (size - 20) % 8 != 0) {
+            ADD_FAILURE() << "invalid BM25 stats blob size " << size;
+            return std::nullopt;
+        }
+
+        int32_t version = 0;
+        ParsedBM25Stats stats;
+        std::memcpy(&version, data, sizeof(version));
+        std::memcpy(&stats.num_row, data + 4, sizeof(stats.num_row));
+        std::memcpy(&stats.num_token, data + 12, sizeof(stats.num_token));
+        EXPECT_EQ(version, 0);
+        if (version != 0) {
+            return std::nullopt;
+        }
+
+        auto entries = (size - 20) / 8;
+        for (size_t i = 0; i < entries; i++) {
+            uint32_t token = 0;
+            int32_t row_count = 0;
+            std::memcpy(&token, data + 20 + i * 8, sizeof(token));
+            std::memcpy(&row_count, data + 20 + i * 8 + 4, sizeof(row_count));
+            stats.rows_with_token[token] += row_count;
+        }
+        return stats;
+    }
+
+    std::optional<ParsedBM25Stats>
+    ParseBM25StatsFromResult(const CFlushResult& result, FieldId field_id) {
+        for (size_t i = 0; i < result.num_bm25_stats; i++) {
+            if (result.bm25_field_ids[i] == field_id.get()) {
+                return ParseBM25StatsBlob(result.bm25_stats[i],
+                                          result.bm25_stats_sizes[i]);
+            }
+        }
+        ADD_FAILURE() << "missing BM25 stats for field " << field_id.get();
+        return std::nullopt;
+    }
+
+    std::optional<ParsedBM25Stats>
+    ReadBM25StatsFromFile(const std::string& path) {
+        auto fs = GetDefaultArrowFileSystem();
+        EXPECT_NE(fs, nullptr);
+        if (!fs) {
+            return std::nullopt;
+        }
+        auto input_result = fs->OpenInputFile(path);
+        EXPECT_TRUE(input_result.ok()) << input_result.status().ToString();
+        if (!input_result.ok()) {
+            return std::nullopt;
+        }
+        auto input = input_result.ValueOrDie();
+        auto size_result = input->GetSize();
+        EXPECT_TRUE(size_result.ok()) << size_result.status().ToString();
+        if (!size_result.ok()) {
+            return std::nullopt;
+        }
+        auto buffer_result = input->Read(size_result.ValueOrDie());
+        EXPECT_TRUE(buffer_result.ok()) << buffer_result.status().ToString();
+        if (!buffer_result.ok()) {
+            return std::nullopt;
+        }
+        auto buffer = buffer_result.ValueOrDie();
+        return ParseBM25StatsBlob(buffer->data(), buffer->size());
+    }
 };
 
 // test basic flush with scalar fields
@@ -163,7 +274,7 @@ TEST_F(FlushGrowingSegmentTest, BasicFlushScalarFields) {
     config.num_text_columns = 0;
 
     // flush data
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -179,6 +290,75 @@ TEST_F(FlushGrowingSegmentTest, BasicFlushScalarFields) {
 
     // cleanup
     FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest, FlushAllowsStaleReadVersionOverwrite) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->AddDebugField("i32_field", DataType::INT32);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    int N = 100;
+    auto dataset = DataGen(schema, N);
+    segment->PreInsert(N);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    std::string segment_path = test_dir_ + "/segment_stale_read_version";
+
+    CFlushConfig first_config{};
+    first_config.segment_path = segment_path.c_str();
+    first_config.read_version = -1;
+    first_config.retry_limit = 3;
+
+    CFlushResult first_result{};
+    auto status = FlushGrowingSegmentData(
+        segment.get(), 0, 50, &first_config, &first_result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(first_result.num_rows, 50);
+    auto acknowledged_version = first_result.committed_version;
+
+    CFlushConfig orphan_config{};
+    orphan_config.segment_path = segment_path.c_str();
+    orphan_config.read_version = acknowledged_version;
+    orphan_config.retry_limit = 3;
+
+    CFlushResult orphan_result{};
+    status = FlushGrowingSegmentData(
+        segment.get(), 50, 75, &orphan_config, &orphan_result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(orphan_result.num_rows, 25);
+    ASSERT_GT(orphan_result.committed_version, acknowledged_version);
+
+    CFlushConfig retry_config{};
+    retry_config.segment_path = segment_path.c_str();
+    retry_config.read_version = acknowledged_version;
+    retry_config.retry_limit = 3;
+
+    CFlushResult retry_result{};
+    status = FlushGrowingSegmentData(
+        segment.get(), 50, 100, &retry_config, &retry_result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(retry_result.num_rows, 50);
+    ASSERT_GT(retry_result.committed_version, orphan_result.committed_version);
+
+    auto pk_datas = ReadFlushedFieldData(
+        segment_path, retry_result, pk_fid, DataType::INT64, false, 0);
+    int64_t total_rows = 0;
+    for (const auto& data : pk_datas) {
+        total_rows += data->get_num_rows();
+    }
+    EXPECT_EQ(total_rows, N);
+
+    FreeFlushResult(&first_result);
+    FreeFlushResult(&orphan_result);
+    FreeFlushResult(&retry_result);
 }
 
 // test explicit writer format in flush config
@@ -252,7 +432,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithVectorFields) {
     config.num_text_columns = 0;
 
     // flush data
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -296,7 +476,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithStringFields) {
     config.num_text_columns = 0;
 
     // flush data
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -342,7 +522,7 @@ TEST_F(FlushGrowingSegmentTest, FlushPartialRange) {
     // flush only rows 20-50
     int start = 20;
     int end = 50;
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), start, end, &config, &result);
 
@@ -395,7 +575,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithTextColumnConfig) {
     config.num_text_columns = 1;
 
     // flush data
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -440,7 +620,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithNullableFields) {
     config.num_text_columns = 0;
 
     // flush data
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -538,7 +718,7 @@ TEST_F(FlushGrowingSegmentTest, FlushOrdinaryFieldSemanticsRoundTrip) {
     config.text_lob_paths = nullptr;
     config.num_text_columns = 0;
 
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
     ASSERT_EQ(status.error_code, Success) << status.error_msg;
@@ -655,7 +835,7 @@ TEST_F(FlushGrowingSegmentTest, FlushTimestamptzPartialRangeRoundTrip) {
     config.text_lob_paths = nullptr;
     config.num_text_columns = 0;
 
-    CFlushResult result;
+    CFlushResult result{};
     constexpr int64_t start = 1;
     constexpr int64_t end = 4;
     auto status =
@@ -748,7 +928,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableScalarTypesPartialRangeRoundTrip) {
     config.text_lob_paths = nullptr;
     config.num_text_columns = 0;
 
-    CFlushResult result;
+    CFlushResult result{};
     constexpr int64_t start = 1;
     constexpr int64_t end = 5;
     auto status =
@@ -851,7 +1031,7 @@ TEST_F(FlushGrowingSegmentTest, FlushVectorArrayRoundTrip) {
     config.text_lob_paths = nullptr;
     config.num_text_columns = 0;
 
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -929,7 +1109,7 @@ TEST_F(FlushGrowingSegmentTest, FlushVectorArrayElementTypesRoundTrip) {
         config.text_lob_paths = nullptr;
         config.num_text_columns = 0;
 
-        CFlushResult result;
+        CFlushResult result{};
         auto status =
             FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -1006,7 +1186,7 @@ TEST_F(FlushGrowingSegmentTest, FlushStringAndTextRoundTrip) {
     config.text_lob_paths = nullptr;
     config.num_text_columns = 0;
 
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -1120,7 +1300,7 @@ TEST_F(FlushGrowingSegmentTest, FlushArrayElementTypesRoundTrip) {
     config.text_lob_paths = nullptr;
     config.num_text_columns = 0;
 
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -1239,7 +1419,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableFloatVectorKeepsCompactMapping) {
     config.text_lob_paths = nullptr;
     config.num_text_columns = 0;
 
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -1307,7 +1487,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableInt8VectorKeepsCompactMapping) {
     config.text_lob_paths = nullptr;
     config.num_text_columns = 0;
 
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -1411,7 +1591,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableFixedWidthVectorTypesRoundTrip) {
         config.text_lob_paths = nullptr;
         config.num_text_columns = 0;
 
-        CFlushResult result;
+        CFlushResult result{};
         auto status =
             FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -1518,7 +1698,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableSparseVectorKeepsCompactMapping) {
     config.text_lob_paths = nullptr;
     config.num_text_columns = 0;
 
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -1553,6 +1733,145 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableSparseVectorKeepsCompactMapping) {
     FreeFlushResult(&result);
 }
 
+TEST_F(FlushGrowingSegmentTest, FlushBM25StatsRangeAndCompoundManifest) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto sparse_fid = schema->AddDebugField(
+        "bm25", DataType::VECTOR_SPARSE_U32_F32, 0, std::nullopt);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 4;
+    std::vector<int64_t> row_ids = {0, 1, 2, 3};
+    std::vector<Timestamp> timestamps = {10, 11, 12, 13};
+    std::vector<int64_t> pks = {100, 101, 102, 103};
+    auto sparse_vectors =
+        std::make_unique<knowhere::sparse::SparseRow<SparseValueType>[]>(N);
+
+    sparse_vectors[0] = knowhere::sparse::SparseRow<SparseValueType>(2);
+    sparse_vectors[0].set_at(0, 10, 2.0F);
+    sparse_vectors[0].set_at(1, 20, 1.0F);
+    sparse_vectors[1] = knowhere::sparse::SparseRow<SparseValueType>(1);
+    sparse_vectors[1].set_at(0, 10, 1.0F);
+    sparse_vectors[2] = knowhere::sparse::SparseRow<SparseValueType>(1);
+    sparse_vectors[2].set_at(0, 30, 4.0F);
+    sparse_vectors[3] = knowhere::sparse::SparseRow<SparseValueType>(2);
+    sparse_vectors[3].set_at(0, 10, 3.0F);
+    sparse_vectors[3].set_at(1, 30, 1.0F);
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(N);
+    auto pk_array =
+        CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid]);
+    insert_data->mutable_fields_data()->AddAllocated(pk_array.release());
+    auto sparse_array = CreateVectorDataArrayFrom(
+        sparse_vectors.get(), nullptr, N, N, (*schema)[sparse_fid]);
+    insert_data->mutable_fields_data()->AddAllocated(sparse_array.release());
+
+    segment->PreInsert(N);
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+    std::string segment_path = test_dir_ + "/segment_bm25";
+    int64_t bm25_field_ids[] = {sparse_fid.get()};
+    int64_t first_bm25_stats_log_ids[] = {1001};
+    int64_t second_bm25_stats_log_ids[] = {1002};
+
+    CFlushConfig first_config{};
+    first_config.segment_path = segment_path.c_str();
+    first_config.read_version = -1;
+    first_config.retry_limit = 3;
+    first_config.bm25_field_ids = bm25_field_ids;
+    first_config.bm25_stats_log_ids = first_bm25_stats_log_ids;
+    first_config.num_bm25_fields = 1;
+    first_config.write_merged_bm25_stats = false;
+
+    CFlushResult first_result{};
+    auto status = FlushGrowingSegmentData(
+        segment.get(), 0, 2, &first_config, &first_result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(first_result.num_rows, 2);
+    ASSERT_EQ(first_result.num_bm25_stats, 1);
+
+    auto first_stats = ParseBM25StatsFromResult(first_result, sparse_fid);
+    ASSERT_TRUE(first_stats.has_value());
+    EXPECT_EQ(first_stats->num_row, 2);
+    EXPECT_EQ(first_stats->num_token, 4);
+    EXPECT_EQ(first_stats->rows_with_token[10], 2);
+    EXPECT_EQ(first_stats->rows_with_token[20], 1);
+
+    CFlushConfig second_config{};
+    second_config.segment_path = segment_path.c_str();
+    second_config.read_version = first_result.committed_version;
+    second_config.retry_limit = 3;
+    second_config.bm25_field_ids = bm25_field_ids;
+    second_config.bm25_stats_log_ids = second_bm25_stats_log_ids;
+    second_config.num_bm25_fields = 1;
+    second_config.write_merged_bm25_stats = true;
+
+    CFlushResult second_result{};
+    status = FlushGrowingSegmentData(
+        segment.get(), 2, 4, &second_config, &second_result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(second_result.num_rows, 2);
+    ASSERT_EQ(second_result.num_bm25_stats, 1);
+
+    auto second_stats = ParseBM25StatsFromResult(second_result, sparse_fid);
+    ASSERT_TRUE(second_stats.has_value());
+    EXPECT_EQ(second_stats->num_row, 2);
+    EXPECT_EQ(second_stats->num_token, 8);
+    EXPECT_EQ(second_stats->rows_with_token[10], 1);
+    EXPECT_EQ(second_stats->rows_with_token[30], 2);
+
+    auto stat_key = "bm25." + std::to_string(sparse_fid.get());
+    auto stat_paths = ManifestStatPaths(
+        segment_path, second_result.committed_version, stat_key);
+    ASSERT_EQ(stat_paths.size(), 3);
+
+    auto stats_prefix = "_stats/bm25." + std::to_string(sparse_fid.get()) + "/";
+    auto merged_rel_path = stats_prefix + "1";
+    auto merged_full_path = segment_path + "/" + merged_rel_path;
+    size_t merged_path_count = 0;
+    size_t delta_path_count = 0;
+    for (const auto& path : stat_paths) {
+        auto rel_path = path;
+        auto full_prefix = segment_path + "/";
+        if (rel_path.rfind(full_prefix, 0) == 0) {
+            rel_path = rel_path.substr(full_prefix.size());
+        }
+        ASSERT_TRUE(rel_path.rfind(stats_prefix, 0) == 0) << rel_path;
+        if (rel_path == merged_rel_path) {
+            merged_path_count++;
+        } else {
+            EXPECT_NE(rel_path.substr(stats_prefix.size()), "");
+            delta_path_count++;
+        }
+    }
+    EXPECT_EQ(merged_path_count, 1);
+    EXPECT_EQ(delta_path_count, 2);
+    auto has_merged_path = std::any_of(
+        stat_paths.begin(), stat_paths.end(), [&](const std::string& path) {
+            auto suffix = "/" + merged_rel_path;
+            return path == merged_rel_path || path == merged_full_path ||
+                   (path.size() >= suffix.size() &&
+                    path.compare(path.size() - suffix.size(),
+                                 suffix.size(),
+                                 suffix) == 0);
+        });
+    EXPECT_TRUE(has_merged_path);
+    auto merged_stats = ReadBM25StatsFromFile(merged_full_path);
+    ASSERT_TRUE(merged_stats.has_value());
+    EXPECT_EQ(merged_stats->num_row, 4);
+    EXPECT_EQ(merged_stats->num_token, 12);
+    EXPECT_EQ(merged_stats->rows_with_token[10], 3);
+    EXPECT_EQ(merged_stats->rows_with_token[20], 1);
+    EXPECT_EQ(merged_stats->rows_with_token[30], 2);
+
+    FreeFlushResult(&first_result);
+    FreeFlushResult(&second_result);
+}
+
 // test flush with empty range
 TEST_F(FlushGrowingSegmentTest, FlushEmptyRange) {
     // create schema
@@ -1585,7 +1904,7 @@ TEST_F(FlushGrowingSegmentTest, FlushEmptyRange) {
     config.num_text_columns = 0;
 
     // flush empty range (start == end)
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 10, 10, &config, &result);
 
@@ -1631,7 +1950,7 @@ TEST_F(FlushGrowingSegmentTest, FlushLargeDataMultipleChunks) {
     config.num_text_columns = 0;
 
     // flush all data
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -1688,7 +2007,7 @@ TEST_F(FlushGrowingSegmentTest, FlushMultipleTextColumns) {
     config.num_text_columns = 2;
 
     // flush data
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -1732,7 +2051,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithBoolField) {
     config.num_text_columns = 0;
 
     // flush data
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -1780,7 +2099,7 @@ TEST_F(FlushGrowingSegmentTest, FlushAllNumericTypes) {
     config.num_text_columns = 0;
 
     // flush data
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -1822,7 +2141,7 @@ TEST_F(FlushGrowingSegmentTest, FlushDifferentVectorTypes) {
         config.text_lob_paths = nullptr;
         config.num_text_columns = 0;
 
-        CFlushResult result;
+        CFlushResult result{};
         auto status =
             FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -1861,7 +2180,7 @@ TEST_F(FlushGrowingSegmentTest, FlushDifferentVectorTypes) {
         config.text_lob_paths = nullptr;
         config.num_text_columns = 0;
 
-        CFlushResult result;
+        CFlushResult result{};
         auto status =
             FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -1900,7 +2219,7 @@ TEST_F(FlushGrowingSegmentTest, FlushDifferentVectorTypes) {
         config.text_lob_paths = nullptr;
         config.num_text_columns = 0;
 
-        CFlushResult result;
+        CFlushResult result{};
         auto status =
             FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -1913,7 +2232,7 @@ TEST_F(FlushGrowingSegmentTest, FlushDifferentVectorTypes) {
 
 // test FreeFlushResult with null manifest_path
 TEST_F(FlushGrowingSegmentTest, FreeFlushResultNull) {
-    CFlushResult result;
+    CFlushResult result{};
     result.manifest_path = nullptr;
     result.committed_version = 0;
     result.num_rows = 0;
@@ -1944,7 +2263,7 @@ TEST_F(FlushGrowingSegmentTest, FlushSealedSegmentFails) {
     config.num_text_columns = 0;
 
     // flush should fail for sealed segment
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, 10, &config, &result);
 
