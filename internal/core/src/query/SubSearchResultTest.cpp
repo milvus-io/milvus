@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/Consts.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
@@ -140,4 +141,30 @@ TEST(Reduce, SubSearchResult) {
     TestSubSearchResultMerge<queue_type_ip>(knowhere::metric::IP, 4, 1, 10);
     TestSubSearchResultMerge<queue_type_ip>(knowhere::metric::IP, 4, 16, 1);
     TestSubSearchResultMerge<queue_type_ip>(knowhere::metric::IP, 4, 16, 10);
+}
+
+TEST(Reduce, SubSearchResultMergesBeforeRounding) {
+    SubSearchResult final_result(1, 2, knowhere::metric::L2, 0);
+
+    SubSearchResult left(1, 2, knowhere::metric::L2, 0);
+    left.mutable_offsets() = {1, INVALID_SEG_OFFSET};
+    left.mutable_distances() = {
+        0.49f, SubSearchResult::init_value(knowhere::metric::L2)};
+
+    SubSearchResult right(1, 2, knowhere::metric::L2, 0);
+    right.mutable_offsets() = {2, INVALID_SEG_OFFSET};
+    right.mutable_distances() = {
+        0.36f, SubSearchResult::init_value(knowhere::metric::L2)};
+
+    final_result.merge(left);
+    final_result.merge(right);
+
+    EXPECT_EQ(final_result.get_offsets()[0], 2);
+    EXPECT_EQ(final_result.get_offsets()[1], 1);
+    EXPECT_FLOAT_EQ(final_result.get_distances()[0], 0.36f);
+    EXPECT_FLOAT_EQ(final_result.get_distances()[1], 0.49f);
+
+    final_result.round_values();
+    EXPECT_FLOAT_EQ(final_result.get_distances()[0], 0.0f);
+    EXPECT_FLOAT_EQ(final_result.get_distances()[1], 0.0f);
 }
