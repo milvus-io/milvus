@@ -136,7 +136,9 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 	})
 	if len(targetSegments) == 0 {
 		log.Warn("compact wrong, not target sealed segments")
-		return nil, merr.WrapErrParameterInvalidMsg("illegal compaction plan with empty target segments")
+		// The plan is produced by datacoord, so a malformed plan is an internal
+		// protocol violation, not user input.
+		return nil, merr.WrapErrServiceInternalMsg("illegal compaction plan with empty target segments")
 	}
 	err = binlog.DecompressCompactionBinlogsWithRootPath(t.compactionParams.StorageConfig.GetRootPath(), l0Segments)
 	if err != nil {

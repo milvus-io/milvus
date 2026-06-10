@@ -51,7 +51,10 @@ func NewProperties(properties map[string]string) Properties {
 }
 
 func WrapErrTaskPropertyLack(lackProperty string, taskID any) error {
-	return merr.WrapErrParameterInvalidMsg("cannot find property '%s' for task '%v'", lackProperty, taskID)
+	// Task properties are populated by the coordinator, never by user input, so a
+	// missing property is an internal protocol violation (e.g. a mixed-version
+	// rolling upgrade), not a user error.
+	return merr.WrapErrServiceInternalMsg("cannot find property '%s' for task '%v'", lackProperty, taskID)
 }
 
 func (p Properties) AppendClusterID(clusterID string) {
@@ -107,7 +110,10 @@ func (p Properties) GetTaskType() (Type, error) {
 	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment:
 		return p[TypeKey], nil
 	default:
-		return p[TypeKey], merr.WrapErrParameterInvalidMsg("unrecognized task type '%s', taskID=%s", p[TypeKey], p[TaskIDKey])
+		// Task types are assigned by the coordinator; an unrecognized one means a
+		// protocol mismatch (e.g. a newer coordinator scheduling onto an older
+		// node), which is system blame, not user input.
+		return p[TypeKey], merr.WrapErrServiceInternalMsg("unrecognized task type '%s', taskID=%s", p[TypeKey], p[TaskIDKey])
 	}
 }
 

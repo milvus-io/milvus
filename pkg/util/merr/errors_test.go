@@ -177,6 +177,14 @@ func (s *ErrSuite) TestOldCode() {
 	s.ErrorIs(OldCodeToMerr(commonpb.ErrorCode_RateLimit), ErrServiceRateLimit)
 	s.ErrorIs(OldCodeToMerr(commonpb.ErrorCode_ForceDeny), ErrServiceQuotaExceeded)
 	s.ErrorIs(OldCodeToMerr(commonpb.ErrorCode_UnexpectedError), errUnexpected)
+
+	// Every parameter-class error must project to IllegalArgument for old SDKs
+	// that still read the deprecated ErrorCode; otherwise the finer-grained
+	// ParameterMissing/ParameterTooLarge codes regress them to UnexpectedError.
+	s.Equal(commonpb.ErrorCode_IllegalArgument, Status(ErrParameterInvalid).GetErrorCode())
+	s.Equal(commonpb.ErrorCode_IllegalArgument, Status(ErrParameterMissing).GetErrorCode())
+	s.Equal(commonpb.ErrorCode_IllegalArgument, Status(ErrParameterTooLarge).GetErrorCode())
+	s.Equal(commonpb.ErrorCode_IllegalArgument, Status(WrapErrParameterMissingMsg("collection names cannot be empty")).GetErrorCode())
 }
 
 func (s *ErrSuite) TestCombine() {

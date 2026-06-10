@@ -112,14 +112,16 @@ func (t *bumpSchemaVersionCompactionTask) preCompact() error {
 		return t.ctx.Err()
 	}
 
-	// Check segment binlogs: must have exactly one segment
+	// Check segment binlogs: must have exactly one segment.
+	// The plan is produced by datacoord, so a malformed plan is an internal
+	// protocol violation, not user input.
 	if len(t.plan.GetSegmentBinlogs()) != 1 {
-		return merr.WrapErrParameterInvalidMsg("schema bump compaction plan is illegal, must have exactly one segment, but got %d segments, planID = %d", len(t.plan.GetSegmentBinlogs()), t.GetPlanID())
+		return merr.WrapErrServiceInternalMsg("schema bump compaction plan is illegal, must have exactly one segment, but got %d segments, planID = %d", len(t.plan.GetSegmentBinlogs()), t.GetPlanID())
 	}
 
 	segment := t.plan.GetSegmentBinlogs()[0]
 	if segment.GetStorageVersion() < storage.StorageV3 || segment.GetManifest() == "" {
-		return merr.WrapErrParameterInvalidMsg("schema bump compaction requires a StorageV3 segment with manifest, planID = %d, segmentID = %d, storageVersion = %d", t.GetPlanID(), segment.GetSegmentID(), segment.GetStorageVersion())
+		return merr.WrapErrServiceInternalMsg("schema bump compaction requires a StorageV3 segment with manifest, planID = %d, segmentID = %d, storageVersion = %d", t.GetPlanID(), segment.GetSegmentID(), segment.GetStorageVersion())
 	}
 
 	return nil

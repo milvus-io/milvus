@@ -790,7 +790,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		}
 		return node.CopySegment(ctx, req)
 	default:
-		err := merr.WrapErrParameterInvalidMsg("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
+		err := merr.WrapErrServiceInternalMsg("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		log.Ctx(ctx).Warn("CreateTask failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -937,7 +937,7 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		resProperties.AppendReason(resp.GetReason())
 		return wrapQueryTaskResult(resp, resProperties)
 	default:
-		err := merr.WrapErrParameterInvalidMsg("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
+		err := merr.WrapErrServiceInternalMsg("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		log.Ctx(ctx).Warn("QueryTask failed", zap.Error(err))
 		return &workerpb.QueryTaskResponse{
 			Status: merr.Status(err),
@@ -997,7 +997,7 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 			zap.String("clusterID", clusterID))
 		return merr.Success(), nil
 	default:
-		err := merr.WrapErrParameterInvalidMsg("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
+		err := merr.WrapErrServiceInternalMsg("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		log.Ctx(ctx).Warn("DropTask failed", zap.Error(err))
 		return merr.Status(err), nil
 	}

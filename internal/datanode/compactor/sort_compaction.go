@@ -108,7 +108,9 @@ func (t *sortCompactionTask) preCompact() error {
 	}
 
 	if len(t.plan.GetSegmentBinlogs()) != 1 {
-		return merr.WrapErrParameterInvalidMsg("sort compaction should handle exactly one segment, but got %d segments, planID = %d",
+		// The plan is produced by datacoord, so a malformed plan is an internal
+		// protocol violation, not user input.
+		return merr.WrapErrServiceInternalMsg("sort compaction should handle exactly one segment, but got %d segments, planID = %d",
 			len(t.plan.GetSegmentBinlogs()), t.GetPlanID())
 	}
 

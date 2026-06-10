@@ -110,11 +110,13 @@ func (t *mixCompactionTask) preCompact() error {
 	}
 
 	if len(t.plan.GetSegmentBinlogs()) < 1 {
-		return merr.WrapErrParameterInvalidMsg("compaction plan is illegal, there's no segments in compaction plan, planID = %d", t.GetPlanID())
+		// The plan is produced by datacoord, so a malformed plan is an internal
+		// protocol violation, not user input.
+		return merr.WrapErrServiceInternalMsg("compaction plan is illegal, there's no segments in compaction plan, planID = %d", t.GetPlanID())
 	}
 
 	if t.plan.GetMaxSize() == 0 {
-		return merr.WrapErrParameterInvalidMsg("compaction plan is illegal, empty maxSize, planID = %d", t.GetPlanID())
+		return merr.WrapErrServiceInternalMsg("compaction plan is illegal, empty maxSize, planID = %d", t.GetPlanID())
 	}
 
 	t.collectionID = t.plan.GetSegmentBinlogs()[0].GetCollectionID()
@@ -440,7 +442,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 
 	if isEmpty {
 		log.Warn("compact wrong, all segments' binlogs are empty")
-		return nil, merr.WrapErrParameterInvalidMsg("illegal compaction plan")
+		return nil, merr.WrapErrServiceInternalMsg("illegal compaction plan")
 	}
 
 	sortMergeAppicable := t.compactionParams.UseMergeSort

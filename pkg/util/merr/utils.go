@@ -183,7 +183,10 @@ func oldCode(code int32) commonpb.ErrorCode {
 	case ErrCollectionNotFound.code():
 		return commonpb.ErrorCode_CollectionNotExists
 
-	case ErrParameterInvalid.code():
+	case ErrParameterInvalid.code(), ErrParameterMissing.code(), ErrParameterTooLarge.code():
+		// The legacy contract is that every parameter-class error surfaces as
+		// IllegalArgument, so the finer-grained 1101/1102 codes must not regress
+		// old SDKs (which still read the deprecated ErrorCode) to UnexpectedError.
 		return commonpb.ErrorCode_IllegalArgument
 
 	case ErrNodeNotMatch.code():
