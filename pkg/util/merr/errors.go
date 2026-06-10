@@ -17,6 +17,8 @@
 package merr
 
 import (
+	"fmt"
+
 	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/errors/markers"
 	"github.com/samber/lo"
@@ -341,7 +343,25 @@ type milvusError struct {
 	inner error
 }
 
+// registeredCodes maps every sentinel code to the message of the sentinel
+// that owns it. milvusError.Is matches by code alone, so two sentinels
+// sharing a code would silently satisfy errors.Is against each other.
+var registeredCodes = make(map[int32]string)
+
+// newMilvusError defines a package-level sentinel and registers its code,
+// panicking at package init on a duplicate. Use makeMilvusError for
+// non-sentinel values (e.g. reconstructing an error from a wire Status).
 func newMilvusError(msg string, code int32, retriable bool, options ...errorOption) milvusError {
+	if owner, dup := registeredCodes[code]; dup {
+		panic(fmt.Sprintf("merr: duplicate sentinel error code %d: %q vs %q", code, owner, msg))
+	}
+	registeredCodes[code] = msg
+	return makeMilvusError(msg, code, retriable, options...)
+}
+
+// makeMilvusError constructs a milvusError value without claiming its code in
+// the sentinel registry.
+func makeMilvusError(msg string, code int32, retriable bool, options ...errorOption) milvusError {
 	err := milvusError{
 		msg:       msg,
 		detail:    msg,

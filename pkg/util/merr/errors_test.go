@@ -18,6 +18,7 @@ package merr
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 
@@ -44,8 +45,19 @@ func (s *ErrSuite) TestCode() {
 	s.Equal(CanceledCode, Code(context.Canceled))
 	s.Equal(errUnexpected.errCode, Code(errUnexpected))
 
-	sameCodeErr := newMilvusError("new error", ErrCollectionNotFound.errCode, false)
+	sameCodeErr := makeMilvusError("new error", ErrCollectionNotFound.errCode, false)
 	s.True(sameCodeErr.Is(ErrCollectionNotFound))
+}
+
+func (s *ErrSuite) TestDuplicateSentinelCodePanics() {
+	// milvusError.Is matches by code alone, so defining a second sentinel on an
+	// occupied code must fail loudly at init instead of silently satisfying
+	// errors.Is against an unrelated sentinel.
+	s.PanicsWithValue(
+		fmt.Sprintf("merr: duplicate sentinel error code %d: %q vs %q",
+			ErrCollectionNotFound.errCode, ErrCollectionNotFound.msg, "duplicate probe"),
+		func() { newMilvusError("duplicate probe", ErrCollectionNotFound.errCode, false) },
+	)
 }
 
 func (s *ErrSuite) TestStatus() {
