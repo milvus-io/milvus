@@ -40,6 +40,9 @@ extraConfigFiles:
       storage:
         # enable storage v3
         useLoonFFI: true
+    dataNode:
+      storage:
+        format: vortex
     dataCoord:
       targetVecIndexVersion: 10
       gc:
