@@ -47,8 +47,6 @@ func (n NodeInfo) String() string {
 	return fmt.Sprintf("<NodeID: %d, serviceable: %v, address: %s>", n.NodeID, n.Serviceable, n.Address)
 }
 
-var errClosed = merr.WrapErrServiceUnavailable("client is closed")
-
 type shardClient struct {
 	sync.RWMutex
 	info     NodeInfo
@@ -129,7 +127,7 @@ func (n *shardClient) roundRobinSelectClient() (types.QueryNodeClient, error) {
 	n.RLock()
 	defer n.RUnlock()
 	if n.isClosed {
-		return nil, errClosed
+		return nil, merr.WrapErrServiceUnavailable("client is closed")
 	}
 
 	if len(n.clients) == 0 {

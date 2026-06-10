@@ -243,10 +243,10 @@ func validateSupportedMissingFunctionMaterialization(functionSchema *schemapb.Fu
 		return nil
 	case schemapb.FunctionType_MinHash:
 		if len(functionSchema.GetInputFieldIds()) == 0 {
-			return merr.WrapErrFunctionFailedMsg("minhash function should have input fields")
+			return merr.WrapErrParameterInvalidMsg("minhash function should have input fields")
 		}
 		if len(functionSchema.GetOutputFieldIds()) == 0 {
-			return merr.WrapErrFunctionFailedMsg("minhash function should have output fields")
+			return merr.WrapErrParameterInvalidMsg("minhash function should have output fields")
 		}
 		return nil
 	default:
@@ -262,7 +262,7 @@ func validateMaterializationInputField(functionSchema *schemapb.FunctionSchema, 
 		}
 	case schemapb.FunctionType_MinHash:
 		if field.GetDataType() != schemapb.DataType_VarChar && field.GetDataType() != schemapb.DataType_Text {
-			return merr.WrapErrFunctionFailedMsg("input field data type must be varchar or text for minhash materialization")
+			return merr.WrapErrParameterInvalidMsg("input field data type must be varchar or text for minhash materialization")
 		}
 	}
 	return nil
@@ -276,7 +276,7 @@ func validateMaterializationOutputField(functionSchema *schemapb.FunctionSchema,
 		}
 	case schemapb.FunctionType_MinHash:
 		if field.GetDataType() != schemapb.DataType_BinaryVector {
-			return merr.WrapErrFunctionFailedMsg("output field data type must be binary vector for minhash materialization")
+			return merr.WrapErrParameterInvalidMsg("output field data type must be binary vector for minhash materialization")
 		}
 	}
 	return nil

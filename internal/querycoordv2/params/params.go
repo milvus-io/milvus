@@ -22,14 +22,18 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cockroachdb/errors"
+
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var Params *paramtable.ComponentParam = paramtable.Get()
 
-var ErrFailedAllocateID = merr.WrapErrServiceInternalMsg("failed to allocate ID")
+// ErrFailedAllocateID is an identity sentinel returned by the test-only
+// ErrorIDAllocator; keep it a plain errors.New (not merr) so errors.Is
+// matches by identity instead of by merr error code.
+var ErrFailedAllocateID = errors.New("failed to allocate ID")
 
 // GenerateEtcdConfig returns a etcd config with a random root path,
 // NOTE: for test only

@@ -162,11 +162,14 @@ func (kc *Catalog) parseBinlogKey(key string) (int64, error) {
 	// ---------------------------------|collectionID      |partitionID       |segmentID         |fieldID
 	keyWordGroup := strings.Split(key, "/")
 	if len(keyWordGroup) < 3 {
-		return 0, merr.WrapErrParameterInvalidMsg("parse key: %s failed, key:%s", key, key)
+		// A malformed key read back from the metastore during recovery is corrupt
+		// stored data, not a caller's bad parameter (cf. the unmarshal sibling
+		// below) — classify it as DataIntegrity.
+		return 0, merr.WrapErrDataIntegrityMsg("parse binlog key failed, key:%s", key)
 	}
 	segmentID, err := strconv.ParseInt(keyWordGroup[len(keyWordGroup)-2], 10, 64)
 	if err != nil {
-		return 0, merr.WrapErrParameterInvalidMsg("parse key failed, key:%s, err:%v", key, err)
+		return 0, merr.WrapErrDataIntegrity(err, "parse binlog key failed, key:%s", key)
 	}
 	return segmentID, nil
 }

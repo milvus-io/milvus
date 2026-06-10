@@ -2526,6 +2526,12 @@ func (c *Core) isValidRole(ctx context.Context, entity *milvuspb.RoleEntity) err
 	}
 	if _, err := c.meta.SelectRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.Name}, false); err != nil {
 		log.Warn("fail to select the role", zap.String("role_name", entity.Name), zap.Error(err))
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			// The caller named a non-existent role; translate the storage
+			// not-found into an input error instead of leaking the internal
+			// io-key-not-found code to the client.
+			return merr.WrapErrParameterInvalidMsg("the role %q does not exist", entity.Name)
+		}
 		return merr.Wrap(err, "fail to validate role")
 	}
 	return nil
@@ -2641,6 +2647,11 @@ func (c *Core) operatePrivilegeCommonCheck(ctx context.Context, in *milvuspb.Ope
 	}
 	if _, err := c.meta.SelectUser(ctx, util.DefaultTenant, &milvuspb.UserEntity{Name: entity.User.Name}, false); err != nil {
 		log.Ctx(ctx).Warn("fail to select the user", zap.String("username", entity.User.Name), zap.Error(err))
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			// The grantor user does not exist; translate the storage not-found
+			// into an input error instead of leaking io-key-not-found.
+			return merr.WrapErrParameterInvalidMsg("the grantor user %q does not exist", entity.User.Name)
+		}
 		return merr.Wrap(err, "fail to validate grantor user")
 	}
 	if entity.Privilege == nil {

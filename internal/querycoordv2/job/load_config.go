@@ -32,8 +32,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-var ErrIgnoredAlterLoadConfig = merr.WrapErrServiceInternalMsg("ignored alter load config")
-
 type AlterLoadConfigRequest struct {
 	Meta           *meta.Meta
 	CollectionInfo *milvuspb.DescribeCollectionResponse
@@ -141,6 +139,8 @@ func (c *CurrentLoadConfig) IntoLoadConfigMessageHeader() *messagespb.AlterLoadC
 }
 
 // GenerateAlterLoadConfigMessage generates the alter load config message for the collection.
+// It returns a nil message (with a nil error) when the expected load config is identical to
+// the current one, i.e. there is nothing to broadcast and the operation is a no-op.
 func GenerateAlterLoadConfigMessage(ctx context.Context, req *AlterLoadConfigRequest) (message.BroadcastMutableMessage, error) {
 	loadFields := generateLoadFields(req.Expected.ExpectedLoadFields, req.Expected.ExpectedFieldIndexID)
 	loadReplicaConfigs, err := req.generateReplicas(ctx)
@@ -161,9 +161,9 @@ func GenerateAlterLoadConfigMessage(ctx context.Context, req *AlterLoadConfigReq
 		Replicas:                 loadReplicaConfigs,
 		UserSpecifiedReplicaMode: req.Expected.ExpectedUserSpecifiedReplicaMode,
 	}
-	// check if the load configuration is changed
+	// check if the load configuration is changed; nothing to broadcast if not.
 	if previousHeader := req.Current.IntoLoadConfigMessageHeader(); proto.Equal(previousHeader, header) {
-		return nil, ErrIgnoredAlterLoadConfig
+		return nil, nil
 	}
 	return message.NewAlterLoadConfigMessageBuilderV2().
 		WithHeader(header).

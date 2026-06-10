@@ -24,8 +24,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-var errLazyLoadTimeout = merr.WrapErrServiceInternal("lazy load time out")
-
 func GetPkField(schema *schemapb.CollectionSchema) *schemapb.FieldSchema {
 	for _, field := range schema.GetFields() {
 		if field.GetIsPrimaryKey() {

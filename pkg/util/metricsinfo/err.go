@@ -11,12 +11,8 @@
 
 package metricsinfo
 
-import "github.com/milvus-io/milvus/pkg/v3/util/merr"
-
 const (
 	// MsgUnimplementedMetric represents that user requests an unimplemented metric type
 	MsgUnimplementedMetric           = "metric request type is not implemented"
 	msgInvalidSystemInfosMetricCache = "system infos metric is invalid"
 )
-
-var errInvalidSystemInfosMetricCache = merr.WrapErrParameterInvalidMsg(msgInvalidSystemInfosMetricCache)

@@ -457,3 +457,23 @@ func rawmerrerror(m dsl.Matcher) {
 			!m.File().PkgPath.Matches(`/mocks/`)).
 		Report(`raw error returned from function body; originate through the merr framework (merr.WrapErr*/merr.Wrap) instead of fmt.Errorf/errors.New/errors.Errorf`)
 }
+
+// merrsentinel forbids parking merr-typed errors in variables that look like
+// sentinels. milvusError.Is compares error codes only, so errors.Is against a
+// merr-typed "sentinel" silently matches ANY error sharing the code — a guard
+// like errors.Is(err, ErrIgnoredFoo) then treats unrelated internal failures
+// as the special case (real incident: stale-meta / already-loaded guards
+// acknowledged etcd write failures as success). Identity sentinels must stay
+// plain errors.New; merr errors must be created at the return site.
+func merrsentinel(m dsl.Matcher) {
+	m.Match(
+		`var $x = merr.$f($*_)`,
+		`var $x = merr.$v`,
+	).
+		Where(!m.File().Name.Matches(`_test\.go$`) &&
+			!m.File().PkgPath.Matches(`/milvus/cmd/`) &&
+			!m.File().PkgPath.Matches(`/milvus/tests/`) &&
+			!m.File().PkgPath.Matches(`/mocks/`) &&
+			!m.File().PkgPath.Matches(`util/merr`)).
+		Report(`don't store a merr error in a sentinel-like variable: errors.Is on merr compares codes, not identity, so any same-code error would match. Use errors.New for identity sentinels, or create the merr error at the return site`)
+}

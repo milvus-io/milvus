@@ -19,8 +19,6 @@ type queryFunc func(context.Context, UniqueID, types.QueryNodeClient, ...string)
 
 type pickShardPolicy func(context.Context, shardclient.ShardClientMgr, queryFunc, map[string][]nodeInfo) error
 
-var errInvalidShardLeaders = merr.WrapErrParameterInvalidMsg("Invalid shard leader")
-
 // RoundRobinPolicy do the query with multiple dml channels
 // if request failed, it finds shard leader for failed dml channels
 func RoundRobinPolicy(

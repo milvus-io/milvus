@@ -29,8 +29,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-var ErrConsumed = merr.WrapErrParameterInvalidMsg("future is already consumed")
-
 // Would put this in futures.go but for the documented issue with
 // exports and functions in preamble
 // (https://code.google.com/p/go-wiki/wiki/cgo#Global_functions)
@@ -57,7 +55,7 @@ type Future interface {
 	basicFuture
 
 	// BlockAndLeakyGet block until the future is ready or canceled, and return the leaky result.
-	//   Caller should only call once for BlockAndLeakyGet, otherwise the ErrConsumed will returned.
+	//   Caller should only call once for BlockAndLeakyGet, otherwise a merr.ErrParameterInvalid (future is already consumed) will be returned.
 	//   Caller will get the merr.ErrSegcoreCancel or merr.ErrSegcoreTimeout respectively if the future is canceled or timeout.
 	//   Caller will get other error if the underlying cgo function throws, otherwise caller will get result.
 	//   Caller should free the result after used (defined by caller), otherwise the memory of result is leaked.
@@ -131,7 +129,7 @@ func (f *futureImpl) BlockAndLeakyGet() (unsafe.Pointer, error) {
 
 	guard := f.state.LockForConsume()
 	if guard == nil {
-		return nil, ErrConsumed
+		return nil, merr.WrapErrParameterInvalidMsg("future is already consumed")
 	}
 	defer guard.Unlock()
 

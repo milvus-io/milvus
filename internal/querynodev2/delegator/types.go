@@ -50,8 +50,6 @@ type TSafeUpdater interface {
 }
 
 // ErrTsLagTooLarge serviceable and guarantee lag too large.
-var ErrTsLagTooLarge = merr.ErrChannelTSafeStalled
-
 // WrapErrTsLagTooLarge wraps ErrTsLagTooLarge with lag and max value.
 func WrapErrTsLagTooLarge(channel string, duration time.Duration, maxLag time.Duration) error {
 	return merr.WrapErrChannelTSafeStalled(channel, fmt.Sprintf("lag(%s) max(%s)", duration, maxLag))

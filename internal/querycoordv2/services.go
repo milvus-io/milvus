@@ -227,11 +227,6 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 	}
 
 	if err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, req); err != nil {
-		if errors.Is(err, job.ErrIgnoredAlterLoadConfig) {
-			logger.Info("load collection ignored, collection is already loaded")
-			metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
-			return merr.Success(), nil
-		}
 		logger.Warn("failed to load collection", zap.Error(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
@@ -305,11 +300,6 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 	}
 
 	if err := s.broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx, req); err != nil {
-		if errors.Is(err, job.ErrIgnoredAlterLoadConfig) {
-			logger.Info("load partitions ignored, partitions are already loaded")
-			metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
-			return merr.Success(), nil
-		}
 		logger.Warn("failed to load partitions", zap.Error(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
@@ -343,11 +333,6 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 
 	collectionReleased, err := s.broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx, req)
 	if err != nil {
-		if errors.Is(err, job.ErrIgnoredAlterLoadConfig) {
-			logger.Info("release partitions ignored, partitions are already released")
-			metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
-			return merr.Success(), nil
-		}
 		logger.Warn("failed to release partitions", zap.Error(err))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
