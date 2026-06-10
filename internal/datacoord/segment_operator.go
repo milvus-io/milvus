@@ -122,7 +122,6 @@ func (f ChannelFilter) Match(segment *SegmentInfo) bool {
 
 func (f ChannelFilter) AddFilter(criterion *segmentCriterion) {
 	criterion.channel = string(f)
-	criterion.others = append(criterion.others, f)
 }
 
 // WithChannel WithCollection has a higher priority if both WithCollection and WithChannel are in condition together.

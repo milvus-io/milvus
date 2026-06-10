@@ -100,15 +100,16 @@ type Server struct {
 	quitCh           chan struct{}
 	stateCode        atomic.Value
 
-	etcdCli        *clientv3.Client
-	tikvCli        *txnkv.Client
-	address        string
-	watchClient    kv.WatchKV
-	kv             kv.MetaKv
-	metaRootPath   string
-	meta           *meta
-	segmentManager Manager
-	allocator      allocator.Allocator
+	etcdCli         *clientv3.Client
+	tikvCli         *txnkv.Client
+	address         string
+	watchClient     kv.WatchKV
+	kv              kv.MetaKv
+	metaRootPath    string
+	meta            *meta
+	dataViewManager DataViewManager
+	segmentManager  Manager
+	allocator       allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
 	idAllocator      *globalIDAllocator.GlobalIDAllocator
 	nodeManager      session.NodeManager
@@ -199,6 +200,12 @@ func WithDataNodeCreator(creator session.DataNodeCreatorFunc) Option {
 func WithSegmentManager(manager Manager) Option {
 	return func(svr *Server) {
 		svr.segmentManager = manager
+	}
+}
+
+func WithDataViewReferenceChecker(checker DataViewReferenceChecker) Option {
+	return func(svr *Server) {
+		svr.gcOpt.dataViewRefs = checker
 	}
 }
 
@@ -492,6 +499,7 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 		scanInterval:     Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
 		dropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
+		dataViewRefs:     s.gcOpt.dataViewRefs,
 	})
 }
 
@@ -640,14 +648,18 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		if err != nil {
 			return err
 		}
-
-		// Load collection information asynchronously
-		// HINT: please make sure this is the last step in the `reloadEtcdFn` function !!!
-		go func() {
-			_ = retry.Do(s.ctx, func() error {
-				return s.meta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
-			}, retry.Sleep(time.Second), retry.Attempts(connMetaMaxRetryTime))
-		}()
+		s.dataViewManager = newDataViewManager(catalog, s.meta)
+		s.meta.dataViewManager = s.dataViewManager
+		// DataView recovery must see the current collection/partition cache so
+		// DDL trim intent from RootCoord is applied before reconciling segments.
+		if err := s.meta.reloadCollectionsFromRootcoord(s.ctx, s.broker); err != nil {
+			return err
+		}
+		for _, collectionID := range s.meta.recoveredCollectionIDs {
+			if err := s.dataViewManager.RecoverCollection(s.ctx, collectionID); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))

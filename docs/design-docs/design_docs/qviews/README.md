@@ -72,8 +72,8 @@ For a single Shard of a Collection, the complete distributed query view consists
 
 ## 5. Data Side — Storage View (DataView)
 
-TODO(data_view.md): add the detailed DataView contract, event triggers, delayed
-visibility rules, and delete timetick handling when DataView is picked.
+For the detailed DataView contract, event triggers, delayed visibility rules,
+and delete timetick handling, see [DataView Design](data_view.md).
 
 ### 5.1 Overview
 
@@ -88,6 +88,7 @@ data ([B1] and [A1]). A version number DataVersion is introduced:
 Version numbers are ordered lexicographically by `(streaming_version, compact_version)`.
 
 ### 5.2 Data Structures
+
 
 `DataViewOfCollection`, `DataViewOfShard`, and `DataViewOfPartition` are
 immutable builder inputs defined in [view.proto](../../../../pkg/proto/view.proto).

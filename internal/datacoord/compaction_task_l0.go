@@ -520,9 +520,17 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 	)
 
 	if len(v3Deltalogs) > 0 {
-		return t.commitL0V3DeltalogsBatch(ctx, v3Deltalogs, operators...)
+		if err := t.commitL0V3DeltalogsBatch(ctx, v3Deltalogs, operators...); err != nil {
+			return err
+		}
+		t.publishDataViewAfterL0Compact(ctx)
+		return nil
 	}
-	return t.meta.UpdateSegmentsInfo(ctx, operators...)
+	if err := t.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
+		return err
+	}
+	t.publishDataViewAfterL0Compact(ctx)
+	return nil
 }
 
 // commitL0V3DeltalogsBatch publishes every V3 target's deltalogs together with
@@ -632,6 +640,22 @@ func (t *l0CompactionTask) context() context.Context {
 	// Unit-test CompactionMeta implementations do not own the DataCoord
 	// lifecycle context. Production tasks always take the meta context above.
 	return context.Background()
+}
+
+func (t *l0CompactionTask) publishDataViewAfterL0Compact(ctx context.Context) {
+	meta, ok := t.meta.(*meta)
+	if !ok || meta.dataViewManager == nil {
+		return
+	}
+	task := t.GetTaskProto()
+	if _, err := meta.dataViewManager.OnL0Compact(ctx, L0CompactDataViewEvent{
+		CollectionID: task.GetCollectionID(),
+	}); err != nil {
+		log.Ctx(ctx).Warn("failed to refresh DataView delete timetick after L0 compaction",
+			zap.Int64("planID", task.GetPlanID()),
+			zap.Int64("collectionID", task.GetCollectionID()),
+			zap.Error(err))
+	}
 }
 
 func (t *l0CompactionTask) GetSlotUsage() int64 {

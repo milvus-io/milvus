@@ -230,70 +230,6 @@ func (_c *DataCoordCatalog_AlterSegments_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
-// AlterSegmentsAndSaveDataView provides a mock function with given fields: ctx, newSegments, collectionID, view, binlogs
-func (_m *DataCoordCatalog) AlterSegmentsAndSaveDataView(ctx context.Context, newSegments []*datapb.SegmentInfo, collectionID int64, view *viewpb.DataViewOfCollection, binlogs ...metastore.BinlogsIncrement) error {
-	_va := make([]interface{}, len(binlogs))
-	for _i := range binlogs {
-		_va[_i] = binlogs[_i]
-	}
-	var _ca []interface{}
-	_ca = append(_ca, ctx, newSegments, collectionID, view)
-	_ca = append(_ca, _va...)
-	ret := _m.Called(_ca...)
-
-	if len(ret) == 0 {
-		panic("no return value specified for AlterSegmentsAndSaveDataView")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, []*datapb.SegmentInfo, int64, *viewpb.DataViewOfCollection, ...metastore.BinlogsIncrement) error); ok {
-		r0 = rf(ctx, newSegments, collectionID, view, binlogs...)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// DataCoordCatalog_AlterSegmentsAndSaveDataView_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterSegmentsAndSaveDataView'
-type DataCoordCatalog_AlterSegmentsAndSaveDataView_Call struct {
-	*mock.Call
-}
-
-// AlterSegmentsAndSaveDataView is a helper method to define mock.On call
-//   - ctx context.Context
-//   - newSegments []*datapb.SegmentInfo
-//   - collectionID int64
-//   - view *viewpb.DataViewOfCollection
-//   - binlogs ...metastore.BinlogsIncrement
-func (_e *DataCoordCatalog_Expecter) AlterSegmentsAndSaveDataView(ctx interface{}, newSegments interface{}, collectionID interface{}, view interface{}, binlogs ...interface{}) *DataCoordCatalog_AlterSegmentsAndSaveDataView_Call {
-	return &DataCoordCatalog_AlterSegmentsAndSaveDataView_Call{Call: _e.mock.On("AlterSegmentsAndSaveDataView",
-		append([]interface{}{ctx, newSegments, collectionID, view}, binlogs...)...)}
-}
-
-func (_c *DataCoordCatalog_AlterSegmentsAndSaveDataView_Call) Run(run func(ctx context.Context, newSegments []*datapb.SegmentInfo, collectionID int64, view *viewpb.DataViewOfCollection, binlogs ...metastore.BinlogsIncrement)) *DataCoordCatalog_AlterSegmentsAndSaveDataView_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]metastore.BinlogsIncrement, len(args)-4)
-		for i, a := range args[4:] {
-			if a != nil {
-				variadicArgs[i] = a.(metastore.BinlogsIncrement)
-			}
-		}
-		run(args[0].(context.Context), args[1].([]*datapb.SegmentInfo), args[2].(int64), args[3].(*viewpb.DataViewOfCollection), variadicArgs...)
-	})
-	return _c
-}
-
-func (_c *DataCoordCatalog_AlterSegmentsAndSaveDataView_Call) Return(_a0 error) *DataCoordCatalog_AlterSegmentsAndSaveDataView_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *DataCoordCatalog_AlterSegmentsAndSaveDataView_Call) RunAndReturn(run func(context.Context, []*datapb.SegmentInfo, int64, *viewpb.DataViewOfCollection, ...metastore.BinlogsIncrement) error) *DataCoordCatalog_AlterSegmentsAndSaveDataView_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // ChannelExists provides a mock function with given fields: ctx, channel
 func (_m *DataCoordCatalog) ChannelExists(ctx context.Context, channel string) bool {
 	ret := _m.Called(ctx, channel)
@@ -766,9 +702,9 @@ func (_c *DataCoordCatalog_DropCurrentPartitionStatsVersion_Call) RunAndReturn(r
 	return _c
 }
 
-// DropDataView provides a mock function with given fields: ctx, collectionID, version
-func (_m *DataCoordCatalog) DropDataView(ctx context.Context, collectionID int64, version *viewpb.DataVersion) error {
-	ret := _m.Called(ctx, collectionID, version)
+// DropDataView provides a mock function with given fields: ctx, collectionID, dataVersion
+func (_m *DataCoordCatalog) DropDataView(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) error {
+	ret := _m.Called(ctx, collectionID, dataVersion)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DropDataView")
@@ -776,7 +712,7 @@ func (_m *DataCoordCatalog) DropDataView(ctx context.Context, collectionID int64
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(context.Context, int64, *viewpb.DataVersion) error); ok {
-		r0 = rf(ctx, collectionID, version)
+		r0 = rf(ctx, collectionID, dataVersion)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -792,12 +728,12 @@ type DataCoordCatalog_DropDataView_Call struct {
 // DropDataView is a helper method to define mock.On call
 //   - ctx context.Context
 //   - collectionID int64
-//   - version *viewpb.DataVersion
-func (_e *DataCoordCatalog_Expecter) DropDataView(ctx interface{}, collectionID interface{}, version interface{}) *DataCoordCatalog_DropDataView_Call {
-	return &DataCoordCatalog_DropDataView_Call{Call: _e.mock.On("DropDataView", ctx, collectionID, version)}
+//   - dataVersion *viewpb.DataVersion
+func (_e *DataCoordCatalog_Expecter) DropDataView(ctx interface{}, collectionID interface{}, dataVersion interface{}) *DataCoordCatalog_DropDataView_Call {
+	return &DataCoordCatalog_DropDataView_Call{Call: _e.mock.On("DropDataView", ctx, collectionID, dataVersion)}
 }
 
-func (_c *DataCoordCatalog_DropDataView_Call) Run(run func(ctx context.Context, collectionID int64, version *viewpb.DataVersion)) *DataCoordCatalog_DropDataView_Call {
+func (_c *DataCoordCatalog_DropDataView_Call) Run(run func(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion)) *DataCoordCatalog_DropDataView_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(int64), args[2].(*viewpb.DataVersion))
 	})
@@ -814,12 +750,12 @@ func (_c *DataCoordCatalog_DropDataView_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
-// DropDataViewsByCollection provides a mock function with given fields: ctx, collectionID
-func (_m *DataCoordCatalog) DropDataViewsByCollection(ctx context.Context, collectionID int64) error {
+// DropDataViews provides a mock function with given fields: ctx, collectionID
+func (_m *DataCoordCatalog) DropDataViews(ctx context.Context, collectionID int64) error {
 	ret := _m.Called(ctx, collectionID)
 
 	if len(ret) == 0 {
-		panic("no return value specified for DropDataViewsByCollection")
+		panic("no return value specified for DropDataViews")
 	}
 
 	var r0 error
@@ -832,31 +768,31 @@ func (_m *DataCoordCatalog) DropDataViewsByCollection(ctx context.Context, colle
 	return r0
 }
 
-// DataCoordCatalog_DropDataViewsByCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropDataViewsByCollection'
-type DataCoordCatalog_DropDataViewsByCollection_Call struct {
+// DataCoordCatalog_DropDataViews_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropDataViews'
+type DataCoordCatalog_DropDataViews_Call struct {
 	*mock.Call
 }
 
-// DropDataViewsByCollection is a helper method to define mock.On call
+// DropDataViews is a helper method to define mock.On call
 //   - ctx context.Context
 //   - collectionID int64
-func (_e *DataCoordCatalog_Expecter) DropDataViewsByCollection(ctx interface{}, collectionID interface{}) *DataCoordCatalog_DropDataViewsByCollection_Call {
-	return &DataCoordCatalog_DropDataViewsByCollection_Call{Call: _e.mock.On("DropDataViewsByCollection", ctx, collectionID)}
+func (_e *DataCoordCatalog_Expecter) DropDataViews(ctx interface{}, collectionID interface{}) *DataCoordCatalog_DropDataViews_Call {
+	return &DataCoordCatalog_DropDataViews_Call{Call: _e.mock.On("DropDataViews", ctx, collectionID)}
 }
 
-func (_c *DataCoordCatalog_DropDataViewsByCollection_Call) Run(run func(ctx context.Context, collectionID int64)) *DataCoordCatalog_DropDataViewsByCollection_Call {
+func (_c *DataCoordCatalog_DropDataViews_Call) Run(run func(ctx context.Context, collectionID int64)) *DataCoordCatalog_DropDataViews_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(int64))
 	})
 	return _c
 }
 
-func (_c *DataCoordCatalog_DropDataViewsByCollection_Call) Return(_a0 error) *DataCoordCatalog_DropDataViewsByCollection_Call {
+func (_c *DataCoordCatalog_DropDataViews_Call) Return(_a0 error) *DataCoordCatalog_DropDataViews_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *DataCoordCatalog_DropDataViewsByCollection_Call) RunAndReturn(run func(context.Context, int64) error) *DataCoordCatalog_DropDataViewsByCollection_Call {
+func (_c *DataCoordCatalog_DropDataViews_Call) RunAndReturn(run func(context.Context, int64) error) *DataCoordCatalog_DropDataViews_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1744,29 +1680,29 @@ func (_c *DataCoordCatalog_ListCopySegmentTasks_Call) RunAndReturn(run func(cont
 	return _c
 }
 
-// ListDataViews provides a mock function with given fields: ctx
-func (_m *DataCoordCatalog) ListDataViews(ctx context.Context) (map[int64][]*viewpb.DataViewOfCollection, error) {
-	ret := _m.Called(ctx)
+// ListDataViews provides a mock function with given fields: ctx, collectionID
+func (_m *DataCoordCatalog) ListDataViews(ctx context.Context, collectionID int64) ([]*viewpb.DataViewOfCollection, error) {
+	ret := _m.Called(ctx, collectionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListDataViews")
 	}
 
-	var r0 map[int64][]*viewpb.DataViewOfCollection
+	var r0 []*viewpb.DataViewOfCollection
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (map[int64][]*viewpb.DataViewOfCollection, error)); ok {
-		return rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, int64) ([]*viewpb.DataViewOfCollection, error)); ok {
+		return rf(ctx, collectionID)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) map[int64][]*viewpb.DataViewOfCollection); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, int64) []*viewpb.DataViewOfCollection); ok {
+		r0 = rf(ctx, collectionID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[int64][]*viewpb.DataViewOfCollection)
+			r0 = ret.Get(0).([]*viewpb.DataViewOfCollection)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
+		r1 = rf(ctx, collectionID)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1781,23 +1717,24 @@ type DataCoordCatalog_ListDataViews_Call struct {
 
 // ListDataViews is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *DataCoordCatalog_Expecter) ListDataViews(ctx interface{}) *DataCoordCatalog_ListDataViews_Call {
-	return &DataCoordCatalog_ListDataViews_Call{Call: _e.mock.On("ListDataViews", ctx)}
+//   - collectionID int64
+func (_e *DataCoordCatalog_Expecter) ListDataViews(ctx interface{}, collectionID interface{}) *DataCoordCatalog_ListDataViews_Call {
+	return &DataCoordCatalog_ListDataViews_Call{Call: _e.mock.On("ListDataViews", ctx, collectionID)}
 }
 
-func (_c *DataCoordCatalog_ListDataViews_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_ListDataViews_Call {
+func (_c *DataCoordCatalog_ListDataViews_Call) Run(run func(ctx context.Context, collectionID int64)) *DataCoordCatalog_ListDataViews_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run(args[0].(context.Context), args[1].(int64))
 	})
 	return _c
 }
 
-func (_c *DataCoordCatalog_ListDataViews_Call) Return(_a0 map[int64][]*viewpb.DataViewOfCollection, _a1 error) *DataCoordCatalog_ListDataViews_Call {
+func (_c *DataCoordCatalog_ListDataViews_Call) Return(_a0 []*viewpb.DataViewOfCollection, _a1 error) *DataCoordCatalog_ListDataViews_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *DataCoordCatalog_ListDataViews_Call) RunAndReturn(run func(context.Context) (map[int64][]*viewpb.DataViewOfCollection, error)) *DataCoordCatalog_ListDataViews_Call {
+func (_c *DataCoordCatalog_ListDataViews_Call) RunAndReturn(run func(context.Context, int64) ([]*viewpb.DataViewOfCollection, error)) *DataCoordCatalog_ListDataViews_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2924,17 +2861,17 @@ func (_c *DataCoordCatalog_SaveCopySegmentTasksBatch_Call) RunAndReturn(run func
 	return _c
 }
 
-// SaveDataView provides a mock function with given fields: ctx, collectionID, view
-func (_m *DataCoordCatalog) SaveDataView(ctx context.Context, collectionID int64, view *viewpb.DataViewOfCollection) error {
-	ret := _m.Called(ctx, collectionID, view)
+// SaveDataView provides a mock function with given fields: ctx, dataView
+func (_m *DataCoordCatalog) SaveDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection) error {
+	ret := _m.Called(ctx, dataView)
 
 	if len(ret) == 0 {
 		panic("no return value specified for SaveDataView")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, *viewpb.DataViewOfCollection) error); ok {
-		r0 = rf(ctx, collectionID, view)
+	if rf, ok := ret.Get(0).(func(context.Context, *viewpb.DataViewOfCollection) error); ok {
+		r0 = rf(ctx, dataView)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -2949,15 +2886,14 @@ type DataCoordCatalog_SaveDataView_Call struct {
 
 // SaveDataView is a helper method to define mock.On call
 //   - ctx context.Context
-//   - collectionID int64
-//   - view *viewpb.DataViewOfCollection
-func (_e *DataCoordCatalog_Expecter) SaveDataView(ctx interface{}, collectionID interface{}, view interface{}) *DataCoordCatalog_SaveDataView_Call {
-	return &DataCoordCatalog_SaveDataView_Call{Call: _e.mock.On("SaveDataView", ctx, collectionID, view)}
+//   - dataView *viewpb.DataViewOfCollection
+func (_e *DataCoordCatalog_Expecter) SaveDataView(ctx interface{}, dataView interface{}) *DataCoordCatalog_SaveDataView_Call {
+	return &DataCoordCatalog_SaveDataView_Call{Call: _e.mock.On("SaveDataView", ctx, dataView)}
 }
 
-func (_c *DataCoordCatalog_SaveDataView_Call) Run(run func(ctx context.Context, collectionID int64, view *viewpb.DataViewOfCollection)) *DataCoordCatalog_SaveDataView_Call {
+func (_c *DataCoordCatalog_SaveDataView_Call) Run(run func(ctx context.Context, dataView *viewpb.DataViewOfCollection)) *DataCoordCatalog_SaveDataView_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].(*viewpb.DataViewOfCollection))
+		run(args[0].(context.Context), args[1].(*viewpb.DataViewOfCollection))
 	})
 	return _c
 }
@@ -2967,7 +2903,7 @@ func (_c *DataCoordCatalog_SaveDataView_Call) Return(_a0 error) *DataCoordCatalo
 	return _c
 }
 
-func (_c *DataCoordCatalog_SaveDataView_Call) RunAndReturn(run func(context.Context, int64, *viewpb.DataViewOfCollection) error) *DataCoordCatalog_SaveDataView_Call {
+func (_c *DataCoordCatalog_SaveDataView_Call) RunAndReturn(run func(context.Context, *viewpb.DataViewOfCollection) error) *DataCoordCatalog_SaveDataView_Call {
 	_c.Call.Return(run)
 	return _c
 }

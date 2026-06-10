@@ -717,6 +717,15 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		mlog.Error(context.TODO(), "save binlog and checkpoints failed", mlog.Err(err))
 		return merr.Status(err), nil
 	}
+	if s.dataViewManager != nil && req.GetFlushed() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
+		if _, err := s.dataViewManager.OnFlush(ctx, FlushDataViewEvent{
+			CollectionID:         req.GetCollectionID(),
+			SegmentIDs:           []int64{req.GetSegmentID()},
+			TemporaryUnavailable: enableSortCompaction(),
+		}); err != nil {
+			mlog.Warn(ctx, "failed to publish DataView after flush", mlog.Err(err))
+		}
+	}
 
 	s.meta.SetLastWrittenTime(req.GetSegmentID())
 	mlog.Info(context.TODO(), "SaveBinlogPaths sync segment with meta",
@@ -1523,9 +1532,6 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 
 			return resp, nil
 		}
-		resp.Flushed = true
-		log.Info("GetFlushState all segment flushed")
-		return resp, nil
 	}
 
 	channels, err := s.getChannelsByCollectionID(ctx, req.GetCollectionID())
@@ -2180,6 +2186,16 @@ func (s *Server) NotifyDropPartition(ctx context.Context, channel string, partit
 	mlog.Info(ctx, "receive NotifyDropPartition request",
 		mlog.String("channelname", channel),
 		mlog.Any("partitionID", partitionIDs))
+	if s.dataViewManager != nil {
+		for _, collectionID := range s.meta.GetCollectionIDsByPartition(ctx, partitionIDs) {
+			if _, err := s.dataViewManager.OnDropPartition(ctx, DropPartitionDataViewEvent{
+				CollectionID: collectionID,
+				PartitionIDs: partitionIDs,
+			}); err != nil {
+				return err
+			}
+		}
+	}
 	s.segmentManager.DropSegmentsOfPartition(ctx, channel, partitionIDs)
 	// release all segments of the partition.
 	return s.meta.DropSegmentsOfPartition(ctx, partitionIDs)
@@ -2200,6 +2216,17 @@ func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flu
 		if err != nil {
 			mlog.Warn(ctx, "WatchChannelCheckpoint failed", mlog.Err(err))
 			return err
+		}
+		if s.dataViewManager != nil {
+			_, err = s.dataViewManager.OnTruncate(ctx, TruncateDataViewEvent{
+				CollectionID: collectionID,
+				VChannel:     channelName,
+				FlushTs:      flushTs,
+			})
+			if err != nil {
+				mlog.Warn(ctx, "OnTruncate DataView failed", mlog.Err(err))
+				return err
+			}
 		}
 		// drop segments that were updated before the flush timestamp
 		err = s.meta.TruncateChannelByTime(ctx, channelName, flushTs)
@@ -3036,8 +3063,10 @@ func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *dat
 }
 
 // broadcastCommitImportMessage broadcasts a CommitImport WAL message for the given import job.
-// The message is broadcast to the job's data vchannels so each vchannel's recovery data path
-// can observe the commit fence, flush pending DML, and ack after the local durable state advances.
+// The message is broadcast to the job's data vchannels so each vchannel's WAL flusher
+// can observe the commit fence, flush pending DML, and call HandleCommitVchannel.
+// (Control-channel-only broadcast is dropped by the flusher's IsControlChannel guard
+// before reaching the CommitImport case, so it cannot drive per-vchannel commits.)
 func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob) error {
 	vchannels := job.GetVchannels()
 	if len(vchannels) == 0 {
@@ -3056,7 +3085,7 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 			JobId:        job.GetJobID(),
 		}).
 		WithBody(&messagespb.CommitImportMessageBody{}).
-		WithBroadcast(vchannels, message.OptBuildBroadcastAckSyncUp()).
+		WithBroadcast(vchannels).
 		MustBuildBroadcast()
 
 	_, err = broadcaster.Broadcast(ctx, msg)
@@ -3207,19 +3236,20 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	if err := s.handleCommitImportVChannel(ctx, req.GetJobId(), req.GetVchannel(), req.GetCommitTimestamp()); err != nil {
-		return merr.Status(err), nil
-	}
-	return merr.Success(), nil
-}
+	jobID := req.GetJobId()
+	vchannel := req.GetVchannel()
 
-func (s *Server) handleCommitImportVChannel(ctx context.Context, jobID int64, vchannel string, commitTs uint64) error {
 	// Pre-fetch segment IDs for this job+vchannel BEFORE calling HandleCommitVchannel.
 	// The callback must not access importMeta because HandleCommitVchannel holds m.mu (write lock);
 	// calling GetTaskBy inside the callback would attempt to re-acquire m.mu (read lock) → deadlock.
 	segIDs := s.getImportSegmentIDsByVchannel(ctx, jobID, vchannel)
+	collectionID := int64(0)
+	if job := s.importMeta.GetJob(ctx, jobID); job != nil {
+		collectionID = job.GetCollectionID()
+	}
 
-	return s.importMeta.HandleCommitVchannel(ctx, jobID, vchannel, func() error {
+	commitTs := req.GetCommitTimestamp()
+	err := s.importMeta.HandleCommitVchannel(ctx, jobID, vchannel, func() error {
 		// Only access s.meta (segment meta) here, NOT s.importMeta.
 		// Set CommitTimestamp and clear isImporting in a single call per segment.
 		ops := make([]UpdateOperator, 0, len(segIDs)*2)
@@ -3232,8 +3262,26 @@ func (s *Server) handleCommitImportVChannel(ctx context.Context, jobID int64, vc
 		if len(ops) == 0 {
 			return nil
 		}
-		return s.meta.UpdateSegmentsInfo(ctx, ops...)
+		if err := s.meta.UpdateSegmentsInfo(ctx, ops...); err != nil {
+			return err
+		}
+		if s.dataViewManager != nil && collectionID != 0 {
+			if _, err := s.dataViewManager.OnImport(ctx, ImportDataViewEvent{
+				CollectionID: collectionID,
+				SegmentIDs:   segIDs,
+			}); err != nil {
+				mlog.Warn(ctx, "failed to publish DataView after import commit",
+					mlog.FieldJobID(jobID),
+					mlog.String("vchannel", vchannel),
+					mlog.Err(err))
+			}
+		}
+		return nil
 	})
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	return merr.Success(), nil
 }
 
 // getImportSegmentIDsByVchannel returns all segment IDs (including sorted segments) belonging to
