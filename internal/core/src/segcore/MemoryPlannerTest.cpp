@@ -15,6 +15,7 @@
 // limitations under the License.
 #include <gtest/gtest.h>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <future>
@@ -24,10 +25,12 @@
 
 #include "arrow/api.h"
 #include <folly/CancellationToken.h>
+#include "folly/ScopeGuard.h"
 #include "common/EasyAssert.h"
 #include "gtest/gtest.h"
 #include "milvus-storage/common/metadata.h"
 #include "segcore/memory_planner.h"
+#include "storage/EntryStreamUtils.h"
 
 using namespace milvus::segcore;
 
@@ -441,4 +444,63 @@ TEST(LoadCellBatchAsync, CancellationStopsMidBatchPush) {
         EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::FollyCancel);
     }
     EXPECT_LT(received, specs.size());
+}
+
+TEST(LoadCellBatchAsync, CancellationWhileWaitingForBudgetSkipsRead) {
+    auto& budget =
+        milvus::storage::TransientMemoryBudget::GetFieldDataLoadBudget();
+    auto old_capacity = budget.CapacityBytes();
+    budget.SetCapacityBytes(1);
+    budget.Acquire(1);
+    auto cleanup = folly::makeGuard([&budget, old_capacity]() {
+        budget.Release(1);
+        budget.SetCapacityBytes(old_capacity);
+    });
+
+    std::atomic<int> read_calls{0};
+    BatchReaderFactory factory = [&read_calls](size_t /*batch_key*/,
+                                               int64_t /*rg_offset*/,
+                                               int64_t total_rg_count,
+                                               int64_t /*reader_memory_limit*/,
+                                               uint64_t /*read_parallelism*/)
+        -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
+        read_calls.fetch_add(1);
+        auto schema = arrow::schema({arrow::field("x", arrow::int64())});
+        std::vector<std::shared_ptr<arrow::Table>> tables;
+        for (int64_t i = 0; i < total_rg_count; ++i) {
+            tables.push_back(arrow::Table::MakeEmpty(schema).ValueOrDie());
+        }
+        return tables;
+    };
+
+    folly::CancellationSource source;
+    milvus::OpContext op_ctx(source.getToken());
+    auto channel = std::make_shared<CellReaderChannel>(1);
+    std::vector<CellSpec> specs = {{/*cid=*/0,
+                                    /*file_idx=*/0,
+                                    /*local_rg_offset=*/0,
+                                    /*rg_count=*/1,
+                                    /*memory_size=*/1}};
+    auto futures = LoadCellBatchAsync(
+        &op_ctx, std::move(specs), std::move(factory), channel, 1);
+
+    ASSERT_EQ(futures.size(), 1);
+    EXPECT_EQ(futures[0].wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+    EXPECT_EQ(read_calls.load(), 0);
+
+    source.requestCancellation();
+
+    ASSERT_EQ(futures[0].wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    try {
+        futures[0].get();
+        FAIL() << "expected cancellation";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::FollyCancel);
+    }
+
+    std::shared_ptr<CellLoadResult> cell_data;
+    EXPECT_FALSE(channel->pop(cell_data));
+    EXPECT_EQ(read_calls.load(), 0);
 }

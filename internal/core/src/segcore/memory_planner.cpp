@@ -169,7 +169,8 @@ ReadFileRowGroupBlock(const milvus_storage::ArrowFileSystemPtr& fs,
                               file,
                               nullptr,
                               reader_memory_limit,
-                              milvus::storage::GetReaderProperties()));
+                              milvus::storage::GetReaderProperties(),
+                              milvus::storage::GetArrowReaderProperties()));
     auto close_guard = folly::makeGuard([&reader]() { (void)reader->Close(); });
     ARROW_RETURN_NOT_OK(reader->SetRowGroupOffsetAndCount(rg_offset, rg_count));
     std::vector<std::shared_ptr<arrow::Table>> tables;
@@ -524,7 +525,14 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
 
             auto& budget = milvus::storage::TransientMemoryBudget::
                 GetFieldDataLoadBudget();
-            budget.Acquire(batch_budget_bytes);
+            auto acquired = budget.AcquireUntil(batch_budget_bytes, [op_ctx]() {
+                return op_ctx &&
+                       op_ctx->cancellation_token.isCancellationRequested();
+            });
+            if (!acquired) {
+                CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
+                return;
+            }
             size_t transferred_budget_bytes = 0;
             auto release_guard = folly::makeGuard(
                 [&budget, batch_budget_bytes, &transferred_budget_bytes]() {
@@ -533,6 +541,7 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                                        transferred_budget_bytes);
                     }
                 });
+            CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
 
             auto tables_result = (*shared_factory)(batch.file_idx,
                                                    batch.rg_offset,
@@ -620,13 +629,13 @@ MakeChunkReaderFactory(
                           int64_t rg_offset,
                           int64_t total_rg_count,
                           int64_t /*reader_memory_limit*/,
-                          uint64_t read_parallelism)
+                          uint64_t /*read_parallelism*/)
                -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
         std::vector<int64_t> rg_indices(total_rg_count);
         std::iota(rg_indices.begin(), rg_indices.end(), rg_offset);
         ARROW_ASSIGN_OR_RAISE(
             auto batches,
-            chunk_reader->get_chunks(rg_indices, read_parallelism));
+            chunk_reader->get_chunks(rg_indices, /*parallelism=*/1));
         std::vector<std::shared_ptr<arrow::Table>> tables;
         tables.reserve(batches.size());
         for (auto& batch : batches) {
