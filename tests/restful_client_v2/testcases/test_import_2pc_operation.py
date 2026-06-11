@@ -8476,8 +8476,9 @@ class TestImport2PCRestOperation(TestBase):
     def test_import_2pc_abort_before_commit_keeps_import_invisible(self):
         """
         target: abort manual import before commit
-        method: abort an Uncommitted import job while a normal DML row is visible in the same collection
-        expected: aborted import moves to Failed, imported rows stay invisible, and normal DML remains visible
+        method: abort an Uncommitted import job while a normal DML row is visible, then try CommitImport
+        expected: aborted import moves to Failed, later CommitImport is rejected, imported rows stay invisible,
+                  and normal DML remains visible
         """
         collection_name = gen_collection_name(prefix="import_2pc_abort_before_commit")
         self._create_base_collection(collection_name)
@@ -8511,6 +8512,13 @@ class TestImport2PCRestOperation(TestBase):
         rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
+        commit_after_abort_rsp = self.import_job_client.commit_import_job(job_id)
+        assert commit_after_abort_rsp["code"] != 0, commit_after_abort_rsp
+
+        progress_after_commit_rsp = self.import_job_client.get_import_job_progress(job_id)
+        assert progress_after_commit_rsp["code"] == 0, progress_after_commit_rsp
+        assert progress_after_commit_rsp["data"]["state"] == "Failed", progress_after_commit_rsp
+
         seen_after_abort, absent_after_abort = self._wait_imported_ids_absent(
             collection_name, imported_ids, duration=18
         )
@@ -8527,11 +8535,19 @@ class TestImport2PCRestOperation(TestBase):
             os.remove(file_path)
 
     @pytest.mark.L0
-    def test_import_2pc_abort_rejects_failed_job_after_cleanup(self):
+    @pytest.mark.xfail(
+        reason=(
+            "milvus-io/milvus#50483: "
+            "AbortImport should be retry-safe/idempotent after the first abort moves a job to Failed; "
+            "current Milvus returns code=2100 for retry abort on Failed job"
+        ),
+        strict=True,
+    )
+    def test_import_2pc_abort_is_idempotent_for_failed_job(self):
         """
-        target: abort terminal failed import job
+        target: abort retry idempotency for terminal failed import job
         method: abort an Uncommitted import job, wait for Failed, then abort the same job again
-        expected: repeated abort is rejected, job remains Failed, and imported rows stay invisible
+        expected: repeated abort returns success, job remains Failed, and imported rows stay invisible
         """
         collection_name = gen_collection_name(prefix="import_2pc_abort_idempotent")
         self._create_base_collection(collection_name)
@@ -8559,7 +8575,7 @@ class TestImport2PCRestOperation(TestBase):
         assert ok, rsp
 
         retry_abort_rsp = self.import_job_client.abort_import_job(job_id)
-        assert retry_abort_rsp["code"] != 0, retry_abort_rsp
+        assert retry_abort_rsp["code"] == 0, retry_abort_rsp
 
         progress_rsp = self.import_job_client.get_import_job_progress(job_id)
         assert progress_rsp["code"] == 0, progress_rsp

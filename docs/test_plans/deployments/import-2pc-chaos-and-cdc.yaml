@@ -1,0 +1,305 @@
+apiVersion: milvus.io/v1beta1
+kind: Milvus
+metadata:
+  name: import-2pc-chaos-cluster
+  namespace: chaos-testing
+  labels:
+    app: milvus
+    import-2pc-test: "true"
+    import-2pc-role: chaos-cluster
+spec:
+  mode: cluster
+  components:
+    image: harbor.milvus.io/manta/milvus:master-20260609-385caab
+    version: "2.7.0"
+    enableRollingUpdate: true
+    imageUpdateMode: rollingUpgrade
+    mixCoord:
+      replicas: 1
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+    proxy:
+      replicas: 1
+      serviceType: LoadBalancer
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+    queryNode:
+      replicas: 1
+      resources:
+        requests:
+          cpu: "1"
+          memory: 2Gi
+        limits:
+          cpu: "2"
+          memory: 4Gi
+    dataNode:
+      replicas: 1
+      resources:
+        requests:
+          cpu: "1"
+          memory: 2Gi
+        limits:
+          cpu: "2"
+          memory: 4Gi
+    streamingNode:
+      replicas: 1
+      resources:
+        requests:
+          cpu: "1"
+          memory: 2Gi
+        limits:
+          cpu: "2"
+          memory: 4Gi
+  dependencies:
+    etcd:
+      inCluster:
+        values:
+          replicaCount: 1
+          service:
+            type: LoadBalancer
+          persistence:
+            size: 10Gi
+        deletionPolicy: Delete
+        pvcDeletion: true
+    storage:
+      inCluster:
+        values:
+          mode: standalone
+          service:
+            type: LoadBalancer
+          persistence:
+            size: 50Gi
+        deletionPolicy: Delete
+        pvcDeletion: true
+    msgStreamType: woodpecker
+  config:
+    common:
+      security:
+        authorizationEnabled: true
+    msgChannel:
+      chanNamePrefix:
+        cluster: import-2pc-chaos
+    rootCoord:
+      dmlChannelNum: 16
+---
+apiVersion: milvus.io/v1beta1
+kind: Milvus
+metadata:
+  name: import-2pc-cdc-primary
+  namespace: chaos-testing
+  labels:
+    app: milvus
+    import-2pc-test: "true"
+    import-2pc-role: cdc-primary
+spec:
+  mode: cluster
+  components:
+    image: harbor.milvus.io/manta/milvus:master-20260609-385caab
+    version: "2.7.0"
+    enableRollingUpdate: true
+    imageUpdateMode: rollingUpgrade
+    mixCoord:
+      replicas: 1
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+    proxy:
+      replicas: 1
+      serviceType: LoadBalancer
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+    queryNode:
+      replicas: 1
+      resources:
+        requests:
+          cpu: "1"
+          memory: 2Gi
+        limits:
+          cpu: "2"
+          memory: 4Gi
+    dataNode:
+      replicas: 1
+      resources:
+        requests:
+          cpu: "1"
+          memory: 2Gi
+        limits:
+          cpu: "2"
+          memory: 4Gi
+    streamingNode:
+      replicas: 1
+      resources:
+        requests:
+          cpu: "1"
+          memory: 2Gi
+        limits:
+          cpu: "2"
+          memory: 4Gi
+    cdc:
+      replicas: 1
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+  dependencies:
+    etcd:
+      inCluster:
+        values:
+          replicaCount: 1
+          service:
+            type: LoadBalancer
+          persistence:
+            size: 10Gi
+        deletionPolicy: Delete
+        pvcDeletion: true
+    storage:
+      inCluster:
+        values:
+          mode: standalone
+          service:
+            type: LoadBalancer
+          persistence:
+            size: 50Gi
+        deletionPolicy: Delete
+        pvcDeletion: true
+    msgStreamType: woodpecker
+  config:
+    common:
+      security:
+        authorizationEnabled: true
+    dataCoord:
+      import:
+        enableInReplicatingCluster: true
+    msgChannel:
+      chanNamePrefix:
+        cluster: import-2pc-cdc-source
+    rootCoord:
+      dmlChannelNum: 16
+---
+apiVersion: milvus.io/v1beta1
+kind: Milvus
+metadata:
+  name: import-2pc-cdc-secondary
+  namespace: chaos-testing
+  labels:
+    app: milvus
+    import-2pc-test: "true"
+    import-2pc-role: cdc-secondary
+spec:
+  mode: cluster
+  components:
+    image: harbor.milvus.io/manta/milvus:master-20260609-385caab
+    version: "2.7.0"
+    enableRollingUpdate: true
+    imageUpdateMode: rollingUpgrade
+    mixCoord:
+      replicas: 1
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+    proxy:
+      replicas: 1
+      serviceType: LoadBalancer
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+    queryNode:
+      replicas: 1
+      resources:
+        requests:
+          cpu: "1"
+          memory: 2Gi
+        limits:
+          cpu: "2"
+          memory: 4Gi
+    dataNode:
+      replicas: 1
+      resources:
+        requests:
+          cpu: "1"
+          memory: 2Gi
+        limits:
+          cpu: "2"
+          memory: 4Gi
+    streamingNode:
+      replicas: 1
+      resources:
+        requests:
+          cpu: "1"
+          memory: 2Gi
+        limits:
+          cpu: "2"
+          memory: 4Gi
+    cdc:
+      replicas: 1
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+  dependencies:
+    etcd:
+      inCluster:
+        values:
+          replicaCount: 1
+          service:
+            type: LoadBalancer
+          persistence:
+            size: 10Gi
+        deletionPolicy: Delete
+        pvcDeletion: true
+    storage:
+      inCluster:
+        values:
+          mode: standalone
+          service:
+            type: LoadBalancer
+          persistence:
+            size: 50Gi
+        deletionPolicy: Delete
+        pvcDeletion: true
+    msgStreamType: woodpecker
+  config:
+    common:
+      security:
+        authorizationEnabled: true
+    dataCoord:
+      import:
+        enableInReplicatingCluster: true
+    msgChannel:
+      chanNamePrefix:
+        cluster: import-2pc-cdc-target
+    rootCoord:
+      dmlChannelNum: 16
