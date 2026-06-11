@@ -324,6 +324,92 @@ TEST(Util_Segcore, MergeDataArrayWithNullableByteVectorsAppendsRows) {
     }
 }
 
+TEST(Util_Segcore, BitsetViewAllNone) {
+    using namespace milvus;
+
+    // empty view: vacuously true for both
+    BitsetView empty_view;
+    EXPECT_TRUE(empty_view.all());
+    EXPECT_TRUE(empty_view.none());
+
+    // sweep sizes across byte tails and the 64-byte block boundary
+    for (size_t n : {1,
+                     7,
+                     8,
+                     9,
+                     63,
+                     64,
+                     65,
+                     255,
+                     256,
+                     257,
+                     511,
+                     512,
+                     513,
+                     520,
+                     1000,
+                     4096,
+                     4099}) {
+        const size_t n_bytes = (n + 7) / 8;
+        // bits beyond `n` are trailing garbage and must be ignored
+        std::vector<uint8_t> zeros(n_bytes, 0x00);
+        std::vector<uint8_t> ones(n_bytes, 0xFF);
+        if ((n & 7) != 0) {
+            zeros.back() = static_cast<uint8_t>(0xFF << (n & 7));
+            ones.back() = static_cast<uint8_t>((1U << (n & 7)) - 1U);
+        }
+
+        BitsetView zero_view(zeros.data(), n);
+        EXPECT_TRUE(zero_view.none()) << "n=" << n;
+        EXPECT_FALSE(zero_view.all()) << "n=" << n;
+
+        BitsetView one_view(ones.data(), n);
+        EXPECT_TRUE(one_view.all()) << "n=" << n;
+        EXPECT_FALSE(one_view.none()) << "n=" << n;
+
+        // a single set bit at the first / middle / last position
+        for (size_t pos : {size_t(0), n / 2, n - 1}) {
+            auto flipped = zeros;
+            if ((n & 7) != 0) {
+                flipped.back() = 0x00;
+            }
+            flipped[pos / 8] = static_cast<uint8_t>(1U << (pos & 7));
+            BitsetView v(flipped.data(), n);
+            EXPECT_FALSE(v.none()) << "n=" << n << " pos=" << pos;
+            if (n > 1) {
+                EXPECT_FALSE(v.all()) << "n=" << n << " pos=" << pos;
+            } else {
+                EXPECT_TRUE(v.all()) << "n=" << n << " pos=" << pos;
+            }
+        }
+    }
+}
+
+TEST(Util_Segcore, TransformBitsetAllFilteredAndNoFilterFastPaths) {
+    using namespace milvus;
+
+    constexpr size_t kRows = 130;  // not a multiple of 8 or 64
+    std::vector<bool> valid_flags(kRows, true);
+    std::unique_ptr<bool[]> valid_data(new bool[kRows]);
+    std::copy(valid_flags.begin(), valid_flags.end(), valid_data.get());
+
+    SealedOffsetMapping mapping;
+    mapping.Build(valid_data.get(), kRows);
+
+    const size_t n_bytes = (kRows + 7) / 8;
+    std::vector<uint8_t> ones(n_bytes, 0xFF);
+    ones.back() = static_cast<uint8_t>((1U << (kRows & 7)) - 1U);
+    TargetBitmap physical_bitset;
+    auto status = mapping.TransformBitset(BitsetView(ones.data(), kRows),
+                                          physical_bitset);
+    EXPECT_EQ(status, OffsetMapping::BitsetTransformStatus::AllFiltered);
+
+    std::vector<uint8_t> zeros(n_bytes, 0x00);
+    status = mapping.TransformBitset(BitsetView(zeros.data(), kRows),
+                                     physical_bitset);
+    EXPECT_EQ(status, OffsetMapping::BitsetTransformStatus::NoFilter);
+}
+
 TEST(Util_Segcore, TransformBitsetMasksNullableVectorRowsOutsideLogicalView) {
     using namespace milvus;
 
