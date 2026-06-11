@@ -81,7 +81,7 @@ class PhyTermFilterExpr : public SegmentExpr {
                       false,
                       plan_options),
           expr_(expr) {
-        DetermineExecPath();
+        // DetermineExecPath();
     }
 
     void
@@ -104,6 +104,13 @@ class PhyTermFilterExpr : public SegmentExpr {
     GetColumnInfo() const override {
         return expr_->column_;
     }
+
+    void
+    PrefetchRawData() override;
+
+    template <typename T>
+    void
+    PrefetchRawData();
 
  private:
     void

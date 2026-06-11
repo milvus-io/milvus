@@ -71,6 +71,17 @@ class PhyElementFilterBitsNode : public Operator {
         return BlockingReason::kNotBlocked;
     }
 
+    void
+    PrefetchAsync(const std::shared_ptr<folly::CPUThreadPoolExecutor>
+                      prefetch_pool) override {
+        element_exprs_->PrefetchAsync(prefetch_pool);
+    }
+
+    void
+    WaitPrefetch() override {
+        element_exprs_->WaitPrefetch();
+    }
+
     std::string
     ToString() const override {
         return "PhyElementFilterBitsNode";

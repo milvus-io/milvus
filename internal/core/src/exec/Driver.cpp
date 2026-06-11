@@ -51,6 +51,7 @@
 #include "glog/logging.h"
 #include "log/Log.h"
 #include "plan/PlanNode.h"
+#include "storage/PrefetchThreadPool.h"
 
 namespace milvus {
 namespace exec {
@@ -68,7 +69,7 @@ DriverFactory::CreateDriver(
     const std::function<int(int pipelineid)>& num_drivers) {
     auto driver = std::shared_ptr<Driver>(new Driver());
     ctx->driver_ = driver.get();
-    std::vector<std::unique_ptr<Operator>> operators;
+    std::vector<std::shared_ptr<Operator>> operators;
     operators.reserve(plannodes_.size());
 
     for (size_t i = 0; i < plannodes_.size(); ++i) {
@@ -78,70 +79,70 @@ DriverFactory::CreateDriver(
                 std::dynamic_pointer_cast<const plan::FilterBitsNode>(
                     plannode)) {
             tracer::AddEvent("create_operator: FilterBitsNode");
-            operators.push_back(std::make_unique<PhyFilterBitsNode>(
+            operators.push_back(std::make_shared<PhyFilterBitsNode>(
                 id, ctx.get(), filterbitsnode));
         } else if (auto filternode = std::dynamic_pointer_cast<
                        const plan::IterativeFilterNode>(plannode)) {
             tracer::AddEvent("create_operator: IterativeFilterNode");
-            operators.push_back(std::make_unique<PhyIterativeFilterNode>(
+            operators.push_back(std::make_shared<PhyIterativeFilterNode>(
                 id, ctx.get(), filternode));
         } else if (auto mvccnode =
                        std::dynamic_pointer_cast<const plan::MvccNode>(
                            plannode)) {
             tracer::AddEvent("create_operator: MvccNode");
             operators.push_back(
-                std::make_unique<PhyMvccNode>(id, ctx.get(), mvccnode));
+                std::make_shared<PhyMvccNode>(id, ctx.get(), mvccnode));
         } else if (auto vectorsearchnode =
                        std::dynamic_pointer_cast<const plan::VectorSearchNode>(
                            plannode)) {
             tracer::AddEvent("create_operator: VectorSearchNode");
-            operators.push_back(std::make_unique<PhyVectorSearchNode>(
+            operators.push_back(std::make_shared<PhyVectorSearchNode>(
                 id, ctx.get(), vectorsearchnode));
         } else if (auto searchGroupByNode =
                        std::dynamic_pointer_cast<const plan::SearchGroupByNode>(
                            plannode)) {
             tracer::AddEvent("create_operator: SearchGroupByNode");
-            operators.push_back(std::make_unique<PhySearchGroupByNode>(
+            operators.push_back(std::make_shared<PhySearchGroupByNode>(
                 id, ctx.get(), searchGroupByNode));
         } else if (auto queryGroupByNode =
                        std::dynamic_pointer_cast<const plan::AggregationNode>(
                            plannode)) {
             tracer::AddEvent("create_operator: AggregationNode");
-            operators.push_back(std::make_unique<PhyAggregationNode>(
+            operators.push_back(std::make_shared<PhyAggregationNode>(
                 id, ctx.get(), queryGroupByNode));
         } else if (auto projectNode =
                        std::dynamic_pointer_cast<const plan::ProjectNode>(
                            plannode)) {
             tracer::AddEvent("create_operator: ProjectNode");
             operators.push_back(
-                std::make_unique<PhyProjectNode>(id, ctx.get(), projectNode));
+                std::make_shared<PhyProjectNode>(id, ctx.get(), projectNode));
         } else if (auto orderByNode =
                        std::dynamic_pointer_cast<const plan::OrderByNode>(
                            plannode)) {
             tracer::AddEvent("create_operator: QueryOrderByNode");
-            operators.push_back(std::make_unique<PhyQueryOrderByNode>(
+            operators.push_back(std::make_shared<PhyQueryOrderByNode>(
                 id, ctx.get(), orderByNode));
         } else if (auto samplenode =
                        std::dynamic_pointer_cast<const plan::RandomSampleNode>(
                            plannode)) {
             tracer::AddEvent("create_operator: RandomSampleNode");
-            operators.push_back(std::make_unique<PhyRandomSampleNode>(
+            operators.push_back(std::make_shared<PhyRandomSampleNode>(
                 id, ctx.get(), samplenode));
         } else if (auto rescoresnode =
                        std::dynamic_pointer_cast<const plan::RescoresNode>(
                            plannode)) {
             tracer::AddEvent("create_operator: RescoresNode");
             operators.push_back(
-                std::make_unique<PhyRescoresNode>(id, ctx.get(), rescoresnode));
+                std::make_shared<PhyRescoresNode>(id, ctx.get(), rescoresnode));
         } else if (auto node = std::dynamic_pointer_cast<
                        const plan::IterativeElementFilterNode>(plannode)) {
             tracer::AddEvent("create_operator: IterativeElementFilterNode");
-            operators.push_back(std::make_unique<PhyIterativeElementFilterNode>(
+            operators.push_back(std::make_shared<PhyIterativeElementFilterNode>(
                 id, ctx.get(), node));
         } else if (auto node = std::dynamic_pointer_cast<
                        const plan::ElementFilterBitsNode>(plannode)) {
             tracer::AddEvent("create_operator: ElementFilterBitsNode");
-            operators.push_back(std::make_unique<PhyElementFilterBitsNode>(
+            operators.push_back(std::make_shared<PhyElementFilterBitsNode>(
                 id, ctx.get(), node));
         } else {
             ThrowInfo(ErrorCode::UnexpectedError, "Unknown plan node type");
@@ -224,7 +225,7 @@ Driver::initializeOperators() {
 
 void
 Driver::Init(std::unique_ptr<DriverContext> ctx,
-             std::vector<std::unique_ptr<Operator>> operators) {
+             std::vector<std::shared_ptr<Operator>> operators) {
     assert(ctx != nullptr);
     ctx_ = std::move(ctx);
     AssertInfo(operators.size() != 0, "operators in driver must not empty");
@@ -239,6 +240,7 @@ Driver::Close() {
     }
 
     for (auto& op : operators_) {
+        op->WaitPrefetch();
         op->Close();
     }
 
@@ -282,6 +284,7 @@ Driver::RunInternal(std::shared_ptr<Driver>& self,
                     RowVectorPtr& result) {
     try {
         initializeOperators();
+        std::call_once(self->once_, [self]() { self->PrefetchAsync(); });
         int num_operators = operators_.size();
         ContinueFuture future;
 
@@ -381,6 +384,14 @@ Driver::RunInternal(std::shared_ptr<Driver>& self,
     } catch (std::exception& e) {
         get_task()->SetError(std::current_exception());
         return StopReason::kAlreadyTerminated;
+    }
+}
+
+void
+Driver::PrefetchAsync() {
+    auto prefetch_pool = GetPrefetchThreadPool();
+    for (auto& op : operators_) {
+        op->PrefetchAsync(prefetch_pool);
     }
 }
 
