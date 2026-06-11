@@ -81,7 +81,7 @@ func genInsertMsgsByPartition(ctx context.Context,
 		// If the insert message size exceeds the threshold, flush the current
 		// message first. A single row can be larger than the threshold, so do
 		// not emit an empty message before adding that row.
-		if requestSize > 0 && requestSize+curRowMessageSize >= threshold {
+		if msg.NumRows > 0 && requestSize+curRowMessageSize >= threshold {
 			repackedMsgs = append(repackedMsgs, msg)
 			msg = createInsertMsg(segmentID, channelName)
 			requestSize = 0
