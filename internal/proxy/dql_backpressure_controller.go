@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"time"
 
@@ -205,10 +204,10 @@ func (c *dqlBackpressureController) Observe(err error) {
 }
 
 func dqlBackpressureSlowdownReason(err error) (string, bool) {
-	if errors.Is(err, merr.ErrServiceTooManyRequests) || strings.Contains(err.Error(), merr.ErrServiceTooManyRequests.Error()) {
+	if errors.Is(err, merr.ErrServiceTooManyRequests) {
 		return dqlBackpressureReasonTooManyRequests, true
 	}
-	if errors.Is(err, merr.ErrServiceResourceInsufficient) || strings.Contains(err.Error(), merr.ErrServiceResourceInsufficient.Error()) {
+	if errors.Is(err, merr.ErrServiceResourceInsufficient) {
 		return dqlBackpressureReasonResourceInsufficient, true
 	}
 	return "", false
