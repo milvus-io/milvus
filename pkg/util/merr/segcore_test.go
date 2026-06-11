@@ -124,6 +124,23 @@ func TestSegcoreErrorClassification(t *testing.T) {
 		assert.False(t, IsSegcoreSignal(2055))
 	})
 
+	t.Run("wire_code_projection", func(t *testing.T) {
+		// Pins the client-visible contract: pass-through segcore codes collapse
+		// to ErrSegcore's wire code on Status, with the original C++ code kept
+		// in the Reason text. Anyone changing a sentinel's numeric code, the
+		// Code() extraction, or promoting a table entry to its own sentinel
+		// changes what clients receive — this test forces that to be explicit.
+		st := Status(SegcoreError(2028, "expr bad"))
+		assert.Equal(t, ErrSegcore.code(), st.GetCode())
+		assert.Contains(t, st.GetReason(), "2028")
+
+		// A named sentinel keeps its own distinct wire code.
+		assert.Equal(t, ErrSegcoreUnsupported.code(), Status(SegcoreError(2003, "x")).GetCode())
+
+		// An unregistered (future) code collapses safely as well.
+		assert.Equal(t, ErrSegcore.code(), Status(SegcoreError(9999, "x")).GetCode())
+	})
+
 	t.Run("empty_message", func(t *testing.T) {
 		err := SegcoreError(2000, "")
 		assert.ErrorIs(t, err, ErrSegcore)
