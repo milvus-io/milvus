@@ -42,6 +42,7 @@ func TestSegmentCoversBM25Stats(t *testing.T) {
 	segment := &datapb.SegmentInfo{
 		ManifestPath: "manifest",
 		Bm25Statslogs: []*datapb.FieldBinlog{
+			nil,
 			{FieldID: 101, Binlogs: []*datapb.Binlog{{LogID: 1}}},
 			{FieldID: 102},
 		},

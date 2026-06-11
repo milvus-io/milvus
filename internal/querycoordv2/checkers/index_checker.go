@@ -242,7 +242,7 @@ func (c *IndexChecker) externalSegmentCoversIndexField(ctx context.Context, coll
 	if targetSegment == nil {
 		return true
 	}
-	return externalmaterialization.SegmentCoversField(targetSegment, fieldID)
+	return externalmaterialization.SegmentCoversSchemaField(targetSegment, field, fieldID)
 }
 
 // checkRedundantIndices returns redundant indexIDs for each segment

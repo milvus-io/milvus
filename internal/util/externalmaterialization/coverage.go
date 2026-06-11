@@ -92,7 +92,7 @@ func MissingFieldsForSegment(fields []*schemapb.FieldSchema, segment *datapb.Seg
 	missingFields := make([]FieldRef, 0, len(sortedFieldIDs))
 	for _, fieldID := range sortedFieldIDs {
 		field := fieldSchemas[fieldID]
-		if !segmentCoversSchemaField(segment, field, fieldID) {
+		if !SegmentCoversSchemaField(segment, field, fieldID) {
 			fieldName := ""
 			if field != nil {
 				fieldName = field.GetName()
@@ -107,7 +107,9 @@ func MissingFieldsForSegment(fields []*schemapb.FieldSchema, segment *datapb.Seg
 	return missingFields
 }
 
-func segmentCoversSchemaField(segment *datapb.SegmentInfo, field *schemapb.FieldSchema, fieldID int64) bool {
+// SegmentCoversSchemaField reports whether the segment materializes the schema
+// field using the correct backing metadata for that field kind.
+func SegmentCoversSchemaField(segment *datapb.SegmentInfo, field *schemapb.FieldSchema, fieldID int64) bool {
 	if field != nil &&
 		field.GetDataType() == schemapb.DataType_SparseFloatVector &&
 		(field.GetIsFunctionOutput() || field.GetExternalField() == "") {

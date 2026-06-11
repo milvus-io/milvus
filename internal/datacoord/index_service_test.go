@@ -627,6 +627,137 @@ func TestCreateIndexRejectsUnmaterializedExternalField(t *testing.T) {
 	require.Contains(t, status.GetReason(), "RefreshExternalCollection")
 }
 
+func TestValidateExternalIndexFieldMaterialized_Branches(t *testing.T) {
+	const collID = UniqueID(100)
+
+	newServer := func() *Server {
+		return &Server{meta: &meta{segments: NewSegmentsInfo()}}
+	}
+	t.Run("non_external_collection", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "regular",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64},
+			},
+		}
+		err := newServer().validateExternalIndexFieldMaterialized(context.Background(), schema, &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      100,
+		})
+		require.NoError(t, err)
+	})
+	t.Run("invalid_schema", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "ext",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "dup", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+				{FieldID: 101, Name: "dup", DataType: schemapb.DataType_Int64, ExternalField: "id2"},
+			},
+		}
+		err := newServer().validateExternalIndexFieldMaterialized(context.Background(), schema, &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      100,
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "duplicated fieldName")
+	})
+	t.Run("missing_field_id", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "ext",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			},
+		}
+		err := newServer().validateExternalIndexFieldMaterialized(context.Background(), schema, &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      999,
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "fieldID(999) not found")
+	})
+	t.Run("internal_field_in_external_collection", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "ext",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+				{FieldID: 101, Name: "age", DataType: schemapb.DataType_Int64},
+			},
+		}
+		err := newServer().validateExternalIndexFieldMaterialized(context.Background(), schema, &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      101,
+		})
+		require.NoError(t, err)
+	})
+	t.Run("unnamed_unmaterialized_field", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "ext",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+				{FieldID: 101, DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+			},
+		}
+		server := newServer()
+		server.meta.segments.SetSegment(10, NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           10,
+			CollectionID: collID,
+			State:        commonpb.SegmentState_Flushed,
+			Level:        datapb.SegmentLevel_L1,
+			ManifestPath: `{"base_path":"seg10","ver":1}`,
+		}))
+		err := server.validateExternalIndexFieldMaterialized(context.Background(), schema, &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      101,
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "101")
+	})
+}
+
+func TestValidateExternalIndexFieldMaterialized_BM25Statslog(t *testing.T) {
+	const (
+		collID  = UniqueID(100)
+		fieldID = UniqueID(101)
+	)
+	schema := &schemapb.CollectionSchema{
+		Name: "ext",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			{FieldID: 102, Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text"},
+			{FieldID: fieldID, Name: "bm25_sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+	}
+	server := &Server{meta: &meta{segments: NewSegmentsInfo()}}
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           10,
+		CollectionID: collID,
+		State:        commonpb.SegmentState_Flushed,
+		Level:        datapb.SegmentLevel_L1,
+		ManifestPath: `{"base_path":"seg10","ver":1}`,
+		Bm25Statslogs: []*datapb.FieldBinlog{{
+			FieldID: fieldID,
+			Binlogs: []*datapb.Binlog{{
+				LogPath: "bm25/101/stats",
+			}},
+		}},
+	})
+	server.meta.segments.SetSegment(segment.GetID(), segment)
+
+	err := server.validateExternalIndexFieldMaterialized(context.Background(), schema, &indexpb.CreateIndexRequest{
+		CollectionID: collID,
+		FieldID:      fieldID,
+	})
+	require.NoError(t, err)
+
+	segment.Bm25Statslogs = nil
+	err = server.validateExternalIndexFieldMaterialized(context.Background(), schema, &indexpb.CreateIndexRequest{
+		CollectionID: collID,
+		FieldID:      fieldID,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "bm25_sparse")
+}
+
 func TestServer_AlterIndex(t *testing.T) {
 	initStreamingSystem(t)
 	var (

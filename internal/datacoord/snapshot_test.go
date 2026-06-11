@@ -1247,10 +1247,9 @@ func TestGetManifestSchemaByVersion(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:        "version_4_unsupported",
-			version:     4,
-			wantErr:     true,
-			errContains: "unsupported manifest schema version",
+			name:    "version_4_current",
+			version: 4,
+			wantErr: false,
 		},
 		{
 			name:        "version_99_unsupported",

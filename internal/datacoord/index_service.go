@@ -364,7 +364,7 @@ func (s *Server) validateExternalIndexFieldMaterialized(ctx context.Context, sch
 		}),
 	)
 	for _, segment := range segments {
-		if externalmaterialization.SegmentCoversField(segment.SegmentInfo, req.GetFieldID()) {
+		if externalmaterialization.SegmentCoversSchemaField(segment.SegmentInfo, field, req.GetFieldID()) {
 			continue
 		}
 		fieldName := field.GetName()
