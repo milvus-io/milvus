@@ -72,7 +72,7 @@ func TestFutureWithSuccessCase(t *testing.T) {
 	runtime.GC()
 
 	_, err = future.BlockAndLeakyGet()
-	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
 }
 
 func TestFutureWithCaseNoInterrupt(t *testing.T) {

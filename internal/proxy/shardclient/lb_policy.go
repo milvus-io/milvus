@@ -18,6 +18,7 @@ package shardclient
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -430,7 +431,10 @@ func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload Collecti
 			PreferredNodeID: preferredNodeID(workload, channel),
 		})
 	}
-	return merr.WrapErrCollectionNotLoaded(workload.CollectionID)
+	// An empty leader list here is a transient routing-cache state (leaders are
+	// re-discovered on retry); reporting "collection not loaded" would tell the
+	// user to re-load a collection that is loaded.
+	return merr.WrapErrServiceUnavailable(fmt.Sprintf("no available shard leader for collection %d", workload.CollectionID))
 }
 
 func (lb *LBPolicyImpl) UpdateCostMetrics(node int64, cost *internalpb.CostAggregation) {

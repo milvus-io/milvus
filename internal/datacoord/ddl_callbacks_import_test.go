@@ -231,7 +231,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterEnabl
 		{Key: "timeout", Value: "300s"},
 	})
 	s.Error(err)
-	s.True(errors.Is(err, merr.ErrImportFailed))
+	s.True(errors.Is(err, merr.ErrOperationNotSupported))
 	s.Contains(err.Error(), "auto_commit=true")
 
 	err = server.validateImportRequest(ctx, files, []*commonpb.KeyValuePair{

@@ -137,7 +137,7 @@ func (s *Server) validateImportReplication(ctx context.Context, options []*commo
 		return merr.WrapErrOperationNotSupportedMsg("import in replicating cluster is not supported yet")
 	}
 	if importutilv2.IsAutoCommit(options) {
-		return merr.WrapErrImportFailed("auto_commit=true import in replicating cluster is not supported")
+		return merr.WrapErrOperationNotSupportedMsg("auto_commit=true import in replicating cluster is not supported")
 	}
 	return nil
 }

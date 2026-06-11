@@ -226,13 +226,14 @@ func UpdateDiskIndexBuildParams(params *paramtable.ComponentParam, indexParams [
 	if params.AutoIndexConfig.Enable.GetAsBool() {
 		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
 		if err != nil {
-			return indexParams, merr.WrapErrParameterInvalidMsg("index param search_cache_budget_gb_ratio not exist in AutoIndex Config")
+			// AutoIndexConfig is server-side configuration, not request input.
+			return indexParams, merr.WrapErrServiceInternalMsg("index param search_cache_budget_gb_ratio not exist in AutoIndex Config")
 		}
 		searchCacheBudgetGBRatio = fmt.Sprintf("%f", extraParams.SearchCacheBudgetGBRatio)
 	} else {
 		paramVal, err := strconv.ParseFloat(params.CommonCfg.SearchCacheBudgetGBRatio.GetValue(), 64)
 		if err != nil {
-			return indexParams, merr.WrapErrParameterInvalidMsg("index param search_cache_budget_gb_ratio not exist in Config")
+			return indexParams, merr.WrapErrServiceInternalMsg("index param search_cache_budget_gb_ratio not exist in Config")
 		}
 		searchCacheBudgetGBRatio = fmt.Sprintf("%f", paramVal)
 	}

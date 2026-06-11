@@ -81,7 +81,9 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 		Cancel: taskCancel,
 		State:  commonpb.IndexState_InProgress,
 	}); oldInfo != nil {
-		err := merr.WrapErrIndexDuplicate(req.GetIndexName(), "building index task existed")
+		// Node-internal dedup of a coordinator-dispatched build task: a duplicate
+		// is a scheduling race, not the user re-creating an index.
+		err := merr.WrapErrServiceInternalMsg("building index task existed, index=%s, buildID=%d", req.GetIndexName(), req.GetBuildID())
 		log.Warn("duplicated index build task", zap.Error(err))
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel).Inc()
 		return merr.Status(err), nil

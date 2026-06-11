@@ -37,7 +37,10 @@ func HandleCStatus(status *C.CStatus) error {
 	errorMsg := C.GoString(status.error_msg)
 	defer C.free(unsafe.Pointer(status.error_msg))
 
-	return merr.WrapErrParameterInvalidMsg("%s", errorMsg)
+	// Route through the shared segcore code table so user-input codes (bad
+	// index params) classify as InputError while internal C++ failures stay
+	// SystemError, instead of blanket-labeling every CGO error as user input.
+	return merr.SegcoreError(int32(status.error_code), errorMsg)
 }
 
 func (c vecIndexChecker) StaticCheck(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {

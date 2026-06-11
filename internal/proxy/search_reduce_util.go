@@ -781,7 +781,7 @@ func setupIdListForSearchResult(searchResult *milvuspb.SearchResults, pkType sch
 			},
 		}
 	default:
-		return merr.WrapErrParameterInvalidMsg("unsupported pk type")
+		return merr.WrapErrServiceInternalMsg("unsupported pk type")
 	}
 	return nil
 }
@@ -854,14 +854,16 @@ func decodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 
 func checkSearchResultData(data *schemapb.SearchResultData, nq int64, topk int64, pkHitNum int) error {
 	if data.NumQueries != nq {
-		return merr.WrapErrParameterInvalidMsg("search result's nq(%d) mis-match with %d", data.NumQueries, nq)
+		// The result shape comes from querynode/segcore, never from the request:
+		// a mismatch is an internal protocol violation, not user input.
+		return merr.WrapErrServiceInternalMsg("search result's nq(%d) mis-match with %d", data.NumQueries, nq)
 	}
 	if data.TopK != topk {
-		return merr.WrapErrParameterInvalidMsg("search result's topk(%d) mis-match with %d", data.TopK, topk)
+		return merr.WrapErrServiceInternalMsg("search result's topk(%d) mis-match with %d", data.TopK, topk)
 	}
 
 	if len(data.Scores) != pkHitNum {
-		return merr.WrapErrParameterInvalidMsg("search result's score length invalid, score length=%d, expectedLength=%d",
+		return merr.WrapErrServiceInternalMsg("search result's score length invalid, score length=%d, expectedLength=%d",
 			len(data.Scores), pkHitNum)
 	}
 	return nil

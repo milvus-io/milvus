@@ -4,7 +4,8 @@ package proxy
 import (
 	"context"
 
-		"go.uber.org/zap"
+	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
@@ -18,6 +19,8 @@ import (
 type queryFunc func(context.Context, UniqueID, types.QueryNodeClient, ...string) error
 
 type pickShardPolicy func(context.Context, shardclient.ShardClientMgr, queryFunc, map[string][]nodeInfo) error
+
+var errInvalidShardLeaders = errors.New("Invalid shard leader")
 
 // RoundRobinPolicy do the query with multiple dml channels
 // if request failed, it finds shard leader for failed dml channels
