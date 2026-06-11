@@ -181,7 +181,7 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
         config_[milvus::index::COLLECTION_ID] =
             file_manager_context_.fieldDataMeta.collection_id;
         LOG_INFO("load V3 scalar index with configs: {}", config_.dump());
-        index->LoadUnified(config_);
+        index->LoadUnified(config_, ctx);
     } else {
         LOG_INFO("load index with configs: {}", config_.dump());
         index->Load(ctx_, config_);

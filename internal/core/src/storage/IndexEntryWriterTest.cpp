@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <future>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -27,6 +28,8 @@
 #include <utility>
 #include <vector>
 
+#include "folly/CancellationToken.h"
+#include "folly/ScopeGuard.h"
 #include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "filemanager/InputStream.h"
@@ -1490,6 +1493,60 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamDrainsActiveTasksAfterError) {
         },
         slice_size);
     EXPECT_EQ(streamed, data);
+}
+
+TEST_F(IndexEntryWriterV3Test, ReadEntryStreamCancellationWhileWaitingBudget) {
+    const std::string file_path = kV3FilePath + "_stream_cancel_budget_wait";
+    const size_t slice_size = kMinStreamSliceSize;
+    auto data = GeneratePattern(slice_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto& budget = TransientMemoryBudget::GetEntryStreamBudget();
+    auto old_capacity = budget.CapacityBytes();
+    budget.SetCapacityBytes(slice_size);
+    budget.Acquire(slice_size);
+    auto cleanup = folly::makeGuard([&budget, old_capacity, slice_size]() {
+        budget.Release(slice_size);
+        budget.SetCapacityBytes(old_capacity);
+    });
+
+    folly::CancellationSource source;
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    auto reader = IndexEntryReader::Open(
+        input, file_size, 0, milvus::HIGH, source.getToken());
+
+    std::atomic<size_t> slice_count{0};
+    auto future = std::async(std::launch::async, [&]() {
+        reader->ReadEntryStream(
+            "data",
+            [&slice_count](const uint8_t*, size_t) {
+                slice_count.fetch_add(1);
+            },
+            slice_size);
+    });
+
+    EXPECT_EQ(future.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+    EXPECT_EQ(slice_count.load(), 0);
+
+    source.requestCancellation();
+
+    ASSERT_EQ(future.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    try {
+        future.get();
+        FAIL() << "expected cancellation";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::FollyCancel);
+    }
+    EXPECT_EQ(slice_count.load(), 0);
 }
 
 TEST_F(IndexEntryWriterV3Test, GetEntrySize) {
