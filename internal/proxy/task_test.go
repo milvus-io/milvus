@@ -8175,7 +8175,7 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("drop by function_name - success", func(t *testing.T) {
+	t.Run("drop by function_name - detach minhash success", func(t *testing.T) {
 		schemaWithFunc := &schemapb.CollectionSchema{
 			Name: "test_collection",
 			Fields: []*schemapb.FieldSchema{
@@ -8184,7 +8184,45 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 				{FieldID: 102, Name: "text", DataType: schemapb.DataType_VarChar},
 			},
 			Functions: []*schemapb.FunctionSchema{
-				{Name: "bm25_func", Type: schemapb.FunctionType_BM25},
+				{Name: "minhash_func", Type: schemapb.FunctionType_MinHash},
+			},
+		}
+		task := &alterCollectionSchemaTask{
+			ctx:       ctx,
+			oldSchema: schemaWithFunc,
+			AlterCollectionSchemaRequest: &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_collection",
+				Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+					Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+						DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+							Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FunctionName{
+								FunctionName: "minhash_func",
+							},
+						},
+					},
+				},
+			},
+		}
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("drop by function_name - bm25 function field success", func(t *testing.T) {
+		schemaWithFunc := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "dense_vector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+				{FieldID: 102, Name: "text", DataType: schemapb.DataType_VarChar},
+				{FieldID: 103, Name: "sparse_vector", DataType: schemapb.DataType_SparseFloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"text"},
+					OutputFieldNames: []string{"sparse_vector"},
+				},
 			},
 		}
 		task := &alterCollectionSchemaTask{
@@ -8198,6 +8236,7 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 							Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FunctionName{
 								FunctionName: "bm25_func",
 							},
+							DropFunctionOutputFields: true,
 						},
 					},
 				},
@@ -8342,7 +8381,7 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 
 func TestValidateDropFunction(t *testing.T) {
 	t.Run("empty function name", func(t *testing.T) {
-		err := validateDropFunction(&schemapb.CollectionSchema{}, "")
+		err := validateDropFunction(&schemapb.CollectionSchema{}, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function name is empty")
 	})
@@ -8353,13 +8392,87 @@ func TestValidateDropFunction(t *testing.T) {
 				{Name: "embedding_func", Type: schemapb.FunctionType_TextEmbedding},
 			},
 		}
-		err := validateDropFunction(schema, "nonexistent")
+		err := validateDropFunction(schema, "nonexistent", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function not found")
 	})
 
-	t.Run("drop function leaves another vector field", func(t *testing.T) {
-		// Cascade removes vec_func_out, but vec_other remains.
+	t.Run("detach minhash function succeeds", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+				{FieldID: 102, Name: "minhash_vec", DataType: schemapb.DataType_BinaryVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name: "minhash_func", Type: schemapb.FunctionType_MinHash,
+					InputFieldNames: []string{"text"}, OutputFieldNames: []string{"minhash_vec"},
+				},
+			},
+		}
+		err := validateDropFunction(schema, "minhash_func", false)
+		assert.NoError(t, err)
+	})
+
+	t.Run("detach bm25 function fails", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+				{FieldID: 102, Name: "sparse_vec", DataType: schemapb.DataType_SparseFloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name: "bm25_func", Type: schemapb.FunctionType_BM25,
+					InputFieldNames: []string{"text"}, OutputFieldNames: []string{"sparse_vec"},
+				},
+			},
+		}
+		err := validateDropFunction(schema, "bm25_func", false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "BM25 function must be dropped with its output field")
+	})
+
+	t.Run("drop function field leaves another vector field", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+				{FieldID: 102, Name: "sparse_vec", DataType: schemapb.DataType_SparseFloatVector},
+				{FieldID: 103, Name: "vec_other", DataType: schemapb.DataType_FloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name: "bm25_func", Type: schemapb.FunctionType_BM25,
+					InputFieldNames: []string{"text"}, OutputFieldNames: []string{"sparse_vec"},
+				},
+			},
+		}
+		err := validateDropFunction(schema, "bm25_func", true)
+		assert.NoError(t, err)
+	})
+
+	t.Run("drop minhash function field succeeds", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+				{FieldID: 102, Name: "minhash_vec", DataType: schemapb.DataType_BinaryVector},
+				{FieldID: 103, Name: "vec_other", DataType: schemapb.DataType_FloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name: "minhash_func", Type: schemapb.FunctionType_MinHash,
+					InputFieldNames: []string{"text"}, OutputFieldNames: []string{"minhash_vec"},
+				},
+			},
+		}
+		err := validateDropFunction(schema, "minhash_func", true)
+		assert.NoError(t, err)
+	})
+
+	t.Run("drop unsupported function field fails", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -8374,13 +8487,12 @@ func TestValidateDropFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateDropFunction(schema, "embed_func")
-		assert.NoError(t, err)
+		err := validateDropFunction(schema, "embed_func", true)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "only BM25 and MinHash functions support dropping output fields")
 	})
 
-	t.Run("drop function would leave no vector field", func(t *testing.T) {
-		// BM25-only collection: sparse_vec is the only vector and is the
-		// function's output. Cascade removal would leave 0 vectors.
+	t.Run("drop function field would leave no vector field", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -8394,14 +8506,12 @@ func TestValidateDropFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateDropFunction(schema, "bm25_func")
+		err := validateDropFunction(schema, "bm25_func", true)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "would leave no vector field")
 	})
 
-	t.Run("drop function preserves vector in struct array field", func(t *testing.T) {
-		// Cascade removes the function's output vector, but a vector inside a
-		// StructArrayField remains, so the collection is still searchable.
+	t.Run("drop function field preserves vector in struct array field", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -8423,7 +8533,7 @@ func TestValidateDropFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateDropFunction(schema, "bm25_func")
+		err := validateDropFunction(schema, "bm25_func", true)
 		assert.NoError(t, err)
 	})
 }
