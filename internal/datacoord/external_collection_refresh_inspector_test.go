@@ -61,9 +61,9 @@ func TestExternalCollectionRefreshInspector_NewInspector(t *testing.T) {
 	catalog := &stubCatalog{}
 
 	// Mock catalog methods
-	mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+	mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 	defer mockListJobs.UnPatch()
-	mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+	mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 	defer mockListTasks.UnPatch()
 
 	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
@@ -86,9 +86,9 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInit},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
@@ -112,9 +112,9 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateRetry},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
@@ -138,9 +138,9 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
@@ -164,9 +164,9 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
@@ -190,9 +190,9 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFailed},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
@@ -219,9 +219,9 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 			{TaskId: 1004, JobId: 1, State: indexpb.JobState_JobStateFinished},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
@@ -249,9 +249,9 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInit},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
@@ -275,9 +275,9 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateRetry},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
@@ -301,9 +301,9 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
@@ -327,9 +327,9 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
@@ -353,9 +353,9 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFailed},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
@@ -383,9 +383,9 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 			{TaskId: 1005, JobId: 1, State: indexpb.JobState_JobStateFailed},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
