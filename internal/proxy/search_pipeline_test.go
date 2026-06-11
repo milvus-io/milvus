@@ -697,6 +697,25 @@ func (s *SearchPipelineSuite) TestElementBestCollapseOp_RejectsSumCollapseForNeg
 	s.Contains(err.Error(), "only supported for positively related metrics")
 }
 
+func (s *SearchPipelineSuite) TestElementBestCollapseOp_RejectsSumCollapseForNegativeMetricsWithEmptyResult() {
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries:     1,
+			TopK:           0,
+			Topks:          []int64{0},
+			ElementIndices: &schemapb.LongArray{},
+		},
+	}
+	op := &elementBestCollapseOperator{configs: []elementCollapseConfig{{Strategy: elementCollapseTopKSum, TopK: 2}}}
+
+	_, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{"L2"})
+
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.Contains(err.Error(), "only supported for positively related metrics")
+}
+
 func (s *SearchPipelineSuite) TestElementLevelHybridPrepareAndRestoreKeys() {
 	input := &milvuspb.SearchResults{
 		Status: merr.Success(),
