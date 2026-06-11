@@ -1,0 +1,156 @@
+package shard
+
+import (
+	"context"
+	"testing"
+
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/shard/mock_shards"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+)
+
+func newTestSplitShardMutableMessage() message.MutableMessage {
+	return message.NewSplitShardMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&message.SplitShardMessageHeader{
+			CollectionId: 1,
+			SplitTaskId:  100,
+			Targets: []*message.SplitShardTarget{
+				{Vchannel: "v2", KeyRange: &message.KeyRange{Upper: []byte{0x80}}},
+				{Vchannel: "v3", KeyRange: &message.KeyRange{Lower: []byte{0x80}}},
+			},
+		}).
+		WithBody(&message.SplitShardMessageBody{}).
+		MustBuildMutable().
+		WithTimeTick(100).
+		WithLastConfirmedUseMessageID()
+}
+
+func newTestShardInterceptor(t *testing.T) (interceptors.Interceptor, *mock_shards.MockShardManager) {
+	core, _ := observer.New(zapcore.WarnLevel)
+	logger := &log.MLogger{Logger: zap.New(core)}
+	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().Logger().Return(logger).Maybe()
+	i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
+		ShardManager: shardManager,
+	})
+	t.Cleanup(i.Close)
+	return i, shardManager
+}
+
+func TestShardInterceptorSplitShardMessage(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1)).Return(nil).Once()
+	shardManager.EXPECT().FlushAndFenceSegmentAllocUntil(int64(1), uint64(100)).Return([]int64{7}, nil).Once()
+	shardManager.EXPECT().SplitShard(mock.Anything).Once()
+
+	appended := false
+	msgID, err := i.DoAppend(context.Background(), newTestSplitShardMutableMessage(),
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			appended = true
+			return rmq.NewRmqID(1), nil
+		})
+	assert.NoError(t, err)
+	assert.True(t, appended)
+	assert.True(t, msgID.EQ(rmq.NewRmqID(1)))
+}
+
+func TestShardInterceptorSplitShardMessageOnFencedVChannel(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	// idempotent: the vchannel is already fenced by a previous split message.
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1)).Return(shards.ErrVChannelFenced).Once()
+
+	msgID, err := i.DoAppend(context.Background(), newTestSplitShardMutableMessage(),
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			assert.Fail(t, "the append should not be called on a fenced vchannel")
+			return nil, nil
+		})
+	assert.Nil(t, msgID)
+	assert.True(t, status.AsStreamingError(err).IsShardFenced())
+}
+
+func TestShardInterceptorSplitShardMessageOnUnknownCollection(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1)).Return(shards.ErrCollectionNotFound).Once()
+
+	msgID, err := i.DoAppend(context.Background(), newTestSplitShardMutableMessage(),
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			assert.Fail(t, "the append should not be called on an unknown collection")
+			return nil, nil
+		})
+	assert.Nil(t, msgID)
+	assert.True(t, status.AsStreamingError(err).IsUnrecoverable())
+	assert.False(t, status.AsStreamingError(err).IsShardFenced())
+}
+
+func TestShardInterceptorSplitShardMessageFlushFailure(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1)).Return(nil).Once()
+	shardManager.EXPECT().FlushAndFenceSegmentAllocUntil(int64(1), uint64(100)).Return(nil, errors.New("mock flush error")).Once()
+
+	msgID, err := i.DoAppend(context.Background(), newTestSplitShardMutableMessage(),
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			assert.Fail(t, "the append should not be called when the flush fails")
+			return nil, nil
+		})
+	assert.Nil(t, msgID)
+	assert.Error(t, err)
+}
+
+func TestShardInterceptorInsertOnFencedVChannel(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1)).Return(shards.ErrVChannelFenced).Once()
+
+	msg := message.NewInsertMessageBuilderV1().
+		WithVChannel("v1").
+		WithHeader(&messagespb.InsertMessageHeader{
+			CollectionId: 1,
+			Partitions: []*messagespb.PartitionSegmentAssignment{
+				{PartitionId: 1, Rows: 1, BinarySize: 100},
+			},
+		}).
+		WithBody(&msgpb.InsertRequest{}).
+		MustBuildMutable().WithTimeTick(100)
+
+	msgID, err := i.DoAppend(context.Background(), msg,
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			assert.Fail(t, "the append should not be called on a fenced vchannel")
+			return nil, nil
+		})
+	assert.Nil(t, msgID)
+	assert.True(t, status.AsStreamingError(err).IsShardFenced())
+}
+
+func TestShardInterceptorDeleteOnFencedVChannel(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1)).Return(shards.ErrVChannelFenced).Once()
+
+	msg := message.NewDeleteMessageBuilderV1().
+		WithVChannel("v1").
+		WithHeader(&messagespb.DeleteMessageHeader{
+			CollectionId: 1,
+		}).
+		WithBody(&msgpb.DeleteRequest{}).
+		MustBuildMutable().WithTimeTick(100)
+
+	msgID, err := i.DoAppend(context.Background(), msg,
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			assert.Fail(t, "the append should not be called on a fenced vchannel")
+			return nil, nil
+		})
+	assert.Nil(t, msgID)
+	assert.True(t, status.AsStreamingError(err).IsShardFenced())
+}
