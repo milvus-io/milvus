@@ -9,6 +9,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
@@ -417,6 +418,195 @@ func materializerBM25Schema() (*schemapb.CollectionSchema, *schemapb.FunctionSch
 		OutputFieldIds: []int64{101},
 	}
 	return &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{inputField, outputField}, Functions: []*schemapb.FunctionSchema{functionSchema}}, functionSchema, inputField, outputField
+}
+
+func materializerMinHashSchema() (*schemapb.CollectionSchema, *schemapb.FunctionSchema, *schemapb.FieldSchema, *schemapb.FieldSchema) {
+	inputField := &schemapb.FieldSchema{
+		FieldID:  100,
+		Name:     "text",
+		DataType: schemapb.DataType_VarChar,
+	}
+	outputField := &schemapb.FieldSchema{
+		FieldID:  101,
+		Name:     "minhash",
+		DataType: schemapb.DataType_BinaryVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "32"},
+		},
+	}
+	functionSchema := &schemapb.FunctionSchema{
+		Name:           "minhash_func",
+		Type:           schemapb.FunctionType_MinHash,
+		InputFieldIds:  []int64{inputField.GetFieldID()},
+		OutputFieldIds: []int64{outputField.GetFieldID()},
+	}
+	schema := &schemapb.CollectionSchema{
+		Fields:    []*schemapb.FieldSchema{inputField, outputField},
+		Functions: []*schemapb.FunctionSchema{functionSchema},
+	}
+	return schema, functionSchema, inputField, outputField
+}
+
+func TestMinHashFunctionMaterializerMaterializesBinaryOutput(t *testing.T) {
+	schema, functionSchema, inputField, outputField := materializerMinHashSchema()
+	runner := &materializerTestFunctionRunner{
+		schema:       functionSchema,
+		inputFields:  []*schemapb.FieldSchema{inputField},
+		outputFields: []*schemapb.FieldSchema{outputField},
+		outputs: []any{&schemapb.FieldData{
+			Type:    schemapb.DataType_BinaryVector,
+			FieldId: outputField.GetFieldID(),
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 32,
+					Data: &schemapb.VectorField_BinaryVector{
+						BinaryVector: []byte{
+							0x01, 0x02, 0x03, 0x04,
+							0x05, 0x06, 0x07, 0x08,
+						},
+					},
+				},
+			},
+		}},
+	}
+	materializer, err := newFunctionMaterializer(schema, runner, []int{0}, false)
+	require.NoError(t, err)
+	defer materializer.Close()
+
+	input := newStringArray(t, []string{"hello", "world"})
+	defer input.Release()
+	record := &materializerTestRecord{len: 2, columns: map[storage.FieldID]arrow.Array{100: input}}
+
+	arrays, err := materializer.Materialize(record)
+	require.NoError(t, err)
+	require.Len(t, arrays, 1)
+	defer releaseArrowArrays(arrays)
+
+	output := arrays[101]
+	require.NotNil(t, output)
+	require.Equal(t, 2, output.Len())
+	binary, ok := output.(*array.FixedSizeBinary)
+	require.True(t, ok)
+	require.Equal(t, []byte{0x01, 0x02, 0x03, 0x04}, binary.Value(0))
+	require.Equal(t, []byte{0x05, 0x06, 0x07, 0x08}, binary.Value(1))
+	require.Len(t, runner.inputs, 1)
+	require.Equal(t, []string{"hello", "world"}, runner.inputs[0])
+}
+
+func TestMinHashFunctionMaterializerRejectsNonBinaryOutputField(t *testing.T) {
+	schema, functionSchema, inputField, outputField := materializerMinHashSchema()
+	outputField.DataType = schemapb.DataType_FloatVector
+	runner := &materializerTestFunctionRunner{
+		schema:       functionSchema,
+		inputFields:  []*schemapb.FieldSchema{inputField},
+		outputFields: []*schemapb.FieldSchema{outputField},
+	}
+
+	_, err := newFunctionMaterializer(schema, runner, []int{0}, false)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "output field data type must be binary vector for minhash function materialization")
+}
+
+func TestMinHashFunctionMaterializerRejectsRowCountMismatch(t *testing.T) {
+	schema, functionSchema, inputField, outputField := materializerMinHashSchema()
+	runner := &materializerTestFunctionRunner{
+		schema:       functionSchema,
+		inputFields:  []*schemapb.FieldSchema{inputField},
+		outputFields: []*schemapb.FieldSchema{outputField},
+		outputs: []any{&schemapb.FieldData{
+			Type:    schemapb.DataType_BinaryVector,
+			FieldId: outputField.GetFieldID(),
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 32,
+					Data: &schemapb.VectorField_BinaryVector{
+						BinaryVector: []byte{0x01, 0x02, 0x03, 0x04},
+					},
+				},
+			},
+		}},
+	}
+	materializer, err := newFunctionMaterializer(schema, runner, []int{0}, false)
+	require.NoError(t, err)
+	defer materializer.Close()
+
+	input := newStringArray(t, []string{"hello", "world"})
+	defer input.Release()
+	record := &materializerTestRecord{len: 2, columns: map[storage.FieldID]arrow.Array{100: input}}
+
+	arrays, err := materializer.Materialize(record)
+	require.Nil(t, arrays)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "minhash function output row count mismatch")
+}
+
+func TestRecordMaterializerMaterializesBM25AndMinHashOutputs(t *testing.T) {
+	bm25Schema, bm25Function, inputField, bm25Output := materializerBM25Schema()
+	minHashOutput := &schemapb.FieldSchema{
+		FieldID:  102,
+		Name:     "minhash",
+		DataType: schemapb.DataType_BinaryVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "32"},
+		},
+	}
+	minHashFunction := &schemapb.FunctionSchema{
+		Name:           "minhash_func",
+		Type:           schemapb.FunctionType_MinHash,
+		InputFieldIds:  []int64{inputField.GetFieldID()},
+		OutputFieldIds: []int64{minHashOutput.GetFieldID()},
+	}
+	bm25Schema.Fields = append(bm25Schema.Fields, minHashOutput)
+	bm25Schema.Functions = []*schemapb.FunctionSchema{bm25Function, minHashFunction}
+
+	input := newStringArray(t, []string{"hello", "world"})
+	defer input.Release()
+	record := &materializerTestRecord{len: 2, columns: map[storage.FieldID]arrow.Array{100: input}}
+
+	bm25Runner := &materializerTestFunctionRunner{
+		schema:       bm25Function,
+		inputFields:  []*schemapb.FieldSchema{inputField},
+		outputFields: []*schemapb.FieldSchema{bm25Output},
+		outputs: []any{&schemapb.SparseFloatArray{
+			Dim: 16,
+			Contents: [][]byte{
+				typeutil.CreateSparseFloatRow([]uint32{1}, []float32{0.5}),
+				typeutil.CreateSparseFloatRow([]uint32{2}, []float32{0.8}),
+			},
+		}},
+	}
+	minHashRunner := &materializerTestFunctionRunner{
+		schema:       minHashFunction,
+		inputFields:  []*schemapb.FieldSchema{inputField},
+		outputFields: []*schemapb.FieldSchema{minHashOutput},
+		outputs: []any{&schemapb.FieldData{
+			Type:    schemapb.DataType_BinaryVector,
+			FieldId: minHashOutput.GetFieldID(),
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim:  32,
+					Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 2, 3, 4, 5, 6, 7, 8}},
+				},
+			},
+		}},
+	}
+	bm25Materializer, err := newFunctionMaterializer(bm25Schema, bm25Runner, []int{0}, false)
+	require.NoError(t, err)
+	minHashMaterializer, err := newFunctionMaterializer(bm25Schema, minHashRunner, []int{0}, false)
+	require.NoError(t, err)
+	materializer := &RecordMaterializer{
+		schema:        bm25Schema,
+		materializers: []FunctionMaterializer{bm25Materializer, minHashMaterializer},
+	}
+	defer materializer.Close()
+
+	wrapped, err := materializer.Wrap(record)
+	require.NoError(t, err)
+	defer wrapped.Release()
+
+	require.NotNil(t, wrapped.Column(bm25Output.GetFieldID()))
+	require.NotNil(t, wrapped.Column(minHashOutput.GetFieldID()))
+	require.Equal(t, 2, wrapped.Len())
 }
 
 func newStringArray(t *testing.T, values []string) *array.String {

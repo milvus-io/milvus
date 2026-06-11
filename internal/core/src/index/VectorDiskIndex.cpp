@@ -320,13 +320,14 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
             GetValueFromConfig<std::vector<std::string>>(config, "index_files");
         AssertInfo(index_files.has_value(),
                    "index file paths is empty when load disk ann index data");
-        // If index is loaded with stream, we don't need to cache index to disk
-        if (!index_.LoadIndexWithStream()) {
-            auto load_priority =
-                GetValueFromConfig<milvus::proto::common::LoadPriority>(
-                    config, milvus::LOAD_PRIORITY)
-                    .value_or(milvus::proto::common::LoadPriority::HIGH);
-            file_manager_->CacheIndexToDisk(index_files.value(), load_priority);
+        auto load_priority =
+            GetValueFromConfig<milvus::proto::common::LoadPriority>(
+                config, milvus::LOAD_PRIORITY)
+                .value_or(milvus::proto::common::LoadPriority::HIGH);
+        auto cache_files = GetCacheFilesForDiskIndexLoad(
+            index_files.value(), index_.LoadIndexWithStream());
+        if (!cache_files.empty()) {
+            file_manager_->CacheIndexToDisk(cache_files, load_priority);
         }
         read_file_span->End();
     }

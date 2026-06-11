@@ -21,6 +21,7 @@ package credentials
 import (
 	"encoding/base64"
 	"fmt"
+	"strings"
 )
 
 const (
@@ -45,8 +46,13 @@ func NewCredentials(conf map[string]string) *Credentials {
 	return &Credentials{conf}
 }
 
+func credentialKey(name, key string) string {
+	// Config keys are case-insensitive and normalized to lowercase.
+	return strings.ToLower(name) + "." + key
+}
+
 func (c *Credentials) GetAPIKeyCredential(name string) (string, error) {
-	k := name + "." + APIKey
+	k := credentialKey(name, APIKey)
 	apikey, exist := c.confMap[k]
 	if !exist {
 		return "", fmt.Errorf("%s is not a apikey crediential, can not find key: %s", name, k)
@@ -55,13 +61,13 @@ func (c *Credentials) GetAPIKeyCredential(name string) (string, error) {
 }
 
 func (c *Credentials) GetAKSKCredential(name string) (string, string, error) {
-	IdKey := name + "." + AccessKeyId
+	IdKey := credentialKey(name, AccessKeyId)
 	accessKeyId, exist := c.confMap[IdKey]
 	if !exist {
 		return "", "", fmt.Errorf("%s is not a aksk crediential, can not find key: %s", name, IdKey)
 	}
 
-	AccessKey := name + "." + SecretAccessKey
+	AccessKey := credentialKey(name, SecretAccessKey)
 	secretAccessKey, exist := c.confMap[AccessKey]
 	if !exist {
 		return "", "", fmt.Errorf("%s is not a aksk crediential, can not find key: %s", name, AccessKey)
@@ -70,7 +76,7 @@ func (c *Credentials) GetAKSKCredential(name string) (string, string, error) {
 }
 
 func (c *Credentials) GetGcpCredential(name string) ([]byte, error) {
-	k := name + "." + CredentialJSON
+	k := credentialKey(name, CredentialJSON)
 	jsonByte, exist := c.confMap[k]
 	if !exist {
 		return nil, fmt.Errorf("%s is not a gcp crediential, can not find key: %s ", name, k)

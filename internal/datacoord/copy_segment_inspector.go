@@ -263,7 +263,7 @@ func (s *copySegmentInspector) processPending(task CopySegmentTask) {
 //  1. Iterate through all segment ID mappings in the task
 //  2. For each target segment:
 //     a. Retrieve segment metadata
-//     b. Mark segment as Dropped if it exists
+//     b. Mark segment as Dropped if it exists and is not already Dropped
 //     c. Log success/failure of drop operation
 //
 // Why drop target segments:
@@ -279,16 +279,18 @@ func (s *copySegmentInspector) processFailed(task CopySegmentTask) {
 	for _, mapping := range task.GetIdMappings() {
 		targetSegID := mapping.GetTargetSegmentId()
 		segment := s.meta.GetSegment(s.ctx, targetSegID)
-		if segment != nil {
-			op := UpdateStatusOperator(targetSegID, commonpb.SegmentState_Dropped)
-			err := s.meta.UpdateSegmentsInfo(s.ctx, op)
-			if err != nil {
-				log.Warn("failed to drop target segment after copy task failed",
-					WrapCopySegmentTaskLog(task, zap.Int64("segmentID", targetSegID), zap.Error(err))...)
-			} else {
-				log.Info("dropped target segment after copy task failed",
-					WrapCopySegmentTaskLog(task, zap.Int64("segmentID", targetSegID))...)
-			}
+		if segment == nil || segment.GetState() == commonpb.SegmentState_Dropped {
+			continue
+		}
+
+		op := UpdateStatusOperator(targetSegID, commonpb.SegmentState_Dropped)
+		err := s.meta.UpdateSegmentsInfo(s.ctx, op)
+		if err != nil {
+			log.Warn("failed to drop target segment after copy task failed",
+				WrapCopySegmentTaskLog(task, zap.Int64("segmentID", targetSegID), zap.Error(err))...)
+		} else {
+			log.Info("dropped target segment after copy task failed",
+				WrapCopySegmentTaskLog(task, zap.Int64("segmentID", targetSegID))...)
 		}
 	}
 }

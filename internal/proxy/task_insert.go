@@ -157,6 +157,9 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 	it.schema = schema.CollectionSchema
 	it.schemaVersion = schema.Version
+	if err := validateTextStorageV3Enabled(it.schema); err != nil {
+		return err
+	}
 
 	if err := genFunctionFields(ctx, it.insertMsg, schema, false); err != nil {
 		return err

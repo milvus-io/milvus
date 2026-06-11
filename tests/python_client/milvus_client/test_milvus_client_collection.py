@@ -4260,7 +4260,7 @@ class TestMilvusClientDescribeCollectionValid(TestMilvusClientV2Base):
             "aliases": [],
             "consistency_level": 0,
             "consistency_level_name": "Strong",
-            "properties": {"timezone": "UTC"},
+            "properties": {"timezone": "UTC", "max_field_id": "102"},
             "num_partitions": 1,
             "enable_dynamic_field": True,
             "enable_namespace": False,

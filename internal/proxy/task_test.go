@@ -240,6 +240,24 @@ func constructCollectionSchemaByDataType(collectionName string, fieldName2DataTy
 	}
 }
 
+func newTextSchemaForStorageV3Test(collectionName string) *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: testInt64Field, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_Text},
+			{
+				FieldID:  102,
+				Name:     testFloatVecField,
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: strconv.Itoa(testVecDim)},
+				},
+			},
+		},
+	}
+}
+
 func constructCollectionSchemaWithTTLField(collectionName string, ttlField string) *schemapb.CollectionSchema {
 	pk := &schemapb.FieldSchema{
 		FieldID:      100,
@@ -3980,6 +3998,43 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 	})
 }
 
+func TestLoadCollectionTaskExecuteTextRequiresStorageV3(t *testing.T) {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	})
+
+	oldCache := globalMetaCache
+	t.Cleanup(func() {
+		globalMetaCache = oldCache
+	})
+
+	const (
+		dbName         = "db"
+		collectionName = "text_collection"
+		collectionID   = int64(100)
+	)
+	schema := newSchemaInfo(newTextSchemaForStorageV3Test(collectionName))
+	cache := NewMockCache(t)
+	cache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil)
+	cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(schema, nil)
+	globalMetaCache = cache
+
+	task := &loadCollectionTask{
+		LoadCollectionRequest: &milvuspb.LoadCollectionRequest{
+			Base:           commonpbutil.NewMsgBase(),
+			DbName:         dbName,
+			CollectionName: collectionName,
+		},
+		ctx: context.Background(),
+	}
+
+	err := task.Execute(context.Background())
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "TEXT field requires StorageV3")
+}
+
 func Test_loadPartitionTask_Execute(t *testing.T) {
 	qc := NewMixCoordMock()
 
@@ -7003,6 +7058,38 @@ func TestValidateAddFieldRequest(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("text field requires storage v3", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
+		t.Cleanup(func() {
+			paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+		})
+		schema := baseSchema()
+		newField := &schemapb.FieldSchema{
+			Name:     "text_field",
+			DataType: schemapb.DataType_Text,
+			Nullable: true,
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "TEXT field requires StorageV3")
+	})
+
+	t.Run("text field allowed with storage v3", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+		t.Cleanup(func() {
+			paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+		})
+		schema := baseSchema()
+		newField := &schemapb.FieldSchema{
+			Name:     "text_field",
+			DataType: schemapb.DataType_Text,
+			Nullable: true,
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.NoError(t, err)
+	})
+
 	t.Run("field count exceeds MaxFieldNum", func(t *testing.T) {
 		schema := baseSchema()
 		// Build exactly MaxFieldNum fields so that the check triggers.
@@ -7256,6 +7343,13 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		Name:     "sparse_bm25",
 		DataType: schemapb.DataType_SparseFloatVector,
 	}
+	minHashOutputField := &schemapb.FieldSchema{
+		Name:     "minhash_binary",
+		DataType: schemapb.DataType_BinaryVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "32"},
+		},
+	}
 
 	// BM25 function schema: input "text", output "sparse_bm25".
 	functionSchema := &schemapb.FunctionSchema{
@@ -7265,7 +7359,9 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		OutputFieldNames: []string{"sparse_bm25"},
 	}
 
-	buildValidRequest := func() *milvuspb.AlterCollectionSchemaRequest {
+	buildAddFunctionRequest := func(field *schemapb.FieldSchema, function *schemapb.FunctionSchema) *milvuspb.AlterCollectionSchemaRequest {
+		field = proto.Clone(field).(*schemapb.FieldSchema)
+		function = proto.Clone(function).(*schemapb.FunctionSchema)
 		return &milvuspb.AlterCollectionSchemaRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
@@ -7273,13 +7369,17 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
 					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
 						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
-							{FieldSchema: sparseOutputField},
+							{FieldSchema: field},
 						},
-						FuncSchema: []*schemapb.FunctionSchema{functionSchema},
+						FuncSchema: []*schemapb.FunctionSchema{function},
 					},
 				},
 			},
 		}
+	}
+
+	buildValidRequest := func() *milvuspb.AlterCollectionSchemaRequest {
+		return buildAddFunctionRequest(sparseOutputField, functionSchema)
 	}
 
 	buildTask := func(req *milvuspb.AlterCollectionSchemaRequest, schema *schemapb.CollectionSchema) *alterCollectionSchemaTask {
@@ -7500,18 +7600,30 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
-	t.Run("PreExecute rejects non-BM25 function", func(t *testing.T) {
+	t.Run("PreExecute happy path for MinHash", func(t *testing.T) {
+		functionSchema := &schemapb.FunctionSchema{
+			Name:             "minhash_func",
+			Type:             schemapb.FunctionType_MinHash,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"minhash_binary"},
+		}
+		task := buildTask(buildAddFunctionRequest(minHashOutputField, functionSchema), oldSchema)
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("PreExecute rejects unsupported function", func(t *testing.T) {
 		req := buildValidRequest()
 		addRequest := req.GetAction().GetAddRequest()
 		functionSchema := proto.Clone(addRequest.GetFuncSchema()[0]).(*schemapb.FunctionSchema)
-		functionSchema.Type = schemapb.FunctionType_MinHash
+		functionSchema.Type = schemapb.FunctionType_TextEmbedding
 		addRequest.FuncSchema = []*schemapb.FunctionSchema{functionSchema}
 
 		task := buildTask(req, oldSchema)
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.ErrorContains(t, err, "only BM25 function is supported")
+		assert.ErrorContains(t, err, "only BM25 and MinHash functions are supported")
 	})
 
 	t.Run("PreExecute ignores legacy DoPhysicalBackfill", func(t *testing.T) {

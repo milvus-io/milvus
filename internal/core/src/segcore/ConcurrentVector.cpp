@@ -136,6 +136,7 @@ VectorBase::set_data_raw(ssize_t element_offset,
                                 FIELD_DATA(data, timestamptz).data(),
                                 element_count);
         }
+        case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT: {
             auto& field_data = FIELD_DATA(data, string);

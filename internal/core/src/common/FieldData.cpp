@@ -312,17 +312,23 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                 std::dynamic_pointer_cast<arrow::BinaryArray>(array);
             AssertInfo(geometry_array != nullptr,
                        "null geometry arrow binary array");
-            std::vector<uint8_t> values(element_count);
-            for (size_t index = 0; index < element_count; ++index) {
-                values[index] = *geometry_array->GetValue(index, 0);
+            if constexpr (std::is_same_v<Type, std::string>) {
+                std::vector<std::string> values(element_count);
+                for (size_t index = 0; index < element_count; ++index) {
+                    auto sv = geometry_array->GetView(index);
+                    values[index].assign(sv.data(), sv.size());
+                }
+                if (nullable_) {
+                    return FillFieldData(values.data(),
+                                         array->null_bitmap_data(),
+                                         element_count,
+                                         array->offset());
+                }
+                return FillFieldData(values.data(), element_count);
             }
-            if (nullable_) {
-                return FillFieldData(values.data(),
-                                     array->null_bitmap_data(),
-                                     element_count,
-                                     array->offset());
-            }
-            return FillFieldData(values.data(), element_count);
+            ThrowInfo(DataTypeInvalid,
+                      "GEOMETRY arrow data must be filled into string-backed "
+                      "FieldData");
         }
         case DataType::ARRAY: {
             auto array_array =

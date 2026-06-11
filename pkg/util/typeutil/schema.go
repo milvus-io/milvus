@@ -92,6 +92,35 @@ func getVarFieldLength(fieldSchema *schemapb.FieldSchema, policy getVariableFiel
 	}
 }
 
+// HasTextField returns whether schema contains a TEXT field.
+func HasTextField(schema *schemapb.CollectionSchema) bool {
+	if schema == nil {
+		return false
+	}
+	for _, field := range schema.GetFields() {
+		if field.GetDataType() == schemapb.DataType_Text {
+			return true
+		}
+	}
+	return false
+}
+
+func ValidateTextRequiresStorageV3(schema *schemapb.CollectionSchema, storageV3Enabled bool) error {
+	if HasTextField(schema) && !storageV3Enabled {
+		return fmt.Errorf("TEXT field requires StorageV3; enable common.storage.useLoonFFI")
+	}
+	return nil
+}
+
+// UseGrowingSourceFlush returns whether insert payload for the schema should
+// be flushed from QueryNode growing source when available.
+func UseGrowingSourceFlush(schema *schemapb.CollectionSchema, storageV3Enabled bool, enableGrowingSourceFlush bool) bool {
+	if !storageV3Enabled {
+		return false
+	}
+	return HasTextField(schema) || enableGrowingSourceFlush
+}
+
 // EstimateSizePerRecord returns the estimate size of a record in a collection
 func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 	return estimateSizeBy(schema, custom)
@@ -2539,11 +2568,11 @@ func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSc
 }
 
 // NormalizeAndValidateExternalCollectionSchema ensures unsupported features are
-// disabled for external collections AND mutates each non-vector user field to
-// set nullable=true. The mutation is intentional: external Parquet sources may
-// contain nulls in scalar columns, and a non-nullable scalar field would silently
-// produce incorrect results when reading those nulls. The function is named
-// "NormalizeAndValidate" so callers know it has a write-back side effect.
+// disabled for external collections AND mutates each user field to set
+// nullable=true. The mutation is intentional: external Parquet sources may
+// contain nulls, and non-nullable fields would silently produce incorrect
+// results when reading those nulls. The function is named "NormalizeAndValidate"
+// so callers know it has a write-back side effect.
 //
 // Validation runs in two passes: pass 1 checks every field; pass 2 mutates
 // only after all checks succeed. Without this split, a failing check on a
@@ -2630,19 +2659,14 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 	}
 
 	// Pass 2: normalize. All fields passed validation; safe to mutate.
-	// Force nullable for external scalar fields: Parquet columns can contain
-	// nulls, and non-nullable scalars would silently produce incorrect results.
+	// Force nullable for external user fields: Parquet columns can contain
+	// nulls, and non-nullable fields would silently produce incorrect results.
 	for _, field := range schema.GetFields() {
 		if IsExternalSystemOrVirtualField(field.GetName()) {
 			continue
 		}
 		// Function output fields are computed internally.
 		if isExternalGeneratedField(field, generatedColumns) {
-			continue
-		}
-		if IsVectorType(field.GetDataType()) {
-			// External nullable vectors currently build incorrect offset mapping.
-			// Restore forced nullable after the offset mapping path is fixed.
 			continue
 		}
 		if !field.GetNullable() {

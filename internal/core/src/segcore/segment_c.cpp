@@ -937,6 +937,7 @@ struct FieldInfo {
     milvus::FieldId field_id;
     std::string field_name;
     milvus::DataType data_type;
+    milvus::DataType element_type;
     bool nullable;
     int64_t dim;  // for vector types
     const milvus::segcore::VectorBase* vec_base;
@@ -958,6 +959,7 @@ GetElementByteWidth(milvus::DataType data_type, int64_t dim) {
         case milvus::DataType::FLOAT:
             return 4;
         case milvus::DataType::INT64:
+        case milvus::DataType::TIMESTAMPTZ:
         case milvus::DataType::DOUBLE:
             return 8;
         case milvus::DataType::VECTOR_FLOAT:
@@ -1275,6 +1277,47 @@ BuildTextArrayForChunkWithSpillover(
     return builder.Finish();
 }
 
+arrow::Result<std::shared_ptr<arrow::Array>>
+BuildVectorArrayForChunk(const FieldInfo& field_info,
+                         int64_t start_offset,
+                         int64_t num_rows) {
+    if (field_info.valid_data) {
+        return arrow::Status::Invalid(
+            "VECTOR_ARRAY does not support null rows");
+    }
+
+    auto vector_array_vec = dynamic_cast<
+        const milvus::segcore::ConcurrentVector<milvus::VectorArray>*>(
+        field_info.vec_base);
+    if (!vector_array_vec) {
+        return arrow::Status::Invalid("Expected ConcurrentVector<VectorArray>");
+    }
+
+    auto byte_width = milvus::vector_bytes_per_element(field_info.element_type,
+                                                       field_info.dim);
+    auto value_builder = std::make_shared<arrow::FixedSizeBinaryBuilder>(
+        arrow::fixed_size_binary(byte_width));
+    arrow::ListBuilder builder(arrow::default_memory_pool(), value_builder);
+    ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
+
+    for (int64_t i = 0; i < num_rows; i++) {
+        const auto& vector_array = (*vector_array_vec)[start_offset + i];
+        if (vector_array.get_element_type() != field_info.element_type) {
+            return arrow::Status::Invalid("VECTOR_ARRAY element type mismatch");
+        }
+        if (vector_array.dim() != field_info.dim) {
+            return arrow::Status::Invalid("VECTOR_ARRAY dim mismatch");
+        }
+
+        ARROW_RETURN_NOT_OK(builder.Append());
+        ARROW_RETURN_NOT_OK(value_builder->AppendValues(
+            reinterpret_cast<const uint8_t*>(vector_array.data()),
+            vector_array.length()));
+    }
+
+    return builder.Finish();
+}
+
 // build boolean array for a chunk - booleans need special handling
 arrow::Result<std::shared_ptr<arrow::Array>>
 BuildBoolArrayForChunk(
@@ -1343,6 +1386,7 @@ BuildArrayForChunk(const FieldInfo& field_info,
                 global_offset);
 
         case milvus::DataType::INT64:
+        case milvus::DataType::TIMESTAMPTZ:
             return WrapChunkAsArrowArray<arrow::Int64Array>(
                 get_data_ptr(),
                 num_rows,
@@ -1450,6 +1494,29 @@ BuildArrayForChunk(const FieldInfo& field_info,
             return builder.Finish();
         }
 
+        case milvus::DataType::GEOMETRY: {
+            auto geometry_vec = dynamic_cast<
+                const milvus::segcore::ConcurrentVector<std::string>*>(
+                field_info.vec_base);
+            if (!geometry_vec) {
+                return arrow::Status::Invalid(
+                    "Expected ConcurrentVector<std::string> for GEOMETRY");
+            }
+            arrow::BinaryBuilder builder;
+            ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
+            for (int64_t i = 0; i < num_rows; i++) {
+                int64_t offset = global_offset + i;
+                if (field_info.valid_data &&
+                    !field_info.valid_data->is_valid(offset)) {
+                    ARROW_RETURN_NOT_OK(builder.AppendNull());
+                } else {
+                    auto wkb = geometry_vec->view_element(offset);
+                    ARROW_RETURN_NOT_OK(builder.Append(wkb.data(), wkb.size()));
+                }
+            }
+            return builder.Finish();
+        }
+
         case milvus::DataType::VECTOR_FLOAT:
         case milvus::DataType::VECTOR_BINARY:
         case milvus::DataType::VECTOR_FLOAT16:
@@ -1471,6 +1538,10 @@ BuildArrayForChunk(const FieldInfo& field_info,
 
         case milvus::DataType::VECTOR_SPARSE_U32_F32:
             return BuildSparseFloatVectorArrayForChunk(
+                field_info, global_offset, num_rows);
+
+        case milvus::DataType::VECTOR_ARRAY:
+            return BuildVectorArrayForChunk(
                 field_info, global_offset, num_rows);
 
         default:
@@ -1537,6 +1608,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
             info.field_id = RowFieldID;
             info.field_name = field_meta.get_name().get();
             info.data_type = field_meta.get_data_type();
+            info.element_type = milvus::DataType::NONE;
             info.nullable = field_meta.is_nullable();
             info.dim = 0;
             info.vec_base = &insert_record.row_ids_;
@@ -1586,7 +1658,10 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                                !milvus::IsSparseFloatVectorDataType(data_type)
                            ? field_meta.get_dim()
                            : 0;
-            auto arrow_type = milvus::GetArrowDataType(data_type, dim);
+            auto arrow_type = data_type == milvus::DataType::VECTOR_ARRAY
+                                  ? milvus::GetArrowDataTypeForVectorArray(
+                                        field_meta.get_element_type(), dim)
+                                  : milvus::GetArrowDataType(data_type, dim);
             if (field_meta.is_nullable() &&
                 IsSupportedNullableVectorDataType(data_type)) {
                 arrow_type = arrow::binary();
@@ -1596,6 +1671,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
             info.field_id = field_id;
             info.field_name = field_meta.get_name().get();
             info.data_type = data_type;
+            info.element_type = field_meta.get_element_type();
             info.nullable = field_meta.is_nullable();
             info.dim = dim;
             info.vec_base = vec_base;
@@ -1621,6 +1697,13 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 std::to_string(field_id.get())};
             if (field_meta.is_nullable() &&
                 IsFixedWidthVectorDataType(data_type)) {
+                metadata_keys.push_back(DIM_KEY);
+                metadata_values.push_back(std::to_string(dim));
+            }
+            if (data_type == milvus::DataType::VECTOR_ARRAY) {
+                metadata_keys.push_back(ELEMENT_TYPE_KEY_FOR_ARROW);
+                metadata_values.push_back(std::to_string(
+                    static_cast<int>(field_meta.get_element_type())));
                 metadata_keys.push_back(DIM_KEY);
                 metadata_values.push_back(std::to_string(dim));
             }
