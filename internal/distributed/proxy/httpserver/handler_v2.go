@@ -572,6 +572,9 @@ func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, ch
 	}
 
 	if err != nil {
+		// Expose the exact classification (incl. boundary InputError marks) to
+		// the REST access log; key must match accesslog/info.ContextErrorType.
+		ginCtx.Set("error_type", merr.GetErrorType(err).String())
 		log.Ctx(ctx).Warn("high level restful api, grpc call failed", zap.Error(err))
 		if !ignoreErr {
 			HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})

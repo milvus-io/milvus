@@ -290,8 +290,7 @@ func Error(status *commonpb.Status) error {
 	}
 
 	var eType ErrorType
-	_, ok := status.GetExtraInfo()[InputErrorFlagKey]
-	if ok {
+	if status.GetExtraInfo()[InputErrorFlagKey] == "true" {
 		eType = InputError
 	}
 

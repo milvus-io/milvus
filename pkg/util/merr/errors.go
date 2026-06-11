@@ -343,20 +343,33 @@ type milvusError struct {
 	inner error
 }
 
-// registeredCodes maps every sentinel code to the message of the sentinel
-// that owns it. milvusError.Is matches by code alone, so two sentinels
-// sharing a code would silently satisfy errors.Is against each other.
-var registeredCodes = make(map[int32]string)
+// registeredCodes maps every sentinel code to the sentinel that owns it.
+// milvusError.Is matches by code alone, so two sentinels sharing a code would
+// silently satisfy errors.Is against each other; the registry also lets a
+// wire code be mapped back to its baked classification (ErrorTypeOfCode).
+var registeredCodes = make(map[int32]milvusError)
 
 // newMilvusError defines a package-level sentinel and registers its code,
 // panicking at package init on a duplicate. Use makeMilvusError for
 // non-sentinel values (e.g. reconstructing an error from a wire Status).
 func newMilvusError(msg string, code int32, retriable bool, options ...errorOption) milvusError {
 	if owner, dup := registeredCodes[code]; dup {
-		panic(fmt.Sprintf("merr: duplicate sentinel error code %d: %q vs %q", code, owner, msg))
+		panic(fmt.Sprintf("merr: duplicate sentinel error code %d: %q vs %q", code, owner.msg, msg))
 	}
-	registeredCodes[code] = msg
-	return makeMilvusError(msg, code, retriable, options...)
+	err := makeMilvusError(msg, code, retriable, options...)
+	registeredCodes[code] = err
+	return err
+}
+
+// ErrorTypeOfCode returns the baked classification of the sentinel that owns
+// the given wire code, or SystemError for unregistered codes. Note this is
+// the sentinel default only — boundary InputError marks stamped at runtime
+// (WrapErrAsInputError) are not recoverable from the code.
+func ErrorTypeOfCode(code int32) ErrorType {
+	if s, ok := registeredCodes[code]; ok {
+		return s.errType
+	}
+	return SystemError
 }
 
 // makeMilvusError constructs a milvusError value without claiming its code in
@@ -462,6 +475,11 @@ func Combine(errs ...error) error {
 	errs = lo.Filter(errs, func(err error, _ int) bool { return err != nil })
 	if len(errs) == 0 {
 		return nil
+	}
+	// A single error must keep its own identity/code: wrapping it in
+	// multiErrors would make Unwrap return nil and degrade Code() to 65535.
+	if len(errs) == 1 {
+		return errs[0]
 	}
 	return multiErrors{
 		errs,
