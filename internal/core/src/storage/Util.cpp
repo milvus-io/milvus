@@ -1982,6 +1982,15 @@ IsByteVectorListInput(DataType data_type) {
            data_type == DataType::VECTOR_BFLOAT16;
 }
 
+bool
+CanTreatVectorListAsRawBytes(
+    DataType data_type, const std::shared_ptr<arrow::DataType>& actual_type) {
+    return actual_type->id() == arrow::Type::UINT8 &&
+           IsVectorDataType(data_type) &&
+           !IsSparseFloatVectorDataType(data_type) &&
+           !IsVectorArrayDataType(data_type);
+}
+
 arrow::Type::type
 ExpectedVectorListElementArrowType(DataType data_type,
                                    const FieldMeta& field_meta) {
@@ -2023,10 +2032,13 @@ ArrowTypeName(arrow::Type::type type) {
 }
 
 int
-ExpectedVectorListLength(DataType data_type, int dim) {
+ExpectedVectorListLength(DataType data_type,
+                         int dim,
+                         const std::shared_ptr<arrow::DataType>& actual_type) {
     // Float-like vector lists are element-counted by dim. Byte vector lists are
     // raw-byte encoded, so their list length must match the physical byte width.
-    if (IsByteVectorListInput(data_type)) {
+    if (IsByteVectorListInput(data_type) ||
+        CanTreatVectorListAsRawBytes(data_type, actual_type)) {
         return GetDataTypeSize(data_type, dim);
     }
     return dim;
@@ -2039,8 +2051,13 @@ ValidateVectorListElementType(
     const FieldMeta& field_meta) {
     auto expected_type =
         ExpectedVectorListElementArrowType(data_type, field_meta);
-    AssertInfo(actual_type->id() == expected_type,
-               "vector element type mismatch{}, expected {}, actual {}",
+    if (actual_type->id() == expected_type ||
+        CanTreatVectorListAsRawBytes(data_type, actual_type)) {
+        return;
+    }
+    AssertInfo(false,
+               "vector element type mismatch{}, expected {} or raw uint8 "
+               "bytes, actual {}",
                FieldErrorSuffix(field_meta),
                ArrowTypeName(expected_type),
                actual_type->ToString());
@@ -2067,7 +2084,6 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
         }
 
         int64_t num_rows = array->length();
-        int expected_list_length = ExpectedVectorListLength(data_type, dim);
         auto buffer_result = arrow::AllocateBuffer(num_rows * byte_width);
         AssertInfo(buffer_result.ok(),
                    "Failed to allocate buffer for vector normalization");
@@ -2083,6 +2099,8 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
             auto values = list_array->values();
             ValidateVectorListElementType(
                 values->type(), data_type, field_meta);
+            int expected_list_length =
+                ExpectedVectorListLength(data_type, dim, values->type());
             int elem_bit_width = values->type()->bit_width();
             AssertInfo(elem_bit_width > 0 && elem_bit_width % 8 == 0,
                        "vector list element{} must be fixed-width "
@@ -2117,6 +2135,8 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
             auto values = fsl_array->values();
             ValidateVectorListElementType(
                 values->type(), data_type, field_meta);
+            int expected_list_length =
+                ExpectedVectorListLength(data_type, dim, values->type());
             int elem_bit_width = values->type()->bit_width();
             AssertInfo(elem_bit_width > 0 && elem_bit_width % 8 == 0,
                        "vector list element{} must be fixed-width "

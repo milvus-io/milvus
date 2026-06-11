@@ -90,6 +90,28 @@ MakeExternalFieldMetaForTest(DataType data_type,
     return FieldMeta::ParseFrom(field_schema);
 }
 
+template <size_t N>
+void
+AppendFloatVectorBytes(arrow::UInt8Builder& builder,
+                       const std::array<float, N>& row) {
+    auto bytes = reinterpret_cast<const uint8_t*>(row.data());
+    for (size_t i = 0; i < sizeof(float) * row.size(); ++i) {
+        ASSERT_TRUE(builder.Append(bytes[i]).ok());
+    }
+}
+
+template <size_t N>
+void
+AssertFixedSizeBinaryRows(const std::shared_ptr<arrow::Array>& array,
+                          const std::array<float, N>& row0,
+                          const std::array<float, N>& row1) {
+    auto fsb_array =
+        std::static_pointer_cast<arrow::FixedSizeBinaryArray>(array);
+    ASSERT_EQ(fsb_array->byte_width(), sizeof(float) * N);
+    EXPECT_EQ(memcmp(fsb_array->Value(0), row0.data(), sizeof(row0)), 0);
+    EXPECT_EQ(memcmp(fsb_array->Value(1), row1.data(), sizeof(row1)), 0);
+}
+
 }  // namespace
 
 TEST(storage, ExternalVarCharStringNormalizesToBinaryAndFillSucceeds) {
@@ -311,6 +333,57 @@ TEST(storage, ExternalFloatVectorListNormalizesToFixedSizeBinary) {
         DataType::VECTOR_FLOAT, DataType::NONE, false, 2);
     auto normalized = storage::NormalizeExternalArrow(list_array, field_meta);
     ASSERT_EQ(normalized->type_id(), arrow::Type::FIXED_SIZE_BINARY);
+}
+
+TEST(storage, ExternalFloatVectorByteListNormalizesToFixedSizeBinary) {
+    constexpr int dim = 2;
+    std::array<float, dim> row0 = {1.0F, 2.0F};
+    std::array<float, dim> row1 = {3.0F, 4.0F};
+
+    auto value_builder = std::make_shared<arrow::UInt8Builder>();
+    arrow::ListBuilder builder(arrow::default_memory_pool(), value_builder);
+    auto& byte_builder =
+        dynamic_cast<arrow::UInt8Builder&>(*builder.value_builder());
+
+    ASSERT_TRUE(builder.Append().ok());
+    AppendFloatVectorBytes(byte_builder, row0);
+    ASSERT_TRUE(builder.Append().ok());
+    AppendFloatVectorBytes(byte_builder, row1);
+
+    std::shared_ptr<arrow::Array> list_array;
+    ASSERT_TRUE(builder.Finish(&list_array).ok());
+
+    auto field_meta = MakeExternalFieldMetaForTest(
+        DataType::VECTOR_FLOAT, DataType::NONE, false, dim);
+    auto normalized = storage::NormalizeExternalArrow(list_array, field_meta);
+    ASSERT_EQ(normalized->type_id(), arrow::Type::FIXED_SIZE_BINARY);
+    AssertFixedSizeBinaryRows(normalized, row0, row1);
+}
+
+TEST(storage, ExternalFloatVectorFixedSizeByteListNormalizesToFixedSizeBinary) {
+    constexpr int dim = 2;
+    std::array<float, dim> row0 = {1.0F, 2.0F};
+    std::array<float, dim> row1 = {3.0F, 4.0F};
+
+    auto value_builder = std::make_shared<arrow::UInt8Builder>();
+    arrow::FixedSizeListBuilder builder(
+        arrow::default_memory_pool(), value_builder, sizeof(float) * dim);
+    auto& byte_builder =
+        dynamic_cast<arrow::UInt8Builder&>(*builder.value_builder());
+
+    ASSERT_TRUE(builder.Append().ok());
+    AppendFloatVectorBytes(byte_builder, row0);
+    ASSERT_TRUE(builder.Append().ok());
+    AppendFloatVectorBytes(byte_builder, row1);
+
+    std::shared_ptr<arrow::Array> list_array;
+    ASSERT_TRUE(builder.Finish(&list_array).ok());
+
+    auto field_meta = MakeExternalFieldMetaForTest(
+        DataType::VECTOR_FLOAT, DataType::NONE, false, dim);
+    auto normalized = storage::NormalizeExternalArrow(list_array, field_meta);
+    ASSERT_EQ(normalized->type_id(), arrow::Type::FIXED_SIZE_BINARY);
+    AssertFixedSizeBinaryRows(normalized, row0, row1);
 }
 
 TEST(storage, ExternalNullableFloatVectorBinaryIsAccepted) {
