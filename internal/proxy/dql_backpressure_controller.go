@@ -23,31 +23,57 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+)
+
+const (
+	dqlBackpressureStateCurrent     = "current"
+	dqlBackpressureStateInflight    = "inflight"
+	dqlBackpressureStateMax         = "max"
+	dqlBackpressureStateSlowdownMin = "slowdown_min"
+
+	dqlBackpressureEventSlowdown      = "slowdown"
+	dqlBackpressureEventRecover       = "recover"
+	dqlBackpressureEventConfigUpdate  = "config_update"
+	dqlBackpressureEventAcquireCancel = "acquire_cancel"
+
+	dqlBackpressureReasonTooManyRequests      = "too_many_requests"
+	dqlBackpressureReasonResourceInsufficient = "resource_insufficient"
+	dqlBackpressureReasonSuccess              = "success"
+	dqlBackpressureReasonQuietPeriod          = "quiet_period"
+	dqlBackpressureReasonEnabled              = "enabled"
+	dqlBackpressureReasonDisabled             = "disabled"
+	dqlBackpressureReasonContextCancel        = "context_cancel"
 )
 
 type dqlBackpressureControllerConfig struct {
-	enabled          bool
-	maxConcurrency   int64
-	minConcurrency   int64
-	reduceRatio      float64
-	decreaseInterval time.Duration
-	recoverInterval  time.Duration
+	enabled                bool
+	maxConcurrency         int64
+	slowdownMinConcurrency int64
+	slowdownRatio          float64
+	slowdownInterval       time.Duration
+	recoverInterval        time.Duration
+	recoverStep            int64
+	recoverQuiet           time.Duration
 }
 
 type dqlBackpressureController struct {
 	mu sync.Mutex
 
-	enabled          bool
-	maxConcurrency   int64
-	minConcurrency   int64
-	reduceRatio      float64
-	decreaseInterval time.Duration
-	recoverInterval  time.Duration
+	enabled                bool
+	maxConcurrency         int64
+	slowdownMinConcurrency int64
+	slowdownRatio          float64
+	slowdownInterval       time.Duration
+	recoverInterval        time.Duration
+	recoverStep            int64
+	recoverQuiet           time.Duration
 
 	currentConcurrency int64
 	inflight           int64
-	lastDecrease       time.Time
+	lastSlowdown       time.Time
 	lastRecover        time.Time
 	notifyCh           chan struct{}
 	now                func() time.Time
@@ -64,20 +90,30 @@ func newDQLBackpressureController(cfg dqlBackpressureControllerConfig) *dqlBackp
 
 func normalizeDQLBackpressureConfig(cfg dqlBackpressureControllerConfig) dqlBackpressureControllerConfig {
 	maxConcurrency := max(cfg.maxConcurrency, int64(1))
-	minConcurrency := cfg.minConcurrency
-	if minConcurrency <= 0 {
-		minConcurrency = 1
+	slowdownMinConcurrency := cfg.slowdownMinConcurrency
+	if slowdownMinConcurrency <= 0 {
+		slowdownMinConcurrency = 1
 	}
-	minConcurrency = min(minConcurrency, maxConcurrency)
+	slowdownMinConcurrency = min(slowdownMinConcurrency, maxConcurrency)
 
-	reduceRatio := cfg.reduceRatio
-	if reduceRatio <= 0 || reduceRatio >= 1 {
-		reduceRatio = 0.5
+	slowdownRatio := cfg.slowdownRatio
+	if slowdownRatio <= 0 || slowdownRatio >= 1 {
+		slowdownRatio = 0.5
+	}
+	recoverStep := cfg.recoverStep
+	if recoverStep <= 0 {
+		recoverStep = 4
+	}
+	recoverQuiet := cfg.recoverQuiet
+	if recoverQuiet < 0 {
+		recoverQuiet = 0
 	}
 
 	cfg.maxConcurrency = maxConcurrency
-	cfg.minConcurrency = minConcurrency
-	cfg.reduceRatio = reduceRatio
+	cfg.slowdownMinConcurrency = slowdownMinConcurrency
+	cfg.slowdownRatio = slowdownRatio
+	cfg.recoverStep = recoverStep
+	cfg.recoverQuiet = recoverQuiet
 	return cfg
 }
 
@@ -92,15 +128,23 @@ func (c *dqlBackpressureController) updateConfig(cfg dqlBackpressureControllerCo
 
 	c.enabled = cfg.enabled
 	c.maxConcurrency = cfg.maxConcurrency
-	c.minConcurrency = cfg.minConcurrency
-	c.reduceRatio = cfg.reduceRatio
-	c.decreaseInterval = cfg.decreaseInterval
+	c.slowdownMinConcurrency = cfg.slowdownMinConcurrency
+	c.slowdownRatio = cfg.slowdownRatio
+	c.slowdownInterval = cfg.slowdownInterval
 	c.recoverInterval = cfg.recoverInterval
+	c.recoverStep = cfg.recoverStep
+	c.recoverQuiet = cfg.recoverQuiet
 
 	if c.currentConcurrency == 0 || !oldEnabled && c.enabled || c.currentConcurrency == oldMaxConcurrency {
 		c.currentConcurrency = c.maxConcurrency
 	} else {
-		c.currentConcurrency = min(max(c.currentConcurrency, c.minConcurrency), c.maxConcurrency)
+		c.currentConcurrency = min(max(c.currentConcurrency, c.slowdownMinConcurrency), c.maxConcurrency)
+	}
+	c.updateConcurrencyMetricsLocked()
+	if c.enabled {
+		c.recordEventLocked(dqlBackpressureEventConfigUpdate, dqlBackpressureReasonEnabled)
+	} else {
+		c.recordEventLocked(dqlBackpressureEventConfigUpdate, dqlBackpressureReasonDisabled)
 	}
 	if !c.enabled {
 		c.notify()
@@ -108,21 +152,31 @@ func (c *dqlBackpressureController) updateConfig(cfg dqlBackpressureControllerCo
 }
 
 func (c *dqlBackpressureController) Acquire(ctx context.Context) bool {
+	var waitStart time.Time
 	for {
 		c.mu.Lock()
 		if !c.enabled {
 			c.mu.Unlock()
+			c.recordWaitDuration(waitStart)
 			return true
 		}
+		c.recoverByElapsedQuietPeriodLocked(c.now())
 		if c.inflight < c.currentConcurrency {
 			c.inflight++
+			c.updateConcurrencyMetricsLocked()
 			c.mu.Unlock()
+			c.recordWaitDuration(waitStart)
 			return true
+		}
+		if waitStart.IsZero() {
+			waitStart = c.now()
 		}
 		c.mu.Unlock()
 
 		select {
 		case <-ctx.Done():
+			c.recordWaitDuration(waitStart)
+			c.recordEvent(dqlBackpressureEventAcquireCancel, dqlBackpressureReasonContextCancel)
 			return false
 		case <-c.notifyCh:
 		}
@@ -134,15 +188,17 @@ func (c *dqlBackpressureController) Release() {
 	if c.inflight > 0 {
 		c.inflight--
 	}
+	c.updateConcurrencyMetricsLocked()
 	c.mu.Unlock()
 	c.notify()
 }
 
 func (c *dqlBackpressureController) Observe(err error) {
 	if err != nil {
-		if errors.Is(err, merr.ErrServiceTooManyRequests) ||
-			errors.Is(err, merr.ErrServiceResourceInsufficient) {
-			c.decrease()
+		if errors.Is(err, merr.ErrServiceTooManyRequests) {
+			c.slowdown(dqlBackpressureReasonTooManyRequests)
+		} else if errors.Is(err, merr.ErrServiceResourceInsufficient) {
+			c.slowdown(dqlBackpressureReasonResourceInsufficient)
 		}
 		return
 	}
@@ -161,7 +217,7 @@ func (c *dqlBackpressureController) Inflight() int64 {
 	return c.inflight
 }
 
-func (c *dqlBackpressureController) decrease() {
+func (c *dqlBackpressureController) slowdown(reason string) {
 	now := c.now()
 
 	c.mu.Lock()
@@ -170,16 +226,18 @@ func (c *dqlBackpressureController) decrease() {
 	if !c.enabled {
 		return
 	}
-	if c.decreaseInterval > 0 && !c.lastDecrease.IsZero() && now.Sub(c.lastDecrease) < c.decreaseInterval {
+	if c.slowdownInterval > 0 && !c.lastSlowdown.IsZero() && now.Sub(c.lastSlowdown) < c.slowdownInterval {
 		return
 	}
-	next := int64(float64(c.currentConcurrency) * c.reduceRatio)
+	next := int64(float64(c.currentConcurrency) * c.slowdownRatio)
 	if next >= c.currentConcurrency {
 		next = c.currentConcurrency - 1
 	}
-	c.currentConcurrency = max(c.minConcurrency, next)
-	c.lastDecrease = now
+	c.currentConcurrency = max(c.slowdownMinConcurrency, next)
+	c.lastSlowdown = now
 	c.lastRecover = now
+	c.updateConcurrencyMetricsLocked()
+	c.recordEventLocked(dqlBackpressureEventSlowdown, reason)
 }
 
 func (c *dqlBackpressureController) recover() {
@@ -194,11 +252,56 @@ func (c *dqlBackpressureController) recover() {
 	if c.currentConcurrency >= c.maxConcurrency {
 		return
 	}
+	if c.recoverQuiet > 0 && !c.lastSlowdown.IsZero() && now.Sub(c.lastSlowdown) < c.recoverQuiet {
+		return
+	}
 	if c.recoverInterval > 0 && !c.lastRecover.IsZero() && now.Sub(c.lastRecover) < c.recoverInterval {
 		return
 	}
-	c.currentConcurrency++
+	c.currentConcurrency = min(c.maxConcurrency, c.currentConcurrency+c.recoverStep)
 	c.lastRecover = now
+	c.updateConcurrencyMetricsLocked()
+	c.recordEventLocked(dqlBackpressureEventRecover, dqlBackpressureReasonSuccess)
+	c.notify()
+}
+
+func (c *dqlBackpressureController) recoverByElapsedQuietPeriodLocked(now time.Time) {
+	if c.currentConcurrency >= c.maxConcurrency {
+		return
+	}
+	if c.lastSlowdown.IsZero() {
+		return
+	}
+	recoverStart := c.lastSlowdown.Add(c.recoverQuiet)
+	if now.Before(recoverStart) {
+		return
+	}
+
+	if c.recoverInterval <= 0 {
+		c.currentConcurrency = min(c.maxConcurrency, c.currentConcurrency+c.recoverStep)
+		c.lastRecover = now
+		c.updateConcurrencyMetricsLocked()
+		c.recordEventLocked(dqlBackpressureEventRecover, dqlBackpressureReasonQuietPeriod)
+		c.notify()
+		return
+	}
+
+	lastRecover := c.lastRecover
+	if lastRecover.Before(recoverStart) {
+		lastRecover = recoverStart
+	}
+	if now.Sub(lastRecover) < c.recoverInterval {
+		return
+	}
+
+	steps := int64(now.Sub(lastRecover) / c.recoverInterval)
+	if steps <= 0 {
+		return
+	}
+	c.currentConcurrency = min(c.maxConcurrency, c.currentConcurrency+steps*c.recoverStep)
+	c.lastRecover = lastRecover.Add(time.Duration(steps) * c.recoverInterval)
+	c.updateConcurrencyMetricsLocked()
+	c.recordEventLocked(dqlBackpressureEventRecover, dqlBackpressureReasonQuietPeriod)
 	c.notify()
 }
 
@@ -207,4 +310,27 @@ func (c *dqlBackpressureController) notify() {
 	case c.notifyCh <- struct{}{}:
 	default:
 	}
+}
+
+func (c *dqlBackpressureController) updateConcurrencyMetricsLocked() {
+	nodeID := paramtable.GetStringNodeID()
+	metrics.ProxyDQLBackpressureConcurrency.WithLabelValues(nodeID, dqlBackpressureStateCurrent).Set(float64(c.currentConcurrency))
+	metrics.ProxyDQLBackpressureConcurrency.WithLabelValues(nodeID, dqlBackpressureStateInflight).Set(float64(c.inflight))
+	metrics.ProxyDQLBackpressureConcurrency.WithLabelValues(nodeID, dqlBackpressureStateMax).Set(float64(c.maxConcurrency))
+	metrics.ProxyDQLBackpressureConcurrency.WithLabelValues(nodeID, dqlBackpressureStateSlowdownMin).Set(float64(c.slowdownMinConcurrency))
+}
+
+func (c *dqlBackpressureController) recordEvent(event string, reason string) {
+	metrics.ProxyDQLBackpressureEventsTotal.WithLabelValues(paramtable.GetStringNodeID(), event, reason).Inc()
+}
+
+func (c *dqlBackpressureController) recordEventLocked(event string, reason string) {
+	metrics.ProxyDQLBackpressureEventsTotal.WithLabelValues(paramtable.GetStringNodeID(), event, reason).Inc()
+}
+
+func (c *dqlBackpressureController) recordWaitDuration(waitStart time.Time) {
+	if waitStart.IsZero() {
+		return
+	}
+	metrics.ProxyDQLBackpressureWaitDuration.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(c.now().Sub(waitStart).Microseconds()) / 1000.0)
 }

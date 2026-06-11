@@ -485,22 +485,26 @@ func newTaskScheduler(ctx context.Context,
 
 func loadDQLBackpressureControllerConfig() dqlBackpressureControllerConfig {
 	return dqlBackpressureControllerConfig{
-		enabled:          Params.ProxyCfg.DQLBackpressureEnabled.GetAsBool(),
-		maxConcurrency:   Params.ProxyCfg.MaxTaskNum.GetAsInt64(),
-		minConcurrency:   Params.ProxyCfg.DQLBackpressureMinConcurrency.GetAsInt64(),
-		reduceRatio:      Params.ProxyCfg.DQLBackpressureReduceRatio.GetAsFloat(),
-		decreaseInterval: Params.ProxyCfg.DQLBackpressureDecreaseInterval.GetAsDurationByParse(),
-		recoverInterval:  Params.ProxyCfg.DQLBackpressureRecoverInterval.GetAsDurationByParse(),
+		enabled:                Params.ProxyCfg.DQLBackpressureEnabled.GetAsBool(),
+		maxConcurrency:         Params.ProxyCfg.MaxTaskNum.GetAsInt64(),
+		slowdownMinConcurrency: Params.ProxyCfg.DQLBackpressureSlowdownMinConcurrency.GetAsInt64(),
+		slowdownRatio:          Params.ProxyCfg.DQLBackpressureSlowdownRatio.GetAsFloat(),
+		slowdownInterval:       Params.ProxyCfg.DQLBackpressureSlowdownInterval.GetAsDurationByParse(),
+		recoverInterval:        Params.ProxyCfg.DQLBackpressureRecoverInterval.GetAsDurationByParse(),
+		recoverStep:            Params.ProxyCfg.DQLBackpressureRecoverStep.GetAsInt64(),
+		recoverQuiet:           Params.ProxyCfg.DQLBackpressureRecoverQuietPeriod.GetAsDurationByParse(),
 	}
 }
 
 func registerDQLBackpressureConfigCallback(controller *dqlBackpressureController) func() {
 	params := []*paramtable.ParamItem{
 		&Params.ProxyCfg.DQLBackpressureEnabled,
-		&Params.ProxyCfg.DQLBackpressureMinConcurrency,
-		&Params.ProxyCfg.DQLBackpressureReduceRatio,
-		&Params.ProxyCfg.DQLBackpressureDecreaseInterval,
+		&Params.ProxyCfg.DQLBackpressureSlowdownMinConcurrency,
+		&Params.ProxyCfg.DQLBackpressureSlowdownRatio,
+		&Params.ProxyCfg.DQLBackpressureSlowdownInterval,
 		&Params.ProxyCfg.DQLBackpressureRecoverInterval,
+		&Params.ProxyCfg.DQLBackpressureRecoverStep,
+		&Params.ProxyCfg.DQLBackpressureRecoverQuietPeriod,
 	}
 	callback := func(context.Context, string, string, string) error {
 		controller.updateConfig(loadDQLBackpressureControllerConfig())
