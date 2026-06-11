@@ -189,6 +189,10 @@ func UpdateStorageV2CellTargetSizeBytes(bytes int64) {
 	C.SetStorageV2CellTargetSizeBytes(C.int64_t(bytes))
 }
 
+func UpdateStorageV2FieldDataLoadBudgetBytes(bytes int64) {
+	C.SetStorageV2FieldDataLoadBudgetBytes(C.int64_t(bytes))
+}
+
 func UpdateDefaultGrowingJSONKeyStatsEnable(enable bool) {
 	C.SetDefaultGrowingJSONKeyStatsEnable(C.bool(enable))
 }

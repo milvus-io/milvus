@@ -491,6 +491,12 @@ func TestComponentParam(t *testing.T) {
 		// test query side config
 		chunkRows := Params.ChunkRows.GetAsInt64()
 		assert.Equal(t, int64(128), chunkRows)
+		defer params.Reset(Params.StorageV2FieldDataLoadBudgetBytes.Key)
+		assert.Equal(t, int64(DefaultStorageV2FieldDataLoadBudgetBytes), Params.StorageV2FieldDataLoadBudgetBytes.GetAsInt64())
+		params.Save(Params.StorageV2FieldDataLoadBudgetBytes.Key, "0")
+		assert.Equal(t, int64(DefaultStorageV2FieldDataLoadBudgetBytes), Params.StorageV2FieldDataLoadBudgetBytes.GetAsInt64())
+		params.Save(Params.StorageV2FieldDataLoadBudgetBytes.Key, "67108864")
+		assert.Equal(t, int64(67108864), Params.StorageV2FieldDataLoadBudgetBytes.GetAsInt64())
 
 		nlist := Params.InterimIndexNlist.GetAsInt64()
 		assert.Equal(t, int64(128), nlist)

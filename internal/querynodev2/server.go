@@ -286,6 +286,16 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 			mlog.Info(node.ctx, "queryNode.segcore.storageV2.cellTargetSizeBytes updated",
 				mlog.Int64("bytes", newBytes))
 		}))
+	pt.Watch(pt.QueryNodeCfg.StorageV2FieldDataLoadBudgetBytes.Key,
+		config.NewHandler("queryNode.segcore.storageV2.fieldDataLoadBudgetBytes", func(evt *config.Event) {
+			if !evt.HasUpdated {
+				return
+			}
+			newBytes := paramtable.Get().QueryNodeCfg.StorageV2FieldDataLoadBudgetBytes.GetAsInt64()
+			initcore.UpdateStorageV2FieldDataLoadBudgetBytes(newBytes)
+			log.Info("queryNode.segcore.storageV2.fieldDataLoadBudgetBytes updated",
+				zap.Int64("bytes", newBytes))
+		}))
 	initcore.RegisterArrowReaderConfigWatchers(pt, "querynode")
 }
 

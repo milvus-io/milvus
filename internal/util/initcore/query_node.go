@@ -166,6 +166,8 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 
 	cStorageV2CellTargetSizeBytes := C.int64_t(paramtable.Get().QueryNodeCfg.StorageV2CellTargetSizeBytes.GetAsInt64())
 	C.SetStorageV2CellTargetSizeBytes(cStorageV2CellTargetSizeBytes)
+	cStorageV2FieldDataLoadBudgetBytes := C.int64_t(paramtable.Get().QueryNodeCfg.StorageV2FieldDataLoadBudgetBytes.GetAsInt64())
+	C.SetStorageV2FieldDataLoadBudgetBytes(cStorageV2FieldDataLoadBudgetBytes)
 
 	enableParquetStatsSkipIndex := paramtable.Get().CommonCfg.ParquetStatsSkipIndex.GetAsBool()
 	C.SetDefaultEnableParquetStatsSkipIndex(C.bool(enableParquetStatsSkipIndex))

@@ -51,6 +51,7 @@ const (
 	DefaultLowPriorityThreadCoreCoefficient    = 1
 	DefaultBM25LoadThreadCoreCoefficient       = 1
 	DefaultThreadPoolMaxThreadsSize            = 16
+	DefaultStorageV2FieldDataLoadBudgetBytes   = 128 << 20
 
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
@@ -3656,7 +3657,8 @@ type queryNodeConfig struct {
 
 	// Target average byte size per storage v2 cache cell. Parquet row groups
 	// are packed into cells so rgs_per_cell * avg_rg_size ≈ this value.
-	StorageV2CellTargetSizeBytes ParamItem `refreshable:"true"`
+	StorageV2CellTargetSizeBytes      ParamItem `refreshable:"true"`
+	StorageV2FieldDataLoadBudgetBytes ParamItem `refreshable:"true"`
 
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
@@ -4837,6 +4839,27 @@ user-task-polling:
 		},
 	}
 	p.StorageV2CellTargetSizeBytes.Init(base.mgr)
+
+	p.StorageV2FieldDataLoadBudgetBytes = ParamItem{
+		Key:          "queryNode.segcore.storageV2.fieldDataLoadBudgetBytes",
+		Version:      "3.0.0",
+		DefaultValue: strconv.Itoa(DefaultStorageV2FieldDataLoadBudgetBytes),
+		Doc: `Process-wide transient memory budget in bytes for storage v2 ` +
+			`field-data loading. It gates in-flight Arrow data across concurrent ` +
+			`load tasks. Lower values reduce peak transient memory at the cost of ` +
+			`load throughput. Oversized cells are still allowed to proceed ` +
+			`exclusively to guarantee progress. Default 128 MiB.`,
+		Export: true,
+		Formatter: func(v string) string {
+			if getAsInt64(v) <= 0 {
+				log.Warn("queryNode.segcore.storageV2.fieldDataLoadBudgetBytes must be positive, using default 128 MiB",
+					zap.String("configured", v))
+				return strconv.Itoa(DefaultStorageV2FieldDataLoadBudgetBytes)
+			}
+			return v
+		},
+	}
+	p.StorageV2FieldDataLoadBudgetBytes.Init(base.mgr)
 
 	p.EnableWorkerSQCostMetrics = ParamItem{
 		Key:          "queryNode.enableWorkerSQCostMetrics",

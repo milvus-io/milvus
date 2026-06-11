@@ -120,6 +120,10 @@ UpdateArrowIOThreadPoolMetrics();
 void
 SetStorageV2CellTargetSizeBytes(int64_t bytes);
 
+// Process-wide transient memory budget for storage v2 field-data load.
+void
+SetStorageV2FieldDataLoadBudgetBytes(int64_t bytes);
+
 #ifdef __cplusplus
 };
 #endif

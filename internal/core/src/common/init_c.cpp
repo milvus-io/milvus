@@ -218,6 +218,18 @@ SetStorageV2CellTargetSizeBytes(int64_t bytes) {
 }
 
 void
+SetStorageV2FieldDataLoadBudgetBytes(int64_t bytes) {
+    if (bytes <= 0) {
+        LOG_WARN("ignore invalid storage v2 field data load budget bytes: {}",
+                 bytes);
+        return;
+    }
+    milvus::storage::TransientMemoryBudget::SetFieldDataLoadBudgetBytes(
+        static_cast<size_t>(bytes));
+    LOG_INFO("set storage v2 field data load budget bytes: {}", bytes);
+}
+
+void
 LogOpenSSLFIPSStatus() {
     std::call_once(fipsFlag, []() {
         LOG_INFO("Milvus FIPS in OpenSSL: {}",
