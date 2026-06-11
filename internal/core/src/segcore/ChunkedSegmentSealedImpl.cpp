@@ -680,8 +680,19 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path,
     // gated on is_external_collection() — see SegmentLoadInfo.cpp where the
     // flag is assigned. The non-external path uses LoadColumnGroups(
     // column_groups, ...) and never enters here.
-    auto needed_columns = schema_->GetExternalColumnNames();
-    // reader_mutex_ guards reader_ against concurrent use in ExecuteTake.
+    auto source_needed_columns = std::make_shared<std::vector<std::string>>();
+    auto function_output_needed_columns =
+        std::make_shared<std::vector<std::string>>();
+    for (const auto& field_id : schema_->get_field_ids()) {
+        const auto& field_meta = (*schema_)[field_id];
+        if (field_meta.is_external_field()) {
+            source_needed_columns->push_back(field_meta.get_external_field());
+        } else if (schema_->is_function_output(field_id)) {
+            function_output_needed_columns->push_back(
+                std::to_string(field_id.get()));
+        }
+    }
+    // reader_mutex_ guards readers against concurrent use in ExecuteTake.
     // Reopen reaches this function with mutex_ already released (see Reopen
     // for the rationale), so without this lock a concurrent ExecuteTake can
     // observe a mid-assigned shared_ptr or drop the old Reader's refcount
@@ -691,8 +702,16 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path,
         std::lock_guard<std::mutex> lock(reader_mutex_);
         reader_ = milvus_storage::api::Reader::create(column_groups,
                                                       /*arrow_schema=*/nullptr,
-                                                      needed_columns,
+                                                      source_needed_columns,
                                                       *properties);
+        function_output_reader_.reset();
+        if (!function_output_needed_columns->empty()) {
+            function_output_reader_ = milvus_storage::api::Reader::create(
+                column_groups,
+                schema_->ConvertToLoonArrowSchema(),
+                function_output_needed_columns,
+                *properties);
+        }
     }
 
     auto reader_create_ms =
@@ -728,6 +747,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path,
         int cg_index;
         std::vector<FieldId> field_ids;
         bool eager_load;
+        ExternalReaderOrigin origin;
     };
     std::vector<FieldGroupTask> tasks;
 
@@ -735,11 +755,20 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path,
         auto cg_index = pair.first;
         const auto& all_fields = pair.second;
 
-        std::vector<FieldId> eager_fields;
+        std::vector<FieldId> eager_source_fields;
+        std::vector<FieldId> eager_function_output_fields;
         std::vector<FieldId> lazy_fields;
-
         for (const auto& field_id : all_fields) {
             const auto& field_meta = (*schema_)[field_id];
+            auto origin = ExternalReaderOrigin::ExternalSource;
+            if (schema_->is_function_output(field_id)) {
+                origin = ExternalReaderOrigin::FunctionOutput;
+            } else {
+                AssertInfo(field_meta.is_external_field(),
+                           "external column group field {} is neither external "
+                           "source nor function output",
+                           field_id.get());
+            }
             bool field_is_vector = IsVectorDataType(field_meta.get_data_type());
             auto [has_warmup, warmup_str] = schema_->WarmupPolicy(
                 field_id, field_is_vector, /*is_index=*/false);
@@ -749,28 +778,46 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path,
                                                  /*is_index=*/false,
                                                  /*in_load_list=*/true);
             if (resolved != CacheWarmupPolicy::CacheWarmupPolicy_Disable) {
-                eager_fields.push_back(field_id);
+                if (origin == ExternalReaderOrigin::FunctionOutput) {
+                    eager_function_output_fields.push_back(field_id);
+                } else {
+                    eager_source_fields.push_back(field_id);
+                }
             } else {
                 lazy_fields.push_back(field_id);
             }
         }
 
-        if (!eager_fields.empty()) {
-            tasks.push_back({cg_index, std::move(eager_fields), true});
+        auto eager_count =
+            eager_source_fields.size() + eager_function_output_fields.size();
+        if (!eager_source_fields.empty()) {
+            tasks.push_back({cg_index,
+                             std::move(eager_source_fields),
+                             true,
+                             ExternalReaderOrigin::ExternalSource});
+        }
+        if (!eager_function_output_fields.empty()) {
+            tasks.push_back({cg_index,
+                             std::move(eager_function_output_fields),
+                             true,
+                             ExternalReaderOrigin::FunctionOutput});
         }
         // Lazy fields are emitted one-per-field so that each creates its
         // own single-column projected ChunkReader. Accessing one lazy
         // field (e.g. caption) will not co-load sibling lazy fields
         // (e.g. vector), avoiding unnecessary S3 downloads.
         for (const auto& fid : lazy_fields) {
-            tasks.push_back({cg_index, {fid}, false});
+            const auto origin = schema_->is_function_output(fid)
+                                    ? ExternalReaderOrigin::FunctionOutput
+                                    : ExternalReaderOrigin::ExternalSource;
+            tasks.push_back({cg_index, {fid}, false, origin});
         }
-        if (!eager_fields.empty() && !lazy_fields.empty()) {
+        if (eager_count > 0 && !lazy_fields.empty()) {
             LOG_INFO(
                 "[LoadColumnGroups] segment {} cg {} split: {} eager, {} lazy",
                 get_segment_id(),
                 cg_index,
-                eager_fields.size(),
+                eager_count,
                 lazy_fields.size());
         }
     }
@@ -791,6 +838,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path,
                                    cg_index = task.cg_index,
                                    field_ids = std::move(task.field_ids),
                                    eager_load = task.eager_load,
+                                   origin = task.origin,
                                    op_ctx] {
             CheckCancellation(op_ctx,
                               id_,
@@ -802,7 +850,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path,
                             field_ids,
                             eager_load,
                             op_ctx,
-                            /*is_replace=*/false);
+                            /*is_replace=*/false,
+                            origin);
         });
         load_group_futures.emplace_back(std::move(future));
     }
@@ -4795,6 +4844,7 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
                 std::lock_guard<std::mutex> lock(reader_mutex_);
                 reader_ = milvus_storage::api::Reader::create(
                     column_groups, arrow_schema, needed_columns, *properties);
+                function_output_reader_.reset();
             }
             // New column group fields
             if (!diff.column_groups_to_load.empty()) {
@@ -5119,6 +5169,7 @@ ChunkedSegmentSealedImpl::LoadManifest(const std::string& manifest_path) {
     auto arrow_schema = schema_->ConvertToArrowSchema();
     reader_ = milvus_storage::api::Reader::create(
         column_groups, arrow_schema, nullptr, *properties);
+    function_output_reader_.reset();
 
     std::vector<std::pair<int, std::vector<FieldId>>> cg_field_ids;
     for (int i = 0; i < column_groups->size(); ++i) {
@@ -5224,7 +5275,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     const std::vector<FieldId>& milvus_field_ids,
     bool eager_load,
     milvus::OpContext* op_ctx,
-    bool is_replace) {
+    bool is_replace,
+    ExternalReaderOrigin reader_origin) {
     AssertInfo(index < column_groups->size(),
                "load column group index out of range");
     AssertInfo(!milvus_field_ids.empty(),
@@ -5293,12 +5345,24 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     for (const auto& fid : milvus_field_ids) {
         needed_columns->push_back(schema_->get_storage_column_name(fid));
     }
-    auto chunk_reader_result = reader_->get_chunk_reader(index, needed_columns);
-    AssertInfo(chunk_reader_result.ok(),
-               "get chunk reader failed, segment {}, column group index {}, "
-               "status msg: {}",
+    auto* reader = reader_.get();
+    auto reader_origin_name = "external_source";
+    if (reader_origin == ExternalReaderOrigin::FunctionOutput) {
+        reader = function_output_reader_.get();
+        reader_origin_name = "function_output";
+    }
+    AssertInfo(reader != nullptr,
+               "reader is null, segment {}, column group index {}, origin {}",
                get_segment_id(),
                index,
+               reader_origin_name);
+    auto chunk_reader_result = reader->get_chunk_reader(index, needed_columns);
+    AssertInfo(chunk_reader_result.ok(),
+               "get chunk reader failed, segment {}, column group index {}, "
+               "origin {}, status msg: {}",
+               get_segment_id(),
+               index,
+               reader_origin_name,
                chunk_reader_result.status().ToString());
 
     auto chunk_reader = std::move(chunk_reader_result).ValueOrDie();

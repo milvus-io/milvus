@@ -582,6 +582,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     static TakeContext
     BuildTakeContext(const int64_t* offsets, int64_t size);
 
+    enum class ExternalReaderOrigin {
+        ExternalSource,
+        FunctionOutput,
+    };
+
     // Converts a combined Arrow array into a proto DataArray using
     // result_mapping for reorder.  Returns nullptr on unsupported type.
     static std::unique_ptr<DataArray>
@@ -1305,7 +1310,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::vector<FieldId>& milvus_field_ids,
         bool eager_load,
         milvus::OpContext* op_ctx = nullptr,
-        bool is_replace = false);
+        bool is_replace = false,
+        ExternalReaderOrigin reader_origin =
+            ExternalReaderOrigin::ExternalSource);
 
     // Synthesize system fields (virtual PK, timestamps, PK index, row count)
     // for external collections. External collections don't have real PK or
@@ -1561,6 +1568,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // Query-time access (take) must be serialized via reader_mutex_ — concurrent
     // retrieve/search workers can hit the same segment at the same time.
     std::unique_ptr<milvus_storage::api::Reader> reader_;
+    std::unique_ptr<milvus_storage::api::Reader> function_output_reader_;
     mutable std::mutex reader_mutex_;
 
     // ArrayOffsetsSealed for element-level filtering on array fields
