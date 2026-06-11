@@ -37,9 +37,16 @@ func HandleCStatus(status *C.CStatus) error {
 	errorMsg := C.GoString(status.error_msg)
 	defer C.free(unsafe.Pointer(status.error_msg))
 
-	// Route through the shared segcore code table so user-input codes (bad
-	// index params) classify as InputError while internal C++ failures stay
-	// SystemError, instead of blanket-labeling every CGO error as user input.
+	// The sole caller validates USER-SUPPLIED index params via knowhere, which
+	// reports bad params as ConfigInvalid (2006). At this boundary that is the
+	// established ParameterInvalid wire contract (code 1100, message suffix
+	// "invalid parameter") that SDK/e2e error handling is built on. Any other
+	// code is an internal C++ failure and classifies via the shared segcore
+	// table (system blame, original code preserved in the message).
+	const knowhereConfigInvalid = 2006
+	if int32(status.error_code) == knowhereConfigInvalid {
+		return merr.WrapErrParameterInvalidMsg("%s", errorMsg)
+	}
 	return merr.SegcoreError(int32(status.error_code), errorMsg)
 }
 
