@@ -1139,13 +1139,15 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		if r == nil || len(r.GetFieldsData()) == 0 || size == 0 {
 			continue
 		}
-		// Validate element-level consistency: if any result is element-level, all must be
+		// Validate element-level consistency: if any result is element-level, all
+		// must be. The flag and element_indices come from querynode results, never
+		// from the request, so a mismatch is an internal contract violation.
 		if isElementLevel && !r.GetElementLevel() {
-			return nil, merr.WrapErrParameterInvalidMsg("inconsistent element-level flag: expected all results to be element-level")
+			return nil, merr.WrapErrServiceInternalMsg("inconsistent element-level flag: expected all results to be element-level")
 		}
 		// Validate element_indices length matches ids length for element-level
 		if isElementLevel && len(r.GetElementIndices()) != size {
-			return nil, merr.WrapErrParameterInvalidMsg("element_indices length (%d) does not match ids length (%d)", len(r.GetElementIndices()), size)
+			return nil, merr.WrapErrServiceInternalMsg("element_indices length (%d) does not match ids length (%d)", len(r.GetElementIndices()), size)
 		}
 		validRetrieveResults = append(validRetrieveResults, r)
 		loopEnd += size

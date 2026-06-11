@@ -413,7 +413,9 @@ func TestRootCoord_DescribeAlias(t *testing.T) {
 		ctx := context.Background()
 		resp, err := c.DescribeAlias(ctx, &milvuspb.DescribeAliasRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		// ParameterMissing (1101) projects to the legacy IllegalArgument like
+		// every parameter-class error, so old SDKs don't see UnexpectedError.
+		assert.Equal(t, commonpb.ErrorCode_IllegalArgument, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, int32(1101), resp.GetStatus().GetCode())
 	})
 

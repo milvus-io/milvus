@@ -991,13 +991,15 @@ func (m *MetaCache) showPartitions(ctx context.Context, dbName string, collectio
 		return nil, err
 	}
 
+	// The response shape is produced by the coordinator, not the caller: a
+	// misaligned array is backend metadata inconsistency, not user input.
 	if len(partitions.PartitionIDs) != len(partitions.PartitionNames) {
-		return nil, merr.WrapErrParameterInvalidMsg("partition ids len: %d doesn't equal Partition name len %d",
+		return nil, merr.WrapErrServiceInternalMsg("partition ids len: %d doesn't equal Partition name len %d",
 			len(partitions.PartitionIDs), len(partitions.PartitionNames))
 	}
 	if len(partitions.PartitionNames) != len(partitions.CreatedTimestamps) ||
 		len(partitions.PartitionNames) != len(partitions.CreatedUtcTimestamps) {
-		return nil, merr.WrapErrParameterInvalidMsg(
+		return nil, merr.WrapErrServiceInternalMsg(
 			"partition names and timestamps number is not aligned, response: %s",
 			partitions.String(),
 		)
