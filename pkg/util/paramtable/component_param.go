@@ -5038,6 +5038,7 @@ type dataCoordConfig struct {
 	SingleCompactionDeltalogMaxNum    ParamItem `refreshable:"true"`
 
 	StorageVersionCompactionEnabled                   ParamItem `refreshable:"true"`
+	StorageFormatCompactionEnabled                    ParamItem `refreshable:"true"`
 	StorageVersionCompactionRateLimitTokens           ParamItem `refreshable:"true"`
 	StorageVersionCompactionRateLimitInterval         ParamItem `refreshable:"true"`
 	StorageVersionCompactionSessionVersionRequirement ParamItem `refreshable:"true"`
@@ -5603,6 +5604,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       false,
 	}
 	p.StorageVersionCompactionEnabled.Init(base.mgr)
+
+	p.StorageFormatCompactionEnabled = ParamItem{
+		Key:          "dataCoord.compaction.storageFormat.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Enable storage format compaction",
+		Export:       false,
+	}
+	p.StorageFormatCompactionEnabled.Init(base.mgr)
 
 	p.StorageVersionCompactionRateLimitTokens = ParamItem{
 		Key:          "dataCoord.compaction.storageVersion.rateLimitTokens",

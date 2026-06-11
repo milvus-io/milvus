@@ -28,12 +28,88 @@
 #include <utility>
 
 #include "folly/ExceptionWrapper.h"
+#include "folly/ScopeGuard.h"
 #include "folly/Unit.h"
 #include "folly/futures/Future.h"
 #include "folly/futures/Promise.h"
 #include "storage/FileWriter.h"
 
 namespace milvus::storage {
+namespace {
+
+bool
+PWriteAll(int fd, const void* data, size_t nbyte, size_t file_offset) {
+    const char* src = static_cast<const char*>(data);
+    size_t left = nbyte;
+
+    while (left != 0) {
+        ssize_t done = pwrite(fd, src, left, file_offset);
+        if (done < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        if (done == 0) {
+            errno = EIO;
+            return false;
+        }
+        left -= done;
+        file_offset += done;
+        src += done;
+    }
+
+    return true;
+}
+
+void
+PositionedWriteWithRateLimit(int fd,
+                             const std::string& filename,
+                             io::WriteRateLimiter& rate_limiter,
+                             io::Priority priority,
+                             size_t alignment_bytes,
+                             const void* data,
+                             size_t nbyte,
+                             size_t file_offset) {
+    size_t bytes_to_write = nbyte;
+    int32_t empty_loops = 0;
+    int64_t total_wait_us = 0;
+    while (bytes_to_write != 0) {
+        auto allowed_bytes =
+            rate_limiter.Acquire(bytes_to_write, alignment_bytes, priority);
+        if (allowed_bytes == 0) {
+            ++empty_loops;
+            if (empty_loops > FileWriter::MAX_EMPTY_LOOPS ||
+                total_wait_us > FileWriter::MAX_WAIT_US) {
+                allowed_bytes = bytes_to_write;
+                empty_loops = 0;
+                total_wait_us = 0;
+            } else {
+                int64_t wait_us = (1 << (empty_loops / 10)) *
+                                  rate_limiter.GetRateLimitPeriod();
+                std::this_thread::sleep_for(std::chrono::microseconds(wait_us));
+                total_wait_us += wait_us;
+                continue;
+            }
+        }
+        if (!PWriteAll(fd, data, allowed_bytes, file_offset)) {
+            ThrowInfo(ErrorCode::FileWriteFailed,
+                      "Failed to write to file: {}, error: {}",
+                      filename,
+                      strerror(errno));
+        }
+        file_offset += allowed_bytes;
+        bytes_to_write -= allowed_bytes;
+        data = static_cast<const char*>(data) + allowed_bytes;
+    }
+}
+
+size_t
+RoundUpToAlignment(size_t size) {
+    return (size + FileWriter::ALIGNMENT_MASK) & ~FileWriter::ALIGNMENT_MASK;
+}
+
+}  // namespace
 
 FileWriter::FileWriter(std::string filename, io::Priority priority)
     : filename_(std::move(filename)),
@@ -112,61 +188,26 @@ bool
 FileWriter::PositionedWrite(const void* data,
                             size_t nbyte,
                             size_t file_offset) {
-    const char* src = static_cast<const char*>(data);
-    size_t left = nbyte;
-
-    while (left != 0) {
-        ssize_t done = pwrite(fd_, src, left, file_offset);
-        if (done < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            return false;
-        }
-        left -= done;
-        file_offset += done;
-        src += done;
-    }
-
-    return true;
+    return PWriteAll(fd_, data, nbyte, file_offset);
 }
 
 void
 FileWriter::PositionedWriteWithCheck(const void* data,
                                      size_t nbyte,
                                      size_t file_offset) {
-    size_t bytes_to_write = nbyte;
-    int32_t empty_loops = 0;
-    int64_t total_wait_us = 0;
     size_t alignment_bytes = use_direct_io_ ? ALIGNMENT_BYTES : 1;
-    while (bytes_to_write != 0) {
-        auto allowed_bytes =
-            rate_limiter_.Acquire(bytes_to_write, alignment_bytes, priority_);
-        if (allowed_bytes == 0) {
-            ++empty_loops;
-            // if the empty loops is too large or the total wait time is too long, we should write the data directly
-            if (empty_loops > MAX_EMPTY_LOOPS || total_wait_us > MAX_WAIT_US) {
-                allowed_bytes = bytes_to_write;
-                empty_loops = 0;
-                total_wait_us = 0;
-            } else {
-                int64_t wait_us = (1 << (empty_loops / 10)) *
-                                  rate_limiter_.GetRateLimitPeriod();
-                std::this_thread::sleep_for(std::chrono::microseconds(wait_us));
-                total_wait_us += wait_us;
-                continue;
-            }
-        }
-        if (!PositionedWrite(data, allowed_bytes, file_offset)) {
-            Cleanup();
-            ThrowInfo(ErrorCode::FileWriteFailed,
-                      "Failed to write to file: {}, error: {}",
-                      filename_,
-                      strerror(errno));
-        }
-        file_offset += allowed_bytes;
-        bytes_to_write -= allowed_bytes;
-        data = static_cast<const char*>(data) + allowed_bytes;
+    try {
+        PositionedWriteWithRateLimit(fd_,
+                                     filename_,
+                                     rate_limiter_,
+                                     priority_,
+                                     alignment_bytes,
+                                     data,
+                                     nbyte,
+                                     file_offset);
+    } catch (...) {
+        Cleanup();
+        throw;
     }
 }
 
@@ -342,6 +383,164 @@ FileWriter::Finish() {
     Cleanup();
 
     // return the file size
+    return file_size_;
+}
+
+PositionedFileWriter::PositionedFileWriter(std::string filename,
+                                           size_t file_size,
+                                           io::Priority priority)
+    : filename_(std::move(filename)),
+      file_size_(file_size),
+      mode_(priority == io::Priority::HIGH ? FileWriter::WriteMode::BUFFERED
+                                           : FileWriter::GetMode()),
+      use_direct_io_(mode_ == FileWriter::WriteMode::DIRECT),
+      priority_(priority),
+      rate_limiter_(io::WriteRateLimiter::GetInstance()) {
+    auto open_flags = O_CREAT | O_RDWR | O_TRUNC;
+    if (use_direct_io_) {
+#ifndef __APPLE__
+        open_flags |= O_DIRECT;
+#endif
+    }
+
+    fd_ = open(filename_.c_str(), open_flags, S_IRUSR | S_IWUSR);
+    if (fd_ == -1) {
+        ThrowInfo(ErrorCode::FileCreateFailed,
+                  "Failed to open file: {}, error: {}",
+                  filename_,
+                  strerror(errno));
+    }
+
+#ifdef __APPLE__
+    if (use_direct_io_) {
+        auto ret = fcntl(fd_, F_NOCACHE, 1);
+        if (ret == -1) {
+            Cleanup();
+            ThrowInfo(ErrorCode::FileCreateFailed,
+                      "Failed to set F_NOCACHE on file: {}, error: {}",
+                      filename_,
+                      strerror(errno));
+        }
+    }
+#endif
+}
+
+PositionedFileWriter::~PositionedFileWriter() {
+    Cleanup();
+}
+
+void
+PositionedFileWriter::Cleanup() noexcept {
+    if (fd_ != -1) {
+        close(fd_);
+        fd_ = -1;
+    }
+}
+
+void
+PositionedFileWriter::WriteBufferedAt(size_t file_offset,
+                                      const void* data,
+                                      size_t size) {
+    PositionedWriteWithRateLimit(
+        fd_, filename_, rate_limiter_, priority_, 1, data, size, file_offset);
+}
+
+void
+PositionedFileWriter::WriteDirectAlignedAt(size_t file_offset,
+                                           const void* data,
+                                           size_t size) {
+    AssertInfo((file_offset & FileWriter::ALIGNMENT_MASK) == 0,
+               "Direct positioned write offset must be {}-byte aligned, got {}",
+               FileWriter::ALIGNMENT_BYTES,
+               file_offset);
+
+    auto end_offset = file_offset + size;
+    bool is_tail = end_offset == file_size_;
+    bool aligned_size = (size & FileWriter::ALIGNMENT_MASK) == 0;
+    AssertInfo(aligned_size || is_tail,
+               "Direct positioned write size must be {}-byte aligned unless "
+               "it is the file tail: offset {}, size {}, file size {}",
+               FileWriter::ALIGNMENT_BYTES,
+               file_offset,
+               size,
+               file_size_);
+
+    auto write_size = aligned_size ? size : RoundUpToAlignment(size);
+    bool aligned_data =
+        (reinterpret_cast<uintptr_t>(data) & FileWriter::ALIGNMENT_MASK) == 0;
+    if (aligned_data && write_size == size) {
+        PositionedWriteWithRateLimit(fd_,
+                                     filename_,
+                                     rate_limiter_,
+                                     priority_,
+                                     FileWriter::ALIGNMENT_BYTES,
+                                     data,
+                                     size,
+                                     file_offset);
+        return;
+    }
+
+    void* aligned_data_ptr =
+        aligned_alloc(FileWriter::ALIGNMENT_BYTES, write_size);
+    AssertInfo(aligned_data_ptr != nullptr,
+               "Failed to allocate aligned write buffer of size {}",
+               write_size);
+    auto free_aligned_data =
+        folly::makeGuard([aligned_data_ptr]() { free(aligned_data_ptr); });
+
+    memcpy(aligned_data_ptr, data, size);
+    if (write_size > size) {
+        memset(
+            static_cast<char*>(aligned_data_ptr) + size, 0, write_size - size);
+    }
+    PositionedWriteWithRateLimit(fd_,
+                                 filename_,
+                                 rate_limiter_,
+                                 priority_,
+                                 FileWriter::ALIGNMENT_BYTES,
+                                 aligned_data_ptr,
+                                 write_size,
+                                 file_offset);
+}
+
+void
+PositionedFileWriter::WriteAt(size_t file_offset,
+                              const void* data,
+                              size_t size) {
+    AssertInfo(!finished_, "Cannot write after Finish() has been called");
+    AssertInfo(fd_ != -1, "File is not open: {}", filename_);
+    if (size == 0) {
+        return;
+    }
+    AssertInfo(
+        data != nullptr, "Cannot write null data to file: {}", filename_);
+    AssertInfo(file_offset <= file_size_ && size <= file_size_ - file_offset,
+               "Positioned write exceeds file size: offset {}, size {}, file "
+               "size {}",
+               file_offset,
+               size,
+               file_size_);
+
+    if (use_direct_io_) {
+        WriteDirectAlignedAt(file_offset, data, size);
+    } else {
+        WriteBufferedAt(file_offset, data, size);
+    }
+}
+
+size_t
+PositionedFileWriter::Finish() {
+    AssertInfo(!finished_, "Finish() has already been called");
+    finished_ = true;
+
+    if (fd_ != -1 && ftruncate(fd_, file_size_) != 0) {
+        Cleanup();
+        ThrowInfo(ErrorCode::FileWriteFailed,
+                  "Failed to truncate file: {}, error: {}",
+                  filename_,
+                  strerror(errno));
+    }
+    Cleanup();
     return file_size_;
 }
 

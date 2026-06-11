@@ -11,64 +11,6 @@ namespace milvus {
 namespace {
 
 bool
-BitsetHasNoFilteredRows(const BitsetView& bitset) {
-    if (bitset.empty()) {
-        return true;
-    }
-    if (bitset.has_out_ids()) {
-        for (size_t i = 0; i < bitset.size(); ++i) {
-            if (bitset.test(i)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    const auto* data = bitset.data();
-    auto full_bytes = bitset.size() / 8;
-    for (size_t i = 0; i < full_bytes; ++i) {
-        if (data[i] != 0) {
-            return false;
-        }
-    }
-    auto remain_bits = bitset.size() & 7;
-    if (remain_bits == 0) {
-        return true;
-    }
-    uint8_t mask = static_cast<uint8_t>((1U << remain_bits) - 1U);
-    return (data[full_bytes] & mask) == 0;
-}
-
-bool
-BitsetFiltersAllRows(const BitsetView& bitset) {
-    if (bitset.empty()) {
-        return false;
-    }
-    if (bitset.has_out_ids()) {
-        for (size_t i = 0; i < bitset.size(); ++i) {
-            if (!bitset.test(i)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    const auto* data = bitset.data();
-    auto full_bytes = bitset.size() / 8;
-    for (size_t i = 0; i < full_bytes; ++i) {
-        if (data[i] != 0xFF) {
-            return false;
-        }
-    }
-    auto remain_bits = bitset.size() & 7;
-    if (remain_bits == 0) {
-        return true;
-    }
-    uint8_t mask = static_cast<uint8_t>((1U << remain_bits) - 1U);
-    return (data[full_bytes] & mask) == mask;
-}
-
-bool
 ShouldSkipBitsetTransform(const BitsetView& bitset,
                           int64_t total_count,
                           TargetBitmap& result,
@@ -78,12 +20,11 @@ ShouldSkipBitsetTransform(const BitsetView& bitset,
         status = OffsetMapping::BitsetTransformStatus::NoFilter;
         return true;
     }
-    if (BitsetFiltersAllRows(bitset)) {
+    if (bitset.all()) {
         status = OffsetMapping::BitsetTransformStatus::AllFiltered;
         return true;
     }
-    if (static_cast<int64_t>(bitset.size()) >= total_count &&
-        BitsetHasNoFilteredRows(bitset)) {
+    if (static_cast<int64_t>(bitset.size()) >= total_count && bitset.none()) {
         status = OffsetMapping::BitsetTransformStatus::NoFilter;
         return true;
     }

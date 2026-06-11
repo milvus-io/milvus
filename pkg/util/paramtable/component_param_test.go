@@ -634,6 +634,7 @@ func TestComponentParam(t *testing.T) {
 		params.Save("dataCoord.compaction.dropTolerance", "100")
 		assert.Equal(t, float64(100), Params.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds())
 		assert.Equal(t, int64(10000), Params.CompactionPreAllocateIDExpansionFactor.GetAsInt64())
+		assert.False(t, Params.StorageFormatCompactionEnabled.GetAsBool())
 
 		params.Save("dataCoord.compaction.clustering.enable", "true")
 		assert.Equal(t, true, Params.ClusteringCompactionEnable.GetAsBool())

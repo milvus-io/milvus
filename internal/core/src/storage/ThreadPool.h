@@ -172,7 +172,9 @@ class ThreadPool {
 
         if (idle_threads_size_ > 0) {
             condition_lock_.notify_one();
-        } else if (current_threads_size_ < max_threads_size_.load()) {
+        }
+        if (work_queue_.size() > static_cast<size_t>(idle_threads_size_) &&
+            current_threads_size_ < max_threads_size_.load()) {
             // Dynamic increase thread number
             std::thread t(&ThreadPool::Worker, this);
             assert(threads_.find(t.get_id()) == threads_.end());

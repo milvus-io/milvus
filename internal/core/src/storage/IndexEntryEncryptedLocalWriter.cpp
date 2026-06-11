@@ -32,6 +32,7 @@
 #include "folly/ScopeGuard.h"
 #include "nlohmann/json.hpp"
 #include "storage/Crc32cUtil.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/RemoteOutputStream.h"
 
 namespace milvus::storage {
@@ -51,6 +52,11 @@ IndexEntryEncryptedLocalWriter::IndexEntryEncryptedLocalWriter(
       collection_id_(collection_id),
       slice_size_(slice_size),
       pool_(ThreadPools::GetThreadPool(ThreadPoolPriority::MIDDLE)) {
+    AssertInfo(IsStreamSliceSizeAligned(slice_size_),
+               "Encrypted entry slice_size must be {}-byte aligned, got {}",
+               kStreamSliceAlignment,
+               slice_size_);
+
     auto [encryptor, edek] =
         cipher_plugin_->GetEncryptor(ez_id_, collection_id_);
     edek_ = std::move(edek);

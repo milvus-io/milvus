@@ -132,5 +132,40 @@ TEST(StlSortIndexTest, TestIn) {
         data, DataType::INT64, true, exec_expr, expected_result);
 }
 
+TEST(StlSortIndexTest, MmapByteSizeCountsValidBitsetOnce) {
+    constexpr size_t kAlignment = 32;
+    constexpr uint64_t kMmapIndexPadding = 1;
+    const std::vector<int64_t> data = {
+        10, 2, 6, 5, 9, 3, 7, 8, 4, 1, 11, 12, 13};
+
+    std::vector<std::string> index_files;
+    {
+        auto index = std::make_shared<index::ScalarIndexSort<int64_t>>(
+            CreateScalarSortTestFileManagerContext());
+        index->Build(data.size(), data.data());
+
+        auto create_index_result = index->UploadUnified({});
+        index_files = create_index_result->GetIndexFiles();
+    }
+
+    auto index = std::make_shared<index::ScalarIndexSort<int64_t>>(
+        CreateScalarSortTestFileManagerContext());
+    Config config;
+    config[milvus::index::ENABLE_MMAP] = true;
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+    config["index_files"] = index_files;
+    index->LoadUnified(config);
+
+    auto index_data_bytes = data.size() * sizeof(IndexStructure<int64_t>);
+    auto aligned_data_bytes =
+        ((index_data_bytes + kAlignment - 1) / kAlignment) * kAlignment;
+    TargetBitmap valid_bitset(data.size(), true);
+    auto expected_byte_size = aligned_data_bytes + kMmapIndexPadding +
+                              data.size() * sizeof(int32_t) +
+                              valid_bitset.size_in_bytes();
+
+    ASSERT_EQ(index->ByteSize(), static_cast<int64_t>(expected_byte_size));
+}
+
 // V2 compat test removed: kScalarIndexUseV3 flag deleted,
 // Upload()/Load() now always route to V3 paths.
