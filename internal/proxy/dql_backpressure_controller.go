@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -195,14 +196,22 @@ func (c *dqlBackpressureController) Release() {
 
 func (c *dqlBackpressureController) Observe(err error) {
 	if err != nil {
-		if errors.Is(err, merr.ErrServiceTooManyRequests) {
-			c.slowdown(dqlBackpressureReasonTooManyRequests)
-		} else if errors.Is(err, merr.ErrServiceResourceInsufficient) {
-			c.slowdown(dqlBackpressureReasonResourceInsufficient)
+		if reason, ok := dqlBackpressureSlowdownReason(err); ok {
+			c.slowdown(reason)
 		}
 		return
 	}
 	c.recover()
+}
+
+func dqlBackpressureSlowdownReason(err error) (string, bool) {
+	if errors.Is(err, merr.ErrServiceTooManyRequests) || strings.Contains(err.Error(), merr.ErrServiceTooManyRequests.Error()) {
+		return dqlBackpressureReasonTooManyRequests, true
+	}
+	if errors.Is(err, merr.ErrServiceResourceInsufficient) || strings.Contains(err.Error(), merr.ErrServiceResourceInsufficient.Error()) {
+		return dqlBackpressureReasonResourceInsufficient, true
+	}
+	return "", false
 }
 
 func (c *dqlBackpressureController) CurrentConcurrency() int64 {
