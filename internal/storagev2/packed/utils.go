@@ -16,6 +16,7 @@ package packed
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"

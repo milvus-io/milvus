@@ -27,6 +27,7 @@ import "C"
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"path"
 	"sort"

@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 
 #include "common/EasyAssert.h"
 #include "common/Types.h"
@@ -72,6 +73,16 @@ struct FieldDataMeta {
     int64_t field_id;
     proto::schema::FieldSchema field_schema;
 };
+
+// Column name mapping used when reading StorageV3 manifests. The index config
+// must not carry raw external_spec because Knowhere also consumes that config.
+struct StorageColumnMapping {
+    std::string schema_column_name;
+    std::string storage_column_name;
+    bool is_external_column = false;
+};
+
+using StorageColumnMappings = std::unordered_map<int64_t, StorageColumnMapping>;
 
 enum CodecType {
     InvalidCodecType = 0,

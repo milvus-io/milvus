@@ -35,6 +35,7 @@ CStatus NewPackedReaderWithProperties(char** paths,
 import "C"
 
 import (
+	"fmt"
 	"io"
 	"unsafe"
 

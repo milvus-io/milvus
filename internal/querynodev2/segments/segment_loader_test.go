@@ -1627,21 +1627,31 @@ func TestSegmentLoaderPrepareLoadsWhenSegmentIsNotActive(t *testing.T) {
 		NumOfRows:     100,
 		InsertChannel: "by-dev-rootcoord-dml_0_1v0",
 	}
-	segmentManager := NewMockSegmentManager(t)
+	segMgr := &segmentManager{}
+	getWithTypeCalled := atomic.NewInt32(0)
+	patchGetWithType := mockey.Mock(mockey.GetMethod(segMgr, "GetWithType")).
+		To(func(segmentID typeutil.UniqueID, typ SegmentType) Segment {
+			getWithTypeCalled.Inc()
+			assert.EqualValues(t, loadInfo.GetSegmentID(), segmentID)
+			assert.Equal(t, SegmentTypeGrowing, typ)
+			return nil
+		}).
+		Build()
+	defer patchGetWithType.UnPatch()
+
 	loader := &segmentLoader{
 		manager: &Manager{
-			Segment: segmentManager,
+			Segment: segMgr,
 		},
 		loadingSegments: typeutil.NewConcurrentMap[int64, *loadResult](),
 	}
-
-	segmentManager.EXPECT().GetWithType(segmentID, SegmentTypeGrowing).Return(nil).Once()
 
 	infos := loader.prepare(context.Background(), SegmentTypeGrowing, loadInfo)
 
 	assert.Len(t, infos, 1)
 	assert.Equal(t, segmentID, infos[0].GetSegmentID())
 	assert.True(t, loader.loadingSegments.Contain(segmentID))
+	assert.EqualValues(t, 1, getWithTypeCalled.Load())
 }
 
 func TestConfigureUseTakeForOutput(t *testing.T) {

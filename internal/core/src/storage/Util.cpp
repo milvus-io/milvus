@@ -1540,22 +1540,27 @@ GetFieldDatasFromManifest(
     std::optional<DataType> data_type,
     int64_t dim,
     std::optional<DataType> element_type,
-    const std::string& external_spec) {
+    std::optional<StorageColumnMapping> storage_column_mapping) {
     auto loon_manifest = GetLoonManifest(manifest_path, loon_ffi_properties);
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
 
-    // Determine the column name to use. Milvus-table manifests expose source
-    // field IDs as column names; other external formats use ExternalField.
-    // Internal and function-output fields use numeric field ID strings.
+    // Determine the column name to use. New index-build callers pass the
+    // storage column mapping through FileManagerContext. The fallback keeps
+    // direct test callers and older internal paths on the existing behavior.
     std::string column_name;
     const auto& ext_field = field_meta.field_schema.external_field();
-    bool is_milvus_table = milvus::IsMilvusTableExternalSpec(external_spec);
-    if (is_milvus_table) {
-        column_name = std::to_string(field_meta.field_id);
+    bool is_external = false;
+    if (storage_column_mapping.has_value()) {
+        column_name = storage_column_mapping->storage_column_name;
+        is_external = storage_column_mapping->is_external_column;
     } else if (!ext_field.empty()) {
         column_name = ext_field;
+        is_external = true;
     } else {
+        column_name = std::to_string(field_meta.field_id);
+    }
+    if (column_name.empty()) {
         column_name = std::to_string(field_meta.field_id);
     }
 
@@ -1578,7 +1583,6 @@ GetFieldDatasFromManifest(
     std::vector<std::string> needed_columns = {column_name};
 
     bool nullable = field_meta.field_schema.nullable();
-    bool is_external = !ext_field.empty() || is_milvus_table;
     std::optional<FieldMeta> normalize_field_meta;
     if (is_external) {
         auto schema = field_meta.field_schema;
