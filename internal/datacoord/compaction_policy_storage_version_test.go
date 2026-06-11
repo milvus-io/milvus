@@ -24,11 +24,15 @@ import (
 	"github.com/blang/semver/v4"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -417,6 +421,16 @@ func (s *StorageVersionUpgradePolicySuite) TestFormatRefreshRespectsSegmentFilte
 
 func (s *StorageVersionUpgradePolicySuite) TestSegmentColumnGroupFormatsAllEqual() {
 	collID := int64(100)
+	core, logs := observer.New(zapcore.WarnLevel)
+	oldLogger := log.L()
+	oldLevel := log.GetLevel()
+	log.ReplaceGlobals(zap.New(core), &log.ZapProperties{
+		Core:  core,
+		Level: zap.NewAtomicLevelAt(zapcore.WarnLevel),
+	})
+	defer log.ReplaceGlobals(oldLogger, &log.ZapProperties{
+		Level: zap.NewAtomicLevelAt(oldLevel),
+	})
 
 	s.True(segmentColumnGroupFormatsAllEqual(
 		newStorageVersionPolicyTestSegment(collID, 101, storage.StorageV3, "vortex"),
@@ -444,6 +458,10 @@ func (s *StorageVersionUpgradePolicySuite) TestSegmentColumnGroupFormatsAllEqual
 		},
 		"vortex",
 	))
+	entries := logs.FilterMessage("unexpected empty binlogs for V3 segment during storage format compaction").All()
+	s.Len(entries, 1)
+	s.Equal(int64(105), entries[0].ContextMap()["segmentID"])
+	s.Equal("vortex", entries[0].ContextMap()["targetFormat"])
 	s.False(segmentColumnGroupFormatsAllEqual(
 		newStorageVersionPolicyTestSegment(collID, 106, storage.StorageV3, ""),
 		"vortex",

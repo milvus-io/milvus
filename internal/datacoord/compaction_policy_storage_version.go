@@ -76,6 +76,10 @@ func segmentColumnGroupFormatsAllEqual(segment *SegmentInfo, targetFormat string
 
 	binlogs := segment.GetBinlogs()
 	if len(binlogs) == 0 {
+		log.Warn("unexpected empty binlogs for V3 segment during storage format compaction",
+			zap.Int64("segmentID", segment.GetID()),
+			zap.Int64("collectionID", segment.GetCollectionID()),
+			zap.String("targetFormat", targetFormat))
 		return false
 	}
 
