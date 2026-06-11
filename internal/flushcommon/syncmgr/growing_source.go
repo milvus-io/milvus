@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -45,18 +46,22 @@ import (
 )
 
 type GrowingFlushConfig struct {
-	SegmentBasePath   string
-	PartitionBasePath string
-	CollectionID      int64
-	PartitionID       int64
-	TextFieldIDs      []int64
-	TextLobPaths      []string
-	ReadVersion       int64
+	SegmentBasePath      string
+	PartitionBasePath    string
+	CollectionID         int64
+	PartitionID          int64
+	TextFieldIDs         []int64
+	TextLobPaths         []string
+	BM25FieldIDs         []int64
+	BM25StatsLogIDs      []int64
+	WriteMergedBM25Stats bool
+	ReadVersion          int64
 }
 
 type GrowingFlushResult struct {
 	ManifestPath string
 	NumRows      int64
+	BM25Stats    map[int64]*storage.BM25Stats
 }
 
 type GrowingFlushSource interface {
@@ -314,8 +319,13 @@ type GrowingSourceSyncTask struct {
 	source     GrowingFlushSource
 
 	chunkManager storage.ChunkManager
+	allocator    allocator.Interface
 	manifestPath string
 	flushedSize  int64
+	bm25Stats    map[int64]*storage.BM25Stats
+
+	committedManifestPath string
+	committedBM25Stats    map[int64]*storage.BM25Stats
 
 	writeRetryOpts  []retry.Option
 	failureCallback func(error)
@@ -401,6 +411,17 @@ func (t *GrowingSourceSyncTask) WithSource(source GrowingFlushSource) *GrowingSo
 	return t
 }
 
+func (t *GrowingSourceSyncTask) WithCommittedFlush(manifestPath string, bm25Stats map[int64]*storage.BM25Stats) *GrowingSourceSyncTask {
+	t.committedManifestPath = manifestPath
+	t.committedBM25Stats = bm25Stats
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithAllocator(allocator allocator.Interface) *GrowingSourceSyncTask {
+	t.allocator = allocator
+	return t
+}
+
 func (t *GrowingSourceSyncTask) WithChunkManager(cm storage.ChunkManager) *GrowingSourceSyncTask {
 	t.chunkManager = cm
 	return t
@@ -442,6 +463,24 @@ func (t *GrowingSourceSyncTask) IsDrop() bool {
 
 func (t *GrowingSourceSyncTask) ManifestPath() string {
 	return t.manifestPath
+}
+
+func (t *GrowingSourceSyncTask) HasCommittedFlush() bool {
+	return t.committedManifestPath != "" || t.manifestPath != ""
+}
+
+func (t *GrowingSourceSyncTask) CommittedManifestPath() string {
+	if t.committedManifestPath != "" {
+		return t.committedManifestPath
+	}
+	return t.manifestPath
+}
+
+func (t *GrowingSourceSyncTask) CommittedBM25Stats() map[int64]*storage.BM25Stats {
+	if len(t.committedBM25Stats) > 0 {
+		return t.committedBM25Stats
+	}
+	return t.bm25Stats
 }
 
 func (t *GrowingSourceSyncTask) BatchRows() int64 {
@@ -495,22 +534,27 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 		log.Warn("segment not found in metacache")
 		return nil
 	}
-	if t.source == nil {
-		return errors.New("growing flush source is nil")
-	}
-	if t.source.CurrentOffset() < t.targetOffset {
-		return errors.Errorf("growing flush source is behind target offset, current=%d target=%d", t.source.CurrentOffset(), t.targetOffset)
-	}
-
 	expectedRows := t.targetOffset - segment.FlushedRows()
 	if expectedRows < 0 {
 		return errors.Errorf("growing source target offset is behind flushed rows, flushedRows=%d targetOffset=%d segmentID=%d",
 			segment.FlushedRows(), t.targetOffset, t.segmentID)
 	}
-	if expectedRows == 0 {
+	if t.committedManifestPath != "" {
+		t.manifestPath = t.committedManifestPath
+		t.bm25Stats = t.committedBM25Stats
+	} else if expectedRows == 0 {
 		t.manifestPath = segment.ManifestPath()
 	} else {
-		config := t.buildFlushConfig(segment)
+		if t.source == nil {
+			return errors.New("growing flush source is nil")
+		}
+		if t.source.CurrentOffset() < t.targetOffset {
+			return errors.Errorf("growing flush source is behind target offset, current=%d target=%d", t.source.CurrentOffset(), t.targetOffset)
+		}
+		config, err := t.buildFlushConfig(segment)
+		if err != nil {
+			return err
+		}
 		result, err := t.source.FlushGrowingData(ctx, segment.FlushedRows(), t.targetOffset, config)
 		if err != nil {
 			return errors.Wrap(err, "flush growing source data")
@@ -523,6 +567,9 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 				expectedRows, result.NumRows, segment.FlushedRows(), t.targetOffset, t.segmentID)
 		}
 		t.manifestPath = result.ManifestPath
+		if len(result.BM25Stats) > 0 {
+			t.bm25Stats = result.BM25Stats
+		}
 	}
 	t.flushedSize = expectedRows
 
@@ -538,6 +585,9 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 	}
 	if t.manifestPath != "" {
 		actions = append(actions, metacache.UpdateManifestPath(t.manifestPath))
+	}
+	if len(t.bm25Stats) > 0 {
+		actions = append(actions, metacache.MergeBm25Stats(t.bm25Stats))
 	}
 	if t.IsFlush() {
 		actions = append(actions, metacache.UpdateState(commonpb.SegmentState_Flushed))
@@ -560,7 +610,7 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 	return nil
 }
 
-func (t *GrowingSourceSyncTask) buildFlushConfig(segment *metacache.SegmentInfo) *GrowingFlushConfig {
+func (t *GrowingSourceSyncTask) buildFlushConfig(segment *metacache.SegmentInfo) (*GrowingFlushConfig, error) {
 	segmentBasePath := path.Join(t.chunkManager.RootPath(), common.SegmentInsertLogPath,
 		metautil.JoinIDPath(t.collectionID, t.partitionID, t.segmentID))
 	partitionBasePath := path.Join(t.chunkManager.RootPath(), common.SegmentInsertLogPath,
@@ -568,6 +618,8 @@ func (t *GrowingSourceSyncTask) buildFlushConfig(segment *metacache.SegmentInfo)
 
 	var textFieldIDs []int64
 	var textLobPaths []string
+	var bm25FieldIDs []int64
+	var bm25StatsLogIDs []int64
 	if t.schema != nil {
 		for _, field := range t.schema.GetFields() {
 			if field.GetDataType() == schemapb.DataType_Text {
@@ -576,27 +628,57 @@ func (t *GrowingSourceSyncTask) buildFlushConfig(segment *metacache.SegmentInfo)
 				textLobPaths = append(textLobPaths, fmt.Sprintf("%s/lobs/%d", partitionBasePath, fieldID))
 			}
 		}
+		for _, function := range t.schema.GetFunctions() {
+			if function.GetType() == schemapb.FunctionType_BM25 && len(function.GetOutputFieldIds()) > 0 {
+				bm25FieldIDs = append(bm25FieldIDs, function.GetOutputFieldIds()[0])
+			}
+		}
+	}
+	if len(bm25FieldIDs) > 0 {
+		var err error
+		bm25StatsLogIDs, err = t.allocBM25StatsLogIDs(len(bm25FieldIDs))
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &GrowingFlushConfig{
-		SegmentBasePath:   segmentBasePath,
-		PartitionBasePath: partitionBasePath,
-		CollectionID:      t.collectionID,
-		PartitionID:       t.partitionID,
-		TextFieldIDs:      textFieldIDs,
-		TextLobPaths:      textLobPaths,
-		ReadVersion:       manifestVersion(segment.ManifestPath()),
+		SegmentBasePath:      segmentBasePath,
+		PartitionBasePath:    partitionBasePath,
+		CollectionID:         t.collectionID,
+		PartitionID:          t.partitionID,
+		TextFieldIDs:         textFieldIDs,
+		TextLobPaths:         textLobPaths,
+		BM25FieldIDs:         bm25FieldIDs,
+		BM25StatsLogIDs:      bm25StatsLogIDs,
+		WriteMergedBM25Stats: t.IsFlush() && t.level != datapb.SegmentLevel_L0 && t.schema != nil && hasBM25Function(t.schema),
+		ReadVersion:          manifestVersion(segment.ManifestPath()),
+	}, nil
+}
+
+func (t *GrowingSourceSyncTask) allocBM25StatsLogIDs(count int) ([]int64, error) {
+	if t.allocator == nil {
+		return nil, merr.WrapErrServiceInternal("id allocator is nil when allocating bm25 stats log ids")
 	}
+	ids := make([]int64, count)
+	for i := range ids {
+		id, err := t.allocator.AllocOne()
+		if err != nil {
+			return nil, err
+		}
+		ids[i] = id
+	}
+	return ids, nil
 }
 
 func manifestVersion(manifestPath string) int64 {
 	if manifestPath == "" {
-		return -1
+		return packed.ManifestEarliest
 	}
 	if _, version, err := packedManifestVersion(manifestPath); err == nil {
 		return version
 	}
-	return -1
+	return packed.ManifestEarliest
 }
 
 func packedManifestVersion(manifestPath string) (string, int64, error) {

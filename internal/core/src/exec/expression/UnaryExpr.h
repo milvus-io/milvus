@@ -116,6 +116,11 @@ struct UnaryElementFuncForMatch {
     using IndexInnerType =
         std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
 
+    // Pre-built matcher — owned by PhyUnaryRangeFilterExpr and reused
+    // across batches; nullptr means build a local one (mirrors
+    // UnaryElementFuncForRegexMatch).
+    const LikePatternMatcher* matcher = nullptr;
+
     void
     operator()(const T* src,
                size_t size,
@@ -128,9 +133,14 @@ struct UnaryElementFuncForMatch {
 
         if constexpr (std::is_same_v<T, std::string> ||
                       std::is_same_v<T, std::string_view>) {
-            LikePatternMatcher matcher(val);
+            std::unique_ptr<LikePatternMatcher> local_matcher;
+            const LikePatternMatcher* m = matcher;
+            if (m == nullptr) {
+                local_matcher = std::make_unique<LikePatternMatcher>(val);
+                m = local_matcher.get();
+            }
             for (int i = 0; i < size; ++i) {
-                res[i] = matcher(src[i]);
+                res[i] = (*m)(src[i]);
             }
         } else {
             ThrowInfo(OpTypeInvalid,
@@ -148,16 +158,21 @@ struct UnaryElementFuncForMatch {
                const int32_t* offsets = nullptr) {
         if constexpr (std::is_same_v<T, std::string> ||
                       std::is_same_v<T, std::string_view>) {
-            LikePatternMatcher matcher(val);
+            std::unique_ptr<LikePatternMatcher> local_matcher;
+            const LikePatternMatcher* m = matcher;
+            if (m == nullptr) {
+                local_matcher = std::make_unique<LikePatternMatcher>(val);
+                m = local_matcher.get();
+            }
             bool has_bitmap_input = !bitmap_input.empty();
             for (int i = 0; i < size; ++i) {
                 if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
                     continue;
                 }
                 if constexpr (filter_type == FilterType::random) {
-                    res[i] = matcher(src[offsets ? offsets[i] : i]);
+                    res[i] = (*m)(src[offsets ? offsets[i] : i]);
                 } else {
-                    res[i] = matcher(src[i]);
+                    res[i] = (*m)(src[i]);
                 }
             }
         } else {
@@ -1168,6 +1183,22 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
             cached_volnitsky_searcher_ =
                 std::make_unique<VolnitskySearcher>(cached_volnitsky_literal_);
         }
+    }
+
+    // Cached LIKE pattern matcher — constructed once per segment, reused
+    // across batches (the pattern is an expression constant).
+    bool like_cache_inited_{false};
+    std::unique_ptr<LikePatternMatcher> cached_like_matcher_;
+
+    void
+    EnsureLikeMatcherCache() {
+        if (like_cache_inited_)
+            return;
+        like_cache_inited_ = true;
+        if (expr_->op_type_ != proto::plan::OpType::Match)
+            return;
+        auto pattern = GetValueFromProto<std::string>(expr_->val_);
+        cached_like_matcher_ = std::make_unique<LikePatternMatcher>(pattern);
     }
 };
 }  // namespace exec

@@ -148,16 +148,6 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 		}
 		growing.UpdatePkCandidate(insertData.PrimaryKeys)
 
-		// record batch info for checkpoint tracking (growing-source collections only)
-		if sd.checkpointTracker != nil {
-			endOffset := growing.InsertCount()
-			sd.checkpointTracker.RecordBatch(
-				growing.ID(),
-				endOffset,
-				insertData.StartPosition,
-			)
-		}
-
 		if newGrowingSegment {
 			sd.growingSegmentLock.Lock()
 			// Forbid create growing segment in excluded segment
@@ -412,27 +402,6 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 
 	segmentIDs = lo.Map(loaded, func(segment segments.Segment, _ int) int64 { return segment.ID() })
 	log.Info("load growing segments done", zap.Int64s("segmentIDs", segmentIDs))
-
-	// initialize checkpoint tracking for recovered growing segments (growing-source collections only)
-	if sd.checkpointTracker != nil {
-		for _, segment := range loaded {
-			// the segment was recovered from binlog, so the current row count is the flushed offset
-			flushedOffset := segment.RowNum()
-			manifest := segment.LoadInfo().GetManifestPath()
-			if manifest == "" && flushedOffset > 0 {
-				log.Info("initialize checkpoint tracker for legacy recovered growing segment",
-					zap.Int64("segmentID", segment.ID()),
-					zap.Int64("flushedOffset", flushedOffset))
-				sd.checkpointTracker.InitSegment(segment.ID(), flushedOffset)
-				continue
-			}
-			sd.checkpointTracker.InitSegmentWithManifest(segment.ID(), flushedOffset, manifest)
-			log.Info("initialized checkpoint tracker for recovered growing segment",
-				zap.Int64("segmentID", segment.ID()),
-				zap.Int64("flushedOffset", flushedOffset),
-				zap.String("manifest", manifest))
-		}
-	}
 
 	if idfOracle := sd.getIDFOracle(); idfOracle != nil {
 		for _, segment := range loaded {
@@ -1139,22 +1108,6 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 		return id, req.GetCheckpoint().GetTimestamp()
 	})
 	sd.AddExcludedSegments(droppedInfos)
-
-	// Note: Candidate cleanup is handled by RemoveDistributions above
-	// - Sealed segment candidates (BloomFilterSet) are refunded in RemoveDistributions
-	// - Growing segment candidates (LocalSegment) are managed by segmentManager.Release()
-	if len(growing) > 0 {
-		// growing-source data is not flushed directly from QueryNode during
-		// release. WAL flusher owns metadata commits; if a source-backed sync
-		// has not committed yet, WriteBuffer checkpoint pin keeps WAL replayable.
-
-		// clean up checkpoint tracking for released growing segments (growing-source collections only)
-		if sd.checkpointTracker != nil {
-			for _, entry := range growing {
-				sd.checkpointTracker.RemoveSegment(entry.SegmentID)
-			}
-		}
-	}
 
 	var releaseErr error
 	if !force {

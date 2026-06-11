@@ -819,9 +819,8 @@ func (suite *SegmentLoaderSuite) TestLoadIndex() {
 		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 	}
 	segment := &LocalSegment{
-		baseSegment: baseSegment{
-			loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
-		},
+		baseSegment:     baseSegment{loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo)},
+		bm25StatsHolder: newBM25StatsHolder(),
 	}
 
 	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
@@ -860,9 +859,8 @@ func (suite *SegmentLoaderSuite) TestLoadIndexWithLimitedResource() {
 	}
 
 	segment := &LocalSegment{
-		baseSegment: baseSegment{
-			loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
-		},
+		baseSegment:     baseSegment{loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo)},
+		bm25StatsHolder: newBM25StatsHolder(),
 	}
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key, "100000")
 	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key)
@@ -1871,6 +1869,89 @@ func (suite *ExternalSegmentEstimateSuite) TestLazyLoadSubtractsRawData() {
 
 	suite.True(lazyUsage.MemorySize <= nonLazyUsage.MemorySize,
 		"lazy load memory (%d) should be <= non-lazy (%d)", lazyUsage.MemorySize, nonLazyUsage.MemorySize)
+}
+
+func TestGpuIndexRequiresGpu(t *testing.T) {
+	tests := []struct {
+		name     string
+		params   []*commonpb.KeyValuePair
+		expected bool
+	}{
+		{
+			name: "GPU_CAGRA adapt for CPU",
+			params: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+				{Key: "adapt_for_cpu", Value: "true"},
+			},
+			expected: false,
+		},
+		{
+			name: "GPU_CUVS_CAGRA adapt for CPU",
+			params: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "GPU_CUVS_CAGRA"},
+				{Key: "adapt_for_cpu", Value: "1"},
+			},
+			expected: false,
+		},
+		{
+			name: "GPU_CAGRA without adapt for CPU",
+			params: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+			},
+			expected: true,
+		},
+		{
+			name: "GPU_CAGRA invalid adapt for CPU",
+			params: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+				{Key: "adapt_for_cpu", Value: "invalid"},
+			},
+			expected: true,
+		},
+		{
+			name: "other GPU index ignores adapt for CPU",
+			params: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "GPU_IVF_FLAT"},
+				{Key: "adapt_for_cpu", Value: "true"},
+			},
+			expected: true,
+		},
+		{
+			name: "CPU index",
+			params: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "HNSW"},
+			},
+			expected: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.expected, gpuIndexRequiresGpu(test.params))
+		})
+	}
+
+	t.Run("GPU_CAGRA adapt for CPU from load config", func(t *testing.T) {
+		params := paramtable.Get()
+		oldEnable := params.KnowhereConfig.Enable.GetValue()
+		adaptKey := params.KnowhereConfig.IndexParam.KeyPrefix + "GPU_CAGRA.load.adapt_for_cpu"
+		oldAdaptValue := params.GetWithDefault(adaptKey, "")
+		defer params.Save(params.KnowhereConfig.Enable.Key, oldEnable)
+		defer func() {
+			if oldAdaptValue == "" {
+				params.Remove(adaptKey)
+				return
+			}
+			params.Save(adaptKey, oldAdaptValue)
+		}()
+
+		params.Save(params.KnowhereConfig.Enable.Key, "true")
+		params.Save(adaptKey, "true")
+
+		assert.False(t, gpuIndexRequiresGpu([]*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+		}))
+	})
 }
 
 func TestEstimateLoadingResourceUsage_DroppedFieldSkipped(t *testing.T) {

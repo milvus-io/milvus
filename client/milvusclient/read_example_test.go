@@ -168,6 +168,59 @@ func ExampleClient_Search_outputFields() {
 	}
 }
 
+func ExampleClient_Search_searchAggregation() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	milvusAddr := "127.0.0.1:19530"
+	token := "root:Milvus"
+
+	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: milvusAddr,
+		APIKey:  token,
+	})
+	if err != nil {
+		log.Fatal("failed to connect to milvus server: ", err.Error())
+	}
+
+	defer cli.Close(ctx)
+
+	queryVector := []float32{0.3580376395471989, -0.6023495712049978, 0.18414012509913835, -0.26286205330961354, 0.9029438446296592}
+	aggregation := milvusclient.NewSearchAggregation([]string{"category"}, 10).
+		WithSearchSize(30).
+		WithMetric("total_price", "sum", "price").
+		WithMetric("doc_count", "count", "*").
+		WithOrder("total_price", "desc").
+		WithTopHits(milvusclient.NewTopHits(2).WithSort("_score", "asc")).
+		WithSubAggregation(
+			milvusclient.NewSearchAggregation([]string{"brand"}, 5).
+				WithMetric("avg_rating", "avg", "rating").
+				WithOrder("avg_rating", "desc").
+				WithTopHits(milvusclient.NewTopHits(1).WithSort("rating", "desc")),
+		)
+
+	resultSets, err := cli.Search(ctx, milvusclient.NewSearchOption(
+		"products", // collectionName
+		100,        // limit is still required by Search; aggregation size controls returned buckets.
+		[]entity.Vector{entity.FloatVector(queryVector)},
+	).WithANNSField("embedding").WithSearchAggregation(aggregation))
+	if err != nil {
+		log.Fatal("failed to perform search aggregation: ", err.Error())
+	}
+
+	for _, bucket := range resultSets[0].AggregationBuckets {
+		log.Println("Bucket key: ", bucket.Key)
+		log.Println("Document count: ", bucket.Count)
+		log.Println("Metrics: ", bucket.Metrics)
+		for _, hit := range bucket.Hits {
+			log.Println("Top hit: ", hit.PK, hit.Score, hit.Fields)
+		}
+		for _, subBucket := range bucket.SubGroups {
+			log.Println("Sub bucket: ", subBucket.Key, subBucket.Metrics)
+		}
+	}
+}
+
 func ExampleClient_Search_offsetLimit() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

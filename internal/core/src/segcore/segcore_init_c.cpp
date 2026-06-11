@@ -51,6 +51,13 @@ SegcoreSetEnableInterminSegmentIndex(const bool value) {
 }
 
 extern "C" void
+SegcoreSetStorageV3Enabled(const bool value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_storage_v3_enabled(value);
+}
+
+extern "C" void
 SegcoreSetEnableGrowingSourceFlush(const bool value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();

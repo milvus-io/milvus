@@ -142,6 +142,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
                            size_t num_rows);
 
     void
+    BuildTextIndexFromTextLobRefs(FieldId field_id,
+                                  const std::vector<FieldDataPtr>& field_data,
+                                  size_t reserved_offset,
+                                  const FieldMeta& field_meta);
+
+    void
     Reopen(SchemaPtr sch) override;
 
     void

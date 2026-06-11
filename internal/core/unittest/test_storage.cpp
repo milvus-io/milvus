@@ -15,18 +15,24 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstdint>
+#include <filesystem>
 #include <iosfwd>
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "aws/core/client/ClientConfiguration.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/Schema.h"
 #include "common/Types.h"
 #include "common/common_type_c.h"
 #include "common/type_c.h"
 #include "gtest/gtest.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "segcore/Utils.h"
+#include "segcore/segment_c.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/KeyRetriever.h"
@@ -39,6 +45,7 @@
 #include "storage/minio/MinioChunkManager.h"
 #include "storage/storage_c.h"
 #include "test_utils/Constants.h"
+#include "test_utils/DataGen.h"
 
 // Test-only subclass that exposes the protected ApplyChecksumConfigOverrides
 // and NeedChecksumOverride helpers so we can assert their behavior directly.
@@ -50,6 +57,7 @@ class TestableMinioChunkManager : public milvus::storage::MinioChunkManager {
 
 using namespace std;
 using namespace milvus;
+using namespace milvus::segcore;
 using namespace milvus::storage;
 
 string bucketName = "a-bucket";
@@ -104,6 +112,111 @@ class StorageTest : public testing::Test {
 TEST_F(StorageTest, InitLocalChunkManagerSingleton) {
     auto status = InitLocalChunkManagerSingleton("tmp");
     EXPECT_EQ(status.error_code, Success);
+}
+
+TEST_F(StorageTest, TextFieldDataFromManifestResolvesLobRefs) {
+#ifndef BUILD_VORTEX_BRIDGE
+    GTEST_SKIP() << "Vortex support is not enabled";
+#endif
+
+    std::string test_dir =
+        "/tmp/text_manifest_reader_" +
+        std::to_string(
+            std::chrono::system_clock::now().time_since_epoch().count());
+    std::filesystem::create_directories(test_dir);
+    auto cleanup = [&]() {
+        if (std::filesystem::exists(test_dir)) {
+            std::filesystem::remove_all(test_dir);
+        }
+    };
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto text_fid = schema->AddDebugField("text", DataType::TEXT, true);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 3;
+    std::vector<int64_t> row_ids = {0, 1, 2};
+    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<int64_t> pks = {100, 101, 102};
+    std::vector<std::string> texts = {
+        "inline text for text match",
+        "",
+        std::string(70 * 1024, 'x') + " searchable-tail-token"};
+    bool text_valid[N] = {true, false, true};
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(N);
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(texts.data(), text_valid, N, (*schema)[text_fid])
+            .release());
+
+    segment->PreInsert(N);
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+    CFlushConfig config{};
+    std::string segment_path =
+        test_dir + "/collection/partition/segment_text_lob";
+    std::string text_lob_path = test_dir + "/collection/partition/lobs/" +
+                                std::to_string(text_fid.get());
+    int64_t text_field_ids[] = {text_fid.get()};
+    const char* text_lob_paths[] = {text_lob_path.c_str()};
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+    config.text_field_ids = text_field_ids;
+    config.text_lob_paths = text_lob_paths;
+    config.num_text_columns = 1;
+
+    CFlushResult result{};
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, N);
+
+    auto properties = LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    ASSERT_NE(properties, nullptr);
+    auto field_meta = gen_field_meta(
+        1, 2, 3, text_fid.get(), DataType::TEXT, DataType::NONE, true);
+    std::string manifest_json =
+        "{\"base_path\":\"" + segment_path +
+        "\",\"ver\":" + std::to_string(result.committed_version) + "}";
+
+    auto raw_datas = GetFieldDatasFromManifest(manifest_json,
+                                               properties,
+                                               field_meta,
+                                               DataType::TEXT,
+                                               0,
+                                               DataType::NONE);
+    ASSERT_EQ(raw_datas.size(), 1);
+    ASSERT_TRUE(raw_datas[0]->is_valid(0));
+    EXPECT_FALSE(raw_datas[0]->is_valid(1));
+    ASSERT_TRUE(raw_datas[0]->is_valid(2));
+    EXPECT_NE(*static_cast<const std::string*>(raw_datas[0]->RawValue(0)),
+              texts[0]);
+    EXPECT_NE(*static_cast<const std::string*>(raw_datas[0]->RawValue(2)),
+              texts[2]);
+
+    auto text_datas =
+        GetTextFieldDatasFromManifest(manifest_json, properties, field_meta);
+    ASSERT_EQ(text_datas.size(), 1);
+    ASSERT_TRUE(text_datas[0]->is_valid(0));
+    EXPECT_FALSE(text_datas[0]->is_valid(1));
+    ASSERT_TRUE(text_datas[0]->is_valid(2));
+    EXPECT_EQ(*static_cast<const std::string*>(text_datas[0]->RawValue(0)),
+              texts[0]);
+    EXPECT_EQ(*static_cast<const std::string*>(text_datas[0]->RawValue(2)),
+              texts[2]);
+
+    FreeFlushResult(&result);
+    cleanup();
 }
 
 TEST_F(StorageTest, GetLocalUsedSize) {

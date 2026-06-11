@@ -68,6 +68,11 @@ func (c *Client) Search(ctx context.Context, option SearchOption, callOptions ..
 func (c *Client) handleSearchResult(schema *entity.Schema, outputFields []string, nq int, resp *milvuspb.SearchResults) ([]ResultSet, error) {
 	sr := make([]ResultSet, 0, nq)
 	results := resp.GetResults()
+	aggBuckets, err := parseAggregationBuckets(results)
+	if err != nil {
+		return nil, err
+	}
+	isAggregationResult := len(results.GetAggTopks()) > 0 || len(results.GetAggBuckets()) > 0
 	offset := 0
 	fieldDataList := results.GetFieldsData()
 	gb := results.GetGroupByFieldValue()
@@ -86,8 +91,14 @@ func (c *Client) handleSearchResult(schema *entity.Schema, outputFields []string
 				entry.Err = errors.Newf("topk not returned for nq %d", i)
 				return
 			}
+			if i < len(aggBuckets) {
+				entry.AggregationBuckets = aggBuckets[i]
+			}
 			rc = int(results.GetTopks()[i]) // result entry count for current query
 			entry.ResultCount = rc
+			if rc == 0 && isAggregationResult {
+				return
+			}
 			entry.Scores = results.GetScores()[offset : offset+rc]
 
 			// set recall if returned

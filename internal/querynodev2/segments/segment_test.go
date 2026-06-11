@@ -542,7 +542,6 @@ func newTestBaseSegment(segmentID, partitionID int64) baseSegment {
 			PartitionID: partitionID,
 		}),
 		version:            atomic.NewInt64(0),
-		bm25Stats:          make(map[int64]*storage.BM25Stats),
 		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
 		needUpdatedVersion: atomic.NewInt64(0),
 	}
@@ -657,6 +656,30 @@ func TestBaseSegment_PkCandidateNil(t *testing.T) {
 	blc := storage.NewBatchLocationsCache(pks)
 	results := bs.BatchPkExist(blc)
 	assert.Equal(t, []bool{true, true}, results)
+}
+
+func TestLocalSegmentBM25StatsAreCloned(t *testing.T) {
+	segment := &LocalSegment{
+		baseSegment:     newTestBaseSegment(1, 0),
+		bm25StatsHolder: newBM25StatsHolder(),
+	}
+
+	stats := storage.NewBM25Stats()
+	stats.Append(map[uint32]float32{1: 1})
+	input := map[int64]*storage.BM25Stats{102: stats}
+
+	segment.UpdateBM25Stats(input)
+	stats.Append(map[uint32]float32{2: 1})
+
+	got := segment.GetBM25Stats()
+	assert.Equal(t, int64(1), got[102].NumRow())
+
+	got[102].Append(map[uint32]float32{3: 1})
+	got[103] = storage.NewBM25Stats()
+
+	gotAgain := segment.GetBM25Stats()
+	assert.Equal(t, int64(1), gotAgain[102].NumRow())
+	assert.NotContains(t, gotAgain, int64(103))
 }
 
 // TestBaseSegment_SkipGrowingBF tests that skipGrowingBF bypasses PK candidate checks.

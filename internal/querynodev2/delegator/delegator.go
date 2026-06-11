@@ -183,9 +183,6 @@ type shardDelegator struct {
 	// for slow down the delegator consumption and reduce the timetick dispatch frequency.
 	latestRequiredMVCCTimeTick *atomic.Uint64
 
-	// checkpointTracker is still updated by legacy growing ingest hooks. It no
-	// longer drives QueryNode-side metadata commit; WAL flusher owns commit.
-	checkpointTracker *segments.CheckpointTracker
 	// growingSourceRegistration is the process-local registry lease for this
 	// delegator's optional growing-source source.
 	growingSourceRegistration *syncmgr.GrowingSourceRegistration
@@ -1482,7 +1479,6 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	// Register growing-source segments as optional local flush sources. Metadata
 	// commit is still owned by WAL flusher / WriteBuffer.
 	if sd.useGrowingSourceFlush() {
-		sd.checkpointTracker = segments.NewCheckpointTracker()
 		sd.growingSourceProvider = newDelegatorGrowingSourceProvider(manager.Segment, func(ctx context.Context, fenceTs uint64) error {
 			_, err := sd.waitTSafe(ctx, fenceTs)
 			return err

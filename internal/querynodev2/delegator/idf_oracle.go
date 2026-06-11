@@ -81,6 +81,19 @@ type bm25FunctionSet map[typeutil.UniqueID]*schemapb.FunctionSchema
 
 type bm25Stats map[int64]*storage.BM25Stats
 
+func (s bm25Stats) Clone() bm25Stats {
+	if len(s) == 0 {
+		return nil
+	}
+	cloned := make(bm25Stats, len(s))
+	for fieldID, stats := range s {
+		if stats != nil {
+			cloned[fieldID] = stats.Clone()
+		}
+	}
+	return cloned
+}
+
 func newBM25FunctionSet(schema *schemapb.CollectionSchema) bm25FunctionSet {
 	result := make(bm25FunctionSet)
 	if schema == nil {
@@ -381,16 +394,18 @@ func (o *idfOracle) activateExistingSealedStats(segmentID int64, stats bm25Stats
 }
 
 func (o *idfOracle) RegisterGrowing(segmentID int64, stats bm25Stats) {
+	clonedStats := stats.Clone()
+
 	o.Lock()
 	if _, ok := o.growing[segmentID]; ok {
 		o.Unlock()
 		return
 	}
 	o.growing[segmentID] = &growingBm25Stats{
-		bm25Stats: stats,
+		bm25Stats: clonedStats,
 		activate:  true,
 	}
-	o.current.Merge(stats)
+	o.current.Merge(clonedStats)
 	o.Unlock()
 	o.syncResource()
 }

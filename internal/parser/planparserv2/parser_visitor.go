@@ -58,6 +58,10 @@ func (v *ParserVisitor) VisitParens(ctx *parser.ParensContext) interface{} {
 }
 
 func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, error) {
+	return v.translateIdentifierWithText(identifier, false)
+}
+
+func (v *ParserVisitor) translateIdentifierWithText(identifier string, allowText bool) (*ExprWithType, error) {
 	identifier = decodeUnicode(identifier)
 	field, err := v.schema.GetFieldFromNameDefaultJSON(identifier)
 	if err != nil {
@@ -68,7 +72,7 @@ func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, e
 		nestedPath = append(nestedPath, identifier)
 	}
 
-	if field.DataType == schemapb.DataType_Text {
+	if field.DataType == schemapb.DataType_Text && !allowText {
 		return nil, merr.WrapErrParameterInvalidMsg("filter on text field (%s) is not supported yet", field.Name)
 	}
 
@@ -844,16 +848,13 @@ func (v *ParserVisitor) VisitRegexNotMatch(ctx *parser.RegexNotMatchContext) int
 
 func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{} {
 	identifier := ctx.Identifier().GetText()
-	column, err := v.translateIdentifier(identifier)
+	column, err := v.translateIdentifierWithText(identifier, true)
 	if err != nil {
 		return err
 	}
 	columnInfo := toColumnInfo(column)
 	if !typeutil.IsStringType(column.dataType) {
 		return errors.New("text match operation on non-string is unsupported")
-	}
-	if column.dataType == schemapb.DataType_Text {
-		return errors.New("text match operation on text field is not supported yet")
 	}
 	if !v.schema.IsFieldTextMatchEnabled(columnInfo.FieldId) {
 		return merr.WrapErrParameterInvalidMsg("field \"%s\" does not enable match", identifier)
@@ -921,7 +922,7 @@ func (v *ParserVisitor) VisitTextMatchOption(ctx *parser.TextMatchOptionContext)
 
 func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interface{} {
 	identifier := ctx.Identifier().GetText()
-	column, err := v.translateIdentifier(identifier)
+	column, err := v.translateIdentifierWithText(identifier, true)
 	if err != nil {
 		return err
 	}

@@ -116,6 +116,13 @@ PhyVectorSearchNode::GetOutput() {
     milvus::BitsetView search_view;
     int64_t data_cnt = active_count_;
 
+    if (!ph.element_level_ && query_context_->bitset_is_element_level()) {
+        ThrowInfo(ExprInvalid,
+                  "element-level filter bitset cannot be used for row-level "
+                  "vector search; use MATCH_ANY/MATCH_* for row-level struct "
+                  "array filtering");
+    }
+
     if (query_context_->get_all_rows_visible() && !ph.element_level_) {
         // search_view stays default-constructed (empty)
     } else {
