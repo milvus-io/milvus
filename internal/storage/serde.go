@@ -390,7 +390,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				if err := proto.Unmarshal(arr.Value(i), v); err == nil {
 					return v, nil
 				} else {
-					return nil, merr.WrapErrStorage(err, "failed to unmarshal ScalarField")
+					return nil, merr.WrapErrSerializationFailed(err, "failed to unmarshal ScalarField")
 				}
 			}
 			return nil, merr.WrapErrServiceInternalMsg("expected *array.Binary, got %T", a)
@@ -406,7 +406,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 						builder.Append(bytes)
 						return nil
 					} else {
-						return merr.WrapErrStorage(err, "failed to marshal ScalarField")
+						return merr.WrapErrSerializationFailed(err, "failed to marshal ScalarField")
 					}
 				}
 				return merr.WrapErrServiceInternalMsg("expected *schemapb.ScalarField value, got %T", v)
@@ -450,7 +450,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 						builder.Append(bytes)
 						return nil
 					} else {
-						return merr.WrapErrStorage(err, "failed to marshal ScalarField")
+						return merr.WrapErrSerializationFailed(err, "failed to marshal ScalarField")
 					}
 				}
 				if vv, ok := v.(*schemapb.VectorField); ok {

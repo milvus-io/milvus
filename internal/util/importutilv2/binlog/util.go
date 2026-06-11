@@ -61,9 +61,11 @@ func readData(reader *storage.BinlogReader, et storage.EventTypeCode) ([]any, []
 
 // read delete data only
 func newBinlogReader(ctx context.Context, cm storage.ChunkManager, path string) (*storage.BinlogReader, error) {
-	bytes, err := cm.Read(ctx, path) // TODO: dyh, checks if the error is a retryable error
+	bytes, err := cm.Read(ctx, path)
 	if err != nil {
-		return nil, merr.WrapErrImportSysFailedMsg("failed to open binlog %s", path)
+		// cm.Read returns a typed storage error (Io* family); keep its code and
+		// retriability instead of flattening it into a generic import failure.
+		return nil, merr.Wrapf(err, "failed to open binlog %s", path)
 	}
 	var reader *storage.BinlogReader
 	reader, err = storage.NewBinlogReader(bytes)

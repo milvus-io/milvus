@@ -204,7 +204,9 @@ func readDescriptorEventData(buffer io.Reader) (*descriptorEventData, error) {
 		return nil, err
 	}
 	if err := json.Unmarshal(event.ExtraBytes, &event.Extras); err != nil {
-		return nil, err
+		// Malformed extras read back from a stored descriptor event is corrupt
+		// stored data, consistent with the other ErrDataIntegrity checks here.
+		return nil, merr.WrapErrDataIntegrity(err, "failed to unmarshal descriptor event extras")
 	}
 
 	return event, nil
