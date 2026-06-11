@@ -2483,11 +2483,14 @@ please adjust in embedded Milvus: false`,
 		PanicIfEmpty: true,
 		Doc:          "maximum number of elements in an array field for a single row",
 		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt64(v) <= 0 {
+				return "4096"
+			}
+			return v
+		},
 	}
 	p.MaxArrayCapacity.Init(base.mgr)
-	if p.MaxArrayCapacity.GetAsInt64() <= 0 {
-		panic(fmt.Sprintf("proxy.maxArrayCapacity should be greater than 0, not %d", p.MaxArrayCapacity.GetAsInt64()))
-	}
 
 	p.MaxResultEntries = ParamItem{
 		Key:          "proxy.maxResultEntries",
