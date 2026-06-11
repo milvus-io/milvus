@@ -54,6 +54,9 @@ func (opt *searchIteratorOption) ValidateParams() error {
 	if opt.batchSize <= 0 {
 		return fmt.Errorf("batch size must be greater than 0")
 	}
+	if opt.searchAggregation != nil {
+		return fmt.Errorf("search_aggregation is not supported with search iterator")
+	}
 	return nil
 }
 

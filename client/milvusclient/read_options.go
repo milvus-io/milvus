@@ -60,6 +60,7 @@ type searchOption struct {
 	collectionName             string
 	partitionNames             []string
 	outputFields               []string
+	searchAggregation          *SearchAggregation
 	consistencyLevel           entity.ConsistencyLevel
 	useDefaultConsistencyLevel bool
 }
@@ -335,6 +336,28 @@ func (opt *searchOption) Request() (*milvuspb.SearchRequest, error) {
 	request.ConsistencyLevel = commonpb.ConsistencyLevel(opt.consistencyLevel)
 	request.UseDefaultConsistency = opt.useDefaultConsistencyLevel
 	request.OutputFields = opt.outputFields
+	if opt.searchAggregation != nil {
+		if opt.annRequest.groupByField != "" || opt.annRequest.groupSize != 0 || opt.annRequest.strictGroupSize {
+			return nil, errors.New("search_aggregation and group_by_field/group_size are mutually exclusive")
+		}
+		if opt.annRequest.offset > 0 {
+			return nil, errors.New("offset is not supported with search_aggregation")
+		}
+		if rawOffset := strings.TrimSpace(opt.annRequest.searchParam[spOffset]); rawOffset != "" && rawOffset != "0" {
+			return nil, errors.New("offset is not supported with search_aggregation")
+		}
+		if strings.TrimSpace(opt.annRequest.searchParam[spGroupBy]) != "" {
+			return nil, errors.New("group_by_field and search_aggregation cannot be used simultaneously")
+		}
+		if strings.TrimSpace(opt.annRequest.searchParam["group_by_fields"]) != "" {
+			return nil, errors.New("group_by_fields and search_aggregation cannot be used simultaneously")
+		}
+		searchAggregation, err := opt.searchAggregation.protoMessage()
+		if err != nil {
+			return nil, err
+		}
+		request.SearchAggregation = searchAggregation
+	}
 
 	return request, nil
 }
@@ -402,6 +425,11 @@ func (opt *searchOption) WithAnnParam(ap index.AnnParam) *searchOption {
 
 func (opt *searchOption) WithSearchParam(key, value string) *searchOption {
 	opt.annRequest.WithSearchParam(key, value)
+	return opt
+}
+
+func (opt *searchOption) WithSearchAggregation(agg *SearchAggregation) *searchOption {
+	opt.searchAggregation = agg
 	return opt
 }
 
