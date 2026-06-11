@@ -21,6 +21,7 @@
 #include "common/Vector.h"
 #include "common/Utils.h"
 #include "Aggregate.h"
+#include "exec/operator/query-agg/AggRawInput.h"
 #include "storage/Util.h"
 
 namespace milvus {
@@ -196,9 +197,77 @@ class RowContainer {
                                             index);
     }
 
+    template <DataType Type>
+    inline bool
+    equalsRawNoNulls(const char* row,
+                     int32_t offset,
+                     const AggRawColumnView& column,
+                     const AggRawInput& input,
+                     vector_size_t index) {
+        if constexpr (Type == DataType::NONE || Type == DataType::ROW ||
+                      Type == DataType::JSON || Type == DataType::ARRAY) {
+            ThrowInfo(DataTypeInvalid,
+                      "Cannot support complex data type:[ROW/JSON/ARRAY] in "
+                      "rows container for now");
+        } else {
+            using T = typename TypeTraits<Type>::NativeType;
+            bool equal = false;
+            if constexpr (std::is_same_v<T, std::string>) {
+                equal = (column.StringViewAt(index, input) ==
+                         *(strAt(row, offset)));
+            } else {
+                equal = (milvus::comparePrimitiveAsc(
+                             column.ValueAt<T>(index, input),
+                             valueAt<T>(row, offset)) == 0);
+            }
+            return equal;
+        }
+    }
+
+    template <DataType Type>
+    inline bool
+    equalsRawWithNulls(const char* row,
+                       int32_t offset,
+                       int32_t nullByte,
+                       uint8_t nullMask,
+                       const AggRawColumnView& column,
+                       const AggRawInput& input,
+                       vector_size_t index) {
+        bool rowIsNull = isNullAt(row, nullByte, nullMask);
+        bool columnIsNull = !column.ValidAt(index, input);
+        if (rowIsNull || columnIsNull) {
+            return rowIsNull == columnIsNull;
+        }
+        return equalsRawNoNulls<Type>(row, offset, column, input, index);
+    }
+
+    inline bool
+    equals(const char* row,
+           RowColumn column,
+           const AggRawColumnView& column_data,
+           const AggRawInput& input,
+           vector_size_t index) {
+        return MILVUS_DYNAMIC_TYPE_DISPATCH(equalsRawWithNulls,
+                                            column_data.type(),
+                                            row,
+                                            column.offset(),
+                                            column.nullByte(),
+                                            column.nullMask(),
+                                            column_data,
+                                            input,
+                                            index);
+    }
+
     /// Stores the 'index'th value in 'columnVector' into 'row' at 'columnIndex'.
     void
     store(const ColumnVectorPtr& column_data,
+          vector_size_t index,
+          char* row,
+          int32_t column_index);
+
+    void
+    store(const AggRawColumnView& column_data,
+          const AggRawInput& input,
           vector_size_t index,
           char* row,
           int32_t column_index);
@@ -256,6 +325,62 @@ class RowContainer {
             } else {
                 *reinterpret_cast<T*>(group + offset) =
                     *(static_cast<T*>(raw_val_ptr));
+            }
+        }
+    }
+
+    template <DataType Type>
+    inline void
+    storeRawWithNull(const AggRawColumnView& column,
+                     const AggRawInput& input,
+                     vector_size_t index,
+                     char* row,
+                     int32_t offset,
+                     int32_t nullByte,
+                     uint8_t nullMask) {
+        static std::string null_string_val = "";
+        static std::string* null_string_val_ptr = &null_string_val;
+        if constexpr (Type == DataType::NONE || Type == DataType::ROW ||
+                      Type == DataType::JSON || Type == DataType::ARRAY) {
+            ThrowInfo(DataTypeInvalid,
+                      "Cannot support complex data type:[ROW/JSON/ARRAY] in "
+                      "rows container for now");
+        } else {
+            using T = typename milvus::TypeTraits<Type>::NativeType;
+            if (!column.ValidAt(index, input)) {
+                row[nullByte] |= nullMask;
+                if constexpr (std::is_same_v<T, std::string>) {
+                    *reinterpret_cast<std::string**>(row + offset) =
+                        null_string_val_ptr;
+                } else {
+                    *reinterpret_cast<T*>(row + offset) = T();
+                }
+                return;
+            }
+            storeRawNoNulls<Type>(column, input, index, row, offset);
+        }
+    }
+
+    template <DataType Type>
+    inline void
+    storeRawNoNulls(const AggRawColumnView& column,
+                    const AggRawInput& input,
+                    vector_size_t index,
+                    char* group,
+                    int32_t offset) {
+        using T = typename milvus::TypeTraits<Type>::NativeType;
+        if constexpr (Type == DataType::NONE || Type == DataType::ROW ||
+                      Type == DataType::JSON || Type == DataType::ARRAY) {
+            ThrowInfo(DataTypeInvalid,
+                      "Cannot support complex data type:[ROW/JSON/ARRAY] in "
+                      "rows container for now");
+        } else {
+            if constexpr (std::is_same_v<T, std::string>) {
+                *reinterpret_cast<std::string**>(group + offset) =
+                    new std::string(column.StringViewAt(index, input));
+            } else {
+                *reinterpret_cast<T*>(group + offset) =
+                    column.ValueAt<T>(index, input);
             }
         }
     }
