@@ -520,27 +520,14 @@ class VectorArrayChunk : public Chunk {
         : Chunk(row_nums, data, size, nullable, chunk_mmap_guard),
           dim_(dim),
           element_type_(element_type) {
-        if (nullable_) {
-            logical_to_physical_.reserve(row_nums_);
-            for (int64_t i = 0; i < row_nums_; i++) {
-                if (valid_[i]) {
-                    logical_to_physical_.push_back(physical_row_nums_++);
-                } else {
-                    logical_to_physical_.push_back(-1);
-                }
-            }
-        } else {
-            physical_row_nums_ = row_nums_;
-        }
-
         auto null_bitmap_bytes_num = nullable_ ? (row_nums_ + 7) / 8 : 0;
         offsets_lens_ =
             reinterpret_cast<uint32_t*>(data + null_bitmap_bytes_num);
 
         auto offset = 0;
-        offsets_.reserve(physical_row_nums_ + 1);
+        offsets_.reserve(row_nums_ + 1);
         offsets_.push_back(offset);
-        for (int64_t i = 0; i < physical_row_nums_; i++) {
+        for (int64_t i = 0; i < row_nums_; i++) {
             offset += offsets_lens_[i * 2 + 1];
             offsets_.push_back(offset);
         }
@@ -548,11 +535,14 @@ class VectorArrayChunk : public Chunk {
 
     VectorArrayView
     View(int64_t idx) const {
-        AssertInfo(idx >= 0 && idx < physical_row_nums_,
+        AssertInfo(idx >= 0 && idx < row_nums_,
                    "VectorArrayChunk::View offset {} out of range, "
-                   "physical rows {}",
+                   "rows {}",
                    idx,
-                   physical_row_nums_);
+                   row_nums_);
+        AssertInfo(!nullable_ || valid_[idx],
+                   "VectorArrayChunk::View offset {} is null",
+                   idx);
         int idx_off = 2 * idx;
         auto offset = offsets_lens_[idx_off];
         auto len = offsets_lens_[idx_off + 1];
@@ -596,7 +586,7 @@ class VectorArrayChunk : public Chunk {
         for (int64_t i = start_offset; i < end_offset; i++) {
             if (nullable_) {
                 if (valid_[i]) {
-                    views.emplace_back(View(logical_to_physical_[i]));
+                    views.emplace_back(View(i));
                 } else {
                     views.emplace_back();
                 }
@@ -632,9 +622,7 @@ class VectorArrayChunk : public Chunk {
     int64_t dim_;
     uint32_t* offsets_lens_;
     milvus::DataType element_type_;
-    int64_t physical_row_nums_ = 0;
     std::vector<size_t> offsets_;
-    std::vector<int64_t> logical_to_physical_;
 };
 
 class SparseFloatVectorChunk : public Chunk {
