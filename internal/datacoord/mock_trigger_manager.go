@@ -5,6 +5,7 @@ package datacoord
 import (
 	context "context"
 
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	session "github.com/milvus-io/milvus/internal/datacoord/session"
 	mock "github.com/stretchr/testify/mock"
 
@@ -61,9 +62,9 @@ func (_c *MockTriggerManager_InitForceMergeMemoryQuerier_Call) RunAndReturn(run 
 	return _c
 }
 
-// ManualTrigger provides a mock function with given fields: ctx, collectionID, clusteringCompaction, l0Compaction, targetSize
-func (_m *MockTriggerManager) ManualTrigger(ctx context.Context, collectionID int64, clusteringCompaction bool, l0Compaction bool, targetSize int64) (int64, error) {
-	ret := _m.Called(ctx, collectionID, clusteringCompaction, l0Compaction, targetSize)
+// ManualTrigger provides a mock function with given fields: ctx, req
+func (_m *MockTriggerManager) ManualTrigger(ctx context.Context, req *milvuspb.ManualCompactionRequest) (int64, error) {
+	ret := _m.Called(ctx, req)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ManualTrigger")
@@ -71,17 +72,17 @@ func (_m *MockTriggerManager) ManualTrigger(ctx context.Context, collectionID in
 
 	var r0 int64
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, bool, bool, int64) (int64, error)); ok {
-		return rf(ctx, collectionID, clusteringCompaction, l0Compaction, targetSize)
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ManualCompactionRequest) (int64, error)); ok {
+		return rf(ctx, req)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64, bool, bool, int64) int64); ok {
-		r0 = rf(ctx, collectionID, clusteringCompaction, l0Compaction, targetSize)
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ManualCompactionRequest) int64); ok {
+		r0 = rf(ctx, req)
 	} else {
 		r0 = ret.Get(0).(int64)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, int64, bool, bool, int64) error); ok {
-		r1 = rf(ctx, collectionID, clusteringCompaction, l0Compaction, targetSize)
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ManualCompactionRequest) error); ok {
+		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -96,17 +97,14 @@ type MockTriggerManager_ManualTrigger_Call struct {
 
 // ManualTrigger is a helper method to define mock.On call
 //   - ctx context.Context
-//   - collectionID int64
-//   - clusteringCompaction bool
-//   - l0Compaction bool
-//   - targetSize int64
-func (_e *MockTriggerManager_Expecter) ManualTrigger(ctx interface{}, collectionID interface{}, clusteringCompaction interface{}, l0Compaction interface{}, targetSize interface{}) *MockTriggerManager_ManualTrigger_Call {
-	return &MockTriggerManager_ManualTrigger_Call{Call: _e.mock.On("ManualTrigger", ctx, collectionID, clusteringCompaction, l0Compaction, targetSize)}
+//   - req *milvuspb.ManualCompactionRequest
+func (_e *MockTriggerManager_Expecter) ManualTrigger(ctx interface{}, req interface{}) *MockTriggerManager_ManualTrigger_Call {
+	return &MockTriggerManager_ManualTrigger_Call{Call: _e.mock.On("ManualTrigger", ctx, req)}
 }
 
-func (_c *MockTriggerManager_ManualTrigger_Call) Run(run func(ctx context.Context, collectionID int64, clusteringCompaction bool, l0Compaction bool, targetSize int64)) *MockTriggerManager_ManualTrigger_Call {
+func (_c *MockTriggerManager_ManualTrigger_Call) Run(run func(ctx context.Context, req *milvuspb.ManualCompactionRequest)) *MockTriggerManager_ManualTrigger_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].(bool), args[3].(bool), args[4].(int64))
+		run(args[0].(context.Context), args[1].(*milvuspb.ManualCompactionRequest))
 	})
 	return _c
 }
@@ -116,7 +114,7 @@ func (_c *MockTriggerManager_ManualTrigger_Call) Return(_a0 int64, _a1 error) *M
 	return _c
 }
 
-func (_c *MockTriggerManager_ManualTrigger_Call) RunAndReturn(run func(context.Context, int64, bool, bool, int64) (int64, error)) *MockTriggerManager_ManualTrigger_Call {
+func (_c *MockTriggerManager_ManualTrigger_Call) RunAndReturn(run func(context.Context, *milvuspb.ManualCompactionRequest) (int64, error)) *MockTriggerManager_ManualTrigger_Call {
 	_c.Call.Return(run)
 	return _c
 }

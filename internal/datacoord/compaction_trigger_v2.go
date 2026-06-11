@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -128,7 +129,7 @@ type TriggerManager interface {
 	Start()
 	Stop()
 	OnCollectionUpdate(collectionID int64)
-	ManualTrigger(ctx context.Context, collectionID int64, clusteringCompaction bool, l0Compaction bool, targetSize int64) (UniqueID, error)
+	ManualTrigger(ctx context.Context, req *milvuspb.ManualCompactionRequest) (UniqueID, error)
 	InitForceMergeMemoryQuerier(nodeManager session.NodeManager, mixCoord types.MixCoord, session sessionutil.SessionInterface)
 }
 
@@ -176,7 +177,7 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, ins
 	m.forceMergePolicy = newForceMergeCompactionPolicy(meta, m.allocator, m.handler)
 	m.upgradeStorageVersionPolicy = newStorageVersionUpgradePolicy(meta, m.allocator, m.handler, versionManager)
 	m.bumpSchemaVersionPolicy = newBumpSchemaVersionPolicy(meta, m.allocator, m.handler)
-	if Params.DataCoordCfg.EnableCompactionTargetReconcile.GetAsBool() {
+	if Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() {
 		m.targetReconciler = newCompactionTargetReconciler(meta)
 	}
 
@@ -305,7 +306,11 @@ func (m *CompactionTriggerManager) handleTicker(ctx context.Context, tickerType 
 	}
 }
 
-func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collectionID int64, isClustering bool, isL0 bool, targetSize int64) (UniqueID, error) {
+func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, req *milvuspb.ManualCompactionRequest) (UniqueID, error) {
+	collectionID := req.GetCollectionID()
+	isClustering := req.GetMajorCompaction()
+	isL0 := req.GetL0Compaction()
+	targetSize := req.GetTargetSize()
 	log.Ctx(ctx).Info("receive manual trigger",
 		zap.Int64("collectionID", collectionID),
 		zap.Bool("is clustering", isClustering),
@@ -322,6 +327,9 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collection
 	if collection.IsExternal() {
 		return 0, merr.WrapErrParameterInvalidMsg(
 			"compaction is not supported for external collection")
+	}
+	if isTargetBasedManualRewriteCompactionRequest(req) {
+		return m.saveManualRewriteCompactionTarget(ctx, req)
 	}
 
 	var triggerID UniqueID
@@ -347,6 +355,36 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collection
 		}
 	}
 	return triggerID, nil
+}
+
+func isManualRewriteCompactionRequest(req *milvuspb.ManualCompactionRequest) bool {
+	return req != nil &&
+		!req.GetMajorCompaction() &&
+		!req.GetL0Compaction() &&
+		req.GetTargetSize() == 0
+}
+
+func isTargetBasedManualRewriteCompactionRequest(req *milvuspb.ManualCompactionRequest) bool {
+	return Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() &&
+		isManualRewriteCompactionRequest(req)
+}
+
+func (m *CompactionTriggerManager) saveManualRewriteCompactionTarget(ctx context.Context, req *milvuspb.ManualCompactionRequest) (UniqueID, error) {
+	if m.meta == nil {
+		return 0, merr.WrapErrServiceInternal("data coord meta is not initialized")
+	}
+	targetMeta := m.meta.GetCompactionTargetMeta()
+	if targetMeta == nil {
+		return 0, merr.WrapErrServiceInternal("compaction target meta is not initialized")
+	}
+	record, err := newManualRewriteCompactionTarget(req.GetCollectionID(), req.GetSegmentIds()).Create(ctx, m.allocator)
+	if err != nil {
+		return 0, err
+	}
+	if err := targetMeta.SaveCompactionTarget(ctx, record); err != nil {
+		return 0, err
+	}
+	return record.GetTargetID(), nil
 }
 
 func (m *CompactionTriggerManager) triggerViewForCompaction(ctx context.Context, eventType CompactionTriggerType,

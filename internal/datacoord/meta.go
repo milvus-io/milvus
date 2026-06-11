@@ -323,7 +323,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		return err
 	})
 
-	if Params.DataCoordCfg.EnableCompactionTargetReconcile.GetAsBool() {
+	if Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() {
 		g.Go(func() error {
 			var err error
 			crm, err = newCompactionTargetMeta(ctx, catalog)

@@ -939,15 +939,15 @@ func TestDataCoordCompactionTargetConfig(t *testing.T) {
 	params.Init(base)
 
 	cfg := &params.DataCoordCfg
-	assert.Equal(t, "dataCoord.compaction.targetReconcile.enabled", cfg.EnableCompactionTargetReconcile.Key)
-	assert.Equal(t, "3.0.0", cfg.EnableCompactionTargetReconcile.Version)
-	assert.Equal(t, "false", cfg.EnableCompactionTargetReconcile.DefaultValue)
-	assert.False(t, cfg.EnableCompactionTargetReconcile.GetAsBool())
+	assert.Equal(t, "dataCoord.compaction.enableTargetBasedCompaction", cfg.EnableTargetBasedCompaction.Key)
+	assert.Equal(t, "3.0.0", cfg.EnableTargetBasedCompaction.Version)
+	assert.Equal(t, "false", cfg.EnableTargetBasedCompaction.DefaultValue)
+	assert.False(t, cfg.EnableTargetBasedCompaction.GetAsBool())
 
-	base.Save(cfg.EnableCompactionTargetReconcile.Key, "true")
-	assert.True(t, cfg.EnableCompactionTargetReconcile.GetAsBool())
+	base.Save(cfg.EnableTargetBasedCompaction.Key, "true")
+	assert.True(t, cfg.EnableTargetBasedCompaction.GetAsBool())
 
-	field, ok := reflect.TypeOf(dataCoordConfig{}).FieldByName("EnableCompactionTargetReconcile")
+	field, ok := reflect.TypeOf(dataCoordConfig{}).FieldByName("EnableTargetBasedCompaction")
 	assert.True(t, ok)
 	assert.Equal(t, "true", field.Tag.Get("refreshable"))
 }

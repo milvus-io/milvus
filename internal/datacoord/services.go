@@ -1334,26 +1334,11 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
-	if Params.DataCoordCfg.EnableCompactionTargetReconcile.GetAsBool() &&
-		!req.GetMajorCompaction() &&
-		!req.GetL0Compaction() &&
-		req.GetTargetSize() == 0 {
-		targetID, err := s.saveManualRewriteCompactionTarget(ctx, req)
-		if err != nil {
-			log.Error("failed to record manual rewrite compaction target", zap.Error(err))
-			resp.Status = merr.Status(err)
-			return resp, nil
-		}
-		resp.CompactionID = targetID
-		resp.CompactionPlanCount = 0
-		log.Info("success to record manual rewrite compaction target", zap.Int64("compactionID", targetID))
-		return resp, nil
-	}
-
 	var id int64
 	var err error
-	if req.GetMajorCompaction() || req.GetL0Compaction() || req.GetTargetSize() != 0 {
-		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req.CollectionID, req.GetMajorCompaction(), req.GetL0Compaction(), req.GetTargetSize())
+	if req.GetMajorCompaction() || req.GetL0Compaction() || req.GetTargetSize() != 0 ||
+		isTargetBasedManualRewriteCompactionRequest(req) {
+		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req)
 	} else {
 		id, err = s.compactionTrigger.TriggerCompaction(ctx, NewCompactionSignal().
 			WithIsForce(true).
@@ -1369,6 +1354,13 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
+	if isTargetBasedManualRewriteCompactionRequest(req) {
+		resp.CompactionID = id
+		resp.CompactionPlanCount = 0
+		log.Info("success to record manual rewrite compaction target", zap.Int64("compactionID", id))
+		return resp, nil
+	}
+
 	taskCnt := s.compactionInspector.getCompactionTasksNumBySignalID(id)
 	if taskCnt == 0 {
 		resp.CompactionID = -1
@@ -1381,33 +1373,6 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 	log.Info("success to trigger manual compaction", zap.Bool("isL0Compaction", req.GetL0Compaction()),
 		zap.Bool("isMajorCompaction", req.GetMajorCompaction()), zap.Int64("targetSize", req.GetTargetSize()), zap.Int64("compactionID", id), zap.Int("taskNum", taskCnt))
 	return resp, nil
-}
-
-func (s *Server) saveManualRewriteCompactionTarget(ctx context.Context, req *milvuspb.ManualCompactionRequest) (int64, error) {
-	targetMeta := s.meta.GetCompactionTargetMeta()
-	if targetMeta == nil {
-		return 0, merr.WrapErrServiceInternal("compaction target meta is not initialized")
-	}
-
-	targetID, activatedAtTS, err := allocCompactionTargetIdentity(ctx, s.allocator)
-	if err != nil {
-		return 0, err
-	}
-
-	record := &datapb.CompactionTarget{
-		TargetID:      targetID,
-		CollectionID:  req.GetCollectionID(),
-		Intent:        datapb.TargetIntent_INTENT_REWRITE,
-		Properties:    compactionTargetSegmentIDProperties(req.GetSegmentIds()),
-		ExpectedTS:    activatedAtTS,
-		TailLimit:     0,
-		State:         datapb.TargetState_TARGET_STATE_ACTIVE,
-		ActivatedAtTS: activatedAtTS,
-	}
-	if err := targetMeta.SaveCompactionTarget(ctx, record); err != nil {
-		return 0, err
-	}
-	return targetID, nil
 }
 
 // GetCompactionState gets the state of a compaction

@@ -1873,7 +1873,9 @@ func TestManualCompaction(t *testing.T) {
 		})
 		mockTriggerManager := NewMockTriggerManager(t)
 		svr.compactionTriggerManager = mockTriggerManager
-		mockTriggerManager.EXPECT().ManualTrigger(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
+		mockTriggerManager.EXPECT().ManualTrigger(mock.Anything, mock.MatchedBy(func(req *milvuspb.ManualCompactionRequest) bool {
+			return req.GetCollectionID() == 1 && req.GetL0Compaction()
+		})).Return(1, nil)
 
 		mockHandler := NewMockCompactionInspector(t)
 		mockHandler.EXPECT().getCompactionTasksNumBySignalID(mock.Anything).Return(1)
@@ -1888,8 +1890,8 @@ func TestManualCompaction(t *testing.T) {
 	})
 
 	t.Run("test manual rewrite target returns durable target id when guard enabled", func(t *testing.T) {
-		paramtable.Get().Save(Params.DataCoordCfg.EnableCompactionTargetReconcile.Key, "true")
-		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompactionTargetReconcile.Key)
+		paramtable.Get().Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableTargetBasedCompaction.Key)
 
 		alloc := allocator.NewMockAllocator(t)
 		alloc.EXPECT().AllocID(mock.Anything).Return(int64(100), nil).Once()
@@ -1899,16 +1901,16 @@ func TestManualCompaction(t *testing.T) {
 		targetMeta, err := newCompactionTargetMeta(context.Background(), catalog)
 		require.NoError(t, err)
 
+		handler := NewNMockHandler(t)
+		handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&collectionInfo{}, nil)
+		inspector := NewMockCompactionInspector(t)
+		versionManager := NewMockVersionManager(t)
+		versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0")).Maybe()
+
 		svr := &Server{allocator: alloc}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		svr.meta = &meta{compactionTargetMeta: targetMeta}
-
-		mockTrigger := NewMockTrigger(t)
-		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.Anything).Return(int64(99), nil).Maybe()
-		svr.compactionTrigger = mockTrigger
-		mockHandler := NewMockCompactionInspector(t)
-		mockHandler.EXPECT().getCompactionTasksNumBySignalID(mock.Anything).Return(1).Maybe()
-		svr.compactionInspector = mockHandler
+		svr.compactionTriggerManager = NewCompactionTriggerManager(alloc, handler, inspector, svr.meta, versionManager)
 
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,

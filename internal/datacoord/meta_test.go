@@ -138,8 +138,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 
 	suite.Run("ok", func() {
 		defer suite.resetMock()
-		paramtable.Get().Save(Params.DataCoordCfg.EnableCompactionTargetReconcile.Key, "true")
-		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompactionTargetReconcile.Key)
+		paramtable.Get().Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableTargetBasedCompaction.Key)
 
 		brk := broker.NewMockBroker(suite.T())
 		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{

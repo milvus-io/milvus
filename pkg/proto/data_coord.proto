@@ -1373,14 +1373,17 @@ enum CompactionTaskState {
 }
 
 enum TargetState {
-  TARGET_STATE_UNKNOWN = 0;
-  TARGET_STATE_ACTIVE = 1;
-  TARGET_STATE_INACTIVE = 2;
+  TARGET_STATE_ACTIVE = 0;
+  TARGET_STATE_INACTIVE = 1;
 }
 
 enum TargetIntent {
   INTENT_UNKNOWN = 0;
   INTENT_REWRITE = 1;
+  INTENT_SIZE = 2;
+  INTENT_SORT = 3;
+  INTENT_OPTIMIZE = 4;
+  INTENT_BACKFILL = 5;
 }
 
 message CompactionTarget {

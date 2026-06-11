@@ -150,9 +150,9 @@ func newLoadedCompactionTargetMeta(t *testing.T, ctx context.Context, records ..
 
 func enableCompactionTargetReconciler(t *testing.T) {
 	t.Helper()
-	paramtable.Get().Save(Params.DataCoordCfg.EnableCompactionTargetReconcile.Key, "true")
+	paramtable.Get().Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
 	t.Cleanup(func() {
-		paramtable.Get().Reset(Params.DataCoordCfg.EnableCompactionTargetReconcile.Key)
+		paramtable.Get().Reset(Params.DataCoordCfg.EnableTargetBasedCompaction.Key)
 	})
 }
 
