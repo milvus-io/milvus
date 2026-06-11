@@ -38,21 +38,28 @@ wait for data-module progress before acking the coordinator.
 Preconditions are defined by message type and message scope:
 
 - VChannel-scoped flush/drop/schema-changing messages wait for the composed
-  Data frontier of affected modules in that vchannel.
+  durable Data frontier of affected modules in that vchannel.
 - Partition-scoped drop messages wait for the composed Data frontier of the
   affected partition.
 - PChannel-wide flush-style messages wait for the composed all-local data-module
   Data frontier.
+- `DropCollection`, `ManualFlush`, and `FlushAll` wait for the composed
+  materialized frontier. For SegmentModule this is the normal L1 Data frontier;
+  for TransformLogModule this is the L0 materialized frontier backed by
+  `materialized_time_tick`.
 - Broadcast messages without growing-data dependency wait only for previous ack
   task completion.
 
 Examples:
 
-- `DropCollection` waits for the target vchannel's composed
-  SegmentModule/TransformLogModule Data frontier.
+- `DropCollection` waits for the target vchannel's composed materialized
+  SegmentModule/TransformLogModule frontier.
 - `DropPartition` waits for the affected partition's SegmentModule frontier and
-  the vchannel TransformLogModule frontier.
-- `FlushAll` waits for all local SegmentModule/TransformLogModule frontiers.
+  the vchannel TransformLogModule durable frontier.
+- `ManualFlush` waits for the target vchannel's composed materialized
+  SegmentModule/TransformLogModule frontier.
+- `FlushAll` waits for all local SegmentModule/TransformLogModule
+  materialized frontiers.
 - `CommitImport` waits only for previous ack task completion.
 
 ## 4. Module Interaction
@@ -116,6 +123,10 @@ frontierProvider.DataFrontier(scope)
 The provider composes all modules implementing `DataFrontierView`, such as
 SegmentModule and TransformLogModule. AckModule does not depend on those
 modules directly.
+
+AckModule sets `scope.Kind` to `DataProgressDurable` for ordinary data
+dependencies and `DataProgressMaterialized` for `DropCollection`,
+`ManualFlush`, and `FlushAll`.
 
 AckModule does not implement `DataCheckpointView`, `DataFrontierView`, or
 `CheckpointPersistedObserver`.

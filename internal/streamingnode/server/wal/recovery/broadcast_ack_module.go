@@ -104,47 +104,56 @@ func (m *broadcastAckModule) ConsumeDirtySnapshots() []moduleapi.DirtySnapshot {
 func (m *broadcastAckModule) buildPrecondition(msg message.ImmutableMessage) scheduler.Precondition {
 	switch msg.MessageType() {
 	case message.MessageTypeDropCollection:
-		return m.vchannelDurablePrecondition(msg.TimeTick(), msg.VChannel())
+		return m.vchannelPrecondition(msg.TimeTick(), msg.VChannel(), moduleapi.DataProgressMaterialized)
 	case message.MessageTypeTruncateCollection:
-		return m.vchannelDurablePrecondition(msg.TimeTick(), msg.VChannel())
+		return m.vchannelPrecondition(msg.TimeTick(), msg.VChannel(), moduleapi.DataProgressDurable)
 	case message.MessageTypeDropPartition:
 		drop := message.MustAsImmutableDropPartitionMessageV1(msg)
 		header := drop.Header()
-		return m.partitionDurablePrecondition(drop.TimeTick(), drop.VChannel(), header.GetCollectionId(), header.GetPartitionId())
+		return m.partitionPrecondition(drop.TimeTick(), drop.VChannel(), header.GetCollectionId(), header.GetPartitionId(), moduleapi.DataProgressDurable)
 	case message.MessageTypeManualFlush:
-		return m.vchannelDurablePrecondition(msg.TimeTick(), msg.VChannel())
+		return m.vchannelPrecondition(msg.TimeTick(), msg.VChannel(), moduleapi.DataProgressMaterialized)
 	case message.MessageTypeFlushAll:
-		return m.allDurablePrecondition(msg.TimeTick())
+		return m.allPrecondition(msg.TimeTick(), moduleapi.DataProgressMaterialized)
 	case message.MessageTypeAlterCollection:
 		alter := message.MustAsImmutableAlterCollectionMessageV2(msg)
 		if messageutil.IsSchemaChange(alter.Header()) {
-			return m.vchannelDurablePrecondition(alter.TimeTick(), alter.VChannel())
+			return m.vchannelPrecondition(alter.TimeTick(), alter.VChannel(), moduleapi.DataProgressDurable)
 		}
 	case message.MessageTypeAlterWAL:
-		return m.allDurablePrecondition(msg.TimeTick())
+		return m.allPrecondition(msg.TimeTick(), moduleapi.DataProgressDurable)
 	default:
 	}
 	return scheduler.AlwaysReady{}
 }
 
-func (m *broadcastAckModule) partitionDurablePrecondition(timetick uint64, vchannel string, collectionID int64, partitionID int64) scheduler.Precondition {
+func (m *broadcastAckModule) partitionPrecondition(
+	timetick uint64,
+	vchannel string,
+	collectionID int64,
+	partitionID int64,
+	kind moduleapi.DataProgressKind,
+) scheduler.Precondition {
 	return m.frontierPrecondition(timetick, moduleapi.Scope{
 		Type:         moduleapi.ScopePartition,
+		Kind:         kind,
 		VChannel:     vchannel,
 		CollectionID: collectionID,
 		PartitionID:  partitionID,
 	})
 }
 
-func (m *broadcastAckModule) allDurablePrecondition(timetick uint64) scheduler.Precondition {
+func (m *broadcastAckModule) allPrecondition(timetick uint64, kind moduleapi.DataProgressKind) scheduler.Precondition {
 	return m.frontierPrecondition(timetick, moduleapi.Scope{
 		Type: moduleapi.ScopeAll,
+		Kind: kind,
 	})
 }
 
-func (m *broadcastAckModule) vchannelDurablePrecondition(timetick uint64, vchannel string) scheduler.Precondition {
+func (m *broadcastAckModule) vchannelPrecondition(timetick uint64, vchannel string, kind moduleapi.DataProgressKind) scheduler.Precondition {
 	return m.frontierPrecondition(timetick, moduleapi.Scope{
 		Type:     moduleapi.ScopeVChannel,
+		Kind:     kind,
 		VChannel: vchannel,
 	})
 }

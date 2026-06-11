@@ -57,9 +57,11 @@ but this document only defines Delete behavior.
 10. **TransformLog is part of RecoveryStorage data persistence**. It
     contributes a DataBarrier so the RecoveryStorage data checkpoint cannot pass
     a Delete whose TransformLog entry is not durably published.
-11. **L0 segments are asynchronous output**. L0 materialization is how
+11. **L0 segments are independent output**. L0 materialization is how
     TransformLog interacts with DataCoord/Coordinator, but it is not the
-    QueryNode subscription replay source.
+    QueryNode subscription replay source. `DropCollection`, `ManualFlush`, and
+    `FlushAll` additionally wait for L0 materialization through the
+    materialized frontier.
 12. **Cross-module reads are intentionally narrow**. `SegmentModule` may read
     `SchemaAt(vchannel, partitionID, timetick)` from `VChannelModule` when
     creating segment state. `TransformLogModule` does not read VChannel or
@@ -290,6 +292,7 @@ Segment state.
 TransformLogModule
   meta                       // VChannelTransformLogMeta in memory
   persistedCheckpointTimeTick // catalog-persisted checkpoint frontier
+  persistedMaterializedTimeTick // catalog-persisted L0 materialized frontier
   pending                    // in-memory entries not yet handed to a flush task
   pendingFlushChunks          // chunks handed to pending/running flush tasks
   pendingTasks                // unfinished flush/materialization/truncate cleanup tasks
@@ -301,6 +304,12 @@ written to object storage and published in in-memory meta.
 `persistedCheckpointTimeTick` records the newest TransformLog TimeTick whose
 meta has been persisted to the recovery catalog. The DataBarrier exposes
 `persistedCheckpointTimeTick`.
+
+`meta.materialized_time_tick` records the newest TransformLog TimeTick whose
+entries have been emitted as DataCoord-managed L0 segments. The materialized
+frontier exposes `persistedMaterializedTimeTick`, so a synchronous flush/drop
+ack only completes after the L0 commit and the TransformLog meta update have
+both been persisted.
 
 ### 6.3 Append And Chunk Flush
 
@@ -349,7 +358,67 @@ TransformLog DataBarrier = persistedCheckpointTimeTick
 RecoveryStorage data checkpoint cannot pass Delete@T until TransformLog's
 DataBarrier is at least T.
 
-### 6.5 Crash Rules
+### 6.5 L0 Materialization
+
+L0 materialization has a separate progress cursor and does not change
+TransformLog subscription durability.
+
+```text
+TransformLog checkpoint_time_tick  -> chunk/recovery/subscription durability
+TransformLog materialized_time_tick -> L0 Segment output committed to DataCoord
+```
+
+`FlushTo(T)` and `MaterializeTo(T)` are separate operations:
+
+- `FlushTo(T)` makes TransformLog entries up to `T` durable in TransformLog
+  chunks and advances `checkpoint_time_tick` after catalog persistence.
+- `MaterializeTo(T)` reads retained entries in
+  `(materialized_time_tick, T]`, writes L0 deltalog files, commits L0 segments to
+  DataCoord, and advances `materialized_time_tick` after catalog persistence.
+
+Materialization requires TransformLog chunk durability first. A materialization
+task for target `T` has a precondition that the same vchannel's durable
+frontier has reached `T`.
+
+The materializer groups Delete blocks by `(vchannel, partitionID)` and writes
+one or more L0 segments per group. Each L0 Segment owns exactly one deltalog
+file. If a selected range must be split by row or size limit, the materializer
+creates multiple L0 segments instead of attaching multiple deltalogs to one L0
+Segment. The collection id is a vchannel-level property and is obtained from
+the owning TransformLog, not from every Delete block.
+
+```text
+retained TransformLog entries
+  -> select entries with materialized_time_tick < entry.time_tick <= T
+  -> group Delete blocks by partitionID
+  -> build storage.DeleteData with primary keys and entry.time_tick
+  -> allocate L0 segment ids
+  -> write one deltalog per L0 segment through the existing syncmgr / pack-writer path
+  -> SaveBinlogPaths(SegLevel_L0, Flushed=true)
+  -> update meta.materialized_time_tick = T
+  -> mark TransformLog DirtySnapshot
+  -> RecoveryStorage persists TransformLogMeta
+  -> DirtySnapshot.MarkPersisted publishes the materialized frontier
+```
+
+The completion point for synchronous flush/drop messages is:
+
+```text
+DataCoord has accepted all L0 segments for the target range
+AND TransformLogMeta.materialized_time_tick >= target timetick is persisted
+```
+
+It does not wait for L0 compaction and does not wait for QueryNode
+subscription consumption.
+
+The first implementation uses only `materialized_time_tick` as the recovery
+cursor. It does not persist a pending materialization batch. If StreamingNode
+crashes after `SaveBinlogPaths` succeeds but before
+`materialized_time_tick` is persisted, recovery may materialize the same range
+again. That idempotency gap is outside this batch and should be addressed by a
+later batch-level idempotency design.
+
+### 6.6 Crash Rules
 
 | Crash point | Recovery behavior |
 | --- | --- |
@@ -364,7 +433,11 @@ Delete has `time_tick <= checkpoint_time_tick`, it has already been published
 by TransformLog and can be skipped. If the same `time_tick` appears with
 different Delete content, it is a recovery consistency error.
 
-### 6.6 Recovery
+L0 materialization recovery is based on `materialized_time_tick`: entries with
+`time_tick <= materialized_time_tick` are considered already emitted to
+DataCoord; entries after it are eligible for future materialization.
+
+### 6.7 Recovery
 
 On StreamingNode recovery:
 
@@ -384,15 +457,17 @@ On StreamingNode recovery:
    state.
 6. `persistedCheckpointTimeTick` is initialized from
    `meta.checkpoint_time_tick`.
-7. RecoveryStorage resumes WAL consumption after its recovered checkpoint.
-8. Replayed Delete messages are appended idempotently.
+7. `persistedMaterializedTimeTick` is initialized from
+   `meta.materialized_time_tick`.
+8. RecoveryStorage resumes WAL consumption after its recovered checkpoint.
+9. Replayed Delete messages are appended idempotently.
 
 If a chunk inside `[first_chunk_id, next_chunk_id)` is missing or corrupt, the
 retained TransformLog is incomplete and the vchannel cannot serve safely. Chunks
 outside this range are not part of recovered TransformLog and may be removed by
 asynchronous GC.
 
-### 6.7 Truncate
+### 6.8 Truncate
 
 Truncation controls the number of retained object-storage files and therefore
 is more important than a per-chunk catalog index.
@@ -461,9 +536,10 @@ Returns `ModuleNameTransformLog`.
 
 - `Delete`
 - Delete bodies inside committed `Txn`
-- flush-style barriers from `DropPartition`, `DropCollection`,
-  `TruncateCollection`, schema-changing `AlterCollection`, `FlushAll`, and
-  `AlterWAL`
+- flush-style durable barriers from `DropPartition`, `DropCollection`,
+  `TruncateCollection`, schema-changing `AlterCollection`, `ManualFlush`,
+  `FlushAll`, and `AlterWAL`
+- materialized barriers from `DropCollection`, `ManualFlush`, and `FlushAll`
 
 For a plain Delete, TransformLogModule appends the Delete WAL message to the
 vchannel TransformLog buffer in MetaAndData mode and returns a Data barrier.
@@ -476,6 +552,10 @@ Txn(Delete) before it reaches TransformLogModule.
 
 TransformLogModule does not read VChannelModule or SegmentModule state when
 replaying Delete data.
+
+`DropCollection`, `ManualFlush`, and `FlushAll` force both `FlushTo(T)` and
+`MaterializeTo(T)`. Other flush-style messages force only `FlushTo(T)` unless
+their message semantics are explicitly extended to wait for L0 materialization.
 
 ### Module.SwitchIntoMetaAndData
 
@@ -513,10 +593,11 @@ func (s *transformLogDirtySnapshot) MarkPersisted() {
 }
 ```
 
-The owner records persisted `checkpoint_time_tick`, clears the matching
-in-flight dirty snapshot, recomputes dirty state against the current
-TransformLog view, and advances the TransformLog Data barrier. Delete snapshots
-remove retained TransformLog state after catalog drop succeeds.
+The owner records persisted `checkpoint_time_tick` and
+`materialized_time_tick`, clears the matching in-flight dirty snapshot,
+recomputes dirty state against the current TransformLog view, and advances the
+TransformLog durable and materialized frontiers. Delete snapshots remove
+retained TransformLog state after catalog drop succeeds.
 
 ### DataCheckpointView
 
@@ -527,12 +608,16 @@ data to protect must not pin the global data checkpoint.
 
 ### DataFrontierView
 
-`DataFrontier(scope)` returns a barrier for TransformLog Data progress:
+`DataFrontier(scope)` returns a barrier for TransformLog progress:
 
 - `ScopeAll`: all retained local TransformLogs;
 - `ScopeVChannel`: the target vchannel TransformLog;
 - `ScopePartition`: the owning vchannel TransformLog, because Delete data is
   stored at vchannel granularity.
+
+`scope.Kind == DataProgressDurable` returns the catalog-persisted
+`checkpoint_time_tick` frontier. `scope.Kind == DataProgressMaterialized`
+returns the catalog-persisted `materialized_time_tick` frontier.
 
 AckModule uses this through RecoveryStorage's composed `DataFrontierProvider`.
 
@@ -811,28 +896,47 @@ This workflow describes how TransformLog publishes its accumulated entries to
 DataCoord/Coordinator.
 
 TransformLog periodically materializes retained entries into L0 delete segments.
-This path is independent from QueryNode subscription progress.
+This path is independent from QueryNode subscription progress, but selected
+flush/drop messages can wait for it through the materialized frontier.
 
 ### 12.1 Materialization Policy
 
 The materializer accumulates TransformLog entries and triggers when enough data
-has been collected. The primary trigger is size, such as row count or bytes.
+has been collected. The primary trigger is accumulated unmaterialized Delete
+data size:
+
+- if accumulated rows after `materialized_time_tick` reach or exceed
+  `l0.maxRowNum`;
+- or if accumulated bytes after `materialized_time_tick` reach or exceed
+  `l0.maxSize`.
 
 Small ranges should stay in TransformLog until the threshold is met. L0
 materialization is not triggered by QueryNode subscription ack or local buffer
 progress.
 
+`DropCollection`, `ManualFlush`, and `FlushAll` are force triggers. When one of
+these messages is observed in MetaAndData mode, TransformLogModule submits
+materialization work up to the message timetick after the corresponding
+TransformLog chunks are durable.
+
 ### 12.2 Materialization Flow
 
-1. Select TransformLog entries with
-   `entry.time_tick > materialized_time_tick`.
-2. Build an L0 delete segment from selected Delete blocks.
-3. Write the L0 deltalog object.
-4. Commit the L0 segment to DataCoord.
-5. Advance `TransformLogMeta.materialized_time_tick`.
-6. Mark a TransformLog DirtySnapshot.
-7. RecoveryStorage persists independent TransformLogMeta.
-8. DirtySnapshot.MarkPersisted publishes the materialized cursor.
+1. Ensure `checkpoint_time_tick >= target_timetick` for the same vchannel.
+2. Select retained TransformLog entries with
+   `materialized_time_tick < entry.time_tick <= target_timetick`.
+3. Group Delete blocks by `(vchannel, partitionID)`.
+4. Build `storage.DeleteData` from primary keys and the enclosing entry
+   timetick.
+5. Split the selected data into one or more L0 segments. Each L0 segment
+   contains exactly one deltalog file.
+6. Allocate L0 segment ids and write one deltalog per L0 segment through the
+   existing syncmgr / pack-writer path.
+7. Commit the L0 segments to DataCoord with
+   `SaveBinlogPaths(SegLevel_L0, Flushed=true)`.
+8. Advance `TransformLogMeta.materialized_time_tick` to `target_timetick`.
+9. Mark a TransformLog DirtySnapshot.
+10. RecoveryStorage persists independent TransformLogMeta.
+11. DirtySnapshot.MarkPersisted publishes the materialized cursor.
 
 `materialized_time_tick` is on the same TransformLog timeline as
 `entry.time_tick`. No separate materialized data/effect cursor exists.
@@ -845,6 +949,30 @@ L0 materialization does not:
 - provide normal gap filling for QueryNode reconnect;
 - decide TransformLog truncation;
 - decide QueryNode local buffer truncation.
+
+### 12.4 Synchronous Flush/Drop Completion
+
+`DropCollection`, `ManualFlush`, and `FlushAll` complete only after both L1 and
+L0 data effects for their scope are committed and the corresponding module
+frontiers are persisted.
+
+```text
+DropCollection(vchannel, T):
+  Segment durable/materialized frontier for vchannel >= T
+  TransformLog materialized frontier for vchannel >= T
+
+ManualFlush(vchannel, T):
+  Segment durable/materialized frontier for vchannel >= T
+  TransformLog materialized frontier for vchannel >= T
+
+FlushAll(T):
+  all local Segment durable/materialized frontiers >= T
+  all local TransformLog materialized frontiers >= T
+```
+
+SegmentModule maps the materialized frontier to its normal Data frontier,
+because L1 flush is already its DataCoord-visible materialization. TransformLog
+uses a distinct materialized frontier based on `materialized_time_tick`.
 
 ## 13. SubscribeTransform Protocol
 
@@ -918,7 +1046,7 @@ It does not expose a latest TimeTick. It is not an idle progress message.
 | `QN TransformClient` | Owns TransformLog scanners and one local transform buffer per vchannel. |
 | `QN vchannel transform buffer` | Stores received TransformLog entries for local QueryView consumption and truncates old entries as local views advance. |
 | `QN SegmentManager/DeleteApplier` | Loads sealed segments, consumes the local vchannel transform buffer, applies Delete entries, and reports Ready or Unrecoverable. |
-| `L0 materializer` | Converts accumulated TransformLog entries into DataCoord-managed L0 delete segments when thresholds are met. |
+| `L0 materializer` | Converts accumulated TransformLog entries into DataCoord-managed L0 delete segments when thresholds or force barriers are met. |
 
 ## 15. Errors
 
@@ -965,13 +1093,17 @@ It does not expose a latest TimeTick. It is not an idle progress message.
 21. Later QueryViews on the same QueryNode/vchannel consume from the local
     buffer and do not create a new upstream subscription.
 22. QueryView start points on the same QueryNode/vchannel are monotonic.
-23. L0 materialization is asynchronous output to DataCoord/Coordinator.
+23. L0 materialization is independent output to DataCoord/Coordinator.
 24. L0 is not the normal QueryNode subscription replay source.
-25. Caught-up is a subscription barrier, not a TimeTick watermark.
-26. Delete delivery may be at least once; Delete apply must be idempotent.
-27. TransformLogModule does not read VChannel or Segment state for Delete
+25. `DropCollection`, `ManualFlush`, and `FlushAll` wait for the
+    TransformLog materialized frontier before acking.
+26. The materialized frontier is backed by catalog-persisted
+    `materialized_time_tick`, not by DataCoord RPC success alone.
+27. Caught-up is a subscription barrier, not a TimeTick watermark.
+28. Delete delivery may be at least once; Delete apply must be idempotent.
+29. TransformLogModule does not read VChannel or Segment state for Delete
     replay, tombstone finalize, or cleanup.
-28. The only required cross-module read is `SegmentModule -> VChannelModule`
+30. The only required cross-module read is `SegmentModule -> VChannelModule`
     `SchemaAt(vchannel, partitionID, timetick)` for segment creation.
 
 ## 17. Implementation Stages
@@ -1017,9 +1149,11 @@ It does not expose a latest TimeTick. It is not an idle progress message.
 
 - Materialize TransformLog entries into L0 delete segments when thresholds are
   met.
+- Force materialization for `DropCollection`, `ManualFlush`, and `FlushAll`.
 - Commit L0 segments to DataCoord.
 - Advance `materialized_time_tick` independently from QueryNode subscription
   progress.
+- Expose a materialized frontier for AckModule preconditions.
 
 ### Stage 4: Naming And Protocol Cleanup
 
@@ -1038,3 +1172,5 @@ It does not expose a latest TimeTick. It is not an idle progress message.
 4. Minimum untruncated range policy for StreamingNode TransformLog when no
    active QueryView exists yet but future QueryNode first subscription may
    occur.
+5. Later idempotency design for crash after DataCoord L0 commit but before
+   `materialized_time_tick` persistence.

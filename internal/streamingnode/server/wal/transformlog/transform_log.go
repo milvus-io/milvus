@@ -15,6 +15,7 @@ import (
 type TransformLog interface {
 	Append(message.ImmutableMessage, AppendOption) AppendResult
 	Flush(context.Context, FlushOption) (FlushResult, error)
+	Materialize(context.Context, MaterializeOption) (MaterializeResult, error)
 	Read(context.Context, transformlogapi.ReadOption) transformlogapi.Scanner
 	Truncate(TruncateOption) TruncateResult
 
@@ -22,17 +23,23 @@ type TransformLog interface {
 	SnapshotMeta() *streamingpb.VChannelTransformLogMeta
 	DataCheckpointTimeTick() uint64
 	DataBarrierTimeTick() uint64
+	MaterializedTimeTick() uint64
+	MaterializedBarrierTimeTick() uint64
 	HasDirty() bool
 	ConsumeDirtyAndGetSnapshot() *streamingpb.VChannelTransformLogMeta
 	MarkSnapshotPersisted(*streamingpb.VChannelTransformLogMeta)
 	HasPendingWork() bool
+	ShouldMaterialize() bool
 }
 
 type Config struct {
-	VChannel string
-	MaxRows  uint64
-	Meta     *streamingpb.VChannelTransformLogMeta
-	Store    Store
+	VChannel            string
+	MaxRows             uint64
+	MaterializeMaxRows  uint64
+	MaterializeMaxBytes uint64
+	Meta                *streamingpb.VChannelTransformLogMeta
+	Store               Store
+	Materializer        Materializer
 }
 
 type AppendResult struct {
@@ -62,6 +69,18 @@ type FlushResult struct {
 	NextTargetTimeTick uint64
 }
 
+type MaterializeOption struct {
+	TargetTimeTick uint64
+}
+
+type MaterializeResult struct {
+	Started                 bool
+	MaterializedTimeTick    uint64
+	MaterializedRows        uint64
+	MaterializedBytes       uint64
+	HasMaterializedSegments bool
+}
+
 type TruncateOption struct {
 	TimeTick uint64
 }
@@ -77,14 +96,19 @@ type RecoverResult struct {
 
 type transformLog struct {
 	flushMu               sync.Mutex
+	materializeMu         sync.Mutex
 	mu                    sync.Mutex
 	vchannel              string
 	meta                  *streamingpb.VChannelTransformLogMeta
 	persistedDataTimeTick uint64
+	persistedMaterialized uint64
 	dirty                 bool
 	pendingDirtySnapshot  *streamingpb.VChannelTransformLogMeta
 	buffer                buffer
 	store                 Store
+	materializer          Materializer
+	materializeMaxRows    uint64
+	materializeMaxBytes   uint64
 
 	retainedChunks []*streamingpb.TransformLogChunk
 
@@ -98,8 +122,12 @@ func New(config Config) TransformLog {
 		vchannel:              config.VChannel,
 		meta:                  meta,
 		persistedDataTimeTick: meta.GetCheckpointTimeTick(),
+		persistedMaterialized: meta.GetMaterializedTimeTick(),
 		buffer:                newBuffer(config.MaxRows),
 		store:                 config.Store,
+		materializer:          config.Materializer,
+		materializeMaxRows:    config.MaterializeMaxRows,
+		materializeMaxBytes:   config.MaterializeMaxBytes,
 		subscribers:           make(map[*scanner]struct{}),
 	}
 }
@@ -156,6 +184,49 @@ func (t *transformLog) Flush(ctx context.Context, opt FlushOption) (FlushResult,
 	return result, nil
 }
 
+func (t *transformLog) Materialize(ctx context.Context, opt MaterializeOption) (MaterializeResult, error) {
+	t.materializeMu.Lock()
+	defer t.materializeMu.Unlock()
+	var work materializeWork
+	t.mu.Lock()
+	targetTimeTick := opt.TargetTimeTick
+	if targetTimeTick == 0 {
+		targetTimeTick = t.meta.GetCheckpointTimeTick()
+	}
+	if targetTimeTick <= t.meta.GetMaterializedTimeTick() {
+		t.mu.Unlock()
+		return MaterializeResult{}, nil
+	}
+	if targetTimeTick > t.meta.GetCheckpointTimeTick() {
+		targetTimeTick = t.meta.GetCheckpointTimeTick()
+	}
+	if targetTimeTick <= t.meta.GetMaterializedTimeTick() {
+		t.mu.Unlock()
+		return MaterializeResult{}, nil
+	}
+	work = t.prepareMaterializeLocked(targetTimeTick)
+	t.mu.Unlock()
+
+	if len(work.Entries) > 0 {
+		if t.materializer == nil {
+			return MaterializeResult{}, errors.New("transform log materializer is nil")
+		}
+		if err := t.materializer.Materialize(ctx, MaterializeRequest{
+			VChannel:       t.vchannel,
+			TargetTimeTick: work.TargetTimeTick,
+			Entries:        work.Entries,
+			MaxRows:        t.materializeMaxRows,
+			MaxBytes:       t.materializeMaxBytes,
+		}); err != nil {
+			return MaterializeResult{}, err
+		}
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.commitMaterializeLocked(work), nil
+}
+
 func (t *transformLog) Read(ctx context.Context, opt transformlogapi.ReadOption) transformlogapi.Scanner {
 	t.mu.Lock()
 	if opt.StartAfterTimeTick < t.meta.GetTruncateTimeTick() {
@@ -197,6 +268,7 @@ func (t *transformLog) Recover(ctx context.Context, meta *streamingpb.VChannelTr
 	if meta != nil {
 		t.meta = cloneMetaOrNew(meta)
 		t.persistedDataTimeTick = t.meta.GetCheckpointTimeTick()
+		t.persistedMaterialized = t.meta.GetMaterializedTimeTick()
 	}
 	recoverMeta := cloneMeta(t.meta)
 	t.retainedChunks = nil
@@ -241,6 +313,18 @@ func (t *transformLog) DataBarrierTimeTick() uint64 {
 	return t.persistedDataTimeTick
 }
 
+func (t *transformLog) MaterializedTimeTick() uint64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.meta.GetMaterializedTimeTick()
+}
+
+func (t *transformLog) MaterializedBarrierTimeTick() uint64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.persistedMaterialized
+}
+
 func (t *transformLog) HasDirty() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -266,6 +350,9 @@ func (t *transformLog) MarkSnapshotPersisted(snapshot *streamingpb.VChannelTrans
 	if snapshot.GetCheckpointTimeTick() > t.persistedDataTimeTick {
 		t.persistedDataTimeTick = snapshot.GetCheckpointTimeTick()
 	}
+	if snapshot.GetMaterializedTimeTick() > t.persistedMaterialized {
+		t.persistedMaterialized = snapshot.GetMaterializedTimeTick()
+	}
 	if t.pendingDirtySnapshot != nil && proto.Equal(t.pendingDirtySnapshot, snapshot) {
 		t.pendingDirtySnapshot = nil
 	}
@@ -278,6 +365,21 @@ func (t *transformLog) HasPendingWork() bool {
 	return !t.buffer.IsEmpty() ||
 		t.buffer.IsFlushing() ||
 		t.buffer.FlushTargetTimeTick() > t.persistedDataTimeTick
+}
+
+func (t *transformLog) ShouldMaterialize() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	rows, bytes := t.pendingMaterializeStatsLocked(t.meta.GetCheckpointTimeTick())
+	maxRows := t.materializeMaxRows
+	if maxRows == 0 {
+		maxRows = defaultMaterializeMaxRows
+	}
+	maxBytes := t.materializeMaxBytes
+	if maxBytes == 0 {
+		maxBytes = defaultMaterializeMaxBytes
+	}
+	return rows >= maxRows || bytes >= maxBytes
 }
 
 type flushWork struct {
@@ -300,9 +402,6 @@ func (t *transformLog) commitFlushLocked(work flushWork) (FlushResult, []*stream
 		t.buffer.DiscardThrough(toTimeTick)
 		t.retainedChunks = append(t.retainedChunks, work.Chunk)
 		publishedEntries = work.Chunk.GetEntries()
-		if toTimeTick > t.meta.GetCheckpointTimeTick() {
-			t.meta.CheckpointTimeTick = toTimeTick
-		}
 		if work.Chunk.GetChunkId() >= t.meta.GetNextChunkId() {
 			t.meta.NextChunkId = work.Chunk.GetChunkId() + 1
 		}
@@ -310,6 +409,9 @@ func (t *transformLog) commitFlushLocked(work flushWork) (FlushResult, []*stream
 		result.DurableTimeTick = toTimeTick
 		if !t.buffer.HasFlushWorkThrough(work.TargetTimeTick) {
 			result.DurableTimeTick = work.TargetTimeTick
+		}
+		if result.DurableTimeTick > t.meta.GetCheckpointTimeTick() {
+			t.meta.CheckpointTimeTick = result.DurableTimeTick
 		}
 	} else if work.TargetTimeTick > t.meta.GetCheckpointTimeTick() {
 		t.meta.CheckpointTimeTick = work.TargetTimeTick
@@ -329,6 +431,66 @@ func (t *transformLog) commitFlushLocked(work flushWork) (FlushResult, []*stream
 		result.NextTargetTimeTick = t.buffer.DataTimeTick()
 	}
 	return result, publishedEntries
+}
+
+type materializeWork struct {
+	TargetTimeTick uint64
+	Entries        []*streamingpb.TransformLogEntry
+	Rows           uint64
+	Bytes          uint64
+}
+
+func (t *transformLog) prepareMaterializeLocked(targetTimeTick uint64) materializeWork {
+	work := materializeWork{TargetTimeTick: targetTimeTick}
+	startAfter := t.meta.GetMaterializedTimeTick()
+	for _, chunk := range t.retainedChunks {
+		for _, entry := range chunk.GetEntries() {
+			if entry.GetTimeTick() <= startAfter {
+				continue
+			}
+			if entry.GetTimeTick() > targetTimeTick {
+				return work
+			}
+			work.Entries = append(work.Entries, cloneTransformLogEntry(entry))
+			work.Rows += transformLogEntryRows(entry)
+			work.Bytes += uint64(proto.Size(entry))
+		}
+	}
+	return work
+}
+
+func (t *transformLog) pendingMaterializeStatsLocked(targetTimeTick uint64) (uint64, uint64) {
+	startAfter := t.meta.GetMaterializedTimeTick()
+	var rows uint64
+	var bytes uint64
+	for _, chunk := range t.retainedChunks {
+		for _, entry := range chunk.GetEntries() {
+			if entry.GetTimeTick() <= startAfter {
+				continue
+			}
+			if entry.GetTimeTick() > targetTimeTick {
+				return rows, bytes
+			}
+			rows += transformLogEntryRows(entry)
+			bytes += uint64(proto.Size(entry))
+		}
+	}
+	return rows, bytes
+}
+
+func (t *transformLog) commitMaterializeLocked(work materializeWork) MaterializeResult {
+	if work.TargetTimeTick <= t.meta.GetMaterializedTimeTick() {
+		return MaterializeResult{}
+	}
+	t.meta.MaterializedTimeTick = work.TargetTimeTick
+	t.dirty = true
+	return MaterializeResult{
+		Started:                 true,
+		MaterializedTimeTick:    work.TargetTimeTick,
+		MaterializedRows:        work.Rows,
+		MaterializedBytes:       work.Bytes,
+		HasMaterializedSegments: len(work.Entries) > 0,
+	}
 }
 
 func (t *transformLog) publish(entries []*streamingpb.TransformLogEntry) {
