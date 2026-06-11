@@ -22,7 +22,9 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -241,11 +243,19 @@ func (c *dqlBackpressureController) slowdown(reason string) {
 	if next >= c.currentConcurrency {
 		next = c.currentConcurrency - 1
 	}
+	oldConcurrency := c.currentConcurrency
 	c.currentConcurrency = max(c.slowdownMinConcurrency, next)
 	c.lastSlowdown = now
 	c.lastRecover = now
 	c.updateConcurrencyMetricsLocked()
 	c.recordEventLocked(dqlBackpressureEventSlowdown, reason)
+	log.Info("proxy DQL backpressure enters slowdown",
+		zap.String("reason", reason),
+		zap.Int64("oldConcurrency", oldConcurrency),
+		zap.Int64("newConcurrency", c.currentConcurrency),
+		zap.Int64("maxConcurrency", c.maxConcurrency),
+		zap.Int64("slowdownMinConcurrency", c.slowdownMinConcurrency),
+	)
 }
 
 func (c *dqlBackpressureController) recover() {
@@ -266,10 +276,11 @@ func (c *dqlBackpressureController) recover() {
 	if c.recoverInterval > 0 && !c.lastRecover.IsZero() && now.Sub(c.lastRecover) < c.recoverInterval {
 		return
 	}
+	oldConcurrency := c.currentConcurrency
 	c.currentConcurrency = min(c.maxConcurrency, c.currentConcurrency+c.recoverStep)
 	c.lastRecover = now
 	c.updateConcurrencyMetricsLocked()
-	c.recordEventLocked(dqlBackpressureEventRecover, dqlBackpressureReasonSuccess)
+	c.recordRecoverLocked(dqlBackpressureReasonSuccess, oldConcurrency)
 	c.notify()
 }
 
@@ -286,10 +297,11 @@ func (c *dqlBackpressureController) recoverByElapsedQuietPeriodLocked(now time.T
 	}
 
 	if c.recoverInterval <= 0 {
+		oldConcurrency := c.currentConcurrency
 		c.currentConcurrency = min(c.maxConcurrency, c.currentConcurrency+c.recoverStep)
 		c.lastRecover = now
 		c.updateConcurrencyMetricsLocked()
-		c.recordEventLocked(dqlBackpressureEventRecover, dqlBackpressureReasonQuietPeriod)
+		c.recordRecoverLocked(dqlBackpressureReasonQuietPeriod, oldConcurrency)
 		c.notify()
 		return
 	}
@@ -306,11 +318,23 @@ func (c *dqlBackpressureController) recoverByElapsedQuietPeriodLocked(now time.T
 	if steps <= 0 {
 		return
 	}
+	oldConcurrency := c.currentConcurrency
 	c.currentConcurrency = min(c.maxConcurrency, c.currentConcurrency+steps*c.recoverStep)
 	c.lastRecover = lastRecover.Add(time.Duration(steps) * c.recoverInterval)
 	c.updateConcurrencyMetricsLocked()
-	c.recordEventLocked(dqlBackpressureEventRecover, dqlBackpressureReasonQuietPeriod)
+	c.recordRecoverLocked(dqlBackpressureReasonQuietPeriod, oldConcurrency)
 	c.notify()
+}
+
+func (c *dqlBackpressureController) recordRecoverLocked(reason string, oldConcurrency int64) {
+	c.recordEventLocked(dqlBackpressureEventRecover, reason)
+	log.Info("proxy DQL backpressure enters recover",
+		zap.String("reason", reason),
+		zap.Int64("oldConcurrency", oldConcurrency),
+		zap.Int64("newConcurrency", c.currentConcurrency),
+		zap.Int64("maxConcurrency", c.maxConcurrency),
+		zap.Int64("recoverStep", c.recoverStep),
+	)
 }
 
 func (c *dqlBackpressureController) notify() {
