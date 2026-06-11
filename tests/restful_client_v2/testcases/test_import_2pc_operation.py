@@ -230,6 +230,10 @@ class TestImport2PCRestOperation(TestBase):
         primary_client = MilvusClient(uri=self.endpoint, token=self.api_key)
         secondary_client = MilvusClient(uri=secondary_endpoint, token=secondary_token)
         try:
+            if not hasattr(primary_client, "update_replicate_configuration") or not hasattr(
+                secondary_client, "update_replicate_configuration"
+            ):
+                return
             with ThreadPoolExecutor(max_workers=2) as executor:
                 futures = [
                     executor.submit(primary_client.update_replicate_configuration, timeout=600, **config),
@@ -4784,6 +4788,70 @@ class TestImport2PCRestOperation(TestBase):
             os.remove(file_path)
 
     @pytest.mark.L0
+    def test_import_2pc_backup_storage_version_supported_values_reach_reader_validation(self):
+        """
+        target: backup import storage_version supported string values
+        method: submit backup imports with storage_version unset/0/1/2/3 against invalid backup objects
+        expected: supported values are accepted by option parsing, then fail later with reader/input reasons and no rows
+        """
+        collection_name = gen_collection_name(prefix="import_2pc_storage_version_values")
+        self._create_base_collection(collection_name)
+
+        scenarios = [
+            ("unset", None),
+            ("0", "0"),
+            ("1", "1"),
+            ("2", "2"),
+            ("3", "3"),
+        ]
+        local_files = []
+
+        try:
+            for label, storage_version in scenarios:
+                object_prefix = f"import_2pc_storage_version_{label}_{uuid4().hex}"
+                fake_binlog_object = f"{object_prefix}/123456789/fake-binlog"
+                local_files.append(self._write_text_object_and_upload("not a real binlog", fake_binlog_object))
+
+                options = {"auto_commit": "false", "backup": "true"}
+                if storage_version is not None:
+                    options["storage_version"] = storage_version
+                payload = {
+                    "collectionName": collection_name,
+                    "partitionName": "_default",
+                    "files": [[object_prefix]],
+                    "options": options,
+                }
+
+                create_rsp = self.import_job_client.create_import_jobs(payload)
+                if create_rsp["code"] == 0:
+                    job_id = create_rsp["data"]["jobId"]
+                    rsp, failed = self.import_job_client.wait_import_job_state(
+                        job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT
+                    )
+                    assert failed, {"label": label, "create_rsp": create_rsp, "last_rsp": rsp}
+                    reason_text = str(rsp.get("data", {}).get("reason", rsp))
+                    detail_text = " ".join(str(detail) for detail in rsp.get("data", {}).get("details", []))
+                    error_context = rsp
+                else:
+                    assert "jobId" not in str(create_rsp), {"label": label, "create_rsp": create_rsp}
+                    reason_text = str(create_rsp.get("message", create_rsp))
+                    detail_text = ""
+                    error_context = create_rsp
+
+                combined_reason = f"{reason_text} {detail_text}".strip()
+                lower_reason = combined_reason.lower()
+                assert combined_reason, {"label": label, "rsp": error_context}
+                assert "parse storage_version" not in lower_reason, {"label": label, "rsp": error_context}
+                assert "invalid storage_version" not in lower_reason, {"label": label, "rsp": error_context}
+
+                count, count_ok = self._wait_count(collection_name, 0, timeout=20)
+                assert count_ok, {"label": label, "expected_count": 0, "last_count": count, "rsp": error_context}
+        finally:
+            for file_path in local_files:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+
+    @pytest.mark.L0
     def test_import_2pc_backup_reversed_time_range_fails_with_reason_and_no_visible_rows(self):
         """
         target: backup import start_ts/end_ts guardrail
@@ -9008,6 +9076,161 @@ class TestImport2PCRestOperation(TestBase):
                 os.remove(file_path)
 
     @pytest.mark.L0
+    def test_import_2pc_cdc_ttl_expires_from_commit_timestamp_primary_secondary_consistent(
+        self,
+        secondary_endpoint,
+        secondary_token,
+        secondary_minio_host,
+        secondary_bucket_name,
+        secondary_root_path,
+        source_cluster_id,
+        target_cluster_id,
+        pchannel_num,
+    ):
+        """
+        target: IMP-TTL-002 CDC TTL calculation for manually committed import rows
+        method: keep import Uncommitted longer than collection TTL, commit on primary, then observe both clusters
+        expected: primary and secondary expose rows after commit and expire them from commit timestamp, not row write time
+        """
+        self._require_cdc_rest_env(
+            "IMP-TTL-002",
+            secondary_endpoint,
+            secondary_minio_host,
+            secondary_bucket_name,
+            source_cluster_id,
+            target_cluster_id,
+        )
+        self._apply_cdc_topology(
+            secondary_endpoint,
+            secondary_token,
+            source_cluster_id,
+            target_cluster_id,
+            pchannel_num,
+        )
+        secondary = self._build_secondary_cdc_clients(
+            secondary_endpoint,
+            secondary_token,
+            secondary_minio_host,
+            secondary_bucket_name,
+            secondary_root_path,
+        )
+
+        collection_name = gen_collection_name(prefix="import_2pc_cdc_ttl")
+        ttl_seconds = 30
+        rows = self._make_rows(12750, 6, phase=127)
+        expected_ids = {row["id"] for row in rows}
+        file_name = f"import_2pc_cdc_ttl_{uuid4()}.parquet"
+        file_path = None
+        job_id = None
+
+        try:
+            self._create_base_collection(collection_name, shards_num=4, ttl_seconds=ttl_seconds)
+            rsp, synced = self._wait_collection_exists_with_client(
+                secondary["collection"], collection_name, timeout=180
+            )
+            assert synced, rsp
+            rsp, loaded = self._wait_collection_loaded_with_client(
+                secondary["collection"], collection_name, timeout=180
+            )
+            assert loaded, rsp
+
+            file_path = self._write_parquet_and_upload_to_both_clusters(rows, file_name, secondary["storage"])
+            job_id = self._create_manual_import_job(collection_name, file_name)
+
+            primary_rsp, primary_uncommitted = self.import_job_client.wait_import_job_state(
+                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert primary_uncommitted, primary_rsp
+            secondary_rsp, secondary_uncommitted = secondary["import_job"].wait_import_job_state(
+                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert secondary_uncommitted, secondary_rsp
+
+            time.sleep(ttl_seconds + 5)
+            primary_seen, primary_absent = self._wait_imported_ids_absent(
+                collection_name, expected_ids, duration=8, interval=2
+            )
+            assert primary_absent, {"unexpected_primary_ids": primary_seen}
+            secondary_seen, secondary_absent = self._wait_imported_ids_absent_with_clients(
+                secondary["collection"],
+                secondary["vector"],
+                collection_name,
+                expected_ids,
+                duration=8,
+                interval=2,
+            )
+            assert secondary_absent, {"unexpected_secondary_ids": secondary_seen}
+
+            commit_start = time.time()
+            commit_rsp = self.import_job_client.commit_import_job(job_id)
+            assert commit_rsp["code"] == 0, commit_rsp
+
+            primary_rsp, primary_completed = self.import_job_client.wait_import_job_state(
+                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert primary_completed, primary_rsp
+            secondary_rsp, secondary_completed = secondary["import_job"].wait_import_job_state(
+                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert secondary_completed, secondary_rsp
+
+            primary_seen, primary_visible = self._wait_imported_ids_visible(
+                collection_name, expected_ids, timeout=180
+            )
+            assert primary_visible, {"expected": expected_ids, "seen": primary_seen}
+            secondary_seen, secondary_visible = self._wait_imported_ids_visible_with_clients(
+                secondary["collection"],
+                secondary["vector"],
+                collection_name,
+                expected_ids,
+                timeout=180,
+            )
+            assert secondary_visible, {"expected": expected_ids, "seen": secondary_seen}
+            assert primary_seen == secondary_seen == expected_ids
+
+            seconds_until_midpoint = 15 - (time.time() - commit_start)
+            if seconds_until_midpoint > 0:
+                time.sleep(seconds_until_midpoint)
+            assert self._query_imported_ids(collection_name, sorted(expected_ids)) == expected_ids
+            assert (
+                self._query_imported_ids_with_client(secondary["vector"], collection_name, sorted(expected_ids))
+                == expected_ids
+            )
+
+            seconds_until_expiry_probe = ttl_seconds + 5 - (time.time() - commit_start)
+            if seconds_until_expiry_probe > 0:
+                time.sleep(seconds_until_expiry_probe)
+            primary_seen, primary_expired = self._wait_imported_ids_eventually_absent(
+                collection_name, expected_ids, timeout=60, interval=2
+            )
+            assert primary_expired, {"expected_absent": expected_ids, "last_primary_seen": primary_seen}
+            secondary_seen, secondary_expired = self._wait_imported_ids_eventually_absent_with_clients(
+                secondary["collection"],
+                secondary["vector"],
+                collection_name,
+                expected_ids,
+                timeout=60,
+                interval=2,
+            )
+            assert secondary_expired, {"expected_absent": expected_ids, "last_secondary_seen": secondary_seen}
+
+            primary_count, primary_count_ok = self._wait_count(collection_name, 0, timeout=30)
+            assert primary_count_ok, {"expected_count": 0, "last_count": primary_count}
+            secondary_count, secondary_count_ok = self._wait_count_with_clients(
+                secondary["collection"], secondary["vector"], collection_name, 0, timeout=60
+            )
+            assert secondary_count_ok, {"expected_count": 0, "last_count": secondary_count}
+
+        finally:
+            if job_id is not None:
+                progress_rsp = self.import_job_client.get_import_job_progress(job_id)
+                state = progress_rsp.get("data", {}).get("state") if progress_rsp.get("code") == 0 else None
+                if state in ("Pending", "PreImporting", "Importing", "Sorting", "IndexBuilding", "Uncommitted"):
+                    self.import_job_client.abort_import_job(job_id)
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
+
+    @pytest.mark.L0
     def test_import_2pc_cdc_abort_before_commit_primary_secondary_cleanup(
         self,
         secondary_endpoint,
@@ -9391,6 +9614,169 @@ class TestImport2PCRestOperation(TestBase):
                 os.remove(file_path)
 
     @pytest.mark.L0
+    def test_import_2pc_cdc_secondary_direct_import_commit_abort_rejected(
+        self,
+        secondary_endpoint,
+        secondary_token,
+        secondary_minio_host,
+        secondary_bucket_name,
+        secondary_root_path,
+        source_cluster_id,
+        target_cluster_id,
+        pchannel_num,
+    ):
+        """
+        target: IMP-REP-003/009 standby write-role guard for import 2PC REST APIs
+        method: create a replicated manual import, then call create/commit/abort directly on secondary
+        expected: secondary direct writes are rejected, primary commit still replicates, and final PK sets match
+        """
+        self._require_cdc_rest_env(
+            "IMP-REP-003",
+            secondary_endpoint,
+            secondary_minio_host,
+            secondary_bucket_name,
+            source_cluster_id,
+            target_cluster_id,
+        )
+        self._apply_cdc_topology(
+            secondary_endpoint,
+            secondary_token,
+            source_cluster_id,
+            target_cluster_id,
+            pchannel_num,
+        )
+        secondary = self._build_secondary_cdc_clients(
+            secondary_endpoint,
+            secondary_token,
+            secondary_minio_host,
+            secondary_bucket_name,
+            secondary_root_path,
+        )
+
+        collection_name = gen_collection_name(prefix="import_2pc_cdc_secondary_guard")
+        primary_rows = self._make_rows(12600, 8, phase=126)
+        secondary_direct_rows = self._make_rows(12650, 4, phase=127)
+        expected_ids = {row["id"] for row in primary_rows}
+        secondary_direct_ids = {row["id"] for row in secondary_direct_rows}
+        primary_file_name = f"import_2pc_cdc_secondary_guard_primary_{uuid4()}.parquet"
+        secondary_file_name = f"import_2pc_cdc_secondary_guard_direct_{uuid4()}.parquet"
+        local_files = []
+        job_id = None
+        unexpected_secondary_job_id = None
+
+        try:
+            self._create_base_collection(collection_name, shards_num=4)
+            rsp, synced = self._wait_collection_exists_with_client(
+                secondary["collection"], collection_name, timeout=180
+            )
+            assert synced, rsp
+            rsp, loaded = self._wait_collection_loaded_with_client(
+                secondary["collection"], collection_name, timeout=180
+            )
+            assert loaded, rsp
+
+            local_files.append(
+                self._write_parquet_and_upload_to_both_clusters(primary_rows, primary_file_name, secondary["storage"])
+            )
+            local_files.append(
+                self._write_parquet_and_upload_to_both_clusters(
+                    secondary_direct_rows, secondary_file_name, secondary["storage"]
+                )
+            )
+
+            job_id = self._create_manual_import_job(collection_name, primary_file_name)
+            primary_rsp, primary_uncommitted = self.import_job_client.wait_import_job_state(
+                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert primary_uncommitted, primary_rsp
+            secondary_rsp, secondary_uncommitted = secondary["import_job"].wait_import_job_state(
+                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert secondary_uncommitted, secondary_rsp
+
+            secondary_create_rsp = secondary["import_job"].create_import_jobs(
+                {
+                    "collectionName": collection_name,
+                    "files": [[secondary_file_name]],
+                    "options": {"auto_commit": "false"},
+                }
+            )
+            if secondary_create_rsp.get("code") == 0:
+                unexpected_secondary_job_id = secondary_create_rsp["data"]["jobId"]
+            assert secondary_create_rsp.get("code") != 0, secondary_create_rsp
+            assert "jobId" not in str(secondary_create_rsp), secondary_create_rsp
+
+            secondary_commit_rsp = secondary["import_job"].commit_import_job(job_id)
+            assert secondary_commit_rsp.get("code") != 0, secondary_commit_rsp
+            secondary_abort_rsp = secondary["import_job"].abort_import_job(job_id)
+            assert secondary_abort_rsp.get("code") != 0, secondary_abort_rsp
+
+            primary_rsp = self.import_job_client.get_import_job_progress(job_id)
+            secondary_rsp = secondary["import_job"].get_import_job_progress(job_id)
+            assert primary_rsp["code"] == 0 and primary_rsp["data"]["state"] == "Uncommitted", {
+                "primary_rsp": primary_rsp,
+                "secondary_commit_rsp": secondary_commit_rsp,
+                "secondary_abort_rsp": secondary_abort_rsp,
+            }
+            assert secondary_rsp["code"] == 0 and secondary_rsp["data"]["state"] == "Uncommitted", {
+                "secondary_rsp": secondary_rsp,
+                "secondary_commit_rsp": secondary_commit_rsp,
+                "secondary_abort_rsp": secondary_abort_rsp,
+            }
+
+            primary_seen, primary_absent = self._wait_imported_ids_absent(collection_name, expected_ids, duration=12)
+            assert primary_absent, {"unexpected_primary_ids": primary_seen}
+            secondary_seen, secondary_absent = self._wait_imported_ids_absent_with_clients(
+                secondary["collection"],
+                secondary["vector"],
+                collection_name,
+                expected_ids | secondary_direct_ids,
+                duration=12,
+            )
+            assert secondary_absent, {"unexpected_secondary_ids": secondary_seen}
+
+            commit_rsp = self.import_job_client.commit_import_job(job_id)
+            assert commit_rsp["code"] == 0, commit_rsp
+            primary_rsp, primary_completed = self.import_job_client.wait_import_job_state(
+                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert primary_completed, primary_rsp
+            secondary_rsp, secondary_completed = secondary["import_job"].wait_import_job_state(
+                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert secondary_completed, secondary_rsp
+
+            primary_final_ids, primary_visible = self._wait_imported_ids_visible(
+                collection_name, expected_ids, timeout=180
+            )
+            assert primary_visible, {"expected": expected_ids, "seen": primary_final_ids}
+            secondary_final_ids, secondary_visible = self._wait_imported_ids_visible_with_clients(
+                secondary["collection"],
+                secondary["vector"],
+                collection_name,
+                expected_ids,
+                timeout=180,
+            )
+            assert secondary_visible, {"expected": expected_ids, "seen": secondary_final_ids}
+            assert primary_final_ids == secondary_final_ids == expected_ids
+            assert self._query_imported_ids(collection_name, sorted(secondary_direct_ids)) == set()
+            assert (
+                self._query_imported_ids_with_client(secondary["vector"], collection_name, sorted(secondary_direct_ids))
+                == set()
+            )
+        finally:
+            if unexpected_secondary_job_id is not None:
+                secondary["import_job"].abort_import_job(unexpected_secondary_job_id)
+            if job_id is not None:
+                progress_rsp = self.import_job_client.get_import_job_progress(job_id)
+                state = progress_rsp.get("data", {}).get("state") if progress_rsp.get("code") == 0 else None
+                if state in ("Pending", "PreImporting", "Importing", "Sorting", "IndexBuilding", "Uncommitted"):
+                    self.import_job_client.abort_import_job(job_id)
+            for file_path in local_files:
+                if file_path and os.path.exists(file_path):
+                    os.remove(file_path)
+
+    @pytest.mark.L0
     def test_import_2pc_cdc_commit_while_secondary_import_still_building_requires_cdc_env(self):
         """
         target: IMP-REP-101 environment precondition
@@ -9481,10 +9867,61 @@ class TestImport2PCRestOperation(TestBase):
                 os.remove(file_path)
 
     @pytest.mark.L0
-    def test_import_2pc_datanode_restart_during_importing_requires_cluster_mode(self, release_name):
+    def test_import_2pc_datanode_restart_during_importing_recovers_to_uncommitted(self, release_name):
         """
-        target: IMP-FT-101 environment precondition
-        method: inspect the target K8s release and require a separate DataNode pod before running restart fault injection
-        expected: standalone instance is skipped because it has no independent DataNode process to restart
+        target: IMP-FT-003 DataNode recovery while a manual import is being processed
+        method: start a large manual import, restart a DataNode pod during scheduling/importing, then commit
+        expected: job recovers to Uncommitted, commit succeeds, and imported rows become visible
         """
-        self._skip_if_release_has_no_component(release_name, "datanode", "IMP-FT-101")
+        self._skip_if_release_has_no_component(release_name, "datanode", "IMP-FT-003")
+
+        collection_name = gen_collection_name(prefix="import_2pc_datanode_restart")
+        self._create_base_collection(collection_name, shards_num=4)
+
+        rows = self._make_rows(14000, 20000, phase=140)
+        expected_ids = {row["id"] for row in rows[:12] + rows[-12:]}
+        file_name = f"import_2pc_datanode_restart_{uuid4()}.parquet"
+        file_path = None
+        job_id = None
+
+        try:
+            file_path = self._write_parquet_and_upload(rows, file_name)
+            job_id = self._create_manual_import_job(collection_name, file_name)
+
+            old_pod, new_pod = self._kubectl_delete_one_component_pod_and_wait_ready(
+                release_name, "datanode", timeout=300
+            )
+            assert old_pod != new_pod
+            cr_status, healthy = self._wait_milvus_cr_healthy(release_name, timeout=300)
+            assert healthy, cr_status
+
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
+            assert ok, rsp
+            assert rsp["data"]["importedRows"] == len(rows), rsp
+
+            seen_before_commit, absent_before_commit = self._wait_imported_ids_absent(
+                collection_name, expected_ids, duration=12
+            )
+            assert absent_before_commit, {"unexpected_visible_ids": seen_before_commit}
+
+            commit_rsp = self.import_job_client.commit_import_job(job_id)
+            assert commit_rsp["code"] == 0, commit_rsp
+
+            rsp, completed = self.import_job_client.wait_import_job_state(
+                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert completed, rsp
+
+            seen_ids, visible = self._wait_imported_ids_visible(collection_name, expected_ids, timeout=180)
+            assert visible, {"expected": expected_ids, "seen": seen_ids}
+            final_count, final_count_ok = self._wait_count(collection_name, len(rows), timeout=180)
+            assert final_count_ok, {"expected_count": len(rows), "last_count": final_count}
+
+        finally:
+            if job_id is not None:
+                progress_rsp = self.import_job_client.get_import_job_progress(job_id)
+                state = progress_rsp.get("data", {}).get("state") if progress_rsp.get("code") == 0 else None
+                if state in ("Pending", "PreImporting", "Importing", "Sorting", "IndexBuilding", "Uncommitted"):
+                    self.import_job_client.abort_import_job(job_id)
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
