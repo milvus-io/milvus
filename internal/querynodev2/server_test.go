@@ -297,6 +297,10 @@ func TestRegisterSegcoreConfigWatcher(t *testing.T) {
 	assert.NotPanics(t, func() {
 		pt.Save(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, "1048576")
 	})
+	assert.NotPanics(t, func() {
+		pt.Save(pt.QueryNodeCfg.StorageV2FieldDataLoadBudgetBytes.Key, "67108864")
+	})
+	pt.Reset(pt.QueryNodeCfg.StorageV2FieldDataLoadBudgetBytes.Key)
 }
 
 func TestQueryNode(t *testing.T) {
