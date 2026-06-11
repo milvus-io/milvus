@@ -88,7 +88,15 @@ func TestDQLBackpressureControllerObserveStatusRoundTripError(t *testing.T) {
 		recoverQuiet:           2 * time.Second,
 	})
 
-	controller.Observe(errors.New("worker query failed: limit by queryNode.scheduler.unsolvedQueueSize: too many concurrent requests, queue is full[limit=4]"))
+	workerErr := errors.Wrapf(
+		merr.WrapErrTooManyRequests(4, "limit by queryNode.scheduler.unsolvedQueueSize"),
+		"worker(%d) query failed",
+		1,
+	)
+	roundTripErr := merr.Error(merr.Status(workerErr))
+	require.ErrorIs(t, roundTripErr, merr.ErrServiceTooManyRequests)
+
+	controller.Observe(roundTripErr)
 	assert.Equal(t, int64(4), controller.CurrentConcurrency())
 }
 
