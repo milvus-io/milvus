@@ -17,5 +17,8 @@ Persists WAL consumer state to the catalog (etcd) and object storage. **Core inv
 ## Key Packages
 
 - `internal/streamingnode/server/wal/recovery/` — `RecoveryStorage`, `RecoverySnapshot`, WAL replay orchestration, meta recovery and background persist task
+- `internal/streamingnode/server/wal/moduleapi/` — common RecoveryStorage module contracts, dirty snapshots, data checkpoints, and data frontiers
+- `internal/streamingnode/server/wal/vchannel/` — VChannel metadata, schema history, partition lifecycle, and VChannel tombstones
+- `internal/streamingnode/server/wal/segment/` — growing segment assignment metadata, Insert/L1 persistence, segment lifecycle, and segment tombstones
+- `internal/streamingnode/server/wal/transformlog/` — Delete TransformLog storage, recovery, chunk replay, scanners, and truncation
 - `internal/streamingnode/server/wal/checkpoint/` — WAL checkpoint manager, meta/data barriers and checkpoint advancement rules
-- `internal/streamingnode/server/wal/growing/` — Growing segment data durability path, write-only buffers, object storage flush and lifecycle commits

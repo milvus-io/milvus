@@ -4,41 +4,134 @@ import (
 	"context"
 
 	walcheckpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/checkpoint"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	scheduler "github.com/milvus-io/milvus/pkg/v3/syncutil/preconditioned"
+	"google.golang.org/protobuf/proto"
 )
 
 type Module interface {
-	Name() string
+	Name() ModuleName
 	ObserveMessage(ctx context.Context, msg message.ImmutableMessage) ObserveResult
-	SwitchIntoMetaAndData() Snapshot
-	RequirePersist()
+	SwitchIntoMetaAndData() ModuleSnapshot
+	// ConsumeDirtySnapshots captures module-local dirty views as stable
+	// snapshots for RecoveryStorage-owned catalog persistence. It does not
+	// return an error because it only snapshots in-memory state.
+	ConsumeDirtySnapshots() []DirtySnapshot
 }
+
+type ModuleName string
+
+const (
+	ModuleNameVChannel     ModuleName = "vchannel"
+	ModuleNameSegment      ModuleName = "segment"
+	ModuleNameTransformLog ModuleName = "transformlog"
+	ModuleNameAck          ModuleName = "ack"
+)
 
 type ObserveResult struct {
 	Meta walcheckpoint.Barrier
 	Data walcheckpoint.Barrier
 }
 
-type Snapshot interface{}
+type ModuleSnapshot interface {
+	ModuleName() ModuleName
+}
+
+type CompositeModuleSnapshot []ModuleSnapshot
+
+func (CompositeModuleSnapshot) ModuleName() ModuleName {
+	return ""
+}
+
+func FlattenModuleSnapshot(snapshot ModuleSnapshot) []ModuleSnapshot {
+	if snapshot == nil {
+		return nil
+	}
+	if composite, ok := snapshot.(CompositeModuleSnapshot); ok {
+		return composite
+	}
+	return []ModuleSnapshot{snapshot}
+}
+
+type VChannelModuleSnapshot struct {
+	VChannels map[string]*streamingpb.VChannelMeta
+}
+
+func (*VChannelModuleSnapshot) ModuleName() ModuleName {
+	return ModuleNameVChannel
+}
+
+type SegmentModuleSnapshot struct {
+	Segments map[int64]*streamingpb.SegmentAssignmentMeta
+}
+
+func (*SegmentModuleSnapshot) ModuleName() ModuleName {
+	return ModuleNameSegment
+}
+
+type TransformLogModuleSnapshot struct {
+	TransformLogs map[string]*streamingpb.VChannelTransformLogMeta
+}
+
+func (*TransformLogModuleSnapshot) ModuleName() ModuleName {
+	return ModuleNameTransformLog
+}
+
+type SnapshotKey struct {
+	PChannel  string
+	VChannel  string
+	SegmentID int64
+}
+
+type SnapshotOp int
+
+const (
+	SnapshotOpUpsert SnapshotOp = iota
+	SnapshotOpDelete
+)
+
+type DirtySnapshot interface {
+	ModuleName() ModuleName
+	Key() SnapshotKey
+	Op() SnapshotOp
+	Payload() proto.Message
+	MetaTimeTick() uint64
+	DataTimeTick() uint64
+	MarkPersisted()
+}
 
 type CheckpointPersistedObserver interface {
 	NotifyCheckpointPersisted(metaTimeTick uint64, dataTimeTick uint64)
 }
 
-type DurableFrontierView interface {
-	PartitionDurableFrontier(collectionID int64, partitionID int64) walcheckpoint.Barrier
-	VChannelDurableFrontier(vchannel string) walcheckpoint.Barrier
-	AllDurableFrontier() walcheckpoint.Barrier
+type ScopeType int
+
+const (
+	ScopeAll ScopeType = iota
+	ScopeVChannel
+	ScopePartition
+)
+
+type Scope struct {
+	Type ScopeType
+
+	VChannel     string
+	CollectionID int64
+	PartitionID  int64
 }
 
-type DataCheckpointView interface {
-	DataCheckpointTimeTick() uint64
+type DataFrontierView interface {
+	DataFrontier(scope Scope) walcheckpoint.Barrier
+}
+
+type DataFrontierProvider interface {
+	DataFrontier(scope Scope) walcheckpoint.Barrier
 }
 
 type Runtime struct {
 	Scheduler AsyncTaskScheduler
-	Notifier  BarrierUpdatedNotifier
+	Notifier  ModuleNotifier
 }
 
 type AsyncTaskScheduler interface {
@@ -46,7 +139,8 @@ type AsyncTaskScheduler interface {
 	Notify()
 }
 
-type BarrierUpdatedNotifier interface {
+type ModuleNotifier interface {
+	NotifyModuleUpdated(module ModuleName)
 	NotifyBarrierUpdated()
 }
 

@@ -1,4 +1,4 @@
-package growing
+package segment
 
 import (
 	"context"
@@ -33,14 +33,6 @@ func (w *segmentLifecycleWriter) EnsureGrowingSegment(ctx context.Context, meta 
 
 func (w *segmentLifecycleWriter) CommitL1Segment(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta) error {
 	req := buildCommitL1SegmentRequest(w.serverID, meta)
-	return retry.Do(ctx, func() error {
-		resp, err := w.coord.SaveBinlogPaths(ctx, req)
-		return merr.CheckRPCCall(resp, err)
-	}, retry.AttemptAlways())
-}
-
-func (w *segmentLifecycleWriter) CommitL0Segment(ctx context.Context, batch *l0DeleteBatch) error {
-	req := buildCommitL0SegmentRequest(w.serverID, batch)
 	return retry.Do(ctx, func() error {
 		resp, err := w.coord.SaveBinlogPaths(ctx, req)
 		return merr.CheckRPCCall(resp, err)
@@ -97,45 +89,6 @@ func buildCommitL1SegmentRequest(serverID int64, meta *streamingpb.SegmentAssign
 		WithFullBinlogs: true,
 		ManifestPath:    storage.GetManifestPath(),
 	}
-}
-
-func buildCommitL0SegmentRequest(serverID int64, batch *l0DeleteBatch) *datapb.SaveBinlogPathsRequest {
-	req := &datapb.SaveBinlogPathsRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(0),
-			commonpbutil.WithMsgID(0),
-			commonpbutil.WithSourceID(serverID),
-		),
-		SegmentID:           batch.SegmentID,
-		CollectionID:        batch.CollectionID,
-		PartitionID:         batch.PartitionID,
-		Deltalogs:           batch.Deltalogs,
-		Flushed:             true,
-		Channel:             batch.VChannel,
-		SegLevel:            datapb.SegmentLevel_L0,
-		StorageVersion:      0,
-		WithFullBinlogs:     true,
-		Field2BinlogPaths:   []*datapb.FieldBinlog{},
-		Field2StatslogPaths: []*datapb.FieldBinlog{},
-		Field2Bm25LogPaths:  []*datapb.FieldBinlog{},
-	}
-	if batch.Checkpoint != nil {
-		req.CheckPoints = []*datapb.CheckPoint{
-			{
-				SegmentID: batch.SegmentID,
-				Position:  batch.Checkpoint,
-			},
-		}
-	}
-	if batch.StartPosition != nil {
-		req.StartPositions = []*datapb.SegmentStartPosition{
-			{
-				SegmentID:     batch.SegmentID,
-				StartPosition: batch.StartPosition,
-			},
-		}
-	}
-	return req
 }
 
 var _ segmentLifecycle = (*segmentLifecycleWriter)(nil)

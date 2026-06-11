@@ -1,4 +1,4 @@
-package growing
+package vchannel
 
 import (
 	"math"
@@ -37,11 +37,6 @@ func newVChannelView(
 		meta:                  meta,
 		persistedMetaTimeTick: persistedMetaTimeTick,
 		dirty:                 dirty,
-		segments:              make(map[int64]*segmentView),
-		lifecycle:             config.lifecycle,
-		packWriter:            config.packWriter,
-		runtime:               config.runtime,
-		onDataUpdated:         config.onDataUpdated,
 		metaAndData:           config.metaAndData,
 	}
 }
@@ -83,14 +78,10 @@ type vChannelView struct {
 
 	meta                  *streamingpb.VChannelMeta
 	persistedMetaTimeTick uint64
-	dirty                 bool // whether the vchannel recovery info is dirty.
+	dirty                 bool // whether the current vchannel recovery info still needs catalog persistence.
+	pendingDirtySnapshot  *streamingpb.VChannelMeta
 
-	segments      map[int64]*segmentView
-	lifecycle     segmentLifecycle
-	packWriter    packWriter
-	runtime       moduleapi.Runtime
-	onDataUpdated func()
-	metaAndData   bool
+	metaAndData bool
 }
 
 func (info *vChannelView) AssignmentMeta() *streamingpb.VChannelMeta {
@@ -131,13 +122,10 @@ func (info *vChannelView) MarkSnapshotPersisted(snapshot *streamingpb.VChannelMe
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	info.markMetaPersistedLocked(snapshot.GetCheckpointTimeTick())
-	info.dirty = !proto.Equal(info.meta, snapshot)
-}
-
-func (info *vChannelView) NotifyDataUpdated() {
-	if info.onDataUpdated != nil {
-		info.onDataUpdated()
+	if info.pendingDirtySnapshot != nil && proto.Equal(info.pendingDirtySnapshot, snapshot) {
+		info.pendingDirtySnapshot = nil
 	}
+	info.dirty = !proto.Equal(info.meta, snapshot)
 }
 
 func (info *vChannelView) TryFinalizeTombstone(dataCheckpointTimeTick uint64) bool {
@@ -158,18 +146,6 @@ func (info *vChannelView) HasReadyTombstoneFinalize(dataCheckpointTimeTick uint6
 		}
 	}
 	return false
-}
-
-func (info *vChannelView) AddSegment(segment *segmentView) {
-	info.mu.Lock()
-	defer info.mu.Unlock()
-	info.segments[segment.AssignmentMeta().SegmentId] = segment
-}
-
-func (info *vChannelView) RemoveSegment(segmentID int64) {
-	info.mu.Lock()
-	defer info.mu.Unlock()
-	delete(info.segments, segmentID)
 }
 
 func (info *vChannelView) SwitchIntoMetaAndData() {
@@ -276,41 +252,6 @@ func (info *vChannelView) CreateSegmentSchema(partitionID int64, timetick uint64
 	}
 	_, schema := info.GetSchemaLocked(timetick)
 	return schema
-}
-
-func (info *vChannelView) SegmentForInsert(partitionID int64, segmentID int64, timetick uint64) *segmentView {
-	info.mu.Lock()
-	defer info.mu.Unlock()
-	if !info.canReplayAtLocked(timetick) || !info.canReplayExistingPartitionAtLocked(partitionID, timetick) {
-		return nil
-	}
-	return info.segments[segmentID]
-}
-
-func (info *vChannelView) SegmentsForFlush(partitionID int64, timetick uint64) []*segmentView {
-	info.mu.Lock()
-	if !info.canReplayAtLocked(timetick) || !info.canReplayExistingPartitionAtLocked(partitionID, timetick) {
-		info.mu.Unlock()
-		return nil
-	}
-	candidates := make([]*segmentView, 0, len(info.segments))
-	for _, segment := range info.segments {
-		candidates = append(candidates, segment)
-	}
-	info.mu.Unlock()
-
-	segments := candidates[:0]
-	for _, segment := range candidates {
-		meta := segment.AssignmentMeta()
-		if partitionID != common.AllPartitionsID && meta.GetPartitionId() != partitionID {
-			continue
-		}
-		if segment.CreateTimeTick() >= timetick {
-			continue
-		}
-		segments = append(segments, segment)
-	}
-	return segments
 }
 
 func (info *vChannelView) TombstonedCleanupPlan(
@@ -578,15 +519,20 @@ func (info *vChannelView) ObserveCreatePartitionMessageV1(msg message.ImmutableC
 	return moduleapi.ObserveResult{Meta: info.MetaBarrier()}
 }
 
-// ConsumeDirtyAndGetSnapshot returns the snapshot of the vchannel recovery info.
-// It returns nil if the vchannel recovery info is not dirty.
+// ConsumeDirtyAndGetSnapshot returns the current stable dirty snapshot of the
+// vchannel recovery info. It is not a queue pop: until MarkSnapshotPersisted is
+// called, repeated calls keep returning the same in-flight snapshot.
 func (info *vChannelView) ConsumeDirtyAndGetSnapshot() *streamingpb.VChannelMeta {
 	info.mu.Lock()
 	defer info.mu.Unlock()
+	if info.pendingDirtySnapshot != nil {
+		return proto.Clone(info.pendingDirtySnapshot).(*streamingpb.VChannelMeta)
+	}
 	if !info.dirty {
 		return nil
 	}
-	return proto.Clone(info.meta).(*streamingpb.VChannelMeta)
+	info.pendingDirtySnapshot = proto.Clone(info.meta).(*streamingpb.VChannelMeta)
+	return proto.Clone(info.pendingDirtySnapshot).(*streamingpb.VChannelMeta)
 }
 
 func (info *vChannelView) maybeMarkTombstonedLocked(dataCheckpointTimeTick uint64) bool {
@@ -613,28 +559,14 @@ func (info *vChannelView) vchannelTombstoneFinalizeReadyLocked(dataCheckpointTim
 	tombstoneTimeTick := info.meta.GetCheckpointTimeTick()
 	return info.meta.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED &&
 		tombstoneTimeTick > 0 &&
-		dataCheckpointTimeTick >= tombstoneTimeTick &&
-		info.coveredSegmentsTombstonedLocked(common.AllPartitionsID, tombstoneTimeTick)
+		dataCheckpointTimeTick >= tombstoneTimeTick
 }
 
 func (info *vChannelView) partitionTombstoneFinalizeReadyLocked(partition *streamingpb.PartitionInfoOfVChannel, dataCheckpointTimeTick uint64) bool {
 	tombstoneTimeTick := partition.GetTombstoneTimeTick()
 	return partition.GetState() == streamingpb.PartitionState_PARTITION_STATE_DROPPED &&
 		tombstoneTimeTick > 0 &&
-		dataCheckpointTimeTick >= tombstoneTimeTick &&
-		info.coveredSegmentsTombstonedLocked(partition.GetPartitionId(), tombstoneTimeTick)
-}
-
-func (info *vChannelView) coveredSegmentsTombstonedLocked(partitionID int64, timetick uint64) bool {
-	for _, segment := range info.segments {
-		if !segment.CoveredByTombstone(info.meta.GetVchannel(), partitionID, timetick) {
-			continue
-		}
-		if !segment.TombstonePersisted() {
-			return false
-		}
-	}
-	return true
+		dataCheckpointTimeTick >= tombstoneTimeTick
 }
 
 func isVChannelClosed(state streamingpb.VChannelState) bool {

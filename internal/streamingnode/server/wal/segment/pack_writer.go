@@ -1,4 +1,4 @@
-package growing
+package segment
 
 import (
 	"context"
@@ -133,75 +133,6 @@ func (w *growingBulkPackWriter) FlushInsertBuffer(ctx context.Context, pack *flu
 			},
 		},
 	}, nil
-}
-
-func (w *growingBulkPackWriter) FlushDeleteBuffer(ctx context.Context, pack *deleteFlushPack) (*deleteFlushResult, error) {
-	if w.allocator == nil {
-		return nil, errors.New("growing bulk pack writer allocator is nil")
-	}
-	schema := pack.Schema
-	if schema == nil {
-		return nil, errors.New("growing delete flush pack schema is nil")
-	}
-	deleteData, err := buildGrowingDeleteData(pack)
-	if err != nil {
-		return nil, err
-	}
-	segmentID, err := w.allocator.AllocOne()
-	if err != nil {
-		return nil, err
-	}
-	writer, err := syncmgr.NewBulkPackWriter(nil, schema, w.chunkManager, w.allocator, w.writeRetryOpts...)
-	if err != nil {
-		return nil, err
-	}
-	syncPack := new(syncmgr.SyncPack).
-		WithCollectionID(pack.CollectionID).
-		WithPartitionID(pack.PartitionID).
-		WithSegmentID(segmentID).
-		WithChannelName(pack.VChannel).
-		WithDeleteData(deleteData).
-		WithStartPosition(pack.StartPosition).
-		WithTimeRange(pack.FromTimeTick, pack.ToTimeTick).
-		WithLevel(datapb.SegmentLevel_L0).
-		WithCheckpoint(pack.Checkpoint).
-		WithFlush()
-	_, delta, _, _, _, err := writer.Write(ctx, syncPack)
-	if err != nil {
-		return nil, err
-	}
-	return &deleteFlushResult{
-		Batch: &l0DeleteBatch{
-			VChannel:      pack.VChannel,
-			CollectionID:  pack.CollectionID,
-			PartitionID:   pack.PartitionID,
-			SegmentID:     segmentID,
-			FromTimeTick:  pack.FromTimeTick,
-			ToTimeTick:    pack.ToTimeTick,
-			Deltalogs:     []*datapb.FieldBinlog{delta},
-			StartPosition: pack.StartPosition,
-			Checkpoint:    pack.Checkpoint,
-		},
-	}, nil
-}
-
-func buildGrowingDeleteData(pack *deleteFlushPack) (*storage.DeleteData, error) {
-	deleteData := &storage.DeleteData{}
-	for _, entry := range pack.Deletes {
-		request := cloneDeleteRequest(entry.request)
-		if request == nil {
-			return nil, errors.New("vchannel delete entry has nil request")
-		}
-		pks := storage.ParseIDs2PrimaryKeys(request.GetPrimaryKeys())
-		timestamps := request.GetTimestamps()
-		if len(pks) != len(timestamps) {
-			return nil, errors.Errorf("delete primary key count %d mismatches timestamp count %d", len(pks), len(timestamps))
-		}
-		for idx, pk := range pks {
-			deleteData.Append(pk, timestamps[idx])
-		}
-	}
-	return deleteData, nil
 }
 
 func buildGrowingInsertData(schema *schemapb.CollectionSchema, pack *flushPack) ([]*storage.InsertData, error) {

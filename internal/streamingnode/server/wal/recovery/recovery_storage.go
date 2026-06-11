@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/transformlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -26,6 +27,14 @@ type RecoverySnapshot struct {
 	// SalvageCheckpoint captures the replicate checkpoint at force-promote time.
 	// It must be persisted before the consume checkpoint so that the ordering guarantee holds.
 	SalvageCheckpoint *utility.ReplicateCheckpoint
+}
+
+type dirtyPersistSnapshot struct {
+	Checkpoint         *WALCheckpoint
+	CheckpointDirty    bool
+	ModuleDirtySnaps   []moduleapi.DirtySnapshot
+	ModuleSnapshotsAck bool
+	SalvageCheckpoint  *utility.ReplicateCheckpoint
 }
 
 // AlterWALInfo contains information about WAL alteration process.
@@ -81,13 +90,10 @@ type RecoveryStream interface {
 	Close() error
 }
 
-// RecoveryStorage is an interface that is used to observe the messages from the WAL.
+// RecoveryStorage owns WAL recovery state for one pchannel.
 type RecoveryStorage interface {
 	// Metrics gets the metrics of the recovery storage.
 	Metrics() RecoveryMetrics
-
-	// ObserveMessage observes the message from the WAL.
-	ObserveMessage(ctx context.Context, msg message.ImmutableMessage)
 
 	// GetDataCheckpoint returns the recovery-owned data checkpoint.
 	GetDataCheckpoint(ctx context.Context) *WALCheckpoint

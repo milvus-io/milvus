@@ -1,4 +1,4 @@
-package growing
+package segment
 
 import (
 	"time"

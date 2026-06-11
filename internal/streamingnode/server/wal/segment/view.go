@@ -1,4 +1,4 @@
-package growing
+package segment
 
 import (
 	"context"
@@ -111,8 +111,11 @@ type segmentView struct {
 	// persistedDataTimeTick is the latest data durability timetick already
 	// persisted into the recovery catalog. It backs the segment data barrier.
 	persistedDataTimeTick uint64
-	// dirty means meta contains changes not yet consumed by the catalog persist path.
+	// dirty means current meta contains changes not yet persisted into the catalog.
 	dirty bool
+	// pendingDirtySnapshot is the stable in-flight catalog view returned by
+	// ConsumeDirtyAndGetSnapshot and cleared by MarkSnapshotPersisted.
+	pendingDirtySnapshot *streamingpb.SegmentAssignmentMeta
 
 	// lifecycle commits data-side segment state to the coordinator after object
 	// storage output is ready.
@@ -334,12 +337,6 @@ func (info *segmentView) dataTimeTick() uint64 {
 	return info.persistedDataTimeTick
 }
 
-func (info *segmentView) DataCheckpointTimeTick() uint64 {
-	info.mu.Lock()
-	defer info.mu.Unlock()
-	return info.meta.GetDataCheckpointTimeTick()
-}
-
 func (info *segmentView) dataBarrier() walcheckpoint.Barrier {
 	return walcheckpoint.BarrierFunc(info.dataTimeTick)
 }
@@ -401,6 +398,9 @@ func (info *segmentView) MarkSnapshotPersisted(snapshot *streamingpb.SegmentAssi
 	defer info.mu.Unlock()
 	info.markMetaPersistedLocked(snapshot.GetCheckpointTimeTick())
 	info.markDataPersistedLocked(snapshot.GetDataCheckpointTimeTick())
+	if info.pendingDirtySnapshot != nil && proto.Equal(info.pendingDirtySnapshot, snapshot) {
+		info.pendingDirtySnapshot = nil
+	}
 	info.dirty = !proto.Equal(info.meta, snapshot)
 }
 
@@ -618,8 +618,12 @@ func (info *segmentView) ensureStat() {
 func (info *segmentView) ConsumeDirtyAndGetSnapshot() *streamingpb.SegmentAssignmentMeta {
 	info.mu.Lock()
 	defer info.mu.Unlock()
+	if info.pendingDirtySnapshot != nil {
+		return proto.Clone(info.pendingDirtySnapshot).(*streamingpb.SegmentAssignmentMeta)
+	}
 	if !info.dirty {
 		return nil
 	}
-	return proto.Clone(info.meta).(*streamingpb.SegmentAssignmentMeta)
+	info.pendingDirtySnapshot = proto.Clone(info.meta).(*streamingpb.SegmentAssignmentMeta)
+	return proto.Clone(info.pendingDirtySnapshot).(*streamingpb.SegmentAssignmentMeta)
 }

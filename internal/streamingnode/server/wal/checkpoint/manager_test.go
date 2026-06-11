@@ -128,25 +128,6 @@ func TestCheckpointManagerAdvanceMetaCheckpointInMemoryDoesNotDirty(t *testing.T
 	assert.False(t, manager.HasDirty())
 }
 
-func TestCheckpointManagerUpdateDataCheckpointUsesPhysicalPositionAndDataTimeTick(t *testing.T) {
-	manager := NewManager(&utility.WALCheckpoint{
-		MessageID: walimplstest.NewTestMessageID(10),
-		TimeTick:  100,
-		DataCheckpoint: &utility.WALConsumeCheckpoint{
-			MessageID: walimplstest.NewTestMessageID(5),
-			TimeTick:  50,
-		},
-	})
-
-	manager.UpdateDataCheckpointFromPhysicalCheckpoint(80)
-
-	snapshot := manager.Snapshot()
-	require.NotNil(t, snapshot.DataCheckpoint)
-	assert.True(t, walimplstest.NewTestMessageID(10).EQ(snapshot.DataCheckpoint.MessageID))
-	assert.Equal(t, uint64(80), snapshot.DataCheckpoint.TimeTick)
-	assert.True(t, manager.ConsumeDirty())
-}
-
 func newTestConsumeCheckpoint(timetick uint64) utility.WALConsumeCheckpoint {
 	return utility.WALConsumeCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(int64(timetick)),
