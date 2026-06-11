@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -338,9 +339,45 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerSkipExternal() {
 	}, nil)
 	s.triggerManager.handler = handler
 
-	_, err := s.triggerManager.ManualTrigger(context.Background(), 1, true, false, 0)
+	_, err := s.triggerManager.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{
+		CollectionID:    1,
+		MajorCompaction: true,
+	})
 	s.Error(err)
 	s.Contains(err.Error(), "external collection")
+}
+
+func (s *CompactionTriggerManagerSuite) TestManualTriggerRecordsRewriteTargetWhenGuardEnabled() {
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key)
+
+	catalog, records, _, _ := newCompactionTargetTestCatalog(s.T())
+	targetMeta, err := newCompactionTargetMeta(context.Background(), catalog)
+	s.Require().NoError(err)
+	s.meta.compactionTargetMeta = targetMeta
+
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).Return(&collectionInfo{}, nil)
+	s.triggerManager.handler = handler
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(100), nil).Once()
+	s.mockAlloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(200), nil).Once()
+
+	targetID, err := s.triggerManager.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{
+		CollectionID: s.testLabel.CollectionID,
+		SegmentIds:   []int64{20, 10},
+	})
+
+	s.Require().NoError(err)
+	s.Equal(int64(100), targetID)
+	record := records[100]
+	s.Require().NotNil(record)
+	s.Equal(datapb.TargetIntent_INTENT_REWRITE, record.GetIntent())
+	s.Equal(datapb.TargetState_TARGET_STATE_ACTIVE, record.GetState())
+	s.Equal(uint64(200), record.GetExpectedTS())
+	s.Equal(uint64(200), record.GetActivatedAtTS())
+	segmentIDs, ok := compactionTargetSegmentIDs(record)
+	s.True(ok)
+	s.Equal([]int64{10, 20}, segmentIDs)
 }
 
 func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
@@ -541,7 +578,10 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerL0Compaction() {
 		}).Return(nil).Once()
 
 	// Test L0 manual trigger
-	triggerID, err := s.triggerManager.ManualTrigger(context.Background(), s.testLabel.CollectionID, false, true, 0)
+	triggerID, err := s.triggerManager.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{
+		CollectionID: s.testLabel.CollectionID,
+		L0Compaction: true,
+	})
 	s.NoError(err)
 	s.Equal(int64(12345), triggerID)
 }
@@ -551,7 +591,9 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerInvalidParams() {
 	handler := NewNMockHandler(s.T())
 	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
 	s.triggerManager.handler = handler
-	triggerID, err := s.triggerManager.ManualTrigger(context.Background(), s.testLabel.CollectionID, false, false, 0)
+	triggerID, err := s.triggerManager.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{
+		CollectionID: s.testLabel.CollectionID,
+	})
 	s.NoError(err)
 	s.Equal(int64(0), triggerID)
 }

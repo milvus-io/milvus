@@ -14,7 +14,7 @@ Released: N/A
 ## Summary
 
 This slice adds the first target-based compaction path behind the default-off
-`dataCoord.compaction.targetReconcile.enabled` guard.
+`dataCoord.compaction.enableTargetBasedCompaction` guard.
 
 When the guard is enabled, a plain manual compaction request records one finite
 `REWRITE` target and returns the target id in the existing `compactionID`

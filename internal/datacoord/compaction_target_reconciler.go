@@ -28,7 +28,7 @@ func newCompactionTargetReconciler(meta *meta) *compactionTargetReconciler {
 }
 
 func (reconciler *compactionTargetReconciler) Enable() bool {
-	return paramtable.Get().DataCoordCfg.EnableCompactionTargetReconcile.GetAsBool() &&
+	return paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() &&
 		reconciler != nil &&
 		reconciler.meta != nil &&
 		reconciler.meta.GetCompactionTargetMeta() != nil

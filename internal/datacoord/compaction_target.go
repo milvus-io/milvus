@@ -231,6 +231,45 @@ type compactionTarget interface {
 	SegmentsInScope(candidates []*SegmentInfo) []*SegmentInfo
 }
 
+type compactionTargetFactory interface {
+	Create(ctx context.Context, alloc allocator.Allocator) (*datapb.CompactionTarget, error)
+}
+
+type manualRewriteCompactionTarget struct {
+	collectionID int64
+	segmentIDs   []int64
+}
+
+var _ compactionTargetFactory = (*manualRewriteCompactionTarget)(nil)
+
+func newManualRewriteCompactionTarget(collectionID int64, segmentIDs []int64) *manualRewriteCompactionTarget {
+	return &manualRewriteCompactionTarget{
+		collectionID: collectionID,
+		segmentIDs:   normalizedCompactionTargetSegmentIDs(segmentIDs),
+	}
+}
+
+func (target *manualRewriteCompactionTarget) Create(ctx context.Context, alloc allocator.Allocator) (*datapb.CompactionTarget, error) {
+	targetID, activatedAtTS, err := allocCompactionTargetIdentity(ctx, alloc)
+	if err != nil {
+		return nil, err
+	}
+	return &datapb.CompactionTarget{
+		TargetID:      targetID,
+		CollectionID:  target.collectionID,
+		Intent:        datapb.TargetIntent_INTENT_REWRITE,
+		Properties:    target.Properties(),
+		ExpectedTS:    activatedAtTS,
+		TailLimit:     0,
+		State:         datapb.TargetState_TARGET_STATE_ACTIVE,
+		ActivatedAtTS: activatedAtTS,
+	}, nil
+}
+
+func (target *manualRewriteCompactionTarget) Properties() map[string]string {
+	return compactionTargetSegmentIDProperties(target.segmentIDs)
+}
+
 type compactionTargetBase struct {
 	record *datapb.CompactionTarget
 }
