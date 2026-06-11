@@ -102,11 +102,85 @@ Am I crossing into another component / returning to a client?
 └─ Yes → I must return a typed merr:
     ├─ Brand-new failure, no underlying error worth carrying?
     │      → merr.WrapErrXxxMsg("detail %s", v)             (§3.1 originate)
+    │        and pick Input vs System deliberately (next section)
     ├─ I hold an underlying error and want to KEEP its code, just add context?
     │      → merr.Wrap(err, "while doing X")                (§3.2 add context)
     └─ I hold an underlying error and want to DOWNGRADE it to a generic class?
            → merr.WrapErrServiceInternalErr(err, "...")     (§3.2 — deliberate override)
 ```
+
+## Input vs System: who is to blame?
+
+Every merr is classified as **InputError** (the request author's fault) or
+**SystemError** (Milvus's fault, the default). Choosing a factory chooses the
+classification, so when you originate an error, ask one question first:
+
+> **Would a correctly implemented Milvus ever hit this branch, given this
+> request?** If the request content itself triggers it → InputError. If
+> reaching this branch means a Milvus bug or internal failure → SystemError.
+
+Quick rules for the cases that get misclassified in practice:
+
+- A **plan / task type / request produced by a coordinator** is not user input.
+  An unrecognized task type or malformed compaction plan is an internal
+  protocol violation (think mixed-version rolling upgrade) →
+  `WrapErrServiceInternalMsg`, even though the check looks like validation.
+- **Data produced by segcore or another internal component** is not user
+  input. A violated data-shape contract (ValidData length, truncated vectors)
+  is a Milvus bug → `WrapErrServiceInternalMsg`.
+- A **TOCTOU race** (state was valid at check time, changed by execution time)
+  is not user input → keep it a system error.
+
+### How classification is attached
+
+Two mechanisms, used in different situations:
+
+1. **Baked-in sentinels.** ~25 sentinels are declared
+   `WithErrorType(InputError)` in `errors.go` (`ErrParameterInvalid/Missing/
+   TooLarge`, `ErrPrivilegeNotPermitted`, `ErrDatabaseInvalidName`, ...).
+   Using their factory *is* the classification — which is exactly why reaching
+   for `WrapErrParameterInvalidMsg` to express an internal assertion is wrong.
+2. **Boundary marking** for dual-use sentinels. `ErrCollectionNotFound` stays
+   SystemError (internal refresh/retry paths depend on that), and the proxy
+   boundary stamps it InputError only where the name came from the user:
+
+   ```go
+   // proxy meta cache, the central chokepoint for user-supplied names:
+   return collection, merr.WrapErrAsInputErrorWhen(err,
+       merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+   ```
+
+   `WrapErrAsInputError(err)` marks unconditionally;
+   `WrapErrAsInputErrorWhen(err, targets...)` marks only if the error's code
+   matches a target. Both preserve `errors.Is` and the code — they relabel the
+   classification, nothing else.
+
+### What the classification drives
+
+| Surface | InputError behavior |
+|---|---|
+| `commonpb.Status` | `ExtraInfo["is_input_error"]="true"`, `Retriable` forced `false` |
+| Prometheus | request counted as `fail_input` / `rejected_user` (vs `fail_system` / `rejected_system`) |
+| Access log / failure log | `error_type` field set accordingly |
+| proxy lb_policy | **no cross-replica failover** — retrying a bad request elsewhere can't help |
+| `retry.Do` | aborts immediately instead of retrying |
+
+The last two rows are why misclassification is not cosmetic: marking an
+internal failure as InputError disables the retry/failover machinery that
+would have healed it, and a dashboard blames users for Milvus bugs.
+
+### Pitfalls (each of these happened)
+
+- **Don't mark a shared sentinel InputError globally** to fix one callsite —
+  every internal `retry.Do` loop waiting on that error stops retrying. Use
+  boundary marking instead.
+- **Don't classify in a helper** what only the boundary can know. The same
+  not-found is the user's fault when the name came from a request, and a
+  system fault when it came from internal state — stamp at the chokepoint
+  where the origin is known.
+- **"Looks like validation" is not the test.** Coordinator-to-node protocol
+  checks, segcore output checks, and cgo boundary checks all look like
+  validation; none of them are user input.
 
 ## The three correct ways
 
