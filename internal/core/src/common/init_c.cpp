@@ -77,29 +77,6 @@ SetThreadPoolMaxThreadsSize(const int value) {
 }
 
 void
-SetFieldDataLoadMemoryLimitMB(const int64_t value) {
-    milvus::storage::TransientMemoryBudget::SetFieldDataLoadBudgetBytes(
-        static_cast<size_t>(std::max<int64_t>(value, 1)) << 20);
-}
-
-void
-SetFieldDataLoadBatchSizeMB(const int64_t value) {
-    milvus::segcore::SetFieldDataLoadBatchTargetBytes(
-        std::max<int64_t>(value, 1) << 20);
-}
-
-void
-SetFieldDataLoadReadBufferSizeMB(const int64_t value) {
-    milvus::segcore::SetFieldDataReadWindowBytes(std::max<int64_t>(value, 1)
-                                                 << 20);
-}
-
-void
-SetFieldDataLoadMaxReadParallelism(const int64_t value) {
-    milvus::segcore::SetFieldDataMaxReadParallelism(value);
-}
-
-void
 SetDefaultExprEvalBatchSize(int64_t val) {
     milvus::SetDefaultExecEvalExprBatchSize(val);
 }
