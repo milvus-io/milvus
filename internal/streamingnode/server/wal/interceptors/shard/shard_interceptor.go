@@ -45,6 +45,7 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeFlush:              impl.handleFlushSegment,
 		message.MessageTypeFlushAll:           impl.handleFlushAllMessage,
 		message.MessageTypeTruncateCollection: impl.handleTruncateCollectionMessage,
+		message.MessageTypeSplitShard:         impl.handleSplitShardMessage,
 	}
 }
 
@@ -151,6 +152,11 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	header := insertMsg.Header()
 	collectionID := header.GetCollectionId()
 	schemaVersion := header.GetSchemaVersion()
+	if err := impl.shardManager.CheckIfVChannelCanBeWritten(collectionID); errors.Is(err, shards.ErrVChannelFenced) {
+		// the vchannel is fenced by shard split, the client should refresh
+		// the routing table and write to the new shards.
+		return nil, status.NewShardFenced(msg.VChannel())
+	}
 	correctSchemaVersion, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(header)
 	if err != nil {
 		if errors.Is(err, shards.ErrCollectionNotFound) {
@@ -239,6 +245,11 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	deleteMessage := message.MustAsMutableDeleteMessageV1(msg)
 	header := deleteMessage.Header()
+	if err := impl.shardManager.CheckIfVChannelCanBeWritten(header.GetCollectionId()); errors.Is(err, shards.ErrVChannelFenced) {
+		// the vchannel is fenced by shard split, the client should refresh
+		// the routing table and write to the new shards.
+		return nil, status.NewShardFenced(msg.VChannel())
+	}
 	if err := impl.shardManager.CheckIfCollectionExists(header.GetCollectionId()); err != nil {
 		// The collection can not be deleted at current shard, ignored
 		return nil, status.NewUnrecoverableError(err.Error())
@@ -246,6 +257,38 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 
 	impl.shardManager.ApplyDelete(deleteMessage)
 	return appendOp(ctx, msg)
+}
+
+// handleSplitShardMessage handles the split shard message.
+// The message is the write fence of the source vchannel: it must be appended
+// exclusively (ExclusiveRequired), and after it is persisted the vchannel
+// never accepts new DML again.
+func (impl *shardInterceptor) handleSplitShardMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	splitShardMsg := message.MustAsMutableSplitShardMessageV2(msg)
+	header := splitShardMsg.Header()
+	collectionID := header.GetCollectionId()
+	if err := impl.shardManager.CheckIfVChannelCanBeWritten(collectionID); err != nil {
+		if errors.Is(err, shards.ErrVChannelFenced) {
+			// idempotent: the vchannel is already fenced by a previous split
+			// message, the split RPC interprets the error and returns the
+			// recorded T_switch.
+			return nil, status.NewShardFenced(msg.VChannel())
+		}
+		return nil, status.NewUnrecoverableError(err.Error())
+	}
+	// Defensively flush and fence the segment allocation until the split message.
+	// The ManualFlush message written right before the split message should
+	// have sealed all growing segments already.
+	if _, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(collectionID, msg.TimeTick()); err != nil {
+		return nil, status.NewUnrecoverableError(err.Error())
+	}
+
+	msgID, err := appendOp(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
+	impl.shardManager.SplitShard(message.MustAsImmutableSplitShardMessageV2(msg.IntoImmutableMessage(msgID)))
+	return msgID, nil
 }
 
 // handleManualFlushMessage handles the manual flush message.

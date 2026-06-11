@@ -52,6 +52,53 @@ func (m *shardManagerImpl) checkIfCollectionExists(collectionID int64) error {
 	return nil
 }
 
+// CheckIfVChannelCanBeWritten checks if the vchannel of the collection still accepts new DML.
+func (m *shardManagerImpl) CheckIfVChannelCanBeWritten(collectionID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.checkIfVChannelCanBeWritten(collectionID)
+}
+
+// checkIfVChannelCanBeWritten checks if the vchannel of the collection still accepts new DML.
+func (m *shardManagerImpl) checkIfVChannelCanBeWritten(collectionID int64) error {
+	collectionInfo, ok := m.collections[collectionID]
+	if !ok {
+		return ErrCollectionNotFound
+	}
+	if collectionInfo.State == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED {
+		return ErrVChannelFenced
+	}
+	return nil
+}
+
+// SplitShard marks the vchannel of the collection as splitted (fenced) when
+// a SplitShard message is written into the wal.
+// The growing segments have been sealed by the ManualFlush message written
+// right before the SplitShard message; here only the fence state flips.
+func (m *shardManagerImpl) SplitShard(msg message.ImmutableSplitShardMessageV2) {
+	collectionID := msg.Header().CollectionId
+	logger := m.Logger().With(log.FieldMessage(msg))
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	collectionInfo, ok := m.collections[collectionID]
+	if !ok {
+		logger.Warn("collection not exists when splitting shard", zap.Int64("collectionID", collectionID))
+		return
+	}
+	if collectionInfo.State == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED {
+		// idempotent, only the first split message takes effect.
+		return
+	}
+	collectionInfo.State = streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED
+	logger.Info("vchannel is fenced by shard split",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("splitTaskID", msg.Header().GetSplitTaskId()),
+		zap.Uint64("timetick", msg.TimeTick()))
+}
+
 // CreateCollection creates a new partition manager when create collection message is written into wal.
 // After CreateCollection is called, the ddl and dml on the collection can be applied.
 func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectionMessageV1) {

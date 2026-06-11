@@ -682,7 +682,7 @@ enum VChannelState {
     VCHANNEL_STATE_UNKNOWN = 0;  // should never used.
     VCHANNEL_STATE_NORMAL  = 1;  // vchannel is normal.
     VCHANNEL_STATE_DROPPED = 2;  // vchannel is dropped.
-    // VCHANNEL_STATE_SPLITTED = 3; // TODO: vchannel is splitted to other vchannels, used to support shard-splitting.
+    VCHANNEL_STATE_SPLITTED = 3; // vchannel is splitted into other vchannels by shard split, fenced for any new DML.
 }
 
 // VChannelSchemaState is the state of vchannel schema.

@@ -16,6 +16,16 @@ type ShardManager interface {
 
 	CheckIfCollectionExists(collectionID int64) error
 
+	// CheckIfVChannelCanBeWritten checks if the vchannel of the collection
+	// still accepts new DML. It returns ErrVChannelFenced if the vchannel
+	// has been fenced by shard split.
+	CheckIfVChannelCanBeWritten(collectionID int64) error
+
+	// SplitShard marks the vchannel of the collection as splitted (fenced)
+	// when a SplitShard message is written into the wal. After it is called,
+	// any new DML on the vchannel is rejected forever.
+	SplitShard(msg message.ImmutableSplitShardMessageV2)
+
 	CreateCollection(msg message.ImmutableCreateCollectionMessageV1)
 
 	DropCollection(msg message.ImmutableDropCollectionMessageV1)
