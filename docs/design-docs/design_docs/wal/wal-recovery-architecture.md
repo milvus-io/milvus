@@ -417,6 +417,18 @@ compute the global data checkpoint as the minimum data checkpoint across data
 owners.
 
 ```go
+type DataProgressKind int
+
+const (
+    // DataProgressDurable is the normal Data checkpoint frontier. It means the
+    // module's recovery-visible Data effect has been persisted.
+    DataProgressDurable DataProgressKind = iota
+
+    // DataProgressMaterialized is the coordinator-visible materialization
+    // frontier used by synchronous flush/drop acknowledgements.
+    DataProgressMaterialized
+)
+
 type DataFrontierView interface {
     DataFrontier(scope Scope) walcheckpoint.Barrier
 }
@@ -425,6 +437,7 @@ type DataFrontierView interface {
 ```go
 type Scope struct {
     Type ScopeType
+    Kind DataProgressKind
 
     VChannel     string
     CollectionID int64
@@ -451,6 +464,15 @@ type DataFrontierProvider interface {
 
 RecoveryStorage builds the provider by composing all modules that implement
 `DataFrontierView`.
+
+`Scope.Kind` selects the progress kind. `DataProgressDurable` is used for
+normal RecoveryStorage/Ack data dependency checks. `DataProgressMaterialized`
+is used when the caller needs coordinator-visible data output, currently
+`DropCollection`, `ManualFlush`, and `FlushAll`. `SegmentModule` maps
+`DataProgressMaterialized` to its normal Segment Data frontier because L1 flush
+is already committed through DataCoord. `TransformLogModule` returns a distinct
+L0 materialized frontier backed by catalog-persisted
+`materialized_time_tick`.
 
 ```go
 type CheckpointPersistedObserver interface {

@@ -1,8 +1,9 @@
 package transformlog
 
 import (
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 )
 
 type moduleDirtySnapshot struct {

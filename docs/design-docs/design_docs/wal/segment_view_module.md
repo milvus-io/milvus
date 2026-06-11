@@ -204,6 +204,11 @@ scope:
 - `ScopeVChannel`: segments in the target vchannel;
 - `ScopePartition`: segments in the target vchannel/partition.
 
+`scope.Kind == DataProgressDurable` and
+`scope.Kind == DataProgressMaterialized` return the same Segment frontier.
+SegmentModule's Data work commits L1 output through DataCoord, so its normal
+durable frontier is already coordinator-visible materialization.
+
 AckModule uses this through RecoveryStorage's composed `DataFrontierProvider`.
 
 ### CheckpointPersistedObserver

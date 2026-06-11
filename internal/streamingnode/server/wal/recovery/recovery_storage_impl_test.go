@@ -60,6 +60,16 @@ func (v testDurableFrontierView) DataFrontier(scope moduleapi.Scope) walcheckpoi
 	}
 }
 
+type recordingFrontierView struct {
+	barrier walcheckpoint.Barrier
+	scopes  []moduleapi.Scope
+}
+
+func (v *recordingFrontierView) DataFrontier(scope moduleapi.Scope) walcheckpoint.Barrier {
+	v.scopes = append(v.scopes, scope)
+	return v.barrier
+}
+
 type notifyingDirtyModule struct {
 	testRecoveryModule
 	notify func()
@@ -335,6 +345,60 @@ func TestBroadcastAckModulePreconditionsFollowMessageFlow(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			assert.Equal(t, test.ready, module.buildPrecondition(test.msg).Ready())
+		})
+	}
+}
+
+func TestBroadcastAckModuleUsesMaterializedFrontierForSynchronousFlushAndDrop(t *testing.T) {
+	blockingBarrier := walcheckpoint.BarrierFunc(func() uint64 { return 9 })
+	view := &recordingFrontierView{barrier: blockingBarrier}
+	module := newBroadcastAckModule("test-pchannel", view, moduleapi.Runtime{})
+
+	tests := []struct {
+		name string
+		msg  message.ImmutableMessage
+		kind moduleapi.DataProgressKind
+	}{
+		{
+			name: "drop collection waits for materialized frontier",
+			msg: newAckPreconditionMessage(t, message.NewDropCollectionMessageBuilderV1().
+				WithVChannel("v1").
+				WithHeader(&message.DropCollectionMessageHeader{CollectionId: 1}).
+				WithBody(&msgpb.DropCollectionRequest{})),
+			kind: moduleapi.DataProgressMaterialized,
+		},
+		{
+			name: "manual flush waits for materialized frontier",
+			msg: newAckPreconditionMessage(t, message.NewManualFlushMessageBuilderV2().
+				WithVChannel("v1").
+				WithHeader(&message.ManualFlushMessageHeader{CollectionId: 1}).
+				WithBody(&message.ManualFlushMessageBody{})),
+			kind: moduleapi.DataProgressMaterialized,
+		},
+		{
+			name: "flush all waits for materialized frontier",
+			msg: newAckPreconditionMessage(t, message.NewFlushAllMessageBuilderV2().
+				WithVChannel("v1").
+				WithHeader(&message.FlushAllMessageHeader{}).
+				WithBody(&message.FlushAllMessageBody{})),
+			kind: moduleapi.DataProgressMaterialized,
+		},
+		{
+			name: "alter wal waits for durable frontier",
+			msg: newAckPreconditionMessage(t, message.NewAlterWALMessageBuilderV2().
+				WithVChannel("v1").
+				WithHeader(&message.AlterWALMessageHeader{TargetWalName: commonpb.WALName_RocksMQ}).
+				WithBody(&message.AlterWALMessageBody{})),
+			kind: moduleapi.DataProgressDurable,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			view.scopes = nil
+			assert.False(t, module.buildPrecondition(test.msg).Ready())
+			require.Len(t, view.scopes, 1)
+			assert.Equal(t, test.kind, view.scopes[0].Kind)
 		})
 	}
 }

@@ -40,9 +40,11 @@ message and calls the coordinator Ack API after previous ack task completion.
 ## DropCollection
 
 SegmentModule flushes every retained segment in the target vchannel whose create
-timetick is older than the message timetick. TransformLogModule flushes the
-target vchannel TransformLog buffer. These operations return Data barriers
-owned by the affected SegmentModule and TransformLogModule state.
+timetick is older than the message timetick. TransformLogModule first flushes
+the target vchannel TransformLog buffer to make Delete entries durable, then
+materializes TransformLog entries up to the message timetick into L0 segments.
+These operations return Data barriers owned by the affected SegmentModule and
+TransformLogModule state.
 
 VChannelModule updates the VChannel View.Meta to dropped at the message
 timetick and marks the View dirty. The retained View remains available for
@@ -50,7 +52,7 @@ historical-message filtering and VChannelModule-local tombstone finalization.
 
 AckModule returns an ack DataBarrier for the broadcast message. The ack
 precondition waits for previous ack task completion and the target vchannel's
-composed SegmentModule/TransformLogModule Data frontier to reach the
+composed SegmentModule/TransformLogModule materialized frontier to reach the
 DropCollection timetick.
 
 ## TruncateCollection
@@ -187,20 +189,28 @@ SegmentModule flushes every retained segment in the target vchannel whose
 create timetick is older than the message timetick. It ignores any segment id
 hints in the message body for recovery semantics.
 
-The affected Segment Views return Meta and Data barriers according to the Flush
-rules. AckModule returns an ack DataBarrier for the broadcast message. The ack
-precondition waits for previous ack task completion and the target vchannel's
-SegmentModule Data frontier to reach the ManualFlush timetick.
+TransformLogModule flushes the target vchannel TransformLog buffer to the
+message timetick and then materializes TransformLog entries up to that timetick
+into L0 segments.
+
+The affected Segment Views and TransformLog return Data barriers according to
+their durable and materialized progress rules. AckModule returns an ack
+DataBarrier for the broadcast message. The ack precondition waits for previous
+ack task completion and the target vchannel's composed
+SegmentModule/TransformLogModule materialized frontier to reach the ManualFlush
+timetick.
 
 ## FlushAll
 
 SegmentModule flushes every retained segment on the PChannel whose create
 timetick is older than the message timetick. TransformLogModule flushes all
-eligible TransformLog buffers.
+eligible TransformLog buffers and materializes all local TransformLogs up to
+the message timetick.
 
 AckModule returns an ack DataBarrier for the broadcast message. The ack
 precondition waits for previous ack task completion and the all-local composed
-SegmentModule/TransformLogModule Data frontier to reach the FlushAll timetick.
+SegmentModule/TransformLogModule materialized frontier to reach the FlushAll
+timetick.
 
 ## AlterReplicateConfig
 

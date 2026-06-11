@@ -3,11 +3,12 @@ package moduleapi
 import (
 	"context"
 
+	"google.golang.org/protobuf/proto"
+
 	walcheckpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/checkpoint"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	scheduler "github.com/milvus-io/milvus/pkg/v3/syncutil/preconditioned"
-	"google.golang.org/protobuf/proto"
 )
 
 type Module interface {
@@ -113,8 +114,16 @@ const (
 	ScopePartition
 )
 
+type DataProgressKind int
+
+const (
+	DataProgressDurable DataProgressKind = iota
+	DataProgressMaterialized
+)
+
 type Scope struct {
 	Type ScopeType
+	Kind DataProgressKind
 
 	VChannel     string
 	CollectionID int64

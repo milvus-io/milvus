@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	walcheckpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/checkpoint"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
@@ -174,11 +176,21 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 		resource.Resource().ChunkManager(),
 		r.channel.Name,
 	)
+	transformLogMaterializer := waltransformlog.NewSyncMaterializer(
+		resource.Resource().ChunkManager(),
+		idalloc.NewMAllocator(resource.Resource().IDAllocator()),
+		syncmgr.BrokerMetaWriter(broker.NewCoordBroker(coord, paramtable.GetNodeID()), paramtable.GetNodeID()),
+	)
 	r.transformLogModule = waltransformlog.NewModule(
 		r.channel.Name,
 		transformLogMetas,
 		transformLogStore,
 		waltransformlog.WithModuleRuntime(moduleRuntime),
+		waltransformlog.WithModuleMaterializer(transformLogMaterializer),
+		waltransformlog.WithModuleMaterializeLimits(
+			uint64(paramtable.Get().StreamingCfg.FlushL0MaxRowNum.GetAsInt()),
+			uint64(paramtable.Get().StreamingCfg.FlushL0MaxSize.GetAsSize()),
+		),
 	)
 	if err := r.transformLogModule.Recover(ctx); err != nil {
 		return err

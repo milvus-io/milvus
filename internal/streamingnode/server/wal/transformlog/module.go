@@ -25,14 +25,17 @@ const (
 )
 
 type Module struct {
-	mu          sync.Mutex
-	pchannel    string
-	logs        map[string]*moduleLog
-	store       Store
-	maxRows     uint64
-	runtime     moduleapi.Runtime
-	mode        moduleMode
-	initialized bool
+	mu                  sync.Mutex
+	pchannel            string
+	logs                map[string]*moduleLog
+	store               Store
+	maxRows             uint64
+	materializer        Materializer
+	materializeMaxRows  uint64
+	materializeMaxBytes uint64
+	runtime             moduleapi.Runtime
+	mode                moduleMode
+	initialized         bool
 }
 
 type ModuleOption func(*Module)
@@ -46,6 +49,19 @@ func WithModuleRuntime(runtime moduleapi.Runtime) ModuleOption {
 func WithModuleMaxRows(maxRows uint64) ModuleOption {
 	return func(m *Module) {
 		m.maxRows = maxRows
+	}
+}
+
+func WithModuleMaterializer(materializer Materializer) ModuleOption {
+	return func(m *Module) {
+		m.materializer = materializer
+	}
+}
+
+func WithModuleMaterializeLimits(maxRows uint64, maxBytes uint64) ModuleOption {
+	return func(m *Module) {
+		m.materializeMaxRows = maxRows
+		m.materializeMaxBytes = maxBytes
 	}
 }
 
@@ -80,9 +96,12 @@ func (m *Module) ObserveMessage(ctx context.Context, msg message.ImmutableMessag
 	case message.MessageTypeTxn:
 		return m.observeTransformLogMessage(msg)
 	case message.MessageTypeDropCollection,
-		message.MessageTypeTruncateCollection,
+		message.MessageTypeFlushAll:
+		return m.materializeByMessageTimeTick(msg.TimeTick(), msg.VChannel(), msg.MessageType())
+	case message.MessageTypeManualFlush:
+		return m.materializeByMessageTimeTick(msg.TimeTick(), msg.VChannel(), msg.MessageType())
+	case message.MessageTypeTruncateCollection,
 		message.MessageTypeDropPartition,
-		message.MessageTypeFlushAll,
 		message.MessageTypeAlterWAL:
 		return m.flushByMessageTimeTick(msg.TimeTick(), msg.VChannel(), msg.MessageType())
 	case message.MessageTypeAlterCollection:
@@ -101,6 +120,9 @@ func (m *Module) SwitchIntoMetaAndData() moduleapi.ModuleSnapshot {
 	snapshot := make(map[string]*streamingpb.VChannelTransformLogMeta, len(m.logs))
 	for vchannel, log := range m.logs {
 		snapshot[vchannel] = log.log.SnapshotMeta()
+		if log.log.ShouldMaterialize() {
+			m.submitMaterializeTask(log, vchannel, log.log.DataCheckpointTimeTick())
+		}
 	}
 	return &moduleapi.TransformLogModuleSnapshot{TransformLogs: snapshot}
 }
@@ -148,20 +170,23 @@ func (m *Module) Read(ctx context.Context, opt transformlogapi.ReadOption) trans
 }
 
 func (m *Module) DataFrontier(scope moduleapi.Scope) walcheckpoint.Barrier {
-	logs := make(transformLogFrontierOwners, 0)
+	owners := make([]transformLogFrontierOwner, 0)
 	switch scope.Type {
 	case moduleapi.ScopeAll:
 		for _, log := range m.snapshotLogs() {
-			logs = append(logs, log)
+			owners = append(owners, log)
 		}
 	case moduleapi.ScopeVChannel, moduleapi.ScopePartition:
 		if log := m.getLog(scope.VChannel); log != nil {
-			logs = append(logs, log)
+			owners = append(owners, log)
 		}
 	default:
 		return nil
 	}
-	return logs
+	return transformLogFrontierOwners{
+		kind:   scope.Kind,
+		owners: owners,
+	}
 }
 
 func (m *Module) observeTransformLogMessage(msg message.ImmutableMessage) moduleapi.ObserveResult {
@@ -180,6 +205,23 @@ func (m *Module) observeTransformLogMessage(msg message.ImmutableMessage) module
 		m.submitFlushTask(log, msg.VChannel(), appendResult.DataTimeTick)
 	}
 	return moduleapi.ObserveResult{Data: log.dataBarrier()}
+}
+
+func (m *Module) materializeByMessageTimeTick(timetick uint64, vchannel string, msgType message.MessageType) moduleapi.ObserveResult {
+	if m.currentMode() != moduleModeMetaAndData {
+		return moduleapi.ObserveResult{}
+	}
+	if msgType == message.MessageTypeFlushAll {
+		result := moduleapi.ObserveResult{}
+		for name, log := range m.snapshotLogs() {
+			result.Data = composeBarrier(result.Data, m.materializeLog(name, log, timetick))
+		}
+		return result
+	}
+	if vchannel == "" {
+		return moduleapi.ObserveResult{}
+	}
+	return moduleapi.ObserveResult{Data: m.materializeLog(vchannel, m.getLog(vchannel), timetick)}
 }
 
 func (m *Module) flushByMessageTimeTick(timetick uint64, vchannel string, msgType message.MessageType) moduleapi.ObserveResult {
@@ -210,11 +252,31 @@ func (m *Module) flushLog(vchannel string, log *moduleLog, timetick uint64) walc
 	return log.dataBarrier()
 }
 
+func (m *Module) materializeLog(vchannel string, log *moduleLog, timetick uint64) walcheckpoint.Barrier {
+	if log == nil {
+		return nil
+	}
+	if !log.log.HasPendingWork() && timetick <= log.log.DataCheckpointTimeTick() && timetick <= log.log.MaterializedTimeTick() {
+		return nil
+	}
+	m.submitFlushTask(log, vchannel, timetick)
+	m.submitMaterializeTask(log, vchannel, timetick)
+	return log.materializedBarrier()
+}
+
 func (m *Module) submitFlushTask(log *moduleLog, vchannel string, timetick uint64) {
 	if m.runtime.Scheduler == nil {
 		return
 	}
 	task := log.startFlushTask(m, vchannel, timetick)
+	m.runtime.Scheduler.Submit(task)
+}
+
+func (m *Module) submitMaterializeTask(log *moduleLog, vchannel string, timetick uint64) {
+	if m.runtime.Scheduler == nil {
+		return
+	}
+	task := log.startMaterializeTask(m, vchannel, timetick)
 	m.runtime.Scheduler.Submit(task)
 }
 
@@ -253,17 +315,21 @@ func (m *Module) snapshotLogs() map[string]*moduleLog {
 
 func (m *Module) newTransformLog(vchannel string, meta *streamingpb.VChannelTransformLogMeta) TransformLog {
 	return New(Config{
-		VChannel: vchannel,
-		MaxRows:  m.maxRows,
-		Meta:     meta,
-		Store:    m.store,
+		VChannel:            vchannel,
+		MaxRows:             m.maxRows,
+		MaterializeMaxRows:  m.materializeMaxRows,
+		MaterializeMaxBytes: m.materializeMaxBytes,
+		Meta:                meta,
+		Store:               m.store,
+		Materializer:        m.materializer,
 	})
 }
 
 type moduleLog struct {
-	mu    sync.Mutex
-	log   TransformLog
-	tasks []scheduler.TaskHandle
+	mu               sync.Mutex
+	log              TransformLog
+	flushTasks       []scheduler.TaskHandle
+	materializeTasks []scheduler.TaskHandle
 }
 
 func newModuleLog(log TransformLog) *moduleLog {
@@ -271,24 +337,45 @@ func newModuleLog(log TransformLog) *moduleLog {
 }
 
 func (l *moduleLog) hasDataCheckpoint() bool {
-	return l.log.DataBarrierTimeTick() > 0 || l.log.HasPendingWork() || l.hasPendingTask()
+	return l.log.DataBarrierTimeTick() > 0 || l.log.HasPendingWork() || l.hasPendingFlushTask()
 }
 
 func (l *moduleLog) dataBarrier() walcheckpoint.Barrier {
 	return walcheckpoint.BarrierFunc(l.log.DataBarrierTimeTick)
 }
 
-func (l *moduleLog) frontierTimeTick() uint64 {
-	if l.log.HasDirty() || l.log.HasPendingWork() || l.hasPendingTask() {
+func (l *moduleLog) materializedBarrier() walcheckpoint.Barrier {
+	return walcheckpoint.BarrierFunc(l.log.MaterializedBarrierTimeTick)
+}
+
+func (l *moduleLog) frontierTimeTick(kind moduleapi.DataProgressKind) uint64 {
+	if kind == moduleapi.DataProgressMaterialized {
+		if l.log.HasDirty() || l.hasPendingMaterializeTask() {
+			return l.log.MaterializedBarrierTimeTick()
+		}
+		return math.MaxUint64
+	}
+	if l.log.HasDirty() || l.log.HasPendingWork() || l.hasPendingFlushTask() {
 		return l.log.DataBarrierTimeTick()
 	}
 	return math.MaxUint64
 }
 
-func (l *moduleLog) hasPendingTask() bool {
+func (l *moduleLog) hasPendingFlushTask() bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	for _, task := range l.tasks {
+	for _, task := range l.flushTasks {
+		if task != nil && !task.Done() {
+			return true
+		}
+	}
+	return false
+}
+
+func (l *moduleLog) hasPendingMaterializeTask() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, task := range l.materializeTasks {
 		if task != nil && !task.Done() {
 			return true
 		}
@@ -306,22 +393,54 @@ func (l *moduleLog) startFlushTask(module *Module, vchannel string, timetick uin
 		timetick:     timetick,
 		precondition: l.taskPreconditionLocked(),
 	}
-	l.tasks = append(l.tasks, task)
+	l.flushTasks = append(l.flushTasks, task)
+	return task
+}
+
+func (l *moduleLog) startMaterializeTask(module *Module, vchannel string, timetick uint64) scheduler.Task {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	task := &materializeTask{
+		module:   module,
+		vchannel: vchannel,
+		log:      l,
+		timetick: timetick,
+		precondition: scheduler.All(l.taskPreconditionLocked(), scheduler.PreconditionFunc(func() bool {
+			return l.log.DataBarrierTimeTick() >= timetick
+		})),
+	}
+	l.materializeTasks = append(l.materializeTasks, task)
 	return task
 }
 
 func (l *moduleLog) taskPreconditionLocked() scheduler.Precondition {
-	pending := l.tasks[:0]
-	preconditions := make([]scheduler.Precondition, 0, len(l.tasks))
-	for _, task := range l.tasks {
+	l.flushTasks = compactPendingTasks(l.flushTasks)
+	l.materializeTasks = compactPendingTasks(l.materializeTasks)
+	preconditions := make([]scheduler.Precondition, 0, len(l.flushTasks)+len(l.materializeTasks))
+	for _, task := range l.flushTasks {
+		if task == nil || task.Done() {
+			continue
+		}
+		preconditions = append(preconditions, scheduler.After(task))
+	}
+	for _, task := range l.materializeTasks {
+		if task == nil || task.Done() {
+			continue
+		}
+		preconditions = append(preconditions, scheduler.After(task))
+	}
+	return scheduler.All(preconditions...)
+}
+
+func compactPendingTasks(tasks []scheduler.TaskHandle) []scheduler.TaskHandle {
+	pending := tasks[:0]
+	for _, task := range tasks {
 		if task == nil || task.Done() {
 			continue
 		}
 		pending = append(pending, task)
-		preconditions = append(preconditions, scheduler.After(task))
 	}
-	l.tasks = pending
-	return scheduler.All(preconditions...)
+	return pending
 }
 
 type flushTask struct {
@@ -354,6 +473,42 @@ func (t *flushTask) Run(ctx context.Context) error {
 	if result.NextTargetTimeTick > 0 {
 		t.module.submitFlushTask(t.log, t.vchannel, result.NextTargetTimeTick)
 	}
+	if t.log.log.ShouldMaterialize() && !t.log.hasPendingMaterializeTask() {
+		t.module.submitMaterializeTask(t.log, t.vchannel, t.log.log.DataCheckpointTimeTick())
+	}
+	if t.module.runtime.Notifier != nil {
+		t.module.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameTransformLog)
+	}
+	return nil
+}
+
+type materializeTask struct {
+	module       *Module
+	vchannel     string
+	log          *moduleLog
+	timetick     uint64
+	precondition scheduler.Precondition
+	done         atomic.Bool
+}
+
+func (t *materializeTask) Name() string {
+	return "transformlog-materialize"
+}
+
+func (t *materializeTask) Precondition() scheduler.Precondition {
+	return t.precondition
+}
+
+func (t *materializeTask) Done() bool {
+	return t.done.Load()
+}
+
+func (t *materializeTask) Run(ctx context.Context) error {
+	_, err := t.log.log.Materialize(ctx, MaterializeOption{TargetTimeTick: t.timetick})
+	if err != nil {
+		return err
+	}
+	t.done.Store(true)
 	if t.module.runtime.Notifier != nil {
 		t.module.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameTransformLog)
 	}
@@ -361,18 +516,21 @@ func (t *flushTask) Run(ctx context.Context) error {
 }
 
 type transformLogFrontierOwner interface {
-	frontierTimeTick() uint64
+	frontierTimeTick(moduleapi.DataProgressKind) uint64
 }
 
-type transformLogFrontierOwners []transformLogFrontierOwner
+type transformLogFrontierOwners struct {
+	kind   moduleapi.DataProgressKind
+	owners []transformLogFrontierOwner
+}
 
 func (owners transformLogFrontierOwners) TimeTick() uint64 {
-	if len(owners) == 0 {
+	if len(owners.owners) == 0 {
 		return math.MaxUint64
 	}
 	frontier := uint64(math.MaxUint64)
-	for _, owner := range owners {
-		if timetick := owner.frontierTimeTick(); timetick < frontier {
+	for _, owner := range owners.owners {
+		if timetick := owner.frontierTimeTick(owners.kind); timetick < frontier {
 			frontier = timetick
 		}
 	}
@@ -393,5 +551,5 @@ var (
 	_ moduleapi.Module           = (*Module)(nil)
 	_ moduleapi.DataFrontierView = (*Module)(nil)
 	_ transformlogapi.Accesser   = (*Module)(nil)
-	_ walcheckpoint.Barrier      = (transformLogFrontierOwners)(nil)
+	_ walcheckpoint.Barrier      = transformLogFrontierOwners{}
 )
