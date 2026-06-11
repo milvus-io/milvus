@@ -5233,7 +5233,10 @@ class TestImport2PCRestOperation(TestBase):
 
     @pytest.mark.L0
     @pytest.mark.xfail(
-        reason="Manual compaction may remain Executing on current import 2PC test builds",
+        reason=(
+            "milvus-io/milvus#50464: manual MixCompaction may remain Executing after compacting "
+            "committed import segments with normal segments"
+        ),
         strict=False,
     )
     def test_import_2pc_manual_compaction_after_commit_preserves_rows(self):
