@@ -13,55 +13,40 @@ import (
 
 const exportedSnapshotFilesPath = "files"
 
-type snapshotExporter struct {
-	sourceCM     storage.ChunkManager
-	targetCM     storage.ChunkManager
-	copier       storage.CrossBucketCopier
-	sourceBucket string
-	targetBucket string
-}
-
-func newSnapshotExporter(
+func exportSnapshot(
+	ctx context.Context,
 	sourceCM storage.ChunkManager,
 	targetCM storage.ChunkManager,
 	copier storage.CrossBucketCopier,
 	sourceBucket string,
 	targetBucket string,
-) *snapshotExporter {
-	return &snapshotExporter{
-		sourceCM:     sourceCM,
-		targetCM:     targetCM,
-		copier:       copier,
-		sourceBucket: sourceBucket,
-		targetBucket: targetBucket,
-	}
-}
-
-func (e *snapshotExporter) Export(ctx context.Context, snapshot *SnapshotData, targetPath string) (string, error) {
+	snapshot *SnapshotData,
+	targetPath string,
+) (string, error) {
 	if snapshot == nil || snapshot.SnapshotInfo == nil {
 		return "", fmt.Errorf("snapshot cannot be nil")
 	}
-	if e.sourceCM == nil {
+	if sourceCM == nil {
 		return "", fmt.Errorf("source chunk manager cannot be nil")
 	}
-	if e.targetCM == nil {
+	if targetCM == nil {
 		return "", fmt.Errorf("target chunk manager cannot be nil")
 	}
-	if err := validateSnapshotObjectPathForBucket(e.targetCM, "target_s3_path", targetPath, e.targetBucket); err != nil {
+	if err := validateSnapshotObjectPathForBucket(targetCM, "target_s3_path", targetPath, targetBucket); err != nil {
 		return "", err
 	}
-	targetRoot := strings.TrimSuffix(normalizeSnapshotObjectPath(e.targetCM, targetPath), "/")
+	targetRoot := strings.TrimSuffix(normalizeSnapshotObjectPath(targetCM, targetPath), "/")
 	if targetRoot == "" {
 		return "", fmt.Errorf("target_s3_path cannot be empty")
 	}
 
-	refs, err := ListSnapshotDataFiles(ctx, e.sourceCM, snapshot)
+	refs, err := ListSnapshotDataFiles(ctx, sourceCM, snapshot)
 	if err != nil {
 		return "", err
 	}
 	mappings := make(map[string]string, len(refs)*2)
 	for _, ref := range refs {
-		dst := exportedSnapshotPath(e.sourceCM, ref.NormalizedPath, targetRoot)
+		dst := exportedSnapshotPath(sourceCM, ref.NormalizedPath, targetRoot)
 		mappings[ref.Path] = dst
 		mappings[ref.NormalizedPath] = dst
 	}
@@ -75,10 +60,10 @@ func (e *snapshotExporter) Export(ctx context.Context, snapshot *SnapshotData, t
 		if src == dst {
 			continue
 		}
-		if e.copier == nil {
+		if copier == nil {
 			return "", fmt.Errorf("cross-bucket copier cannot be nil")
 		}
-		if err := e.copier.CopyCrossBucket(ctx, e.sourceBucket, src, e.targetBucket, dst); err != nil {
+		if err := copier.CopyCrossBucket(ctx, sourceBucket, src, targetBucket, dst); err != nil {
 			return "", fmt.Errorf("failed to copy snapshot file from %s to %s: %w", src, dst, err)
 		}
 	}
@@ -88,11 +73,7 @@ func (e *snapshotExporter) Export(ctx context.Context, snapshot *SnapshotData, t
 		fmt.Sprintf("%d", snapshot.SnapshotInfo.GetCollectionId()),
 		SnapshotMetadataSubPath,
 		fmt.Sprintf("%d.json", snapshot.SnapshotInfo.GetId()))
-	writtenURI, err := WriteSnapshotWithMapping(ctx, e.targetCM, snapshot, mappings, SnapshotRewriteOptions{
-		TargetRoot:    targetRoot,
-		MetadataURI:   metadataURI,
-		StrictMapping: true,
-	})
+	writtenURI, err := WriteSnapshotWithMapping(ctx, targetCM, snapshot, mappings, targetRoot, metadataURI)
 	if err != nil {
 		return "", err
 	}

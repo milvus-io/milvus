@@ -1000,13 +1000,16 @@ func (sm *snapshotManager) ExportSnapshot(
 		return "", err
 	}
 
-	metadataURI, err := newSnapshotExporter(
+	metadataURI, err := exportSnapshot(
+		ctx,
 		sm.snapshotMeta.reader.chunkManager,
 		resolved.ForeignCM,
 		resolved.Copier,
 		instanceCfg.BucketName,
 		resolved.ForeignBucket,
-	).Export(ctx, snapshotData, targetS3Path)
+		snapshotData,
+		targetS3Path,
+	)
 	if err != nil {
 		logger.Warn(ctx, "failed to export snapshot", zap.Error(err))
 		return "", err

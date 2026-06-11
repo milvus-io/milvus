@@ -51,7 +51,9 @@ import (
 )
 
 type fixedRestoreAllocator struct {
-	id typeutil.UniqueID
+	id          typeutil.UniqueID
+	allocNStart typeutil.UniqueID
+	allocNEnd   typeutil.UniqueID
 }
 
 func (a *fixedRestoreAllocator) AllocTimestamp(context.Context) (typeutil.Timestamp, error) {
@@ -63,7 +65,14 @@ func (a *fixedRestoreAllocator) AllocID(context.Context) (typeutil.UniqueID, err
 }
 
 func (a *fixedRestoreAllocator) AllocN(n int64) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	if a.allocNStart != 0 || a.allocNEnd != 0 {
+		return a.allocNStart, a.allocNEnd, nil
+	}
 	return 0, n, nil
+}
+
+func (s *mockMixCoord) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotRequest) (*datapb.ExportSnapshotResponse, error) {
+	panic("implement me")
 }
 
 // --- Test CreateSnapshot ---
@@ -1909,12 +1918,6 @@ func TestCreateRestoreJob_ExternalPersistsSourceLocationAndSkipsLocalSegmentLook
 		},
 	}
 
-	mockAlloc := allocator.NewMockAllocator(t)
-	mockAlloc.EXPECT().AllocN(int64(1)).Return(int64(1000), int64(1001), nil)
-
-	mockHandler := NewNMockHandler(t)
-	mockHandler.EXPECT().GetCollection(mock.Anything, int64(200)).Return(&collectionInfo{}, nil)
-
 	getSegmentCalled := false
 	mGetSegment := mockey.Mock((*meta).GetSegment).To(func(_ *meta, _ context.Context, _ int64) *SegmentInfo {
 		getSegmentCalled = true
@@ -1936,8 +1939,8 @@ func TestCreateRestoreJob_ExternalPersistsSourceLocationAndSkipsLocalSegmentLook
 
 	sm := &snapshotManager{
 		meta:            &meta{},
-		allocator:       mockAlloc,
-		handler:         mockHandler,
+		allocator:       &fixedRestoreAllocator{allocNStart: 1000, allocNEnd: 1001},
+		handler:         newMockHandler(),
 		copySegmentMeta: &copySegmentMeta{},
 	}
 
@@ -3039,13 +3042,22 @@ func TestSnapshotManager_ExportSnapshot_ResolvesForeignStorageAndUsesTargetManag
 		}).Build()
 	defer mockReadSnapshot.UnPatch()
 
-	mockExport := mockey.Mock((*snapshotExporter).Export).To(
-		func(exporter *snapshotExporter, _ context.Context, gotSnapshot *SnapshotData, targetPath string) (string, error) {
-			assert.Same(t, sourceCM, exporter.sourceCM)
-			assert.Same(t, targetCM, exporter.targetCM)
-			assert.Same(t, copier, exporter.copier)
-			assert.Equal(t, Params.MinioCfg.BucketName.GetValue(), exporter.sourceBucket)
-			assert.Equal(t, "foreign-bucket", exporter.targetBucket)
+	mockExport := mockey.Mock(exportSnapshot).To(
+		func(
+			_ context.Context,
+			gotSourceCM storage.ChunkManager,
+			gotTargetCM storage.ChunkManager,
+			gotCopier storage.CrossBucketCopier,
+			sourceBucket string,
+			targetBucket string,
+			gotSnapshot *SnapshotData,
+			targetPath string,
+		) (string, error) {
+			assert.Same(t, sourceCM, gotSourceCM)
+			assert.Same(t, targetCM, gotTargetCM)
+			assert.Same(t, copier, gotCopier)
+			assert.Equal(t, Params.MinioCfg.BucketName.GetValue(), sourceBucket)
+			assert.Equal(t, "foreign-bucket", targetBucket)
 			assert.Same(t, snapshotData, gotSnapshot)
 			assert.Equal(t, "s3://foreign-bucket/export-root", targetPath)
 			return "s3://foreign-bucket/export-root/snapshots/100/metadata/1.json", nil
@@ -3183,9 +3195,7 @@ func TestRestoreExternalSnapshot_BroadcastCarriesExternalSpec(t *testing.T) {
 		snapshotMeta: &snapshotMeta{},
 		allocator:    &fixedRestoreAllocator{id: 77},
 	}
-	mockWAL := mock_streaming.NewMockWALAccesser(t)
-	mockWAL.EXPECT().ControlChannel().Return("control_channel")
-	streaming.SetWALForTest(mockWAL)
+	streaming.SetupNoopWALForTest()
 
 	jobID, err := sm.RestoreExternalSnapshot(
 		ctx,

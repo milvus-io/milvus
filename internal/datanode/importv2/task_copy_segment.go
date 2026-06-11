@@ -32,47 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// Copy Segment Task for Snapshot Restore
-//
-// This file implements the task layer for high-performance segment copying during
-// snapshot restore operations. It manages the execution of segment copy operations
-// across multiple source-target segment pairs in parallel.
-//
-// TASK LIFECYCLE:
-// 1. Create: NewCopySegmentTask initializes task with source/target segment pairs
-// 2. Execute: Parallel copy of all segment pairs using worker pool
-// 3. Monitor: Task manager tracks progress and handles failures
-// 4. Complete: Report results to DataCoord with binlog/index metadata
-// 5. Cleanup: On failure, remove all copied files to prevent orphans
-//
-// PARALLEL EXECUTION:
-// - Each source-target segment pair is copied independently in parallel
-// - Uses shared execution pool (GetExecPool) for resource management
-// - Fail-fast behavior: first failure marks entire task as failed
-// - All copied files are tracked for potential cleanup on failure
-//
-// FAILURE HANDLING:
-// - Track all successfully copied files during execution
-// - On task failure, DropCopySegment triggers CleanupCopiedFiles
-// - Cleanup removes all copied files to prevent orphan data
-// - Thread-safe file tracking using mutex
-//
-// INTEGRATION:
-// - DataCoord creates tasks via CopySegment RPC
-// - DataNode executes tasks and reports results
-// - Inspector monitors task progress and triggers cleanup on failure
-
 // CopySegmentTask manages the copying of multiple segment pairs from source to target.
-//
-// This task is created by DataNode when it receives a CopySegment RPC from DataCoord.
-// It coordinates parallel copying of segment files (binlogs and indexes) for one or
-// more source-target segment pairs.
-//
-// Key responsibilities:
-//   - Parallel execution of segment copy operations
-//   - Progress tracking and result reporting to DataCoord
-//   - Cleanup of copied files on task failure
-//   - Resource management via slot allocation
 type CopySegmentTask struct {
 	ctx            context.Context                     // Context for cancellation and timeout
 	cancel         context.CancelFunc                  // Cancel function for aborting task execution
@@ -99,27 +59,6 @@ type CopySegmentTask struct {
 	copiedFiles   []string   // List of all successfully copied file paths
 }
 
-// NewCopySegmentTask creates a new copy segment task from a DataCoord request.
-//
-// This is called by DataNode when it receives a CopySegment RPC. The task is initialized
-// in Pending state and will be executed by the task scheduler when resources are available.
-//
-// Process flow:
-//  1. Create cancellable context for task execution control
-//  2. Initialize empty result structures for each target segment
-//  3. Extract collection and partition IDs from targets (deduplicate partitions)
-//  4. Create task with all necessary components (manager, chunkManager)
-//
-// The task supports copying multiple source-target segment pairs in a single task,
-// enabling efficient parallel execution and result batching.
-//
-// Parameters:
-//   - req: CopySegmentRequest containing source/target segment pairs and metadata
-//   - manager: TaskManager for state updates and progress tracking
-//   - cm: ChunkManager for file copy operations (S3, MinIO, local storage)
-//
-// Returns:
-//   - Task: Initialized CopySegmentTask in Pending state, ready for execution
 func NewCopySegmentTask(
 	req *datapb.CopySegmentRequest,
 	manager TaskManager,

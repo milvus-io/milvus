@@ -675,14 +675,7 @@ func deriveSnapshotRootURI(snapshotS3Location string) string {
 	if root == "" {
 		return ""
 	}
-	parsed, err := url.Parse(snapshotS3Location)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return root
-	}
-	parsed.Path = "/" + strings.TrimPrefix(root, "/")
-	parsed.RawQuery = ""
-	parsed.Fragment = ""
-	return strings.TrimSuffix(parsed.String(), "/")
+	return replaceSnapshotURIObjectKey(snapshotS3Location, root)
 }
 
 func deriveSnapshotSourceRootURI(snapshotS3Location string, snapshotData *SnapshotData) string {
@@ -693,7 +686,7 @@ func deriveSnapshotSourceRootURI(snapshotS3Location string, snapshotData *Snapsh
 			continue
 		}
 		if bundleRoot == "" || sourceRoot == bundleRoot || strings.HasPrefix(sourceRoot, bundleRoot+"/") {
-			return sourceRoot
+			return replaceSnapshotURIObjectKey(snapshotS3Location, sourceRoot)
 		}
 	}
 	rootURI := deriveSnapshotRootURI(snapshotS3Location)
@@ -701,6 +694,34 @@ func deriveSnapshotSourceRootURI(snapshotS3Location string, snapshotData *Snapsh
 		return ""
 	}
 	return joinSnapshotURI(rootURI, exportedSnapshotFilesPath)
+}
+
+func replaceSnapshotURIObjectKey(snapshotS3Location string, objectKey string) string {
+	objectKey = strings.Trim(objectKey, "/")
+	parsed, err := url.Parse(snapshotS3Location)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return objectKey
+	}
+
+	bucket, _, endpointHost, err := snapshotstorage.ParseForeignURI(snapshotS3Location)
+	if err != nil {
+		parsed.Path = "/" + objectKey
+		parsed.RawQuery = ""
+		parsed.Fragment = ""
+		return strings.TrimSuffix(parsed.String(), "/")
+	}
+	if endpointHost != "" {
+		parts := []string{bucket}
+		if objectKey != "" {
+			parts = append(parts, objectKey)
+		}
+		parsed.Path = "/" + path.Join(parts...)
+	} else {
+		parsed.Path = "/" + objectKey
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return strings.TrimSuffix(parsed.String(), "/")
 }
 
 func snapshotDataFilePaths(snapshotData *SnapshotData) []string {
@@ -759,6 +780,9 @@ func normalizeSnapshotDataObjectPath(objectPath string) string {
 	objectPath = strings.TrimSuffix(objectPath, "/")
 	parsed, err := url.Parse(objectPath)
 	if err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		if _, objectKey, _, parseErr := snapshotstorage.ParseForeignURI(objectPath); parseErr == nil {
+			return strings.Trim(objectKey, "/")
+		}
 		return strings.Trim(strings.TrimPrefix(parsed.Path, "/"), "/")
 	}
 	return strings.Trim(objectPath, "/")

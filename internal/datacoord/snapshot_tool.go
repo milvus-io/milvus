@@ -309,13 +309,13 @@ func (c *snapshotFileRefCollector) refs() []SnapshotFileRef {
 	return refs
 }
 
-type SnapshotRewriteOptions struct {
-	TargetRoot    string
-	MetadataURI   string
-	StrictMapping bool
-}
-
-func RewriteSnapshotWithMapping(cm storage.ChunkManager, snapshot *SnapshotData, mappings map[string]string, opts SnapshotRewriteOptions) (*SnapshotData, error) {
+func RewriteSnapshotWithMapping(
+	cm storage.ChunkManager,
+	snapshot *SnapshotData,
+	mappings map[string]string,
+	targetRoot string,
+	metadataURI string,
+) (*SnapshotData, error) {
 	if cm == nil {
 		return nil, fmt.Errorf("chunk manager cannot be nil")
 	}
@@ -328,8 +328,11 @@ func RewriteSnapshotWithMapping(cm storage.ChunkManager, snapshot *SnapshotData,
 	if snapshot.Collection == nil {
 		return nil, fmt.Errorf("collection description cannot be nil")
 	}
-	if opts.TargetRoot == "" {
+	if targetRoot == "" {
 		return nil, fmt.Errorf("target root cannot be empty")
+	}
+	if metadataURI == "" {
+		return nil, fmt.Errorf("metadata URI cannot be empty")
 	}
 	if err := validateSnapshotIndexInfos(snapshot.Indexes); err != nil {
 		return nil, err
@@ -338,7 +341,6 @@ func RewriteSnapshotWithMapping(cm storage.ChunkManager, snapshot *SnapshotData,
 	rewriter := snapshotPathRewriter{
 		cm:       cm,
 		mappings: mappings,
-		opts:     opts,
 	}
 	exported := &SnapshotData{
 		SnapshotInfo: proto.Clone(snapshot.SnapshotInfo).(*datapb.SnapshotInfo),
@@ -348,7 +350,7 @@ func RewriteSnapshotWithMapping(cm storage.ChunkManager, snapshot *SnapshotData,
 		BuildIDs:     append([]int64(nil), snapshot.BuildIDs...),
 		Layout:       datapb.SnapshotLayout_SnapshotLayoutSelfContained,
 	}
-	exported.SnapshotInfo.S3Location = opts.MetadataURI
+	exported.SnapshotInfo.S3Location = metadataURI
 	exported.Segments = make([]*datapb.SegmentDescription, 0, len(snapshot.Segments))
 	for i, segment := range snapshot.Segments {
 		if segment == nil {
@@ -451,21 +453,19 @@ func validateSnapshotJSONKeyIndexes(indexes map[int64]*datapb.JsonKeyStats, segm
 	return nil
 }
 
-func WriteSnapshotWithMapping(ctx context.Context, cm storage.ChunkManager, snapshot *SnapshotData, mappings map[string]string, opts SnapshotRewriteOptions) (string, error) {
-	rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, mappings, opts)
+func WriteSnapshotWithMapping(
+	ctx context.Context,
+	cm storage.ChunkManager,
+	snapshot *SnapshotData,
+	mappings map[string]string,
+	targetRoot string,
+	metadataURI string,
+) (string, error) {
+	rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, mappings, targetRoot, metadataURI)
 	if err != nil {
 		return "", err
 	}
-	metadataURI := opts.MetadataURI
-	if metadataURI == "" {
-		metadataURI = joinSnapshotURI(opts.TargetRoot,
-			SnapshotRootPath,
-			fmt.Sprintf("%d", rewritten.SnapshotInfo.GetCollectionId()),
-			SnapshotMetadataSubPath,
-			fmt.Sprintf("%d.json", rewritten.SnapshotInfo.GetId()))
-		rewritten.SnapshotInfo.S3Location = metadataURI
-	}
-	if _, err := NewSnapshotWriter(cm).SaveToRoot(ctx, rewritten, opts.TargetRoot, datapb.SnapshotLayout_SnapshotLayoutSelfContained); err != nil {
+	if _, err := NewSnapshotWriter(cm).SaveToRoot(ctx, rewritten, targetRoot, datapb.SnapshotLayout_SnapshotLayoutSelfContained); err != nil {
 		return "", err
 	}
 	return metadataURI, nil
@@ -474,7 +474,6 @@ func WriteSnapshotWithMapping(ctx context.Context, cm storage.ChunkManager, snap
 type snapshotPathRewriter struct {
 	cm       storage.ChunkManager
 	mappings map[string]string
-	opts     SnapshotRewriteOptions
 }
 
 func (r snapshotPathRewriter) rewriteSegment(segment *datapb.SegmentDescription) error {
@@ -655,10 +654,7 @@ func (r snapshotPathRewriter) rewritePath(src string, context string) (string, e
 	if dst, ok := r.mappings[normalized]; ok {
 		return dst, nil
 	}
-	if r.opts.StrictMapping {
-		return "", fmt.Errorf("missing snapshot file mapping for %s: %s", context, src)
-	}
-	return exportedSnapshotPath(r.cm, normalized, r.opts.TargetRoot), nil
+	return "", fmt.Errorf("missing snapshot file mapping for %s: %s", context, src)
 }
 
 func exportedSnapshotPath(cm storage.ChunkManager, src string, targetRoot string) string {

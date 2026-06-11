@@ -239,7 +239,8 @@ func TestCopySegmentTask_CleanupUsesTargetManager(t *testing.T) {
 	assert.Empty(t, sourceCM.removedFiles)
 	assert.Len(t, targetCM.removedFiles, 1)
 	assert.Len(t, targetCM.removedFiles[0], 1)
-	assert.Equal(t, "local-root/files/insert_log/200/2/20/101/1", targetCM.removedFiles[0][0])
+	assert.Len(t, copier.calls, 2)
+	assert.Equal(t, copier.calls[0].dstObject, targetCM.removedFiles[0][0])
 }
 
 func TestCopySegmentTask_CopySingleSegmentAllowsManifestOnlyStorageV3(t *testing.T) {

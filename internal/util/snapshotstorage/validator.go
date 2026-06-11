@@ -17,7 +17,6 @@
 package snapshotstorage
 
 import (
-	"context"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -39,16 +38,6 @@ var snapshotExtfsKeys = map[string]struct{}{
 	externalspec.ExtfsKeySSLCACert:      {},
 	externalspec.ExtfsKeyUseSSL:         {},
 	externalspec.ExtfsKeyUseVirtualHost: {},
-}
-
-func ValidateExternalSpec(
-	ctx context.Context,
-	direction Direction,
-	foreignURI string,
-	externalSpec string,
-) (*ValidatedSpec, error) {
-	_ = ctx
-	return ValidateSnapshotForeignStorage(direction, foreignURI, externalSpec)
 }
 
 func ValidateSnapshotForeignStorage(
@@ -115,7 +104,7 @@ func ValidateSnapshotForeignStorage(
 
 func validateDirection(direction Direction) error {
 	switch direction {
-	case DirectionExport, DirectionRestore:
+	case DirectionExport, DirectionRestore, DirectionCopySource:
 		return nil
 	default:
 		return merr.WrapErrParameterInvalidMsg("snapshot foreign storage direction %d is not supported", direction)

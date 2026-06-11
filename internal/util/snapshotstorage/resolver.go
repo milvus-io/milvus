@@ -311,7 +311,7 @@ func selectProviderCopyConfig(
 	if validated == nil || !validated.HasLayer2 {
 		return instanceCfg
 	}
-	if direction != DirectionRestore {
+	if direction != DirectionRestore && direction != DirectionCopySource {
 		return foreignCfg
 	}
 

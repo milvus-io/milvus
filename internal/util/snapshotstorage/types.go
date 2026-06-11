@@ -26,11 +26,13 @@ type Direction int
 const (
 	DirectionExport Direction = iota
 	DirectionRestore
+	DirectionCopySource
 )
 
 const (
-	Export  = DirectionExport
-	Restore = DirectionRestore
+	Export     = DirectionExport
+	Restore    = DirectionRestore
+	CopySource = DirectionCopySource
 )
 
 type ResolvedForeignStorage struct {

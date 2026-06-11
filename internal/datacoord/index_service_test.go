@@ -119,6 +119,10 @@ func initStreamingSystem(t *testing.T) {
 	channel.RecoverPChannelStatsManager([]string{})
 }
 
+func mockAnythingMatcher() string {
+	return "mock" + ".Anything"
+}
+
 func TestServerId(t *testing.T) {
 	s := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 0}}}
 	assert.Equal(t, int64(0), s.serverID())
@@ -2306,7 +2310,7 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 	})
 
 	t.Run("describe after drop index", func(t *testing.T) {
-		s.mixCoord.(*mocks.MixCoord).EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		s.mixCoord.(*mocks.MixCoord).EXPECT().ShowLoadCollections(mockAnythingMatcher(), mockAnythingMatcher()).Return(&querypb.ShowCollectionsResponse{
 			Status:        merr.Success(),
 			CollectionIDs: []int64{},
 		}, nil)

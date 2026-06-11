@@ -1312,7 +1312,7 @@ func TestAssembleCopySegmentRequest_ExternalSnapshotRootRemap(t *testing.T) {
 	assert.NotNil(t, req)
 	assert.Len(t, req.Sources, 1)
 	assert.Len(t, req.Targets, 1)
-	assert.Equal(t, "source-root/files/files", req.Sources[0].GetSourceRootPath())
+	assert.Equal(t, "s3://bucket/source-root/files", req.Sources[0].GetSourceRootPath())
 	assert.Equal(t, "target-root", req.Targets[0].GetTargetRootPath())
 }
 
@@ -1366,8 +1366,18 @@ func TestAssembleCopySegmentRequest_ExternalSnapshotCarriesForeignSpecAndRef(t *
 	mockStorage := mockey.Mock(createStorageConfig).Return(&indexpb.StorageConfig{RootPath: "target-root"}).Build()
 	defer mockStorage.UnPatch()
 
+	nextID := int64(9001)
+	alloc := &struct{ allocator.Allocator }{}
+	mockAlloc := mockey.Mock((*struct{ allocator.Allocator }).AllocID).To(func(ctx context.Context) (typeutil.UniqueID, error) {
+		id := nextID
+		nextID++
+		return id, nil
+	}).Build()
+	defer mockAlloc.UnPatch()
+
 	task := &copySegmentTask{
 		snapshotMeta: sm,
+		alloc:        alloc,
 		tr:           timerecord.NewTimeRecorder("test"),
 		times:        taskcommon.NewTimes(),
 	}
@@ -1398,7 +1408,7 @@ func TestAssembleCopySegmentRequest_ExternalSnapshotCarriesForeignSpecAndRef(t *
 	require.NotNil(t, req)
 	assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, req.GetExternalSpec())
 	require.Len(t, req.GetSources(), 1)
-	assert.Equal(t, "source-root/files/files", req.GetSources()[0].GetSourceRootPath())
+	assert.Equal(t, "s3://bucket/source-root/files/files", req.GetSources()[0].GetSourceRootPath())
 }
 
 func TestAssembleCopySegmentRequest_AllocatesTextAndJsonBuildIDs(t *testing.T) {

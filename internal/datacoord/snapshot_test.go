@@ -1063,7 +1063,7 @@ func TestSnapshotExporter_ExportCopiesFilesAndWritesSelfContainedMetadata(t *tes
 
 	targetRoot := path.Join(tempDir, "exported")
 	copier := &recordingCrossBucketCopier{sourceCM: cm, targetCM: cm}
-	metadataURI, err := newSnapshotExporter(cm, cm, copier, "", "").Export(ctx, snapshotData, targetRoot)
+	metadataURI, err := exportSnapshot(ctx, cm, cm, copier, "", "", snapshotData, targetRoot)
 	assert.NoError(t, err)
 	assert.Equal(t, path.Join(targetRoot, SnapshotRootPath, "100", SnapshotMetadataSubPath, "1.json"), metadataURI)
 
@@ -1144,12 +1144,12 @@ func TestSnapshotExporter_ExportCrossBucketUsesTargetManagerAndCopier(t *testing
 	snapshotData.SegmentIDs = []int64{segment.GetSegmentId()}
 	snapshotData.BuildIDs = nil
 
-	var origin func(context.Context, storage.ChunkManager, *SnapshotData, map[string]string, SnapshotRewriteOptions) (string, error)
+	var origin func(context.Context, storage.ChunkManager, *SnapshotData, map[string]string, string, string) (string, error)
 	mockWriteSnapshot := mockey.Mock(WriteSnapshotWithMapping).To(
-		func(ctx context.Context, gotCM storage.ChunkManager, gotSnapshot *SnapshotData, mappings map[string]string, opts SnapshotRewriteOptions) (string, error) {
+		func(ctx context.Context, gotCM storage.ChunkManager, gotSnapshot *SnapshotData, mappings map[string]string, targetRoot string, metadataURI string) (string, error) {
 			assert.Same(t, targetCM, gotCM)
 			assert.Same(t, snapshotData, gotSnapshot)
-			return origin(ctx, gotCM, gotSnapshot, mappings, opts)
+			return origin(ctx, gotCM, gotSnapshot, mappings, targetRoot, metadataURI)
 		}).Origin(&origin).Build()
 	defer mockWriteSnapshot.UnPatch()
 
@@ -1157,8 +1157,7 @@ func TestSnapshotExporter_ExportCrossBucketUsesTargetManagerAndCopier(t *testing
 	expectedMetadataURI := joinSnapshotURI(targetURI, SnapshotRootPath, "100", SnapshotMetadataSubPath, "1.json")
 	expectedCopiedBinlog := path.Join(targetRoot, "export-root", exportedSnapshotFilesPath, "files/insert_log/100/1/10/1")
 
-	exporter := newSnapshotExporter(sourceCM, targetCM, copier, "local-bucket", "foreign-bucket")
-	metadataURI, err := exporter.Export(ctx, snapshotData, targetURI)
+	metadataURI, err := exportSnapshot(ctx, sourceCM, targetCM, copier, "local-bucket", "foreign-bucket", snapshotData, targetURI)
 	require.NoError(t, err)
 	assert.Equal(t, expectedMetadataURI, metadataURI)
 	assert.Equal(t, []copyCall{{
@@ -1222,27 +1221,26 @@ func TestSnapshotExporter_ExportUsesSnapshotPrimitivesStrictly(t *testing.T) {
 		SnapshotMetadataSubPath,
 		fmt.Sprintf("%d.json", snapshotData.SnapshotInfo.GetId()))
 
-	var origin func(context.Context, storage.ChunkManager, *SnapshotData, map[string]string, SnapshotRewriteOptions) (string, error)
+	var origin func(context.Context, storage.ChunkManager, *SnapshotData, map[string]string, string, string) (string, error)
 	called := false
 	mockWriteSnapshot := mockey.Mock(WriteSnapshotWithMapping).To(
-		func(ctx context.Context, gotCM storage.ChunkManager, gotSnapshot *SnapshotData, mappings map[string]string, opts SnapshotRewriteOptions) (string, error) {
+		func(ctx context.Context, gotCM storage.ChunkManager, gotSnapshot *SnapshotData, mappings map[string]string, gotTargetRoot string, gotMetadataURI string) (string, error) {
 			called = true
 			assert.Same(t, cm, gotCM)
 			assert.Same(t, snapshotData, gotSnapshot)
-			assert.Equal(t, targetRoot, opts.TargetRoot)
-			assert.Equal(t, metadataURI, opts.MetadataURI)
-			assert.True(t, opts.StrictMapping)
+			assert.Equal(t, targetRoot, gotTargetRoot)
+			assert.Equal(t, metadataURI, gotMetadataURI)
 			for _, ref := range refs {
 				expectedPath := exportedSnapshotPath(cm, ref.NormalizedPath, targetRoot)
 				assert.Equal(t, expectedPath, mappings[ref.Path])
 				assert.Equal(t, expectedPath, mappings[ref.NormalizedPath])
 			}
-			return origin(ctx, gotCM, gotSnapshot, mappings, opts)
+			return origin(ctx, gotCM, gotSnapshot, mappings, gotTargetRoot, gotMetadataURI)
 		}).Origin(&origin).Build()
 	defer mockWriteSnapshot.UnPatch()
 
 	copier := &recordingCrossBucketCopier{sourceCM: cm, targetCM: cm}
-	gotMetadataURI, err := newSnapshotExporter(cm, cm, copier, "", "").Export(ctx, snapshotData, targetPath)
+	gotMetadataURI, err := exportSnapshot(ctx, cm, cm, copier, "", "", snapshotData, targetPath)
 	require.NoError(t, err)
 	assert.True(t, called)
 	assert.Equal(t, metadataURI, gotMetadataURI)
@@ -1281,7 +1279,7 @@ func TestSnapshotExporter_ExportReturnsManifestLobError(t *testing.T) {
 	defer mockGetLobFiles.UnPatch()
 
 	copier := &recordingCrossBucketCopier{sourceCM: cm, targetCM: cm}
-	_, err := newSnapshotExporter(cm, cm, copier, "", "").Export(ctx, snapshotData, path.Join(tempDir, "exported"))
+	_, err := exportSnapshot(ctx, cm, cm, copier, "", "", snapshotData, path.Join(tempDir, "exported"))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to list LOB files for segment 1001")
 	assert.Contains(t, err.Error(), "lob unavailable")
@@ -1660,11 +1658,7 @@ func TestRewriteSnapshotWithMapping_RewritesAllReferencesStrictly(t *testing.T) 
 		"files/insert_log/100/20/1001":              "exports/files/insert_log/100/20/1001",
 	}
 
-	rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, mappings, SnapshotRewriteOptions{
-		TargetRoot:    "exports",
-		MetadataURI:   "s3://bucket/exports/snapshots/100/metadata/1.json",
-		StrictMapping: true,
-	})
+	rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, mappings, "exports", "s3://bucket/exports/snapshots/100/metadata/1.json")
 	require.NoError(t, err)
 	require.Len(t, rewritten.Segments, 1)
 
@@ -1688,7 +1682,7 @@ func TestRewriteSnapshotWithMapping_RewritesAllReferencesStrictly(t *testing.T) 
 	assert.Equal(t, int64(1), originalManifestVersion)
 }
 
-func TestRewriteSnapshotWithMapping_MissingMappingFailsStrictMode(t *testing.T) {
+func TestRewriteSnapshotWithMapping_MissingMappingFails(t *testing.T) {
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	snapshot := createTestSnapshotData()
 	segment := snapshot.Segments[0]
@@ -1705,10 +1699,7 @@ func TestRewriteSnapshotWithMapping_MissingMappingFailsStrictMode(t *testing.T) 
 	segment.TextIndexFiles = nil
 	segment.JsonKeyIndexFiles = nil
 
-	rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, map[string]string{}, SnapshotRewriteOptions{
-		TargetRoot:    "exports",
-		StrictMapping: true,
-	})
+	rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, map[string]string{}, "exports", "s3://bucket/exports/snapshots/100/metadata/1.json")
 	require.Error(t, err)
 	assert.Nil(t, rewritten)
 	assert.Contains(t, err.Error(), "missing snapshot file mapping")
@@ -1746,10 +1737,7 @@ func TestRewriteSnapshotWithMapping_StorageV3ClearsStaleInsertBinlogs(t *testing
 	rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, map[string]string{
 		"files/insert_log/100/20/1001":                 "exports/files/insert_log/100/20/1001",
 		"files/insert_log/100/20/lobs/30/_data/lob.vx": "exports/files/insert_log/100/20/lobs/30/_data/lob.vx",
-	}, SnapshotRewriteOptions{
-		TargetRoot:    "exports",
-		StrictMapping: true,
-	})
+	}, "exports", "s3://bucket/exports/snapshots/100/metadata/1.json")
 	require.NoError(t, err)
 	require.Len(t, rewritten.Segments, 1)
 
@@ -1788,17 +1776,14 @@ func TestRewriteSnapshotWithMapping_StorageV3IgnoresMalformedStaleInsertBinlogs(
 
 	rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, map[string]string{
 		"files/insert_log/100/20/1001": "exports/files/insert_log/100/20/1001",
-	}, SnapshotRewriteOptions{
-		TargetRoot:    "exports",
-		StrictMapping: true,
-	})
+	}, "exports", "s3://bucket/exports/snapshots/100/metadata/1.json")
 	require.NoError(t, err)
 	require.Len(t, rewritten.Segments, 1)
 	assert.Empty(t, rewritten.Segments[0].GetBinlogs())
 	assert.Len(t, snapshot.Segments[0].GetBinlogs(), 2)
 }
 
-func TestRewriteSnapshotWithMapping_MissingStorageV3LOBMappingFailsStrictMode(t *testing.T) {
+func TestRewriteSnapshotWithMapping_MissingStorageV3LOBMappingFails(t *testing.T) {
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	snapshot := createTestSnapshotData()
 	segment := snapshot.Segments[0]
@@ -1822,10 +1807,7 @@ func TestRewriteSnapshotWithMapping_MissingStorageV3LOBMappingFailsStrictMode(t 
 
 	rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, map[string]string{
 		"files/insert_log/100/20/1001": "exports/files/insert_log/100/20/1001",
-	}, SnapshotRewriteOptions{
-		TargetRoot:    "exports",
-		StrictMapping: true,
-	})
+	}, "exports", "s3://bucket/exports/snapshots/100/metadata/1.json")
 	require.Error(t, err)
 	assert.Nil(t, rewritten)
 	assert.Contains(t, err.Error(), "missing snapshot file mapping")
@@ -1840,9 +1822,7 @@ func TestRewriteSnapshotWithMapping_RejectsNilSnapshotEntries(t *testing.T) {
 		snapshot := createTestSnapshotData()
 		snapshot.Indexes = []*indexpb.IndexInfo{nil}
 
-		rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, nil, SnapshotRewriteOptions{
-			TargetRoot: "exports",
-		})
+		rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, nil, "exports", "s3://bucket/exports/snapshots/100/metadata/1.json")
 		require.Error(t, err)
 		assert.Nil(t, rewritten)
 		assert.Contains(t, err.Error(), "snapshot index at index 0 cannot be nil")
@@ -1852,9 +1832,7 @@ func TestRewriteSnapshotWithMapping_RejectsNilSnapshotEntries(t *testing.T) {
 		snapshot := createTestSnapshotData()
 		snapshot.Segments = []*datapb.SegmentDescription{nil}
 
-		rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, nil, SnapshotRewriteOptions{
-			TargetRoot: "exports",
-		})
+		rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, nil, "exports", "s3://bucket/exports/snapshots/100/metadata/1.json")
 		require.Error(t, err)
 		assert.Nil(t, rewritten)
 		assert.Contains(t, err.Error(), "snapshot segment at index 0 cannot be nil")
@@ -1871,9 +1849,7 @@ func TestRewriteSnapshotWithMapping_RejectsNilSnapshotEntries(t *testing.T) {
 		segment.TextIndexFiles = nil
 		segment.JsonKeyIndexFiles = nil
 
-		rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, nil, SnapshotRewriteOptions{
-			TargetRoot: "exports",
-		})
+		rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, nil, "exports", "s3://bucket/exports/snapshots/100/metadata/1.json")
 		require.Error(t, err)
 		assert.Nil(t, rewritten)
 		assert.Contains(t, err.Error(), "insert binlog segment 1001 field binlog at index 0 cannot be nil")
@@ -1895,9 +1871,7 @@ func TestRewriteSnapshotWithMapping_RejectsNilSnapshotEntries(t *testing.T) {
 		segment.TextIndexFiles = nil
 		segment.JsonKeyIndexFiles = nil
 
-		rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, nil, SnapshotRewriteOptions{
-			TargetRoot: "exports",
-		})
+		rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, nil, "exports", "s3://bucket/exports/snapshots/100/metadata/1.json")
 		require.Error(t, err)
 		assert.Nil(t, rewritten)
 		assert.Contains(t, err.Error(), "insert binlog segment 1001 field 10 binlog at index 0 cannot be nil")
@@ -1914,9 +1888,7 @@ func TestRewriteSnapshotWithMapping_RejectsNilSnapshotEntries(t *testing.T) {
 		segment.TextIndexFiles = nil
 		segment.JsonKeyIndexFiles = nil
 
-		rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, nil, SnapshotRewriteOptions{
-			TargetRoot: "exports",
-		})
+		rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, nil, "exports", "s3://bucket/exports/snapshots/100/metadata/1.json")
 		require.Error(t, err)
 		assert.Nil(t, rewritten)
 		assert.Contains(t, err.Error(), "index file segment 1001 entry at index 0 cannot be nil")
@@ -1933,9 +1905,7 @@ func TestRewriteSnapshotWithMapping_RejectsNilSnapshotEntries(t *testing.T) {
 		segment.TextIndexFiles = map[int64]*datapb.TextIndexStats{12: nil}
 		segment.JsonKeyIndexFiles = nil
 
-		rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, nil, SnapshotRewriteOptions{
-			TargetRoot: "exports",
-		})
+		rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, nil, "exports", "s3://bucket/exports/snapshots/100/metadata/1.json")
 		require.Error(t, err)
 		assert.Nil(t, rewritten)
 		assert.Contains(t, err.Error(), "text index segment 1001 field 12 cannot be nil")
@@ -1952,9 +1922,7 @@ func TestRewriteSnapshotWithMapping_RejectsNilSnapshotEntries(t *testing.T) {
 		segment.TextIndexFiles = nil
 		segment.JsonKeyIndexFiles = map[int64]*datapb.JsonKeyStats{13: nil}
 
-		rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, nil, SnapshotRewriteOptions{
-			TargetRoot: "exports",
-		})
+		rewritten, err := RewriteSnapshotWithMapping(cm, snapshot, nil, "exports", "s3://bucket/exports/snapshots/100/metadata/1.json")
 		require.Error(t, err)
 		assert.Nil(t, rewritten)
 		assert.Contains(t, err.Error(), "json key index segment 1001 field 13 cannot be nil")

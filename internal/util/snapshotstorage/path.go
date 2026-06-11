@@ -88,7 +88,7 @@ func ParseForeignURI(raw string) (bucket, objectKey, endpointHost string, err er
 
 func DeriveForeignRoot(direction Direction, objectKey string) (string, error) {
 	objectKey = strings.Trim(objectKey, "/")
-	if direction == DirectionExport {
+	if direction == DirectionExport || direction == DirectionCopySource {
 		return objectKey, nil
 	}
 

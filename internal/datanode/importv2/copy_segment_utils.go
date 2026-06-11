@@ -57,47 +57,7 @@ type SegmentFiles struct {
 	JSONStats         []string
 }
 
-// Copy Mode Implementation for Snapshot/Backup Import
-//
-// This file implements high-performance segment import by copying files directly
-// instead of reading, parsing, and rewriting data. This is specifically designed
-// for snapshot restore and backup import scenarios where data format is identical.
-//
-// IMPLEMENTATION APPROACH:
-// 1. Pre-calculate all file path mappings (source -> target) in one pass
-// 2. Copy files sequentially using ChunkManager.Copy()
-// 3. Preserve all binlog metadata (EntriesNum, Timestamps, LogSize) from source
-// 4. Build complete index metadata (vector/scalar, text, JSON) from source
-// 5. Generate complete segment metadata with accurate row counts
-//
-// SUPPORTED FILE TYPES:
-// - Binlogs: Insert (required), Delta, Stats, BM25
-// - Indexes: Vector/Scalar indexes, Text indexes, JSON Key indexes
-//
-// WHY THIS APPROACH:
-// - Direct file copying is 10-100x faster than data parsing/rewriting
-// - Snapshot/backup scenarios guarantee data format compatibility
-// - All metadata is preserved from source (binlogs, indexes, row counts, timestamps)
-// - Simplified error handling - any copy failure aborts the entire operation
-//
-// SAFETY:
-// - All file operations are validated and logged
-// - Copy failures are properly detected and reported with full context
-// - Fail-fast behavior prevents partial/inconsistent imports
-//
 // CopySegmentAndIndexFiles copies all segment files and index files sequentially.
-//
-// Process flow:
-// 1. Collect all source files (from manifest or pb)
-// 2. Generate src->dst path mappings
-// 3. Execute file copy operations
-// 3.5. For manifest segments (StorageV3+), add logical pb path mappings after physical
-//      files are copied (needed for metadata generation which expects pb paths)
-// 4. Build index metadata from source
-// 5. Generate segment metadata with path mappings
-// 6. Compress paths for RPC efficiency
-// 7. Build result with all metadata
-// 8. Transform manifest path if present
 
 // transformManifestPath replaces source IDs in manifest path with target IDs.
 //

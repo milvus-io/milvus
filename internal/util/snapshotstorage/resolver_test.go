@@ -63,7 +63,7 @@ func TestResolveForeignStorageLayer1OverridesBucketRoot(t *testing.T) {
 		context.Background(),
 		instanceCfg,
 		DirectionExport,
-		"s3://foreign-bucket/relocated/snapshots/s1/metadata/manifest.json",
+		"s3://foreign-bucket/relocated",
 		"",
 	)
 	require.NoError(t, err)
@@ -231,6 +231,43 @@ func TestResolveForeignStorageLayer2RestoreCopierPreservesSpecCredentialMode(t *
 	assert.Equal(t, "foreign-sk", copyCfg.SecretAccessKeyID)
 	assert.False(t, copyCfg.UseIAM)
 	assert.Equal(t, "foreign-iam", copyCfg.IAMEndpoint)
+}
+
+func TestResolveForeignStorageCopySourceAcceptsSourceRoot(t *testing.T) {
+	var captured []objectstorage.Config
+	patchRemoteChunkManager(t, &captured)
+
+	resolved, err := ResolveForeignStorage(
+		context.Background(),
+		&objectstorage.Config{
+			Address:           "s3.us-west-2.amazonaws.com",
+			BucketName:        "instance-bucket",
+			RootPath:          "by-dev",
+			AccessKeyID:       "instance-ak",
+			SecretAccessKeyID: "instance-sk",
+			CloudProvider:     objectstorage.CloudProviderAWS,
+			Region:            "us-west-2",
+		},
+		DirectionCopySource,
+		"s3://foreign-bucket/source-root/files",
+		`{"extfs":{"cloud_provider":"aws","region":"us-west-2","access_key_id":"foreign-ak","access_key_value":"foreign-sk"}}`,
+	)
+	require.NoError(t, err)
+	require.Len(t, captured, 2)
+
+	copyCfg := captured[0]
+	assert.Equal(t, "instance-bucket", copyCfg.BucketName)
+	assert.Equal(t, "by-dev", copyCfg.RootPath)
+	assert.Equal(t, "foreign-ak", copyCfg.AccessKeyID)
+	assert.Equal(t, "foreign-sk", copyCfg.SecretAccessKeyID)
+
+	assert.Equal(t, "foreign-bucket", captured[1].BucketName)
+	assert.Equal(t, "source-root/files", captured[1].RootPath)
+	require.NotNil(t, resolved.ForeignStorageConfig)
+	assert.Equal(t, "foreign-bucket", resolved.ForeignStorageConfig.GetBucketName())
+	assert.Equal(t, "source-root/files", resolved.ForeignStorageConfig.GetRootPath())
+	assert.Equal(t, "foreign-ak", resolved.ForeignStorageConfig.GetAccessKeyID())
+	assert.Equal(t, "foreign-sk", resolved.ForeignStorageConfig.GetSecretAccessKey())
 }
 
 func TestEndpointAllowlistRejectsPrivateIPUnlessAllowlisted(t *testing.T) {
@@ -407,7 +444,7 @@ func TestResolveForeignStorageLayer1RejectsDifferentURIFamily(t *testing.T) {
 			Region:        "us-west-2",
 		},
 		DirectionRestore,
-		"gs://foreign-bucket/root/manifest.json",
+		"gs://foreign-bucket/root/snapshots/1/metadata/1.json",
 		"",
 	)
 	require.Error(t, err)
@@ -428,7 +465,7 @@ func TestResolveForeignStorageLayer2RejectsURISchemeProviderMismatch(t *testing.
 			Region:        "us-west-2",
 		},
 		DirectionRestore,
-		"gs://foreign-bucket/root/manifest.json",
+		"gs://foreign-bucket/root/snapshots/1/metadata/1.json",
 		`{"extfs":{"cloud_provider":"aws","region":"us-west-2"}}`,
 	)
 	require.Error(t, err)

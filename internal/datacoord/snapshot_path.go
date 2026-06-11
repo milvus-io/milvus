@@ -39,38 +39,39 @@ func validateSnapshotObjectPath(cm storage.ChunkManager, fieldName string, objec
 	return validateSnapshotObjectPathForBucket(cm, fieldName, objectPath, expectedBucket)
 }
 
-func validateSnapshotObjectPathShape(fieldName string, objectPath string) error {
+func validateSnapshotObjectPathShape(fieldName string, objectPath string) (string, error) {
 	if objectPath == "" {
-		return fmt.Errorf("%s is required", fieldName)
+		return "", fmt.Errorf("%s is required", fieldName)
 	}
 	parsed, err := url.Parse(objectPath)
 	if err != nil {
-		return fmt.Errorf("%s is invalid: %w", fieldName, err)
+		return "", fmt.Errorf("%s is invalid: %w", fieldName, err)
 	}
 	if parsed.Scheme == "" {
-		return nil
+		return "", nil
 	}
 	if parsed.User != nil {
-		return fmt.Errorf("%s must not embed credentials in the URI", fieldName)
+		return "", fmt.Errorf("%s must not embed credentials in the URI", fieldName)
 	}
 	if !isSupportedSnapshotURIScheme(parsed.Scheme) {
-		return fmt.Errorf("%s must be an object key or supported snapshot URI", fieldName)
+		return "", fmt.Errorf("%s must be an object key or supported snapshot URI", fieldName)
 	}
 	if parsed.Host == "" {
-		return fmt.Errorf("%s URI must include a bucket or endpoint host", fieldName)
+		return "", fmt.Errorf("%s URI must include a bucket or endpoint host", fieldName)
 	}
-	if _, _, _, err := snapshotstorage.ParseForeignURI(objectPath); err != nil {
-		return fmt.Errorf("%s is invalid: %w", fieldName, err)
+	bucket, _, _, err := snapshotstorage.ParseForeignURI(objectPath)
+	if err != nil {
+		return "", fmt.Errorf("%s is invalid: %w", fieldName, err)
 	}
-	return nil
+	return bucket, nil
 }
 
 func validateSnapshotObjectPathForBucket(cm storage.ChunkManager, fieldName string, objectPath string, expectedBucket string) error {
-	if err := validateSnapshotObjectPathShape(fieldName, objectPath); err != nil {
+	actualBucket, err := validateSnapshotObjectPathShape(fieldName, objectPath)
+	if err != nil {
 		return err
 	}
-	parsed, err := url.Parse(objectPath)
-	if err != nil || parsed.Scheme == "" {
+	if actualBucket == "" {
 		return nil
 	}
 	bucket := strings.TrimSpace(expectedBucket)
@@ -79,11 +80,7 @@ func validateSnapshotObjectPathForBucket(cm storage.ChunkManager, fieldName stri
 			bucket = bucketCM.BucketName()
 		}
 	}
-	actualBucket, _, _, err := snapshotstorage.ParseForeignURI(objectPath)
-	if err != nil {
-		return fmt.Errorf("%s is invalid: %w", fieldName, err)
-	}
-	if bucket != "" && actualBucket != "" && actualBucket != bucket {
+	if bucket != "" && actualBucket != bucket {
 		return fmt.Errorf("%s bucket %q does not match configured bucket %q", fieldName, actualBucket, bucket)
 	}
 	return nil
