@@ -255,6 +255,18 @@ def gen_add_function_field_parquet_bytes(num_rows, start_id, dim=ct.default_dim)
     return buf.getvalue()
 
 
+def gen_text_embedding_function_parquet_bytes(num_rows, start_id, phrases):
+    ids = list(range(start_id, start_id + num_rows))
+    columns = {
+        "id": pa.array(ids, type=pa.int64()),
+        "doc": pa.array([phrases[i % len(phrases)] for i in ids], type=pa.string()),
+    }
+
+    buf = io.BytesIO()
+    pq.write_table(pa.table(columns), buf, compression="snappy")
+    return buf.getvalue()
+
+
 def gen_add_all_supported_fields_parquet_bytes(num_rows, start_id):
     """Generate parquet where every non-primary field can be added later."""
     columns = _full_matrix_arrow_columns(num_rows, start_id)
@@ -4092,6 +4104,98 @@ class TestMilvusClientExternalTableDQL(ExternalTableTestBase):
         )[0][0]
         assert len(hits) == 10
         assert all(50 <= h["id"] < 100 for h in hits), f"filter violated: {[h['id'] for h in hits]}"
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_external_table_text_embedding_function_search(
+        self,
+        minio_env,
+        external_prefix,
+        tei_endpoint,
+    ):
+        """
+        target: test external table TextEmbedding function output search
+        method: refresh a Parquet-backed external collection with doc -> dense TextEmbedding, index/load, and search
+        expected: dense FloatVector function output is searchable and retrievable
+        """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+        dim = 768
+        phrases = [
+            "machine learning models process large datasets",
+            "vector databases store high dimensional embeddings",
+            "distributed systems handle concurrent requests",
+            "natural language processing enables text understanding",
+            "cloud computing provides elastic infrastructure",
+        ]
+        num_files = 5
+        rows_per_file = 200
+        nb = num_files * rows_per_file
+
+        for file_idx in range(num_files):
+            upload_parquet(
+                minio_client,
+                cfg["bucket"],
+                f"{ext_key}/data{file_idx}.parquet",
+                gen_text_embedding_function_parquet_bytes(rows_per_file, file_idx * rows_per_file, phrases),
+            )
+
+        schema = self.create_schema(
+            client,
+            external_source=ext_url,
+            external_spec=build_external_spec(cfg),
+        )[0]
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, "doc", DataType.VARCHAR, max_length=1024, external_field="doc")
+        self.add_field(schema, "dense", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_function(
+            Function(
+                name="tei_fn",
+                function_type=FunctionType.TEXTEMBEDDING,
+                input_field_names=["doc"],
+                output_field_names=["dense"],
+                params={"provider": "TEI", "endpoint": tei_endpoint},
+            )
+        )
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        stats = self.get_collection_stats(client, coll)[0]
+        assert stats.get("row_count") == nb
+
+        self.add_vector_index(client, coll, "dense", "FLAT", "L2")
+        self.load_collection(client, coll)
+
+        for class_id, phrase in enumerate(phrases):
+            hits = self.search(
+                client,
+                coll,
+                data=[phrase],
+                limit=10,
+                anns_field="dense",
+                output_fields=["id"],
+                search_params={"metric_type": "L2"},
+            )[0][0]
+            assert len(hits) == 10
+            hit_ids = [hit["id"] for hit in hits]
+            matched = sum(1 for row_id in hit_ids if row_id % len(phrases) == class_id)
+            min_matched = max(1, len(hits) // len(phrases))
+            assert matched >= min_matched, (
+                f"TextEmbedding search for {phrase!r} returned {matched}/{len(hits)} same-class ids: {hit_ids}"
+            )
+
+        take_hits = self.search(
+            client,
+            coll,
+            data=[phrases[0]],
+            limit=5,
+            anns_field="dense",
+            output_fields=["id", "dense"],
+            search_params={"metric_type": "L2"},
+        )[0][0]
+        dense_values = [hit.get("entity", hit).get("dense") for hit in take_hits]
+        assert all(vec is not None for vec in dense_values), f"dense output missing from hits: {take_hits}"
+        assert all(len(vec) == dim for vec in dense_values), f"dense output dim mismatch: {dense_values}"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_external_table_hybrid_search_multi_vector(self, minio_env, external_prefix):
