@@ -958,10 +958,20 @@ class SegmentExpr : public Expr {
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 i == current_data_chunk_ ? current_data_chunk_pos_ : 0;
-            int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
+            int64_t size;
+            if (segment_->is_chunked()) {
+                size = segment_->chunk_size(field_id_, i) - data_pos;
+            } else {
+                size = (i == num_data_chunk_ - 1)
+                           ? (active_count_ % size_per_chunk_ == 0
+                                  ? size_per_chunk_ - data_pos
+                                  : active_count_ % size_per_chunk_ - data_pos)
+                           : size_per_chunk_ - data_pos;
+            }
             size = std::min(size, batch_size_ - processed_rows);
-            if (size == 0)
+            if (size <= 0) {
                 continue;
+            }
 
             auto& skip_index = segment_->GetSkipIndex();
             if ((!skip_func || !skip_func(skip_index, field_id_, i))) {
