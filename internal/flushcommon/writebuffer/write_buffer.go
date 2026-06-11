@@ -1651,7 +1651,7 @@ func getBM25OutputFieldIDs(schema *schemapb.CollectionSchema) ([]int64, error) {
 
 		outputField := typeutil.GetFunctionOutputField(schema, fn)
 		if outputField == nil {
-			return nil, fmt.Errorf("function %s output field not found", fn.GetName())
+			return nil, merr.WrapErrFunctionFailedMsg("function %s output field not found", fn.GetName())
 		}
 
 		outputFieldIDs = append(outputFieldIDs, outputField.GetFieldID())
@@ -1663,12 +1663,12 @@ func appendBM25StatsFromInsertData(stats map[int64]*storage.BM25Stats, outputFie
 	for _, outputFieldID := range outputFieldIDs {
 		outputData, ok := data.Data[outputFieldID]
 		if !ok {
-			return fmt.Errorf("BM25 output field %d not found in insert data", outputFieldID)
+			return merr.WrapErrFunctionFailedMsg("BM25 output field %d not found in insert data", outputFieldID)
 		}
 
 		sparseData, ok := outputData.(*storage.SparseFloatVectorFieldData)
 		if !ok {
-			return fmt.Errorf("BM25 output field %d is not sparse vector data", outputFieldID)
+			return merr.WrapErrFunctionFailedMsg("BM25 output field %d is not sparse vector data", outputFieldID)
 		}
 
 		if _, ok := stats[outputFieldID]; !ok {

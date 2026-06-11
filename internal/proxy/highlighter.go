@@ -341,7 +341,7 @@ func (op *lexicalHighlightOperator) run(ctx context.Context, span trace.Span, in
 
 	datas := resultData.GetFieldsData()
 	if len(datas) == 0 {
-		return nil, errors.Errorf("get highlight failed, field data is empty for non-empty search result")
+		return nil, merr.WrapErrServiceInternalMsg("get highlight failed, field data is empty for non-empty search result")
 	}
 
 	req := &querypb.GetHighlightRequest{
@@ -485,7 +485,7 @@ func (op *semanticHighlightOperator) run(ctx context.Context, span trace.Span, i
 
 	datas := resultData.GetFieldsData()
 	if len(datas) == 0 {
-		return nil, errors.Errorf("get highlight failed, field data is empty for non-empty search result")
+		return nil, merr.WrapErrServiceInternalMsg("get highlight failed, field data is empty for non-empty search result")
 	}
 	highlightResults := []*commonpb.HighlightResult{}
 	topks := result.Results.GetTopks()

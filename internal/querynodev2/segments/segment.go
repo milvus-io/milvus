@@ -1705,7 +1705,7 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 	numBM25Fields := len(config.BM25FieldIDs)
 	if numBM25Fields > 0 {
 		if len(config.BM25StatsLogIDs) != numBM25Fields {
-			return nil, errors.Errorf("BM25 stats log IDs count mismatch, fields=%d logIDs=%d", numBM25Fields, len(config.BM25StatsLogIDs))
+			return nil, merr.WrapErrServiceInternalMsg("BM25 stats log IDs count mismatch, fields=%d logIDs=%d", numBM25Fields, len(config.BM25StatsLogIDs))
 		}
 		cBM25FieldIDs := (*C.int64_t)(C.malloc(C.size_t(numBM25Fields) * C.size_t(unsafe.Sizeof(C.int64_t(0)))))
 		defer C.free(unsafe.Pointer(cBM25FieldIDs))

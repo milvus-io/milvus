@@ -1242,13 +1242,13 @@ func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.Sear
 			return err
 		}
 		if len(output) == 0 {
-			return errors.New("BM25 embedding failed: runner returned empty output")
+			return merr.WrapErrFunctionFailedMsg("BM25 embedding failed: runner returned empty output")
 		}
 
 		var ok bool
 		tfArray, ok = output[0].(*schemapb.SparseFloatArray)
 		if !ok {
-			return errors.New("functionRunner return unknown data")
+			return merr.WrapErrFunctionFailedMsg("functionRunner return unknown data")
 		}
 		return nil
 	})
@@ -1311,13 +1311,13 @@ func (sd *shardDelegator) parseMinHash(ctx context.Context, req *internalpb.Sear
 			return err
 		}
 		if len(output) == 0 {
-			return errors.New("MinHash embedding failed: runner returned empty output")
+			return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: runner returned empty output")
 		}
 
 		var ok bool
 		fieldData, ok = output[0].(*schemapb.FieldData)
 		if !ok {
-			return errors.New("MinHash embedding failed: MinHash functionRunner return unknown data")
+			return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: MinHash functionRunner return unknown data")
 		}
 		return nil
 	})

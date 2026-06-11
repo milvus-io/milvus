@@ -2733,29 +2733,31 @@ func hasSearchAggregationResult(results *schemapb.SearchResultData) bool {
 
 func buildSearchAggregationResp(results *schemapb.SearchResultData, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) ([]gin.H, error) {
 	if results == nil {
-		return nil, errors.New("search_aggregation result is nil")
+		// The aggregation payload is produced by the server-side reduce, never
+		// by the request: a malformed shape is an internal contract violation.
+		return nil, merr.WrapErrServiceInternalMsg("search_aggregation result is nil")
 	}
 	aggTopks := results.GetAggTopks()
 	pbBuckets := results.GetAggBuckets()
 	if len(aggTopks) == 0 {
-		return nil, errors.New("search_aggregation response missing agg_topks")
+		return nil, merr.WrapErrServiceInternalMsg("search_aggregation response missing agg_topks")
 	}
 	if results.GetNumQueries() <= 0 {
-		return nil, errors.New("search_aggregation response missing nq")
+		return nil, merr.WrapErrServiceInternalMsg("search_aggregation response missing nq")
 	}
 	if len(aggTopks) != int(results.GetNumQueries()) {
-		return nil, fmt.Errorf("search_aggregation agg_topks length %d does not match nq %d", len(aggTopks), results.GetNumQueries())
+		return nil, merr.WrapErrServiceInternalMsg("search_aggregation agg_topks length %d does not match nq %d", len(aggTopks), results.GetNumQueries())
 	}
 
 	total := int64(0)
 	for _, topk := range aggTopks {
 		if topk < 0 {
-			return nil, errors.New("search_aggregation agg_topks cannot contain negative values")
+			return nil, merr.WrapErrServiceInternalMsg("search_aggregation agg_topks cannot contain negative values")
 		}
 		total += topk
 	}
 	if total != int64(len(pbBuckets)) {
-		return nil, fmt.Errorf("search_aggregation agg_topks sum %d does not match bucket count %d", total, len(pbBuckets))
+		return nil, merr.WrapErrServiceInternalMsg("search_aggregation agg_topks sum %d does not match bucket count %d", total, len(pbBuckets))
 	}
 
 	output := make([]gin.H, 0, len(aggTopks))
@@ -2777,7 +2779,7 @@ func buildSearchAggregationResp(results *schemapb.SearchResultData, enableInt64 
 
 func buildAggBucketResp(pb *schemapb.AggBucket, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) (gin.H, error) {
 	if pb == nil {
-		return nil, errors.New("search_aggregation bucket is nil")
+		return nil, merr.WrapErrServiceInternalMsg("search_aggregation bucket is nil")
 	}
 	bucket := gin.H{
 		"key":       buildAggBucketKeyResp(pb.GetKey(), enableInt64),

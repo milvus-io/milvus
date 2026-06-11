@@ -22,6 +22,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // Handlers handles http requests
@@ -359,7 +360,7 @@ func (h *Handlers) handleSearch(c *gin.Context) (interface{}, error) {
 		return nil, badRequestf(err, "parse body failed")
 	}
 	if wrappedReq.HasSearchAggregation() {
-		return nil, fmt.Errorf("%w: searchAggregation is not supported for low-level REST search", errBadRequest)
+		return nil, badRequestf(merr.WrapErrParameterInvalidMsg("searchAggregation is not supported for low-level REST search"), "invalid request")
 	}
 	req := milvuspb.SearchRequest{
 		Base:               wrappedReq.Base,
