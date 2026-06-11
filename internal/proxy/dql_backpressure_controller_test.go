@@ -76,6 +76,22 @@ func TestDQLBackpressureControllerObserve(t *testing.T) {
 	assert.Equal(t, int64(8), controller.CurrentConcurrency())
 }
 
+func TestDQLBackpressureControllerObserveStatusRoundTripError(t *testing.T) {
+	controller := newDQLBackpressureController(dqlBackpressureControllerConfig{
+		enabled:                true,
+		maxConcurrency:         8,
+		slowdownMinConcurrency: 2,
+		slowdownRatio:          0.5,
+		slowdownInterval:       time.Second,
+		recoverInterval:        time.Second,
+		recoverStep:            4,
+		recoverQuiet:           2 * time.Second,
+	})
+
+	controller.Observe(errors.New("worker query failed: limit by queryNode.scheduler.unsolvedQueueSize: too many concurrent requests, queue is full[limit=4]"))
+	assert.Equal(t, int64(4), controller.CurrentConcurrency())
+}
+
 func TestDQLBackpressureControllerMetrics(t *testing.T) {
 	metrics.ProxyDQLBackpressureConcurrency.Reset()
 	metrics.ProxyDQLBackpressureEventsTotal.Reset()
