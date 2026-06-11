@@ -235,7 +235,8 @@ class ScalarIndex : public IndexBase {
     // LoadEntries() for subclass-specific loading. Currently handles the V3
     // file format (see UploadUnified above for naming rationale).
     void
-    LoadUnified(const Config& config) override;
+    LoadUnified(const Config& config,
+                milvus::OpContext* op_ctx = nullptr) override;
 
     virtual void
     WriteEntries(storage::IndexEntryWriter* writer) {

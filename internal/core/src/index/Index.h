@@ -31,6 +31,10 @@
 #include "index/Meta.h"
 #include "index/IndexStats.h"
 
+namespace milvus {
+struct OpContext;
+}
+
 namespace milvus::index {
 
 class IndexBase {
@@ -65,7 +69,8 @@ class IndexBase {
     Upload(const Config& config = {}) = 0;
 
     virtual void
-    LoadUnified(const Config& config) {
+    LoadUnified(const Config& config, milvus::OpContext* op_ctx = nullptr) {
+        (void)op_ctx;
         ThrowInfo(Unsupported,
                   "LoadUnified is not supported for this index type");
     }
