@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
@@ -462,6 +463,69 @@ func TestAllocVirtualChannels(t *testing.T) {
 	assert.Equal(t, allocVChannels[1], "by-dev-rootcoord-dml_11_1v1")
 	assert.Equal(t, allocVChannels[2], "by-dev-rootcoord-dml_12_1v2")
 	assert.Equal(t, allocVChannels[3], "by-dev-rootcoord-dml_13_1v3")
+}
+
+func TestAllocVirtualChannelsForExistingCollection(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
+		Pchannel: "test-channel",
+	}, nil).Maybe()
+	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().ListPChannel(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil).Maybe()
+
+	ctx := context.Background()
+	topics := util.GetAllTopicsFromConfiguration().Collect()
+	m, err := RecoverChannelManager(ctx, topics...)
+	assert.NoError(t, err)
+
+	existing := []string{
+		"by-dev-rootcoord-dml_0_1v0",
+		"by-dev-rootcoord-dml_1_1v1",
+	}
+
+	// The new vchannels avoid the occupied pchannels and continue the shard index.
+	vchannels, err := m.AllocVirtualChannels(ctx, AllocVChannelParam{
+		CollectionID:      1,
+		Num:               2,
+		ExistingVChannels: existing,
+	})
+	assert.NoError(t, err)
+	assert.Len(t, vchannels, 2)
+	occupied := map[string]struct{}{
+		"by-dev-rootcoord-dml_0": {},
+		"by-dev-rootcoord-dml_1": {},
+	}
+	for i, vchannel := range vchannels {
+		assert.Equal(t, int64(1), funcutil.GetCollectionIDFromVChannel(vchannel))
+		assert.Equal(t, 2+i, funcutil.GetShardIndexFromVChannel(vchannel))
+		_, ok := occupied[funcutil.ToPhysicalChannel(vchannel)]
+		assert.False(t, ok, "allocated vchannel %s must not reuse an occupied pchannel", vchannel)
+	}
+
+	// A vchannel of another collection is rejected.
+	_, err = m.AllocVirtualChannels(ctx, AllocVChannelParam{
+		CollectionID:      1,
+		Num:               1,
+		ExistingVChannels: []string{"by-dev-rootcoord-dml_0_2v0"},
+	})
+	assert.Error(t, err)
+
+	// Occupied pchannels shrink the candidate set: asking for one less than
+	// the total pchannel count with two of them occupied must fail.
+	_, err = m.AllocVirtualChannels(ctx, AllocVChannelParam{
+		CollectionID:      1,
+		Num:               len(topics) - 1,
+		ExistingVChannels: existing,
+	})
+	assert.Error(t, err)
 }
 
 func TestStreamingEnableChecker(t *testing.T) {
