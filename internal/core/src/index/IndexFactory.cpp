@@ -762,7 +762,8 @@ IndexFactory::CreatePrimitiveScalarIndex(
 
             // create string index
         case DataType::STRING:
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::TEXT: {
             auto& ngram_params = create_index_info.ngram_params;
             if (ngram_params.has_value()) {
                 return std::make_unique<NgramInvertedIndex>(
@@ -1053,6 +1054,7 @@ IndexFactory::CreateScalarIndex(
         case DataType::DOUBLE:
         case DataType::VARCHAR:
         case DataType::STRING:
+        case DataType::TEXT:
         case DataType::TIMESTAMPTZ:
             return CreatePrimitiveScalarIndex(
                 data_type, create_index_info, file_manager_context);

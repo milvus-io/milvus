@@ -2981,12 +2981,11 @@ ChunkedSegmentSealedImpl::bulk_subscript_text_impl(
     int64_t count,
     google::protobuf::RepeatedPtrField<std::string>* dst) const {
     auto it = text_lob_paths_.find(field_id);
-    if (it == text_lob_paths_.end()) {
-        throw SegcoreError(
-            ErrorCode::UnexpectedError,
-            fmt::format("LOB base path not found for TEXT field {}",
-                        field_id.get()));
-    }
+    AssertInfo(it != text_lob_paths_.end(),
+               "TEXT field {} has no LOB path. TEXT type requires StorageV3 "
+               "with manifest. segment_id={}",
+               field_id.get(),
+               id_);
     const auto& lob_base_path = it->second;
 
     std::vector<milvus_storage::lob_column::EncodedRef> encoded_refs;
@@ -3110,11 +3109,79 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id,
                               id_,
                               field_id.get(),
                               "ChunkedSegmentSealedImpl::CreateTextIndex()");
-            column->BulkRawStringAt(
-                nullptr,
-                [&](std::string_view value, size_t offset, bool is_valid) {
-                    index->AddTextSealed(std::string(value), is_valid, offset);
-                });
+            if (field_meta.get_data_type() == DataType::TEXT) {
+                auto it = text_lob_paths_.find(field_id);
+                AssertInfo(it != text_lob_paths_.end(),
+                           "TEXT field {} has no LOB path. TEXT type "
+                           "requires StorageV3 with manifest. segment_id={}",
+                           field_id.get(),
+                           id_);
+
+                struct TextIndexEntry {
+                    size_t offset;
+                    bool is_valid;
+                    size_t text_index;
+                };
+                constexpr size_t kTextLobIndexBuildBatchSize = 1024;
+                std::vector<TextIndexEntry> entries;
+                std::vector<milvus_storage::lob_column::EncodedRef>
+                    encoded_refs;
+                auto flush_text_entries = [&]() {
+                    if (entries.empty()) {
+                        return;
+                    }
+                    auto texts = ReadTextLobBatch(it->second, encoded_refs);
+                    AssertInfo(texts.size() == encoded_refs.size(),
+                               "TEXT field {} LOB batch read returned {} "
+                               "texts for {} refs. segment_id={}",
+                               field_id.get(),
+                               texts.size(),
+                               encoded_refs.size(),
+                               id_);
+                    for (const auto& entry : entries) {
+                        if (!entry.is_valid) {
+                            index->AddNullSealed(entry.offset);
+                            continue;
+                        }
+                        index->AddTextSealed(
+                            texts[entry.text_index], true, entry.offset);
+                    }
+                    entries.clear();
+                    encoded_refs.clear();
+                    CheckCancellation(
+                        op_ctx,
+                        id_,
+                        field_id.get(),
+                        "ChunkedSegmentSealedImpl::CreateTextIndex()");
+                };
+                column->BulkRawStringAt(
+                    nullptr,
+                    [&](std::string_view value, size_t offset, bool is_valid) {
+                        if (!is_valid) {
+                            entries.push_back({offset, false, 0});
+                            if (entries.size() >= kTextLobIndexBuildBatchSize) {
+                                flush_text_entries();
+                            }
+                            return;
+                        }
+                        entries.push_back({offset, true, encoded_refs.size()});
+                        encoded_refs.push_back(
+                            MakeTextLobEncodedRef(value.data(), value.size()));
+                        if (encoded_refs.size() >=
+                                kTextLobIndexBuildBatchSize ||
+                            entries.size() >= kTextLobIndexBuildBatchSize) {
+                            flush_text_entries();
+                        }
+                    });
+                flush_text_entries();
+            } else {
+                column->BulkRawStringAt(
+                    nullptr,
+                    [&](std::string_view value, size_t offset, bool is_valid) {
+                        index->AddTextSealed(
+                            std::string(value), is_valid, offset);
+                    });
+            }
         } else {  // fetch raw data from index.
             auto field_index_iter =
                 scalar_indexings_.withRLock([&](auto& mapping) {

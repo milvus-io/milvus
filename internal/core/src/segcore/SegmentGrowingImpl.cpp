@@ -261,13 +261,12 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
 
 bool
 SchemaHasTextField(const Schema& schema) {
-    for ([[maybe_unused]] const auto& [field_id, field_meta] :
-         schema.get_fields()) {
-        if (field_meta.get_data_type() == DataType::TEXT) {
-            return true;
-        }
-    }
-    return false;
+    return std::any_of(schema.get_fields().begin(),
+                       schema.get_fields().end(),
+                       [](const auto& field) {
+                           return field.second.get_data_type() ==
+                                  DataType::TEXT;
+                       });
 }
 
 }  // anonymous namespace
@@ -323,13 +322,14 @@ SegmentGrowingImpl::mask_with_delete(BitsetTypeView& bitset,
 
 void
 SegmentGrowingImpl::try_remove_chunks(FieldId fieldId) {
-    if (SchemaHasTextField(*schema_) ||
-        segcore_config_.get_enable_growing_source_flush()) {
-        // Growing-source flush needs raw field chunks to persist a growing
-        // segment through milvus-storage. Interim indexes may also contain raw
-        // vector data, but FlushGrowingSegmentData reads directly from
-        // insert_record_ chunks. Keep raw chunks until the flush path can
-        // reliably export from indexes too.
+    if (segcore_config_.get_storage_v3_enabled() &&
+        (SchemaHasTextField(*schema_) ||
+         segcore_config_.get_enable_growing_source_flush())) {
+        // StorageV3 TEXT and growing-source flush persist growing segments
+        // through milvus-storage. Interim indexes may also contain raw vector
+        // data, but FlushGrowingSegmentData reads directly from insert_record_
+        // chunks. Keep raw chunks until the flush path can reliably export from
+        // indexes too.
         return;
     }
 
@@ -783,10 +783,6 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos,
                                   milvus::OpContext* op_ctx) {
     // Note: op_ctx is currently unused in growing segments but kept for interface consistency
     (void)op_ctx;
-    AssertInfo(
-        !(infos.storage_version == STORAGE_V2 && SchemaHasTextField(*schema_)),
-        "TEXT growing segment cannot be loaded from StorageV2 binlogs; "
-        "StorageV3 manifest is required");
     switch (infos.storage_version) {
         case STORAGE_V2:
             load_column_group_data_internal(infos);
@@ -937,12 +933,19 @@ SegmentGrowingImpl::load_field_data_common(
 
     // build text match index
     if (field_meta.enable_match()) {
-        auto pinned = GetTextIndex(nullptr, field_id);
-        auto index = pinned.get();
-        index->BuildIndexFromFieldData(field_data, field_meta.is_nullable());
-        index->Commit();
-        // Reload reader so that the index can be read immediately
-        index->Reload();
+        if (field_meta.get_data_type() == DataType::TEXT &&
+            HasTextLobPath(field_id)) {
+            BuildTextIndexFromTextLobRefs(
+                field_id, field_data, reserved_offset, field_meta);
+        } else {
+            auto pinned = GetTextIndex(nullptr, field_id);
+            auto index = pinned.get();
+            index->BuildIndexFromFieldData(field_data,
+                                           field_meta.is_nullable());
+            index->Commit();
+            // Reload reader so that the index can be read immediately
+            index->Reload();
+        }
     }
 
     // update ArrayOffsetsGrowing for struct fields
@@ -973,6 +976,10 @@ SegmentGrowingImpl::load_field_data_common(
 void
 SegmentGrowingImpl::load_column_group_data_internal(
     const LoadFieldDataInfo& infos) {
+    AssertInfo(!SchemaHasTextField(*schema_),
+               "TEXT growing segment cannot be loaded from StorageV2 column "
+               "groups; StorageV3 manifest is required");
+
     auto primary_field_id =
         schema_->get_primary_field_id().value_or(FieldId(-1));
 
@@ -2061,6 +2068,86 @@ SegmentGrowingImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
 }
 
 void
+SegmentGrowingImpl::BuildTextIndexFromTextLobRefs(
+    FieldId field_id,
+    const std::vector<FieldDataPtr>& field_data,
+    size_t reserved_offset,
+    const FieldMeta& field_meta) {
+    AssertInfo(field_meta.get_data_type() == DataType::TEXT,
+               "field {} is not TEXT",
+               field_id.get());
+    AssertInfo(HasTextLobPath(field_id),
+               "TEXT field {} has no LOB path",
+               field_id.get());
+
+    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                          .GetProperties();
+    AssertInfo(properties != nullptr,
+               "Loon FFI properties is not initialized for TEXT field {}",
+               field_id.get());
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    auto& cache = GetGlobalTextColumnCache();
+    const auto& lob_base_path = text_lob_paths_.at(field_id);
+
+    auto pinned = GetTextIndex(nullptr, field_id);
+    auto index = pinned.get();
+    int64_t offset = reserved_offset;
+
+    for (const auto& data : field_data) {
+        auto n = data->get_num_rows();
+        if (n == 0) {
+            continue;
+        }
+
+        auto raw_refs = static_cast<const std::string*>(data->Data());
+        FixedVector<std::string> decoded_texts(n);
+        FixedVector<bool> valid_data(n, true);
+        std::vector<int64_t> pending_indices;
+        std::vector<milvus_storage::lob_column::EncodedRef> encoded_refs;
+        pending_indices.reserve(n);
+        encoded_refs.reserve(n);
+
+        for (int64_t i = 0; i < n; ++i) {
+            auto valid = !field_meta.is_nullable() || data->is_valid(i);
+            valid_data[i] = valid;
+            if (!valid) {
+                continue;
+            }
+
+            const auto& ref = raw_refs[i];
+            encoded_refs.push_back(
+                {reinterpret_cast<const uint8_t*>(ref.data()), ref.size()});
+            pending_indices.push_back(i);
+        }
+
+        if (!encoded_refs.empty()) {
+            auto texts =
+                cache.ReadBatch(lob_base_path, fs, *properties, encoded_refs);
+            AssertInfo(texts.size() == pending_indices.size(),
+                       "TEXT LOB batch read returned inconsistent result size, "
+                       "field {}, expected {}, actual {}",
+                       field_id.get(),
+                       pending_indices.size(),
+                       texts.size());
+            for (size_t i = 0; i < pending_indices.size(); ++i) {
+                decoded_texts[pending_indices[i]] = std::move(texts[i]);
+            }
+        }
+
+        index->AddTextsGrowing(
+            n,
+            decoded_texts.data(),
+            field_meta.is_nullable() ? valid_data.data() : nullptr,
+            offset);
+        offset += n;
+    }
+
+    index->Commit();
+    // Reload reader so that the index can be read immediately
+    index->Reload();
+}
+
+void
 SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
                                     milvus::OpContext* op_ctx) {
     // Check for cancellation before starting
@@ -2166,19 +2253,19 @@ SegmentGrowingImpl::AddTexts(milvus::FieldId field_id,
     std::unique_lock lock(mutex_);
     auto iter = text_indexes_.find(field_id);
     if (iter == text_indexes_.end()) {
-        throw SegcoreError(
-            ErrorCode::TextIndexNotFound,
-            fmt::format("text index not found for field {}", field_id.get()));
+        ThrowInfo(ErrorCode::TextIndexNotFound,
+                  "text index not found for field {}",
+                  field_id.get());
     }
     // only unique_ptr is supported for growing segment
     if (auto p = std::get_if<std::unique_ptr<milvus::index::TextMatchIndex>>(
             &iter->second)) {
         (*p)->AddTextsGrowing(n, texts, texts_valid_data, offset_begin);
     } else {
-        throw SegcoreError(ErrorCode::UnexpectedError,
-                           fmt::format("text index of growing segment is not a "
-                                       "unique_ptr for field {}",
-                                       field_id.get()));
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "text index of growing segment is not a unique_ptr for field "
+                  "{}",
+                  field_id.get());
     }
 }
 
@@ -2283,9 +2370,6 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     field_data_info.load_priority = load_info_.priority();
 
     auto manifest_path = load_info_.manifest_path();
-    AssertInfo(!(manifest_path.empty() && SchemaHasTextField(*schema_)),
-               "TEXT growing segment cannot be loaded without a StorageV3 "
-               "manifest");
     if (manifest_path != "") {
         LoadColumnsGroups(manifest_path);
         return;
@@ -2359,6 +2443,10 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
 
+    // Initialize LOB paths before field data is loaded so TEXT text-match
+    // indexes can be built from resolved text instead of raw LOB references.
+    InitTextLobPaths(manifest_path);
+
     auto arrow_schema = schema_->ConvertToLoonArrowSchema();
     reader_ = milvus_storage::api::Reader::create(
         column_groups, arrow_schema, nullptr, *properties);
@@ -2417,9 +2505,6 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
 
     insert_record_.ack_responder_.AddSegment(reserved_offset,
                                              reserved_offset + num_rows);
-
-    // initialize LOB paths for TEXT fields (for query-time LOB resolution)
-    InitTextLobPaths(manifest_path);
 }
 
 std::unordered_map<FieldId, std::vector<FieldDataPtr>>

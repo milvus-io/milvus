@@ -100,14 +100,21 @@ type checkpointCandidates struct {
 }
 
 type growingSourceProgress struct {
-	segmentID     int64
-	targetOffset  int64
-	syncingOffset int64
-	syncing       bool
-	pendingFlush  bool
-	batches       []growingSourceProgressBatch
-	failureCount  int64
-	lastFailure   string
+	segmentID        int64
+	targetOffset     int64
+	syncingOffset    int64
+	syncing          bool
+	pendingFlush     bool
+	pendingCommitted *growingSourcePendingCommittedFlush
+	batches          []growingSourceProgressBatch
+	failureCount     int64
+	lastFailure      string
+}
+
+type growingSourcePendingCommittedFlush struct {
+	targetOffset int64
+	manifestPath string
+	bm25Stats    map[int64]*storage.BM25Stats
 }
 
 // growingFlushSourceDecision is the in-memory result of decideGrowingFlushSource.
@@ -152,6 +159,9 @@ func (p *growingSourceProgress) ack(offset int64) {
 		keepIdx++
 	}
 	p.batches = p.batches[keepIdx:]
+	if p.pendingCommitted != nil && offset >= p.pendingCommitted.targetOffset {
+		p.pendingCommitted = nil
+	}
 	p.syncing = false
 	p.syncingOffset = 0
 	p.failureCount = 0
@@ -165,6 +175,19 @@ func (p *growingSourceProgress) failSync(err error) {
 	if err != nil {
 		p.lastFailure = err.Error()
 	}
+}
+
+func cloneBM25StatsMap(stats map[int64]*storage.BM25Stats) map[int64]*storage.BM25Stats {
+	if len(stats) == 0 {
+		return nil
+	}
+	cloned := make(map[int64]*storage.BM25Stats, len(stats))
+	for fieldID, stat := range stats {
+		if stat != nil {
+			cloned[fieldID] = stat.Clone()
+		}
+	}
+	return cloned
 }
 
 func getCandidatesKey(segmentID int64, timestamp uint64) string {
@@ -638,6 +661,14 @@ func (wb *writeBufferBase) growingSourceProgressSyncable(segmentID int64, progre
 		}
 		return false, false
 	}
+	if progress.pendingCommitted != nil {
+		if markSealedFlushing {
+			if segment, ok := wb.metaCache.GetSegmentByID(segmentID); ok && segment.State() == commonpb.SegmentState_Sealed {
+				wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Flushing), metacache.WithSegmentIDs(segmentID))
+			}
+		}
+		return true, false
+	}
 	if len(progress.batches) == 0 && !progress.pendingFlush {
 		return false, false
 	}
@@ -717,11 +748,7 @@ func (wb *writeBufferBase) retryGrowingSourceProgress() {
 func (wb *writeBufferBase) getGrowingSourceSegmentsToRetry() ([]int64, bool) {
 	segments := make([]int64, 0, len(wb.growingSourceProgress))
 	retryNeeded := false
-	ts := wb.checkpoint.GetTimestamp()
 	for segmentID, progress := range wb.growingSourceProgress {
-		if !wb.growingSourceProgressSelectedByPolicy(ts, segmentID, progress) {
-			continue
-		}
 		syncable, retry := wb.growingSourceProgressSyncable(segmentID, progress, false, true)
 		retryNeeded = retryNeeded || retry
 		if syncable {
@@ -872,6 +899,13 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 				wb.mut.Lock()
 				if progress, exists := wb.growingSourceProgress[growingSourceTask.SegmentID()]; exists {
 					if err != nil {
+						if growingSourceTask.HasCommittedFlush() && growingSourceTask.CommittedManifestPath() != "" {
+							progress.pendingCommitted = &growingSourcePendingCommittedFlush{
+								targetOffset: growingSourceTask.TargetOffset(),
+								manifestPath: growingSourceTask.CommittedManifestPath(),
+								bm25Stats:    cloneBM25StatsMap(growingSourceTask.CommittedBM25Stats()),
+							}
+						}
 						progress.failSync(err)
 						wb.rollbackGrowingSourceSyncTaskLocked(growingSourceTask)
 						wb.observeGrowingSourceSyncFailureLocked(growingSourceTask.SegmentID(), progress)
@@ -946,7 +980,7 @@ func (wb *writeBufferBase) getSegmentsToSync(ts typeutil.Timestamp, policies ...
 		}
 	}
 	for segmentID, progress := range wb.growingSourceProgress {
-		if wb.growingSourceProgressSelectedByPolicy(ts, segmentID, progress) {
+		if len(policies) == 0 || wb.growingSourceProgressSelectedByPolicy(ts, segmentID, progress) {
 			segments.Insert(segmentID)
 		}
 	}
@@ -1331,6 +1365,10 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 
 func (wb *writeBufferBase) getGrowingSourceSyncTask(ctx context.Context, segmentInfo *metacache.SegmentInfo, progress *growingSourceProgress) (syncmgr.Task, error) {
 	targetOffset := progress.targetOffset
+	pendingCommitted := progress.pendingCommitted
+	if pendingCommitted != nil {
+		targetOffset = pendingCommitted.targetOffset
+	}
 	checkpoint := progress.checkpointFor(targetOffset)
 	startPos := progress.firstUncommittedPosition()
 	if checkpoint == nil {
@@ -1343,12 +1381,29 @@ func (wb *writeBufferBase) getGrowingSourceSyncTask(ctx context.Context, segment
 	if startPos != nil {
 		schemaTimestamp = startPos.GetTimestamp()
 	}
-	source, state := wb.getGrowingSource(progress.segmentID, targetOffset, checkpoint)
-	if state != syncmgr.GrowingSourceUsable {
-		if source != nil {
-			source.Release()
+	var source syncmgr.GrowingFlushSource
+	if pendingCommitted == nil {
+		var state syncmgr.GrowingSourceState
+		source, state = wb.getGrowingSource(progress.segmentID, targetOffset, checkpoint)
+		if state != syncmgr.GrowingSourceUsable {
+			if source != nil {
+				source.Release()
+			}
+			return nil, errors.Wrapf(errGrowingSourceUnavailable, "segment %d state %d", progress.segmentID, state)
 		}
-		return nil, errors.Wrapf(errGrowingSourceUnavailable, "segment %d state %d", progress.segmentID, state)
+	} else {
+		var state syncmgr.GrowingSourceState
+		source, state = wb.getGrowingSource(progress.segmentID, targetOffset, checkpoint)
+		if state != syncmgr.GrowingSourceUsable {
+			if source != nil {
+				source.Release()
+				source = nil
+			}
+			wb.logger.Warn("growing source unavailable during committed flush ack retry; retrying SaveBinlogPaths without re-flush",
+				zap.Int64("segmentID", progress.segmentID),
+				zap.Int64("targetOffset", targetOffset),
+				zap.Int("state", int(state)))
+		}
 	}
 
 	batchSize := targetOffset - segmentInfo.FlushedRows() - segmentInfo.SyncingRows()
@@ -1366,8 +1421,14 @@ func (wb *writeBufferBase) getGrowingSourceSyncTask(ctx context.Context, segment
 			WithMetaCache(wb.metaCache).
 			WithMetaWriter(wb.metaWriter).
 			WithSchema(wb.metaCache.GetSchema(schemaTimestamp)).
-			WithSource(source).
+			WithAllocator(wb.allocator).
 			WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second))
+		if source != nil {
+			task.WithSource(source)
+		}
+		if pendingCommitted != nil {
+			task.WithCommittedFlush(pendingCommitted.manifestPath, cloneBM25StatsMap(pendingCommitted.bm25Stats))
+		}
 		if segmentInfo.State() == commonpb.SegmentState_Flushing {
 			task.WithFlush()
 		}

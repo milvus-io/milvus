@@ -819,9 +819,8 @@ func (suite *SegmentLoaderSuite) TestLoadIndex() {
 		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 	}
 	segment := &LocalSegment{
-		baseSegment: baseSegment{
-			loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
-		},
+		baseSegment:     baseSegment{loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo)},
+		bm25StatsHolder: newBM25StatsHolder(),
 	}
 
 	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
@@ -860,9 +859,8 @@ func (suite *SegmentLoaderSuite) TestLoadIndexWithLimitedResource() {
 	}
 
 	segment := &LocalSegment{
-		baseSegment: baseSegment{
-			loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
-		},
+		baseSegment:     baseSegment{loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo)},
+		bm25StatsHolder: newBM25StatsHolder(),
 	}
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key, "100000")
 	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key)

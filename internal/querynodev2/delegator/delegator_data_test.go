@@ -639,43 +639,6 @@ func (s *DelegatorDataSuite) TestLoadGrowingWithBM25() {
 	s.NoError(err)
 }
 
-func (s *DelegatorDataSuite) TestLoadLegacyGrowingSourceWithoutManifest() {
-	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
-	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
-
-	s.manager = segments.NewManager()
-	s.genTextCollection()
-	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
-	s.Require().NoError(err)
-	sd, ok := delegator.(*shardDelegator)
-	s.Require().True(ok)
-	s.Require().NotNil(sd.checkpointTracker)
-	s.delegator = sd
-
-	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID:     1001,
-		CollectionID:  s.collectionID,
-		PartitionID:   500,
-		InsertChannel: s.vchannelName,
-		NumOfRows:     50,
-	}
-	s.loader.EXPECT().
-		Load(mock.Anything, s.collectionID, segments.SegmentTypeGrowing, int64(0), mock.Anything).
-		Call.Return(func(ctx context.Context, collectionID int64, segmentType segments.SegmentType, version int64, infos ...*querypb.SegmentLoadInfo) []segments.Segment {
-		ms := segments.NewMockSegment(s.T())
-		ms.EXPECT().ID().Return(loadInfo.GetSegmentID())
-		ms.EXPECT().Partition().Return(loadInfo.GetPartitionID())
-		ms.EXPECT().RowNum().Return(loadInfo.GetNumOfRows())
-		ms.EXPECT().LoadInfo().Return(loadInfo)
-		return []segments.Segment{ms}
-	}, nil)
-
-	err = s.delegator.LoadGrowing(context.Background(), []*querypb.SegmentLoadInfo{loadInfo}, 0)
-	s.Require().NoError(err)
-	s.Equal(int64(50), s.delegator.checkpointTracker.GetFlushedOffset(loadInfo.GetSegmentID()))
-	s.Empty(s.delegator.checkpointTracker.GetAcknowledgedManifest(loadInfo.GetSegmentID()))
-}
-
 func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 	s.genCollectionWithFunction()
 	s.Run("normal_run", func() {

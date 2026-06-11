@@ -242,7 +242,9 @@ func SyncPreferFieldDataWhenIndexHasRawData(ctx context.Context, params *paramta
 // into segcore so growing segments only retain raw chunks when the Go flush path
 // may later persist them through StorageV3 FlushGrowingSegmentData.
 func SyncEnableGrowingSourceFlush(ctx context.Context, params *paramtable.ComponentParam) {
-	v := params.CommonCfg.UseLoonFFI.GetAsBool() && params.CommonCfg.EnableGrowingSourceFlush.GetAsBool()
+	storageV3Enabled := params.CommonCfg.UseLoonFFI.GetAsBool()
+	v := storageV3Enabled && params.CommonCfg.EnableGrowingSourceFlush.GetAsBool()
+	C.SegcoreSetStorageV3Enabled(C.bool(storageV3Enabled))
 	C.SegcoreSetEnableGrowingSourceFlush(C.bool(v))
 	if v {
 		log.Ctx(ctx).Info("enableGrowingSourceFlush=true: growing segments retain raw field chunks for StorageV3 growing-source flush")

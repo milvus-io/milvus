@@ -662,7 +662,8 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
         case proto::schema::DataType::Float:
         case proto::schema::DataType::Double:
         case proto::schema::DataType::String:
-        case proto::schema::DataType::VarChar: {
+        case proto::schema::DataType::VarChar:
+        case proto::schema::DataType::Text: {
             // Generally, we will not build inverted index with single segment except for building index
             // for query node with older version(2.4). See more comments above `inverted_index_single_segment_`.
             if (!inverted_index_single_segment_) {
