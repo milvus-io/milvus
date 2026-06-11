@@ -360,6 +360,9 @@ func (h *Handlers) handleSearch(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
 	}
+	if wrappedReq.HasSearchAggregation() {
+		return nil, fmt.Errorf("%w: searchAggregation is not supported for low-level REST search", errBadRequest)
+	}
 	req := milvuspb.SearchRequest{
 		Base:               wrappedReq.Base,
 		DbName:             wrappedReq.DbName,

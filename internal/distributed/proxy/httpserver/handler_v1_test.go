@@ -1571,6 +1571,34 @@ func TestSearch(t *testing.T) {
 	})
 }
 
+func TestSearchV1RejectSearchAggregation(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(proxy.Params.HTTPCfg.AcceptTypeAllowInt64.Key, "true")
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	testEngine := initHTTPServer(mocks.NewMockProxy(t), true)
+	data, _ := json.Marshal(map[string]interface{}{
+		HTTPCollectionName: DefaultCollectionName,
+		"vector":           []float32{0.0, 0.0},
+		"searchAggregation": map[string]interface{}{
+			"fields": []string{"brand"},
+			"size":   1,
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, versional(VectorSearchPath), bytes.NewReader(data))
+	req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	resp := &ReturnErrMsg{}
+	err := json.Unmarshal(w.Body.Bytes(), resp)
+	assert.NoError(t, err)
+	assert.Equal(t, int32(1100), resp.Code)
+	assert.Contains(t, resp.Message, "searchAggregation is not supported for REST v1 search")
+}
+
 type ReturnType int
 
 func wrapWithDescribeColl(t *testing.T, mp *mocks.MockProxy, returnType ReturnType, times int, testCases []testCase) (*mocks.MockProxy, []testCase) {

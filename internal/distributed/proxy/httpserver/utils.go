@@ -2727,6 +2727,221 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	return queryResp, nil
 }
 
+func hasSearchAggregationResult(results *schemapb.SearchResultData) bool {
+	return results != nil && (len(results.GetAggTopks()) > 0 || len(results.GetAggBuckets()) > 0)
+}
+
+func buildSearchAggregationResp(results *schemapb.SearchResultData, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) ([]gin.H, error) {
+	if results == nil {
+		return nil, errors.New("search_aggregation result is nil")
+	}
+	aggTopks := results.GetAggTopks()
+	pbBuckets := results.GetAggBuckets()
+	if len(aggTopks) == 0 {
+		return nil, errors.New("search_aggregation response missing agg_topks")
+	}
+	if results.GetNumQueries() <= 0 {
+		return nil, errors.New("search_aggregation response missing nq")
+	}
+	if len(aggTopks) != int(results.GetNumQueries()) {
+		return nil, fmt.Errorf("search_aggregation agg_topks length %d does not match nq %d", len(aggTopks), results.GetNumQueries())
+	}
+
+	total := int64(0)
+	for _, topk := range aggTopks {
+		if topk < 0 {
+			return nil, errors.New("search_aggregation agg_topks cannot contain negative values")
+		}
+		total += topk
+	}
+	if total != int64(len(pbBuckets)) {
+		return nil, fmt.Errorf("search_aggregation agg_topks sum %d does not match bucket count %d", total, len(pbBuckets))
+	}
+
+	output := make([]gin.H, 0, len(aggTopks))
+	offset := 0
+	for _, topk := range aggTopks {
+		buckets := make([]gin.H, 0, int(topk))
+		for i := int64(0); i < topk; i++ {
+			bucket, err := buildAggBucketResp(pbBuckets[offset], enableInt64, collectionSchema)
+			if err != nil {
+				return nil, err
+			}
+			buckets = append(buckets, bucket)
+			offset++
+		}
+		output = append(output, gin.H{"buckets": buckets})
+	}
+	return output, nil
+}
+
+func buildAggBucketResp(pb *schemapb.AggBucket, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) (gin.H, error) {
+	if pb == nil {
+		return nil, errors.New("search_aggregation bucket is nil")
+	}
+	bucket := gin.H{
+		"key":       buildAggBucketKeyResp(pb.GetKey(), enableInt64),
+		"count":     formatRESTInt64(pb.GetCount(), enableInt64),
+		"metrics":   buildAggMetricsResp(pb.GetMetrics(), enableInt64),
+		"hits":      buildAggHitsResp(pb.GetHits(), enableInt64, collectionSchema),
+		"subGroups": []gin.H{},
+	}
+	subGroups := make([]gin.H, 0, len(pb.GetSubGroups()))
+	for _, sub := range pb.GetSubGroups() {
+		subGroup, err := buildAggBucketResp(sub, enableInt64, collectionSchema)
+		if err != nil {
+			return nil, err
+		}
+		subGroups = append(subGroups, subGroup)
+	}
+	bucket["subGroups"] = subGroups
+	return bucket, nil
+}
+
+func buildAggBucketKeyResp(keys []*schemapb.BucketKeyEntry, enableInt64 bool) []gin.H {
+	resp := make([]gin.H, 0, len(keys))
+	for _, key := range keys {
+		if key == nil {
+			resp = append(resp, gin.H{})
+			continue
+		}
+		fieldName := key.GetFieldName()
+		if fieldName == "" {
+			fieldName = strconv.FormatInt(key.GetFieldId(), 10)
+		}
+		resp = append(resp, gin.H{
+			"fieldName": fieldName,
+			"fieldId":   formatRESTInt64(key.GetFieldId(), enableInt64),
+			"value":     bucketKeyEntryValueToRESTAny(key, enableInt64),
+		})
+	}
+	return resp
+}
+
+func buildAggMetricsResp(metrics map[string]*schemapb.MetricValue, enableInt64 bool) gin.H {
+	resp := make(gin.H, len(metrics))
+	for alias, metric := range metrics {
+		resp[alias] = metricValueToRESTAny(metric, enableInt64)
+	}
+	return resp
+}
+
+func buildAggHitsResp(hits []*schemapb.AggHit, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) []gin.H {
+	resp := make([]gin.H, 0, len(hits))
+	pkFieldName := getRESTPrimaryFieldName(collectionSchema)
+	for _, hit := range hits {
+		if hit == nil {
+			resp = append(resp, gin.H{})
+			continue
+		}
+		row := gin.H{
+			pkFieldName:        aggHitPKToRESTAny(hit, enableInt64),
+			HTTPReturnDistance: hit.GetScore(),
+		}
+		for _, field := range hit.GetFields() {
+			if field == nil {
+				continue
+			}
+			fieldName := field.GetFieldName()
+			if fieldName == "" {
+				fieldName = strconv.FormatInt(field.GetFieldId(), 10)
+			}
+			row[fieldName] = aggHitFieldValueToRESTAny(field, enableInt64)
+		}
+		resp = append(resp, row)
+	}
+	return resp
+}
+
+func getRESTPrimaryFieldName(collectionSchema *schemapb.CollectionSchema) string {
+	if collectionSchema == nil {
+		return DefaultPrimaryFieldName
+	}
+	for _, field := range collectionSchema.GetFields() {
+		if field.GetIsPrimaryKey() {
+			return field.GetName()
+		}
+	}
+	return DefaultPrimaryFieldName
+}
+
+func formatRESTInt64(v int64, enableInt64 bool) interface{} {
+	if enableInt64 {
+		return v
+	}
+	return strconv.FormatInt(v, 10)
+}
+
+func metricValueToRESTAny(pb *schemapb.MetricValue, enableInt64 bool) interface{} {
+	if pb == nil {
+		return nil
+	}
+	switch v := pb.GetValue().(type) {
+	case *schemapb.MetricValue_IntVal:
+		return formatRESTInt64(v.IntVal, enableInt64)
+	case *schemapb.MetricValue_DoubleVal:
+		return v.DoubleVal
+	case *schemapb.MetricValue_StringVal:
+		return v.StringVal
+	case *schemapb.MetricValue_BoolVal:
+		return v.BoolVal
+	default:
+		return nil
+	}
+}
+
+func bucketKeyEntryValueToRESTAny(pb *schemapb.BucketKeyEntry, enableInt64 bool) interface{} {
+	if pb == nil {
+		return nil
+	}
+	switch v := pb.GetValue().(type) {
+	case *schemapb.BucketKeyEntry_IntVal:
+		return formatRESTInt64(v.IntVal, enableInt64)
+	case *schemapb.BucketKeyEntry_StringVal:
+		return v.StringVal
+	case *schemapb.BucketKeyEntry_BoolVal:
+		return v.BoolVal
+	default:
+		return nil
+	}
+}
+
+func aggHitPKToRESTAny(pb *schemapb.AggHit, enableInt64 bool) interface{} {
+	if pb == nil {
+		return nil
+	}
+	switch v := pb.GetPk().(type) {
+	case *schemapb.AggHit_IntPk:
+		return formatRESTInt64(v.IntPk, enableInt64)
+	case *schemapb.AggHit_StrPk:
+		return v.StrPk
+	default:
+		return nil
+	}
+}
+
+func aggHitFieldValueToRESTAny(pb *schemapb.AggHitField, enableInt64 bool) interface{} {
+	if pb == nil {
+		return nil
+	}
+	switch v := pb.GetValue().(type) {
+	case *schemapb.AggHitField_IntVal:
+		return formatRESTInt64(v.IntVal, enableInt64)
+	case *schemapb.AggHitField_BoolVal:
+		return v.BoolVal
+	case *schemapb.AggHitField_FloatVal:
+		return v.FloatVal
+	case *schemapb.AggHitField_DoubleVal:
+		return v.DoubleVal
+	case *schemapb.AggHitField_StringVal:
+		return v.StringVal
+	case *schemapb.AggHitField_BytesVal:
+		return v.BytesVal
+	default:
+		return nil
+	}
+}
+
 func formatInt64(intArray []int64) []string {
 	stringArray := make([]string, 0, len(intArray))
 	for _, i := range intArray {
@@ -3215,6 +3430,29 @@ func WrapErrorToResponse(err error) *milvuspb.BoolResponse {
 	}
 }
 
+func searchParamsContainAny(reqSearchParams map[string]interface{}, keys ...string) bool {
+	for _, key := range keys {
+		if _, ok := reqSearchParams[key]; ok {
+			return true
+		}
+	}
+
+	params, ok := reqSearchParams[Params]
+	if !ok {
+		return false
+	}
+	paramsMap, ok := params.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	for _, key := range keys {
+		if _, ok := paramsMap[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // after 2.5.2, all parameters of search_params can be written into one layer
 // no more parameters will be written searchParams.params
 // to ensure compatibility and milvus can still get a json format parameter
@@ -3274,6 +3512,106 @@ func generateSearchParams(reqSearchParams map[string]interface{}) ([]*commonpb.K
 	// need to exposure ParamRoundDecimal in req?
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
 	return searchParams, nil
+}
+
+func convertSearchAggregationReq(req *SearchAggregationReq) (*commonpb.SearchAggregationSpec, error) {
+	if req == nil {
+		return nil, nil
+	}
+	if len(req.Fields) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.fields must be non-empty")
+	}
+	fields := make([]string, 0, len(req.Fields))
+	for _, field := range req.Fields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.fields must contain non-empty field names")
+		}
+		fields = append(fields, field)
+	}
+	if req.Size <= 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.size must be positive")
+	}
+	if req.SearchSize < 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.searchSize must be non-negative")
+	}
+	if req.SearchSize > 0 && req.SearchSize < req.Size {
+		return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.searchSize must be greater than or equal to size")
+	}
+
+	spec := &commonpb.SearchAggregationSpec{
+		Fields:     fields,
+		Size:       req.Size,
+		SearchSize: req.SearchSize,
+	}
+
+	if len(req.Metrics) > 0 {
+		spec.Metrics = make(map[string]*commonpb.MetricAggSpec, len(req.Metrics))
+	}
+	for alias, metric := range req.Metrics {
+		alias = strings.TrimSpace(alias)
+		op := strings.TrimSpace(metric.Op)
+		fieldName := strings.TrimSpace(metric.FieldName)
+		if alias == "" {
+			return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.metrics alias must be non-empty")
+		}
+		if op == "" {
+			return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.metrics.%s.op must be non-empty", alias)
+		}
+		if fieldName == "" {
+			return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.metrics.%s.fieldName must be non-empty", alias)
+		}
+		spec.Metrics[alias] = &commonpb.MetricAggSpec{Op: op, FieldName: fieldName}
+	}
+
+	for _, order := range req.Order {
+		key := strings.TrimSpace(order.Key)
+		direction := strings.TrimSpace(order.Direction)
+		if key == "" {
+			return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.order key must be non-empty")
+		}
+		if direction == "" {
+			return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.order direction must be non-empty")
+		}
+		spec.Order = append(spec.Order, &commonpb.OrderSpec{Key: key, Direction: direction})
+	}
+
+	if req.TopHits != nil {
+		topHits, err := convertTopHitsReq(req.TopHits)
+		if err != nil {
+			return nil, err
+		}
+		spec.TopHits = topHits
+	}
+
+	if req.SubAggregation != nil {
+		sub, err := convertSearchAggregationReq(req.SubAggregation)
+		if err != nil {
+			return nil, err
+		}
+		spec.SubAggregation = sub
+	}
+
+	return spec, nil
+}
+
+func convertTopHitsReq(req *TopHitsReq) (*commonpb.TopHitsSpec, error) {
+	if req.Size <= 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.topHits.size must be positive")
+	}
+	spec := &commonpb.TopHitsSpec{Size: req.Size}
+	for _, sort := range req.Sort {
+		fieldName := strings.TrimSpace(sort.FieldName)
+		direction := strings.TrimSpace(sort.Direction)
+		if fieldName == "" {
+			return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.topHits.sort fieldName must be non-empty")
+		}
+		if direction == "" {
+			return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.topHits.sort direction must be non-empty")
+		}
+		spec.Sort = append(spec.Sort, &commonpb.SortSpec{FieldName: fieldName, Direction: direction})
+	}
+	return spec, nil
 }
 
 func genFunctionSchema(ctx context.Context, function *FunctionSchema) (*schemapb.FunctionSchema, error) {

@@ -144,6 +144,7 @@ const (
 	HTTPReturnLoadState      = "loadState"
 	HTTPReturnLoadProgress   = "loadProgress"
 	HTTPReturnTopks          = "topks"
+	HTTPReturnAggTopks       = "aggTopks"
 
 	HTTPReturnHas = "has"
 
