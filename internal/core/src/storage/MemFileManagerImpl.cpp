@@ -57,6 +57,7 @@ MemFileManagerImpl::MemFileManagerImpl(
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
     plugin_context_ = fileManagerContext.plugin_context;
     stats_base_path_ = fileManagerContext.stats_base_path;
+    storage_column_mappings_ = fileManagerContext.storage_column_mappings;
 }
 
 bool
@@ -231,9 +232,6 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
             config, SEGMENT_INSERT_FILES_KEY);
     auto manifest =
         index::GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
-    auto external_spec =
-        index::GetValueFromConfig<std::string>(config, EXTERNAL_SPEC_KEY)
-            .value_or("");
     AssertInfo(segment_insert_files.has_value() || manifest.has_value(),
                "[StorageV2] insert file paths and manifest for storage v2 is "
                "empty when build index");
@@ -243,11 +241,15 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
         AssertInfo(loon_ffi_properties_ != nullptr,
                    "[StorageV2] loon ffi properties is null when build index "
                    "with manifest");
+        auto storage_column_mapping =
+            GetStorageColumnMapping(field_meta_.field_id);
         auto is_text_match =
             index::GetValueFromConfig<bool>(config, "is_text_match")
                 .value_or(false);
         auto is_external_field =
-            !field_meta_.field_schema.external_field().empty();
+            storage_column_mapping.has_value()
+                ? storage_column_mapping->is_external_column
+                : !field_meta_.field_schema.external_field().empty();
         if (data_type.value() == DataType::TEXT && !is_external_field &&
             is_text_match) {
             return GetTextFieldDatasFromManifest(
@@ -259,7 +261,7 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
                                          data_type,
                                          dim,
                                          element_type,
-                                         external_spec);
+                                         storage_column_mapping);
     }
 
     auto remote_files = segment_insert_files.value();
@@ -441,9 +443,6 @@ MemFileManagerImpl::cache_opt_field_memory_v3(const Config& config) {
 
     auto manifest =
         index::GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
-    auto external_spec =
-        index::GetValueFromConfig<std::string>(config, EXTERNAL_SPEC_KEY)
-            .value_or("");
     AssertInfo(manifest.has_value() && manifest.value() != "",
                "[StorageV3] manifest path is empty when build index");
     auto manifest_path_str = manifest.value();
@@ -465,13 +464,14 @@ MemFileManagerImpl::cache_opt_field_memory_v3(const Config& config) {
                                                   field_meta_.segment_id,
                                                   field_id,
                                                   field_schema};
-        auto field_datas = GetFieldDatasFromManifest(manifest_path_str,
-                                                     loon_ffi_properties_,
-                                                     field_meta,
-                                                     field_type,
-                                                     1,  // scalar field
-                                                     element_type,
-                                                     external_spec);
+        auto field_datas =
+            GetFieldDatasFromManifest(manifest_path_str,
+                                      loon_ffi_properties_,
+                                      field_meta,
+                                      field_type,
+                                      1,  // scalar field
+                                      element_type,
+                                      GetStorageColumnMapping(field_id));
 
         res[field_id] = GetOptFieldIvfData(field_type, field_datas);
     }

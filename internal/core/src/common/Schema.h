@@ -50,6 +50,18 @@ ParseFieldIdColumnName(const std::string& column_name);
 bool
 IsMilvusTableExternalSpec(const std::string& external_spec);
 
+// Physical column mapping for a schema field in external storage manifests.
+struct PhysicalColumnMapping {
+    std::string schema_column_name;
+    std::string storage_column_name;
+    bool is_external_column = false;
+};
+
+PhysicalColumnMapping
+ResolvePhysicalColumnMapping(
+    bool is_milvus_table,
+    const milvus::proto::schema::FieldSchema& field_schema);
+
 inline std::optional<std::string>
 GetStructNameForArrayField(const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();

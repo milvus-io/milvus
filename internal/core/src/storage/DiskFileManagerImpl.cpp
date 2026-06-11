@@ -79,6 +79,7 @@ DiskFileManagerImpl::DiskFileManagerImpl(
     plugin_context_ = fileManagerContext.plugin_context;
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
     stats_base_path_ = fileManagerContext.stats_base_path;
+    storage_column_mappings_ = fileManagerContext.storage_column_mappings;
 }
 
 DiskFileManagerImpl::~DiskFileManagerImpl() {
@@ -796,21 +797,19 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     std::vector<FieldDataPtr> field_datas;
     auto manifest =
         index::GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
-    auto external_spec =
-        index::GetValueFromConfig<std::string>(config, EXTERNAL_SPEC_KEY)
-            .value_or("");
     auto manifest_path_str = manifest.value_or("");
     if (manifest_path_str != "") {
         AssertInfo(
             loon_ffi_properties_ != nullptr,
             "loon ffi properties is null when build index with manifest");
-        field_datas = GetFieldDatasFromManifest(manifest_path_str,
-                                                loon_ffi_properties_,
-                                                field_meta_,
-                                                data_type,
-                                                dim,
-                                                element_type,
-                                                external_spec);
+        field_datas = GetFieldDatasFromManifest(
+            manifest_path_str,
+            loon_ffi_properties_,
+            field_meta_,
+            data_type,
+            dim,
+            element_type,
+            GetStorageColumnMapping(field_meta_.field_id));
     } else {
         field_datas = GetFieldDatasFromStorageV2(all_remote_files,
                                                  GetFieldDataMeta().field_id,
@@ -1242,9 +1241,6 @@ DiskFileManagerImpl::cache_opt_field_to_disk_v3(const Config& config) {
 
     auto manifest =
         index::GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
-    auto external_spec =
-        index::GetValueFromConfig<std::string>(config, EXTERNAL_SPEC_KEY)
-            .value_or("");
     AssertInfo(manifest.has_value() && manifest.value() != "",
                "[StorageV3] manifest path is empty when build index");
     auto manifest_path_str = manifest.value();
@@ -1278,13 +1274,14 @@ DiskFileManagerImpl::cache_opt_field_to_disk_v3(const Config& config) {
                                                   field_meta_.segment_id,
                                                   field_id,
                                                   field_schema};
-        auto field_datas = GetFieldDatasFromManifest(manifest_path_str,
-                                                     loon_ffi_properties_,
-                                                     field_meta,
-                                                     field_type,
-                                                     1,  // scalar field
-                                                     element_type,
-                                                     external_spec);
+        auto field_datas =
+            GetFieldDatasFromManifest(manifest_path_str,
+                                      loon_ffi_properties_,
+                                      field_meta,
+                                      field_type,
+                                      1,  // scalar field
+                                      element_type,
+                                      GetStorageColumnMapping(field_id));
 
         if (WriteOptFieldIvfData(field_type,
                                  field_id,

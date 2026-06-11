@@ -77,6 +77,37 @@ IsMilvusTableExternalSpec(const std::string& external_spec) {
     }
 }
 
+namespace {
+
+bool
+IsMilvusTableExternalDataField(FieldId field_id,
+                               const std::string& field_name,
+                               bool is_function_output) {
+    return !SystemProperty::Instance().IsSystem(field_id) &&
+           !is_function_output && field_name != VIRTUAL_PK_FIELD_NAME;
+}
+
+}  // namespace
+
+PhysicalColumnMapping
+ResolvePhysicalColumnMapping(
+    bool is_milvus_table,
+    const milvus::proto::schema::FieldSchema& field_schema) {
+    PhysicalColumnMapping mapping;
+    mapping.schema_column_name = field_schema.name();
+    mapping.storage_column_name = std::to_string(field_schema.fieldid());
+    if (is_milvus_table &&
+        IsMilvusTableExternalDataField(FieldId(field_schema.fieldid()),
+                                       field_schema.name(),
+                                       field_schema.is_function_output())) {
+        mapping.is_external_column = true;
+    } else if (!field_schema.external_field().empty()) {
+        mapping.storage_column_name = field_schema.external_field();
+        mapping.is_external_column = true;
+    }
+    return mapping;
+}
+
 void
 Schema::set_external_spec(const std::string& spec) {
     external_spec_ = spec;
@@ -342,9 +373,8 @@ Schema::IsExternalDataField(FieldId field_id) const {
     if (!is_milvus_table_external_collection()) {
         return meta.is_external_field();
     }
-    return !SystemProperty::Instance().IsSystem(field_id) &&
-           !is_function_output(field_id) &&
-           meta.get_name().get() != VIRTUAL_PK_FIELD_NAME;
+    return IsMilvusTableExternalDataField(
+        field_id, meta.get_name().get(), is_function_output(field_id));
 }
 
 bool

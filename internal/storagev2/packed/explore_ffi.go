@@ -26,6 +26,7 @@ package packed
 import "C"
 
 import (
+	"fmt"
 	"net/url"
 	"path"
 	"sort"

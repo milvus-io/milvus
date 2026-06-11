@@ -299,7 +299,7 @@ GetFieldDatasFromManifest(
     std::optional<DataType> data_type,
     int64_t dim,
     std::optional<DataType> element_type,
-    const std::string& external_spec = "");
+    std::optional<StorageColumnMapping> storage_column_mapping = std::nullopt);
 
 std::vector<FieldDataPtr>
 GetTextFieldDatasFromManifest(
