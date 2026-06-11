@@ -29,6 +29,7 @@ func TestShardInterceptorLogsOmittedSchemaVersionAsNotProvided(t *testing.T) {
 	logger := &log.MLogger{Logger: zap.New(core)}
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(mock.Anything).Return(nil).Maybe()
 	shardManager.EXPECT().Logger().Return(logger).Maybe()
 	i := b.Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
@@ -69,6 +70,7 @@ func TestShardInterceptorLogsOmittedSchemaVersionAsNotProvided(t *testing.T) {
 func TestShardInterceptorReportsExplicitZeroSchemaVersionInMismatchError(t *testing.T) {
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(mock.Anything).Return(nil).Maybe()
 	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
 	i := b.Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
@@ -108,6 +110,7 @@ func TestShardInterceptorReportsExplicitZeroSchemaVersionInMismatchError(t *test
 func TestShardInterceptorDeleteAppliesBeforeAppend(t *testing.T) {
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(mock.Anything).Return(nil).Maybe()
 	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
 	i := b.Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
@@ -138,6 +141,7 @@ func TestShardInterceptorDeleteAppliesBeforeAppend(t *testing.T) {
 func TestShardInterceptorPassesExplicitNonZeroSchemaVersion(t *testing.T) {
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(mock.Anything).Return(nil).Maybe()
 	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
 	i := b.Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
@@ -176,6 +180,7 @@ func TestShardInterceptorPassesExplicitNonZeroSchemaVersion(t *testing.T) {
 func TestShardInterceptorPassesExplicitZeroSchemaVersion(t *testing.T) {
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(mock.Anything).Return(nil).Maybe()
 	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
 	i := b.Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
@@ -217,6 +222,7 @@ func TestShardInterceptor(t *testing.T) {
 
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(mock.Anything).Return(nil).Maybe()
 	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
 	i := b.Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,

@@ -376,12 +376,29 @@ func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 	case message.MessageTypeTruncateCollection:
 		immutableMsg := message.MustAsImmutableTruncateCollectionMessageV2(msg)
 		r.handleTruncateCollection(immutableMsg)
+	case message.MessageTypeSplitShard:
+		immutableMsg := message.MustAsImmutableSplitShardMessageV2(msg)
+		r.handleSplitShard(immutableMsg)
 	case message.MessageTypeTimeTick:
 		// nothing, the time tick message make no recovery operation.
 	case message.MessageTypeAlterWAL:
 		immutableMsg := message.MustAsImmutableAlterWALMessageV2(msg)
 		r.handleAlterWAL(immutableMsg)
 	}
+}
+
+// handleSplitShard handles the split shard message.
+// The split shard message fences the source vchannel: no new DML is appended
+// after it, so only the vchannel state flips here. The growing segments have
+// been sealed by the ManualFlush message written right before it; flush them
+// defensively anyway so the replay stays idempotent even if the two messages
+// were not persisted atomically.
+func (r *recoveryStorageImpl) handleSplitShard(msg message.ImmutableSplitShardMessageV2) {
+	r.flushAllSegmentOfCollection(msg, msg.Header().CollectionId)
+	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; ok {
+		vchannelInfo.ObserveSplitShard(msg)
+	}
+	r.Logger().Info("split shard", log.FieldMessage(msg))
 }
 
 // handleAlterWAL handles the alter WAL message.
