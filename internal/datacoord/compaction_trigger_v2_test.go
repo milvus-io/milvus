@@ -100,8 +100,8 @@ func TestCompactionIDBlockTakeFromMetadataTail(t *testing.T) {
 
 func TestCreateCompactionIDBlockRejectsTooLargeBatch(t *testing.T) {
 	pt := paramtable.Get()
-	pt.Save(pt.DataCoordCfg.CompactionPreAllocateSegmentIDExpansionFactor.Key, "10")
-	defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateSegmentIDExpansionFactor.Key)
+	pt.Save(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "10")
+	defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
 
 	mockAlloc := allocator.NewMockAllocator(t)
 	_, err := createCompactionIDBlock(mockAlloc, math.MaxUint32/10+1, 1)
@@ -113,12 +113,10 @@ func TestCreateCompactionIDBlockRejectsTooLargeBatch(t *testing.T) {
 	}
 }
 
-func TestCreateCompactionIDBlockUsesSegmentIDExpansionFactor(t *testing.T) {
+func TestCreateCompactionIDBlockUsesIDExpansionFactor(t *testing.T) {
 	pt := paramtable.Get()
-	pt.Save(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "10000")
+	pt.Save(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "2")
 	defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
-	pt.Save(pt.DataCoordCfg.CompactionPreAllocateSegmentIDExpansionFactor.Key, "2")
-	defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateSegmentIDExpansionFactor.Key)
 
 	mockAlloc := allocator.NewMockAllocator(t)
 	mockAlloc.EXPECT().AllocN(int64(7)).Return(int64(100), int64(107), nil).Once()
@@ -572,8 +570,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitSingleViewToScheduler() {
 	s.Run("mix compaction allocates estimated result segments", func() {
 		s.SetupTest()
 		pt := paramtable.Get()
-		pt.Save(pt.DataCoordCfg.CompactionPreAllocateSegmentIDExpansionFactor.Key, "1")
-		defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateSegmentIDExpansionFactor.Key)
+		pt.Save(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "1")
+		defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
 		pt.Save(pt.DataCoordCfg.SegmentMaxSize.Key, "100")
 		defer pt.Reset(pt.DataCoordCfg.SegmentMaxSize.Key)
 
@@ -622,8 +620,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitSingleViewToScheduler() {
 	s.Run("sort compaction allocates estimated result segments", func() {
 		s.SetupTest()
 		pt := paramtable.Get()
-		pt.Save(pt.DataCoordCfg.CompactionPreAllocateSegmentIDExpansionFactor.Key, "1")
-		defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateSegmentIDExpansionFactor.Key)
+		pt.Save(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "1")
+		defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
 		pt.Save(pt.DataCoordCfg.SegmentMaxSize.Key, "100")
 		defer pt.Reset(pt.DataCoordCfg.SegmentMaxSize.Key)
 
@@ -662,8 +660,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitSingleViewToScheduler() {
 	s.Run("storage version upgrade keeps size based estimation", func() {
 		s.SetupTest()
 		pt := paramtable.Get()
-		pt.Save(pt.DataCoordCfg.CompactionPreAllocateSegmentIDExpansionFactor.Key, "1")
-		defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateSegmentIDExpansionFactor.Key)
+		pt.Save(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "1")
+		defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
 		pt.Save(pt.DataCoordCfg.SegmentMaxSize.Key, "100")
 		defer pt.Reset(pt.DataCoordCfg.SegmentMaxSize.Key)
 
@@ -703,8 +701,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitSingleViewToScheduler() {
 func (s *CompactionTriggerManagerSuite) TestSubmitClusteringViewToScheduler() {
 	s.SetupTest()
 	pt := paramtable.Get()
-	pt.Save(pt.DataCoordCfg.CompactionPreAllocateSegmentIDExpansionFactor.Key, "2")
-	defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateSegmentIDExpansionFactor.Key)
+	pt.Save(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "2")
+	defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
 	pt.Save(pt.DataCoordCfg.SegmentMaxSize.Key, "100")
 	defer pt.Reset(pt.DataCoordCfg.SegmentMaxSize.Key)
 	pt.Save(pt.DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key, "1")
@@ -756,8 +754,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitClusteringViewToScheduler() {
 func (s *CompactionTriggerManagerSuite) TestSubmitForceMergeViewToScheduler() {
 	s.SetupTest()
 	pt := paramtable.Get()
-	pt.Save(pt.DataCoordCfg.CompactionPreAllocateSegmentIDExpansionFactor.Key, "1")
-	defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateSegmentIDExpansionFactor.Key)
+	pt.Save(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "1")
+	defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
 
 	collectionSchema := &schemapb.CollectionSchema{
 		Name: "test_coll",
@@ -926,8 +924,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitViewToSchedulerDefensiveReturn
 }
 
 func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToScheduler() {
-	Params.Save(Params.DataCoordCfg.CompactionPreAllocateSegmentIDExpansionFactor.Key, "1")
-	defer Params.Reset(Params.DataCoordCfg.CompactionPreAllocateSegmentIDExpansionFactor.Key)
+	Params.Save(Params.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "1")
+	defer Params.Reset(Params.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
 	Params.Save(Params.DataCoordCfg.SegmentMaxSize.Key, "100")
 	defer Params.Reset(Params.DataCoordCfg.SegmentMaxSize.Key)
 	Params.Save(Params.DataCoordCfg.DiskSegmentMaxSize.Key, "100")

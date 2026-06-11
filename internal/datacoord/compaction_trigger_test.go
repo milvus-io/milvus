@@ -528,11 +528,10 @@ func Test_compactionTrigger_force(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	preAllocateSegmentIDExpansionFactor := paramtable.Get().DataCoordCfg.CompactionPreAllocateSegmentIDExpansionFactor.GetAsInt64()
-	preAllocateLogIDExpansionFactor := paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
+	preAllocateIDExpansionFactor := paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
 	preAllocatedSegmentIDBegin := int64(100)
-	preAllocatedSegmentIDEnd := preAllocatedSegmentIDBegin + preAllocateSegmentIDExpansionFactor
-	preAllocatedLogIDEnd := preAllocatedSegmentIDBegin + 4*preAllocateLogIDExpansionFactor
+	preAllocatedSegmentIDEnd := preAllocatedSegmentIDBegin + preAllocateIDExpansionFactor
+	preAllocatedLogIDEnd := preAllocatedSegmentIDBegin + 4*preAllocateIDExpansionFactor
 
 	tests := []struct {
 		name         string
@@ -2586,8 +2585,8 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		pt := paramtable.Get()
 		pt.Save(pt.DataCoordCfg.IndexBasedCompaction.Key, "false")
 		defer pt.Reset(pt.DataCoordCfg.IndexBasedCompaction.Key)
-		pt.Save(pt.DataCoordCfg.CompactionPreAllocateSegmentIDExpansionFactor.Key, "1")
-		defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateSegmentIDExpansionFactor.Key)
+		pt.Save(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "1")
+		defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
 		pt.Save(pt.DataCoordCfg.SegmentMaxSize.Key, "100")
 		defer pt.Reset(pt.DataCoordCfg.SegmentMaxSize.Key)
 

@@ -3549,6 +3549,65 @@ func (_c *MockProxy_DumpMessages_Call) RunAndReturn(run func(*milvuspb.DumpMessa
 	return _c
 }
 
+// ExportSnapshot provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ExportSnapshot(_a0 context.Context, _a1 *milvuspb.ExportSnapshotRequest) (*milvuspb.ExportSnapshotResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ExportSnapshot")
+	}
+
+	var r0 *milvuspb.ExportSnapshotResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ExportSnapshotRequest) (*milvuspb.ExportSnapshotResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ExportSnapshotRequest) *milvuspb.ExportSnapshotResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ExportSnapshotResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ExportSnapshotRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_ExportSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ExportSnapshot'
+type MockProxy_ExportSnapshot_Call struct {
+	*mock.Call
+}
+
+// ExportSnapshot is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ExportSnapshotRequest
+func (_e *MockProxy_Expecter) ExportSnapshot(_a0 interface{}, _a1 interface{}) *MockProxy_ExportSnapshot_Call {
+	return &MockProxy_ExportSnapshot_Call{Call: _e.mock.On("ExportSnapshot", _a0, _a1)}
+}
+
+func (_c *MockProxy_ExportSnapshot_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ExportSnapshotRequest)) *MockProxy_ExportSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ExportSnapshotRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_ExportSnapshot_Call) Return(_a0 *milvuspb.ExportSnapshotResponse, _a1 error) *MockProxy_ExportSnapshot_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_ExportSnapshot_Call) RunAndReturn(run func(context.Context, *milvuspb.ExportSnapshotRequest) (*milvuspb.ExportSnapshotResponse, error)) *MockProxy_ExportSnapshot_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Flush provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) Flush(_a0 context.Context, _a1 *milvuspb.FlushRequest) (*milvuspb.FlushResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -8162,6 +8221,65 @@ func (_c *MockProxy_ReplicateMessage_Call) Return(_a0 *milvuspb.ReplicateMessage
 }
 
 func (_c *MockProxy_ReplicateMessage_Call) RunAndReturn(run func(context.Context, *milvuspb.ReplicateMessageRequest) (*milvuspb.ReplicateMessageResponse, error)) *MockProxy_ReplicateMessage_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RestoreExternalSnapshot provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) RestoreExternalSnapshot(_a0 context.Context, _a1 *milvuspb.RestoreExternalSnapshotRequest) (*milvuspb.RestoreExternalSnapshotResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RestoreExternalSnapshot")
+	}
+
+	var r0 *milvuspb.RestoreExternalSnapshotResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RestoreExternalSnapshotRequest) (*milvuspb.RestoreExternalSnapshotResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RestoreExternalSnapshotRequest) *milvuspb.RestoreExternalSnapshotResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.RestoreExternalSnapshotResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.RestoreExternalSnapshotRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_RestoreExternalSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RestoreExternalSnapshot'
+type MockProxy_RestoreExternalSnapshot_Call struct {
+	*mock.Call
+}
+
+// RestoreExternalSnapshot is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.RestoreExternalSnapshotRequest
+func (_e *MockProxy_Expecter) RestoreExternalSnapshot(_a0 interface{}, _a1 interface{}) *MockProxy_RestoreExternalSnapshot_Call {
+	return &MockProxy_RestoreExternalSnapshot_Call{Call: _e.mock.On("RestoreExternalSnapshot", _a0, _a1)}
+}
+
+func (_c *MockProxy_RestoreExternalSnapshot_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.RestoreExternalSnapshotRequest)) *MockProxy_RestoreExternalSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.RestoreExternalSnapshotRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_RestoreExternalSnapshot_Call) Return(_a0 *milvuspb.RestoreExternalSnapshotResponse, _a1 error) *MockProxy_RestoreExternalSnapshot_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_RestoreExternalSnapshot_Call) RunAndReturn(run func(context.Context, *milvuspb.RestoreExternalSnapshotRequest) (*milvuspb.RestoreExternalSnapshotResponse, error)) *MockProxy_RestoreExternalSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }

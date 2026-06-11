@@ -612,9 +612,9 @@ func allocClusteringCompactionPlanIDs(allocator allocator.Allocator, totalSize f
 // first segmentIDCount IDs are result segment IDs and the rest are task metadata IDs.
 func createCompactionIDBlock(allocator allocator.Allocator, segmentIDCount int64, metaIDCount int64) (*compactionIDBlock, error) {
 	segmentIDCount = max(segmentIDCount, 1)
-	expansionFactor := paramtable.Get().DataCoordCfg.CompactionPreAllocateSegmentIDExpansionFactor.GetAsInt64()
+	expansionFactor := paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
 	if expansionFactor <= 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("compaction pre-allocate segment ID expansion factor must be positive: %d", expansionFactor)
+		return nil, merr.WrapErrParameterInvalidMsg("compaction pre-allocate ID expansion factor must be positive: %d", expansionFactor)
 	}
 	maxBatchSize := int64(math.MaxUint32)
 	if metaIDCount < 0 || metaIDCount > maxBatchSize || segmentIDCount > (maxBatchSize-metaIDCount)/expansionFactor {
