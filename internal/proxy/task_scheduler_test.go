@@ -766,11 +766,11 @@ func TestTaskScheduler_ProcessDQLTaskFeedsBackQueueFull(t *testing.T) {
 	sched, err := newTaskScheduler(context.Background(), newMockTsoAllocator())
 	require.NoError(t, err)
 	sched.dqlBackpressure = newDQLBackpressureController(dqlBackpressureControllerConfig{
-		enabled:         true,
-		maxConcurrency:  8,
-		minConcurrency:  2,
-		reduceRatio:     0.5,
-		recoverInterval: time.Second,
+		enabled:                true,
+		maxConcurrency:         8,
+		slowdownMinConcurrency: 2,
+		slowdownRatio:          0.5,
+		recoverInterval:        time.Second,
 	})
 
 	task := newDefaultMockDqlTask()
@@ -790,8 +790,8 @@ func TestTaskScheduler_DQLBackpressureConfigCallback(t *testing.T) {
 	defer sched.Close()
 
 	current := sched.dqlBackpressure.CurrentConcurrency()
-	require.NoError(t, Params.Save(Params.ProxyCfg.DQLBackpressureReduceRatio.Key, "0.25"))
-	defer Params.Reset(Params.ProxyCfg.DQLBackpressureReduceRatio.Key)
+	require.NoError(t, Params.Save(Params.ProxyCfg.DQLBackpressureSlowdownRatio.Key, "0.25"))
+	defer Params.Reset(Params.ProxyCfg.DQLBackpressureSlowdownRatio.Key)
 
 	sched.dqlBackpressure.Observe(merr.WrapErrTooManyRequests(1024))
 
@@ -805,11 +805,11 @@ func TestTaskScheduler_QueryLoopLimitsDQLDispatchConcurrency(t *testing.T) {
 	sched, err := newTaskScheduler(ctx, newMockTsoAllocator())
 	require.NoError(t, err)
 	sched.dqlBackpressure = newDQLBackpressureController(dqlBackpressureControllerConfig{
-		enabled:         true,
-		maxConcurrency:  1,
-		minConcurrency:  1,
-		reduceRatio:     0.5,
-		recoverInterval: time.Second,
+		enabled:                true,
+		maxConcurrency:         1,
+		slowdownMinConcurrency: 1,
+		slowdownRatio:          0.5,
+		recoverInterval:        time.Second,
 	})
 
 	firstStarted := make(chan struct{}, 1)
