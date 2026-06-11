@@ -580,9 +580,7 @@ class CollectionClient(Requests):
     def get_compaction_state(self, job_id, db_name="default"):
         """Get compaction state"""
         url = f"{self.endpoint}/v2/vectordb/collections/get_compaction_state"
-        payload = {
-            "jobID": job_id
-        }
+        payload = {"jobID": job_id}
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -922,45 +920,36 @@ class ImportJobClient(Requests):
     def describe_import_job(self, job_id, db_name="default"):
         if self.db_name is not None:
             db_name = self.db_name
-        payload = {
-            "dbName": db_name,
-            "jobId": job_id
-        }
+        payload = {"dbName": db_name, "jobId": job_id}
         if db_name is None:
             payload.pop("dbName")
         if job_id is None:
             payload.pop("jobId")
-        url = f'{self.endpoint}/v2/vectordb/jobs/import/describe'
+        url = f"{self.endpoint}/v2/vectordb/jobs/import/describe"
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
 
     def commit_import_job(self, job_id, db_name="default"):
         if self.db_name is not None:
             db_name = self.db_name
-        payload = {
-            "dbName": db_name,
-            "jobId": job_id
-        }
+        payload = {"dbName": db_name, "jobId": job_id}
         if db_name is None:
             payload.pop("dbName")
         if job_id is None:
             payload.pop("jobId")
-        url = f'{self.endpoint}/v2/vectordb/jobs/import/commit'
+        url = f"{self.endpoint}/v2/vectordb/jobs/import/commit"
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
 
     def abort_import_job(self, job_id, db_name="default"):
         if self.db_name is not None:
             db_name = self.db_name
-        payload = {
-            "dbName": db_name,
-            "jobId": job_id
-        }
+        payload = {"dbName": db_name, "jobId": job_id}
         if db_name is None:
             payload.pop("dbName")
         if job_id is None:
             payload.pop("jobId")
-        url = f'{self.endpoint}/v2/vectordb/jobs/import/abort'
+        url = f"{self.endpoint}/v2/vectordb/jobs/import/abort"
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
 
