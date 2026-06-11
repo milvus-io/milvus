@@ -306,7 +306,8 @@ that every error a client sees was deliberately typed at its source.
   `return errors.New / fmt.Errorf / errors.Errorf` from function bodies. It runs
   under `make verifiers` (via `static-check`), so no extra command is needed.
   Exempt paths (run outside the request path): `*_test.go`, `cmd/`, `tests/`,
-  codegen, and the walimpls harness.
+  codegen, the walimpls harness, and `/mocks/` (generated mock helpers are
+  test infrastructure even though some lack a "Code generated" header).
 - It catches the **direct-return** form — the one that lets a raw error escape to
   a boundary. Assignment-then-return escapes (`e := errors.New(); return e`) and
   the full no-exceptions ban require the AST-based linter described as "Tier 2"

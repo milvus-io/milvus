@@ -17,6 +17,7 @@
 package merr
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -140,4 +141,72 @@ func TestSentinelErrorTypeClassification(t *testing.T) {
 	for name, err := range systemSentinels {
 		assert.Equal(t, SystemError, GetErrorType(err), "%s should stay SystemError", name)
 	}
+
+	// Closed-world check over the sentinel registry: the EXACT set of codes
+	// baked WithErrorType(InputError). Unlike the spot checks above, this
+	// cannot under-cover — adding or removing an InputError mark anywhere in
+	// errors.go fails here until the expected set is updated deliberately.
+	wantInputCodes := []int32{
+		102, 104, 105, 107, 108, 109, // Collection: num limit / loaded / illegal schema / vector clustering key / replicate mode / schema mismatch
+		300, 301, 302, 303, // ResourceGroup
+		702,      // IndexDuplicate
+		801, 802, // Database: num limit / invalid name
+		1100, 1101, 1102, // Parameter: invalid / missing / too large
+		1400, 1401, 1402, // Privilege
+		1800, 1801, 1802, 1804, // Auth / parameter format / insert data
+		2100, // ImportFailed
+		2201, // QueryPlan
+	}
+	gotInputCodes := make([]int32, 0, len(wantInputCodes))
+	for code, sentinel := range registeredCodes {
+		if sentinel.errType == InputError {
+			gotInputCodes = append(gotInputCodes, code)
+		}
+	}
+	assert.ElementsMatch(t, wantInputCodes, gotInputCodes,
+		"the set of InputError-baked sentinel codes changed; update this list only with a deliberate classification decision")
+}
+
+// TestStatusReasonComposition pins what clients actually read: Reason is the
+// full composed chain, outermost context first, root cause last.
+func TestStatusReasonComposition(t *testing.T) {
+	err := Wrap(WrapErrCollectionNotFound("c1"), "failed to describe collection")
+	reason := Status(err).GetReason()
+	assert.Contains(t, reason, "failed to describe collection")
+	assert.Contains(t, reason, "collection not found")
+	assert.Less(t, strings.Index(reason, "failed to describe collection"),
+		strings.Index(reason, "collection not found"),
+		"outer context must precede the root cause")
+}
+
+// TestStatusTwoHopRoundtrip simulates proxy -> coord -> proxy: the error is
+// serialized to a Status, reconstructed, and serialized again. Code, the
+// InputError classification, and forced non-retriability must survive both hops.
+func TestStatusTwoHopRoundtrip(t *testing.T) {
+	orig := WrapErrAsInputError(WrapErrCollectionNotFound("c1"))
+
+	st1 := Status(orig)
+	hop := Error(st1)
+	st2 := Status(hop)
+
+	assert.Equal(t, st1.GetCode(), st2.GetCode())
+	assert.Equal(t, "true", st2.GetExtraInfo()[InputErrorFlagKey])
+	assert.Equal(t, InputError, GetErrorType(Error(st2)))
+	assert.False(t, st2.GetRetriable())
+	assert.Contains(t, st2.GetReason(), "collection not found")
+}
+
+// TestRelabelAsMatchTarget documents the errors.Is geometry of a relabel
+// (milvusError-with-inner): the relabel matches its own sentinel AND the inner
+// remains reachable through Unwrap, while an unrelated error sharing neither
+// code does not match.
+func TestRelabelAsMatchTarget(t *testing.T) {
+	inner := WrapErrCollectionNotFound("c1")
+	relabeled := WrapErrServiceInternalErr(inner, "downgraded at boundary")
+
+	assert.ErrorIs(t, relabeled, ErrServiceInternal)    // relabel identity
+	assert.ErrorIs(t, relabeled, ErrCollectionNotFound) // inner stays reachable
+	assert.Equal(t, ErrServiceInternal.code(), Code(relabeled),
+		"the relabel's code wins for the wire")
+	assert.NotErrorIs(t, WrapErrDatabaseNotFound("db"), relabeled)
 }

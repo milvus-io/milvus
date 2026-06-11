@@ -126,12 +126,12 @@ func isSupportedGroupByFieldType(dt schemapb.DataType) bool {
 
 func validateGroupByFieldSchema(field *schemapb.FieldSchema) error {
 	if field == nil {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("group by field schema is nil"))
+		return merr.WrapErrParameterInvalidMsg("group by field schema is nil")
 	}
 	if !isSupportedGroupByFieldType(field.GetDataType()) {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg(
+		return merr.WrapErrParameterInvalidMsg(
 			"group by field %s has unsupported data type %s", field.GetName(), field.GetDataType().String(),
-		))
+		)
 	}
 	return nil
 }
@@ -203,19 +203,19 @@ func validateOrderByFieldsWithGroupBy(
 
 		// Reject aggregate expressions — not yet supported
 		if isAgg, _, _ := agg.MatchAggregationExpression(fieldName); isAgg {
-			return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg(
+			return merr.WrapErrParameterInvalidMsg(
 				"ORDER BY on aggregate expression '%s' is not yet supported",
 				fieldName,
-			))
+			)
 		}
 
 		if !validTargets[fieldName] {
-			return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg(
+			return merr.WrapErrParameterInvalidMsg(
 				"ORDER BY field '%s' is not valid: when using GROUP BY or aggregates, "+
 					"ORDER BY can only reference GROUP BY columns. "+
 					"Valid targets are: %v",
 				fieldName, getValidTargetList(groupByFields, aggregates),
-			))
+			)
 		}
 	}
 
@@ -238,7 +238,7 @@ func getValidTargetList(groupByFields []string, _ []agg.AggregateBase) []string 
 func translateOrderByFields(orderByFieldSpecs []string, schema *schemapb.CollectionSchema) ([]*planpb.OrderByField, error) {
 	parsed, err := orderby.ParseOrderByFields(orderByFieldSpecs, schema)
 	if err != nil {
-		return nil, merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg(err.Error()))
+		return nil, merr.WrapErrParameterInvalidMsg(err.Error())
 	}
 	if len(parsed) == 0 {
 		return nil, nil
@@ -466,14 +466,14 @@ func parseQueryIteratorCursor(queryParamsPair []*commonpb.KeyValuePair, isIterat
 		return nil, nil
 	}
 	if !isIterator {
-		return nil, merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg(
+		return nil, merr.WrapErrParameterInvalidMsg(
 			"invalid query iterator cursor params: %s and %s can only be used when iterator=true",
-			QueryIterLastPKKey, QueryIterLastOffsetKey))
+			QueryIterLastPKKey, QueryIterLastOffsetKey)
 	}
 	if !hasLastPK || !hasLastOffset {
-		return nil, merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg(
+		return nil, merr.WrapErrParameterInvalidMsg(
 			"incomplete query iterator cursor params: %s and %s must be provided together, has_last_pk=%t, has_last_element_offset=%t",
-			QueryIterLastPKKey, QueryIterLastOffsetKey, hasLastPK, hasLastOffset))
+			QueryIterLastPKKey, QueryIterLastOffsetKey, hasLastPK, hasLastOffset)
 	}
 
 	lastOffset, err := strconv.ParseInt(lastOffsetStr, 0, 64)
@@ -496,7 +496,7 @@ func parseQueryIteratorCursor(queryParamsPair []*commonpb.KeyValuePair, isIterat
 	case schemapb.DataType_VarChar:
 		cursor.LastStrPk = &lastPK
 	default:
-		return nil, merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("unsupported primary key type %s for query iterator cursor", pkDataType.String()))
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported primary key type %s for query iterator cursor", pkDataType.String())
 	}
 	return cursor, nil
 }
@@ -529,7 +529,7 @@ func createCntPlan(expr string, schemaHelper *typeutil.SchemaHelper, exprTemplat
 	plan, err := planparserv2.CreateRetrievePlan(schemaHelper, expr, exprTemplateValues)
 	if err != nil {
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
-		return nil, merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err))
+		return nil, merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err)
 	}
 	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	plan.Node.(*planpb.PlanNode_Query).Query.IsCount = true
@@ -549,7 +549,7 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 		t.plan, err = planparserv2.CreateRetrievePlanArgs(schema.schemaHelper, t.request.Expr, t.request.GetExprTemplateValues(), visitorArgs)
 		if err != nil {
 			metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
-			return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err))
+			return merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err)
 		}
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	}
@@ -599,7 +599,7 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 		t.plan.OutputFieldIds = emptyOutputFields
 		aggFieldMap, err := agg.NewAggregationFieldMap(originalOuputFields, t.queryParams.groupByFields, t.userAggregates)
 		if err != nil {
-			return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg(err.Error()))
+			return merr.WrapErrParameterInvalidMsg(err.Error())
 		}
 		t.aggregationFieldMap = aggFieldMap
 	} else {
@@ -712,11 +712,11 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used"))
+		return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
 	}
 	if t.mustUsePartitionKey && !t.partitionKeyMode {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("must use partition key in the query request " +
-			"because the mustUsePartitionKey config is true"))
+		return merr.WrapErrParameterInvalidMsg("must use partition key in the query request " +
+			"because the mustUsePartitionKey config is true")
 	}
 
 	for _, tag := range t.request.PartitionNames {
@@ -736,8 +736,8 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if queryParams.collectionID > 0 && queryParams.collectionID != t.GetCollectionID() {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("Input collection id is not consistent to collectionID in the context," +
-			"alias or database may have changed"))
+		return merr.WrapErrParameterInvalidMsg("Input collection id is not consistent to collectionID in the context," +
+			"alias or database may have changed")
 	}
 	if queryParams.reduceType == reduce.IReduceInOrderForBest {
 		t.ReduceStopForBest = true
@@ -750,7 +750,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	// SortBuffer loads all matching rows into memory for sorting;
 	// MaxOutputSize only guards proxy reduce, not segment sorting.
 	if len(queryParams.orderByFields) > 0 && queryParams.limit == typeutil.Unlimited {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("ORDER BY requires explicit limit"))
+		return merr.WrapErrParameterInvalidMsg("ORDER BY requires explicit limit")
 	}
 
 	// ORDER BY with iterator is not yet supported. Current iterator relies on
@@ -758,7 +758,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	// different pipeline that sorts by arbitrary fields. Future work will
 	// enable iterator with user-specified ORDER BY fields.
 	if len(queryParams.orderByFields) > 0 && queryParams.isIterator {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("ORDER BY with iterator is not supported"))
+		return merr.WrapErrParameterInvalidMsg("ORDER BY with iterator is not supported")
 	}
 
 	t.Limit = queryParams.limit + queryParams.offset
@@ -797,7 +797,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	hasAgg := len(t.userAggregates) > 0
 
 	if planparserv2.IsAlwaysTruePlan(t.plan) && t.Limit == typeutil.Unlimited && !hasAgg {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("empty expression should be used with limit"))
+		return merr.WrapErrParameterInvalidMsg("empty expression should be used with limit")
 	}
 
 	// convert partition names only when requery is false
@@ -825,7 +825,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	// count(*) without GROUP BY is a single-value result, pagination is meaningless.
 	// But count(*) with GROUP BY + limit is valid (limits the number of groups returned).
 	if t.hasCountStar() && t.queryParams.limit != typeutil.Unlimited && len(t.GetGroupByFieldIds()) == 0 {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed"))
+		return merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed")
 	}
 	t.plan.Namespace = t.request.Namespace
 

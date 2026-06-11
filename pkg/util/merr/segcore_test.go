@@ -154,8 +154,13 @@ func TestSegcoreErrorClassification(t *testing.T) {
 	})
 }
 
-// TestSegcoreCodeTableCoverage cross-checks segcoreCodeTable against the C++
-// ErrorCode enum (common/EasyAssert.h). It guards two things:
+// TestSegcoreCodeTableCoverage cross-checks segcoreCodeTable against a
+// hand-copied snapshot of the C++ ErrorCode enum. The enum's source of truth
+// lives in the external milvus-common dependency (common/EasyAssert.h, fetched
+// only at C++ build time), so it cannot be parsed from a Go test on a clean
+// checkout — a new C++ code added upstream is therefore NOT detected here; it
+// is caught at runtime by the safe fallback (collapse to plain non-retriable
+// ErrSegcore, pinned in wire_code_projection above). It guards two things:
 //   - regression: codes we deliberately classified must stay registered with
 //     their intended class (a silent edit that drops one fails here);
 //   - drift: a C++ enum value not present in the table falls back to a plain
