@@ -17,11 +17,14 @@
 #pragma once
 
 #include <fmt/core.h>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -48,6 +51,40 @@
 namespace milvus {
 namespace exec {
 
+template <typename T>
+inline constexpr bool IsCompareStringViewType =
+    std::is_same_v<std::remove_cv_t<T>, std::string_view>;
+
+template <typename T, typename U, proto::plan::OpType op>
+inline bool
+CompareColumnValues(const T& left, const U& right) {
+    if constexpr (op == proto::plan::OpType::Equal) {
+        return left == right;
+    } else if constexpr (op == proto::plan::OpType::NotEqual) {
+        return left != right;
+    } else if constexpr (op == proto::plan::OpType::GreaterThan) {
+        return left > right;
+    } else if constexpr (op == proto::plan::OpType::LessThan) {
+        return left < right;
+    } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
+        return left >= right;
+    } else if constexpr (op == proto::plan::OpType::LessEqual) {
+        return left <= right;
+    } else if constexpr (op == proto::plan::OpType::PrefixMatch) {
+        if constexpr (IsCompareStringViewType<T> &&
+                      IsCompareStringViewType<U>) {
+            return PrefixMatch(left, right);
+        } else {
+            ThrowInfo(OpTypeInvalid,
+                      "PrefixMatch only supports string compare expr");
+        }
+    } else {
+        ThrowInfo(OpTypeInvalid,
+                  fmt::format("unsupported op_type:{} for compare expr", op));
+    }
+    return false;
+}
+
 template <typename T,
           typename U,
           proto::plan::OpType op,
@@ -66,25 +103,8 @@ struct CompareElementFunc {
         if constexpr (filter_type == FilterType::random) {
             for (int i = 0; i < size; ++i) {
                 auto offset = (offsets != nullptr) ? offsets[i] : i;
-                if constexpr (op == proto::plan::OpType::Equal) {
-                    res[i] = left[offset] == right[offset];
-                } else if constexpr (op == proto::plan::OpType::NotEqual) {
-                    res[i] = left[offset] != right[offset];
-                } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-                    res[i] = left[offset] > right[offset];
-                } else if constexpr (op == proto::plan::OpType::LessThan) {
-                    res[i] = left[offset] < right[offset];
-                } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-                    res[i] = left[offset] >= right[offset];
-                } else if constexpr (op == proto::plan::OpType::LessEqual) {
-                    res[i] = left[offset] <= right[offset];
-                } else {
-                    ThrowInfo(
-                        OpTypeInvalid,
-                        fmt::format(
-                            "unsupported op_type:{} for CompareElementFunc",
-                            op));
-                }
+                res[i] =
+                    CompareColumnValues<T, U, op>(left[offset], right[offset]);
             }
             return;
         }
@@ -94,51 +114,54 @@ struct CompareElementFunc {
                 if (!bitmap_input[start_cursor + i]) {
                     continue;
                 }
-                if constexpr (op == proto::plan::OpType::Equal) {
-                    res[i] = left[i] == right[i];
-                } else if constexpr (op == proto::plan::OpType::NotEqual) {
-                    res[i] = left[i] != right[i];
-                } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-                    res[i] = left[i] > right[i];
-                } else if constexpr (op == proto::plan::OpType::LessThan) {
-                    res[i] = left[i] < right[i];
-                } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-                    res[i] = left[i] >= right[i];
-                } else if constexpr (op == proto::plan::OpType::LessEqual) {
-                    res[i] = left[i] <= right[i];
-                } else {
-                    ThrowInfo(
-                        OpTypeInvalid,
-                        fmt::format(
-                            "unsupported op_type:{} for CompareElementFunc",
-                            op));
-                }
+                res[i] = CompareColumnValues<T, U, op>(left[i], right[i]);
             }
             return;
         }
 
-        if constexpr (op == proto::plan::OpType::Equal) {
-            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::EQ>(
-                left, right, size);
-        } else if constexpr (op == proto::plan::OpType::NotEqual) {
-            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::NE>(
-                left, right, size);
-        } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::GT>(
-                left, right, size);
-        } else if constexpr (op == proto::plan::OpType::LessThan) {
-            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::LT>(
-                left, right, size);
-        } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::GE>(
-                left, right, size);
-        } else if constexpr (op == proto::plan::OpType::LessEqual) {
-            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::LE>(
-                left, right, size);
+        if constexpr (IsCompareStringViewType<T> ||
+                      IsCompareStringViewType<U>) {
+            for (int i = 0; i < size; ++i) {
+                res[i] = CompareColumnValues<T, U, op>(left[i], right[i]);
+            }
+            return;
         } else {
-            ThrowInfo(OpTypeInvalid,
-                      fmt::format(
-                          "unsupported op_type:{} for CompareElementFunc", op));
+            if constexpr (op == proto::plan::OpType::Equal) {
+                res.inplace_compare_column<T,
+                                           U,
+                                           milvus::bitset::CompareOpType::EQ>(
+                    left, right, size);
+            } else if constexpr (op == proto::plan::OpType::NotEqual) {
+                res.inplace_compare_column<T,
+                                           U,
+                                           milvus::bitset::CompareOpType::NE>(
+                    left, right, size);
+            } else if constexpr (op == proto::plan::OpType::GreaterThan) {
+                res.inplace_compare_column<T,
+                                           U,
+                                           milvus::bitset::CompareOpType::GT>(
+                    left, right, size);
+            } else if constexpr (op == proto::plan::OpType::LessThan) {
+                res.inplace_compare_column<T,
+                                           U,
+                                           milvus::bitset::CompareOpType::LT>(
+                    left, right, size);
+            } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
+                res.inplace_compare_column<T,
+                                           U,
+                                           milvus::bitset::CompareOpType::GE>(
+                    left, right, size);
+            } else if constexpr (op == proto::plan::OpType::LessEqual) {
+                res.inplace_compare_column<T,
+                                           U,
+                                           milvus::bitset::CompareOpType::LE>(
+                    left, right, size);
+            } else {
+                ThrowInfo(
+                    OpTypeInvalid,
+                    fmt::format(
+                        "unsupported op_type:{} for CompareElementFunc", op));
+            }
         }
     }
 };
@@ -283,7 +306,7 @@ class PhyCompareFilterExpr : public Expr {
     GetNextBatchSize();
 
     bool
-    IsStringExpr();
+    CanUseBothDataCompare(OffsetVector* input) const;
 
     template <typename T>
     static ChunkedColumnInterface::ScanValueKind
@@ -348,12 +371,6 @@ class PhyCompareFilterExpr : public Expr {
                    scan_start,
                    scan_end);
 
-        TargetBitmap offset_bitmap(scan_length, false);
-        for (auto offset : *input) {
-            offset_bitmap[static_cast<size_t>(static_cast<int64_t>(offset) -
-                                              scan_start)] = true;
-        }
-
         auto left_options = ChunkedColumnInterface::ScanOptions::ForData(
             scan_start,
             scan_length,
@@ -368,8 +385,9 @@ class PhyCompareFilterExpr : public Expr {
             DataScanValueKind<U>());
         auto left_cursor = left_column->Scan(op_ctx_, left_options);
         auto right_cursor = right_column->Scan(op_ctx_, right_options);
-        AssertInfo(left_cursor != nullptr && right_cursor != nullptr,
-                   "compare offset scan cursor is null");
+        if (left_cursor == nullptr || right_cursor == nullptr) {
+            return -1;
+        }
 
         ChunkedColumnInterface::ScanBatch left_batch;
         ChunkedColumnInterface::ScanBatch right_batch;
@@ -401,20 +419,20 @@ class PhyCompareFilterExpr : public Expr {
             const auto left_base = interval_start - left_batch.row_id_start;
             const auto right_base = interval_start - right_batch.row_id_start;
             batch_offsets.clear();
-            for (int64_t row = interval_start;
-                 row < interval_end && processed_offsets < input->size();
-                 ++row) {
-                const auto bitmap_pos = row - scan_start;
-                if (!offset_bitmap[static_cast<size_t>(bitmap_pos)]) {
-                    continue;
+            while (processed_offsets < input->size()) {
+                const auto row =
+                    static_cast<int64_t>((*input)[processed_offsets]);
+                if (row >= interval_end) {
+                    break;
                 }
-                while (processed_offsets < input->size() &&
-                       static_cast<int64_t>((*input)[processed_offsets]) ==
-                           row) {
-                    batch_offsets.push_back(
-                        static_cast<int32_t>(row - interval_start));
-                    ++processed_offsets;
-                }
+                AssertInfo(row >= interval_start,
+                           "compare offset {} is before scan interval [{}, {})",
+                           row,
+                           interval_start,
+                           interval_end);
+                batch_offsets.push_back(
+                    static_cast<int32_t>(row - interval_start));
+                ++processed_offsets;
             }
 
             const auto group_size =
@@ -560,15 +578,24 @@ class PhyCompareFilterExpr : public Expr {
                              TargetBitmapView res,
                              TargetBitmapView valid_res,
                              const ValTypes&... values) {
-        if (IsDenseOffsetInputForScan(input, batch_size_)) {
-            const auto processed_size = ProcessBothSortedDataByOffsets<T, U>(
-                func, input, res, valid_res, values...);
-            if (processed_size >= 0) {
-                return processed_size;
+        if constexpr (IsCompareStringViewType<T> ||
+                      IsCompareStringViewType<U>) {
+            if (IsDenseOffsetInputForScan(input, batch_size_)) {
+                return ProcessBothSortedDataByOffsets<T, U>(
+                    func, input, res, valid_res, values...);
             }
+            return -1;
+        } else {
+            if (IsDenseOffsetInputForScan(input, batch_size_)) {
+                const auto processed_size = ProcessBothSortedDataByOffsets<T, U>(
+                    func, input, res, valid_res, values...);
+                if (processed_size >= 0) {
+                    return processed_size;
+                }
+            }
+            return ProcessBothDataByOffsetsByChunkFallback<T, U>(
+                func, input, res, valid_res, values...);
         }
-        return ProcessBothDataByOffsetsByChunkFallback<T, U>(
-            func, input, res, valid_res, values...);
     }
 
     template <typename T, typename U, typename FUNC, typename... ValTypes>
@@ -745,6 +772,12 @@ class PhyCompareFilterExpr : public Expr {
                         DataScanValueKind<U>());
                 left_data_cursor_ = left_column->Scan(op_ctx_, left_options);
                 right_data_cursor_ = right_column->Scan(op_ctx_, right_options);
+                if (left_data_cursor_ == nullptr ||
+                    right_data_cursor_ == nullptr) {
+                    left_data_cursor_.reset();
+                    right_data_cursor_.reset();
+                    return -1;
+                }
             }
         }
         if (left_data_cursor_ == nullptr || right_data_cursor_ == nullptr) {
@@ -809,6 +842,10 @@ class PhyCompareFilterExpr : public Expr {
             right_data_batch_pos_ += size;
         }
 
+        AssertInfo(processed_size == real_batch_size,
+                   "compare data scan processed {} rows, expected {}",
+                   processed_size,
+                   real_batch_size);
         MoveCursor();
         return processed_size;
     }

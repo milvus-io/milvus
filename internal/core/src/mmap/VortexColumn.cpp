@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -105,8 +106,7 @@ FinalizeAllValidRowIdPayloadOutput(ChunkedColumnInterface::ScanBatch* out,
     out->size = static_cast<int64_t>(out->row_ids.size());
     out->validity.size = out->size;
     out->validity.nullable = nullable;
-    out->validity.encoding =
-        ChunkedColumnInterface::ValidityEncoding::AllValid;
+    out->validity.encoding = ChunkedColumnInterface::ValidityEncoding::AllValid;
     out->validity.all_valid = true;
 }
 
@@ -332,21 +332,19 @@ class VortexRowIdScanCursor final : public ChunkedColumnInterface::ScanCursor {
             invalid_row_ids_.clear();
             matched_pos_ = 0;
             invalid_pos_ = 0;
-            reader_may_contain_invalids_ =
-                RangeMayContainInvalids(static_cast<int64_t>(chunk_id));
-            matched_reader_ =
-                column_->OpenRowIdScanForFile(op_ctx_,
-                                              static_cast<int64_t>(chunk_id),
-                                              static_cast<int64_t>(local_offset),
-                                              length,
-                                              predicate_);
+            reader_may_contain_invalids_ = ReaderNeedsValidityStream();
+            matched_reader_ = column_->OpenRowIdScanForFile(
+                op_ctx_,
+                static_cast<int64_t>(chunk_id),
+                static_cast<int64_t>(local_offset),
+                length,
+                predicate_);
             if (reader_may_contain_invalids_) {
-                invalid_reader_ =
-                    column_->OpenDataScanForFile(op_ctx_,
-                                                 static_cast<int64_t>(chunk_id),
-                                                 static_cast<int64_t>(
-                                                     local_offset),
-                                                 length);
+                invalid_reader_ = column_->OpenDataScanForFile(
+                    op_ctx_,
+                    static_cast<int64_t>(chunk_id),
+                    static_cast<int64_t>(local_offset),
+                    length);
             }
             scan_pos_ = reader_range_end_;
             return true;
@@ -355,17 +353,11 @@ class VortexRowIdScanCursor final : public ChunkedColumnInterface::ScanCursor {
     }
 
     bool
-    RangeMayContainInvalids(int64_t chunk_id) const {
-        if (!column_->IsNullable()) {
-            return false;
-        }
-        const auto& valid_counts = column_->GetValidCountPerChunk();
-        if (chunk_id >= 0 &&
-            chunk_id < static_cast<int64_t>(valid_counts.size()) &&
-            valid_counts[chunk_id] == column_->chunk_row_nums(chunk_id)) {
-            return false;
-        }
-        return true;
+    ReaderNeedsValidityStream() const {
+        // VortexColumn does not build ChunkedColumnInterface's materialized
+        // valid-count mapping. For nullable fields, read the Arrow validity
+        // side-stream and merge it with pushed-down row ids.
+        return column_->IsNullable();
     }
 
     void
@@ -451,12 +443,11 @@ class VortexRowIdScanCursor final : public ChunkedColumnInterface::ScanCursor {
                        out->row_ids.back(),
                        matched_row_ids_[matched_pos_]);
         }
-        out->row_ids.insert(out->row_ids.end(),
-                            matched_row_ids_.begin() +
-                                static_cast<int64_t>(matched_pos_),
-                            matched_row_ids_.begin() +
-                                static_cast<int64_t>(matched_pos_ +
-                                                     rows_to_append));
+        out->row_ids.insert(
+            out->row_ids.end(),
+            matched_row_ids_.begin() + static_cast<int64_t>(matched_pos_),
+            matched_row_ids_.begin() +
+                static_cast<int64_t>(matched_pos_ + rows_to_append));
         matched_pos_ += rows_to_append;
         return true;
     }
@@ -546,9 +537,9 @@ class VortexRowIdScanCursor final : public ChunkedColumnInterface::ScanCursor {
         auto array = batch->column(0);
         AssertInfo(array->length() > 0,
                    "vortex row id validity scan returned empty batch");
-        AssertInfo(invalid_reader_next_row_id_ + array->length() <=
-                       reader_range_end_,
-                   "vortex row id validity scan returned too many rows");
+        AssertInfo(
+            invalid_reader_next_row_id_ + array->length() <= reader_range_end_,
+            "vortex row id validity scan returned too many rows");
         invalid_row_ids_.reserve(array->length());
         for (int64_t i = 0; i < array->length(); ++i) {
             if (!array->IsValid(i)) {
@@ -618,6 +609,13 @@ class VortexDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
           scan_pos_(start_offset),
           scan_end_(start_offset + length) {
         AssertInfo(max_batch_rows_ > 0, "invalid vortex data scan batch size");
+        AssertInfo(start_offset >= 0 && length >= 0 &&
+                       start_offset + length <=
+                           static_cast<int64_t>(column_->NumRows()),
+                   "vortex data scan range [{}, {}) out of rows {}",
+                   start_offset,
+                   start_offset + length,
+                   column_->NumRows());
     }
 
     bool
@@ -712,6 +710,8 @@ class VortexDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
     }
 
     struct BatchOwner {
+        std::optional<PinWrapper<std::shared_ptr<arrow::RecordBatchReader>>>
+            reader;
         std::shared_ptr<arrow::Array> array;
         std::shared_ptr<FixedVector<bool>> bool_values;
         std::shared_ptr<FixedVector<bool>> validity;
@@ -877,6 +877,9 @@ class VortexDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
                                ChunkedColumnInterface::ScanBatch* out) const {
         auto array = current_batch_->column(0);
         auto owner = std::make_shared<BatchOwner>();
+        AssertInfo(reader_.has_value(),
+                   "vortex data scan batch requires active reader pin");
+        owner->reader = *reader_;
         owner->array = array;
         out->row_id_start = current_batch_row_id_start_ + current_batch_pos_;
         out->size = rows_to_return;
@@ -918,7 +921,8 @@ VortexColumn::VortexColumn(
     FieldId field_id,
     FieldMeta field_meta,
     std::shared_ptr<milvus_storage::api::Properties> properties,
-    std::shared_ptr<VortexColumnGroup> column_group)
+    std::shared_ptr<VortexColumnGroup> column_group,
+    std::optional<size_t> data_byte_size)
     : field_id_(field_id),
       field_meta_(std::move(field_meta)),
       data_type_(field_meta_.get_data_type()),
@@ -933,6 +937,7 @@ VortexColumn::VortexColumn(
 
     local_format_properties_ = MakeVortexReaderProperties(properties);
     column_group_ = std::move(column_group);
+    data_byte_size_ = data_byte_size.value_or(column_group_->memory_size());
 
     const auto& group_files = column_group_->files();
     files_.reserve(group_files.size());
@@ -978,7 +983,7 @@ VortexColumn::num_chunks() const {
 
 size_t
 VortexColumn::DataByteSize() const {
-    return column_group_->memory_size();
+    return data_byte_size_;
 }
 
 int64_t
@@ -1138,6 +1143,11 @@ VortexColumn::StringViewsByOffsets(milvus::OpContext* op_ctx,
     std::pair<std::vector<std::string_view>, FixedVector<bool>> views;
     views.first.resize(offsets.size());
     views.second.resize(offsets.size());
+    if (offsets.empty()) {
+        return PinWrapper<
+            std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
+            std::move(views));
+    }
 
     std::vector<std::pair<int64_t, int64_t>> entries;
     entries.reserve(offsets.size());
@@ -1188,6 +1198,14 @@ VortexColumn::ArrayViewsByOffsets(milvus::OpContext* op_ctx,
                   "fields");
     }
     CheckChunkId(chunk_id);
+    std::pair<std::vector<ArrayView>, FixedVector<bool>> views;
+    views.first.resize(offsets.size());
+    views.second.resize(offsets.size());
+    if (offsets.empty()) {
+        return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
+            std::move(views));
+    }
+
     std::vector<std::pair<int64_t, int64_t>> entries;
     entries.reserve(offsets.size());
     for (int64_t i = 0; i < static_cast<int64_t>(offsets.size()); ++i) {
@@ -1209,9 +1227,6 @@ VortexColumn::ArrayViewsByOffsets(milvus::OpContext* op_ctx,
     }
 
     auto chunk = TakeFromFile(op_ctx, chunk_id, unique_offsets);
-    std::pair<std::vector<ArrayView>, FixedVector<bool>> views;
-    views.first.resize(offsets.size());
-    views.second.resize(offsets.size());
     auto array_chunk = static_cast<ArrayChunk*>(chunk.get());
     for (const auto& [offset, original_index] : entries) {
         auto it = std::lower_bound(
@@ -1351,12 +1366,26 @@ VortexColumn::QuoteSqlStringLiteral(std::string_view value) {
 bool
 VortexColumn::CanUseVortexPredicateLiteral(
     DataType data_type, const proto::plan::GenericValue& value) {
+    auto is_int64_in_range = [&](int64_t min, int64_t max) {
+        return value.val_case() == proto::plan::GenericValue::kInt64Val &&
+               value.int64_val() >= min && value.int64_val() <= max;
+    };
     switch (data_type) {
         case DataType::BOOL:
             return value.val_case() == proto::plan::GenericValue::kBoolVal;
+        case DataType::INT8:
+            return is_int64_in_range(std::numeric_limits<int8_t>::min(),
+                                     std::numeric_limits<int8_t>::max());
+        case DataType::INT16:
+            return is_int64_in_range(std::numeric_limits<int16_t>::min(),
+                                     std::numeric_limits<int16_t>::max());
+        case DataType::INT32:
+            return is_int64_in_range(std::numeric_limits<int32_t>::min(),
+                                     std::numeric_limits<int32_t>::max());
         case DataType::INT64:
         case DataType::TIMESTAMPTZ:
             return value.val_case() == proto::plan::GenericValue::kInt64Val;
+        case DataType::FLOAT:
         case DataType::DOUBLE:
             return value.val_case() == proto::plan::GenericValue::kFloatVal ||
                    value.val_case() == proto::plan::GenericValue::kInt64Val;
@@ -1390,9 +1419,13 @@ VortexColumn::VortexLiteral(DataType data_type,
     switch (data_type) {
         case DataType::BOOL:
             return value.bool_val() ? "true" : "false";
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
         case DataType::INT64:
         case DataType::TIMESTAMPTZ:
             return std::to_string(value.int64_val());
+        case DataType::FLOAT:
         case DataType::DOUBLE:
             if (value.val_case() == proto::plan::GenericValue::kFloatVal) {
                 return FormatVortexDoubleLiteral(value.float_val());
@@ -1434,6 +1467,13 @@ VortexColumn::BuildVortexPredicate(const ScanOptions& options) const {
         default:
             return std::nullopt;
     }
+}
+
+bool
+VortexColumn::SupportsScanPushdown(const ScanOptions& options) const {
+    return options.output == ScanOutput::RowIds &&
+           options.predicate != ScanPredicate::None &&
+           BuildVortexPredicate(options).has_value();
 }
 
 milvus_storage::api::Properties
@@ -1709,8 +1749,7 @@ VortexColumn::OpenRowIdScanForFile(milvus::OpContext* op_ctx,
                              predicate);
     auto pin = PinPlanCells(op_ctx, file, plan.cell_ids);
     auto vortex_reader = OpenFileReader(column_group_->files()[chunk_id]);
-    auto stream_result =
-        vortex_reader->read_row_ids_with_plan(plan.read_plan);
+    auto stream_result = vortex_reader->read_row_ids_with_plan(plan.read_plan);
     AssertInfo(stream_result.ok(),
                "failed to open vortex row id scan field {} chunk {}: {}",
                field_id_.get(),
@@ -2311,14 +2350,11 @@ VortexColumn::Scan(milvus::OpContext* op_ctx,
 
     auto predicate = BuildVortexPredicate(options);
     if (!predicate.has_value()) {
-        // TODO: Re-enable Vortex predicate/zone-map pushdown for narrow
-        // integer and float types after the storage bridge supports typed
-        // predicates or schema-aware typed literal construction.
-        // Vortex predicate literals are currently width-sensitive: SQL integer
-        // and floating literals are parsed as i64/f64 by the storage bridge.
-        // Fall back to the generic scan path for types like i32/f32 until the
-        // bridge can build typed literals for pushdown.
-        return ChunkedColumnInterface::Scan(op_ctx, options);
+        ThrowInfo(ErrorCode::Unsupported,
+                  "unsupported vortex row id scan predicate for field {} "
+                  "type {}",
+                  field_id_.get(),
+                  static_cast<int>(data_type_));
     }
     return std::make_unique<VortexRowIdScanCursor>(this,
                                                    op_ctx,

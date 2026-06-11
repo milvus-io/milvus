@@ -558,9 +558,14 @@ func validateLocalFormat(fieldSchema *schemapb.FieldSchema) error {
 	for _, kv := range fieldSchema.GetTypeParams() {
 		if kv.GetKey() == common.LocalFormatKey {
 			switch kv.GetValue() {
-			case common.LocalFormatRow:
+			case common.LocalFormatRaw:
 				// valid
 			case common.LocalFormatVortex:
+				if fieldSchema.GetIsPrimaryKey() {
+					return merr.WrapErrParameterInvalidMsg(
+						"local_format vortex is not supported for primary key field '%s'",
+						fieldSchema.GetName())
+				}
 				if typeutil.IsVectorType(fieldSchema.GetDataType()) {
 					return merr.WrapErrParameterInvalidMsg(
 						"local_format vortex is not supported for vector field '%s'",
@@ -568,7 +573,7 @@ func validateLocalFormat(fieldSchema *schemapb.FieldSchema) error {
 				}
 			default:
 				return merr.WrapErrParameterInvalidMsg(
-					"invalid local_format '%s' for field '%s', supported: row, vortex",
+					"invalid local_format '%s' for field '%s', supported: raw, vortex",
 					kv.GetValue(), fieldSchema.GetName())
 			}
 			break

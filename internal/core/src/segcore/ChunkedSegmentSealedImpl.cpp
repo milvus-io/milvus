@@ -5387,7 +5387,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     // - FieldMeta::local_format selects the Milvus-side column implementation.
     // A local Vortex column can only be loaded when the whole physical column
     // group is Vortex and every field in that group opts into local_format=vortex.
-    const bool is_physical_vortex_group = column_group->format == "vortex";
+    const bool is_physical_vortex_group =
+        column_group->format == STORAGE_FORMAT_VORTEX;
     const auto local_vortex_field_ids = [&]() {
         std::vector<FieldId> field_ids;
         if (!is_physical_vortex_group) {
@@ -5396,7 +5397,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         field_ids.reserve(milvus_field_ids.size());
         for (const auto& field_id : milvus_field_ids) {
             const auto& field_meta = field_metas.at(field_id);
-            if (field_meta.get_local_format() == "vortex") {
+            if (field_meta.get_local_format() == LOCAL_FORMAT_VORTEX) {
                 field_ids.emplace_back(field_id);
             }
         }
@@ -5468,10 +5469,25 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
                                                 vortex_field_names,
                                                 group_cache_warmup_policy,
                                                 op_ctx);
+        const auto vortex_group_memory_size =
+            vortex_column_group->memory_size();
+        const auto vortex_group_field_count = local_vortex_field_ids.size();
+        const auto base_data_byte_size =
+            vortex_group_memory_size / vortex_group_field_count;
+        const auto data_byte_size_remainder =
+            vortex_group_memory_size % vortex_group_field_count;
+        size_t vortex_field_index = 0;
         for (const auto& field_id : local_vortex_field_ids) {
             const auto& field_meta = field_metas.at(field_id);
-            auto column = std::make_shared<VortexColumn>(
-                field_id, field_meta, properties, vortex_column_group);
+            const auto data_byte_size =
+                base_data_byte_size +
+                (vortex_field_index < data_byte_size_remainder ? 1 : 0);
+            ++vortex_field_index;
+            auto column = std::make_shared<VortexColumn>(field_id,
+                                                         field_meta,
+                                                         properties,
+                                                         vortex_column_group,
+                                                         data_byte_size);
             auto data_type = field_meta.get_data_type();
             load_field_data_common(field_id,
                                    column,

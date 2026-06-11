@@ -506,7 +506,12 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
                             lower_inclusive,
                             make_scan_value(val2),
                             upper_inclusive);
-                    row_id_scan_cursor_ = column->Scan(op_ctx_, options);
+                    if (column->SupportsScanPushdown(options)) {
+                        row_id_scan_cursor_ = column->Scan(op_ctx_, options);
+                        AssertInfo(row_id_scan_cursor_ != nullptr,
+                                   "row id scan cursor is null for field {}",
+                                   field_id_.get());
+                    }
                 }
             }
             if (row_id_scan_cursor_ != nullptr) {

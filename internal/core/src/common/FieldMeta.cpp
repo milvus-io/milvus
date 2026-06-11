@@ -122,6 +122,7 @@ FieldMeta::ToProto() const {
         if (string_info_.has_value()) {
             params = string_info_->params;
         }
+        params.erase(LOCAL_FORMAT_KEY);
         params[MAX_LENGTH] = std::to_string(get_max_len());
         params["enable_match"] = enable_match() ? "true" : "false";
         params["enable_analyzer"] = enable_analyzer() ? "true" : "false";
@@ -132,8 +133,8 @@ FieldMeta::ToProto() const {
         // element_type already populated above
     }
 
-    if (local_format_ != "row") {
-        add_type_param("local_format", local_format_);
+    if (local_format_ != LOCAL_FORMAT_RAW) {
+        add_type_param(LOCAL_FORMAT_KEY, local_format_);
     }
 
     return proto;
@@ -170,14 +171,12 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
         return schema_proto.default_value();
     }();
 
-    static constexpr const char* kLocalFormatKey = "local_format";
-
     auto type_map = RepeatedKeyValToMap(schema_proto.type_params());
     auto local_format = [&]() -> std::string {
-        if (auto it = type_map.find(kLocalFormatKey); it != type_map.end()) {
+        if (auto it = type_map.find(LOCAL_FORMAT_KEY); it != type_map.end()) {
             return it->second;
         }
-        return "row";
+        return LOCAL_FORMAT_RAW;
     };
 
     if (data_type == DataType::VECTOR_ARRAY) {
@@ -258,7 +257,7 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
         bool enable_analyzer = get_bool_value("enable_analyzer");
         bool enable_match = get_bool_value("enable_match");
         auto string_params = type_map;
-        string_params.erase(kLocalFormatKey);
+        string_params.erase(LOCAL_FORMAT_KEY);
 
         return FieldMeta{name,
                          field_id,

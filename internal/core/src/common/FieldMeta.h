@@ -52,7 +52,7 @@ class FieldMeta {
               bool nullable,
               std::optional<DefaultValueType> default_value,
               std::string external_field_mapping = "",
-              std::string local_format = "row")
+              std::string local_format = LOCAL_FORMAT_RAW)
         : name_(std::move(name)),
           id_(id),
           type_(type),
@@ -70,7 +70,7 @@ class FieldMeta {
               bool nullable,
               std::optional<DefaultValueType> default_value,
               std::string external_field_mapping = "",
-              std::string local_format = "row")
+              std::string local_format = LOCAL_FORMAT_RAW)
         : name_(std::move(name)),
           id_(id),
           type_(type),
@@ -92,7 +92,7 @@ class FieldMeta {
               std::map<std::string, std::string>& params,
               std::optional<DefaultValueType> default_value,
               std::string external_field_mapping = "",
-              std::string local_format = "row")
+              std::string local_format = LOCAL_FORMAT_RAW)
         : name_(std::move(name)),
           id_(id),
           type_(type),
@@ -116,7 +116,7 @@ class FieldMeta {
               bool nullable,
               std::optional<DefaultValueType> default_value,
               std::string external_field_mapping = "",
-              std::string local_format = "row")
+              std::string local_format = LOCAL_FORMAT_RAW)
         : name_(std::move(name)),
           id_(id),
           type_(type),
@@ -138,7 +138,7 @@ class FieldMeta {
               bool nullable,
               std::optional<DefaultValueType> default_value,
               std::string external_field_mapping = "",
-              std::string local_format = "row")
+              std::string local_format = LOCAL_FORMAT_RAW)
         : name_(std::move(name)),
           id_(id),
           type_(type),
@@ -161,7 +161,7 @@ class FieldMeta {
               std::optional<knowhere::MetricType> metric_type,
               bool nullable,
               std::string external_field_mapping = "",
-              std::string local_format = "row")
+              std::string local_format = LOCAL_FORMAT_RAW)
         : name_(std::move(name)),
           id_(id),
           type_(type),
@@ -183,7 +183,7 @@ class FieldMeta {
               bool nullable,
               std::optional<DefaultValueType> default_value,
               std::string external_field_mapping = "",
-              std::string local_format = "row")
+              std::string local_format = LOCAL_FORMAT_RAW)
         : name_(std::move(name)),
           id_(id),
           main_field_id_(main_field_id),
@@ -368,7 +368,7 @@ class FieldMeta {
     // of collection schema, the field id is the json shredding field id
     int64_t main_field_id_ = INVALID_FIELD_ID;
     std::string external_field_mapping_;
-    std::string local_format_ = "row";
+    std::string local_format_ = LOCAL_FORMAT_RAW;
 };
 
 }  // namespace milvus

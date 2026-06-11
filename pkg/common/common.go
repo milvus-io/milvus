@@ -313,7 +313,7 @@ const (
 
 // local format type
 const (
-	LocalFormatRow    = "row"
+	LocalFormatRaw    = "raw"
 	LocalFormatVortex = "vortex"
 )
 

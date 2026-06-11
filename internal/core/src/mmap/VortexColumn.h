@@ -56,7 +56,8 @@ class VortexColumn final : public ChunkedColumnInterface {
     VortexColumn(FieldId field_id,
                  FieldMeta field_meta,
                  std::shared_ptr<milvus_storage::api::Properties> properties,
-                 std::shared_ptr<VortexColumnGroup> column_group);
+                 std::shared_ptr<VortexColumnGroup> column_group,
+                 std::optional<size_t> data_byte_size = std::nullopt);
 
     ~VortexColumn() override;
 
@@ -68,6 +69,14 @@ class VortexColumn final : public ChunkedColumnInterface {
 
     bool
     IsInMultiFieldColumnGroup() const override;
+
+    LocalFormat
+    GetLocalFormat() const override {
+        return LocalFormat::Vortex;
+    }
+
+    bool
+    SupportsScanPushdown(const ScanOptions& options) const override;
 
     bool
     IsNullable() const override;
@@ -388,6 +397,7 @@ class VortexColumn final : public ChunkedColumnInterface {
     std::string field_name_;
     milvus_storage::api::Properties local_format_properties_;
     std::shared_ptr<VortexColumnGroup> column_group_;
+    size_t data_byte_size_ = 0;
     std::vector<FileState> files_;
     std::vector<int64_t> num_rows_until_chunk_;
     int64_t num_rows_ = 0;

@@ -1636,7 +1636,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
                     active_count_ - current_data_global_pos_,
                     expr_->op_type_,
                     expr_->val_);
-                row_id_scan_cursor_ = column->Scan(op_ctx_, options);
+                if (column->SupportsScanPushdown(options)) {
+                    row_id_scan_cursor_ = column->Scan(op_ctx_, options);
+                    AssertInfo(row_id_scan_cursor_ != nullptr,
+                               "row id scan cursor is null for field {}",
+                               field_id_.get());
+                }
             }
         }
         if (row_id_scan_cursor_ != nullptr) {

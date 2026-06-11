@@ -245,7 +245,7 @@ struct ScanOptions {
                            upper_inclusive);
     }
 
-    ScanOutput output = ScanOutput::RowIds;
+    ScanOutput output = ScanOutput::Data;
     ScanPredicate predicate = ScanPredicate::None;
     int64_t start_offset = 0;
     int64_t length = 0;

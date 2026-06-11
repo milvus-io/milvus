@@ -79,6 +79,13 @@ TryGetScanValue(const proto::plan::GenericValue& value, T* out) {
 
 template <typename T>
 inline bool
+CanUseScanValue(const proto::plan::GenericValue& value) {
+    T typed_value{};
+    return TryGetScanValue<T>(value, &typed_value);
+}
+
+template <typename T>
+inline bool
 UnaryScanCompare(T lhs, T rhs, proto::plan::OpType op_type) {
     switch (op_type) {
         case proto::plan::OpType::GreaterThan:
@@ -862,17 +869,20 @@ CanUseFixedWidthRowIdScan(DataType data_type,
 
     switch (data_type) {
         case DataType::BOOL:
-            return value.val_case() == proto::plan::GenericValue::kBoolVal;
+            return CanUseScanValue<bool>(value);
         case DataType::INT8:
+            return CanUseScanValue<int8_t>(value);
         case DataType::INT16:
+            return CanUseScanValue<int16_t>(value);
         case DataType::INT32:
+            return CanUseScanValue<int32_t>(value);
         case DataType::INT64:
         case DataType::TIMESTAMPTZ:
-            return value.val_case() == proto::plan::GenericValue::kInt64Val;
+            return CanUseScanValue<int64_t>(value);
         case DataType::FLOAT:
+            return CanUseScanValue<float>(value);
         case DataType::DOUBLE:
-            return value.val_case() == proto::plan::GenericValue::kFloatVal ||
-                   value.val_case() == proto::plan::GenericValue::kInt64Val;
+            return CanUseScanValue<double>(value);
         default:
             return false;
     }
@@ -885,29 +895,27 @@ CanUseFixedWidthBinaryRangeRowIdScan(
     const proto::plan::GenericValue& upper_value) {
     switch (data_type) {
         case DataType::BOOL:
-            return lower_value.val_case() ==
-                       proto::plan::GenericValue::kBoolVal &&
-                   upper_value.val_case() ==
-                       proto::plan::GenericValue::kBoolVal;
+            return CanUseScanValue<bool>(lower_value) &&
+                   CanUseScanValue<bool>(upper_value);
         case DataType::INT8:
+            return CanUseScanValue<int8_t>(lower_value) &&
+                   CanUseScanValue<int8_t>(upper_value);
         case DataType::INT16:
+            return CanUseScanValue<int16_t>(lower_value) &&
+                   CanUseScanValue<int16_t>(upper_value);
         case DataType::INT32:
+            return CanUseScanValue<int32_t>(lower_value) &&
+                   CanUseScanValue<int32_t>(upper_value);
         case DataType::INT64:
         case DataType::TIMESTAMPTZ:
-            return lower_value.val_case() ==
-                       proto::plan::GenericValue::kInt64Val &&
-                   upper_value.val_case() ==
-                       proto::plan::GenericValue::kInt64Val;
+            return CanUseScanValue<int64_t>(lower_value) &&
+                   CanUseScanValue<int64_t>(upper_value);
         case DataType::FLOAT:
+            return CanUseScanValue<float>(lower_value) &&
+                   CanUseScanValue<float>(upper_value);
         case DataType::DOUBLE:
-            return (lower_value.val_case() ==
-                        proto::plan::GenericValue::kFloatVal ||
-                    lower_value.val_case() ==
-                        proto::plan::GenericValue::kInt64Val) &&
-                   (upper_value.val_case() ==
-                        proto::plan::GenericValue::kFloatVal ||
-                    upper_value.val_case() ==
-                        proto::plan::GenericValue::kInt64Val);
+            return CanUseScanValue<double>(lower_value) &&
+                   CanUseScanValue<double>(upper_value);
         default:
             return false;
     }
@@ -1080,46 +1088,19 @@ ChunkedColumnInterface::Scan(milvus::OpContext* op_ctx,
         return nullptr;
     }
 
-    if (options.output == ScanOutput::Data) {
-        if (options.predicate != ScanPredicate::None) {
-            return nullptr;
-        }
-        return detail::MakeDataScanCursor(this,
-                                          op_ctx,
-                                          options.start_offset,
-                                          options.length,
-                                          *data_type,
-                                          options.projection,
-                                          options.value_kind,
-                                          options.max_batch_rows);
+    if (options.output != ScanOutput::Data ||
+        options.predicate != ScanPredicate::None) {
+        return nullptr;
     }
 
-    switch (options.predicate) {
-        case ScanPredicate::Unary:
-            return detail::MakeFixedWidthRowIdScanCursor(this,
-                                                         op_ctx,
-                                                         options.start_offset,
-                                                         options.length,
-                                                         options.max_batch_rows,
-                                                         *data_type,
-                                                         options.op_type,
-                                                         options.value);
-        case ScanPredicate::BinaryRange:
-            return detail::MakeFixedWidthBinaryRangeRowIdScanCursor(
-                this,
-                op_ctx,
-                options.start_offset,
-                options.length,
-                options.max_batch_rows,
-                *data_type,
-                options.lower_value,
-                options.lower_inclusive,
-                options.upper_value,
-                options.upper_inclusive);
-        default:
-            break;
-    }
-    return nullptr;
+    return detail::MakeDataScanCursor(this,
+                                      op_ctx,
+                                      options.start_offset,
+                                      options.length,
+                                      *data_type,
+                                      options.projection,
+                                      options.value_kind,
+                                      options.max_batch_rows);
 }
 
 }  // namespace milvus

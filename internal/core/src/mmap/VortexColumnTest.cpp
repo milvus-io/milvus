@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <cmath>
 #include <deque>
+#include <exception>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -182,6 +183,13 @@ proto::plan::GenericValue
 IntValue(int64_t value) {
     proto::plan::GenericValue generic_value;
     generic_value.set_int64_val(value);
+    return generic_value;
+}
+
+proto::plan::GenericValue
+StringValue(std::string_view value) {
+    proto::plan::GenericValue generic_value;
+    generic_value.set_string_val(std::string(value));
     return generic_value;
 }
 
@@ -797,7 +805,7 @@ TEST(VortexColumnTest, ScanAndTake) {
     std::filesystem::remove_all(dir);
 }
 
-TEST(VortexColumnTest, FilteredScanRespectsOffsetRange) {
+TEST(VortexColumnTest, UnsupportedInt32FilteredScanThrows) {
     auto schema = MakeSchema();
     auto properties =
         std::make_shared<milvus_storage::api::Properties>(MakeProperties());
@@ -823,13 +831,15 @@ TEST(VortexColumnTest, FilteredScanRespectsOffsetRange) {
 
     auto unary_options = ChunkedColumnInterface::ScanOptions::ForUnary(
         3, 10, proto::plan::OpType::GreaterThan, IntValue(80), 2);
-    EXPECT_EQ(CollectFilteredRowIdPayload(int_column, unary_options),
-              (std::vector<int64_t>{9, 10, 11, 12}));
+    EXPECT_FALSE(int_column.SupportsScanPushdown(unary_options));
+    EXPECT_THROW(CollectFilteredRowIdPayload(int_column, unary_options),
+                 std::exception);
 
     auto range_options = ChunkedColumnInterface::ScanOptions::ForBinaryRange(
         2, 10, IntValue(40), false, IntValue(90), true, 2);
-    EXPECT_EQ(CollectFilteredRowIdPayload(int_column, range_options),
-              (std::vector<int64_t>{5, 6, 7, 8, 9}));
+    EXPECT_FALSE(int_column.SupportsScanPushdown(range_options));
+    EXPECT_THROW(CollectFilteredRowIdPayload(int_column, range_options),
+                 std::exception);
 
     std::filesystem::remove_all(dir);
 }
@@ -896,8 +906,8 @@ TEST(VortexColumnTest, MultiFileTakeAndScan) {
 
     auto filter_options = ChunkedColumnInterface::ScanOptions::ForUnary(
         14, 6, proto::plan::OpType::GreaterThan, IntValue(160), 2);
-    EXPECT_EQ(CollectFilteredRowIdPayload(int_column, filter_options),
-              (std::vector<int64_t>{17, 18, 19}));
+    EXPECT_THROW(CollectFilteredRowIdPayload(int_column, filter_options),
+                 std::exception);
 
     std::filesystem::remove_all(dir);
 }
@@ -947,10 +957,15 @@ TEST(VortexColumnTest, MultiFieldColumnsShareColumnGroup) {
     EXPECT_EQ(CollectStringScanValues(string_column, 4, 4),
               (std::vector<std::string>{"v4", "v5", "v6", "v7"}));
 
+    auto string_filter_options = ChunkedColumnInterface::ScanOptions::ForUnary(
+        0, 16, proto::plan::OpType::Equal, StringValue("v4"), 2);
+    EXPECT_TRUE(string_column.SupportsScanPushdown(string_filter_options));
+
     auto filter_options = ChunkedColumnInterface::ScanOptions::ForBinaryRange(
         0, 16, IntValue(30), true, IntValue(60), true, 2);
-    EXPECT_EQ(CollectFilteredRowIdPayload(int_column, filter_options),
-              (std::vector<int64_t>{3, 4, 5, 6}));
+    EXPECT_FALSE(int_column.SupportsScanPushdown(filter_options));
+    EXPECT_THROW(CollectFilteredRowIdPayload(int_column, filter_options),
+                 std::exception);
 
     std::filesystem::remove_all(dir);
 }

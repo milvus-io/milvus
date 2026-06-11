@@ -95,7 +95,7 @@ RowIdScanToBitmaps(ChunkedColumnInterface::ScanCursor* cursor,
                    int64_t batch_start,
                    int64_t batch_size,
                    const TargetBitmap& bitmap_input,
-                   bool mask_validity_by_bitmap_input = false) {
+                   bool mask_validity_by_bitmap_input = true) {
     AssertInfo(cursor != nullptr, "row id scan cursor is null");
     const int64_t batch_end = batch_start + batch_size;
     RowIdScanBitmaps bitmaps{TargetBitmap(batch_size, false),
@@ -563,6 +563,7 @@ class SegmentExpr : public Expr {
         if (column == nullptr) {
             return false;
         }
+        PrefetchRawDataChunksForScanIfNeeded(column.get());
         auto options = ChunkedColumnInterface::ScanOptions::ForData(
             current_data_global_pos_,
             active_count_ - current_data_global_pos_,
@@ -571,6 +572,23 @@ class SegmentExpr : public Expr {
             DataScanValueKind<T>());
         data_scan_cursor_ = column->Scan(op_ctx_, options);
         return data_scan_cursor_ != nullptr;
+    }
+
+    void
+    PrefetchRawDataChunksForScanIfNeeded(const ChunkedColumnInterface* column) {
+        if (column == nullptr ||
+            column->GetLocalFormat() !=
+                ChunkedColumnInterface::LocalFormat::Raw ||
+            prefetched_ || !segment_->is_chunked()) {
+            return;
+        }
+        std::vector<int64_t> chunk_ids;
+        chunk_ids.reserve(num_data_chunk_ - current_data_chunk_);
+        for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
+            chunk_ids.push_back(i);
+        }
+        segment_->prefetch_chunks(op_ctx_, field_id_, chunk_ids);
+        prefetched_ = true;
     }
 
     bool
@@ -1067,9 +1085,9 @@ class SegmentExpr : public Expr {
             ChunkedColumnInterface::ScanProjection::Data,
             DataScanValueKind<T>());
         auto cursor = column->Scan(op_ctx_, options);
-        AssertInfo(cursor != nullptr,
-                   "data scan cursor is null for field {}",
-                   field_id_.get());
+        if (cursor == nullptr) {
+            return -1;
+        }
 
         auto& skip_index = segment_->GetSkipIndex();
         size_t processed_offsets = 0;
@@ -2016,6 +2034,10 @@ class SegmentExpr : public Expr {
             data_scan_batch_pos_ += size;
         }
 
+        AssertInfo(processed_size == real_batch_size,
+                   "data scan processed {} rows, expected {}",
+                   processed_size,
+                   real_batch_size);
         MoveCursor();
         return processed_size;
     }
@@ -2434,6 +2456,10 @@ class SegmentExpr : public Expr {
             processed_size += size;
             data_scan_batch_pos_ += size;
         }
+        AssertInfo(processed_size == batch_size,
+                   "validity scan processed {} rows, expected {}",
+                   processed_size,
+                   batch_size);
         MoveCursor();
         return valid_result;
     }
