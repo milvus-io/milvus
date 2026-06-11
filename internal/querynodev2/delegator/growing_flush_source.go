@@ -527,13 +527,16 @@ func (s *delegatorGrowingFlushSource) CurrentOffset() int64 {
 
 func (s *delegatorGrowingFlushSource) FlushGrowingData(ctx context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 	result, err := s.segment.FlushData(ctx, startOffset, endOffset, &segments.FlushConfig{
-		SegmentBasePath:   config.SegmentBasePath,
-		PartitionBasePath: config.PartitionBasePath,
-		CollectionID:      config.CollectionID,
-		PartitionID:       config.PartitionID,
-		TextFieldIDs:      config.TextFieldIDs,
-		TextLobPaths:      config.TextLobPaths,
-		ReadVersion:       config.ReadVersion,
+		SegmentBasePath:      config.SegmentBasePath,
+		PartitionBasePath:    config.PartitionBasePath,
+		CollectionID:         config.CollectionID,
+		PartitionID:          config.PartitionID,
+		TextFieldIDs:         config.TextFieldIDs,
+		TextLobPaths:         config.TextLobPaths,
+		BM25FieldIDs:         config.BM25FieldIDs,
+		BM25StatsLogIDs:      config.BM25StatsLogIDs,
+		WriteMergedBM25Stats: config.WriteMergedBM25Stats,
+		ReadVersion:          config.ReadVersion,
 	})
 	if err != nil || result == nil {
 		return nil, err
@@ -541,6 +544,7 @@ func (s *delegatorGrowingFlushSource) FlushGrowingData(ctx context.Context, star
 	return &syncmgr.GrowingFlushResult{
 		ManifestPath: result.ManifestPath,
 		NumRows:      result.NumRows,
+		BM25Stats:    result.BM25Stats,
 	}, nil
 }
 

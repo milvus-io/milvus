@@ -518,7 +518,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 
 		// Mock AllocID to return error — triggers createTasksForJob failure
 		// in the async Phase B goroutine.
-		mockAllocID := mockey.Mock(mockey.GetMethod(alloc, "AllocID")).Return(int64(0), errors.New("alloc failed")).Build()
+		mockAllocID := mockey.Mock((*stubAllocator).AllocID).Return(int64(0), errors.New("alloc failed")).Build()
 		defer mockAllocID.UnPatch()
 
 		scheduler := newStubScheduler()

@@ -101,7 +101,8 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecVisitorImpl<double>(context);
             break;
         }
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::TEXT: {
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()
                      .GetMmapConfig()

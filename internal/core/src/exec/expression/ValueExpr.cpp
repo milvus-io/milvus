@@ -97,6 +97,7 @@ PhyValueExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         case DataType::STRING:
         case DataType::VARCHAR:
+        case DataType::TEXT:
             result = std::make_shared<ConstantVector<std::string>>(
                 expr_->type(),
                 real_batch_size,

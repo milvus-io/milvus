@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <filesystem>
 #include <memory>
 #include "common/FastMem.h"
 
@@ -65,10 +66,14 @@
 #include "mmap/Types.h"
 #include "storage/loon_ffi/ffi_reader_c.h"
 #include "storage/loon_ffi/util.h"
+#include "milvus-storage/common/constants.h"
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/lob_column/lob_column_manager.h"
 #include "milvus-storage/reader.h"
+#include "milvus-storage/segment/segment_reader.h"
+#include "nlohmann/json.hpp"
 
 namespace milvus::storage {
 
@@ -1660,6 +1665,172 @@ GetFieldDatasFromManifest(
         field_data->FillFieldData(chunked_array);
         field_datas.push_back(field_data);
     }
+
+    return field_datas;
+}
+
+static bool
+ManifestContainsColumn(
+    const std::shared_ptr<milvus_storage::api::Manifest>& manifest,
+    const std::string& column_name) {
+    const auto& column_groups = manifest->columnGroups();
+    for (size_t i = 0; i < column_groups.size(); i++) {
+        for (const auto& column : column_groups.at(i)->columns) {
+            if (column == column_name) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static std::string
+GetSegmentBasePathFromManifestPath(const std::string& manifest_path,
+                                   int64_t field_id) {
+    try {
+        auto j = nlohmann::json::parse(manifest_path);
+        return j.at("base_path").get<std::string>();
+    } catch (const std::exception& e) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "Failed to parse manifest path for TEXT field {}: {}",
+                  field_id,
+                  e.what());
+    }
+    return {};
+}
+
+static std::string
+BuildTextLobBasePath(const std::string& segment_base_path, int64_t field_id) {
+    // segment_base_path format: {root}/{collectionID}/{partitionID}/{segmentID}
+    // lob_base_path format: {root}/{collectionID}/{partitionID}/lobs/{field_id}
+    std::filesystem::path segment_fs_path(segment_base_path);
+    auto partition_path = segment_fs_path.parent_path();
+    return (partition_path / "lobs" / std::to_string(field_id)).string();
+}
+
+static std::shared_ptr<arrow::Schema>
+BuildTextFieldReaderSchema(const FieldDataMeta& field_meta,
+                           const std::string& column_name) {
+    auto metadata =
+        arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
+                                  {std::to_string(field_meta.field_id)});
+    auto field = arrow::field(column_name,
+                              arrow::utf8(),
+                              field_meta.field_schema.nullable(),
+                              metadata);
+    return arrow::schema({field});
+}
+
+static milvus_storage::segment::SegmentReaderConfig
+BuildTextSegmentReaderConfig(const milvus_storage::api::Properties& properties,
+                             int64_t field_id,
+                             const std::string& lob_base_path) {
+    milvus_storage::segment::SegmentReaderConfig config;
+    config.properties = properties;
+
+    milvus_storage::lob_column::LobColumnConfig lob_config;
+    lob_config.data_type = milvus_storage::lob_column::LobDataType::kText;
+    lob_config.field_id = field_id;
+    lob_config.lob_base_path = lob_base_path;
+    lob_config.properties = properties;
+    config.lob_columns[field_id] = std::move(lob_config);
+    return config;
+}
+
+static std::unique_ptr<milvus_storage::segment::SegmentReader>
+OpenTextFieldSegmentReader(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const std::shared_ptr<milvus_storage::api::Manifest>& loon_manifest,
+    const FieldDataMeta& field_meta,
+    const std::string& column_name) {
+    auto segment_base_path =
+        GetSegmentBasePathFromManifestPath(manifest_path, field_meta.field_id);
+    auto lob_base_path =
+        BuildTextLobBasePath(segment_base_path, field_meta.field_id);
+
+    auto fs_result = milvus_storage::FilesystemCache::getInstance().get(
+        *loon_ffi_properties, segment_base_path);
+    AssertInfo(fs_result.ok(),
+               "Failed to get filesystem for TEXT field {}: {}",
+               field_meta.field_id,
+               fs_result.status().ToString());
+    auto fs = std::move(fs_result.ValueOrDie());
+
+    auto schema = BuildTextFieldReaderSchema(field_meta, column_name);
+    auto config = BuildTextSegmentReaderConfig(
+        *loon_ffi_properties, field_meta.field_id, lob_base_path);
+
+    auto reader_result = milvus_storage::segment::SegmentReader::Open(
+        fs, loon_manifest, schema, {column_name}, config);
+    AssertInfo(reader_result.ok(),
+               "Failed to open SegmentReader for TEXT field {}: {}",
+               field_meta.field_id,
+               reader_result.status().ToString());
+    return std::move(reader_result.ValueOrDie());
+}
+
+std::vector<FieldDataPtr>
+GetTextFieldDatasFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta) {
+    AssertInfo(loon_ffi_properties != nullptr,
+               "loon ffi properties is null when read text field data from "
+               "manifest");
+
+    auto loon_manifest = GetLoonManifest(manifest_path, loon_ffi_properties);
+
+    std::string column_name = std::to_string(field_meta.field_id);
+
+    if (!ManifestContainsColumn(loon_manifest, column_name)) {
+        LOG_INFO("TEXT field {} not found in manifest", field_meta.field_id);
+        return {};
+    }
+
+    auto reader = OpenTextFieldSegmentReader(manifest_path,
+                                             loon_ffi_properties,
+                                             loon_manifest,
+                                             field_meta,
+                                             column_name);
+
+    std::vector<FieldDataPtr> field_datas;
+    while (true) {
+        std::shared_ptr<arrow::RecordBatch> batch;
+        auto status = reader->ReadNext(&batch);
+        AssertInfo(status.ok(),
+                   "Failed to read TEXT field {} from manifest: {}",
+                   field_meta.field_id,
+                   status.ToString());
+        if (batch == nullptr) {
+            break;
+        }
+
+        auto num_rows = batch->num_rows();
+        if (num_rows == 0) {
+            continue;
+        }
+
+        auto raw_column = batch->GetColumnByName(column_name);
+        AssertInfo(raw_column != nullptr,
+                   "TEXT field {} column {} not found in SegmentReader batch",
+                   field_meta.field_id,
+                   column_name);
+        auto chunked_array = std::make_shared<arrow::ChunkedArray>(raw_column);
+        auto field_data = CreateFieldData(DataType::TEXT,
+                                          DataType::NONE,
+                                          field_meta.field_schema.nullable(),
+                                          1,
+                                          num_rows);
+        field_data->FillFieldData(chunked_array);
+        field_datas.push_back(field_data);
+    }
+
+    auto status = reader->Close();
+    AssertInfo(status.ok(),
+               "Failed to close SegmentReader for TEXT field {}: {}",
+               field_meta.field_id,
+               status.ToString());
 
     return field_datas;
 }
