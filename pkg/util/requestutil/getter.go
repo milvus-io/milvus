@@ -226,15 +226,46 @@ var retryableCode typeutil.Set[int32] = typeutil.NewSet(
 // (additive cardinality) rather than a new dimension label (which would be
 // multiplicative). Retryability takes priority over classification.
 func ParseMetricLabel(resp any, err error) string {
-	// err is returned by interceptors (context cancellation, flow control,
-	// transport issues, auth/privilege rejection) and by REST v2 handlers,
-	// which abort with merr-typed errors directly. Classify merr first: a merr
-	// error has no GRPCStatus(), so status.Code(err) degrades to codes.Unknown
-	// and would misbucket user input errors as system rejections. The
-	// auth/privilege interceptors deliberately return raw gRPC codes (not
-	// merr, to keep SDK retry behavior correct); those are the caller's fault,
-	// so bucket them as a user-side rejection. Everything else is a
-	// system-side rejection.
+	// A response carrying a non-OK status means the request was PROCESSED and
+	// failed (fail_*), and takes priority over a non-nil err: the REST v2
+	// wrappers reconstruct err = merr.Error(status) from that same response,
+	// which previously routed every processed REST failure into the rejected_*
+	// buckets and left the fail_* series blind to the entire REST surface.
+	var st *commonpb.Status
+	switch resp := resp.(type) {
+	case interface{ GetStatus() *commonpb.Status }:
+		st = resp.GetStatus()
+	case *commonpb.Status:
+		st = resp
+	}
+	if st != nil && !merr.Ok(st) {
+		// Client cancellation is neither party's failure.
+		if st.GetCode() == merr.CanceledCode {
+			return metrics.CancelLabel
+		}
+		// Retryability takes priority over input/system classification.
+		if retryableCode.Contain(st.GetCode()) {
+			return metrics.RetryLabel
+		}
+
+		// Hard failure: classify by responsible party. merr.Status already
+		// stamps the InputError flag into ExtraInfo, so read it directly instead
+		// of reconstructing the whole milvusError (this is the proxy hot path).
+		if st.GetExtraInfo()[merr.InputErrorFlagKey] == "true" {
+			return metrics.FailInputLabel
+		}
+		return metrics.FailSystemLabel
+	}
+
+	// No usable response status: err is the interceptor-level outcome (context
+	// cancellation, flow control, transport issues, auth/privilege rejection)
+	// — the request was rejected around processing. Classify merr first: a
+	// merr error has no GRPCStatus(), so status.Code(err) degrades to
+	// codes.Unknown and would misbucket user input errors as system
+	// rejections. The auth/privilege interceptors deliberately return raw gRPC
+	// codes (not merr, to keep SDK retry behavior correct); those are the
+	// caller's fault, so bucket them as a user-side rejection. Everything else
+	// is a system-side rejection.
 	if err != nil {
 		// Client cancellation is neither party's failure; don't count it as a
 		// system rejection.
@@ -250,30 +281,6 @@ func ParseMetricLabel(resp any, err error) string {
 		default:
 			return metrics.RejectedSystemLabel
 		}
-	}
-
-	// check response status code
-	var status *commonpb.Status
-	switch resp := resp.(type) {
-	case interface{ GetStatus() *commonpb.Status }:
-		status = resp.GetStatus()
-	case *commonpb.Status:
-		status = resp
-	}
-
-	if !merr.Ok(status) {
-		// Retryability takes priority over input/system classification.
-		if retryableCode.Contain(status.GetCode()) {
-			return metrics.RetryLabel
-		}
-
-		// Hard failure: classify by responsible party. merr.Status already
-		// stamps the InputError flag into ExtraInfo, so read it directly instead
-		// of reconstructing the whole milvusError (this is the proxy hot path).
-		if status.GetExtraInfo()[merr.InputErrorFlagKey] == "true" {
-			return metrics.FailInputLabel
-		}
-		return metrics.FailSystemLabel
 	}
 	return metrics.SuccessLabel
 }

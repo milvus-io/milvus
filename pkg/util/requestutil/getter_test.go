@@ -556,4 +556,15 @@ func TestParseMetricLabel(t *testing.T) {
 		ParseMetricLabel(&commonpb.Status{}, context.Canceled))
 	assert.Equal(t, metrics.CancelLabel,
 		ParseMetricLabel(&commonpb.Status{}, errors.Wrap(context.Canceled, "rpc aborted")))
+
+	// REST v2 wrapper shape: the response carries the failed status AND the
+	// wrapper reconstructs err from it. Processed failures must classify by
+	// the status (fail_*), not be misrouted into the rejected_* buckets.
+	restSys := merr.Status(merr.ErrSegcore)
+	assert.Equal(t, metrics.FailSystemLabel, ParseMetricLabel(restSys, merr.Error(restSys)))
+	restInput := merr.Status(merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("bad param")))
+	assert.Equal(t, metrics.FailInputLabel, ParseMetricLabel(restInput, merr.Error(restInput)))
+	// Cancellation surfaced through the response status stays out of fail_system.
+	restCancel := merr.Status(context.Canceled)
+	assert.Equal(t, metrics.CancelLabel, ParseMetricLabel(restCancel, merr.Error(restCancel)))
 }

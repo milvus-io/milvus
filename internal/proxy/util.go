@@ -3535,6 +3535,11 @@ func getBM25FunctionOfAnnsField(fieldID int64, functions []*schemapb.FunctionSch
 // requestutil.ParseMetricLabel emits at the gRPC interceptor; the legacy
 // bare "fail" value must not reappear in this metric's value domain.
 func failMetricLabel(err error) string {
+	// Client cancellation is neither party's failure; keep it out of the
+	// fail_system bucket (parity with ParseMetricLabel).
+	if errors.Is(err, context.Canceled) {
+		return metrics.CancelLabel
+	}
 	if merr.GetErrorType(err) == merr.InputError {
 		return metrics.FailInputLabel
 	}

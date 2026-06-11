@@ -6663,4 +6663,7 @@ func TestFailMetricLabel(t *testing.T) {
 	// input-classified merr errors go to the user bucket, also through wrapping
 	assert.Equal(t, metrics.FailInputLabel, failMetricLabel(merr.WrapErrParameterInvalidMsg("bad parameter")))
 	assert.Equal(t, metrics.FailInputLabel, failMetricLabel(merr.Wrap(merr.WrapErrParameterInvalidMsg("bad parameter"), "context")))
+	// client cancellation is neither party's failure
+	assert.Equal(t, metrics.CancelLabel, failMetricLabel(context.Canceled))
+	assert.Equal(t, metrics.CancelLabel, failMetricLabel(errors.Wrap(context.Canceled, "rpc aborted")))
 }

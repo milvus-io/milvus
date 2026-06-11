@@ -260,7 +260,8 @@ func (m *ExternalCollectionManager) SubmitTask(
 					zap.ByteString("stack", stack))
 				reason := fmt.Sprintf("task panicked: %v", r)
 				m.UpdateResult(clusterID, taskID, indexpb.JobState_JobStateFailed, reason, info.KeptSegments, nil)
-				retErr = merr.WrapErrParameterInvalidMsg("%s", reason)
+				// A recovered panic is a server-side failure, never caller input.
+				retErr = merr.WrapErrServiceInternalMsg("%s", reason)
 			}
 		}()
 		log.Info("executing external collection task in pool",
