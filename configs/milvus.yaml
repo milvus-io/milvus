@@ -375,10 +375,12 @@ proxy:
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   dqlBackpressure:
     enabled: true # Whether Proxy adaptively controls DQL task dispatch concurrency according to downstream queue-full errors.
-    minConcurrency: 4 # The minimum DQL task dispatch concurrency kept by Proxy backpressure control.
-    reduceRatio: 0.5 # The multiplicative decrease ratio for Proxy DQL dispatch concurrency when downstream queue-full errors occur.
-    decreaseInterval: 1s # The minimum interval for Proxy DQL dispatch concurrency to decrease again after downstream queue-full errors.
-    recoverInterval: 1s # The minimum interval for Proxy DQL dispatch concurrency to recover by one after successful DQL task execution.
+    slowdownMinConcurrency: 4 # The minimum DQL task dispatch concurrency kept during Proxy DQL backpressure slowdown.
+    slowdownRatio: 0.5 # The multiplicative slowdown ratio for Proxy DQL dispatch concurrency when downstream queue-full errors occur.
+    slowdownInterval: 1s # The minimum interval for Proxy DQL dispatch concurrency to slowdown again after downstream queue-full errors.
+    recoverInterval: 1s # The minimum interval for Proxy DQL dispatch concurrency to recover after successful DQL task execution.
+    recoverStep: 4 # The DQL dispatch concurrency increment for each Proxy backpressure recovery.
+    recoverQuietPeriod: 5s # The quiet period after a Proxy DQL backpressure slowdown before recover is allowed.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
   resolveAliasForPrivilege: true # switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks
   maxArrayCapacity: 4096 # maximum number of elements in an array field for a single row
