@@ -55,6 +55,28 @@ BaseHashTable::prepareForGroupProbe(HashLookup& lookup,
     }
 }
 
+void
+BaseHashTable::prepareForGroupProbe(HashLookup& lookup,
+                                    const AggRawInput& input) {
+    auto& hashers = lookup.hashers_;
+    lookup.reset(input.selected_count());
+
+    const auto mode = hashMode();
+    for (auto i = 0; i < hashers.size(); i++) {
+        if (mode == BaseHashTable::HashMode::kHash) {
+            auto& hasher = hashers[i];
+            hasher->hashRaw(input.child(hasher->ChannelIndex()),
+                            input,
+                            i > 0,
+                            lookup.hashes_);
+        } else {
+            ThrowInfo(
+                milvus::OpTypeInvalid,
+                "Not support target hashMode, only support kHash for now");
+        }
+    }
+}
+
 class ProbeState {
  public:
     enum class Operation { kProbe, kInsert, kErase };
@@ -203,12 +225,45 @@ HashTable::compareKeys(const char* group,
     return true;
 }
 
+bool
+HashTable::compareKeys(const char* group,
+                       milvus::exec::HashLookup& lookup,
+                       const AggRawInput& input,
+                       milvus::vector_size_t row) {
+    int32_t numKeys = lookup.hashers_.size();
+    for (int32_t i = 0; i < numKeys; i++) {
+        auto& hasher = lookup.hashers_[i];
+        if (!rows_->equals(group,
+                           rows()->columnAt(i),
+                           input.child(hasher->ChannelIndex()),
+                           input,
+                           row)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void
 HashTable::storeKeys(milvus::exec::HashLookup& lookup,
                      milvus::vector_size_t row) {
     for (int32_t i = 0; i < lookup.hashers_.size(); i++) {
         auto& hasher = lookup.hashers_[i];
         rows_->store(hasher->columnData(), row, lookup.hits_[row], i);
+    }
+}
+
+void
+HashTable::storeKeys(milvus::exec::HashLookup& lookup,
+                     const AggRawInput& input,
+                     milvus::vector_size_t row) {
+    for (int32_t i = 0; i < lookup.hashers_.size(); i++) {
+        auto& hasher = lookup.hashers_[i];
+        rows_->store(input.child(hasher->ChannelIndex()),
+                     input,
+                     row,
+                     lookup.hits_[row],
+                     i);
     }
 }
 
@@ -244,6 +299,30 @@ HashTable::insertEntry(milvus::exec::HashLookup& lookup,
     return group;
 }
 
+char*
+HashTable::insertEntry(milvus::exec::HashLookup& lookup,
+                       const AggRawInput& input,
+                       uint64_t index,
+                       milvus::vector_size_t row) {
+    if (numDistinct_ >= maxNumGroups_) {
+        ThrowInfo(
+            UnexpectedError,
+            fmt::format("GROUP BY produced too many groups ({}). "
+                        "Add filters or increase common.groupBy.maxGroups "
+                        "(current: {})",
+                        numDistinct_ + 1,
+                        maxNumGroups_));
+    }
+    char* group = rows_->newRow();
+    lookup.hits_[row] = group;
+    storeKeys(lookup, input, row);
+    storeRowPointer(index, lookup.hashes_[row], group);
+    rowHashes_.push_back(lookup.hashes_[row]);
+    numDistinct_++;
+    lookup.newGroups_.push_back(row);
+    return group;
+}
+
 FOLLY_ALWAYS_INLINE void
 HashTable::fullProbe(HashLookup& lookup, ProbeState& state) {
     constexpr ProbeState::Operation op = ProbeState::Operation::kInsert;
@@ -254,6 +333,21 @@ HashTable::fullProbe(HashLookup& lookup, ProbeState& state) {
         },
         [&](int32_t row, uint64_t index) {
             return insertEntry(lookup, index, row);
+        });
+}
+
+FOLLY_ALWAYS_INLINE void
+HashTable::fullProbe(HashLookup& lookup,
+                     const AggRawInput& input,
+                     ProbeState& state) {
+    constexpr ProbeState::Operation op = ProbeState::Operation::kInsert;
+    lookup.hits_[state.row()] = state.fullProbe<op>(
+        *this,
+        [&](char* group, int32_t row) {
+            return compareKeys(group, lookup, input, row);
+        },
+        [&](int32_t row, uint64_t index) {
+            return insertEntry(lookup, input, index, row);
         });
 }
 
@@ -269,6 +363,22 @@ HashTable::groupProbe(milvus::exec::HashLookup& lookup) {
         state.preProbe(*this, lookup.hashes_[idx], idx);
         state.firstProbe<ProbeState::Operation::kInsert>(*this);
         fullProbe(lookup, state);
+    }
+}
+
+void
+HashTable::groupProbe(milvus::exec::HashLookup& lookup,
+                      const AggRawInput& input) {
+    AssertInfo(hashMode_ == HashMode::kHash, "Only support kHash mode for now");
+    checkSizeAndAllocateTable(0);
+    ProbeState state;
+    for (int32_t idx = 0; idx < lookup.hashes_.size(); idx++) {
+        if (numDistinct_ >= rehashSize()) {
+            rehash();
+        }
+        state.preProbe(*this, lookup.hashes_[idx], idx);
+        state.firstProbe<ProbeState::Operation::kInsert>(*this);
+        fullProbe(lookup, input, state);
     }
 }
 

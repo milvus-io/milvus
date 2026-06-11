@@ -56,11 +56,39 @@ class SumAggregateBase
     }
 
     void
+    addRawInput(
+        char** groups,
+        int numGroups,
+        const AggRawInput& input,
+        const std::vector<column_index_t>& input_column_idxes) override {
+        AssertInfo(input_column_idxes.size() == 1,
+                   "sum aggregate expects exactly one raw input column");
+        AssertInfo(numGroups == input.selected_count(),
+                   "raw sum group count must match selected rows");
+        updateRawInternal<TAccumulator>(groups, input, input_column_idxes[0]);
+    }
+
+    void
     addSingleGroupRawInput(char* group,
                            int64_t numRows,
                            const std::vector<VectorPtr>& input) override {
         BaseAggregate::template updateOneGroup<TAccumulator>(
             group, input[0], &updateSingleValue<TAccumulator>);
+    }
+
+    void
+    addSingleGroupRawInput(
+        char* group,
+        int64_t numRows,
+        const AggRawInput& input,
+        const std::vector<column_index_t>& input_column_idxes) override {
+        AssertInfo(input_column_idxes.size() == 1,
+                   "sum aggregate expects exactly one raw input column");
+        BaseAggregate::template updateOneRawGroup<TAccumulator>(
+            group,
+            input,
+            input_column_idxes[0],
+            &updateSingleValue<TAccumulator>);
     }
 
     void
@@ -83,6 +111,20 @@ class SumAggregateBase
         } else {
             BaseAggregate::template updateGroups<false, TData, TValue>(
                 groups, input_column, &updateSingleValue<TData>);
+        }
+    }
+
+    template <typename TData, typename TValue = TInput>
+    void
+    updateRawInternal(char** groups,
+                      const AggRawInput& input,
+                      column_index_t column_idx) {
+        if (Aggregate::numNulls_) {
+            BaseAggregate::template updateRawGroups<true, TData, TValue>(
+                groups, input, column_idx, &updateSingleValue<TData>);
+        } else {
+            BaseAggregate::template updateRawGroups<false, TData, TValue>(
+                groups, input, column_idx, &updateSingleValue<TData>);
         }
     }
 

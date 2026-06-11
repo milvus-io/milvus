@@ -22,6 +22,7 @@
 
 #include "common/Types.h"
 #include "common/Vector.h"
+#include "exec/operator/query-agg/AggRawInput.h"
 #include "expr/ITypeExpr.h"
 
 namespace milvus {
@@ -71,6 +72,19 @@ class VectorHasher {
     template <DataType type>
     void
     hashValues(const ColumnVectorPtr& column_data, bool mix, uint64_t* result);
+
+    template <DataType type>
+    void
+    hashRawValues(const AggRawColumnView& column_data,
+                  const AggRawInput& input,
+                  bool mix,
+                  uint64_t* result);
+
+    void
+    hashRaw(const AggRawColumnView& column_data,
+            const AggRawInput& input,
+            bool mix,
+            std::vector<uint64_t>& result);
 
     void
     setColumnData(const ColumnVectorPtr& column_data) {

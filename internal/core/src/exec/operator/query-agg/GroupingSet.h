@@ -45,13 +45,22 @@ class GroupingSet {
     addInput(const RowVectorPtr& input);
 
     void
+    addRawInput(const AggRawInput& input);
+
+    void
     initializeGlobalAggregation();
 
     void
     addGlobalAggregationInput(const RowVectorPtr& input);
 
     void
+    addGlobalAggregationInput(const AggRawInput& input);
+
+    void
     addInputForActiveRows(const RowVectorPtr& input);
+
+    void
+    addInputForActiveRows(const AggRawInput& input);
 
     void
     createHashTable();
