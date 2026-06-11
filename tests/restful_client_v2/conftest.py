@@ -14,12 +14,29 @@ def pytest_addoption(parser):
     parser.addoption("--secondary_minio_host", action="store", default=None, help="secondary MinIO host")
     parser.addoption("--secondary_bucket_name", action="store", default=None, help="secondary MinIO bucket name")
     parser.addoption("--secondary_root_path", action="store", default="file", help="secondary MinIO root path")
-    parser.addoption("--source-cluster-id", "--source_cluster_id", action="store", default=None, help="CDC source cluster ID")
-    parser.addoption("--target-cluster-id", "--target_cluster_id", action="store", default=None, help="CDC target cluster ID")
-    parser.addoption("--pchannel-num", "--pchannel_num", action="store", default="16", help="CDC physical channel count")
+    parser.addoption(
+        "--source-cluster-id", "--source_cluster_id", action="store", default=None, help="CDC source cluster ID"
+    )
+    parser.addoption(
+        "--target-cluster-id", "--target_cluster_id", action="store", default=None, help="CDC target cluster ID"
+    )
+    parser.addoption(
+        "--pchannel-num", "--pchannel_num", action="store", default="16", help="CDC physical channel count"
+    )
     # a tei endpoint for text embedding, default is http://text-embeddings-service.milvus-ci.svc.cluster.local:80 which is deployed in house
-    parser.addoption("--tei_endpoint", action="store", default="http://text-embeddings-service.milvus-ci.svc.cluster.local:80", help="tei endpoint")
-    parser.addoption("--tei_reranker_endpoint", action="store", default="http://text-rerank-service.milvus-ci.svc.cluster.local:80", help="tei reranker endpoint")
+    parser.addoption(
+        "--tei_endpoint",
+        action="store",
+        default="http://text-embeddings-service.milvus-ci.svc.cluster.local:80",
+        help="tei endpoint",
+    )
+    parser.addoption(
+        "--tei_reranker_endpoint",
+        action="store",
+        default="http://text-rerank-service.milvus-ci.svc.cluster.local:80",
+        help="tei reranker endpoint",
+    )
+
 
 @pytest.fixture
 def endpoint(request):
@@ -49,6 +66,7 @@ def root_path(request):
 @pytest.fixture
 def release_name(request):
     return request.config.getoption("--release_name")
+
 
 @pytest.fixture
 def secondary_endpoint(request):
@@ -93,6 +111,7 @@ def pchannel_num(request):
 @pytest.fixture
 def tei_endpoint(request):
     return request.config.getoption("--tei_endpoint")
+
 
 @pytest.fixture
 def tei_reranker_endpoint(request):

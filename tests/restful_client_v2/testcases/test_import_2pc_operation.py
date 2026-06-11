@@ -42,18 +42,13 @@ class TestImport2PCRestOperation(TestBase):
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=15, check=False)
         if result.returncode != 0:
-            pytest.skip(
-                f"cannot inspect release {release_name} pods in namespace {namespace}: {result.stderr.strip()}"
-            )
+            pytest.skip(f"cannot inspect release {release_name} pods in namespace {namespace}: {result.stderr.strip()}")
         return json.loads(result.stdout).get("items", [])
 
     def _skip_if_release_has_no_component(self, release_name, component, case_id):
         pods = self._kubectl_get_release_pods(release_name)
         components = sorted(
-            {
-                pod.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/component", "")
-                for pod in pods
-            }
+            {pod.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/component", "") for pod in pods}
         )
         if component not in components:
             pytest.skip(
@@ -70,7 +65,8 @@ class TestImport2PCRestOperation(TestBase):
     ):
         pods = self._kubectl_get_release_pods(release_name, namespace=namespace)
         component_pods = [
-            pod for pod in pods
+            pod
+            for pod in pods
             if pod.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/component") == component
             and pod.get("status", {}).get("phase") == "Running"
         ]
@@ -115,8 +111,7 @@ class TestImport2PCRestOperation(TestBase):
                     continue
                 conditions = pod.get("status", {}).get("conditions", [])
                 ready = any(
-                    condition.get("type") == "Ready" and condition.get("status") == "True"
-                    for condition in conditions
+                    condition.get("type") == "Ready" and condition.get("status") == "True" for condition in conditions
                 )
                 if pod.get("status", {}).get("phase") == "Running" and ready:
                     return pod_name, pod.get("metadata", {}).get("name")
@@ -1735,9 +1730,7 @@ class TestImport2PCRestOperation(TestBase):
         assert rsp["code"] == 0, rsp
         return rsp["data"]["jobId"]
 
-    def _create_manual_import_job_with_files(
-        self, collection_name, file_names, partition_name=None, db_name="default"
-    ):
+    def _create_manual_import_job_with_files(self, collection_name, file_names, partition_name=None, db_name="default"):
         payload = {
             "collectionName": collection_name,
             "files": [[file_name] for file_name in file_names],
@@ -2303,9 +2296,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_parquet_and_upload(self._make_rows(2000, 4, phase=2), abort_file)
 
         commit_job_id = self._create_manual_import_job(collection_name, commit_file)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            commit_job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(commit_job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         describe_rsp = self.import_job_client.describe_import_job(commit_job_id)
@@ -2324,23 +2315,17 @@ class TestImport2PCRestOperation(TestBase):
         duplicate_commit_rsp = self.import_job_client.commit_import_job(commit_job_id)
         assert duplicate_commit_rsp["code"] == 0, duplicate_commit_rsp
 
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            commit_job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(commit_job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         abort_job_id = self._create_manual_import_job(collection_name, abort_file)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            abort_job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(abort_job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         abort_rsp = self.import_job_client.abort_import_job(abort_job_id)
         assert abort_rsp["code"] == 0, abort_rsp
 
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            abort_job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(abort_job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         invalid_commit_rsp = self.import_job_client.commit_import_job("not-a-number")
@@ -2415,9 +2400,7 @@ class TestImport2PCRestOperation(TestBase):
                 if job_id is not None:
                     abort_rsp = self.import_job_client.abort_import_job(job_id)
                     if abort_rsp["code"] == 0:
-                        self.import_job_client.wait_import_job_state(
-                            job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT
-                        )
+                        self.import_job_client.wait_import_job_state(job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT)
             for file_name in (first_file, second_file):
                 file_path = f"/tmp/{file_name}"
                 if os.path.exists(file_path):
@@ -2470,9 +2453,7 @@ class TestImport2PCRestOperation(TestBase):
 
         try:
             job_id = self._create_manual_import_job(collection_name, file_name)
-            rsp, ready = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ready = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ready, rsp
 
             list_rsp = self.import_job_client.list_import_jobs({})
@@ -2488,9 +2469,7 @@ class TestImport2PCRestOperation(TestBase):
             if job_id is not None:
                 abort_rsp = self.import_job_client.abort_import_job(job_id)
                 if abort_rsp["code"] == 0:
-                    self.import_job_client.wait_import_job_state(
-                        job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT
-                    )
+                    self.import_job_client.wait_import_job_state(job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT)
             if os.path.exists(file_path):
                 os.remove(file_path)
 
@@ -2988,13 +2967,10 @@ class TestImport2PCRestOperation(TestBase):
             if job_id is not None:
                 abort_rsp = self.import_job_client.abort_import_job(job_id)
                 if abort_rsp.get("code") == 0:
-                    self.import_job_client.wait_import_job_state(
-                        job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT
-                    )
+                    self.import_job_client.wait_import_job_state(job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT)
         assert rsp["code"] != 0, rsp
         assert any(
-            reason_part in str(rsp).lower()
-            for reason_part in ("auto_commit", "null", "string", "type", "unmarshal")
+            reason_part in str(rsp).lower() for reason_part in ("auto_commit", "null", "string", "type", "unmarshal")
         ), rsp
         assert "jobId" not in str(rsp), rsp
 
@@ -3359,9 +3335,9 @@ class TestImport2PCRestOperation(TestBase):
         if create_rsp["code"] != 0:
             readable_reason = str(create_rsp.get("message", create_rsp.get("reason", create_rsp))).lower()
             assert readable_reason, create_rsp
-            assert any(
-                keyword in readable_reason for keyword in ("file", "1024", "max", "limit", "too many")
-            ), create_rsp
+            assert any(keyword in readable_reason for keyword in ("file", "1024", "max", "limit", "too many")), (
+                create_rsp
+            )
             assert "jobId" not in str(create_rsp), create_rsp
             count, count_ok = self._wait_count(collection_name, 0, timeout=20)
             assert count_ok, {"expected_count": 0, "last_count": count, "create_rsp": create_rsp}
@@ -3372,9 +3348,7 @@ class TestImport2PCRestOperation(TestBase):
         abort_rsp = self.import_job_client.abort_import_job(job_id)
         progress_after_cleanup = None
         if abort_rsp["code"] == 0:
-            progress_after_cleanup, _ = self.import_job_client.wait_import_job_state(
-                job_id, "Failed", timeout=60
-            )
+            progress_after_cleanup, _ = self.import_job_client.wait_import_job_state(job_id, "Failed", timeout=60)
         else:
             progress_after_cleanup = self.import_job_client.get_import_job_progress(job_id)
         assert False, {
@@ -3400,9 +3374,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_parquet_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         string_describe_rsp = self.import_job_client.describe_import_job(job_id)
@@ -3424,9 +3396,7 @@ class TestImport2PCRestOperation(TestBase):
             string_commit_rsp = self.import_job_client.commit_import_job(job_id)
             assert string_commit_rsp["code"] == 0, string_commit_rsp
 
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         expected_ids = {row["id"] for row in rows}
@@ -3556,7 +3526,7 @@ class TestImport2PCRestOperation(TestBase):
                     "field": field_name,
                     "describe_rsp": describe_rsp,
                     "progress_rsp": progress_rsp,
-            }
+                }
             assert describe_data["jobId"] == job_id, describe_rsp
             assert describe_data["state"] == "Uncommitted", describe_rsp
             assert 0 <= describe_data["progress"] <= 100, describe_rsp
@@ -3564,16 +3534,12 @@ class TestImport2PCRestOperation(TestBase):
             assert describe_data["totalRows"] == len(rows), describe_rsp
 
             imported_ids = {row["id"] for row in rows}
-            seen_ids, absent = self._wait_imported_ids_absent(
-                collection_name, imported_ids, duration=6
-            )
+            seen_ids, absent = self._wait_imported_ids_absent(collection_name, imported_ids, duration=6)
             assert absent, {"unexpected_visible_ids": seen_ids}
 
             abort_rsp = self.import_job_client.abort_import_job(job_id)
             assert abort_rsp["code"] == 0, abort_rsp
-            rsp, failed = self.import_job_client.wait_import_job_state(
-                job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, failed = self.import_job_client.wait_import_job_state(job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT)
             assert failed, rsp
         finally:
             if job_id is not None:
@@ -3599,16 +3565,12 @@ class TestImport2PCRestOperation(TestBase):
         file_path = self._write_parquet_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         describe_rsp = self.import_job_client.describe_import_job(job_id)
@@ -3662,16 +3624,12 @@ class TestImport2PCRestOperation(TestBase):
         file_path = self._write_parquet_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         seen_before_reload, visible_before_reload = self._wait_imported_ids_visible(
@@ -3824,9 +3782,7 @@ class TestImport2PCRestOperation(TestBase):
             create_user_rsp = self.user_client.user_create({"userName": user_name, "password": password})
             assert create_user_rsp["code"] == 0, create_user_rsp
 
-            unauthorized_import_client = self.import_job_client.__class__(
-                self.endpoint, f"{user_name}:{password}"
-            )
+            unauthorized_import_client = self.import_job_client.__class__(self.endpoint, f"{user_name}:{password}")
 
             commit_job_id = self._create_manual_import_job(collection_name, commit_file)
             rsp, ok = self.import_job_client.wait_import_job_state(
@@ -4012,9 +3968,7 @@ class TestImport2PCRestOperation(TestBase):
         local_files = []
         try:
             for consistency_level, start_id, phase in scenarios:
-                collection_name = gen_collection_name(
-                    prefix=f"import_2pc_mvcc_{consistency_level.lower()}"
-                )
+                collection_name = gen_collection_name(prefix=f"import_2pc_mvcc_{consistency_level.lower()}")
                 self._create_base_collection(collection_name, consistency_level=consistency_level)
 
                 rows = self._make_rows(start_id, 4, phase=phase)
@@ -4044,9 +3998,7 @@ class TestImport2PCRestOperation(TestBase):
                     "consistency_level": consistency_level,
                     "commit_rsp": commit_rsp,
                 }
-                rsp, ok = self.import_job_client.wait_import_job_state(
-                    job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-                )
+                rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
                 assert ok, {"consistency_level": consistency_level, "last_rsp": rsp}
 
                 seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -4077,9 +4029,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_parquet_and_upload(rows, file_name)
 
         job_id = self._create_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -4110,9 +4060,7 @@ class TestImport2PCRestOperation(TestBase):
         file_path = self._write_parquet_and_upload(rows, file_name)
 
         job_id = self._create_import_job(collection_name, file_name, options={"auto_commit": "not-a-bool"})
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -4141,9 +4089,7 @@ class TestImport2PCRestOperation(TestBase):
 
         try:
             job_id = self._create_import_job(collection_name, file_name, options={"auto_commit": "FALSE"})
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
             assert rsp["data"]["state"] == "Uncommitted", rsp
             assert rsp["data"]["importedRows"] == len(rows), rsp
@@ -4157,9 +4103,7 @@ class TestImport2PCRestOperation(TestBase):
 
             abort_rsp = self.import_job_client.abort_import_job(job_id)
             assert abort_rsp["code"] == 0, abort_rsp
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
 
             seen_after_abort, absent_after_abort = self._wait_imported_ids_absent(
@@ -4188,9 +4132,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_parquet_and_upload([], file_name)
 
         job_id = self._create_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == 0, rsp
         assert rsp["data"]["totalRows"] == 0, rsp
@@ -4238,34 +4180,24 @@ class TestImport2PCRestOperation(TestBase):
         self._write_parquet_and_upload(second_rows, second_file)
 
         first_job_id = self._create_manual_import_job(collection_name, first_file)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            first_job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(first_job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(first_rows), rsp
         first_ids = {row["id"] for row in first_rows}
-        seen_first_before_commit, first_absent = self._wait_imported_ids_absent(
-            collection_name, first_ids, duration=12
-        )
+        seen_first_before_commit, first_absent = self._wait_imported_ids_absent(collection_name, first_ids, duration=12)
         assert first_absent, {"unexpected_visible_ids": seen_first_before_commit}
 
         commit_rsp = self.import_job_client.commit_import_job(first_job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            first_job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(first_job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
-        seen_first_ids, first_visible = self._wait_imported_ids_visible(
-            collection_name, first_ids, timeout=120
-        )
+        seen_first_ids, first_visible = self._wait_imported_ids_visible(collection_name, first_ids, timeout=120)
         assert first_visible, {"expected": first_ids, "seen": seen_first_ids}
         assert self._query_count(collection_name) == len(first_rows)
 
         second_job_id = self._create_manual_import_job(collection_name, second_file)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            second_job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(second_job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(second_rows), rsp
 
@@ -4283,9 +4215,7 @@ class TestImport2PCRestOperation(TestBase):
 
         commit_rsp = self.import_job_client.commit_import_job(second_job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            second_job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(second_job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         all_ids = first_ids | second_ids
@@ -4315,9 +4245,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_parquet_and_upload(second_rows, second_file)
 
         job_id = self._create_manual_import_job_with_files(collection_name, [first_file, second_file])
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         all_rows = first_rows + second_rows
@@ -4332,9 +4260,7 @@ class TestImport2PCRestOperation(TestBase):
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -4376,9 +4302,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_json_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -4392,9 +4316,7 @@ class TestImport2PCRestOperation(TestBase):
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -4437,9 +4359,7 @@ class TestImport2PCRestOperation(TestBase):
 
         try:
             job_id = self._create_manual_import_job(collection_name, file_name)
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
             assert rsp["data"]["importedRows"] == len(rows), rsp
             assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -4453,9 +4373,7 @@ class TestImport2PCRestOperation(TestBase):
 
             commit_rsp = self.import_job_client.commit_import_job(job_id)
             assert commit_rsp["code"] == 0, commit_rsp
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
 
             seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -4501,9 +4419,7 @@ class TestImport2PCRestOperation(TestBase):
             file_name,
             options={"auto_commit": "false", "sep": "|"},
         )
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -4517,9 +4433,7 @@ class TestImport2PCRestOperation(TestBase):
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -4566,9 +4480,7 @@ class TestImport2PCRestOperation(TestBase):
                 file_name,
                 options={"auto_commit": "false", "sep": "|", "nullkey": "NULL"},
             )
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
             assert rsp["data"]["importedRows"] == len(rows), rsp
             assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -4581,9 +4493,7 @@ class TestImport2PCRestOperation(TestBase):
 
             commit_rsp = self.import_job_client.commit_import_job(job_id)
             assert commit_rsp["code"] == 0, commit_rsp
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
 
             seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -4651,9 +4561,7 @@ class TestImport2PCRestOperation(TestBase):
                 [file_names],
                 options={"auto_commit": "false"},
             )
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
             assert rsp["data"]["importedRows"] == len(rows), rsp
             assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -4666,9 +4574,7 @@ class TestImport2PCRestOperation(TestBase):
 
             commit_rsp = self.import_job_client.commit_import_job(job_id)
             assert commit_rsp["code"] == 0, commit_rsp
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
 
             seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -4716,9 +4622,7 @@ class TestImport2PCRestOperation(TestBase):
         create_rsp = self.import_job_client.create_import_jobs(payload)
         if create_rsp["code"] == 0:
             job_id = create_rsp["data"]["jobId"]
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
             assert rsp["data"]["state"] == "Failed", rsp
             reason_text = str(rsp.get("data", {}).get("reason", rsp))
@@ -4728,9 +4632,9 @@ class TestImport2PCRestOperation(TestBase):
             reason_text = str(create_rsp.get("message", create_rsp))
             error_context = create_rsp
         assert reason_text, error_context
-        assert any(
-            keyword in reason_text.lower() for keyword in ("txt", "format", "suffix", "unsupported")
-        ), error_context
+        assert any(keyword in reason_text.lower() for keyword in ("txt", "format", "suffix", "unsupported")), (
+            error_context
+        )
 
         self.collection_client.refresh_load(collection_name)
         assert self._query_count(collection_name) == 0
@@ -4807,9 +4711,7 @@ class TestImport2PCRestOperation(TestBase):
         assert create_rsp["code"] == 0, create_rsp
         job_id = create_rsp["data"]["jobId"]
 
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         all_rows = parquet_rows + csv_rows
         expected_ids = {row["id"] for row in all_rows}
@@ -4823,9 +4725,7 @@ class TestImport2PCRestOperation(TestBase):
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
             collection_name, expected_ids, timeout=120
@@ -5137,17 +5037,13 @@ class TestImport2PCRestOperation(TestBase):
             file_name,
             options={"auto_commit": "false", "skip_disk_quota_check": "true"},
         )
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert self._query_count(collection_name) == 0
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -5211,9 +5107,7 @@ class TestImport2PCRestOperation(TestBase):
         assert describe_rsp["data"]["shardsNum"] == 3, describe_rsp
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -5227,9 +5121,7 @@ class TestImport2PCRestOperation(TestBase):
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -5277,9 +5169,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_parquet_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -5299,9 +5189,7 @@ class TestImport2PCRestOperation(TestBase):
         commit_start = time.time()
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -5365,9 +5253,7 @@ class TestImport2PCRestOperation(TestBase):
             batch_rows = self._make_rows(9170000 + batch * batch_size, batch_size, phase=9170 + batch, dim=dim)
             baseline_rows.extend(batch_rows)
             self._insert_rows(collection_name, batch_rows)
-            baseline_count, baseline_count_ok = self._wait_count(
-                collection_name, len(baseline_rows), timeout=60
-            )
+            baseline_count, baseline_count_ok = self._wait_count(collection_name, len(baseline_rows), timeout=60)
             assert baseline_count_ok, {"expected_count": len(baseline_rows), "last_count": baseline_count}
             flush_rsp, flush_ok = self._flush_collection_with_retry(collection_name)
             assert flush_ok, flush_rsp
@@ -5378,9 +5264,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_parquet_and_upload(import_rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(import_rows), rsp
         assert rsp["data"]["totalRows"] == len(import_rows), rsp
@@ -5397,9 +5281,7 @@ class TestImport2PCRestOperation(TestBase):
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         sample_all_ids = sample_baseline_ids | sample_imported_ids
@@ -5447,12 +5329,8 @@ class TestImport2PCRestOperation(TestBase):
             "last_count": count_after_compaction,
         }
 
-        imported_search_ids = self._search_imported_ids(
-            collection_name, import_rows[0]["vector"], limit=20
-        )
-        baseline_search_ids = self._search_imported_ids(
-            collection_name, baseline_rows[0]["vector"], limit=20
-        )
+        imported_search_ids = self._search_imported_ids(collection_name, import_rows[0]["vector"], limit=20)
+        baseline_search_ids = self._search_imported_ids(collection_name, baseline_rows[0]["vector"], limit=20)
         assert imported_search_ids & imported_ids, {
             "expected_any_imported_sample": sorted(sample_imported_ids),
             "search_ids": imported_search_ids,
@@ -5483,9 +5361,7 @@ class TestImport2PCRestOperation(TestBase):
             batch_rows = self._make_rows(9280000 + batch * batch_size, batch_size, phase=9280 + batch)
             baseline_rows.extend(batch_rows)
             self._insert_rows(collection_name, batch_rows)
-            baseline_count, baseline_count_ok = self._wait_count(
-                collection_name, len(baseline_rows), timeout=60
-            )
+            baseline_count, baseline_count_ok = self._wait_count(collection_name, len(baseline_rows), timeout=60)
             assert baseline_count_ok, {"expected_count": len(baseline_rows), "last_count": baseline_count}
             flush_rsp, flush_ok = self._flush_collection_with_retry(collection_name)
             assert flush_ok, flush_rsp
@@ -5496,9 +5372,7 @@ class TestImport2PCRestOperation(TestBase):
 
         try:
             job_id = self._create_manual_import_job(collection_name, file_name)
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
             assert rsp["data"]["importedRows"] == len(import_rows), rsp
             assert rsp["data"]["totalRows"] == len(import_rows), rsp
@@ -5541,9 +5415,7 @@ class TestImport2PCRestOperation(TestBase):
 
             commit_rsp = self.import_job_client.commit_import_job(job_id)
             assert commit_rsp["code"] == 0, commit_rsp
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
 
             all_sample_ids = baseline_sample_ids | import_sample_ids
@@ -5560,9 +5432,7 @@ class TestImport2PCRestOperation(TestBase):
                 "last_count": final_count,
             }
 
-            imported_search_ids = self._search_imported_ids(
-                collection_name, import_rows[0]["vector"], limit=20
-            )
+            imported_search_ids = self._search_imported_ids(collection_name, import_rows[0]["vector"], limit=20)
             assert imported_search_ids & import_sample_ids, {
                 "expected_any_import_ids": import_sample_ids,
                 "search_ids": imported_search_ids,
@@ -5610,9 +5480,7 @@ class TestImport2PCRestOperation(TestBase):
 
             abort_rsp = self.import_job_client.abort_import_job(aborted_job_id)
             assert abort_rsp["code"] == 0, abort_rsp
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                aborted_job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(aborted_job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
 
             seen_after_abort, absent_after_abort = self._wait_imported_ids_absent(
@@ -5731,9 +5599,7 @@ class TestImport2PCRestOperation(TestBase):
 
                 commit_rsp = self.import_job_client.commit_import_job(job_id)
                 assert commit_rsp["code"] == 0, {"metric_type": metric_type, "response": commit_rsp}
-                rsp, ok = self.import_job_client.wait_import_job_state(
-                    job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-                )
+                rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
                 assert ok, {"metric_type": metric_type, "response": rsp}
 
                 seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -5814,9 +5680,7 @@ class TestImport2PCRestOperation(TestBase):
 
                 commit_rsp = self.import_job_client.commit_import_job(job_id)
                 assert commit_rsp["code"] == 0, {"index_type": index_type, "response": commit_rsp}
-                rsp, ok = self.import_job_client.wait_import_job_state(
-                    job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-                )
+                rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
                 assert ok, {"index_type": index_type, "response": rsp}
 
                 seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -5870,9 +5734,7 @@ class TestImport2PCRestOperation(TestBase):
 
         try:
             job_id = self._create_manual_import_job(collection_name, file_name)
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
             assert rsp["data"]["importedRows"] == len(rows), rsp
             assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -5886,9 +5748,7 @@ class TestImport2PCRestOperation(TestBase):
 
             commit_rsp = self.import_job_client.commit_import_job(job_id)
             assert commit_rsp["code"] == 0, commit_rsp
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
 
             seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -5964,9 +5824,7 @@ class TestImport2PCRestOperation(TestBase):
 
                 commit_rsp = self.import_job_client.commit_import_job(job_id)
                 assert commit_rsp["code"] == 0, {"index_type": index_type, "response": commit_rsp}
-                rsp, ok = self.import_job_client.wait_import_job_state(
-                    job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-                )
+                rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
                 assert ok, {"index_type": index_type, "response": rsp}
 
                 seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -6046,9 +5904,7 @@ class TestImport2PCRestOperation(TestBase):
 
                 commit_rsp = self.import_job_client.commit_import_job(job_id)
                 assert commit_rsp["code"] == 0, {"index_type": index_type, "response": commit_rsp}
-                rsp, ok = self.import_job_client.wait_import_job_state(
-                    job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-                )
+                rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
                 assert ok, {"index_type": index_type, "response": rsp}
 
                 seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -6075,9 +5931,7 @@ class TestImport2PCRestOperation(TestBase):
                     "last_count": final_count,
                 }
 
-                search_ids = self._search_binary_imported_ids(
-                    collection_name, rows[0]["binary_vector"], limit=10
-                )
+                search_ids = self._search_binary_imported_ids(collection_name, rows[0]["binary_vector"], limit=10)
                 assert search_ids & expected_ids, {
                     "index_type": index_type,
                     "expected_any": expected_ids,
@@ -6130,9 +5984,7 @@ class TestImport2PCRestOperation(TestBase):
 
                 commit_rsp = self.import_job_client.commit_import_job(job_id)
                 assert commit_rsp["code"] == 0, {"index_type": index_type, "response": commit_rsp}
-                rsp, ok = self.import_job_client.wait_import_job_state(
-                    job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-                )
+                rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
                 assert ok, {"index_type": index_type, "response": rsp}
 
                 seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -6159,9 +6011,7 @@ class TestImport2PCRestOperation(TestBase):
                     "last_count": final_count,
                 }
 
-                search_ids = self._search_sparse_imported_ids(
-                    collection_name, rows[0]["sparse_vector"], limit=10
-                )
+                search_ids = self._search_sparse_imported_ids(collection_name, rows[0]["sparse_vector"], limit=10)
                 assert search_ids & expected_ids, {
                     "index_type": index_type,
                     "expected_any": expected_ids,
@@ -6188,9 +6038,7 @@ class TestImport2PCRestOperation(TestBase):
 
         try:
             job_id = self._create_manual_import_job(collection_name, file_name)
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
             assert rsp["data"]["importedRows"] == len(rows), rsp
             assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -6203,9 +6051,7 @@ class TestImport2PCRestOperation(TestBase):
 
             commit_rsp = self.import_job_client.commit_import_job(job_id)
             assert commit_rsp["code"] == 0, commit_rsp
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
 
             seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -6246,9 +6092,7 @@ class TestImport2PCRestOperation(TestBase):
 
         try:
             job_id = self._create_manual_import_job(collection_name, file_name)
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
             assert rsp["data"]["importedRows"] == len(rows), rsp
             assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -6261,9 +6105,7 @@ class TestImport2PCRestOperation(TestBase):
 
             commit_rsp = self.import_job_client.commit_import_job(job_id)
             assert commit_rsp["code"] == 0, commit_rsp
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
 
             seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -6375,9 +6217,7 @@ class TestImport2PCRestOperation(TestBase):
 
         try:
             job_id = self._create_manual_import_job(collection_name, file_name)
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
             assert rsp["data"]["importedRows"] == len(rows), rsp
             assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -6390,9 +6230,7 @@ class TestImport2PCRestOperation(TestBase):
 
             commit_rsp = self.import_job_client.commit_import_job(job_id)
             assert commit_rsp["code"] == 0, commit_rsp
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
 
             seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -6406,8 +6244,16 @@ class TestImport2PCRestOperation(TestBase):
             filter_cases = [
                 ("phase == 3", {row["id"] for row in rows if row["phase"] == 3}, "INVERTED"),
                 ("flag == true", {row["id"] for row in rows if row["flag"]}, "BITMAP"),
-                ("score > 20.0 and score < 24.0", {row["id"] for row in rows if 20.0 < row["score"] < 24.0}, "STL_SORT"),
-                ('tag like "scalar_tag_1_%"', {row["id"] for row in rows if row["tag"].startswith("scalar_tag_1_")}, "TRIE"),
+                (
+                    "score > 20.0 and score < 24.0",
+                    {row["id"] for row in rows if 20.0 < row["score"] < 24.0},
+                    "STL_SORT",
+                ),
+                (
+                    'tag like "scalar_tag_1_%"',
+                    {row["id"] for row in rows if row["tag"].startswith("scalar_tag_1_")},
+                    "TRIE",
+                ),
             ]
             for filter_expr, expected_filter_ids, index_type in filter_cases:
                 actual_rows = self._query_scalar_index_rows(collection_name, filter_expr, limit=len(rows))
@@ -6444,9 +6290,7 @@ class TestImport2PCRestOperation(TestBase):
 
         try:
             job_id = self._create_manual_import_job(collection_name, file_name)
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
             assert rsp["data"]["importedRows"] == len(rows), rsp
             assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -6459,9 +6303,7 @@ class TestImport2PCRestOperation(TestBase):
 
             commit_rsp = self.import_job_client.commit_import_job(job_id)
             assert commit_rsp["code"] == 0, commit_rsp
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
 
             seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -6515,9 +6357,7 @@ class TestImport2PCRestOperation(TestBase):
 
         try:
             job_id = self._create_manual_import_job(collection_name, file_name)
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
             assert rsp["data"]["importedRows"] == len(rows), rsp
             assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -6530,9 +6370,7 @@ class TestImport2PCRestOperation(TestBase):
 
             commit_rsp = self.import_job_client.commit_import_job(job_id)
             assert commit_rsp["code"] == 0, commit_rsp
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
 
             seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -6554,9 +6392,7 @@ class TestImport2PCRestOperation(TestBase):
                 "last_count": final_count,
             }
 
-            search_ids = self._search_int8_vector_imported_ids(
-                collection_name, rows[0]["int8_vector"], limit=10
-            )
+            search_ids = self._search_int8_vector_imported_ids(collection_name, rows[0]["int8_vector"], limit=10)
             assert search_ids & expected_ids, {
                 "expected_any": expected_ids,
                 "search_ids": search_ids,
@@ -6581,9 +6417,7 @@ class TestImport2PCRestOperation(TestBase):
 
         try:
             job_id = self._create_manual_import_job(collection_name, file_name)
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
             assert rsp["data"]["importedRows"] == len(rows), rsp
             assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -6596,9 +6430,7 @@ class TestImport2PCRestOperation(TestBase):
 
             commit_rsp = self.import_job_client.commit_import_job(job_id)
             assert commit_rsp["code"] == 0, commit_rsp
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
 
             seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -6618,9 +6450,7 @@ class TestImport2PCRestOperation(TestBase):
                 assert len(actual_struct) == len(expected_struct), actual
                 for actual_elem, expected_elem in zip(actual_struct, expected_struct):
                     assert int(actual_elem["sub_int"]) == expected_elem["sub_int"], actual_elem
-                    np.testing.assert_allclose(
-                        actual_elem["sub_vec"], expected_elem["sub_vec"], rtol=1e-5, atol=1e-5
-                    )
+                    np.testing.assert_allclose(actual_elem["sub_vec"], expected_elem["sub_vec"], rtol=1e-5, atol=1e-5)
 
             final_count, final_count_ok = self._wait_count(collection_name, len(rows), timeout=60)
             assert final_count_ok, {
@@ -6655,9 +6485,7 @@ class TestImport2PCRestOperation(TestBase):
 
         try:
             job_id = self._create_manual_import_job(collection_name, file_name)
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
             assert rsp["data"]["importedRows"] == len(rows), rsp
             assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -6670,9 +6498,7 @@ class TestImport2PCRestOperation(TestBase):
 
             commit_rsp = self.import_job_client.commit_import_job(job_id)
             assert commit_rsp["code"] == 0, commit_rsp
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
 
             seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -6727,9 +6553,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_scalar_parquet_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -6742,9 +6566,7 @@ class TestImport2PCRestOperation(TestBase):
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -6791,9 +6613,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_json_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -6807,15 +6627,11 @@ class TestImport2PCRestOperation(TestBase):
         json_filter_ids_before_commit = self._query_ids_by_filter(
             collection_name, "json_contains(json['key'] , 1)", limit=len(rows)
         )
-        assert json_filter_ids_before_commit == set(), {
-            "unexpected_visible_ids": json_filter_ids_before_commit
-        }
+        assert json_filter_ids_before_commit == set(), {"unexpected_visible_ids": json_filter_ids_before_commit}
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -6834,9 +6650,7 @@ class TestImport2PCRestOperation(TestBase):
                 actual_json = json.loads(actual_json)
             assert actual_json == expected["json"], actual
 
-        json_filter_ids = self._query_ids_by_filter(
-            collection_name, "json_contains(json['key'] , 1)", limit=len(rows)
-        )
+        json_filter_ids = self._query_ids_by_filter(collection_name, "json_contains(json['key'] , 1)", limit=len(rows))
         assert json_filter_ids == {rows[1]["id"]}, {
             "expected": {rows[1]["id"]},
             "seen": json_filter_ids,
@@ -6867,9 +6681,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_json_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -6883,15 +6695,11 @@ class TestImport2PCRestOperation(TestBase):
         array_filter_ids_before_commit = self._query_ids_by_filter(
             collection_name, "array_contains(int_array, 3)", limit=len(rows)
         )
-        assert array_filter_ids_before_commit == set(), {
-            "unexpected_visible_ids": array_filter_ids_before_commit
-        }
+        assert array_filter_ids_before_commit == set(), {"unexpected_visible_ids": array_filter_ids_before_commit}
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -6908,9 +6716,7 @@ class TestImport2PCRestOperation(TestBase):
             assert self._normalize_array_value(actual["varchar_array"]) == expected["varchar_array"], actual
             assert self._normalize_array_value(actual["bool_array"]) == expected["bool_array"], actual
 
-        array_filter_ids = self._query_ids_by_filter(
-            collection_name, "array_contains(int_array, 3)", limit=len(rows)
-        )
+        array_filter_ids = self._query_ids_by_filter(collection_name, "array_contains(int_array, 3)", limit=len(rows))
         assert array_filter_ids == {rows[3]["id"]}, {
             "expected": {rows[3]["id"]},
             "seen": array_filter_ids,
@@ -6941,9 +6747,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_json_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -6957,15 +6761,11 @@ class TestImport2PCRestOperation(TestBase):
         dynamic_filter_ids_before_commit = self._query_ids_by_filter(
             collection_name, "extra_int == 1003", limit=len(rows)
         )
-        assert dynamic_filter_ids_before_commit == set(), {
-            "unexpected_visible_ids": dynamic_filter_ids_before_commit
-        }
+        assert dynamic_filter_ids_before_commit == set(), {"unexpected_visible_ids": dynamic_filter_ids_before_commit}
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -6982,9 +6782,7 @@ class TestImport2PCRestOperation(TestBase):
             assert actual["extra_int"] == expected["extra_int"], actual
             assert actual["extra_bool"] == expected["extra_bool"], actual
 
-        dynamic_filter_ids = self._query_ids_by_filter(
-            collection_name, "extra_int == 1003", limit=len(rows)
-        )
+        dynamic_filter_ids = self._query_ids_by_filter(collection_name, "extra_int == 1003", limit=len(rows))
         assert dynamic_filter_ids == {rows[3]["id"]}, {
             "expected": {rows[3]["id"]},
             "seen": dynamic_filter_ids,
@@ -7015,9 +6813,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_nullable_parquet_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -7030,9 +6826,7 @@ class TestImport2PCRestOperation(TestBase):
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -7090,9 +6884,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_default_missing_parquet_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -7105,9 +6897,7 @@ class TestImport2PCRestOperation(TestBase):
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -7150,29 +6940,21 @@ class TestImport2PCRestOperation(TestBase):
         self._write_auto_id_parquet_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
 
         expected_tags = {row["tag"] for row in rows}
-        seen_before_commit, absent_before_commit = self._wait_tags_absent(
-            collection_name, expected_tags, duration=12
-        )
+        seen_before_commit, absent_before_commit = self._wait_tags_absent(collection_name, expected_tags, duration=12)
         assert absent_before_commit, {"unexpected_visible_rows": seen_before_commit}
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
-        tag_rows, visible_after_commit = self._wait_tags_visible(
-            collection_name, expected_tags, timeout=120
-        )
+        tag_rows, visible_after_commit = self._wait_tags_visible(collection_name, expected_tags, timeout=120)
         assert visible_after_commit, {"expected_tags": expected_tags, "seen_rows": tag_rows}
         assert len(tag_rows) == len(rows), tag_rows
         assert {row["tag"] for row in tag_rows} == expected_tags, tag_rows
@@ -7204,13 +6986,9 @@ class TestImport2PCRestOperation(TestBase):
 
         target_partition = "p_import_2pc"
         empty_partition = "p_import_2pc_empty"
-        rsp = self.partition_client.partition_create(
-            collection_name=collection_name, partition_name=target_partition
-        )
+        rsp = self.partition_client.partition_create(collection_name=collection_name, partition_name=target_partition)
         assert rsp["code"] == 0, rsp
-        rsp = self.partition_client.partition_create(
-            collection_name=collection_name, partition_name=empty_partition
-        )
+        rsp = self.partition_client.partition_create(collection_name=collection_name, partition_name=empty_partition)
         assert rsp["code"] == 0, rsp
 
         rows = self._make_rows(90400, 6, phase=904)
@@ -7218,9 +6996,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_parquet_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name, partition_name=target_partition)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -7233,14 +7009,10 @@ class TestImport2PCRestOperation(TestBase):
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
-        seen_all_ids, all_visible = self._wait_imported_ids_visible(
-            collection_name, expected_ids, timeout=120
-        )
+        seen_all_ids, all_visible = self._wait_imported_ids_visible(collection_name, expected_ids, timeout=120)
         assert all_visible, {"expected": expected_ids, "seen": seen_all_ids}
 
         seen_target_ids = self._query_imported_ids(
@@ -7298,9 +7070,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_parquet_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -7313,9 +7083,7 @@ class TestImport2PCRestOperation(TestBase):
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -7467,9 +7235,7 @@ class TestImport2PCRestOperation(TestBase):
 
         try:
             job_id = self._create_manual_import_job(collection_name, file_name)
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
             assert rsp["data"]["importedRows"] == len(rows), rsp
             assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -7483,9 +7249,7 @@ class TestImport2PCRestOperation(TestBase):
 
             commit_rsp = self.import_job_client.commit_import_job(job_id)
             assert commit_rsp["code"] == 0, commit_rsp
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
 
             seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -7553,9 +7317,7 @@ class TestImport2PCRestOperation(TestBase):
 
         try:
             job_id = self._create_manual_import_job(collection_name, file_name)
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
             assert rsp["data"]["importedRows"] == len(rows), rsp
             assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -7568,9 +7330,7 @@ class TestImport2PCRestOperation(TestBase):
 
             commit_rsp = self.import_job_client.commit_import_job(job_id)
             assert commit_rsp["code"] == 0, commit_rsp
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
 
             seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -7642,9 +7402,9 @@ class TestImport2PCRestOperation(TestBase):
             create_rsp = self.import_job_client.create_import_jobs(payload)
             if create_rsp["code"] != 0:
                 reason_text = str(create_rsp.get("message", create_rsp.get("reason", create_rsp))).lower()
-                assert any(
-                    keyword in reason_text for keyword in ("dimension", "dim", "vector", "schema", "field")
-                ), create_rsp
+                assert any(keyword in reason_text for keyword in ("dimension", "dim", "vector", "schema", "field")), (
+                    create_rsp
+                )
                 assert "jobId" not in str(create_rsp), create_rsp
                 count, count_ok = self._wait_count(collection_name, 0, timeout=20)
                 assert count_ok, {"expected_count": 0, "last_count": count, "create_rsp": create_rsp}
@@ -8205,18 +7965,14 @@ class TestImport2PCRestOperation(TestBase):
 
         self._insert_rows(collection_name, before_rows)
         before_ids = {row["id"] for row in before_rows}
-        seen_before_ids, before_visible = self._wait_imported_ids_visible(
-            collection_name, before_ids, timeout=60
-        )
+        seen_before_ids, before_visible = self._wait_imported_ids_visible(collection_name, before_ids, timeout=60)
         assert before_visible, {"expected": before_ids, "seen": seen_before_ids}
 
         file_name = f"import_2pc_mix_insert_{uuid4()}.parquet"
         self._write_parquet_and_upload(import_rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(import_rows), rsp
         assert rsp["data"]["totalRows"] == len(import_rows), rsp
@@ -8239,9 +7995,7 @@ class TestImport2PCRestOperation(TestBase):
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
 
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         committed_ids = dml_ids | import_ids
@@ -8301,23 +8055,17 @@ class TestImport2PCRestOperation(TestBase):
         self._write_parquet_and_upload(import_rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(import_rows), rsp
         assert rsp["data"]["totalRows"] == len(import_rows), rsp
 
         import_ids = {row["id"] for row in import_rows}
-        seen_before_upsert, import_absent = self._wait_imported_ids_absent(
-            collection_name, import_ids, duration=12
-        )
+        seen_before_upsert, import_absent = self._wait_imported_ids_absent(collection_name, import_ids, duration=12)
         assert import_absent, {"unexpected_visible_import_ids": seen_before_upsert}
 
         self._upsert_rows(collection_name, pre_commit_upsert_rows)
-        pre_commit_expected = {
-            row["id"]: {"tag": row["tag"], "phase": row["phase"]} for row in pre_commit_upsert_rows
-        }
+        pre_commit_expected = {row["id"]: {"tag": row["tag"], "phase": row["phase"]} for row in pre_commit_upsert_rows}
         pre_upsert_rows, pre_upsert_visible = self._wait_base_rows_by_ids_match(
             collection_name, pre_commit_expected, timeout=60
         )
@@ -8325,9 +8073,7 @@ class TestImport2PCRestOperation(TestBase):
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         import_expected = {row["id"]: {"tag": row["tag"], "phase": row["phase"]} for row in import_rows}
@@ -8365,18 +8111,14 @@ class TestImport2PCRestOperation(TestBase):
         self._insert_rows(collection_name, baseline_rows)
 
         baseline_ids = {row["id"] for row in baseline_rows}
-        seen_baseline_ids, baseline_visible = self._wait_imported_ids_visible(
-            collection_name, baseline_ids, timeout=60
-        )
+        seen_baseline_ids, baseline_visible = self._wait_imported_ids_visible(collection_name, baseline_ids, timeout=60)
         assert baseline_visible, {"expected": baseline_ids, "seen": seen_baseline_ids}
 
         file_name = f"import_2pc_flush_{uuid4()}.parquet"
         self._write_parquet_and_upload(import_rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(import_rows), rsp
         assert rsp["data"]["totalRows"] == len(import_rows), rsp
@@ -8390,9 +8132,7 @@ class TestImport2PCRestOperation(TestBase):
         flush_rsp = self.collection_client.flush(collection_name)
         assert flush_rsp["code"] == 0, flush_rsp
 
-        seen_after_flush, absent_after_flush = self._wait_imported_ids_absent(
-            collection_name, import_ids, duration=12
-        )
+        seen_after_flush, absent_after_flush = self._wait_imported_ids_absent(collection_name, import_ids, duration=12)
         assert absent_after_flush, {"unexpected_visible_import_ids": seen_after_flush}
 
         seen_baseline_after_flush = self._query_imported_ids(collection_name, sorted(baseline_ids))
@@ -8403,15 +8143,11 @@ class TestImport2PCRestOperation(TestBase):
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         all_ids = baseline_ids | import_ids
-        seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
-            collection_name, all_ids, timeout=120
-        )
+        seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(collection_name, all_ids, timeout=120)
         assert visible_after_commit, {"expected": all_ids, "seen": seen_after_commit}
 
         final_count, final_count_ok = self._wait_count(collection_name, len(all_ids), timeout=60)
@@ -8436,9 +8172,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_parquet_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -8459,9 +8193,7 @@ class TestImport2PCRestOperation(TestBase):
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
 
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -8488,17 +8220,13 @@ class TestImport2PCRestOperation(TestBase):
         self._write_parquet_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
 
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         imported_ids = {row["id"] for row in rows}
@@ -8546,9 +8274,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_parquet_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -8572,9 +8298,7 @@ class TestImport2PCRestOperation(TestBase):
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         seen_after_commit, visible_after_commit = self._wait_imported_ids_visible(
@@ -8623,9 +8347,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_auto_id_parquet_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -8635,23 +8357,17 @@ class TestImport2PCRestOperation(TestBase):
         post_commit_delete_tags = {row["tag"] for row in rows[3:6]}
         never_delete_tags = all_tags - pre_commit_delete_tags - post_commit_delete_tags
 
-        seen_before_delete, absent_before_delete = self._wait_tags_absent(
-            collection_name, all_tags, duration=12
-        )
+        seen_before_delete, absent_before_delete = self._wait_tags_absent(collection_name, all_tags, duration=12)
         assert absent_before_delete, {"unexpected_visible_rows": seen_before_delete}
 
         self._delete_tags(collection_name, pre_commit_delete_tags)
 
-        seen_after_pre_delete, absent_after_pre_delete = self._wait_tags_absent(
-            collection_name, all_tags, duration=12
-        )
+        seen_after_pre_delete, absent_after_pre_delete = self._wait_tags_absent(collection_name, all_tags, duration=12)
         assert absent_after_pre_delete, {"unexpected_visible_rows": seen_after_pre_delete}
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         tag_rows, visible_after_commit = self._wait_tags_visible(collection_name, all_tags, timeout=120)
@@ -8670,9 +8386,7 @@ class TestImport2PCRestOperation(TestBase):
         assert post_deleted_absent, {"unexpected_visible_deleted_rows": seen_post_deleted}
 
         expected_visible_tags = pre_commit_delete_tags | never_delete_tags
-        expected_rows, expected_visible = self._wait_tags_visible(
-            collection_name, expected_visible_tags, timeout=60
-        )
+        expected_rows, expected_visible = self._wait_tags_visible(collection_name, expected_visible_tags, timeout=60)
         assert expected_visible, {"expected_tags": expected_visible_tags, "seen_rows": expected_rows}
 
         final_rows = self._query_rows_by_tags(collection_name, all_tags)
@@ -8709,9 +8423,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_parquet_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -8725,9 +8437,7 @@ class TestImport2PCRestOperation(TestBase):
         abort_rsp = self.import_job_client.abort_import_job(job_id)
         assert abort_rsp["code"] == 0, abort_rsp
 
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         seen_after_abort, absent_after_abort = self._wait_imported_ids_absent(
@@ -8760,9 +8470,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_parquet_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -8776,9 +8484,7 @@ class TestImport2PCRestOperation(TestBase):
         abort_rsp = self.import_job_client.abort_import_job(job_id)
         assert abort_rsp["code"] == 0, abort_rsp
 
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         retry_abort_rsp = self.import_job_client.abort_import_job(job_id)
@@ -8813,9 +8519,7 @@ class TestImport2PCRestOperation(TestBase):
             missing_file,
             options={"auto_commit": "false"},
         )
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            failed_job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(failed_job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         failed_commit_rsp = self.import_job_client.commit_import_job(failed_job_id)
@@ -8846,9 +8550,7 @@ class TestImport2PCRestOperation(TestBase):
             missing_file,
             options={"auto_commit": "false"},
         )
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["jobId"] == job_id, rsp
         assert rsp["data"]["state"] == "Failed", rsp
@@ -8886,9 +8588,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_parquet_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -8936,9 +8636,7 @@ class TestImport2PCRestOperation(TestBase):
         self._write_parquet_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
         assert rsp["data"]["importedRows"] == len(rows), rsp
         assert rsp["data"]["totalRows"] == len(rows), rsp
@@ -8953,9 +8651,7 @@ class TestImport2PCRestOperation(TestBase):
         duplicate_commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert duplicate_commit_rsp["code"] == 0, duplicate_commit_rsp
 
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         seen_ids, visible = self._wait_imported_ids_visible(collection_name, expected_ids, timeout=120)
@@ -8992,17 +8688,13 @@ class TestImport2PCRestOperation(TestBase):
         self._write_parquet_and_upload(rows, file_name)
 
         job_id = self._create_manual_import_job(collection_name, file_name)
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         commit_rsp = self.import_job_client.commit_import_job(job_id)
         assert commit_rsp["code"] == 0, commit_rsp
 
-        rsp, ok = self.import_job_client.wait_import_job_state(
-            job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-        )
+        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
         expected_ids = {row["id"] for row in rows}
@@ -9092,9 +8784,7 @@ class TestImport2PCRestOperation(TestBase):
             )
             assert loaded, rsp
 
-            file_path = self._write_parquet_and_upload_to_both_clusters(
-                rows, file_name, secondary_storage_client
-            )
+            file_path = self._write_parquet_and_upload_to_both_clusters(rows, file_name, secondary_storage_client)
 
             job_id = self._create_manual_import_job(collection_name, file_name)
 
@@ -9110,9 +8800,7 @@ class TestImport2PCRestOperation(TestBase):
             assert secondary_uncommitted, secondary_rsp
             assert secondary_rsp["data"]["importedRows"] == len(rows), secondary_rsp
 
-            primary_seen, primary_absent = self._wait_imported_ids_absent(
-                collection_name, expected_ids, duration=12
-            )
+            primary_seen, primary_absent = self._wait_imported_ids_absent(collection_name, expected_ids, duration=12)
             assert primary_absent, {"unexpected_primary_ids": primary_seen}
 
             secondary_seen, secondary_absent = self._wait_imported_ids_absent_with_clients(
@@ -9227,9 +8915,7 @@ class TestImport2PCRestOperation(TestBase):
             )
             assert loaded, rsp
 
-            file_path = self._write_parquet_and_upload_to_both_clusters(
-                rows, file_name, secondary_storage_client
-            )
+            file_path = self._write_parquet_and_upload_to_both_clusters(rows, file_name, secondary_storage_client)
             job_id = self._create_manual_import_job(collection_name, file_name)
 
             primary_rsp, primary_uncommitted = self.import_job_client.wait_import_job_state(
@@ -9243,9 +8929,7 @@ class TestImport2PCRestOperation(TestBase):
 
             self._delete_ids(collection_name, pre_commit_delete_ids)
 
-            primary_seen, primary_absent = self._wait_imported_ids_absent(
-                collection_name, all_import_ids, duration=12
-            )
+            primary_seen, primary_absent = self._wait_imported_ids_absent(collection_name, all_import_ids, duration=12)
             assert primary_absent, {"unexpected_primary_ids": primary_seen}
             secondary_seen, secondary_absent = self._wait_imported_ids_absent_with_clients(
                 secondary_collection_client,
@@ -9378,9 +9062,7 @@ class TestImport2PCRestOperation(TestBase):
             )
             assert loaded, rsp
 
-            file_path = self._write_parquet_and_upload_to_both_clusters(
-                rows, file_name, secondary["storage"]
-            )
+            file_path = self._write_parquet_and_upload_to_both_clusters(rows, file_name, secondary["storage"])
             job_id = self._create_manual_import_job(collection_name, file_name)
 
             primary_rsp, primary_uncommitted = self.import_job_client.wait_import_job_state(
@@ -9392,9 +9074,7 @@ class TestImport2PCRestOperation(TestBase):
             )
             assert secondary_uncommitted, secondary_rsp
 
-            primary_seen, primary_absent = self._wait_imported_ids_absent(
-                collection_name, expected_ids, duration=12
-            )
+            primary_seen, primary_absent = self._wait_imported_ids_absent(collection_name, expected_ids, duration=12)
             assert primary_absent, {"unexpected_primary_ids": primary_seen}
             secondary_seen, secondary_absent = self._wait_imported_ids_absent_with_clients(
                 secondary["collection"],
@@ -9417,9 +9097,7 @@ class TestImport2PCRestOperation(TestBase):
             )
             assert secondary_failed, secondary_rsp
 
-            primary_seen, primary_absent = self._wait_imported_ids_absent(
-                collection_name, expected_ids, duration=18
-            )
+            primary_seen, primary_absent = self._wait_imported_ids_absent(collection_name, expected_ids, duration=18)
             assert primary_absent, {"unexpected_primary_ids": primary_seen}
             secondary_seen, secondary_absent = self._wait_imported_ids_absent_with_clients(
                 secondary["collection"],
@@ -9516,9 +9194,7 @@ class TestImport2PCRestOperation(TestBase):
             )
             assert secondary_baseline_visible, {"expected": baseline_ids, "seen": secondary_seen}
 
-            file_path = self._write_parquet_and_upload_to_both_clusters(
-                import_rows, file_name, secondary["storage"]
-            )
+            file_path = self._write_parquet_and_upload_to_both_clusters(import_rows, file_name, secondary["storage"])
             job_id = self._create_manual_import_job(collection_name, file_name)
 
             primary_rsp, primary_uncommitted = self.import_job_client.wait_import_job_state(
@@ -9650,9 +9326,7 @@ class TestImport2PCRestOperation(TestBase):
             )
             assert loaded, rsp
 
-            file_path = self._write_parquet_and_upload_to_both_clusters(
-                rows, file_name, secondary["storage"]
-            )
+            file_path = self._write_parquet_and_upload_to_both_clusters(rows, file_name, secondary["storage"])
             job_id = self._create_manual_import_job(collection_name, file_name)
 
             primary_rsp, primary_uncommitted = self.import_job_client.wait_import_job_state(
@@ -9681,9 +9355,7 @@ class TestImport2PCRestOperation(TestBase):
             completed_commit_rsp = self.import_job_client.commit_import_job(job_id)
             assert completed_commit_rsp["code"] == 0, completed_commit_rsp
 
-            primary_seen, primary_visible = self._wait_imported_ids_visible(
-                collection_name, expected_ids, timeout=180
-            )
+            primary_seen, primary_visible = self._wait_imported_ids_visible(collection_name, expected_ids, timeout=180)
             assert primary_visible, {"expected": expected_ids, "seen": primary_seen}
             secondary_seen, secondary_visible = self._wait_imported_ids_visible_with_clients(
                 secondary["collection"],
@@ -9695,9 +9367,7 @@ class TestImport2PCRestOperation(TestBase):
             assert secondary_visible, {"expected": expected_ids, "seen": secondary_seen}
             assert primary_seen == secondary_seen == expected_ids
 
-            primary_count, primary_count_ok = self._wait_count(
-                collection_name, len(expected_ids), timeout=120
-            )
+            primary_count, primary_count_ok = self._wait_count(collection_name, len(expected_ids), timeout=120)
             assert primary_count_ok, {"expected_count": len(expected_ids), "last_count": primary_count}
             secondary_count, secondary_count_ok = self._wait_count_with_clients(
                 secondary["collection"],
@@ -9766,9 +9436,7 @@ class TestImport2PCRestOperation(TestBase):
             file_path = self._write_parquet_and_upload(rows, file_name)
             job_id = self._create_manual_import_job(collection_name, file_name)
 
-            rsp, ok = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ok, rsp
             assert rsp["data"]["importedRows"] == len(rows), rsp
 
