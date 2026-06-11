@@ -13,6 +13,30 @@ import (
 	scheduler "github.com/milvus-io/milvus/pkg/v3/syncutil/preconditioned"
 )
 
+type dataFrontierProvider struct {
+	views []moduleapi.DataFrontierView
+}
+
+func newDataFrontierProvider(views ...moduleapi.DataFrontierView) moduleapi.DataFrontierProvider {
+	filtered := make([]moduleapi.DataFrontierView, 0, len(views))
+	for _, view := range views {
+		if view != nil {
+			filtered = append(filtered, view)
+		}
+	}
+	return dataFrontierProvider{views: filtered}
+}
+
+func (p dataFrontierProvider) DataFrontier(scope moduleapi.Scope) walcheckpoint.Barrier {
+	barriers := make([]walcheckpoint.Barrier, 0, len(p.views))
+	for _, view := range p.views {
+		if barrier := view.DataFrontier(scope); barrier != nil {
+			barriers = append(barriers, barrier)
+		}
+	}
+	return walcheckpoint.NewCompositeBarrier(barriers...)
+}
+
 type moduleMode int
 
 const (
@@ -22,7 +46,7 @@ const (
 
 type broadcastAckModule struct {
 	channelName  string
-	frontierView moduleapi.DurableFrontierView
+	frontierView moduleapi.DataFrontierProvider
 	runtime      moduleapi.Runtime
 	acked        *atomic.Uint64
 	mode         moduleMode
@@ -31,7 +55,7 @@ type broadcastAckModule struct {
 
 func newBroadcastAckModule(
 	channelName string,
-	frontierView moduleapi.DurableFrontierView,
+	frontierView moduleapi.DataFrontierProvider,
 	runtime moduleapi.Runtime,
 ) *broadcastAckModule {
 	return &broadcastAckModule{
@@ -43,8 +67,8 @@ func newBroadcastAckModule(
 	}
 }
 
-func (m *broadcastAckModule) Name() string {
-	return "broadcast-ack"
+func (m *broadcastAckModule) Name() moduleapi.ModuleName {
+	return moduleapi.ModuleNameAck
 }
 
 func (m *broadcastAckModule) ObserveMessage(ctx context.Context, msg message.ImmutableMessage) moduleapi.ObserveResult {
@@ -68,12 +92,13 @@ func (m *broadcastAckModule) ObserveMessage(ctx context.Context, msg message.Imm
 	return moduleapi.ObserveResult{Data: barrier}
 }
 
-func (m *broadcastAckModule) SwitchIntoMetaAndData() moduleapi.Snapshot {
+func (m *broadcastAckModule) SwitchIntoMetaAndData() moduleapi.ModuleSnapshot {
 	m.mode = moduleModeMetaAndData
 	return nil
 }
 
-func (m *broadcastAckModule) RequirePersist() {
+func (m *broadcastAckModule) ConsumeDirtySnapshots() []moduleapi.DirtySnapshot {
+	return nil
 }
 
 func (m *broadcastAckModule) buildPrecondition(msg message.ImmutableMessage) scheduler.Precondition {
@@ -85,7 +110,7 @@ func (m *broadcastAckModule) buildPrecondition(msg message.ImmutableMessage) sch
 	case message.MessageTypeDropPartition:
 		drop := message.MustAsImmutableDropPartitionMessageV1(msg)
 		header := drop.Header()
-		return m.partitionDurablePrecondition(drop.TimeTick(), header.GetCollectionId(), header.GetPartitionId())
+		return m.partitionDurablePrecondition(drop.TimeTick(), drop.VChannel(), header.GetCollectionId(), header.GetPartitionId())
 	case message.MessageTypeManualFlush:
 		return m.vchannelDurablePrecondition(msg.TimeTick(), msg.VChannel())
 	case message.MessageTypeFlushAll:
@@ -102,21 +127,25 @@ func (m *broadcastAckModule) buildPrecondition(msg message.ImmutableMessage) sch
 	return scheduler.AlwaysReady{}
 }
 
-func (m *broadcastAckModule) partitionDurablePrecondition(timetick uint64, collectionID int64, partitionID int64) scheduler.Precondition {
-	return m.frontierPrecondition(timetick, func(view moduleapi.DurableFrontierView) walcheckpoint.Barrier {
-		return view.PartitionDurableFrontier(collectionID, partitionID)
+func (m *broadcastAckModule) partitionDurablePrecondition(timetick uint64, vchannel string, collectionID int64, partitionID int64) scheduler.Precondition {
+	return m.frontierPrecondition(timetick, moduleapi.Scope{
+		Type:         moduleapi.ScopePartition,
+		VChannel:     vchannel,
+		CollectionID: collectionID,
+		PartitionID:  partitionID,
 	})
 }
 
 func (m *broadcastAckModule) allDurablePrecondition(timetick uint64) scheduler.Precondition {
-	return m.frontierPrecondition(timetick, func(view moduleapi.DurableFrontierView) walcheckpoint.Barrier {
-		return view.AllDurableFrontier()
+	return m.frontierPrecondition(timetick, moduleapi.Scope{
+		Type: moduleapi.ScopeAll,
 	})
 }
 
 func (m *broadcastAckModule) vchannelDurablePrecondition(timetick uint64, vchannel string) scheduler.Precondition {
-	return m.frontierPrecondition(timetick, func(view moduleapi.DurableFrontierView) walcheckpoint.Barrier {
-		return view.VChannelDurableFrontier(vchannel)
+	return m.frontierPrecondition(timetick, moduleapi.Scope{
+		Type:     moduleapi.ScopeVChannel,
+		VChannel: vchannel,
 	})
 }
 
@@ -134,12 +163,12 @@ func (m *broadcastAckModule) markAcked(timetick uint64) {
 
 func (m *broadcastAckModule) frontierPrecondition(
 	timetick uint64,
-	frontier func(moduleapi.DurableFrontierView) walcheckpoint.Barrier,
+	scope moduleapi.Scope,
 ) scheduler.Precondition {
 	if m.frontierView == nil {
 		return scheduler.AlwaysReady{}
 	}
-	viewFrontier := frontier(m.frontierView)
+	viewFrontier := m.frontierView.DataFrontier(scope)
 	return scheduler.PreconditionFunc(func() bool {
 		return viewFrontier == nil || viewFrontier.TimeTick() >= timetick
 	})

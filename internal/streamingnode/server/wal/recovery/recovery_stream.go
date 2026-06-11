@@ -6,7 +6,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/growing"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -51,7 +51,7 @@ L:
 				// The recovery stream is reach the end, we can stop the recovery.
 				break L
 			}
-			r.ObserveMessage(ctx, msg)
+			r.observeMetaScannerMessage(ctx, msg)
 		}
 	}
 	if rs.Error() != nil {
@@ -82,10 +82,13 @@ func (r *recoveryStorageImpl) switchModulesIntoMetaAndData() *RecoverySnapshot {
 	}
 	for _, module := range r.modules {
 		moduleSnapshot := module.SwitchIntoMetaAndData()
-		switch s := moduleSnapshot.(type) {
-		case *growing.Snapshot:
-			snapshot.VChannels = s.VChannels
-			snapshot.SegmentAssignments = s.SegmentAssignments
+		for _, s := range moduleapi.FlattenModuleSnapshot(moduleSnapshot) {
+			switch typed := s.(type) {
+			case *moduleapi.VChannelModuleSnapshot:
+				snapshot.VChannels = typed.VChannels
+			case *moduleapi.SegmentModuleSnapshot:
+				snapshot.SegmentAssignments = typed.Segments
+			}
 		}
 	}
 	if r.alterWALInfo != nil {

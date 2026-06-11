@@ -88,6 +88,42 @@ func TestSnapshotChunksCopiesSliceOnly(t *testing.T) {
 	assert.Same(t, first, snapshot[0])
 }
 
+func TestConsumeDirtySnapshotKeepsStableInFlightView(t *testing.T) {
+	transformLog := New(Config{
+		VChannel: "v1",
+		Meta: &streamingpb.VChannelTransformLogMeta{
+			CheckpointTimeTick: 10,
+		},
+	}).(*transformLog)
+
+	transformLog.mu.Lock()
+	transformLog.meta.CheckpointTimeTick = 20
+	transformLog.dirty = true
+	transformLog.mu.Unlock()
+
+	first := transformLog.ConsumeDirtyAndGetSnapshot()
+	require.NotNil(t, first)
+	assert.Equal(t, uint64(20), first.GetCheckpointTimeTick())
+
+	transformLog.mu.Lock()
+	transformLog.meta.CheckpointTimeTick = 30
+	transformLog.dirty = true
+	transformLog.mu.Unlock()
+
+	inFlight := transformLog.ConsumeDirtyAndGetSnapshot()
+	require.NotNil(t, inFlight)
+	assert.Equal(t, uint64(20), inFlight.GetCheckpointTimeTick())
+
+	transformLog.MarkSnapshotPersisted(first)
+
+	next := transformLog.ConsumeDirtyAndGetSnapshot()
+	require.NotNil(t, next)
+	assert.Equal(t, uint64(30), next.GetCheckpointTimeTick())
+
+	transformLog.MarkSnapshotPersisted(next)
+	assert.Nil(t, transformLog.ConsumeDirtyAndGetSnapshot())
+}
+
 func testTransformLogEntry(timeTick uint64) *streamingpb.TransformLogEntry {
 	return &streamingpb.TransformLogEntry{TimeTick: timeTick}
 }

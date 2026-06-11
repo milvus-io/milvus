@@ -81,11 +81,11 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 	if err := r.ensureDataCheckpoint(); err != nil {
 		return err
 	}
-	if err := validateRecoveredGrowingMeta(vchannelMetas, segmentMetas); err != nil {
+	if err := validateRecoveredViewMeta(vchannelMetas, segmentMetas); err != nil {
 		return err
 	}
 	r.Logger().Info(context.TODO(), "recover segment info done", mlog.Int("segments", len(segmentMetas)))
-	return r.initGrowingManager(ctx, vchannelMetas, segmentMetas, transformLogMetas)
+	return r.initRecoveryModules(ctx, vchannelMetas, segmentMetas, transformLogMetas)
 }
 
 func vchannelMetaMap(vchannels []*streamingpb.VChannelMeta) (map[string]*streamingpb.VChannelMeta, error) {
@@ -126,11 +126,11 @@ func (r *recoveryStorageImpl) ensureDataCheckpoint() error {
 	return nil
 }
 
-func validateRecoveredGrowingMeta(
+func validateRecoveredViewMeta(
 	vchannels map[string]*streamingpb.VChannelMeta,
 	segments map[int64]*streamingpb.SegmentAssignmentMeta,
 ) error {
-	normalizeRecoveredGrowingMeta(vchannels, segments)
+	normalizeRecoveredViewMeta(vchannels, segments)
 	for vchannelName, vchannel := range vchannels {
 		if vchannel.GetVchannel() == "" {
 			return errors.New("vchannel missing vchannel owner in recovery meta")
@@ -252,7 +252,7 @@ func validateRecoveredGrowingMeta(
 	return nil
 }
 
-func normalizeRecoveredGrowingMeta(
+func normalizeRecoveredViewMeta(
 	vchannels map[string]*streamingpb.VChannelMeta,
 	segments map[int64]*streamingpb.SegmentAssignmentMeta,
 ) {
@@ -283,35 +283,11 @@ func validateTombstonedOwnerCoveredSegments(
 				}
 			}
 		}
-		if vchannel.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED {
-			for segmentID, segment := range segments {
-				if segmentCoveredByVChannelTombstone(segment, vchannel) &&
-					segment.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED {
-					return errors.Errorf("tombstoned vchannel has unfinished segment in recovery meta: vchannel %s segment %d", vchannelName, segmentID)
-				}
-				if segmentCoveredByVChannelTombstone(segment, vchannel) &&
-					segment.GetTombstoneTimeTick() > vchannel.GetTombstoneTimeTick() {
-					return errors.Errorf("tombstoned vchannel before covered segment tombstone in recovery meta: vchannel %s segment %d", vchannelName, segmentID)
-				}
-			}
-		}
 		for _, partition := range vchannel.GetCollectionInfo().GetPartitions() {
 			if closeState, closeTimeTick, ok := closedPartitionState(partition); ok {
 				for segmentID, segment := range segments {
 					if segmentInPartition(segment, vchannel, partition) && segment.GetStat().GetCreateSegmentTimeTick() >= closeTimeTick {
 						return errors.Errorf("%s partition has future segment in recovery meta: partition %d of vchannel %s segment %d", closeState, partition.GetPartitionId(), vchannelName, segmentID)
-					}
-				}
-			}
-			if partition.GetState() == streamingpb.PartitionState_PARTITION_STATE_TOMBSTONED {
-				for segmentID, segment := range segments {
-					if segmentCoveredByPartitionTombstone(segment, vchannel, partition) &&
-						segment.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED {
-						return errors.Errorf("tombstoned partition has unfinished segment in recovery meta: partition %d of vchannel %s segment %d", partition.GetPartitionId(), vchannelName, segmentID)
-					}
-					if segmentCoveredByPartitionTombstone(segment, vchannel, partition) &&
-						segment.GetTombstoneTimeTick() > partition.GetTombstoneTimeTick() {
-						return errors.Errorf("tombstoned partition before covered segment tombstone in recovery meta: partition %d of vchannel %s segment %d", partition.GetPartitionId(), vchannelName, segmentID)
 					}
 				}
 			}

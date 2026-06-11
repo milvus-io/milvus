@@ -82,6 +82,7 @@ type transformLog struct {
 	meta                  *streamingpb.VChannelTransformLogMeta
 	persistedDataTimeTick uint64
 	dirty                 bool
+	pendingDirtySnapshot  *streamingpb.VChannelTransformLogMeta
 	buffer                buffer
 	store                 Store
 
@@ -249,10 +250,14 @@ func (t *transformLog) HasDirty() bool {
 func (t *transformLog) ConsumeDirtyAndGetSnapshot() *streamingpb.VChannelTransformLogMeta {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.pendingDirtySnapshot != nil {
+		return cloneMeta(t.pendingDirtySnapshot)
+	}
 	if !t.dirty {
 		return nil
 	}
-	return cloneMeta(t.meta)
+	t.pendingDirtySnapshot = cloneMeta(t.meta)
+	return cloneMeta(t.pendingDirtySnapshot)
 }
 
 func (t *transformLog) MarkSnapshotPersisted(snapshot *streamingpb.VChannelTransformLogMeta) {
@@ -260,6 +265,9 @@ func (t *transformLog) MarkSnapshotPersisted(snapshot *streamingpb.VChannelTrans
 	defer t.mu.Unlock()
 	if snapshot.GetCheckpointTimeTick() > t.persistedDataTimeTick {
 		t.persistedDataTimeTick = snapshot.GetCheckpointTimeTick()
+	}
+	if t.pendingDirtySnapshot != nil && proto.Equal(t.pendingDirtySnapshot, snapshot) {
+		t.pendingDirtySnapshot = nil
 	}
 	t.dirty = !proto.Equal(t.meta, snapshot)
 }

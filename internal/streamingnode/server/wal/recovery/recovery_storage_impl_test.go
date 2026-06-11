@@ -3,6 +3,7 @@ package recovery
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -24,19 +25,21 @@ type testRecoveryModule struct {
 	result moduleapi.ObserveResult
 }
 
-func (m *testRecoveryModule) Name() string {
-	return "test"
+func (m *testRecoveryModule) Name() moduleapi.ModuleName {
+	return moduleapi.ModuleName("test")
 }
 
 func (m *testRecoveryModule) ObserveMessage(ctx context.Context, msg message.ImmutableMessage) moduleapi.ObserveResult {
 	return m.result
 }
 
-func (m *testRecoveryModule) SwitchIntoMetaAndData() moduleapi.Snapshot {
+func (m *testRecoveryModule) SwitchIntoMetaAndData() moduleapi.ModuleSnapshot {
 	return nil
 }
 
-func (m *testRecoveryModule) RequirePersist() {}
+func (m *testRecoveryModule) ConsumeDirtySnapshots() []moduleapi.DirtySnapshot {
+	return nil
+}
 
 type testDurableFrontierView struct {
 	partition walcheckpoint.Barrier
@@ -44,25 +47,29 @@ type testDurableFrontierView struct {
 	all       walcheckpoint.Barrier
 }
 
-func (v testDurableFrontierView) PartitionDurableFrontier(collectionID int64, partitionID int64) walcheckpoint.Barrier {
-	return v.partition
+func (v testDurableFrontierView) DataFrontier(scope moduleapi.Scope) walcheckpoint.Barrier {
+	switch scope.Type {
+	case moduleapi.ScopeAll:
+		return v.all
+	case moduleapi.ScopeVChannel:
+		return v.vchannel
+	case moduleapi.ScopePartition:
+		return v.partition
+	default:
+		return nil
+	}
 }
 
-func (v testDurableFrontierView) VChannelDurableFrontier(vchannel string) walcheckpoint.Barrier {
-	return v.vchannel
-}
-
-func (v testDurableFrontierView) AllDurableFrontier() walcheckpoint.Barrier {
-	return v.all
-}
-
-type testDataCheckpointModule struct {
+type notifyingDirtyModule struct {
 	testRecoveryModule
-	timetick uint64
+	notify func()
 }
 
-func (m *testDataCheckpointModule) DataCheckpointTimeTick() uint64 {
-	return m.timetick
+func (m *notifyingDirtyModule) ConsumeDirtySnapshots() []moduleapi.DirtySnapshot {
+	if m.notify != nil {
+		m.notify()
+	}
+	return nil
 }
 
 func TestRecoveryStorageRegistersImmediateCheckpointForBarrierlessMessage(t *testing.T) {
@@ -89,7 +96,7 @@ func TestRecoveryStorageRegistersImmediateCheckpointForBarrierlessMessage(t *tes
 	msg := mutableMsg.WithTimeTick(2).WithLastConfirmed(lastConfirmed).
 		IntoImmutableMessage(walimplstest.NewTestMessageID(3))
 
-	storage.ObserveMessage(context.Background(), msg)
+	storage.observeDataScannerMessage(context.Background(), msg)
 
 	snapshot := storage.checkpointManager.Snapshot()
 	assert.True(t, lastConfirmed.EQ(snapshot.MessageID))
@@ -100,7 +107,42 @@ func TestRecoveryStorageRegistersImmediateCheckpointForBarrierlessMessage(t *tes
 	assert.True(t, storage.checkpointManager.HasDirty())
 }
 
-func TestRecoveryStorageNotifyBarrierUpdatedUsesViewDataCheckpoint(t *testing.T) {
+func TestRecoveryStorageMetaOnlyObserveDoesNotAdvanceDataCheckpoint(t *testing.T) {
+	checkpoint := &utility.WALCheckpoint{
+		MessageID: walimplstest.NewTestMessageID(1),
+		TimeTick:  1,
+		DataCheckpoint: &utility.WALConsumeCheckpoint{
+			MessageID: walimplstest.NewTestMessageID(1),
+			TimeTick:  1,
+		},
+	}
+	storage := newRecoveryStorage(types.PChannelInfo{Name: "test-pchannel"}, checkpoint)
+	defer storage.metrics.Close()
+	defer storage.taskScheduler.Close()
+	storage.modules = []moduleapi.Module{&testRecoveryModule{}}
+
+	lastConfirmed := walimplstest.NewTestMessageID(2)
+	mutableMsg, err := message.NewTimeTickMessageBuilderV1().
+		WithHeader(&message.TimeTickMessageHeader{}).
+		WithVChannel("test-vchannel").
+		WithBody(&msgpb.TimeTickMsg{}).
+		BuildMutable()
+	require.NoError(t, err)
+	msg := mutableMsg.WithTimeTick(2).WithLastConfirmed(lastConfirmed).
+		IntoImmutableMessage(walimplstest.NewTestMessageID(3))
+
+	storage.observeMetaScannerMessage(context.Background(), msg)
+
+	snapshot := storage.checkpointManager.Snapshot()
+	assert.True(t, lastConfirmed.EQ(snapshot.MessageID))
+	assert.Equal(t, uint64(2), snapshot.TimeTick)
+	require.NotNil(t, snapshot.DataCheckpoint)
+	assert.True(t, walimplstest.NewTestMessageID(1).EQ(snapshot.DataCheckpoint.MessageID))
+	assert.Equal(t, uint64(1), snapshot.DataCheckpoint.TimeTick)
+	assert.True(t, storage.checkpointManager.HasDirty())
+}
+
+func TestRecoveryStorageNotifyBarrierUpdatedDoesNotAdvanceDataCheckpointWithoutDataBarrier(t *testing.T) {
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(10),
 		TimeTick:  100,
@@ -112,18 +154,52 @@ func TestRecoveryStorageNotifyBarrierUpdatedUsesViewDataCheckpoint(t *testing.T)
 	storage := newRecoveryStorage(types.PChannelInfo{Name: "test-pchannel"}, checkpoint)
 	defer storage.metrics.Close()
 	defer storage.taskScheduler.Close()
-	storage.modules = []moduleapi.Module{&testDataCheckpointModule{timetick: 80}}
+	storage.modules = []moduleapi.Module{&testRecoveryModule{}}
 
 	storage.NotifyBarrierUpdated()
 
 	snapshot := storage.checkpointManager.Snapshot()
 	require.NotNil(t, snapshot.DataCheckpoint)
-	assert.True(t, walimplstest.NewTestMessageID(10).EQ(snapshot.DataCheckpoint.MessageID))
-	assert.Equal(t, uint64(80), snapshot.DataCheckpoint.TimeTick)
-	assert.True(t, storage.checkpointManager.HasDirty())
+	assert.True(t, walimplstest.NewTestMessageID(5).EQ(snapshot.DataCheckpoint.MessageID))
+	assert.Equal(t, uint64(50), snapshot.DataCheckpoint.TimeTick)
+	assert.False(t, storage.checkpointManager.HasDirty())
 }
 
-func TestValidateRecoveredGrowingMetaNormalizesBackwardCompatibleDefaults(t *testing.T) {
+func TestRecoveryStorageConsumeDirtySnapshotDoesNotHoldLockWhileCollectingModules(t *testing.T) {
+	checkpoint := &utility.WALCheckpoint{
+		MessageID: walimplstest.NewTestMessageID(10),
+		TimeTick:  100,
+		DataCheckpoint: &utility.WALConsumeCheckpoint{
+			MessageID: walimplstest.NewTestMessageID(10),
+			TimeTick:  100,
+		},
+	}
+	storage := newRecoveryStorage(types.PChannelInfo{Name: "test-pchannel"}, checkpoint)
+	defer storage.metrics.Close()
+	defer storage.taskScheduler.Close()
+	storage.modules = []moduleapi.Module{&notifyingDirtyModule{
+		notify: func() {
+			storage.NotifyModuleUpdated(moduleapi.ModuleName("test"))
+		},
+	}}
+
+	done := make(chan struct{})
+	go func() {
+		_ = storage.consumeDirtySnapshot()
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestValidateRecoveredViewMetaNormalizesBackwardCompatibleDefaults(t *testing.T) {
 	vchannel := &streamingpb.VChannelMeta{
 		Vchannel: "v1",
 		State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
@@ -154,7 +230,7 @@ func TestValidateRecoveredGrowingMetaNormalizesBackwardCompatibleDefaults(t *tes
 		},
 	}
 
-	err := validateRecoveredGrowingMeta(
+	err := validateRecoveredViewMeta(
 		map[string]*streamingpb.VChannelMeta{"v1": vchannel},
 		map[int64]*streamingpb.SegmentAssignmentMeta{100: segment},
 	)

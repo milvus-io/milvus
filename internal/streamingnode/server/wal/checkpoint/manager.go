@@ -144,16 +144,6 @@ func (m *Manager) AdvanceMetaCheckpointInMemory(point utility.WALConsumeCheckpoi
 	m.checkpoint.TimeTick = point.TimeTick
 }
 
-func (m *Manager) UpdateDataCheckpointFromPhysicalCheckpoint(dataTimeTick uint64) {
-	if m.checkpoint.MessageID == nil {
-		return
-	}
-	m.advanceDataCheckpoint(utility.WALConsumeCheckpoint{
-		MessageID: m.checkpoint.MessageID,
-		TimeTick:  dataTimeTick,
-	})
-}
-
 func (m *Manager) advanceMetaCheckpoint(point utility.WALConsumeCheckpoint) {
 	if !ShouldAdvance(m.checkpoint.MessageID, m.checkpoint.TimeTick, point) {
 		return

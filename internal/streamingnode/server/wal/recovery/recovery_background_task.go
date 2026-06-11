@@ -2,15 +2,16 @@ package recovery
 
 import (
 	"context"
-	"math"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
 // isDirty checks if the recovery storage mem state is not consistent with the persisted recovery storage.
@@ -22,7 +23,7 @@ func (rs *recoveryStorageImpl) isDirty() bool {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	checkpointDirty := rs.checkpointManager != nil && rs.checkpointManager.HasDirty()
-	return rs.dirtyCounter > 0 || rs.pendingSalvageCheckpoint != nil || checkpointDirty
+	return rs.dirtyCounter > 0 || rs.moduleDirty || rs.pendingSalvageCheckpoint != nil || checkpointDirty
 }
 
 // TODO: !!! all recovery persist operation should be a compare-and-swap operation to
@@ -111,15 +112,101 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlo
 		rs.metrics.ObserveIsOnPersisting(false)
 	}()
 
+	if err := rs.persistModuleDirtySnapshots(ctx, snapshot); err != nil {
+		return err
+	}
 	rs.refreshSnapshotCheckpoint(snapshot)
-
 	if err := rs.persistCheckpointSnapshot(ctx, snapshot, lvl >= mlog.InfoLevel); err != nil {
 		return err
 	}
 	return
 }
 
-func (rs *recoveryStorageImpl) persistCheckpointSnapshot(ctx context.Context, snapshot *RecoverySnapshot, _ bool) error {
+func (rs *recoveryStorageImpl) persistModuleDirtySnapshots(ctx context.Context, snapshot *dirtyPersistSnapshot) error {
+	if snapshot.ModuleSnapshotsAck || len(snapshot.ModuleDirtySnaps) == 0 {
+		return nil
+	}
+	for _, dirtySnapshot := range snapshot.ModuleDirtySnaps {
+		if err := rs.persistModuleDirtySnapshot(ctx, dirtySnapshot); err != nil {
+			return err
+		}
+	}
+	for _, dirtySnapshot := range snapshot.ModuleDirtySnaps {
+		dirtySnapshot.MarkPersisted()
+	}
+	snapshot.ModuleSnapshotsAck = true
+	rs.NotifyBarrierUpdated()
+	return nil
+}
+
+func (rs *recoveryStorageImpl) persistModuleDirtySnapshot(ctx context.Context, snapshot moduleapi.DirtySnapshot) error {
+	key := snapshot.Key()
+	if key.PChannel == "" {
+		key.PChannel = rs.channel.Name
+	}
+	catalog := resource.Resource().StreamingNodeCatalog()
+	logger := rs.Logger().With(
+		mlog.String("op", "persistModuleSnapshot"),
+		mlog.String("module", string(snapshot.ModuleName())),
+		mlog.Int("snapshotOp", int(snapshot.Op())),
+		mlog.String("pchannel", key.PChannel),
+		mlog.String("vchannel", key.VChannel),
+		mlog.Int64("segmentID", key.SegmentID),
+		mlog.Uint64("metaTimeTick", snapshot.MetaTimeTick()),
+		mlog.Uint64("dataTimeTick", snapshot.DataTimeTick()),
+	)
+	return rs.retryOperationWithBackoff(ctx, logger, func(ctx context.Context) error {
+		switch snapshot.ModuleName() {
+		case moduleapi.ModuleNameVChannel:
+			switch snapshot.Op() {
+			case moduleapi.SnapshotOpUpsert:
+				meta, ok := snapshot.Payload().(*streamingpb.VChannelMeta)
+				if !ok || meta == nil {
+					return errors.New("vchannel dirty snapshot payload is not VChannelMeta")
+				}
+				return catalog.SaveVChannels(ctx, key.PChannel, map[string]*streamingpb.VChannelMeta{key.VChannel: meta})
+			case moduleapi.SnapshotOpDelete:
+				meta, _ := snapshot.Payload().(*streamingpb.VChannelMeta)
+				if meta == nil {
+					meta = &streamingpb.VChannelMeta{Vchannel: key.VChannel}
+				}
+				return catalog.DropVChannels(ctx, key.PChannel, map[string]*streamingpb.VChannelMeta{key.VChannel: meta})
+			default:
+				return errors.Errorf("unknown vchannel snapshot op: %d", snapshot.Op())
+			}
+		case moduleapi.ModuleNameSegment:
+			switch snapshot.Op() {
+			case moduleapi.SnapshotOpUpsert:
+				meta, ok := snapshot.Payload().(*streamingpb.SegmentAssignmentMeta)
+				if !ok || meta == nil {
+					return errors.New("segment dirty snapshot payload is not SegmentAssignmentMeta")
+				}
+				return catalog.SaveSegmentAssignments(ctx, key.PChannel, map[int64]*streamingpb.SegmentAssignmentMeta{key.SegmentID: meta})
+			case moduleapi.SnapshotOpDelete:
+				return catalog.DropSegmentAssignments(ctx, key.PChannel, []int64{key.SegmentID})
+			default:
+				return errors.Errorf("unknown segment snapshot op: %d", snapshot.Op())
+			}
+		case moduleapi.ModuleNameTransformLog:
+			switch snapshot.Op() {
+			case moduleapi.SnapshotOpUpsert:
+				meta, ok := snapshot.Payload().(*streamingpb.VChannelTransformLogMeta)
+				if !ok || meta == nil {
+					return errors.New("transformlog dirty snapshot payload is not VChannelTransformLogMeta")
+				}
+				return catalog.SaveTransformLogMeta(ctx, key.PChannel, map[string]*streamingpb.VChannelTransformLogMeta{key.VChannel: meta})
+			case moduleapi.SnapshotOpDelete:
+				return catalog.DropTransformLogMeta(ctx, key.PChannel, []string{key.VChannel})
+			default:
+				return errors.Errorf("unknown transformlog snapshot op: %d", snapshot.Op())
+			}
+		default:
+			return errors.Errorf("unknown module dirty snapshot: %s", snapshot.ModuleName())
+		}
+	})
+}
+
+func (rs *recoveryStorageImpl) persistCheckpointSnapshot(ctx context.Context, snapshot *dirtyPersistSnapshot, _ bool) error {
 	recoverySnapshot := &metastore.WALRecoverySnapshot{}
 	if snapshot.SalvageCheckpoint != nil {
 		recoverySnapshot.SalvageCheckpoint = snapshot.SalvageCheckpoint.IntoProto()
@@ -156,7 +243,7 @@ func (rs *recoveryStorageImpl) notifyCheckpointPersisted(checkpoint *WALCheckpoi
 	}
 }
 
-func (rs *recoveryStorageImpl) refreshSnapshotCheckpoint(snapshot *RecoverySnapshot) {
+func (rs *recoveryStorageImpl) refreshSnapshotCheckpoint(snapshot *dirtyPersistSnapshot) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 
@@ -165,31 +252,10 @@ func (rs *recoveryStorageImpl) refreshSnapshotCheckpoint(snapshot *RecoverySnaps
 	}
 	rs.checkpointManager.TryAdvanceMetaCheckpoint()
 	rs.checkpointManager.TryAdvanceDataCheckpoint()
-	rs.updateDataCheckpointFromViewsLocked()
 	if checkpointDirty := rs.checkpointManager.ConsumeDirty(); checkpointDirty {
 		snapshot.Checkpoint = rs.checkpointManager.Snapshot()
 		snapshot.CheckpointDirty = true
 	}
-}
-
-func (rs *recoveryStorageImpl) updateDataCheckpointFromViewsLocked() {
-	if dataTimeTick := rs.dataCheckpointTimeTickLocked(); dataTimeTick != math.MaxUint64 {
-		rs.checkpointManager.UpdateDataCheckpointFromPhysicalCheckpoint(dataTimeTick)
-	}
-}
-
-func (rs *recoveryStorageImpl) dataCheckpointTimeTickLocked() uint64 {
-	dataTimeTick := uint64(math.MaxUint64)
-	for _, module := range rs.modules {
-		view, ok := module.(moduleapi.DataCheckpointView)
-		if !ok {
-			continue
-		}
-		if timetick := view.DataCheckpointTimeTick(); timetick < dataTimeTick {
-			dataTimeTick = timetick
-		}
-	}
-	return dataTimeTick
 }
 
 func (rs *recoveryStorageImpl) simpleTruncateCheckpoint(ctx context.Context, checkpoint *WALCheckpoint) {
