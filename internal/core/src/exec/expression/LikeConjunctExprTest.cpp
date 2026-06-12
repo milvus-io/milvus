@@ -282,7 +282,9 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
                 static_cast<CLoadIndexInfo>(&load_index_info);
             const auto status = AppendIndexV2(trace, cload_index_info);
             ASSERT_EQ(status.error_code, Success) << status.error_msg;
-            segment->LoadIndex(load_index_info);
+            if (!with_warmup) {
+                segment->LoadIndex(load_index_info);
+            }
         };
 
     // Load pk field
@@ -301,7 +303,6 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
     }
 
     // Load title and content fields with ngram index (use different index_build_id for each)
-    load_varchar_field_with_ngram(try_fid, title_data, 5001, 4001, true);
     load_varchar_field_with_ngram(title_fid, title_data, 5001, 4001);
     load_varchar_field_with_ngram(content_fid, content_data, 5002, 4002);
 
@@ -391,6 +392,6 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
     }
 
     EXPECT_EQ(actual_pks, expected_pks);
-
+    load_varchar_field_with_ngram(try_fid, title_data, 5001, 4001, true);
     EXEC_EVAL_EXPR_BATCH_SIZE.store(DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE);
 }
