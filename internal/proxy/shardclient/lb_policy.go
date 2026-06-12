@@ -73,10 +73,9 @@ const (
 )
 
 type LBPolicyImpl struct {
-	getBalancer    func() LBBalancer
-	clientMgr      ShardClientMgr
-	balancerMap    map[string]LBBalancer
-	retryOnReplica int
+	getBalancer func() LBBalancer
+	clientMgr   ShardClientMgr
+	balancerMap map[string]LBBalancer
 }
 
 func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
@@ -92,13 +91,10 @@ func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
 		return balancerMap[balancePolicy]
 	}
 
-	retryOnReplica := paramtable.Get().ProxyCfg.RetryTimesOnReplica.GetAsInt()
-
 	return &LBPolicyImpl{
-		getBalancer:    getBalancer,
-		clientMgr:      clientMgr,
-		balancerMap:    balancerMap,
-		retryOnReplica: retryOnReplica,
+		getBalancer: getBalancer,
+		clientMgr:   clientMgr,
+		balancerMap: balancerMap,
 	}
 }
 
@@ -147,6 +143,11 @@ func preferredNodeID(workload CollectionWorkLoad, channel string) int64 {
 		recordPreferredNodeSelection(metrics.PreferredNodeMissLabel)
 	}
 	return nodeID
+}
+
+func isResourceInsufficientError(err error) bool {
+	return errors.Is(err, merr.ErrServiceTooManyRequests) ||
+		errors.Is(err, merr.ErrServiceResourceInsufficient)
 }
 
 // try to select the best node from the available nodes
@@ -298,8 +299,11 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			log.Warn("search/query channel failed",
 				zap.Int64("nodeID", targetNode.NodeID),
 				zap.Error(err))
-			excludeNodes.Insert(targetNode.NodeID)
 			lastErr = errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode.NodeID, workload.Channel)
+			if isResourceInsufficientError(err) {
+				return false, lastErr
+			}
+			excludeNodes.Insert(targetNode.NodeID)
 			return true, lastErr
 		}
 
@@ -311,8 +315,8 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		log.Warn("failed to get shard leaders", zap.Error(err))
 		return err
 	}
-	// Sweep all shard leaders once, then allow configured request-level retries after every leader has been tried.
-	retryTimes := len(shardLeaders) + max(lb.retryOnReplica, 1)
+	// Bound request-level attempts by both visible replicas and the configured limit.
+	retryTimes := max(1, min(paramtable.Get().ProxyCfg.RetryTimesOnReplica.GetAsInt(), len(shardLeaders)))
 	err = retry.Handle(ctx, tryExecute, retry.Attempts(uint(retryTimes)))
 	if err != nil {
 		log.Warn("failed to execute",
@@ -352,11 +356,11 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 		})
 	}
 
-	wg, _ := errgroup.WithContext(ctx)
-	// Launch a goroutine for each channel
+	wg, groupCtx := errgroup.WithContext(ctx)
 	for _, channel := range channelList {
+		channel := channel
 		wg.Go(func() error {
-			return lb.ExecuteWithRetry(ctx, ChannelWorkload{
+			return lb.ExecuteWithRetry(groupCtx, ChannelWorkload{
 				Db:              workload.Db,
 				CollectionName:  workload.CollectionName,
 				CollectionID:    workload.CollectionID,

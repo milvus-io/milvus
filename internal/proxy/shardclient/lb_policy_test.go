@@ -20,6 +20,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -92,6 +93,14 @@ func (s *LBPolicySuite) SetupTest() {
 
 func (s *LBPolicySuite) TearDownTest() {
 	s.lbPolicy.Close()
+}
+
+func (s *LBPolicySuite) setRetryTimesOnReplica(value string) {
+	old := paramtable.Get().ProxyCfg.RetryTimesOnReplica.GetValue()
+	s.Require().NoError(paramtable.Get().Save(paramtable.Get().ProxyCfg.RetryTimesOnReplica.Key, value))
+	s.T().Cleanup(func() {
+		s.Require().NoError(paramtable.Get().Save(paramtable.Get().ProxyCfg.RetryTimesOnReplica.Key, old))
+	})
 }
 
 func (s *LBPolicySuite) TestSelectNode() {
@@ -317,7 +326,7 @@ func (s *LBPolicySuite) TestPreferredNodeFailureFallsBackToOtherReplica() {
 		{NodeID: 1, Address: "localhost:9000", Serviceable: true},
 		{NodeID: 2, Address: "localhost:9001", Serviceable: true},
 	}
-	s.lbPolicy.retryOnReplica = 1
+	s.setRetryTimesOnReplica("2")
 
 	s.mgr.ExpectedCalls = nil
 	s.lbBalancer.ExpectedCalls = nil
@@ -500,7 +509,7 @@ func (s *LBPolicySuite) TestExecuteWithRetryRetriableErrorUsesRequestLevelRetry(
 		{NodeID: 1, Address: "localhost:9000", Serviceable: true},
 		{NodeID: 2, Address: "localhost:9001", Serviceable: true},
 	}
-	s.lbPolicy.retryOnReplica = 2
+	s.setRetryTimesOnReplica("2")
 
 	s.mgr.ExpectedCalls = nil
 	s.lbBalancer.ExpectedCalls = nil
@@ -523,7 +532,7 @@ func (s *LBPolicySuite) TestExecuteWithRetryRetriableErrorUsesRequestLevelRetry(
 		Nq:             1,
 		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
 			executedNodes = append(executedNodes, nodeID)
-			if len(executedNodes) <= len(nodes) {
+			if len(executedNodes) == 1 {
 				return errors.Wrapf(merr.ErrServiceUnavailable, "fail on QueryNode %d", nodeID)
 			}
 			return nil
@@ -531,75 +540,23 @@ func (s *LBPolicySuite) TestExecuteWithRetryRetriableErrorUsesRequestLevelRetry(
 	})
 
 	s.NoError(err)
-	s.Len(executedNodes, 3)
+	s.Len(executedNodes, 2)
 	s.NotEqual(executedNodes[0], executedNodes[1])
 }
 
-func (s *LBPolicySuite) TestExecuteWithRetryRetriableErrorRetriesAfterAllReplicasFail() {
+func (s *LBPolicySuite) TestExecuteWithRetryRetriableErrorCapsAttemptsByReplicaCount() {
 	ctx := context.Background()
 	channel := s.channels[0]
 	nodes := []NodeInfo{
 		{NodeID: 1, Address: "localhost:9000", Serviceable: true},
 		{NodeID: 2, Address: "localhost:9001", Serviceable: true},
 	}
-	s.lbPolicy.retryOnReplica = 2
+	s.setRetryTimesOnReplica("5")
 
 	s.mgr.ExpectedCalls = nil
 	s.lbBalancer.ExpectedCalls = nil
 	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil)
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
-	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
-	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
-			return availableNodes[0], nil
-		})
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
-
-	executedNodes := make([]int64, 0, 4)
-	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
-		Db:             s.dbName,
-		CollectionName: s.collectionName,
-		CollectionID:   s.collectionID,
-		Channel:        channel,
-		Nq:             1,
-		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
-			executedNodes = append(executedNodes, nodeID)
-			if len(executedNodes) <= len(nodes)+1 {
-				return errors.Wrapf(merr.ErrServiceUnavailable, "fail on QueryNode %d", nodeID)
-			}
-			return nil
-		},
-	})
-
-	s.NoError(err)
-	s.Len(executedNodes, 4)
-	s.ElementsMatch([]int64{int64(1), int64(2)}, executedNodes[:2])
-	s.NotEqual(executedNodes[2], executedNodes[3])
-}
-
-func (s *LBPolicySuite) TestExecuteWithRetryRetriableErrorRefreshesStaleShardLeaderCache() {
-	ctx := context.Background()
-	channel := s.channels[0]
-	cachedNodes := []NodeInfo{{NodeID: 1, Address: "localhost:9000", Serviceable: true}}
-	freshNodes := []NodeInfo{
-		{NodeID: 1, Address: "localhost:9000", Serviceable: true},
-		{NodeID: 2, Address: "localhost:9001", Serviceable: true},
-	}
-	shardLeaders := cachedNodes
-	s.lbPolicy.retryOnReplica = 2
-
-	s.mgr.ExpectedCalls = nil
-	s.lbBalancer.ExpectedCalls = nil
-	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).RunAndReturn(
-		func(context.Context, bool, string, string, int64, string) ([]NodeInfo, error) {
-			return shardLeaders, nil
-		})
-	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel).RunAndReturn(
-		func(context.Context, bool, string, string, int64, string) ([]NodeInfo, error) {
-			shardLeaders = freshNodes
-			return shardLeaders, nil
-		}).Once()
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
@@ -617,7 +574,79 @@ func (s *LBPolicySuite) TestExecuteWithRetryRetriableErrorRefreshesStaleShardLea
 		Nq:             1,
 		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
 			executedNodes = append(executedNodes, nodeID)
-			if nodeID == cachedNodes[0].NodeID {
+			return errors.Wrapf(merr.ErrServiceUnavailable, "fail on QueryNode %d", nodeID)
+		},
+	})
+
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	s.ElementsMatch([]int64{int64(1), int64(2)}, executedNodes)
+}
+
+func (s *LBPolicySuite) TestExecuteWithRetryRefreshesRetryTimesOnReplicaConfig() {
+	ctx := context.Background()
+	channel := s.channels[0]
+	nodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost:9000", Serviceable: true},
+		{NodeID: 2, Address: "localhost:9001", Serviceable: true},
+	}
+	s.setRetryTimesOnReplica("1")
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil)
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	executedNodes := make([]int64, 0, 1)
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        channel,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			executedNodes = append(executedNodes, nodeID)
+			return errors.Wrapf(merr.ErrServiceUnavailable, "fail on QueryNode %d", nodeID)
+		},
+	})
+
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	s.Equal([]int64{1}, executedNodes)
+}
+
+func (s *LBPolicySuite) TestExecuteWithRetryRetriableErrorRetriesVisibleReplicas() {
+	ctx := context.Background()
+	channel := s.channels[0]
+	nodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost:9000", Serviceable: true},
+		{NodeID: 2, Address: "localhost:9001", Serviceable: true},
+	}
+	s.setRetryTimesOnReplica("2")
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil)
+	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
+			return availableNodes[0], nil
+		})
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	executedNodes := make([]int64, 0, 2)
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        channel,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			executedNodes = append(executedNodes, nodeID)
+			if nodeID == nodes[0].NodeID {
 				return errors.Wrapf(merr.ErrServiceUnavailable, "fail on QueryNode %d", nodeID)
 			}
 			return nil
@@ -632,7 +661,7 @@ func (s *LBPolicySuite) TestExecuteWithRetryNonRetriableErrorReturnsLastError() 
 	ctx := context.Background()
 	channel := s.channels[0]
 	nodes := []NodeInfo{{NodeID: 1, Address: "localhost:9000", Serviceable: true}}
-	s.lbPolicy.retryOnReplica = 1
+	s.setRetryTimesOnReplica("1")
 
 	s.mgr.ExpectedCalls = nil
 	s.lbBalancer.ExpectedCalls = nil
@@ -657,7 +686,81 @@ func (s *LBPolicySuite) TestExecuteWithRetryNonRetriableErrorReturnsLastError() 
 	})
 
 	s.ErrorIs(err, merr.ErrParameterInvalid)
-	s.Equal(2, executed)
+	s.Equal(1, executed)
+}
+
+func (s *LBPolicySuite) TestExecuteWithRetryResourceInsufficientStopsRetry() {
+	ctx := context.Background()
+	channel := s.channels[0]
+	nodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost:9000", Serviceable: true},
+		{NodeID: 2, Address: "localhost:9001", Serviceable: true},
+	}
+	s.setRetryTimesOnReplica("2")
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil)
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	executed := 0
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        channel,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			executed++
+			return errors.Wrap(merr.ErrServiceResourceInsufficient, "query node resource insufficient")
+		},
+	})
+
+	s.ErrorIs(err, merr.ErrServiceResourceInsufficient)
+	s.Equal(1, executed)
+}
+
+func (s *LBPolicySuite) TestExecuteResourceInsufficientCancelsOtherChannels() {
+	ctx := context.Background()
+	channels := []string{"channel1", "channel2"}
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShardLeaderList(mock.Anything, s.dbName, s.collectionName, s.collectionID, true).Return(channels, nil)
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, mock.Anything).Return([]NodeInfo{{NodeID: 1, Address: "localhost:9000", Serviceable: true}}, nil)
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	secondStarted := make(chan struct{})
+	secondCanceled := make(chan struct{})
+	err := s.lbPolicy.Execute(ctx, CollectionWorkLoad{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			if channel == channels[0] {
+				<-secondStarted
+				return merr.WrapErrTooManyRequests(1024)
+			}
+			close(secondStarted)
+			<-ctx.Done()
+			close(secondCanceled)
+			return ctx.Err()
+		},
+	})
+
+	s.ErrorIs(err, merr.ErrServiceTooManyRequests)
+	select {
+	case <-secondCanceled:
+	case <-time.After(time.Second):
+		s.T().Fatal("resource insufficient error should cancel other shard requests")
+	}
 }
 
 func (s *LBPolicySuite) TestExecuteOneChannel() {
@@ -728,7 +831,7 @@ func (s *LBPolicySuite) TestExecute() {
 	s.NoError(err)
 
 	// test some channel failed
-	s.lbPolicy.retryOnReplica = 1
+	s.setRetryTimesOnReplica("1")
 	s.mgr.ExpectedCalls = nil
 	s.lbBalancer.ExpectedCalls = nil
 	s.mgr.EXPECT().GetShardLeaderList(mock.Anything, s.dbName, s.collectionName, s.collectionID, true).Return(s.channels, nil)
@@ -756,7 +859,7 @@ func (s *LBPolicySuite) TestExecute() {
 		},
 	})
 	s.Error(err)
-	s.Equal(int64(7), counter.Load())
+	s.Equal(int64(2), counter.Load())
 
 	// test get shard leader failed
 	s.mgr.ExpectedCalls = nil

@@ -443,9 +443,11 @@ func newDqTaskQueue(tsoAllocatorIns tsoAllocator) *dqTaskQueue {
 
 // taskScheduler schedules the gRPC tasks.
 type taskScheduler struct {
-	ddQueue *ddTaskQueue
-	dmQueue *dmTaskQueue
-	dqQueue *dqTaskQueue
+	ddQueue                        *ddTaskQueue
+	dmQueue                        *dmTaskQueue
+	dqQueue                        *dqTaskQueue
+	dqlBackpressure                *dqlBackpressureController
+	dqlBackpressureCallbackCleanup func()
 
 	// data control queue, use for such as flush operation, which control the data status
 	dcQueue *ddTaskQueue
@@ -469,6 +471,8 @@ func newTaskScheduler(ctx context.Context,
 	s.ddQueue = newDdTaskQueue(tsoAllocatorIns)
 	s.dmQueue = newDmTaskQueue(tsoAllocatorIns)
 	s.dqQueue = newDqTaskQueue(tsoAllocatorIns)
+	s.dqlBackpressure = newDQLBackpressureController(loadDQLBackpressureControllerConfig())
+	s.dqlBackpressureCallbackCleanup = registerDQLBackpressureConfigCallback(s.dqlBackpressure)
 
 	s.dcQueue = newDdTaskQueue(tsoAllocatorIns)
 
@@ -477,6 +481,43 @@ func newTaskScheduler(ctx context.Context,
 	}
 
 	return s, nil
+}
+
+func loadDQLBackpressureControllerConfig() dqlBackpressureControllerConfig {
+	return dqlBackpressureControllerConfig{
+		enabled:                Params.ProxyCfg.DQLBackpressureEnabled.GetAsBool(),
+		maxConcurrency:         Params.ProxyCfg.MaxTaskNum.GetAsInt64(),
+		slowdownMinConcurrency: Params.ProxyCfg.DQLBackpressureSlowdownMinConcurrency.GetAsInt64(),
+		slowdownRatio:          Params.ProxyCfg.DQLBackpressureSlowdownRatio.GetAsFloat(),
+		slowdownInterval:       Params.ProxyCfg.DQLBackpressureSlowdownInterval.GetAsDurationByParse(),
+		recoverInterval:        Params.ProxyCfg.DQLBackpressureRecoverInterval.GetAsDurationByParse(),
+		recoverStep:            Params.ProxyCfg.DQLBackpressureRecoverStep.GetAsInt64(),
+		recoverQuiet:           Params.ProxyCfg.DQLBackpressureRecoverQuietPeriod.GetAsDurationByParse(),
+	}
+}
+
+func registerDQLBackpressureConfigCallback(controller *dqlBackpressureController) func() {
+	params := []*paramtable.ParamItem{
+		&Params.ProxyCfg.DQLBackpressureEnabled,
+		&Params.ProxyCfg.DQLBackpressureSlowdownMinConcurrency,
+		&Params.ProxyCfg.DQLBackpressureSlowdownRatio,
+		&Params.ProxyCfg.DQLBackpressureSlowdownInterval,
+		&Params.ProxyCfg.DQLBackpressureRecoverInterval,
+		&Params.ProxyCfg.DQLBackpressureRecoverStep,
+		&Params.ProxyCfg.DQLBackpressureRecoverQuietPeriod,
+	}
+	callback := func(context.Context, string, string, string) error {
+		controller.updateConfig(loadDQLBackpressureControllerConfig())
+		return nil
+	}
+	for _, param := range params {
+		param.RegisterCallback(callback)
+	}
+	return func() {
+		for _, param := range params {
+			param.UnregisterCallback()
+		}
+	}
 }
 
 func (sched *taskScheduler) scheduleDdTask() task {
@@ -516,6 +557,9 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 	err := t.PreExecute(ctx)
 
 	defer func() {
+		if q == sched.dqQueue {
+			sched.dqlBackpressure.Observe(err)
+		}
 		t.Notify(err)
 	}()
 	if err != nil {
@@ -622,15 +666,28 @@ func (sched *taskScheduler) queryLoop() {
 		case <-sched.ctx.Done():
 			return
 		case <-sched.dqQueue.utChan():
-			for t := sched.scheduleDqTask(); t != nil; t = sched.scheduleDqTask() {
+			for t := sched.dqQueue.FrontUnissuedTask(); t != nil; t = sched.dqQueue.FrontUnissuedTask() {
 				task := t
 				p := pool
 				// if task is sub task spawned by another, use sub task pool in case of deadlock
 				if task.IsSubTask() {
 					p = subTaskPool
+				} else if !sched.dqlBackpressure.Acquire(sched.ctx) {
+					return
 				}
+				task = sched.scheduleDqTask()
+				if task == nil {
+					if !t.IsSubTask() {
+						sched.dqlBackpressure.Release()
+					}
+					continue
+				}
+				taskToRun := task
 				p.Submit(func() (struct{}, error) {
-					sched.processTask(task, sched.dqQueue)
+					if !taskToRun.IsSubTask() {
+						defer sched.dqlBackpressure.Release()
+					}
+					sched.processTask(taskToRun, sched.dqQueue)
 					return struct{}{}, nil
 				})
 			}
@@ -658,6 +715,9 @@ func (sched *taskScheduler) Start() error {
 func (sched *taskScheduler) Close() {
 	sched.cancel()
 	sched.wg.Wait()
+	if sched.dqlBackpressureCallbackCleanup != nil {
+		sched.dqlBackpressureCallbackCleanup()
+	}
 }
 
 func (sched *taskScheduler) getPChanStatistics() (map[pChan]*pChanStatistics, error) {
