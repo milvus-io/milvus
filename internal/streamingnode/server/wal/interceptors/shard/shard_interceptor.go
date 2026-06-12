@@ -176,10 +176,10 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 		return nil, errors.Wrap(err, "CheckIfCollectionSchemaVersionMatch")
 	}
 	if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion); err != nil {
-		impl.shardManager.Logger().Warn("failed to materialize function fields before WAL append",
-			zap.Int64("collectionID", header.GetCollectionId()),
-			zap.Int32("schemaVersion", schemaVersion),
-			zap.Error(err))
+		impl.shardManager.Logger().Warn(ctx, "failed to materialize function fields before WAL append",
+			mlog.Int64("collectionID", header.GetCollectionId()),
+			mlog.Int32("schemaVersion", schemaVersion),
+			mlog.Err(err))
 		return nil, status.NewInner("failed to materialize function fields before WAL append: %s", err.Error())
 	}
 	for _, partition := range header.GetPartitions() {

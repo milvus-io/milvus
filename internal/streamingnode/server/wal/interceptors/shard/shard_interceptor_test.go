@@ -22,7 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
@@ -149,7 +149,7 @@ func TestShardInterceptorUpdateFunctionRunnersReleasesWhenFunctionsDropped(t *te
 	assert.True(t, ok)
 
 	shardManager := mock_shards.NewMockShardManager(t)
-	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
+	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
 	impl := &shardInterceptor{shardManager: shardManager}
 
 	noFunctionSchema := proto.Clone(schema).(*schemapb.CollectionSchema)

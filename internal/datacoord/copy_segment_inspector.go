@@ -284,11 +284,11 @@ func (s *copySegmentInspector) processFailed(task CopySegmentTask) {
 		op := UpdateStatusOperator(targetSegID, commonpb.SegmentState_Dropped)
 		err := s.meta.UpdateSegmentsInfo(s.ctx, op)
 		if err != nil {
-			log.Warn("failed to drop target segment after copy task failed",
-				WrapCopySegmentTaskLog(task, zap.Int64("segmentID", targetSegID), zap.Error(err))...)
+			mlog.Warn(s.ctx, "failed to drop target segment after copy task failed",
+				WrapCopySegmentTaskLog(task, mlog.Int64("segmentID", targetSegID), mlog.Err(err))...)
 		} else {
-			log.Info("dropped target segment after copy task failed",
-				WrapCopySegmentTaskLog(task, zap.Int64("segmentID", targetSegID))...)
+			mlog.Info(s.ctx, "dropped target segment after copy task failed",
+				WrapCopySegmentTaskLog(task, mlog.Int64("segmentID", targetSegID))...)
 		}
 	}
 }

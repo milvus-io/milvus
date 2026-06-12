@@ -613,17 +613,17 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			SegmentId:    targetSegID,
 			NewBuildIds:  newBuildIDs,
 		}
-		log.Info("prepare copy segment source and target",
+		mlog.Info(ctx, "prepare copy segment source and target",
 			WrapCopySegmentTaskLog(task,
-				zap.Int64("sourceCollectionID", source.GetCollectionId()),
-				zap.Int64("sourcePartitionID", source.GetPartitionId()),
-				zap.Int64("sourceSegmentID", source.GetSegmentId()),
-				zap.Int64("targetCollectionID", target.GetCollectionId()),
-				zap.Int64("targetPartitionID", target.GetPartitionId()),
-				zap.Int64("targetSegmentID", target.GetSegmentId()),
-				zap.Int("newBuildIDCount", len(newBuildIDs)),
-				zap.Bool("hasManifestPath", source.GetManifestPath() != ""),
-				zap.Int64("storageVersion", source.GetStorageVersion()))...)
+				mlog.Int64("sourceCollectionID", source.GetCollectionId()),
+				mlog.Int64("sourcePartitionID", source.GetPartitionId()),
+				mlog.Int64("sourceSegmentID", source.GetSegmentId()),
+				mlog.Int64("targetCollectionID", target.GetCollectionId()),
+				mlog.Int64("targetPartitionID", target.GetPartitionId()),
+				mlog.Int64("targetSegmentID", target.GetSegmentId()),
+				mlog.Int("newBuildIDCount", len(newBuildIDs)),
+				mlog.Bool("hasManifestPath", source.GetManifestPath() != ""),
+				mlog.Int64("storageVersion", source.GetStorageVersion()))...)
 		targets = append(targets, target)
 	}
 
@@ -738,10 +738,10 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			}
 
 			mlog.Info(context.TODO(), "update copy segment info done",
-				WrapCopySegmentTaskLog(task, zap.Int64("segmentID", result.GetSegmentId()),
-					zap.Int64("importedRows", result.GetImportedRows()),
-					zap.Int("binlogFields", len(result.GetBinlogs())),
-					zap.Bool("hasManifestPath", result.GetManifestPath() != ""))...)
+				WrapCopySegmentTaskLog(task, mlog.Int64("segmentID", result.GetSegmentId()),
+					mlog.Int64("importedRows", result.GetImportedRows()),
+					mlog.Int("binlogFields", len(result.GetBinlogs())),
+					mlog.Bool("hasManifestPath", result.GetManifestPath() != ""))...)
 		}
 
 		// Mark task as completed and record copying duration

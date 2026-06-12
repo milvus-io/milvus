@@ -3,12 +3,10 @@ package service
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
@@ -41,10 +39,10 @@ func (p *releaseManualFlushPreparer) PrepareReleaseManualFlush(ctx context.Conte
 		return false, nil
 	}
 	if !p.writeBufferManager.UseGrowingSourceFlush(vchannel) {
-		log.Ctx(ctx).Info("skip release manual flush prepare because channel does not use growing-source flush",
-			zap.String("vchannel", vchannel),
-			zap.Int64("collectionID", collectionID),
-			zap.Int64s("releaseSegmentIDs", releaseSegmentIDs))
+		mlog.Info(ctx, "skip release manual flush prepare because channel does not use growing-source flush",
+			mlog.String("vchannel", vchannel),
+			mlog.Int64("collectionID", collectionID),
+			mlog.Int64s("releaseSegmentIDs", releaseSegmentIDs))
 		return false, nil
 	}
 	if checker, ok := p.writeBufferManager.(writebuffer.ReleaseManualFlushNeedChecker); ok {
@@ -53,10 +51,10 @@ func (p *releaseManualFlushPreparer) PrepareReleaseManualFlush(ctx context.Conte
 			return false, err
 		}
 		if !needManualFlush {
-			log.Ctx(ctx).Info("skip release manual flush prepare because target segments do not need release handoff",
-				zap.String("vchannel", vchannel),
-				zap.Int64("collectionID", collectionID),
-				zap.Int64s("releaseSegmentIDs", releaseSegmentIDs))
+			mlog.Info(ctx, "skip release manual flush prepare because target segments do not need release handoff",
+				mlog.String("vchannel", vchannel),
+				mlog.Int64("collectionID", collectionID),
+				mlog.Int64s("releaseSegmentIDs", releaseSegmentIDs))
 			return false, nil
 		}
 	}
@@ -95,13 +93,13 @@ func (p *releaseManualFlushPreparer) PrepareReleaseManualFlush(ctx context.Conte
 			break
 		}
 	}
-	log.Ctx(ctx).Info("prepared release manual flush",
-		zap.String("vchannel", vchannel),
-		zap.Int64("collectionID", collectionID),
-		zap.Uint64("flushTs", appendResult.TimeTick),
-		zap.Int64s("releaseSegmentIDs", releaseSegmentIDs),
-		zap.Int64s("affectedSegmentIDs", flushMsgResponse.GetSegmentIds()),
-		zap.Bool("retained", prepared),
-		zap.Any("progress", progress))
+	mlog.Info(ctx, "prepared release manual flush",
+		mlog.String("vchannel", vchannel),
+		mlog.Int64("collectionID", collectionID),
+		mlog.Uint64("flushTs", appendResult.TimeTick),
+		mlog.Int64s("releaseSegmentIDs", releaseSegmentIDs),
+		mlog.Int64s("affectedSegmentIDs", flushMsgResponse.GetSegmentIds()),
+		mlog.Bool("retained", prepared),
+		mlog.Any("progress", progress))
 	return prepared, nil
 }

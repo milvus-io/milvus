@@ -5,7 +5,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -28,7 +28,7 @@ func RegisterLocalReleaseManualFlushPreparer(preparer ReleaseManualFlushPreparer
 		panic("unreachable: streaming node is not enabled but release manual flush preparer setup")
 	}
 	releaseManualFlushPreparerRegistry.Set(preparer)
-	log.Ctx(context.Background()).Info("register local release manual flush preparer done")
+	mlog.Info(context.TODO(), "register local release manual flush preparer done")
 }
 
 // GetLocalReleaseManualFlushPreparer returns the process-local release handoff preparer.

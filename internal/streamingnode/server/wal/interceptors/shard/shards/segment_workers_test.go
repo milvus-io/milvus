@@ -322,7 +322,7 @@ func TestSegmentAllocWorkerStorageVersionFollowsUseLoonFFI(t *testing.T) {
 				wal:                   mock_wal.NewMockWAL(t),
 				useGrowingSourceFlush: tc.useGrowingSourceFlush,
 			}
-			w.SetLogger(log.With())
+			w.SetLogger(mlog.With())
 
 			err := w.initSegmentConfig()
 			assert.NoError(t, err)

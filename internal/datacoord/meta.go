@@ -692,15 +692,15 @@ func (m *meta) GetAllCollectionNumRows() map[int64]int64 {
 // AddSegment records segment info, persisting info into kv store
 func (m *meta) AddSegment(ctx context.Context, segment *SegmentInfo) error {
 	log := mlog.With(mlog.String("channel", segment.GetInsertChannel()))
-	log.Info(ctx, "meta update: adding segment - Start", mlog.FieldSegmentID(segment.GetID()))
+	mlog.Info(ctx, "meta update: adding segment - Start", mlog.FieldSegmentID(segment.GetID()))
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
 	if info := m.segments.GetSegment(segment.GetID()); info != nil {
-		log.Info(ctx, "segment is already exists, ignore the operation", mlog.FieldSegmentID(segment.ID))
+		mlog.Info(ctx, "segment is already exists, ignore the operation", mlog.FieldSegmentID(segment.ID))
 		return nil
 	}
 	if err := m.catalog.AddSegment(ctx, segment.SegmentInfo); err != nil {
-		log.Error(ctx, "meta update: adding segment failed",
+		mlog.Error(ctx, "meta update: adding segment failed",
 			mlog.FieldSegmentID(segment.GetID()),
 			mlog.Err(err))
 		return err
@@ -708,7 +708,7 @@ func (m *meta) AddSegment(ctx context.Context, segment *SegmentInfo) error {
 	m.segments.SetSegment(segment.GetID(), segment)
 
 	metrics.DataCoordNumSegments.WithLabelValues(segmentMetricLabelValues(segment)...).Inc()
-	log.Info("meta update: adding segment - complete", zap.Int64("segmentID", segment.GetID()))
+	log.Info(ctx, "meta update: adding segment - complete", mlog.Int64("segmentID", segment.GetID()))
 	return nil
 }
 
@@ -2372,7 +2372,7 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 		metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetIsSorted(), segment.GetStorageVersion(), segmentMetricFormatLabel(segment), segment.GetNumOfRows())
 	}
 
-	log = log.With(mlog.Int64s("compact from", compactFromSegIDs), mlog.Int64s("compact to", compactToSegIDs))
+	log = mlog.With(mlog.Int64s("compact from", compactFromSegIDs), mlog.Int64s("compact to", compactToSegIDs))
 	log.Debug(m.ctx, "meta update: prepare for meta mutation - complete")
 
 	compactToInfos := lo.Map(compactToSegInfos, func(info *SegmentInfo, _ int) *datapb.SegmentInfo {
@@ -2443,7 +2443,7 @@ func (m *meta) completeMixCompactionMutation(
 		)
 	}
 
-	log = log.With(mlog.Int64s("compactFrom", compactFromSegIDs))
+	log = mlog.With(mlog.Int64s("compactFrom", compactFromSegIDs))
 
 	if t.GetSchema() == nil {
 		return nil, nil, merr.WrapErrIllegalCompactionPlan("mix compaction task schema is nil")
@@ -2508,7 +2508,7 @@ func (m *meta) completeMixCompactionMutation(
 		// metrics mutation for compactTo segments
 		metricMutation.addNewSeg(compactToSegmentInfo.GetState(), compactToSegmentInfo.GetLevel(), compactToSegmentInfo.GetIsSorted(), compactToSegmentInfo.GetStorageVersion(), segmentMetricFormatLabel(compactToSegmentInfo), compactToSegmentInfo.GetNumOfRows())
 
-		log.Info(m.ctx, "Add a new compactTo segment",
+		mlog.Info(m.ctx, "Add a new compactTo segment",
 			mlog.Int64("compactTo", compactToSegmentInfo.GetID()),
 			mlog.Int64("compactTo segment numRows", compactToSegmentInfo.GetNumOfRows()),
 			mlog.Int("binlog count", len(compactToSegmentInfo.GetBinlogs())),
@@ -2520,7 +2520,7 @@ func (m *meta) completeMixCompactionMutation(
 		compactToSegments = append(compactToSegments, compactToSegmentInfo)
 	}
 
-	log.Debug(m.ctx, "meta update: prepare for meta mutation - complete")
+	mlog.Debug(m.ctx, "meta update: prepare for meta mutation - complete")
 	compactFromInfos := lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *datapb.SegmentInfo {
 		return info.SegmentInfo
 	})
@@ -2536,11 +2536,11 @@ func (m *meta) completeMixCompactionMutation(
 
 	// alter compactTo before compactFrom segments to avoid data lost if service crash during AlterSegments
 	if err := m.catalog.AlterSegments(m.ctx, compactToInfos, binlogs...); err != nil {
-		log.Warn(m.ctx, "fail to alter compactTo segments", mlog.Err(err))
+		mlog.Warn(m.ctx, "fail to alter compactTo segments", mlog.Err(err))
 		return nil, nil, err
 	}
 	if err := m.catalog.AlterSegments(m.ctx, compactFromInfos); err != nil {
-		log.Warn(m.ctx, "fail to alter compactFrom segments", mlog.Err(err))
+		mlog.Warn(m.ctx, "fail to alter compactFrom segments", mlog.Err(err))
 		return nil, nil, err
 	}
 	lo.ForEach(compactFromSegInfos, func(info *SegmentInfo, _ int) {
@@ -2550,7 +2550,7 @@ func (m *meta) completeMixCompactionMutation(
 		m.segments.SetSegment(info.GetID(), info)
 	})
 
-	log.Info(m.ctx, "meta update: alter in memory meta after compaction - complete")
+	mlog.Info(m.ctx, "meta update: alter in memory meta after compaction - complete")
 	return compactToSegments, metricMutation, nil
 }
 
@@ -3056,10 +3056,10 @@ func isFlushState(state commonpb.SegmentState) bool {
 // updateSegStateAndPrepareMetrics updates a segment's in-memory state and prepare for the corresponding metric update.
 func updateSegStateAndPrepareMetrics(segToUpdate *SegmentInfo, targetState commonpb.SegmentState, metricMutation *segMetricMutation) {
 	mlog.Debug(context.TODO(), "updating segment state and updating metrics",
-		zap.Int64("segmentID", segToUpdate.GetID()),
-		zap.String("old state", segToUpdate.GetState().String()),
-		zap.String("new state", targetState.String()),
-		zap.Int64("# of rows", segToUpdate.GetNumOfRows()))
+		mlog.Int64("segmentID", segToUpdate.GetID()),
+		mlog.String("old state", segToUpdate.GetState().String()),
+		mlog.String("new state", targetState.String()),
+		mlog.Int64("# of rows", segToUpdate.GetNumOfRows()))
 	metricMutation.append(segToUpdate.GetState(), targetState, segToUpdate.GetLevel(), segToUpdate.GetIsSorted(), segToUpdate.GetStorageVersion(), segmentMetricFormatLabel(segToUpdate), segToUpdate.GetNumOfRows())
 	segToUpdate.State = targetState
 	if targetState == commonpb.SegmentState_Dropped {
@@ -3229,7 +3229,7 @@ func (m *meta) completeSortCompactionMutation(
 	} else {
 		segment.State = commonpb.SegmentState_Dropped
 		segment.DroppedAt = uint64(time.Now().UnixNano())
-		log.Info(m.ctx, "drop segment due to 0 rows", mlog.FieldSegmentID(segment.GetID()))
+		mlog.Info(m.ctx, "drop segment due to 0 rows", mlog.FieldSegmentID(segment.GetID()))
 	}
 
 	cloned := oldSegment.Clone()
@@ -3238,20 +3238,20 @@ func (m *meta) completeSortCompactionMutation(
 
 	updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
 
-	log = log.With(mlog.Int64s("compactFrom", []int64{oldSegment.GetID()}), mlog.Int64("compactTo", segment.GetID()))
+	log = mlog.With(mlog.Int64s("compactFrom", []int64{oldSegment.GetID()}), mlog.Int64("compactTo", segment.GetID()))
 
-	log.Info(m.ctx, "meta update: prepare for complete stats mutation - complete",
+	mlog.Info(m.ctx, "meta update: prepare for complete stats mutation - complete",
 		mlog.Int64("num rows", segment.GetNumOfRows()),
 		mlog.Int64("segment size", segment.getSegmentSize()),
 		mlog.Int64s("expirQuantiles", segment.GetExpirQuantiles()))
 	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo, segment.SegmentInfo}, metastore.BinlogsIncrement{Segment: segment.SegmentInfo}); err != nil {
-		log.Warn(m.ctx, "fail to alter segments and new segment", mlog.Err(err))
+		mlog.Warn(m.ctx, "fail to alter segments and new segment", mlog.Err(err))
 		return nil, nil, err
 	}
 
 	m.segments.SetSegment(oldSegment.GetID(), cloned)
 	m.segments.SetSegment(segment.GetID(), segment)
-	log.Info(m.ctx, "meta update: alter in memory meta after compaction - complete")
+	mlog.Info(m.ctx, "meta update: alter in memory meta after compaction - complete")
 	return []*SegmentInfo{segment}, metricMutation, nil
 }
 
@@ -3284,7 +3284,7 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	// Re-validate segment health to prevent race condition with drop collection
 	// between ValidateSegmentStateBeforeCompleteCompactionMutation and here
 	if !isSegmentHealthy(oldSegment) {
-		log.Warn(m.ctx, "input segment was dropped during compaction mutation",
+		mlog.Warn(m.ctx, "input segment was dropped during compaction mutation",
 			mlog.Int64("planID", t.GetPlanID()),
 			mlog.FieldSegmentID(segmentID),
 			mlog.String("state", oldSegment.GetState().String()))
@@ -3337,7 +3337,7 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	cloned.Binlogs = resultSegment.GetInsertLogs()
 	if newSchemaVersion > cloned.GetSchemaVersion() {
 		cloned.SchemaVersion = newSchemaVersion
-		log.Info(m.ctx, "meta update: update schema version for schema bump compaction",
+		mlog.Info(m.ctx, "meta update: update schema version for schema bump compaction",
 			mlog.FieldSegmentID(segmentID),
 			mlog.Int32("oldSchemaVersion", oldSegment.GetSchemaVersion()),
 			mlog.Int32("newSchemaVersion", newSchemaVersion))
@@ -3354,23 +3354,23 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 		Segment: cloned.SegmentInfo,
 	}
 
-	log = log.With(mlog.FieldSegmentID(segmentID),
+	log = mlog.With(mlog.FieldSegmentID(segmentID),
 		mlog.Int32("oldSchemaVersion", oldSegment.GetSchemaVersion()),
 		mlog.Int32("newSchemaVersion", cloned.GetSchemaVersion()),
 		mlog.Int("newInsertLogsCount", len(resultSegment.GetInsertLogs())))
 
-	log.Info(m.ctx, "meta update: prepare for complete schema bump compaction mutation - complete",
+	mlog.Info(m.ctx, "meta update: prepare for complete schema bump compaction mutation - complete",
 		mlog.Int64("num rows", cloned.GetNumOfRows()))
 
 	// Save to catalog
 	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo}, binlogsIncrement); err != nil {
-		log.Warn(m.ctx, "fail to alter segment for schema bump compaction", mlog.Err(err))
+		mlog.Warn(m.ctx, "fail to alter segment for schema bump compaction", mlog.Err(err))
 		return nil, nil, err
 	}
 
 	// Update in-memory meta
 	m.segments.SetSegment(segmentID, cloned)
-	log.Info(m.ctx, "meta update: alter in memory meta after schema bump compaction - complete")
+	mlog.Info(m.ctx, "meta update: alter in memory meta after schema bump compaction - complete")
 
 	return []*SegmentInfo{cloned}, metricMutation, nil
 }
@@ -3432,23 +3432,23 @@ func (m *meta) completeBumpSchemaVersionReplacementMutation(
 	}
 
 	binlogsIncrement := metastore.BinlogsIncrement{Segment: newSegment.SegmentInfo}
-	log = log.With(
+	log = mlog.With(
 		mlog.Int64("oldSegmentID", oldSegment.GetID()),
 		mlog.Int64("newSegmentID", newSegment.GetID()),
 		mlog.Int32("oldSchemaVersion", oldSegment.GetSchemaVersion()),
 		mlog.Int32("newSchemaVersion", newSegment.GetSchemaVersion()),
 		mlog.Int("newInsertLogsCount", len(resultSegment.GetInsertLogs())),
 	)
-	log.Info(m.ctx, "meta update: prepare replacement for schema bump full rewrite", mlog.Int64("num rows", newSegment.GetNumOfRows()))
+	mlog.Info(m.ctx, "meta update: prepare replacement for schema bump full rewrite", mlog.Int64("num rows", newSegment.GetNumOfRows()))
 
 	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{dropped.SegmentInfo, newSegment.SegmentInfo}, binlogsIncrement); err != nil {
-		log.Warn(m.ctx, "fail to alter replacement segments for schema bump compaction", mlog.Err(err))
+		mlog.Warn(m.ctx, "fail to alter replacement segments for schema bump compaction", mlog.Err(err))
 		return nil, nil, err
 	}
 
 	m.segments.SetSegment(dropped.GetID(), dropped)
 	m.segments.SetSegment(newSegment.GetID(), newSegment)
-	log.Info(m.ctx, "meta update: alter in memory meta after schema bump full rewrite replacement - complete")
+	mlog.Info(m.ctx, "meta update: alter in memory meta after schema bump full rewrite replacement - complete")
 	return []*SegmentInfo{newSegment}, metricMutation, nil
 }
 

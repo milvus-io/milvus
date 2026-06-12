@@ -62,7 +62,7 @@ func IncreaseVersion(version int64) SegmentAction {
 				return true
 			}
 		}
-		log.Warn(context.TODO(), "segment version cannot go backwards, skip update")
+		mlog.Warn(context.TODO(), "segment version cannot go backwards, skip update")
 		return false
 	}
 }
@@ -672,9 +672,9 @@ func (mgr *segmentManager) DetachStreaming(ctx context.Context, segmentID typeut
 	if mgr.removeSegmentWithType(SegmentTypeGrowing, segmentID) != nil {
 		removeGrowing = 1
 	}
-	log.Ctx(ctx).Info("detached segment from active segment manager",
-		zap.Int64("segmentID", segmentID),
-		zap.Int("growingCount", removeGrowing))
+	mlog.Info(ctx, "detached segment from active segment manager",
+		mlog.Int64("segmentID", segmentID),
+		mlog.Int("growingCount", removeGrowing))
 	return removeGrowing
 }
 

@@ -217,7 +217,7 @@ func (c *copySegmentChecker) LogJobStats(jobs []CopySegmentJob) {
 		metrics.CopySegmentJobs.WithLabelValues(state).Set(float64(num))
 	}
 	if len(jobs) > 0 {
-		log.Info("copy segment job stats", zap.Any("stateNum", stateNum))
+		mlog.Info(c.ctx, "copy segment job stats", mlog.Any("stateNum", stateNum))
 	}
 }
 
@@ -250,9 +250,9 @@ func (c *copySegmentChecker) LogTaskStats() {
 	metrics.CopySegmentTasks.WithLabelValues(datapb.CopySegmentTaskState_CopySegmentTaskFailed.String()).Set(float64(failed))
 
 	if len(tasks) > 0 {
-		log.Info("copy segment task stats",
-			zap.Int("pending", pending), zap.Int("inProgress", inProgress),
-			zap.Int("completed", completed), zap.Int("failed", failed))
+		mlog.Info(c.ctx, "copy segment task stats",
+			mlog.Int("pending", pending), mlog.Int("inProgress", inProgress),
+			mlog.Int("completed", completed), mlog.Int("failed", failed))
 	}
 }
 
