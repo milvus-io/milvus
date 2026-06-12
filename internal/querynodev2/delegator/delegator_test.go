@@ -189,6 +189,7 @@ func (s *DelegatorSuite) SetupTest() {
 }
 
 func (s *DelegatorSuite) TearDownTest() {
+	function.ReleaseFunctionRunners(s.collectionID, s.vchannelName)
 	s.delegator.Close()
 	s.delegator = nil
 }
@@ -1496,6 +1497,16 @@ func (s *DelegatorSuite) ResetDelegator() {
 	s.delegator.Close()
 	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 	s.Require().NoError(err)
+	s.allocFunctionRunnersForTest()
+}
+
+func (s *DelegatorSuite) allocFunctionRunnersForTest() {
+	function.ReleaseFunctionRunners(s.collectionID, s.vchannelName)
+	sd := s.delegator.(*shardDelegator)
+	errCh := function.AllocFunctionRunners(s.collectionID, s.vchannelName, sd.collection.Schema())
+	if errCh != nil {
+		s.Require().NoError(<-errCh)
+	}
 }
 
 func (s *DelegatorSuite) nextSchemaVersionLoadMeta() *querypb.LoadMetaInfo {
@@ -1554,6 +1565,19 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 
 		result, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
 			FieldId:     100,
+			Placeholder: [][]byte{[]byte("test doc")},
+		})
+		s.Require().NoError(err)
+		s.Equal(2, len(result[0].GetTokens()))
+	})
+
+	s.Run("standalone field analyzer", func() {
+		err := s.manager.Collection.PutOrRef(s.collectionID, newFunctionRuntimeTestSchema(), nil, s.nextSchemaVersionLoadMeta())
+		s.Require().NoError(err)
+		s.ResetDelegator()
+
+		result, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+			FieldId:     103,
 			Placeholder: [][]byte{[]byte("test doc")},
 		})
 		s.Require().NoError(err)
@@ -1738,6 +1762,29 @@ func (s *DelegatorSuite) TestGetHighlight() {
 		s.Require().NoError(err)
 		s.Require().Equal(2, len(result))
 		// Check that we got highlight results
+		s.Require().NotNil(result[0].Fragments)
+		s.Require().NotNil(result[1].Fragments)
+	})
+
+	s.Run("highlight with standalone analyzer", func() {
+		err := s.manager.Collection.PutOrRef(s.collectionID, newFunctionRuntimeTestSchema(), nil, s.nextSchemaVersionLoadMeta())
+		s.Require().NoError(err)
+		s.ResetDelegator()
+
+		result, err := s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
+			Topks: []int64{2},
+			Tasks: []*querypb.HighlightTask{
+				{
+					FieldId:       103,
+					FieldName:     "standalone_text",
+					Texts:         []string{"test", "this is a test document", "another test case"},
+					SearchTextNum: 1,
+					CorpusTextNum: 2,
+				},
+			},
+		})
+		s.Require().NoError(err)
+		s.Require().Equal(2, len(result))
 		s.Require().NotNil(result[0].Fragments)
 		s.Require().NotNil(result[1].Fragments)
 	})
@@ -2114,32 +2161,32 @@ func newMinHashFunctionSchema() *schemapb.FunctionSchema {
 	}
 }
 
-func TestBuildFunctionRuntimeStateAddsBM25AndAnalyzerRunners(t *testing.T) {
+func TestBuildFunctionRuntimeStateAddsBM25FunctionType(t *testing.T) {
 	paramtable.Init()
 	schema := newFunctionRuntimeTestSchema(newBM25FunctionSchema())
 
 	state, err := buildFunctionRuntimeState(schema)
 	require.NoError(t, err)
-	defer state.Close()
 
-	require.Contains(t, state.functionRunners, int64(102))
-	assert.Equal(t, schemapb.FunctionType_BM25, state.functionFieldType[102])
-	require.Contains(t, state.analyzerRunners, int64(101))
-	require.Contains(t, state.analyzerRunners, int64(103))
-	assert.Same(t, state.functionRunners[102], state.analyzerRunners[101])
+	runnerCount, functionTypeCount, analyzerCount := state.counts()
+	assert.Equal(t, 0, runnerCount)
+	assert.Equal(t, 1, functionTypeCount)
+	assert.Equal(t, 0, analyzerCount)
+	assert.True(t, state.hasFunctionType(102, schemapb.FunctionType_BM25))
 }
 
-func TestBuildFunctionRuntimeStateAddsMinHashRunner(t *testing.T) {
+func TestBuildFunctionRuntimeStateAddsMinHashFunctionType(t *testing.T) {
 	paramtable.Init()
 	schema := newFunctionRuntimeTestSchema(newMinHashFunctionSchema())
 
 	state, err := buildFunctionRuntimeState(schema)
 	require.NoError(t, err)
-	defer state.Close()
 
-	require.Contains(t, state.functionRunners, int64(104))
-	assert.Equal(t, schemapb.FunctionType_MinHash, state.functionFieldType[104])
-	assert.Contains(t, state.analyzerRunners, int64(101))
+	runnerCount, functionTypeCount, analyzerCount := state.counts()
+	assert.Equal(t, 0, runnerCount)
+	assert.Equal(t, 1, functionTypeCount)
+	assert.Equal(t, 0, analyzerCount)
+	assert.True(t, state.hasFunctionType(104, schemapb.FunctionType_MinHash))
 }
 
 func TestBM25FunctionSetAdditiveValidation(t *testing.T) {
@@ -2189,8 +2236,6 @@ func TestUpdateSchemaRejectsNonAdditiveBM25FunctionChange(t *testing.T) {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
 	workerManager := cluster.NewMockManager(t)
-	oldRunner := function.NewMockFunctionRunner(t)
-	oldRunner.EXPECT().Close().Maybe()
 	oldSchema := newFunctionRuntimeTestSchema(newBM25FunctionSchema())
 	oldOracle := NewIDFOracle("test-channel", oldSchema.GetFunctions())
 	sd := &shardDelegator{
@@ -2201,9 +2246,7 @@ func TestUpdateSchemaRejectsNonAdditiveBM25FunctionChange(t *testing.T) {
 		distribution:  NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
 		workerManager: workerManager,
 		functionState: &functionRuntimeState{
-			functionRunners:   map[int64]function.FunctionRunner{102: oldRunner},
 			functionFieldType: map[int64]schemapb.FunctionType{102: schemapb.FunctionType_BM25},
-			analyzerRunners:   map[int64]function.Analyzer{},
 		},
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
 		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
@@ -2217,7 +2260,7 @@ func TestUpdateSchemaRejectsNonAdditiveBM25FunctionChange(t *testing.T) {
 	err := sd.UpdateSchema(context.Background(), newFunctionRuntimeTestSchema(changed), 100)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported non-additive BM25 function schema change")
-	assert.True(t, sd.functionState.hasFunctionRunner(102))
+	assert.True(t, sd.functionState.hasFunctionType(102, schemapb.FunctionType_BM25))
 	assert.Same(t, oldOracle, sd.getIDFOracle())
 }
 
@@ -2237,9 +2280,7 @@ func TestUpdateSchemaSyncsAdditiveIDFOracleFunctions(t *testing.T) {
 		distribution:  NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
 		workerManager: workerManager,
 		functionState: &functionRuntimeState{
-			functionRunners:   map[int64]function.FunctionRunner{},
 			functionFieldType: map[int64]schemapb.FunctionType{},
-			analyzerRunners:   map[int64]function.Analyzer{},
 		},
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
 		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
@@ -2277,9 +2318,7 @@ func TestUpdateSchemaDoesNotSyncIDFOracleWhenWorkerUpdateFails(t *testing.T) {
 		distribution:  NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
 		workerManager: workerManager,
 		functionState: &functionRuntimeState{
-			functionRunners:   map[int64]function.FunctionRunner{},
 			functionFieldType: map[int64]schemapb.FunctionType{},
-			analyzerRunners:   map[int64]function.Analyzer{},
 		},
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
 		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
@@ -2313,9 +2352,7 @@ func TestUpdateSchemaInitializesIDFOracleWhenBM25Added(t *testing.T) {
 		distribution:  NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
 		workerManager: workerManager,
 		functionState: &functionRuntimeState{
-			functionRunners:   map[int64]function.FunctionRunner{},
 			functionFieldType: map[int64]schemapb.FunctionType{},
-			analyzerRunners:   map[int64]function.Analyzer{},
 		},
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
 		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
@@ -2379,15 +2416,13 @@ func TestUpdateSchemaRefreshesCollectionBaselineForSequentialBM25Validation(t *t
 	require.Equal(t, uint64(100), sd.collection.SchemaVersion())
 }
 
-func TestUpdateSchemaSyncsFunctionRuntimeState(t *testing.T) {
+func TestUpdateSchemaSyncsFunctionRuntimeMetadata(t *testing.T) {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
 	worker := cluster.NewMockWorker(t)
 	worker.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).Return(merr.Success(), nil).Once()
 	workerManager := cluster.NewMockManager(t)
 	workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
-	oldRunner := function.NewMockFunctionRunner(t)
-	oldRunner.EXPECT().Close().Once()
 	sd := &shardDelegator{
 		collectionID:  1000,
 		vchannelName:  "test-channel",
@@ -2396,9 +2431,7 @@ func TestUpdateSchemaSyncsFunctionRuntimeState(t *testing.T) {
 		distribution:  NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
 		workerManager: workerManager,
 		functionState: &functionRuntimeState{
-			functionRunners:   map[int64]function.FunctionRunner{999: oldRunner},
 			functionFieldType: map[int64]schemapb.FunctionType{999: schemapb.FunctionType_BM25},
-			analyzerRunners:   map[int64]function.Analyzer{},
 		},
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
 		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
@@ -2414,13 +2447,9 @@ func TestUpdateSchemaSyncsFunctionRuntimeState(t *testing.T) {
 	err := sd.UpdateSchema(context.Background(), newSchema, 100)
 	require.NoError(t, err)
 
-	require.True(t, sd.functionState.hasFunctionRunner(102))
-	require.True(t, sd.functionState.hasFunctionRunner(104))
 	assert.True(t, sd.functionState.hasFunctionType(102, schemapb.FunctionType_BM25))
 	assert.True(t, sd.functionState.hasFunctionType(104, schemapb.FunctionType_MinHash))
-	require.True(t, sd.functionState.hasAnalyzerRunner(101))
-	require.True(t, sd.functionState.hasAnalyzerRunner(103))
-	assert.True(t, sd.functionState.functionRunnerAliasesAnalyzer(102, 101))
+	assert.False(t, sd.functionState.hasFunctionType(999, schemapb.FunctionType_BM25))
 }
 
 func TestDelegatorSearchBM25InvalidMetricType(t *testing.T) {
@@ -2793,12 +2822,35 @@ func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
 		Functions: []*schemapb.FunctionSchema{minHashFunctionSchema},
 	}
 
-	s.Run("init function failed", func() {
+	s.Run("alloc function failed", func() {
 		manager := segments.NewManager()
 		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
-		s.Error(err)
+		delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
+		s.Require().NoError(err)
+		defer delegator.Close()
+
+		function.ReleaseFunctionRunners(s.collectionID, s.vchannelName)
+		errCh := function.AllocFunctionRunners(s.collectionID, s.vchannelName, schema1)
+		s.Require().NotNil(errCh)
+		s.NoError(<-errCh)
+
+		changed, err := function.FillFunctionData(context.Background(), s.collectionID, schema1, &msgpb.InsertRequest{
+			FieldsData: []*schemapb.FieldData{{
+				Type:    schemapb.DataType_VarChar,
+				FieldId: 102,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{Data: []string{"test minhash data"}},
+						},
+					},
+				},
+			}},
+			NumRows: 1,
+		})
+		s.False(changed)
+		s.ErrorContains(err, "minhash function should only have one output field")
 	})
 
 	s.Run("init function ", func() {

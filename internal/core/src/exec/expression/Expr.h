@@ -958,10 +958,20 @@ class SegmentExpr : public Expr {
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 i == current_data_chunk_ ? current_data_chunk_pos_ : 0;
-            int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
+            int64_t size;
+            if (segment_->is_chunked()) {
+                size = segment_->chunk_size(field_id_, i) - data_pos;
+            } else {
+                size = (i == num_data_chunk_ - 1)
+                           ? (active_count_ % size_per_chunk_ == 0
+                                  ? size_per_chunk_ - data_pos
+                                  : active_count_ % size_per_chunk_ - data_pos)
+                           : size_per_chunk_ - data_pos;
+            }
             size = std::min(size, batch_size_ - processed_rows);
-            if (size == 0)
+            if (size <= 0) {
                 continue;
+            }
 
             auto& skip_index = segment_->GetSkipIndex();
             if ((!skip_func || !skip_func(skip_index, field_id_, i))) {
@@ -1658,139 +1668,138 @@ class SegmentExpr : public Expr {
     template <typename T>
     TargetBitmap
     ProcessChunksForValid(bool use_index) {
-        if (use_index) {
-            // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
-            // NOT ScalarIndex<ArrayView>
-            if (std::is_same_v<T, ArrayView>) {
-                auto element_type =
-                    segment_->get_schema()[field_id_].get_element_type();
-                switch (element_type) {
-                    case DataType::BOOL: {
-                        return ProcessIndexChunksForValid<bool>();
-                    }
-                    case DataType::INT8: {
-                        return ProcessIndexChunksForValid<int8_t>();
-                    }
-                    case DataType::INT16: {
-                        return ProcessIndexChunksForValid<int16_t>();
-                    }
-                    case DataType::INT32: {
-                        return ProcessIndexChunksForValid<int32_t>();
-                    }
-                    case DataType::INT64: {
-                        return ProcessIndexChunksForValid<int64_t>();
-                    }
-                    case DataType::FLOAT: {
-                        return ProcessIndexChunksForValid<float>();
-                    }
-                    case DataType::DOUBLE: {
-                        return ProcessIndexChunksForValid<double>();
-                    }
-                    case DataType::STRING:
-                    case DataType::VARCHAR: {
-                        return ProcessIndexChunksForValid<std::string>();
-                    }
-                    case DataType::GEOMETRY: {
-                        return ProcessIndexChunksForValid<std::string>();
-                    }
-                    default:
-                        ThrowInfo(DataTypeInvalid,
-                                  "unsupported element type: {}",
-                                  element_type);
-                }
-            }
-            return ProcessIndexChunksForValid<T>();
-        } else {
+        if constexpr (std::is_same_v<T, VectorArray>) {
             return ProcessDataChunksForValid<T>();
+        } else {
+            if (use_index) {
+                // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
+                // NOT ScalarIndex<ArrayView>
+                if (std::is_same_v<T, ArrayView>) {
+                    auto element_type =
+                        segment_->get_schema()[field_id_].get_element_type();
+                    switch (element_type) {
+                        case DataType::BOOL: {
+                            return ProcessIndexChunksForValid<bool>();
+                        }
+                        case DataType::INT8: {
+                            return ProcessIndexChunksForValid<int8_t>();
+                        }
+                        case DataType::INT16: {
+                            return ProcessIndexChunksForValid<int16_t>();
+                        }
+                        case DataType::INT32: {
+                            return ProcessIndexChunksForValid<int32_t>();
+                        }
+                        case DataType::INT64: {
+                            return ProcessIndexChunksForValid<int64_t>();
+                        }
+                        case DataType::FLOAT: {
+                            return ProcessIndexChunksForValid<float>();
+                        }
+                        case DataType::DOUBLE: {
+                            return ProcessIndexChunksForValid<double>();
+                        }
+                        case DataType::STRING:
+                        case DataType::VARCHAR: {
+                            return ProcessIndexChunksForValid<std::string>();
+                        }
+                        case DataType::GEOMETRY: {
+                            return ProcessIndexChunksForValid<std::string>();
+                        }
+                        default:
+                            ThrowInfo(DataTypeInvalid,
+                                      "unsupported element type: {}",
+                                      element_type);
+                    }
+                }
+                return ProcessIndexChunksForValid<T>();
+            } else {
+                return ProcessDataChunksForValid<T>();
+            }
         }
     }
 
     template <typename T>
     TargetBitmap
     ProcessChunksForValidByOffsets(bool use_index, const OffsetVector& input) {
-        typedef std::
-            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-                IndexInnerType;
-        using Index = index::ScalarIndex<IndexInnerType>;
         auto batch_size = input.size();
         TargetBitmap valid_result(batch_size);
         valid_result.set();
 
-        if (use_index) {
-            // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
-            // NOT ScalarIndex<ArrayView>
-            if (std::is_same_v<T, ArrayView>) {
-                auto element_type =
-                    segment_->get_schema()[field_id_].get_element_type();
-                switch (element_type) {
-                    case DataType::BOOL: {
-                        return ProcessChunksForValidByOffsets<bool>(use_index,
-                                                                    input);
-                    }
-                    case DataType::INT8: {
-                        return ProcessChunksForValidByOffsets<int8_t>(use_index,
-                                                                      input);
-                    }
-                    case DataType::INT16: {
-                        return ProcessChunksForValidByOffsets<int16_t>(
-                            use_index, input);
-                    }
-                    case DataType::INT32: {
-                        return ProcessChunksForValidByOffsets<int32_t>(
-                            use_index, input);
-                    }
-                    case DataType::INT64: {
-                        return ProcessChunksForValidByOffsets<int64_t>(
-                            use_index, input);
-                    }
-                    case DataType::FLOAT: {
-                        return ProcessChunksForValidByOffsets<float>(use_index,
-                                                                     input);
-                    }
-                    case DataType::DOUBLE: {
-                        return ProcessChunksForValidByOffsets<double>(use_index,
-                                                                      input);
-                    }
-                    case DataType::STRING:
-                    case DataType::VARCHAR: {
-                        return ProcessChunksForValidByOffsets<std::string>(
-                            use_index, input);
-                    }
-                    default:
-                        ThrowInfo(DataTypeInvalid,
-                                  "unsupported element type: {}",
-                                  element_type);
-                }
-            }
-            auto scalar_index =
-                dynamic_cast<const Index*>(pinned_index_[0].get());
-            auto* index_ptr = const_cast<Index*>(scalar_index);
-            const auto& res = index_ptr->IsNotNull();
-            for (auto i = 0; i < batch_size; ++i) {
-                valid_result[i] = res[input[i]];
-            }
+        auto apply_field_valid_data = [&]() {
+            std::vector<int64_t> offsets(input.begin(), input.end());
+            segment_->ApplyFieldValidDataByOffsets(
+                op_ctx_,
+                field_id_,
+                offsets.data(),
+                batch_size,
+                TargetBitmapView(valid_result));
+        };
+
+        if constexpr (std::is_same_v<T, VectorArray>) {
+            apply_field_valid_data();
         } else {
-            for (auto i = 0; i < batch_size; ++i) {
-                auto offset = input[i];
-                auto [chunk_id,
-                      chunk_offset] = [&]() -> std::pair<int64_t, int64_t> {
-                    if (segment_->type() == SegmentType::Growing) {
-                        return {offset / size_per_chunk_,
-                                offset % size_per_chunk_};
-                    } else if (segment_->is_chunked()) {
-                        return segment_->get_chunk_by_offset(field_id_, offset);
-                    } else {
-                        return {0, offset};
+            typedef std::conditional_t<std::is_same_v<T, std::string_view>,
+                                       std::string,
+                                       T>
+                IndexInnerType;
+            using Index = index::ScalarIndex<IndexInnerType>;
+
+            if (use_index) {
+                // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
+                // NOT ScalarIndex<ArrayView>
+                if (std::is_same_v<T, ArrayView>) {
+                    auto element_type =
+                        segment_->get_schema()[field_id_].get_element_type();
+                    switch (element_type) {
+                        case DataType::BOOL: {
+                            return ProcessChunksForValidByOffsets<bool>(
+                                use_index, input);
+                        }
+                        case DataType::INT8: {
+                            return ProcessChunksForValidByOffsets<int8_t>(
+                                use_index, input);
+                        }
+                        case DataType::INT16: {
+                            return ProcessChunksForValidByOffsets<int16_t>(
+                                use_index, input);
+                        }
+                        case DataType::INT32: {
+                            return ProcessChunksForValidByOffsets<int32_t>(
+                                use_index, input);
+                        }
+                        case DataType::INT64: {
+                            return ProcessChunksForValidByOffsets<int64_t>(
+                                use_index, input);
+                        }
+                        case DataType::FLOAT: {
+                            return ProcessChunksForValidByOffsets<float>(
+                                use_index, input);
+                        }
+                        case DataType::DOUBLE: {
+                            return ProcessChunksForValidByOffsets<double>(
+                                use_index, input);
+                        }
+                        case DataType::STRING:
+                        case DataType::VARCHAR: {
+                            return ProcessChunksForValidByOffsets<std::string>(
+                                use_index, input);
+                        }
+                        default:
+                            ThrowInfo(DataTypeInvalid,
+                                      "unsupported element type: {}",
+                                      element_type);
                     }
-                }();
-                auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id);
-                auto chunk = pw.get();
-                const bool* valid_data = chunk.valid_data();
-                if (valid_data != nullptr) {
-                    valid_result[i] = valid_data[chunk_offset];
-                } else {
-                    break;
                 }
+                auto scalar_index =
+                    dynamic_cast<const Index*>(pinned_index_[0].get());
+                auto* index_ptr = const_cast<Index*>(scalar_index);
+                const auto& res = index_ptr->IsNotNull();
+                for (auto i = 0; i < batch_size; ++i) {
+                    valid_result[i] = res[input[i]];
+                }
+            } else {
+                apply_field_valid_data();
             }
         }
         return valid_result;
@@ -1822,35 +1831,12 @@ class SegmentExpr : public Expr {
             size = std::min(size, batch_size_ - processed_size);
             if (size == 0)
                 continue;  //do not go empty-loop at the bound of the chunk
-            bool access_sealed_variable_column = false;
-            if constexpr (std::is_same_v<T, std::string_view> ||
-                          std::is_same_v<T, Json> ||
-                          std::is_same_v<T, ArrayView>) {
-                if (segment_->type() == SegmentType::Sealed) {
-                    auto pw = segment_->get_batch_views<T>(
-                        op_ctx_, field_id_, i, data_pos, size);
-                    auto [data_vec, valid_data] = pw.get();
-                    ApplyValidData(valid_data.data(),
-                                   valid_result + processed_size,
-                                   valid_result + processed_size,
-                                   size);
-                    access_sealed_variable_column = true;
-                }
-            }
-
-            if (!access_sealed_variable_column) {
-                auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
-                auto chunk = pw.get();
-                const bool* valid_data = chunk.valid_data();
-                if (valid_data == nullptr) {
-                    return valid_result;
-                }
-                valid_data += data_pos;
-                ApplyValidData(valid_data,
-                               valid_result + processed_size,
-                               valid_result + processed_size,
-                               size);
-            }
+            segment_->ApplyFieldValidData(op_ctx_,
+                                          field_id_,
+                                          i,
+                                          data_pos,
+                                          size,
+                                          valid_result + processed_size);
 
             processed_size += size;
             if (processed_size >= batch_size_) {

@@ -602,3 +602,21 @@ func TestHandlers(t *testing.T) {
 		})
 	}
 }
+
+func TestLowLevelSearchRejectSearchAggregation(t *testing.T) {
+	h := NewHandlers(&mockProxyComponent{})
+	testEngine := gin.New()
+	h.RegisterRoutesTo(testEngine)
+
+	for _, body := range [][]byte{
+		[]byte(`{"collection_name":"book","searchAggregation":{"fields":["brand"],"size":1}}`),
+		[]byte(`{"collection_name":"book","search_aggregation":{"fields":["brand"],"size":1}}`),
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/search", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "searchAggregation is not supported for low-level REST search")
+	}
+}

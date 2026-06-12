@@ -706,9 +706,6 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             auto* group_chunk = ca->get_cell_of(cids[i]);
             auto chunk = group_chunk->GetChunk(field_id_);
             auto offset = offsets_in_chunk[i];
-            if (field_meta_.is_nullable()) {
-                offset = chunk->PhysicalOffsetOf(offset);
-            }
             auto array = static_cast<VectorArrayChunk*>(chunk.get())
                              ->View(offset)
                              .output_data();

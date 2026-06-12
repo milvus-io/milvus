@@ -1007,7 +1007,8 @@ func TestCreateIndexVanillaFaissGeneric(t *testing.T) {
 	queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).
 		WithANNSField(common.DefaultFloatVecFieldName).
-		WithSearchParam("nprobe", "8").
+		// nprobe=nlist (IVF64) scans all lists so topK results are returned deterministically (#50392)
+		WithSearchParam("nprobe", "64").
 		WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)

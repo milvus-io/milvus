@@ -1493,6 +1493,439 @@ class TestUpsertVectorNegative(TestBase):
         assert "fail to deal the insert data" in rsp["message"]
 
 
+class TestSearchAggregationVector(TestBase):
+    def _create_search_aggregation_collection(self):
+        name = gen_collection_name()
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": True,
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "category", "dataType": "VarChar", "elementTypeParams": {"max_length": "64"}},
+                    {"fieldName": "brand", "dataType": "VarChar", "elementTypeParams": {"max_length": "64"}},
+                    {"fieldName": "color", "dataType": "VarChar", "elementTypeParams": {"max_length": "64"}},
+                    {"fieldName": "price", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "rating", "dataType": "Double", "elementTypeParams": {}},
+                    {"fieldName": "in_stock", "dataType": "Bool", "elementTypeParams": {}},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}},
+                ],
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector", "indexType": "FLAT", "metricType": "L2"}],
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp["code"] == 0
+
+        brands = ["acme", "best", "core"]
+        colors = ["red", "blue"]
+        categories = ["fiction", "science"]
+        data = []
+        for i in range(12):
+            data.append(
+                {
+                    "book_id": i,
+                    "category": categories[i // 6],
+                    "brand": brands[i % len(brands)],
+                    "color": colors[i % len(colors)],
+                    "price": i + 1,
+                    "rating": float((i % 5) + 1),
+                    "in_stock": i % 4 != 0,
+                    "vector": [float(i) / 100, float(i) / 100],
+                }
+            )
+        rsp = self.vector_client.vector_insert({"collectionName": name, "data": data})
+        assert rsp["code"] == 0
+        assert rsp["data"]["insertCount"] == len(data)
+        Collection(name).flush()
+        return name, data
+
+    @staticmethod
+    def _key_value(bucket, field_name):
+        for key in bucket["key"]:
+            if key["fieldName"] == field_name:
+                return key["value"]
+        raise AssertionError(f"field {field_name} not found in bucket key {bucket['key']}")
+
+    @staticmethod
+    def _assert_aggregation_response(rsp):
+        assert rsp["code"] == 0
+        assert "aggTopks" in rsp, rsp
+        assert "data" in rsp, rsp
+
+    @pytest.mark.L0
+    def test_search_aggregation_minimal_parameters(self):
+        name, _ = self._create_search_aggregation_collection()
+
+        rsp = self.vector_client.vector_search(
+            {
+                "collectionName": name,
+                "data": [[0.0, 0.0], [0.11, 0.11]],
+                "annsField": "vector",
+                "limit": 12,
+                "outputFields": ["brand"],
+                "searchAggregation": {"fields": ["brand"], "size": 1},
+            }
+        )
+        self._assert_aggregation_response(rsp)
+        assert rsp["aggTopks"] == [1, 1]
+        assert len(rsp["data"]) == 2
+        for query_result in rsp["data"]:
+            buckets = query_result["buckets"]
+            assert len(buckets) == 1
+            assert buckets[0]["key"][0]["fieldName"] == "brand"
+            assert int(buckets[0]["count"]) > 0
+            assert buckets[0]["metrics"] == {}
+            assert buckets[0]["hits"] == []
+
+    @pytest.mark.L0
+    def test_search_aggregation(self):
+        name = gen_collection_name()
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": True,
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "brand", "dataType": "VarChar", "elementTypeParams": {"max_length": "64"}},
+                    {"fieldName": "price", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}},
+                ],
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector", "indexType": "FLAT", "metricType": "L2"}],
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp["code"] == 0
+
+        brands = ["acme", "best", "core"]
+        data = []
+        for i in range(12):
+            data.append(
+                {
+                    "book_id": i,
+                    "brand": brands[i % len(brands)],
+                    "price": i + 1,
+                    "vector": [float(i) / 100, float(i) / 100],
+                }
+            )
+        rsp = self.vector_client.vector_insert({"collectionName": name, "data": data})
+        assert rsp["code"] == 0
+        assert rsp["data"]["insertCount"] == 12
+        Collection(name).flush()
+
+        search_payload = {
+            "collectionName": name,
+            "data": [[0.0, 0.0]],
+            "annsField": "vector",
+            "limit": 10,
+            "outputFields": ["brand", "price"],
+            "searchAggregation": {
+                "fields": ["brand"],
+                "size": 3,
+                "metrics": {
+                    "doc_count": {"op": "count", "fieldName": "*"},
+                    "total_price": {"op": "sum", "fieldName": "price"},
+                },
+                "order": [{"key": "_key", "direction": "asc"}],
+                "topHits": {"size": 2, "sort": [{"fieldName": "_score", "direction": "asc"}]},
+            },
+        }
+        rsp = self.vector_client.vector_search(search_payload)
+        assert rsp["code"] == 0
+        assert rsp["aggTopks"] == [3]
+        assert len(rsp["data"]) == 1
+        buckets = rsp["data"][0]["buckets"]
+        assert len(buckets) == 3
+
+        for bucket in buckets:
+            key = bucket["key"][0]
+            brand = key["value"]
+            assert key["fieldName"] == "brand"
+            assert brand in brands
+            assert int(bucket["count"]) > 0
+            assert int(bucket["metrics"]["doc_count"]) == int(bucket["count"])
+            assert int(bucket["metrics"]["total_price"]) > 0
+            assert len(bucket["hits"]) <= 2
+            hit_prices = []
+            for hit in bucket["hits"]:
+                assert hit["brand"] == brand
+                assert "book_id" in hit
+                assert "distance" in hit
+                price = int(hit["price"])
+                assert price in [row["price"] for row in data if row["brand"] == brand]
+                hit_prices.append(price)
+            assert int(bucket["metrics"]["total_price"]) >= sum(hit_prices)
+
+        conflict_payloads = [
+            (
+                {
+                    "collectionName": name,
+                    "data": [[0.0, 0.0]],
+                    "annsField": "vector",
+                    "limit": 10,
+                    "offset": 1,
+                    "searchAggregation": {"fields": ["brand"], "size": 2},
+                },
+                "offset is not supported with searchAggregation",
+            ),
+            (
+                {
+                    "collectionName": name,
+                    "data": [[0.0, 0.0]],
+                    "annsField": "vector",
+                    "limit": 10,
+                    "groupingField": "brand",
+                    "searchAggregation": {"fields": ["brand"], "size": 2},
+                },
+                "groupingField/groupSize/strictGroupSize and searchAggregation cannot be used simultaneously",
+            ),
+            (
+                {
+                    "collectionName": name,
+                    "ids": [0],
+                    "searchAggregation": {"fields": ["brand"], "size": 2},
+                },
+                "ids and searchAggregation cannot be used simultaneously",
+            ),
+            (
+                {
+                    "collectionName": name,
+                    "data": [[0.0, 0.0]],
+                    "annsField": "vector",
+                    "limit": 10,
+                    "searchParams": {"offset": 1},
+                    "searchAggregation": {"fields": ["brand"], "size": 2},
+                },
+                "searchParams.offset is not supported with searchAggregation",
+            ),
+            (
+                {
+                    "collectionName": name,
+                    "data": [[0.0, 0.0]],
+                    "annsField": "vector",
+                    "limit": 10,
+                    "searchParams": {"params": {"group_by_fields": '["brand"]'}},
+                    "searchAggregation": {"fields": ["brand"], "size": 2},
+                },
+                "searchParams.group_by_field(s) and searchAggregation cannot be used simultaneously",
+            ),
+        ]
+        for conflict_payload, message in conflict_payloads:
+            rsp = self.vector_client.vector_search(conflict_payload)
+            assert rsp["code"] != 0
+            assert message in rsp["message"]
+
+        hybrid_payload = {
+            "collectionName": name,
+            "search": [{"data": [[0.0, 0.0]], "annsField": "vector", "limit": 10}],
+            "rerank": {"strategy": "rrf", "params": {}},
+            "searchAggregation": {"fields": ["brand"], "size": 2},
+        }
+        rsp = self.vector_client.vector_hybrid_search(hybrid_payload)
+        assert rsp["code"] != 0
+        assert "searchAggregation is not supported for hybrid search" in rsp["message"]
+
+        advanced_payload = {
+            "collectionName": name,
+            "search": [
+                {
+                    "data": [[0.0, 0.0]],
+                    "annsField": "vector",
+                    "limit": 10,
+                    "searchAggregation": {"fields": ["brand"], "size": 2},
+                }
+            ],
+            "rerank": {"strategy": "rrf", "params": {}},
+            "limit": 10,
+        }
+        rsp = self.vector_client.vector_advanced_search(advanced_payload)
+        assert rsp["code"] != 0
+        assert "searchAggregation is not supported for hybrid search" in rsp["message"]
+
+    @pytest.mark.L1
+    def test_search_aggregation_composite_key_metrics_order(self):
+        name, data = self._create_search_aggregation_collection()
+
+        rsp = self.vector_client.vector_search(
+            {
+                "collectionName": name,
+                "data": [[0.0, 0.0]],
+                "annsField": "vector",
+                "limit": len(data),
+                "outputFields": ["brand", "color", "price"],
+                "searchAggregation": {
+                    "fields": ["brand", "color"],
+                    "size": 6,
+                    "metrics": {
+                        "doc_count": {"op": "count", "fieldName": "*"},
+                        "avg_price": {"op": "avg", "fieldName": "price"},
+                    },
+                    "order": [{"key": "avg_price", "direction": "desc"}],
+                    "topHits": {"size": 2, "sort": [{"fieldName": "price", "direction": "asc"}]},
+                },
+            }
+        )
+        self._assert_aggregation_response(rsp)
+        assert rsp["aggTopks"] == [6]
+
+        buckets = rsp["data"][0]["buckets"]
+        assert len(buckets) == 6
+        avg_prices = [bucket["metrics"]["avg_price"] for bucket in buckets]
+        assert avg_prices == sorted(avg_prices, reverse=True)
+        for bucket in buckets:
+            brand = self._key_value(bucket, "brand")
+            color = self._key_value(bucket, "color")
+            expected_rows = [row for row in data if row["brand"] == brand and row["color"] == color]
+            expected_avg = sum(row["price"] for row in expected_rows) / len(expected_rows)
+
+            assert [key["fieldName"] for key in bucket["key"]] == ["brand", "color"]
+            assert int(bucket["count"]) == len(expected_rows)
+            assert int(bucket["metrics"]["doc_count"]) == len(expected_rows)
+            assert abs(bucket["metrics"]["avg_price"] - expected_avg) < 0.000001
+            assert len(bucket["hits"]) == 2
+            hit_prices = [int(hit["price"]) for hit in bucket["hits"]]
+            assert hit_prices == sorted(hit_prices)
+            for hit in bucket["hits"]:
+                assert hit["brand"] == brand
+                assert hit["color"] == color
+
+    @pytest.mark.L1
+    def test_search_aggregation_two_level_nested_with_filter(self):
+        name, data = self._create_search_aggregation_collection()
+        filtered = [row for row in data if row["in_stock"]]
+
+        rsp = self.vector_client.vector_search(
+            {
+                "collectionName": name,
+                "data": [[0.0, 0.0]],
+                "annsField": "vector",
+                "filter": "in_stock == true",
+                "limit": len(filtered),
+                "outputFields": ["category", "brand", "price", "rating", "in_stock"],
+                "searchAggregation": {
+                    "fields": ["category"],
+                    "size": 2,
+                    "metrics": {
+                        "item_count": {"op": "count", "fieldName": "*"},
+                        "total_price": {"op": "sum", "fieldName": "price"},
+                    },
+                    "order": [{"key": "_key", "direction": "asc"}],
+                    "topHits": {"size": 1, "sort": [{"fieldName": "_score", "direction": "asc"}]},
+                    "subAggregation": {
+                        "fields": ["brand"],
+                        "size": 3,
+                        "metrics": {"avg_rating": {"op": "avg", "fieldName": "rating"}},
+                        "order": [{"key": "avg_rating", "direction": "desc"}],
+                        "topHits": {"size": 2, "sort": [{"fieldName": "price", "direction": "asc"}]},
+                    },
+                },
+            }
+        )
+        self._assert_aggregation_response(rsp)
+        assert rsp["aggTopks"] == [2]
+
+        buckets = rsp["data"][0]["buckets"]
+        assert len(buckets) == 2
+        category_keys = [self._key_value(bucket, "category") for bucket in buckets]
+        assert category_keys == sorted(category_keys)
+        for bucket in buckets:
+            category = self._key_value(bucket, "category")
+            category_rows = [row for row in filtered if row["category"] == category]
+            assert int(bucket["count"]) == len(category_rows)
+            assert int(bucket["metrics"]["item_count"]) == len(category_rows)
+            assert int(bucket["metrics"]["total_price"]) == sum(row["price"] for row in category_rows)
+            for hit in bucket["hits"]:
+                assert hit["category"] == category
+                assert hit["in_stock"] is True
+
+            sub_groups = bucket["subGroups"]
+            assert len(sub_groups) == len({row["brand"] for row in category_rows})
+            avg_ratings = [sub_group["metrics"]["avg_rating"] for sub_group in sub_groups]
+            assert avg_ratings == sorted(avg_ratings, reverse=True)
+            for sub_group in sub_groups:
+                brand = self._key_value(sub_group, "brand")
+                brand_rows = [row for row in category_rows if row["brand"] == brand]
+                expected_avg = sum(row["rating"] for row in brand_rows) / len(brand_rows)
+                assert int(sub_group["count"]) == len(brand_rows)
+                assert abs(sub_group["metrics"]["avg_rating"] - expected_avg) < 0.000001
+                assert len(sub_group["hits"]) <= 2
+                hit_prices = [int(hit["price"]) for hit in sub_group["hits"]]
+                assert hit_prices == sorted(hit_prices)
+                for hit in sub_group["hits"]:
+                    assert hit["category"] == category
+                    assert hit["brand"] == brand
+                    assert hit["in_stock"] is True
+
+    @pytest.mark.parametrize(
+        "search_aggregation,message",
+        [
+            ({"size": 1}, "searchAggregation.fields must be non-empty"),
+            ({"fields": ["brand"], "size": 0}, "searchAggregation.size must be positive"),
+            (
+                {"fields": ["brand"], "size": 3, "searchSize": 2},
+                "searchAggregation.searchSize must be greater than or equal to size",
+            ),
+            (
+                {"fields": ["brand"], "size": 1, "metrics": {"bad": {"op": "", "fieldName": "price"}}},
+                "searchAggregation.metrics.bad.op must be non-empty",
+            ),
+            (
+                {"fields": ["brand"], "size": 1, "topHits": {"size": 0}},
+                "searchAggregation.topHits.size must be positive",
+            ),
+        ],
+    )
+    @pytest.mark.L1
+    def test_search_aggregation_reject_invalid_parameters(self, search_aggregation, message):
+        name, _ = self._create_search_aggregation_collection()
+
+        rsp = self.vector_client.vector_search(
+            {
+                "collectionName": name,
+                "data": [[0.0, 0.0]],
+                "annsField": "vector",
+                "limit": 10,
+                "searchAggregation": search_aggregation,
+            }
+        )
+        assert rsp["code"] != 0
+        assert message in rsp["message"]
+
+    @pytest.mark.L1
+    @pytest.mark.parametrize(
+        "search_aggregation,message",
+        [
+            (
+                {"fields": ["unknown_group_field"], "size": 1},
+                "unknown_group_field",
+            ),
+            (
+                {"fields": ["brand"], "size": 1, "metrics": {"bad_metric": {"op": "median", "fieldName": "price"}}},
+                "median",
+            ),
+            (
+                {"fields": ["brand"], "size": 1, "order": [{"key": "_count", "direction": "up"}]},
+                "up",
+            ),
+        ],
+    )
+    def test_search_aggregation_reject_server_validation(self, search_aggregation, message):
+        name, _ = self._create_search_aggregation_collection()
+
+        rsp = self.vector_client.vector_search(
+            {
+                "collectionName": name,
+                "data": [[0.0, 0.0]],
+                "annsField": "vector",
+                "limit": 10,
+                "searchAggregation": search_aggregation,
+            }
+        )
+        assert rsp["code"] != 0
+        assert message in rsp["message"]
+
+
 @pytest.mark.L0
 class TestSearchVector(TestBase):
     @pytest.mark.parametrize("insert_round", [1])
