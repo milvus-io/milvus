@@ -725,6 +725,7 @@ dataCoord:
     maxShardRows: 500000000 # The row count of one shard that triggers a split.
     maxNamespaceCount: 100000 # The namespace (partition) count of one shard that triggers a split.
     maxConcurrentTasks: 1 # The cluster-wide maximum number of concurrent shard split tasks.
+    relabelBatchSize: 256 # The number of segments relabeled to the target shards in one batch during shard split redistribution.
   sealPolicy:
     channel:
       # The size threshold in MB, if the total size of growing segments of each shard

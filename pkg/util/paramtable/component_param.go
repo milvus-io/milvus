@@ -5183,6 +5183,7 @@ type dataCoordConfig struct {
 	ShardSplitMaxShardRows       ParamItem `refreshable:"true"`
 	ShardSplitMaxNamespaceCount  ParamItem `refreshable:"true"`
 	ShardSplitMaxConcurrentTasks ParamItem `refreshable:"true"`
+	ShardSplitRelabelBatchSize   ParamItem `refreshable:"true"`
 	SegmentSealProportion          ParamItem `refreshable:"false"`
 	SegmentSealProportionJitter    ParamItem `refreshable:"true"`
 	SegAssignmentExpiration        ParamItem `refreshable:"false"`
@@ -5610,6 +5611,15 @@ disabling it stops new split tasks but never interrupts a task already past the 
 		Export:       true,
 	}
 	p.ShardSplitMaxConcurrentTasks.Init(base.mgr)
+
+	p.ShardSplitRelabelBatchSize = ParamItem{
+		Key:          "dataCoord.shardSplit.relabelBatchSize",
+		Version:      "2.7.0",
+		DefaultValue: "256",
+		Doc:          "The number of segments relabeled to the target shards in one batch during shard split redistribution.",
+		Export:       true,
+	}
+	p.ShardSplitRelabelBatchSize.Init(base.mgr)
 
 	p.EnableAutoCompaction = ParamItem{
 		Key:          "dataCoord.compaction.enableAutoCompaction",
