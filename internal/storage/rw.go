@@ -19,7 +19,6 @@ package storage
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
 	sio "io"
 	"path"
 	"sort"
@@ -90,7 +89,7 @@ func (o *rwOptions) validate() error {
 			return merr.WrapErrServiceInternal("storage config is nil")
 		}
 	default:
-		return merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", o.version))
+		return merr.WrapErrServiceInternalMsg("unsupported storage version %d", o.version)
 	}
 	return nil
 }
@@ -313,7 +312,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		// FIXME: add needed fields support
 		rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
 	default:
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
+		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
 	}
 	if err != nil {
 		return nil, err
@@ -418,7 +417,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			)
 		}
 	}
-	return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
+	return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
 }
 
 func NewDeltalogWriter(

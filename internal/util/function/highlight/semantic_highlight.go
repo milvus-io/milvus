@@ -21,11 +21,11 @@ package highlight
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type semanticHighlightProvider interface {
@@ -62,21 +62,21 @@ func NewSemanticHighlight(collSchema *schemapb.CollectionSchema, params []*commo
 		switch param.Key {
 		case queryKeyName:
 			if err := json.Unmarshal([]byte(param.Value), &queries); err != nil {
-				return nil, fmt.Errorf("parse queries failed, err: %v", err)
+				return nil, merr.Wrap(err, "parse queries failed")
 			}
 		case inputFieldKeyName:
 			if err := json.Unmarshal([]byte(param.Value), &inputFields); err != nil {
-				return nil, fmt.Errorf("parse input_field failed, err: %v", err)
+				return nil, merr.Wrap(err, "parse input_field failed")
 			}
 		}
 	}
 
 	if len(queries) == 0 {
-		return nil, fmt.Errorf("queries is required")
+		return nil, merr.WrapErrParameterMissingMsg("queries is required")
 	}
 
 	if len(inputFields) == 0 {
-		return nil, fmt.Errorf("input_field is required")
+		return nil, merr.WrapErrParameterMissingMsg("input_field is required")
 	}
 
 	fieldIDMap := make(map[string]*schemapb.FieldSchema)
@@ -97,13 +97,13 @@ func NewSemanticHighlight(collSchema *schemapb.CollectionSchema, params []*commo
 		if ok {
 			// schema field found
 			if field.DataType != schemapb.DataType_VarChar && field.DataType != schemapb.DataType_Text {
-				return nil, fmt.Errorf("input_field %s is not a VarChar or Text field", fieldName)
+				return nil, merr.WrapErrParameterInvalidMsg("input_field %s is not a VarChar or Text field", fieldName)
 			}
 			fieldIDs = append(fieldIDs, field.FieldID)
 		} else {
 			// field not in schema, check if dynamic field is enabled
 			if !collSchema.EnableDynamicField {
-				return nil, fmt.Errorf("input_field %s not found in schema", fieldName)
+				return nil, merr.WrapErrParameterInvalidMsg("input_field %s not found in schema", fieldName)
 			}
 			// Non-schema fields are dynamic fields
 			dynamicFieldNames = append(dynamicFieldNames, fieldName)
@@ -171,7 +171,7 @@ func (highlight *SemanticHighlight) processOneQuery(ctx context.Context, query s
 		return nil, nil, err
 	}
 	if len(highlights) != len(documents) || len(scores) != len(documents) {
-		return nil, nil, fmt.Errorf("highlights size must equal to documents size, but got highlights size [%d], scores size [%d], documents size [%d]", len(highlights), len(scores), len(documents))
+		return nil, nil, merr.WrapErrFunctionFailedMsg("highlights size must equal to documents size, but got highlights size [%d], scores size [%d], documents size [%d]", len(highlights), len(scores), len(documents))
 	}
 
 	return highlights, scores, nil
@@ -180,7 +180,7 @@ func (highlight *SemanticHighlight) processOneQuery(ctx context.Context, query s
 func (highlight *SemanticHighlight) Process(ctx context.Context, topks []int64, documents []string) ([][]string, [][]float32, error) {
 	nq := len(topks)
 	if len(highlight.queries) != nq {
-		return nil, nil, fmt.Errorf("nq must equal to queries size, but got nq [%d], queries size [%d], queries: [%v]", nq, len(highlight.queries), highlight.queries)
+		return nil, nil, merr.WrapErrParameterInvalidMsg("nq must equal to queries size, but got nq [%d], queries size [%d], queries: [%v]", nq, len(highlight.queries), highlight.queries)
 	}
 	if len(documents) == 0 {
 		return [][]string{}, [][]float32{}, nil

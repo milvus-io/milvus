@@ -3,10 +3,10 @@ package recovery
 import (
 	"math"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/messageutil"
@@ -123,7 +123,7 @@ func (info *vchannelRecoveryInfo) UpdateFlushCheckpoint(checkpoint *WALCheckpoin
 		}
 		return nil
 	}
-	return errors.Errorf("update illegal checkpoint of flusher, current: %s, target: %s", info.flusherCheckpoint.MessageID.String(), checkpoint.MessageID.String())
+	return status.NewInner("update illegal checkpoint of flusher, current: %s, target: %s", info.flusherCheckpoint.MessageID.String(), checkpoint.MessageID.String())
 }
 
 // ObserveSchemaChange is called when a schema change message is observed.

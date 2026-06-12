@@ -33,7 +33,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -43,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -98,7 +98,7 @@ func (s bm25Stats) Minus(stats bm25Stats) {
 func (s bm25Stats) GetStats(fieldID int64) (*storage.BM25Stats, error) {
 	stats, ok := s[fieldID]
 	if !ok {
-		return nil, errors.New("field not found in idf oracle BM25 stats")
+		return nil, merr.WrapErrFieldNotFound(fieldID, "not in idf oracle BM25 stats")
 	}
 	return stats, nil
 }
@@ -143,7 +143,7 @@ func (s *sealedBm25Stats) FetchStats() (map[int64]*storage.BM25Stats, error) {
 	defer s.RUnlock()
 
 	if s.removed {
-		return nil, errors.Newf("sealed bm25 stats for segment %d already removed", s.segmentID)
+		return nil, merr.WrapErrServiceInternalMsg("sealed bm25 stats for segment %d already removed", s.segmentID)
 	}
 
 	stats := make(map[int64]*storage.BM25Stats)
@@ -151,7 +151,7 @@ func (s *sealedBm25Stats) FetchStats() (map[int64]*storage.BM25Stats, error) {
 		fieldDir := path.Join(s.localDir, fmt.Sprintf("%d", fieldID))
 		entries, err := os.ReadDir(fieldDir)
 		if err != nil {
-			return nil, errors.Newf("read local dir %s failed: %v", fieldDir, err)
+			return nil, merr.WrapErrIoFailed(fieldDir, err)
 		}
 
 		fieldStats := storage.NewBM25Stats()
@@ -162,12 +162,12 @@ func (s *sealedBm25Stats) FetchStats() (map[int64]*storage.BM25Stats, error) {
 			filePath := path.Join(fieldDir, entry.Name())
 			f, err := os.Open(filePath)
 			if err != nil {
-				return nil, errors.Newf("open local file %s failed: %v", filePath, err)
+				return nil, merr.WrapErrIoFailed(filePath, err)
 			}
 			err = fieldStats.DeserializeFromReader(bufio.NewReader(f))
 			f.Close()
 			if err != nil {
-				return nil, errors.Newf("deserialize local file %s failed: %v", filePath, err)
+				return nil, merr.WrapErrSerializationFailed(err, "deserialize local file %s", filePath)
 			}
 		}
 		stats[fieldID] = fieldStats
@@ -363,7 +363,7 @@ func (o *idfOracle) streamLoad(ctx context.Context, segmentID int64, binlogPaths
 			localFile := path.Join(fieldDir, fmt.Sprintf("%d.data", i))
 			written, err := streamOneFile(ctx, cm, remotePath, localFile, fieldStats)
 			if err != nil {
-				return streamLoadResult{}, errors.Wrapf(err, "stream bm25 stats file %s", remotePath)
+				return streamLoadResult{}, merr.Wrapf(err, "stream bm25 stats file %s", remotePath)
 			}
 			totalDiskSize += written
 		}
@@ -680,7 +680,7 @@ func (o *idfOracle) SyncDistribution() error {
 		if intarget && !activate {
 			stats, err := stats.FetchStats()
 			if err != nil {
-				rangeErr = fmt.Errorf("fetch stats failed with error: %v", err)
+				rangeErr = merr.Wrap(err, "fetch stats failed")
 				return false
 			}
 			diff.Merge(stats)
@@ -689,7 +689,7 @@ func (o *idfOracle) SyncDistribution() error {
 		if !intarget && activate {
 			stats, err := stats.FetchStats()
 			if err != nil {
-				rangeErr = fmt.Errorf("fetch stats failed with error: %v", err)
+				rangeErr = merr.Wrap(err, "fetch stats failed")
 				return false
 			}
 			diff.Minus(stats)

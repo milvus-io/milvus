@@ -26,7 +26,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
 	"github.com/tidwall/gjson"
@@ -164,7 +163,7 @@ func convertRange(field *schemapb.FieldSchema, result gjson.Result) (string, err
 func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) (string, error) {
 	primaryField, ok := getPrimaryField(coll)
 	if !ok {
-		return "", fmt.Errorf("collection: %s has no primary field", coll.Name)
+		return "", merr.WrapErrParameterInvalidMsg("collection: %s has no primary field", coll.Name)
 	}
 	resultStr, err := convertRange(primaryField, idResult)
 	if err != nil {
@@ -178,7 +177,7 @@ func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) 
 // based on the primary key field type
 func convertIDsToSchemapbIDs(ids []interface{}, pkField *schemapb.FieldSchema) (*schemapb.IDs, error) {
 	if len(ids) == 0 {
-		return nil, errors.New("ids array cannot be empty")
+		return nil, merr.WrapErrParameterMissingMsg("ids array cannot be empty")
 	}
 
 	switch pkField.DataType {
@@ -195,18 +194,18 @@ func convertIDsToSchemapbIDs(ids []interface{}, pkField *schemapb.FieldSchema) (
 				// JSON numbers are decoded as float64
 				// Check if the float has a fractional part
 				if v != math.Trunc(v) {
-					return nil, fmt.Errorf("invalid int64 id at index %d: %v has fractional part", i, v)
+					return nil, merr.WrapErrParameterInvalidMsg("invalid int64 id at index %d: %v has fractional part", i, v)
 				}
 				int64ID = int64(v)
 			case string:
 				// Try to parse string as int64
 				parsed, err := strconv.ParseInt(v, 10, 64)
 				if err != nil {
-					return nil, fmt.Errorf("invalid int64 id at index %d: %v, error: %v", i, id, err)
+					return nil, merr.WrapErrParameterInvalidErr(err, "invalid int64 id at index %d: %v", i, id)
 				}
 				int64ID = parsed
 			default:
-				return nil, fmt.Errorf("invalid id type at index %d: expected int64, got %T", i, id)
+				return nil, merr.WrapErrParameterInvalidMsg("invalid id type at index %d: expected int64, got %T", i, id)
 			}
 			int64IDs = append(int64IDs, int64ID)
 		}
@@ -229,10 +228,10 @@ func convertIDsToSchemapbIDs(ids []interface{}, pkField *schemapb.FieldSchema) (
 				// Convert number to string
 				stringID = fmt.Sprintf("%v", v)
 			default:
-				return nil, fmt.Errorf("invalid id type at index %d: expected string, got %T", i, id)
+				return nil, merr.WrapErrParameterInvalidMsg("invalid id type at index %d: expected string, got %T", i, id)
 			}
 			if stringID == "" {
-				return nil, fmt.Errorf("empty string id at index %d", i)
+				return nil, merr.WrapErrParameterInvalidMsg("empty string id at index %d", i)
 			}
 			stringIDs = append(stringIDs, stringID)
 		}
@@ -245,7 +244,7 @@ func convertIDsToSchemapbIDs(ids []interface{}, pkField *schemapb.FieldSchema) (
 		}, nil
 
 	default:
-		return nil, fmt.Errorf("unsupported primary key type: %s", pkField.DataType.String())
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported primary key type: %s", pkField.DataType.String())
 	}
 }
 
@@ -666,7 +665,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 				if !containsString(fieldNames, mapKey) {
 					if collSchema.EnableDynamicField {
 						if mapKey == common.MetaFieldName {
-							return nil, nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("use the invalid field name(%s) when enable dynamicField", mapKey))
+							return nil, nil, merr.WrapErrParameterInvalidMsg("use the invalid field name(%s) when enable dynamicField", mapKey)
 						}
 						mapValueStr := mapValue.String()
 						switch mapValue.Type {
@@ -726,7 +725,7 @@ func convertFloatVectorToArray(vector [][]float32, dim int64) ([]float32, error)
 	floatArray := make([]float32, 0)
 	for _, arr := range vector {
 		if int64(len(arr)) != dim {
-			return nil, fmt.Errorf("[]float32 size %d doesn't equal to vector dimension %d of %s",
+			return nil, merr.WrapErrParameterInvalidMsg("[]float32 size %d doesn't equal to vector dimension %d of %s",
 				len(arr), dim, schemapb.DataType_name[int32(schemapb.DataType_FloatVector)])
 		}
 		for i := int64(0); i < dim; i++ {
@@ -749,7 +748,7 @@ func convertBinaryVectorToArray(vector [][]byte, dim int64, dataType schemapb.Da
 	binaryArray := make([]byte, 0, len(vector)*int(bytesLen))
 	for _, arr := range vector {
 		if int64(len(arr)) != bytesLen {
-			return nil, fmt.Errorf("[]byte size %d doesn't equal to vector dimension %d of %s",
+			return nil, merr.WrapErrParameterInvalidMsg("[]byte size %d doesn't equal to vector dimension %d of %s",
 				len(arr), dim, schemapb.DataType_name[int32(dataType)])
 		}
 		for i := int64(0); i < bytesLen; i++ {
@@ -763,7 +762,7 @@ func convertInt8VectorToArray(vector [][]int8, dim int64) ([]byte, error) {
 	byteArray := make([]byte, 0)
 	for _, arr := range vector {
 		if int64(len(arr)) != dim {
-			return nil, fmt.Errorf("[]int8 size %d doesn't equal to vector dimension %d of %s",
+			return nil, merr.WrapErrParameterInvalidMsg("[]int8 size %d doesn't equal to vector dimension %d of %s",
 				len(arr), dim, schemapb.DataType_name[int32(schemapb.DataType_Int8Vector)])
 		}
 		for i := int64(0); i < dim; i++ {
@@ -797,7 +796,7 @@ func reflectValueCandi(v reflect.Value) (map[string]fieldCandi, error) {
 		}
 		return result, nil
 	default:
-		return nil, fmt.Errorf("unsupport row type: %s", v.Kind().String())
+		return nil, merr.WrapErrParameterInvalidMsg("unsupport row type: %s", v.Kind().String())
 	}
 }
 
@@ -819,7 +818,7 @@ func convertToIntArray(dataType schemapb.DataType, arr interface{}) []int32 {
 func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool, sch *schemapb.CollectionSchema, inInsert bool, partialUpdate bool) ([]*schemapb.FieldData, error) {
 	rowsLen := len(rows)
 	if rowsLen == 0 {
-		return []*schemapb.FieldData{}, errors.New("no row need to be convert to columns")
+		return []*schemapb.FieldData{}, merr.WrapErrParameterInvalidMsg("no row need to be convert to columns")
 	}
 
 	isDynamic := sch.EnableDynamicField
@@ -908,7 +907,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			dim, _ := getDim(field)
 			nameDims[field.Name] = dim
 		default:
-			return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", field.DataType, field.Name)
+			return nil, merr.WrapErrParameterInvalidMsg("the type(%v) of field(%v) is not supported, use other sdk please", field.DataType, field.Name)
 		}
 		nameColumns[field.Name] = data
 		fieldData[field.Name] = &schemapb.FieldData{
@@ -919,7 +918,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 		}
 	}
 	if len(nameDims) == 0 && len(sch.Functions) == 0 && !partialUpdate {
-		return nil, fmt.Errorf("collection: %s has no vector field or functions", sch.Name)
+		return nil, merr.WrapErrParameterInvalidMsg("collection: %s has no vector field or functions", sch.Name)
 	}
 
 	dynamicCol := make([][]byte, 0, rowsLen)
@@ -942,7 +941,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 					continue
 				}
 				if !allowInsertAutoID {
-					return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("no need to pass pk field(%s) when autoid==true in insert", field.Name))
+					return nil, merr.WrapErrParameterInvalidMsg("no need to pass pk field(%s) when autoid==true in insert", field.Name)
 				}
 			}
 			if (field.Nullable || field.DefaultValue != nil) && !ok {
@@ -957,7 +956,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				if partialUpdate {
 					continue
 				}
-				return nil, fmt.Errorf("row %d does not has field %s", idx, field.Name)
+				return nil, merr.WrapErrParameterInvalidMsg("row %d does not has field %s", idx, field.Name)
 			}
 			fieldLen[field.Name] += 1
 			switch field.DataType {
@@ -999,7 +998,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 					vec := typeutil.Float32ArrayToFloat16Bytes(candi.v.Interface().([]float32))
 					nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), vec)
 				default:
-					return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid type(%v) of field(%v) ", field.DataType, field.Name))
+					return nil, merr.WrapErrParameterInvalidMsg("invalid type(%v) of field(%v) ", field.DataType, field.Name)
 				}
 			case schemapb.DataType_BFloat16Vector:
 				switch candi.v.Interface().(type) {
@@ -1009,7 +1008,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 					vec := typeutil.Float32ArrayToBFloat16Bytes(candi.v.Interface().([]float32))
 					nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), vec)
 				default:
-					return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid type(%v) of field(%v) ", field.DataType, field.Name))
+					return nil, merr.WrapErrParameterInvalidMsg("invalid type(%v) of field(%v) ", field.DataType, field.Name)
 				}
 			case schemapb.DataType_SparseFloatVector:
 				content := candi.v.Interface().([]byte)
@@ -1021,7 +1020,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			case schemapb.DataType_Int8Vector:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([][]int8), candi.v.Interface().([]int8))
 			default:
-				return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", field.DataType, field.Name)
+				return nil, merr.WrapErrParameterInvalidMsg("the type(%v) of field(%v) is not supported, use other sdk please", field.DataType, field.Name)
 			}
 
 			delete(set, field.Name)
@@ -1034,7 +1033,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			}
 			bs, err := json.Marshal(m)
 			if err != nil {
-				return nil, fmt.Errorf("failed to marshal dynamic field %w", err)
+				return nil, merr.WrapErrParameterInvalidErr(err, "failed to marshal dynamic field")
 			}
 			dynamicCol = append(dynamicCol, bs)
 		}
@@ -1052,7 +1051,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 						zap.String("fieldName", name),
 						zap.Int("fieldLen", len(validData)),
 						zap.Int("rowsLen", rowsLen))
-					return nil, fmt.Errorf("column %s has length %d, expected %d", name, len(validData), rowsLen)
+					return nil, merr.WrapErrParameterInvalidMsg("column %s has length %d, expected %d", name, len(validData), rowsLen)
 				}
 			} else {
 				log.Info("skip empty field for partial update",
@@ -1066,7 +1065,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				zap.String("fieldName", name),
 				zap.Int("fieldLen", fieldLen[name]),
 				zap.Int("rowsLen", rowsLen))
-			return nil, fmt.Errorf("column %s has length %d, expected %d", name, fieldLen[name], rowsLen)
+			return nil, merr.WrapErrParameterInvalidMsg("column %s has length %d, expected %d", name, fieldLen[name], rowsLen)
 		}
 
 		colData := fieldData[name]
@@ -1286,7 +1285,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				},
 			}
 		default:
-			return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", colData.Type, name)
+			return nil, merr.WrapErrParameterInvalidMsg("the type(%v) of field(%v) is not supported, use other sdk please", colData.Type, name)
 		}
 		colData.ValidData = validDataMap[name]
 		columns = append(columns, colData)
@@ -1514,27 +1513,27 @@ func fieldDataValueCount(fieldData *schemapb.FieldData) (int64, error) {
 		dim := fieldData.GetVectors().GetDim()
 		bytesPerRow := dim / 8
 		if bytesPerRow <= 0 {
-			return 0, fmt.Errorf("invalid binary vector dimension %d for field %s", dim, fieldData.GetFieldName())
+			return 0, merr.WrapErrParameterInvalidMsg("invalid binary vector dimension %d for field %s", dim, fieldData.GetFieldName())
 		}
 		return int64(len(fieldData.GetVectors().GetBinaryVector())) / bytesPerRow, nil
 	case schemapb.DataType_FloatVector:
 		dim := fieldData.GetVectors().GetDim()
 		if dim <= 0 {
-			return 0, fmt.Errorf("invalid float vector dimension %d for field %s", dim, fieldData.GetFieldName())
+			return 0, merr.WrapErrParameterInvalidMsg("invalid float vector dimension %d for field %s", dim, fieldData.GetFieldName())
 		}
 		return int64(len(fieldData.GetVectors().GetFloatVector().GetData())) / dim, nil
 	case schemapb.DataType_Float16Vector:
 		dim := fieldData.GetVectors().GetDim()
 		bytesPerRow := dim * 2
 		if bytesPerRow <= 0 {
-			return 0, fmt.Errorf("invalid float16 vector dimension %d for field %s", dim, fieldData.GetFieldName())
+			return 0, merr.WrapErrParameterInvalidMsg("invalid float16 vector dimension %d for field %s", dim, fieldData.GetFieldName())
 		}
 		return int64(len(fieldData.GetVectors().GetFloat16Vector())) / bytesPerRow, nil
 	case schemapb.DataType_BFloat16Vector:
 		dim := fieldData.GetVectors().GetDim()
 		bytesPerRow := dim * 2
 		if bytesPerRow <= 0 {
-			return 0, fmt.Errorf("invalid bfloat16 vector dimension %d for field %s", dim, fieldData.GetFieldName())
+			return 0, merr.WrapErrParameterInvalidMsg("invalid bfloat16 vector dimension %d for field %s", dim, fieldData.GetFieldName())
 		}
 		return int64(len(fieldData.GetVectors().GetBfloat16Vector())) / bytesPerRow, nil
 	case schemapb.DataType_SparseFloatVector:
@@ -1542,11 +1541,11 @@ func fieldDataValueCount(fieldData *schemapb.FieldData) (int64, error) {
 	case schemapb.DataType_Int8Vector:
 		dim := fieldData.GetVectors().GetDim()
 		if dim <= 0 {
-			return 0, fmt.Errorf("invalid int8 vector dimension %d for field %s", dim, fieldData.GetFieldName())
+			return 0, merr.WrapErrParameterInvalidMsg("invalid int8 vector dimension %d for field %s", dim, fieldData.GetFieldName())
 		}
 		return int64(len(fieldData.GetVectors().GetInt8Vector())) / dim, nil
 	default:
-		return 0, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", fieldData.GetType(), fieldData.GetFieldName())
+		return 0, merr.WrapErrParameterInvalidMsg("the type(%v) of field(%v) is not supported, use other sdk please", fieldData.GetType(), fieldData.GetFieldName())
 	}
 }
 
@@ -1596,7 +1595,7 @@ func newFieldDataRowAccessor(fieldData *schemapb.FieldData) (*fieldDataRowAccess
 		return accessor, nil
 	}
 	if valueCount != validCount {
-		return nil, fmt.Errorf("field %s has %d valid rows, but data length is %d", fieldData.GetFieldName(), validCount, valueCount)
+		return nil, merr.WrapErrParameterInvalidMsg("field %s has %d valid rows, but data length is %d", fieldData.GetFieldName(), validCount, valueCount)
 	}
 	accessor.compactIndices = compactIndices
 	return accessor, nil
@@ -1607,7 +1606,7 @@ func (accessor *fieldDataRowAccessor) rowIndex(rowIdx int64) (int64, bool, error
 		return rowIdx, true, nil
 	}
 	if rowIdx >= int64(len(accessor.validData)) {
-		return 0, false, fmt.Errorf("row index %d out of range for field %s valid data length %d", rowIdx, accessor.fieldData.GetFieldName(), len(accessor.validData))
+		return 0, false, merr.WrapErrParameterInvalidMsg("row index %d out of range for field %s valid data length %d", rowIdx, accessor.fieldData.GetFieldName(), len(accessor.validData))
 	}
 	if !accessor.validData[rowIdx] {
 		return 0, false, nil
@@ -1639,7 +1638,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				stringPks := ids.GetStrId().GetData()
 				rowsNum = int64(len(stringPks))
 			default:
-				return nil, errors.New("the type of primary key(id) is not supported, use other sdk please")
+				return nil, merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please")
 			}
 		}
 	}
@@ -1774,7 +1773,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				stringPks := ids.GetStrId().GetData()
 				row[pkFieldName] = stringPks[i]
 			default:
-				return nil, errors.New("the type of primary key(id) is not supported, use other sdk please")
+				return nil, merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please")
 			}
 		}
 		if scores != nil && int64(len(scores)) > i {
@@ -1829,7 +1828,7 @@ func convertConsistencyLevel(reqConsistencyLevel string) (commonpb.ConsistencyLe
 	if reqConsistencyLevel != "" {
 		level, ok := commonpb.ConsistencyLevel_value[reqConsistencyLevel]
 		if !ok {
-			return 0, false, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("parameter:'%s' is incorrect, please check it", reqConsistencyLevel))
+			return 0, false, merr.WrapErrParameterInvalidMsg("parameter:'%s' is incorrect, please check it", reqConsistencyLevel)
 		}
 		return commonpb.ConsistencyLevel(level), false, nil
 	}
@@ -1939,7 +1938,7 @@ func convertDefaultValue(value interface{}, dataType schemapb.DataType) (*schema
 		}
 		return data, nil
 	default:
-		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("Unexpected default value type: %s", dataType.String()))
+		return nil, merr.WrapErrParameterInvalidMsg("Unexpected default value type: %s", dataType.String())
 	}
 }
 
@@ -2311,7 +2310,7 @@ func generateSearchParams(reqSearchParams map[string]interface{}) ([]*commonpb.K
 	for key, value := range reqSearchParams {
 		if val, ok := paramsMap[key]; ok {
 			if !deepEqual(val, value) {
-				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("ambiguous parameter: %s, in search_param: %v, in search_param.params: %v", key, value, val))
+				return nil, merr.WrapErrParameterInvalidMsg("ambiguous parameter: %s, in search_param: %v, in search_param.params: %v", key, value, val)
 			}
 		} else if key != Params {
 			paramsMap[key] = value

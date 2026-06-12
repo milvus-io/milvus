@@ -98,7 +98,7 @@ func (r *StructFieldReader) Next(count int64) (any, any, error) {
 	case schemapb.DataType_ArrayOfVector:
 		return r.readArrayOfVectorField(chunked)
 	default:
-		return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type for struct field: %v", r.field.GetDataType()))
+		return nil, nil, merr.WrapErrImportFailedMsg("unsupported data type for struct field: %v", r.field.GetDataType())
 	}
 }
 

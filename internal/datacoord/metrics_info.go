@@ -18,10 +18,8 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -138,7 +136,7 @@ func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRe
 		}
 		return string(bs), nil
 	}
-	return "", fmt.Errorf("invalid param value in=[%s], it should be dc or dn", in)
+	return "", merr.WrapErrParameterInvalidMsg("invalid param value in=[%s], it should be dc or dn", in)
 }
 
 func (s *Server) getDistJSON(ctx context.Context, req *milvuspb.GetMetricsRequest) string {
@@ -308,7 +306,7 @@ func (s *Server) getIndexNodeMetrics(ctx context.Context, req *milvuspb.GetMetri
 		},
 	}
 	if node == nil {
-		return infos, errors.New("IndexNode is nil")
+		return infos, merr.WrapErrServiceInternalMsg("index node is nil")
 	}
 
 	metrics, err := node.GetMetrics(ctx, req)

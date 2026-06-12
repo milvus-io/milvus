@@ -20,12 +20,12 @@ package rerank
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"strconv"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 const (
@@ -65,7 +65,7 @@ func newDecayFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemap
 	}
 
 	if len(base.GetInputFieldNames()) != 1 {
-		return nil, fmt.Errorf("decay function only supports single input, but gets [%s] input", base.GetInputFieldNames())
+		return nil, merr.WrapErrParameterInvalidMsg("decay function only supports single input, but gets [%s] input", base.GetInputFieldNames())
 	}
 
 	inputType := base.GetInputFieldTypes()[0]
@@ -80,7 +80,7 @@ func newDecayFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemap
 		case schemapb.DataType_Double:
 			return newFunction[int64, float64](base, funcSchema)
 		default:
-			return nil, fmt.Errorf("decay rerank: unsupported input field type:%s, only support numeric field", inputType.String())
+			return nil, merr.WrapErrParameterInvalidMsg("decay rerank: unsupported input field type:%s, only support numeric field", inputType.String())
 		}
 	} else {
 		switch inputType {
@@ -93,7 +93,7 @@ func newDecayFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemap
 		case schemapb.DataType_Double:
 			return newFunction[string, float64](base, funcSchema)
 		default:
-			return nil, fmt.Errorf("decay rerank: unsupported input field type:%s, only support numeric field", inputType.String())
+			return nil, merr.WrapErrParameterInvalidMsg("decay rerank: unsupported input field type:%s, only support numeric field", inputType.String())
 		}
 	}
 }
@@ -110,25 +110,25 @@ func newFunction[T PKType, R int32 | int64 | float32 | float64](base *RerankBase
 			decayFunc.functionName = param.Value
 		case originKey:
 			if decayFunc.origin, err = strconv.ParseFloat(param.Value, 64); err != nil {
-				return nil, fmt.Errorf("param origin:%s is not a number", param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("param origin:%s is not a number", param.Value)
 			}
 			orginInit = true
 		case scaleKey:
 			if decayFunc.scale, err = strconv.ParseFloat(param.Value, 64); err != nil {
-				return nil, fmt.Errorf("param scale:%s is not a number", param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("param scale:%s is not a number", param.Value)
 			}
 			scaleInit = true
 		case offsetKey:
 			if decayFunc.offset, err = strconv.ParseFloat(param.Value, 64); err != nil {
-				return nil, fmt.Errorf("param offset:%s is not a number", param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("param offset:%s is not a number", param.Value)
 			}
 		case decayKey:
 			if decayFunc.decay, err = strconv.ParseFloat(param.Value, 64); err != nil {
-				return nil, fmt.Errorf("param decay:%s is not a number", param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("param decay:%s is not a number", param.Value)
 			}
 		case normsScorekey:
 			if needNorm, err := strconv.ParseBool(param.Value); err != nil {
-				return nil, fmt.Errorf("%s params must be true/false, bug got %s", normsScorekey, param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("%s params must be true/false, bug got %s", normsScorekey, param.Value)
 			} else {
 				decayFunc.needNorm = needNorm
 			}
@@ -143,23 +143,23 @@ func newFunction[T PKType, R int32 | int64 | float32 | float64](base *RerankBase
 	}
 
 	if !orginInit {
-		return nil, fmt.Errorf("decay function lost param: origin")
+		return nil, merr.WrapErrParameterInvalidMsg("decay function lost param: origin")
 	}
 
 	if !scaleInit {
-		return nil, fmt.Errorf("decay function lost param: scale")
+		return nil, merr.WrapErrParameterInvalidMsg("decay function lost param: scale")
 	}
 
 	if decayFunc.scale <= 0 {
-		return nil, fmt.Errorf("decay function param: scale must > 0, but got %f", decayFunc.scale)
+		return nil, merr.WrapErrParameterInvalidMsg("decay function param: scale must > 0, but got %f", decayFunc.scale)
 	}
 
 	if decayFunc.offset < 0 {
-		return nil, fmt.Errorf("decay function param: offset must >= 0, but got %f", decayFunc.offset)
+		return nil, merr.WrapErrParameterInvalidMsg("decay function param: offset must >= 0, but got %f", decayFunc.offset)
 	}
 
 	if decayFunc.decay <= 0 || decayFunc.decay >= 1 {
-		return nil, fmt.Errorf("decay function param: decay must 0 < decay < 1, but got %f", decayFunc.decay)
+		return nil, merr.WrapErrParameterInvalidMsg("decay function param: decay must 0 < decay < 1, but got %f", decayFunc.decay)
 	}
 
 	switch decayFunc.functionName {
@@ -170,7 +170,7 @@ func newFunction[T PKType, R int32 | int64 | float32 | float64](base *RerankBase
 	case linearFunction:
 		decayFunc.reScorer = linearDecay
 	default:
-		return nil, fmt.Errorf("invalid decay function: %s, only support [%s,%s,%s]", DecayFunctionName, gaussFunction, linearFunction, expFunction)
+		return nil, merr.WrapErrParameterInvalidMsg("invalid decay function: %s, only support [%s,%s,%s]", DecayFunctionName, gaussFunction, linearFunction, expFunction)
 	}
 	return decayFunc, nil
 }

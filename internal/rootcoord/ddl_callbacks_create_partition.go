@@ -18,9 +18,6 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
-
-	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -30,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -55,13 +53,13 @@ func (c *Core) broadcastCreatePartition(ctx context.Context, in *milvuspb.Create
 	}
 	cfgMaxPartitionNum := Params.RootCoordCfg.MaxPartitionNum.GetAsInt()
 	if len(collMeta.Partitions) >= cfgMaxPartitionNum {
-		return fmt.Errorf("partition number (%d) exceeds max configuration (%d), collection: %s",
+		return merr.WrapErrParameterInvalidMsg("partition number (%d) exceeds max configuration (%d), collection: %s",
 			len(collMeta.Partitions), cfgMaxPartitionNum, collMeta.Name)
 	}
 
 	partID, err := c.idAllocator.AllocOne()
 	if err != nil {
-		return errors.Wrap(err, "failed to allocate partition ID")
+		return merr.Wrap(err, "failed to allocate partition ID")
 	}
 
 	channels := make([]string, 0, collMeta.ShardsNum+1)
@@ -100,7 +98,7 @@ func (c *DDLCallback) createPartitionV1AckCallback(ctx context.Context, result m
 		State:                     pb.PartitionState_PartitionCreated,
 	}
 	if err := c.meta.AddPartition(ctx, partition); err != nil {
-		return errors.Wrap(err, "failed to add partition meta")
+		return merr.Wrap(err, "failed to add partition meta")
 	}
 	return c.ExpireCaches(ctx, ce.NewBuilder().
 		WithLegacyProxyCollectionMetaCache(

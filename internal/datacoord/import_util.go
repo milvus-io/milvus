@@ -646,8 +646,8 @@ func ListBinlogsAndGroupBySegment(ctx context.Context,
 		return nil, merr.WrapErrImportFailed("no insert binlogs to import")
 	}
 	if len(importFile.GetPaths()) > 2 {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("too many input paths for binlog import. "+
-			"Valid paths length should be one or two, but got paths:%s", importFile.GetPaths()))
+		return nil, merr.WrapErrImportFailedMsg("too many input paths for binlog import. "+
+			"Valid paths length should be one or two, but got paths:%s", importFile.GetPaths())
 	}
 
 	insertPrefix := importFile.GetPaths()[0]
@@ -766,18 +766,18 @@ func ListBinlogImportRequestFiles(ctx context.Context, cm storage.ChunkManager,
 	}
 	err := conc.AwaitAll(futures...)
 	if err != nil {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("list binlogs failed, err=%s", err))
+		return nil, merr.WrapErrServiceUnavailableMsg("list binlogs failed, err=%s", err)
 	}
 
 	resFiles = lo.Filter(resFiles, func(file *internalpb.ImportFile, _ int) bool {
 		return len(file.GetPaths()) > 0
 	})
 	if len(resFiles) == 0 {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("no binlog to import, input=%s", reqFiles))
+		return nil, merr.WrapErrImportFailedMsg("no binlog to import, input=%s", reqFiles)
 	}
 	if len(resFiles) > paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("The max number of import files should not exceed %d, but got %d",
-			paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(resFiles)))
+		return nil, merr.WrapErrImportFailedMsg("The max number of import files should not exceed %d, but got %d",
+			paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(resFiles))
 	}
 	log.Info("list binlogs prefixes for import done", zap.Int("num", len(resFiles)), zap.Any("binlog_prefixes", resFiles))
 	return resFiles, nil
@@ -788,7 +788,7 @@ func ValidateMaxImportJobExceed(ctx context.Context, importMeta ImportMeta) erro
 	maxNum := paramtable.Get().DataCoordCfg.MaxImportJobNum.GetAsInt()
 	executingNum := importMeta.CountJobBy(ctx, WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed))
 	if executingNum >= maxNum {
-		return merr.WrapErrImportFailed(
+		return merr.WrapErrImportSysFailed(
 			fmt.Sprintf("The number of jobs has reached the limit, please try again later. " +
 				"If your request is set to only import a single file, " +
 				"please consider importing multiple files in one request for better efficiency."))

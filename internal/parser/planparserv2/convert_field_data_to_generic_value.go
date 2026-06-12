@@ -2,13 +2,11 @@ package planparserv2
 
 import (
 	"bytes"
-	"fmt"
-
-	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func convertArrayValue(templateName string, templateValue *schemapb.TemplateArrayValue) (*planpb.GenericValue, error) {
@@ -93,7 +91,7 @@ func convertArrayValue(templateName string, templateValue *schemapb.TemplateArra
 		}
 		elementType = schemapb.DataType_JSON
 	default:
-		return nil, fmt.Errorf("unknown template variable value type: %v", templateValue.GetData())
+		return nil, merr.WrapErrQueryPlanMsg("unknown template variable value type: %v", templateValue.GetData())
 	}
 	return &planpb.GenericValue{
 		Val: &planpb.GenericValue_ArrayVal{
@@ -108,7 +106,7 @@ func convertArrayValue(templateName string, templateValue *schemapb.TemplateArra
 
 func ConvertToGenericValue(templateName string, templateValue *schemapb.TemplateValue) (*planpb.GenericValue, error) {
 	if templateValue == nil {
-		return nil, fmt.Errorf("expression template variable value is nil, template name: {%s}", templateName)
+		return nil, merr.WrapErrQueryPlanMsg("expression template variable value is nil, template name: {%s}", templateName)
 	}
 	switch templateValue.GetVal().(type) {
 	case *schemapb.TemplateValue_BoolVal:
@@ -138,7 +136,7 @@ func ConvertToGenericValue(templateName string, templateValue *schemapb.Template
 	case *schemapb.TemplateValue_ArrayVal:
 		return convertArrayValue(templateName, templateValue.GetArrayVal())
 	default:
-		return nil, errors.New("expression elements can only be scalars")
+		return nil, merr.WrapErrQueryPlanMsg("expression elements can only be scalars")
 	}
 }
 

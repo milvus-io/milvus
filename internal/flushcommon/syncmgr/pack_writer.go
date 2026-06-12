@@ -18,7 +18,6 @@ package syncmgr
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"path"
 
@@ -298,7 +297,7 @@ func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*data
 		return nil
 	}()
 	if pkField == nil {
-		return nil, fmt.Errorf("primary key field not found")
+		return nil, merr.WrapErrServiceInternalMsg("primary key field not found")
 	}
 
 	logID, err := bw.allocator.AllocOne()
@@ -312,7 +311,7 @@ func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*data
 		storage.WithUploader(func(_ context.Context, kvs map[string][]byte) error {
 			// Get the only blob in the map
 			if len(kvs) != 1 {
-				return fmt.Errorf("expected 1 blob, got %d", len(kvs))
+				return merr.WrapErrServiceInternalMsg("expected 1 blob, got %d", len(kvs))
 			}
 			for _, blob := range kvs {
 				return bw.writeBlob(ctx, path, blob)
@@ -335,7 +334,7 @@ func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*data
 		}
 	}()
 	if pkType == nil {
-		return nil, fmt.Errorf("unexpected pk type %v", pkField.DataType)
+		return nil, merr.WrapErrServiceInternalMsg("unexpected pk type %v", pkField.DataType)
 	}
 
 	pkBuilder := array.NewBuilder(memory.DefaultAllocator, pkType)
@@ -353,7 +352,7 @@ func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*data
 		case schemapb.DataType_VarChar:
 			pkBuilder.(*array.StringBuilder).Append(pack.deltaData.Pks[i].GetValue().(string))
 		default:
-			return nil, fmt.Errorf("unexpected pk type %v", pkField.DataType)
+			return nil, merr.WrapErrServiceInternalMsg("unexpected pk type %v", pkField.DataType)
 		}
 		ts := pack.deltaData.Tss[i]
 		tsBuilder.(*array.Int64Builder).Append(int64(ts))

@@ -17,7 +17,6 @@
 package binlog
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -218,7 +217,7 @@ func GetLogIDFromBingLogPath(logPath string) (int64, error) {
 	var logID int64
 	idx := strings.LastIndex(logPath, "/")
 	if idx == -1 {
-		return 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid binlog path: %s", logPath))
+		return 0, merr.WrapErrParameterInvalidMsg("invalid binlog path: %s", logPath)
 	}
 	var err error
 	logPathStr := logPath[(idx + 1):]

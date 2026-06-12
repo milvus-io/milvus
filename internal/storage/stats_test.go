@@ -168,7 +168,7 @@ func TestDeserializeStatsFailed(t *testing.T) {
 	}
 
 	_, err := DeserializeStatsList(blob)
-	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.ErrorIs(t, err, merr.ErrDataIntegrity)
 }
 
 func TestDeserializeEmptyStats(t *testing.T) {

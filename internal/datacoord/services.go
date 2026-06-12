@@ -136,7 +136,7 @@ func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, flu
 		for _, channel := range coll.VChannelNames {
 			sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, channel, toFlushSegments)
 			if err != nil {
-				return nil, errors.Wrapf(err, "failed to flush collection %d", collectionID)
+				return nil, merr.Wrapf(err, "failed to flush collection %d", collectionID)
 			}
 			for _, sealedSegmentID := range sealedSegmentIDs {
 				sealedSegmentsIDDict[sealedSegmentID] = true
@@ -651,13 +651,12 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
 	)
 
-	// Update segment info in memory and meta.
+	// Update segment info in memory and meta. Stale updates (segment already
+	// flushed / outdated time tick) are swallowed inside UpdateSegmentsInfo as
+	// benign no-ops, so any error here is a real failure.
 	if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
-		if !errors.Is(err, ErrIgnoredSegmentMetaOperation) {
-			log.Error("save binlog and checkpoints failed", zap.Error(err))
-			return merr.Status(err), nil
-		}
-		log.Info("save binlog and checkpoints failed with ignorable error", zap.Error(err))
+		log.Error("save binlog and checkpoints failed", zap.Error(err))
+		return merr.Status(err), nil
 	}
 
 	s.meta.SetLastWrittenTime(req.GetSegmentID())
@@ -1210,7 +1209,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		msg := "failed to get metrics"
 		log.Warn(msg, zap.Error(err))
 		return &milvuspb.GetMetricsResponse{
-			Status: merr.Status(errors.Wrap(err, msg)),
+			Status: merr.Status(merr.Wrap(err, msg)),
 		}, nil
 	}
 
@@ -1541,7 +1540,7 @@ OUTER:
 						break OUTER
 					}
 				} else {
-					resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("FlushAllTss or FlushAllTs is required"))
+					resp.Status = merr.Status(merr.WrapErrParameterMissingMsg("FlushAllTss or FlushAllTs is required"))
 					return resp, nil
 				}
 			}
@@ -1839,12 +1838,12 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	jobID := in.GetJobID()
 	if jobID == 0 {
 		if s.allocator == nil {
-			resp.Status = merr.Status(merr.WrapErrImportFailed("allocator not initialized"))
+			resp.Status = merr.Status(merr.WrapErrServiceUnavailable("allocator not initialized"))
 			return resp, nil
 		}
 		jobID, _, err = s.allocator.AllocN(1)
 		if err != nil {
-			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("failed to allocate job ID: %v", err)))
+			resp.Status = merr.Status(merr.Wrap(err, "failed to allocate job ID"))
 			return resp, nil
 		}
 	}
@@ -1864,7 +1863,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	)
 	if err != nil {
 		log.Warn("failed to broadcast import message", zap.Error(err))
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("failed to broadcast import: %v", err)))
+		resp.Status = merr.Status(merr.Wrap(err, "failed to broadcast import"))
 		return resp, nil
 	}
 
@@ -1914,7 +1913,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	// Allocate file ids.
 	idStart, _, err := s.allocator.AllocN(int64(len(files)) + 1)
 	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("alloc id failed: %v", err)))
+		resp.Status = merr.Status(merr.Wrap(err, "alloc id failed"))
 		return resp, nil
 	}
 	files = lo.Map(files, func(importFile *internalpb.ImportFile, i int) *internalpb.ImportFile {
@@ -1927,7 +1926,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 		return resp, nil
 	}
 	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("get collection failed: %v", err)))
+		resp.Status = merr.Status(merr.Wrap(err, "get collection failed"))
 		return resp, nil
 	}
 	if importCollectionInfo == nil {
@@ -1961,7 +1960,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	}
 	err = s.importMeta.AddJob(ctx, job)
 	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("add import job failed: %v", err)))
+		resp.Status = merr.Status(merr.Wrap(err, "add import job failed"))
 		return resp, nil
 	}
 
@@ -1988,13 +1987,13 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	}
 	jobID, err := strconv.ParseInt(in.GetJobID(), 10, 64)
 	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("parse job id failed: %v", err)))
+		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("parse job id failed: %v", err))
 		return resp, nil
 	}
 
 	job := s.importMeta.GetJob(ctx, jobID)
 	if job == nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("import job does not exist, jobID=%d", jobID)))
+		resp.Status = merr.Status(merr.WrapErrImportSysFailedMsg("import job does not exist, jobID=%d", jobID))
 		return resp, nil
 	}
 	progress, state, importedRows, totalRows, reason := GetJobProgress(ctx, jobID, s.importMeta, s.meta)

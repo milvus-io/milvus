@@ -571,12 +571,10 @@ class TestUtilityParams(TestcaseBase):
         old_collection_name = collection_w.name
         alias = "test_alias"
         self.utility_wrap.create_alias(old_collection_name, alias)
-        self.utility_wrap.rename_collection(
-            old_collection_name,
-            alias,
-            check_task=CheckTasks.err_res,
-            check_items={"err_code": 65535, "err_msg": f"cannot rename collection to an existing alias: {alias}"},
-        )
+        self.utility_wrap.rename_collection(old_collection_name, alias,
+                                            check_task=CheckTasks.err_res,
+                                            check_items={"err_code": 1601,
+                                                         "err_msg": f"alias and collection name conflict[database=default][alias={alias}]"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_rename_collection_using_alias(self):

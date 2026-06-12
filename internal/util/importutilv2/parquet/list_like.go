@@ -17,13 +17,12 @@
 package parquet
 
 import (
-	"fmt"
-
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"golang.org/x/exp/constraints"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type listLikeArray struct {
@@ -171,7 +170,7 @@ func expectedVectorListLength(dim int, dataType schemapb.DataType) (int32, error
 	case schemapb.DataType_Int8Vector:
 		return int32(dim), nil
 	default:
-		return 0, fmt.Errorf("unexpected vector data type %s", dataType.String())
+		return 0, merr.WrapErrParameterInvalidMsg("unexpected vector data type %s", dataType.String())
 	}
 }
 

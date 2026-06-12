@@ -17,9 +17,8 @@
 package indexparamcheck
 
 import (
-	"fmt"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -30,7 +29,7 @@ type RTREEChecker struct {
 
 func (c *RTREEChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
 	if !typeutil.IsGeometryType(dataType) {
-		return fmt.Errorf("RTREE index can only be built on geometry field")
+		return merr.WrapErrParameterInvalidMsg("RTREE index can only be built on geometry field")
 	}
 
 	return c.scalarIndexChecker.CheckTrain(dataType, elementType, params)
@@ -39,7 +38,7 @@ func (c *RTREEChecker) CheckTrain(dataType schemapb.DataType, elementType schema
 func (c *RTREEChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {
 	dType := field.GetDataType()
 	if !typeutil.IsGeometryType(dType) {
-		return fmt.Errorf("RTREE index can only be built on geometry field, got %s", dType.String())
+		return merr.WrapErrParameterInvalidMsg("RTREE index can only be built on geometry field, got %s", dType.String())
 	}
 	return nil
 }

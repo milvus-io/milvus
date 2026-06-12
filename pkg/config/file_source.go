@@ -17,7 +17,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -135,7 +134,7 @@ func (fs *FileSource) loadFromFile() error {
 
 		ext := filepath.Ext(configFile)
 		if len(ext) == 0 || (ext[1:] != "yaml" && ext[1:] != "yml") {
-			return fmt.Errorf("unsupported Config Type: %s", ext)
+			return errors.Wrapf(ErrUnsupportedConfigType, "%s", ext)
 		}
 
 		data, err := os.ReadFile(configFile)
@@ -153,7 +152,7 @@ func (fs *FileSource) loadFromFile() error {
 	}
 	// not allow all config files missing, return error for this case
 	if notExistsNum == len(configFiles) {
-		return errors.Newf("all config files not exists, files: %v", configFiles)
+		return errors.Wrapf(ErrAllConfigFilesNotExist, "files: %v", configFiles)
 	}
 
 	return fs.update(newConfig)

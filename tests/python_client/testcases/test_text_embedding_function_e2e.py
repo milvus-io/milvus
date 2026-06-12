@@ -1628,7 +1628,7 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
         """
         target: test add function with duplicate name
         method: create collection with function, try to add another function with same name
-        expected: error indicating duplicate function name (code=65535)
+        expected: error indicating duplicate function name (code=1100)
         """
         self._connect()
         dim = 768
@@ -1666,14 +1666,14 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
             assert False, "Expected exception for duplicate function name"
         except Exception as e:
             log.info(f"Expected error: {e}")
-            assert e.code == 65535
+            assert e.code == 1100
             assert "duplicate function name" in str(e)
 
     def test_add_collection_function_missing_input_field(self, tei_endpoint):
         """
         target: test add function with input field that doesn't exist
         method: add function referencing non-existent input field
-        expected: error indicating input field not found (code=65535)
+        expected: error indicating input field not found (code=1100)
         """
         self._connect()
         dim = 768
@@ -1700,14 +1700,14 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
             assert False, "Expected exception for missing input field"
         except Exception as e:
             log.info(f"Expected error: {e}")
-            assert e.code == 65535
+            assert e.code == 1100
             assert "function input field not found" in str(e)
 
     def test_add_collection_function_missing_output_field(self, tei_endpoint):
         """
         target: test add function with output field that doesn't exist
         method: add function referencing non-existent output field
-        expected: error indicating output field not found (code=65535)
+        expected: error indicating output field not found (code=1100)
         """
         self._connect()
         dim = 768
@@ -1734,14 +1734,14 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
             assert False, "Expected exception for missing output field"
         except Exception as e:
             log.info(f"Expected error: {e}")
-            assert e.code == 65535
+            assert e.code == 1100
             assert "function output field not found" in str(e)
 
     def test_add_collection_function_dim_mismatch(self, tei_endpoint):
         """
         target: test add function with dimension mismatch
         method: create collection with vector field dim=512, add function for model that outputs dim=768
-        expected: error indicating dimension mismatch (code=65535)
+        expected: error indicating dimension mismatch (code=2400)
         """
         self._connect()
         dim = 512  # Mismatched dimension (TEI model outputs 768)
@@ -1768,7 +1768,7 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
             assert False, "Expected exception for dimension mismatch"
         except Exception as e:
             log.info(f"Expected error: {e}")
-            assert e.code == 65535
+            assert e.code == 2400
             assert "embedding dim" in str(e)
 
     # ==================== alter_collection_function negative tests ====================
@@ -1802,7 +1802,7 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
         """
         target: test alter function that doesn't exist
         method: create collection without function, try to alter non-existent function
-        expected: error indicating function not found (code=65535)
+        expected: error indicating function not found (code=1100)
         """
         self._connect()
         dim = 768
@@ -1830,14 +1830,15 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
             assert False, "Expected exception for nonexistent function"
         except Exception as e:
             log.info(f"Expected error: {e}")
-            assert e.code == 65535
+            assert e.code == 1100
             assert "not found" in str(e)
 
     def test_alter_collection_function_invalid_new_endpoint(self, tei_endpoint):
         """
         target: test alter function with invalid endpoint
         method: create collection with valid function, alter to use invalid endpoint
-        expected: error indicating endpoint unreachable (code=65535)
+        expected: error indicating endpoint unreachable (code=2, ServiceUnavailable:
+                  a transport/connect failure to the model backend is retryable)
         """
         self._connect()
         dim = 768
@@ -1874,8 +1875,10 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
             assert False, "Expected exception for invalid endpoint"
         except Exception as e:
             log.info(f"Expected error: {e}")
-            assert e.code == 65535
-            assert "check function" in str(e).lower() and "failed" in str(e).lower()
+            # transport/connect failure to the model backend is now classified as
+            # ServiceUnavailable (2, retryable) rather than FunctionFailed (2400)
+            assert e.code == 2
+            assert "invalid_endpoint_12345" in str(e).lower()
 
     # ==================== drop_collection_function negative tests ====================
 

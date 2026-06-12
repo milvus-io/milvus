@@ -274,7 +274,7 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 			log.Ctx(ctx).Warn("alter a non-existent collection, ignore it", log.FieldMessage(result.Message))
 			return nil
 		}
-		return errors.Wrap(err, "failed to alter collection")
+		return merr.Wrap(err, "failed to alter collection")
 	}
 	if body.Updates.AlterLoadConfig != nil {
 		resp, err := c.mixCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
@@ -282,12 +282,19 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 			ReplicaNumber:  body.Updates.AlterLoadConfig.ReplicaNumber,
 			ResourceGroups: body.Updates.AlterLoadConfig.ResourceGroups,
 		})
+		if err != nil {
+			return merr.Wrap(err, "failed to update load config")
+		}
 		if err := merr.CheckRPCCall(resp, err); err != nil {
-			return errors.Wrap(err, "failed to update load config")
+			if errors.Is(err, merr.ErrResourceGroupNotFound) {
+				log.Ctx(ctx).Warn("failed to update load config due to missing resource group, stop retrying", zap.Error(err))
+				return nil
+			}
+			return merr.Wrap(err, "failed to update load config")
 		}
 	}
 	if err := c.broker.BroadcastAlteredCollection(ctx, header.CollectionId); err != nil {
-		return errors.Wrap(err, "failed to broadcast altered collection")
+		return merr.Wrap(err, "failed to broadcast altered collection")
 	}
 
 	// If the collection was renamed or moved to a different DB, grants were migrated

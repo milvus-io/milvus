@@ -1221,7 +1221,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             expr,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1100,
-                                         "err_msg": "error: two column comparison with JSON type is not supported"})
+                                         "err_msg": "two column comparison with JSON type is not supported"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_ef_less_than_limit(self):

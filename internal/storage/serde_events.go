@@ -19,7 +19,6 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"io"
 	"math"
 	"sort"
@@ -206,7 +205,7 @@ func valueDeserializer(r Record, v []*Value, fields []*schemapb.FieldSchema, sho
 
 				d, err := serdeMap[dt].deserialize(r.Column(j), i, elementType, dim, shouldCopy)
 				if err != nil {
-					return merr.WrapErrServiceInternal(fmt.Sprintf("deserialize error on type %s: %v", dt, err))
+					return merr.WrapErrServiceInternalMsg("deserialize error on type %s: %v", dt, err)
 				}
 				m[j] = d // TODO: avoid memory copy here.
 			}
@@ -459,7 +458,7 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 			}
 
 			if err := typeEntry.serialize(builders[fid], e, elementType); err != nil {
-				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s: %v", types[fid], err))
+				return nil, merr.WrapErrServiceInternalMsg("serialize error on type %s: %v", types[fid], err)
 			}
 		}
 	}

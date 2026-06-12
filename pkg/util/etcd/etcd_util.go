@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type ClientOption func(*clientv3.Config)
@@ -123,11 +124,11 @@ func GetRemoteEtcdSSLClientWithCfg(endpoints []string, certFile string, keyFile 
 	cfg.DialTimeout = 5 * time.Second
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return nil, errors.Wrap(err, "load etcd cert key pair error")
+		return nil, merr.Wrap(err, "load etcd cert key pair error")
 	}
 	caCert, err := os.ReadFile(caCertFile)
 	if err != nil {
-		return nil, errors.Wrapf(err, "load etcd CACert file error, filename = %s", caCertFile)
+		return nil, merr.Wrapf(err, "load etcd CACert file error, filename = %s", caCertFile)
 	}
 
 	caCertPool := x509.NewCertPool()
@@ -153,7 +154,7 @@ func GetRemoteEtcdSSLClientWithCfg(endpoints []string, certFile string, keyFile 
 	}
 
 	if cfg.TLS.MinVersion == 0 {
-		return nil, errors.Errorf("unknown TLS version,%s", minVersion)
+		return nil, merr.WrapErrParameterInvalidMsg("unknown TLS version,%s", minVersion)
 	}
 
 	cfg.DialOptions = append(cfg.DialOptions, grpc.WithBlock())
@@ -240,13 +241,13 @@ func RemoveByBatchWithLimit(removals []string, limit int, op func(partialKeys []
 
 func buildKvGroup(keys, values []string) (map[string]string, error) {
 	if len(keys) != len(values) {
-		return nil, fmt.Errorf("length of keys (%d) and values (%d) are not equal", len(keys), len(values))
+		return nil, merr.WrapErrParameterInvalidMsg("length of keys (%d) and values (%d) are not equal", len(keys), len(values))
 	}
 	ret := make(map[string]string, len(keys))
 	for i, k := range keys {
 		_, ok := ret[k]
 		if ok {
-			return nil, fmt.Errorf("duplicated key was found: %s", k)
+			return nil, merr.WrapErrParameterInvalidMsg("duplicated key was found: %s", k)
 		}
 		ret[k] = values[i]
 	}

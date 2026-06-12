@@ -18,7 +18,6 @@ package binlog
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"math"
 
@@ -105,8 +104,8 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 	// the "paths" has one or two paths, the first is the binlog path of a segment
 	// the other is optional, is the delta path of a segment
 	if len(paths) > 2 {
-		return merr.WrapErrImportFailed(fmt.Sprintf("too many input paths for binlog import. "+
-			"Valid paths length should be one or two, but got paths:%s", paths))
+		return merr.WrapErrImportFailedMsg("too many input paths for binlog import. "+
+			"Valid paths length should be one or two, but got paths:%s", paths)
 	}
 	insertLogs, err := listInsertLogs(r.ctx, r.cm, paths[0], r.retryAttempts)
 	if err != nil {
@@ -323,7 +322,7 @@ OUTER:
 		row := insertData.GetRow(i)
 		err = result.Append(row)
 		if err != nil {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to append row, err=%s", err.Error()))
+			return nil, merr.WrapErrImportFailedMsg("failed to append row, err=%s", err.Error())
 		}
 	}
 	return result, nil

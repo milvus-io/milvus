@@ -28,7 +28,7 @@ import (
 func CreateProduceServer(walManager walmanager.Manager, streamServer streamingpb.StreamingNodeHandlerService_ProduceServer) (*ProduceServer, error) {
 	createReq, err := contextutil.GetCreateProducer(streamServer.Context())
 	if err != nil {
-		return nil, status.NewInvaildArgument("create producer request is required")
+		return nil, status.NewInvalidArgument("create producer request is required")
 	}
 	l, err := walManager.GetAvailableWAL(types.NewPChannelInfoFromProto(createReq.GetPchannel()))
 	if err != nil {
@@ -110,7 +110,7 @@ func (p *ProduceServer) sendLoop() (err error) {
 			// Recv arm will be closed by context cancel of stream server.
 			// Send an unavailable response to ask client to release resource.
 			p.produceServer.SendClosed()
-			return errors.New("send loop is stopped for close of wal")
+			return status.NewOnShutdownError("send loop is stopped for close of wal")
 		case resp, ok := <-p.produceMessageCh:
 			if !ok {
 				// all message has been sent, sent close response.
@@ -205,7 +205,7 @@ func (p *ProduceServer) handleProduce(req *streamingpb.ProduceMessageRequest) {
 func (p *ProduceServer) validateMessage(msg message.MutableMessage) error {
 	// validate the msg.
 	if !msg.MessageType().Valid() {
-		return status.NewInvaildArgument("unsupported message type")
+		return status.NewInvalidArgument("unsupported message type")
 	}
 	return nil
 }

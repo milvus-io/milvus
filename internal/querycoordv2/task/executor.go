@@ -18,7 +18,6 @@ package task
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"strings"
 	"sync"
@@ -323,11 +322,11 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 //
 // 	node := ex.nodeMgr.Get(view.Node)
 // 	if node == nil {
-// 		return merr.WrapErrServiceInternal(fmt.Sprintf("node %d is not found", view.Node))
+// 		return merr.WrapErrServiceInternalMsg("node %d is not found", view.Node)
 // 	}
 // 	nodes := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
 // 	if !nodes.Contain(view.Node) {
-// 		return merr.WrapErrServiceInternal(fmt.Sprintf("channel %s at node %d is not working at streamingnode, skip load segment", view.GetChannelName(), view.Node))
+// 		return merr.WrapErrServiceInternalMsg("channel %s at node %d is not working at streamingnode, skip load segment", view.GetChannelName(), view.Node)
 // 	}
 // 	return nil
 // }
@@ -391,7 +390,7 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 				// NOTE: for balance segment task, expected load and release execution on the same shard leader
 				if GetTaskType(task) == TaskTypeMove && task.ShardLeaderID() != view.Node {
 					msg := "shard leader changed, skip release"
-					err = merr.WrapErrServiceInternal(fmt.Sprintf("shard leader changed from %d to %d", task.ShardLeaderID(), view.Node))
+					err = merr.WrapErrServiceInternalMsg("shard leader changed from %d to %d", task.ShardLeaderID(), view.Node)
 					log.Warn(msg, zap.Error(err))
 					return
 				}
@@ -485,7 +484,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 	partitions, err = utils.GetPartitions(ctx, ex.targetMgr, task.collectionID)
 	if err != nil {
 		log.Warn("failed to get partitions", zap.Error(err))
-		return merr.WrapErrServiceInternal(fmt.Sprintf("failed to get partitions for collection=%d", task.CollectionID()))
+		return merr.Wrapf(err, "failed to get partitions for collection=%d", task.CollectionID())
 	}
 
 	version := ex.targetMgr.GetCollectionTargetVersion(ctx, task.CollectionID(), meta.NextTargetFirst)

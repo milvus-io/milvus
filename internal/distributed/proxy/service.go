@@ -349,7 +349,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		}
 		if !certPool.AppendCertsFromPEM(rootBuf) {
 			log.Warn("fail to append ca to cert")
-			errChan <- errors.New("fail to append ca to cert")
+			errChan <- merr.WrapErrParameterInvalidMsg("fail to append ca to cert")
 			return
 		}
 

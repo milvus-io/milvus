@@ -17,7 +17,6 @@
 package storage
 
 import (
-	"fmt"
 	"path"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -223,7 +222,7 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 
 	err := pw.writer.Write(r)
 	if err != nil {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("write record batch error: %s", err.Error()))
+		return merr.WrapErrStorage(err, "write record batch error")
 	}
 	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	return nil
@@ -247,7 +246,7 @@ func (pw *PackedBinlogRecordWriter) initWriters(r Record) error {
 		}
 		pw.writer, err = NewPackedRecordWriter(pw.storageConfig.GetBucketName(), paths, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext)
 		if err != nil {
-			return merr.WrapErrServiceInternal(fmt.Sprintf("can not new packed record writer %s", err.Error()))
+			return merr.WrapErrStorage(err, "can not new packed record writer")
 		}
 	}
 	return nil
@@ -302,7 +301,7 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 ) (*PackedBinlogRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
+		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
 
 	writer := &PackedBinlogRecordWriter{
@@ -378,7 +377,7 @@ func (pw *PackedManifestRecordWriter) Write(r Record) error {
 
 	err := pw.writer.Write(r)
 	if err != nil {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("write record batch error: %s", err.Error()))
+		return merr.WrapErrStorage(err, "write record batch error")
 	}
 	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	return nil
@@ -399,7 +398,7 @@ func (pw *PackedManifestRecordWriter) initWriters(r Record) error {
 		}
 		pw.writer, err = NewPackedRecordManifestWriter(pw.storageConfig.GetBucketName(), basePath, -1, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext)
 		if err != nil {
-			return merr.WrapErrServiceInternal(fmt.Sprintf("can not new packed record writer %s", err.Error()))
+			return merr.WrapErrStorage(err, "can not new packed record writer")
 		}
 	}
 	return nil
@@ -454,7 +453,7 @@ func newPackedManifestRecordWriter(collectionID, partitionID, segmentID UniqueID
 ) (*PackedManifestRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
+		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
 
 	writer := &PackedManifestRecordWriter{

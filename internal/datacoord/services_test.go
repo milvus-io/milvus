@@ -1427,7 +1427,6 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 
 func TestImportV2(t *testing.T) {
 	ctx := context.Background()
-	mockErr := errors.New("mock err")
 
 	t.Run("ImportV2", func(t *testing.T) {
 		// server not healthy
@@ -1464,11 +1463,11 @@ func TestImportV2(t *testing.T) {
 		s.importMeta, err = NewImportMeta(context.TODO(), catalog, nil, nil)
 		assert.NoError(t, err)
 		alloc := allocator.NewMockAllocator(t)
-		alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, mockErr)
+		alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, merr.WrapErrServiceUnavailable("mock err"))
 		s.allocator = alloc
 		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{})
 		assert.NoError(t, err)
-		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrServiceUnavailable))
 	})
 
 	t.Run("GetImportProgress", func(t *testing.T) {
@@ -1485,7 +1484,7 @@ func TestImportV2(t *testing.T) {
 			JobID: "@%$%$#%",
 		})
 		assert.NoError(t, err)
-		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrParameterInvalid))
 
 		// job does not exist
 		catalog := mocks.NewDataCoordCatalog(t)
@@ -1505,7 +1504,8 @@ func TestImportV2(t *testing.T) {
 			JobID: "-1",
 		})
 		assert.NoError(t, err)
-		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+		// job-not-found is a server-side orchestration issue, not malformed user data
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportSysFailed))
 
 		// normal case
 		var job ImportJob = &importJob{

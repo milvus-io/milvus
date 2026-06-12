@@ -19,6 +19,7 @@ import (
 	msgpulsar "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 	msgwoodpecker "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/wp"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // MustGetMQWrapperIDFromMessage converts message.MessageID to common.MessageID
@@ -88,7 +89,7 @@ func DeserializeToMQWrapperID(msgID []byte, walName string) (common.MessageID, e
 		}
 		return mqwoodpecker.NewWoodpeckerID(wID), nil
 	default:
-		return nil, fmt.Errorf("unsupported mq type %s", walName)
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported mq type %s", walName)
 	}
 }
 

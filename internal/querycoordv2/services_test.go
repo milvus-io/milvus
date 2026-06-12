@@ -715,12 +715,12 @@ func (suite *ServiceSuite) TestTransferNode() {
 	defer server.resourceObserver.Stop()
 	defer server.replicaObserver.Stop()
 
-	err := server.meta.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
+	_, err := server.meta.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 0},
 	})
 	suite.NoError(err)
-	err = server.meta.AddResourceGroup(ctx, "rg2", &rgpb.ResourceGroupConfig{
+	_, err = server.meta.AddResourceGroup(ctx, "rg2", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 0},
 	})
@@ -779,12 +779,12 @@ func (suite *ServiceSuite) TestTransferNode() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
 
-	err = server.meta.AddResourceGroup(ctx, "rg3", &rgpb.ResourceGroupConfig{
+	_, err = server.meta.AddResourceGroup(ctx, "rg3", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 4},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 4},
 	})
 	suite.NoError(err)
-	err = server.meta.AddResourceGroup(ctx, "rg4", &rgpb.ResourceGroupConfig{
+	_, err = server.meta.AddResourceGroup(ctx, "rg4", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 0},
 	})
@@ -863,17 +863,17 @@ func (suite *ServiceSuite) TestTransferReplica() {
 	suite.loadAll()
 	server := suite.server
 
-	err := server.meta.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
+	_, err := server.meta.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 1},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 1},
 	})
 	suite.NoError(err)
-	err = server.meta.AddResourceGroup(ctx, "rg2", &rgpb.ResourceGroupConfig{
+	_, err = server.meta.AddResourceGroup(ctx, "rg2", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 1},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 1},
 	})
 	suite.NoError(err)
-	err = server.meta.AddResourceGroup(ctx, "rg3", &rgpb.ResourceGroupConfig{
+	_, err = server.meta.AddResourceGroup(ctx, "rg3", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 3},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 3},
 	})

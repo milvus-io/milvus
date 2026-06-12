@@ -169,7 +169,7 @@ func NewMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
 					return err
 				}
 			} else {
-				return fmt.Errorf("bucket %s not Existed", c.BucketName)
+				return merr.WrapErrParameterInvalidMsg("bucket %s not Existed", c.BucketName)
 			}
 		}
 		return nil
@@ -375,16 +375,16 @@ func newTLSHTTPClient(minVersion string) (*http.Client, error) {
 
 func getProjectId(gcpCredentialJSON string) (string, error) {
 	if gcpCredentialJSON == "" {
-		return "", errors.New("the JSON string is empty")
+		return "", merr.WrapErrParameterInvalidMsg("the JSON string is empty")
 	}
 	var data map[string]interface{}
 	if err := json.Unmarshal([]byte(gcpCredentialJSON), &data); err != nil {
-		return "", errors.New("failed to parse Google Cloud credentials as JSON")
+		return "", merr.WrapErrParameterInvalidMsg("failed to parse Google Cloud credentials as JSON")
 	}
 	propertyValue, ok := data["project_id"]
 	projectId := fmt.Sprintf("%v", propertyValue)
 	if !ok {
-		return "", errors.New("projectId doesn't exist")
+		return "", merr.WrapErrParameterInvalidMsg("projectId doesn't exist")
 	}
 	return projectId, nil
 }

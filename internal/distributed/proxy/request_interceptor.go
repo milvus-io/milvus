@@ -22,10 +22,14 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -73,6 +77,35 @@ func UnaryRequestStatsInterceptor(ctx context.Context, req any, rpcInfo *grpc.Un
 		dbName,
 		collectionName,
 	).Inc()
+
+	// Mirror the fail_input/fail_system metric split into the logs so a failed
+	// request can be filtered by error_type the same way the metric is. System
+	// failures are logged at Warn (actionable for SRE); input failures at Info
+	// (expected user mistakes — keeping them at Warn would spam the logs).
+	if label == metrics.FailSystemLabel || label == metrics.FailInputLabel {
+		var status *commonpb.Status
+		switch r := resp.(type) {
+		case interface{ GetStatus() *commonpb.Status }:
+			status = r.GetStatus()
+		case *commonpb.Status:
+			status = r
+		}
+		errType := merr.SystemError
+		if label == metrics.FailInputLabel {
+			errType = merr.InputError
+		}
+		logger := log.Ctx(ctx).With(
+			zap.String("method", methodTag),
+			zap.String("error_type", errType.String()),
+			zap.Int32("code", status.GetCode()),
+			zap.String("reason", status.GetReason()),
+		)
+		if errType == merr.InputError {
+			logger.Info("rpc returned an input error")
+		} else {
+			logger.Warn("rpc returned a system error")
+		}
+	}
 
 	// set metrics for latency
 	metrics.ProxyGRPCLatency.WithLabelValues(

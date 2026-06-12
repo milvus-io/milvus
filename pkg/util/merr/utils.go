@@ -19,16 +19,14 @@ package merr
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
+	"golang.org/x/exp/constraints"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 const InputErrorFlagKey string = "is_input_error"
@@ -40,20 +38,22 @@ func Code(err error) int32 {
 		return 0
 	}
 
-	cause := errors.Cause(err)
-	switch specificErr := cause.(type) {
-	case milvusError:
-		return specificErr.code()
-
-	default:
-		if errors.Is(specificErr, context.Canceled) {
-			return CanceledCode
-		} else if errors.Is(specificErr, context.DeadlineExceeded) {
-			return TimeoutCode
-		} else {
-			return errUnexpected.code()
+	// Walk the chain for the first milvusError (a sentinel, a wrapFields value,
+	// or a relabeling milvusError-with-inner). Stopping at the first match means
+	// a relabel reports its own code, not the inner's.
+	for cur := err; cur != nil; cur = errors.Unwrap(cur) {
+		if me, ok := cur.(milvusError); ok {
+			return me.code()
 		}
 	}
+
+	cause := errors.Cause(err)
+	if errors.Is(cause, context.Canceled) {
+		return CanceledCode
+	} else if errors.Is(cause, context.DeadlineExceeded) {
+		return TimeoutCode
+	}
+	return errUnexpected.code()
 }
 
 func IsRetryableErr(err error) bool {
@@ -111,8 +111,14 @@ func Status(err error) *commonpb.Status {
 	code := Code(err)
 
 	status := &commonpb.Status{
-		Code:   code,
-		Reason: previousLastError(err).Error(),
+		Code: code,
+		// Reason is the SDK/REST-visible message: the full composed chain,
+		// outermost context first ("outer context: ...: root cause"). The
+		// previous leaf-oriented heuristic (previousLastError) dropped the
+		// actionable outer context whenever the root cause was itself a
+		// nested error (e.g. strconv.NumError wrapping ErrSyntax), leaving
+		// clients with only the raw low-level cause.
+		Reason: err.Error(),
 		// Deprecated, for compatibility
 		ErrorCode: oldCode(code),
 		Retriable: IsRetryableErr(err),
@@ -121,21 +127,14 @@ func Status(err error) *commonpb.Status {
 
 	if GetErrorType(err) == InputError {
 		status.ExtraInfo = map[string]string{InputErrorFlagKey: "true"}
+		// Invariant enforced at the proxy boundary: an input error means the
+		// request is malformed, so retrying it unchanged can never succeed.
+		// Force Retriable=false even if the underlying sentinel is retriable,
+		// so clients never receive the self-contradictory "your input is wrong
+		// but you may retry" signal.
+		status.Retriable = false
 	}
 	return status
-}
-
-func previousLastError(err error) error {
-	lastErr := err
-	for {
-		nextErr := errors.Unwrap(err)
-		if nextErr == nil {
-			break
-		}
-		lastErr = err
-		err = nextErr
-	}
-	return lastErr
 }
 
 func CheckRPCCall(resp any, err error) error {
@@ -167,11 +166,13 @@ func StatusWithErrorCode(err error, code commonpb.ErrorCode) *commonpb.Status {
 		return &commonpb.Status{}
 	}
 
-	return &commonpb.Status{
-		Code:      Code(err),
-		Reason:    err.Error(),
-		ErrorCode: code,
-	}
+	// Reuse Status so Retriable / Detail / the is_input_error flag are populated
+	// (and Retriable forced false for input errors). Otherwise the ~31 rootcoord
+	// RBAC/credential callers would round-trip genuine input errors as system.
+	// Only override the explicit wire ErrorCode the caller asked for.
+	st := Status(err)
+	st.ErrorCode = code
+	return st
 }
 
 func oldCode(code int32) commonpb.ErrorCode {
@@ -182,7 +183,10 @@ func oldCode(code int32) commonpb.ErrorCode {
 	case ErrCollectionNotFound.code():
 		return commonpb.ErrorCode_CollectionNotExists
 
-	case ErrParameterInvalid.code():
+	case ErrParameterInvalid.code(), ErrParameterMissing.code(), ErrParameterTooLarge.code():
+		// The legacy contract is that every parameter-class error surfaces as
+		// IllegalArgument, so the finer-grained 1101/1102 codes must not regress
+		// old SDKs (which still read the deprecated ErrorCode) to UnexpectedError.
 		return commonpb.ErrorCode_IllegalArgument
 
 	case ErrNodeNotMatch.code():
@@ -286,33 +290,23 @@ func Error(status *commonpb.Status) error {
 	}
 
 	var eType ErrorType
-	_, ok := status.GetExtraInfo()[InputErrorFlagKey]
-	if ok {
+	if status.GetExtraInfo()[InputErrorFlagKey] == "true" {
 		eType = InputError
 	}
 
 	// use code first
 	code := status.GetCode()
 	if code == 0 {
-		return newMilvusError(status.GetReason(), Code(OldCodeToMerr(status.GetErrorCode())), false, WithDetail(status.GetDetail()), WithErrorType(eType))
+		return makeMilvusError(status.GetReason(), Code(OldCodeToMerr(status.GetErrorCode())), false, WithDetail(status.GetDetail()), WithErrorType(eType))
 	}
-	return newMilvusError(status.GetReason(), code, status.GetRetriable(), WithDetail(status.GetDetail()), WithErrorType(eType))
+	return makeMilvusError(status.GetReason(), code, status.GetRetriable(), WithDetail(status.GetDetail()), WithErrorType(eType))
 }
 
-// SegcoreError returns a merr according to the given segcore error code and message
+// SegcoreError returns a merr according to the given segcore error code and
+// message. Classification (sentinel identity, input-vs-system error type) is
+// delegated to the shared segcore code table; see classifySegcoreError.
 func SegcoreError(code int32, msg string) error {
-	return newMilvusError(msg, code, false)
-}
-
-// CheckHealthy checks whether the state is healthy,
-// returns nil if healthy,
-// otherwise returns ErrServiceNotReady wrapped with current state
-func CheckHealthy(state commonpb.StateCode) error {
-	if state != commonpb.StateCode_Healthy {
-		return WrapErrServiceNotReady(paramtable.GetRole(), paramtable.GetNodeID(), state.String())
-	}
-
-	return nil
+	return classifySegcoreError(code, msg)
 }
 
 func IsHealthy(stateCode commonpb.StateCode) error {
@@ -329,32 +323,42 @@ func IsHealthyOrStopping(stateCode commonpb.StateCode) error {
 	return CheckHealthy(stateCode)
 }
 
-func AnalyzeState(role string, nodeID int64, state *milvuspb.ComponentStates) error {
-	if err := Error(state.GetStatus()); err != nil {
-		return errors.Wrapf(err, "%s=%d not healthy", role, nodeID)
-	} else if state := state.GetState().GetStateCode(); state != commonpb.StateCode_Healthy {
-		return WrapErrServiceNotReady(role, nodeID, state.String())
-	}
-
-	return nil
+// errorTypeMarker overrides the broad classification (Input/System) of the
+// error it wraps, no matter how deep the milvus sentinel sits in the chain.
+// GetErrorType finds it via the ErrorClassifier interface, so the mark works on
+// bare milvusError values, *Msg (errors.Wrapf) results, and further-wrapped
+// errors alike. It keeps the underlying error reachable via Unwrap, so Code /
+// IsRetryableErr / errors.Is are unaffected.
+type errorTypeMarker struct {
+	error
+	etype ErrorType
 }
 
+func (m errorTypeMarker) Unwrap() error           { return m.error }
+func (m errorTypeMarker) GetErrorType() ErrorType { return m.etype }
+
 func WrapErrAsInputError(err error) error {
-	if merr, ok := err.(milvusError); ok {
-		WithErrorType(InputError)(&merr)
-		return merr
+	if err == nil {
+		return nil
 	}
-	return err
+	return errorTypeMarker{error: err, etype: InputError}
+}
+
+func WrapErrAsSysError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return errorTypeMarker{error: err, etype: SystemError}
 }
 
 func WrapErrAsInputErrorWhen(err error, targets ...milvusError) error {
-	if merr, ok := err.(milvusError); ok {
-		for _, target := range targets {
-			if target.errCode == merr.errCode {
-				log.Info("mark error as input error", zap.Error(err))
-				WithErrorType(InputError)(&merr)
-				return merr
-			}
+	if err == nil {
+		return nil
+	}
+	code := Code(err)
+	for _, target := range targets {
+		if target.errCode == code {
+			return errorTypeMarker{error: err, etype: InputError}
 		}
 	}
 	return err
@@ -365,14 +369,41 @@ func WrapErrCollectionReplicateMode(operation string) error {
 }
 
 func GetErrorType(err error) ErrorType {
-	if merr, ok := err.(milvusError); ok {
-		return merr.errType
+	// Find the outermost classifier in the chain: an explicit errorTypeMarker
+	// (from WrapErrAsInputError/SysError) takes precedence over the underlying
+	// milvusError's baked-in errType, so the mark works through any wrapping.
+	var ec ErrorClassifier
+	if errors.As(err, &ec) {
+		return ec.GetErrorType()
 	}
 
 	return SystemError
 }
 
-// Service related
+// keeps only 2 decimal places
+func toMB[T constraints.Integer | constraints.Float](mem T) T {
+	return T(math.Round(float64(mem)/1024/1024*100) / 100)
+}
+
+// CheckHealthy checks whether the state is healthy,
+// returns nil if healthy,
+// otherwise returns ErrServiceNotReady wrapped with current state
+func CheckHealthy(stateCode commonpb.StateCode) error {
+	if stateCode != commonpb.StateCode_Healthy {
+		return Wrapf(ErrServiceNotReady, "state code: %s", stateCode.String())
+	}
+	return nil
+}
+
+func AnalyzeState(role string, nodeID int64, state *milvuspb.ComponentStates) error {
+	if err := Error(state.GetStatus()); err != nil {
+		return WrapErrServiceNotReady(role, nodeID, err.Error())
+	} else if stateCode := state.GetState().GetStateCode(); stateCode != commonpb.StateCode_Healthy {
+		return WrapErrServiceNotReady(role, nodeID, stateCode.String())
+	}
+	return nil
+}
+
 func WrapErrServiceNotReady(role string, sessionID int64, state string, msg ...string) error {
 	err := wrapFieldsWithDesc(ErrServiceNotReady,
 		state,
@@ -384,6 +415,36 @@ func WrapErrServiceNotReady(role string, sessionID int64, state string, msg ...s
 	return err
 }
 
+// formatMsg renders a WrapErr* message. When no args are supplied the format is
+// used verbatim (no Sprintf), so a '%' in dynamic content — e.g.
+// WrapErrServiceInternalMsg(err.Error()) where the message contains "50%" — is
+// not misinterpreted as a printf verb and rendered as "%!s(MISSING)" garbage.
+// With args it formats as usual.
+func formatMsg(format string, args ...any) string {
+	if len(args) == 0 {
+		return format
+	}
+	return fmt.Sprintf(format, args...)
+}
+
+// wrapMsg attaches a (safely rendered) message to a sentinel for the
+// WrapErr*Msg factories. When no args are supplied the format is used verbatim
+// (errors.Wrap, no Sprintf), so a '%' in dynamic content — e.g.
+// WrapErrServiceInternalMsg(err.Error()) where the message contains "50%" — is
+// not misinterpreted as a printf verb. The args path uses errors.Wrapf rather
+// than fmt.Sprintf so `go vet` does not classify the WrapErr*Msg helpers as
+// printf wrappers and flag every non-constant-format callsite.
+func wrapMsg(err error, format string, args ...any) error {
+	if len(args) == 0 {
+		return errors.Wrap(err, format)
+	}
+	return errors.Wrapf(err, format, args...)
+}
+
+func WrapErrServiceNotReadyMsg(fmt string, args ...any) error {
+	return wrapMsg(ErrServiceNotReady, fmt, args...)
+}
+
 func WrapErrServiceUnavailable(reason string, msg ...string) error {
 	err := wrapFieldsWithDesc(ErrServiceUnavailable, reason)
 	if len(msg) > 0 {
@@ -392,10 +453,14 @@ func WrapErrServiceUnavailable(reason string, msg ...string) error {
 	return err
 }
 
+func WrapErrServiceUnavailableMsg(fmt string, args ...any) error {
+	return wrapMsg(ErrServiceUnavailable, fmt, args...)
+}
+
 func WrapErrServiceMemoryLimitExceeded(predict, limit float32, msg ...string) error {
 	err := wrapFields(ErrServiceMemoryLimitExceeded,
-		value("predict(MB)", logutil.ToMB(float64(predict))),
-		value("limit(MB)", logutil.ToMB(float64(limit))),
+		value("predict(MB)", toMB(float64(predict))),
+		value("limit(MB)", toMB(float64(limit))),
 	)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
@@ -421,6 +486,17 @@ func WrapErrServiceInternal(reason string, msg ...string) error {
 	return err
 }
 
+func WrapErrServiceInternalErr(err error, format string, args ...any) error {
+	if err == nil {
+		return WrapErrServiceInternalMsg(format, args...)
+	}
+	return wrapInner(ErrServiceInternal, formatMsg(format, args...), err)
+}
+
+func WrapErrServiceInternalMsg(fmt string, args ...any) error {
+	return wrapMsg(ErrServiceInternal, fmt, args...)
+}
+
 func WrapErrServiceCrossClusterRouting(expectedCluster, actualCluster string, msg ...string) error {
 	err := wrapFields(ErrServiceCrossClusterRouting,
 		value("expectedCluster", expectedCluster),
@@ -434,8 +510,8 @@ func WrapErrServiceCrossClusterRouting(expectedCluster, actualCluster string, ms
 
 func WrapErrServiceDiskLimitExceeded(predict, limit float32, msg ...string) error {
 	err := wrapFields(ErrServiceDiskLimitExceeded,
-		value("predict(MB)", logutil.ToMB(float64(predict))),
-		value("limit(MB)", logutil.ToMB(float64(limit))),
+		value("predict(MB)", toMB(float64(predict))),
+		value("limit(MB)", toMB(float64(limit))),
 	)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
@@ -457,6 +533,10 @@ func WrapErrServiceQuotaExceeded(reason string, msg ...string) error {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
 	return err
+}
+
+func WrapErrServiceQuotaExceededMsg(fmt string, args ...any) error {
+	return wrapMsg(ErrServiceQuotaExceeded, fmt, args...)
 }
 
 func WrapErrServiceUnimplemented(grpcErr error) error {
@@ -716,13 +796,19 @@ func WrapErrResourceGroupNodeNotEnough(rg any, current any, expected any, msg ..
 	return err
 }
 
-// WrapErrResourceGroupServiceAvailable wraps ErrResourceGroupServiceAvailable with resource group
-func WrapErrResourceGroupServiceAvailable(msg ...string) error {
-	err := wrapFields(ErrResourceGroupServiceAvailable)
+// WrapErrResourceGroupServiceUnAvailable wraps ErrResourceGroupServiceUnAvailable with resource group
+func WrapErrResourceGroupServiceUnAvailable(msg ...string) error {
+	err := wrapFields(ErrResourceGroupServiceUnAvailable)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
 	return err
+}
+
+// Deprecated: misspelled historical name kept for backward compatibility of the
+// exported symbol; use WrapErrResourceGroupServiceUnAvailable.
+func WrapErrResourceGroupServiceAvailable(msg ...string) error {
+	return WrapErrResourceGroupServiceUnAvailable(msg...)
 }
 
 // Replica related
@@ -778,6 +864,14 @@ func WrapErrChannelNotAvailable(name string, msg ...string) error {
 
 func WrapErrChannelDroppedSentinel(name string, msg ...string) error {
 	return warpChannelErr(ErrChannelDroppedSentinel, name, msg...)
+}
+
+// WrapErrChannelMisrouted is used by a delegator/querynode when it receives a
+// request for a channel it does not own. Encodes the requested channel name
+// in the structured field; callers can put additional context (e.g. the list
+// of channels the node actually owns) into msg.
+func WrapErrChannelMisrouted(name string, msg ...string) error {
+	return warpChannelErr(ErrChannelMisrouted, name, msg...)
 }
 
 // Segment related
@@ -959,6 +1053,98 @@ func WrapErrNodeNotMatch(expectedNodeID, actualNodeID int64, msg ...string) erro
 	return err
 }
 
+// WrapErrSerializationFailedMsg creates a new ErrSerializationFailed (code 1004)
+// with a detail message. Used when stored bytes cannot be decoded into the
+// expected shape and there is no underlying error to wrap (e.g. valuesRead vs
+// rows mismatch in payload reader, type mismatch when reading a column from
+// the wrong DataType).
+func WrapErrSerializationFailedMsg(format string, args ...any) error {
+	return wrapMsg(ErrSerializationFailed, format, args...)
+}
+
+// WrapErrSerializationFailed wraps an existing underlying error 'err' with
+// ErrSerializationFailed (code 1004). Used when a decode / unmarshal /
+// schema-conversion step fails with a non-typed inner error (json, proto,
+// arrow). If 'err' is already a typed merr, use merr.Wrap(err, msg) instead.
+func WrapErrSerializationFailed(err error, format string, args ...any) error {
+	if err == nil {
+		return WrapErrSerializationFailedMsg(format, args...)
+	}
+	return wrapInner(ErrSerializationFailed, formatMsg(format, args...), err)
+}
+
+// WrapErrDataIntegrityMsg creates a new ErrDataIntegrity (code 1009) with a
+// detail message. Use when on-disk bytes don't conform to the expected schema
+// (binlog type mismatch, valuesRead vs rows mismatch, malformed event header,
+// unparseable stats buffer) — i.e. the stored data itself is corrupt, not the
+// (de)serialization step.
+func WrapErrDataIntegrityMsg(format string, args ...any) error {
+	return wrapMsg(ErrDataIntegrity, format, args...)
+}
+
+// WrapErrDataIntegrity wraps an existing underlying error with ErrDataIntegrity
+// (code 1009). Use when stored-byte parsing surfaces a non-typed inner error
+// (json unmarshal of stats buffer, type assertion of decoded header extras).
+// If 'err' is already a typed merr, use merr.Wrap(err, msg) instead.
+func WrapErrDataIntegrity(err error, format string, args ...any) error {
+	if err == nil {
+		return WrapErrDataIntegrityMsg(format, args...)
+	}
+	return wrapInner(ErrDataIntegrity, formatMsg(format, args...), err)
+}
+
+// WrapErrStorageMsg creates a new ErrStorage (code 1008) with a detail message.
+// Used when a logical internal error occurs in the storage layer (e.g. invalid
+// state, corrupted data structure check, nil data) and there is no underlying
+// Go error to wrap.
+func WrapErrStorageMsg(format string, args ...any) error {
+	return wrapMsg(ErrStorage, format, args...)
+}
+
+// WrapErrStorage wraps an existing underlying error 'err' with ErrStorage
+// (code 1008). Used for storage subsystem failures (transaction state machine,
+// writer/reader lifecycle, FFI internal failures) that are not physical I/O,
+// not serialization, and not client-input errors.
+//
+// IMPORTANT: only use when 'err' is a raw error (FFI / fs / proto / arrow).
+// If 'err' is already a typed merr, use merr.Wrap(err, msg) instead — wrapping
+// a typed merr here would mask its inner code (defect#3 pattern).
+//
+// merr.Code(result) returns ErrStorage.code() = 1008; errors.Is(result, ErrStorage)
+// succeeds; errors.Is(result, err) also succeeds (inner chain preserved via Unwrap).
+func WrapErrStorage(err error, format string, args ...any) error {
+	if err == nil {
+		return WrapErrStorageMsg(format, args...)
+	}
+	return wrapInner(ErrStorage, formatMsg(format, args...), err)
+}
+
+// WrapErrFunctionFailedMsg creates a new ErrFunctionFailed (code 2400) with a
+// detail message. Use when a function / BM25 / MinHash / analyzer runner
+// returns a malformed output (wrong type, empty, unexpected shape) and there
+// is no underlying Go error to wrap.
+func WrapErrFunctionFailedMsg(format string, args ...any) error {
+	return wrapMsg(ErrFunctionFailed, format, args...)
+}
+
+// WrapErrFunctionFailed wraps an existing underlying error 'err' with
+// ErrFunctionFailed (code 2400). Use when a function-pipeline call surfaces
+// a non-typed inner error (runner I/O, model invocation, dependency failure).
+//
+// IMPORTANT: only use when 'err' is a raw error. If 'err' is already a typed
+// merr, use merr.Wrap(err, msg) instead — wrapping a typed merr here would
+// mask its inner code (defect#3 pattern).
+//
+// merr.Code(result) returns ErrFunctionFailed.code() = 2400; errors.Is(result,
+// ErrFunctionFailed) succeeds; errors.Is(result, err) also succeeds (inner
+// chain preserved via Unwrap).
+func WrapErrFunctionFailed(err error, format string, args ...any) error {
+	if err == nil {
+		return WrapErrFunctionFailedMsg(format, args...)
+	}
+	return wrapInner(ErrFunctionFailed, formatMsg(format, args...), err)
+}
+
 // IO related
 func WrapErrIoKeyNotFound(key string, msg ...string) error {
 	err := wrapFields(ErrIoKeyNotFound, value("key", key))
@@ -981,6 +1167,10 @@ func WrapErrIoFailedReason(reason string, msg ...string) error {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
 	return err
+}
+
+func WrapErrIoFailedMsg(fmt string, args ...any) error {
+	return wrapMsg(ErrIoFailed, fmt, args...)
 }
 
 func WrapErrIoUnexpectEOF(key string, err error) error {
@@ -1051,6 +1241,17 @@ func WrapErrParameterInvalid[T any](expected, actual T, msg ...string) error {
 	return err
 }
 
+// WrapErrParameterInvalidErr wraps an existing error 'err' with ErrParameterInvalid (Code 1100).
+// This is used when an underlying error (e.g., from parsing, validation utility, or dependency)
+// causes a parameter check to fail, and you need to provide extra context
+// in 'format' and 'args'.
+func WrapErrParameterInvalidErr(err error, format string, args ...any) error {
+	if err == nil {
+		return WrapErrParameterInvalidMsg(format, args...)
+	}
+	return wrapInner(ErrParameterInvalid, formatMsg(format, args...), err)
+}
+
 func WrapErrParameterInvalidRange[T any](lower, upper, actual T, msg ...string) error {
 	err := wrapFields(ErrParameterInvalid,
 		bound("value", actual, lower, upper),
@@ -1062,7 +1263,7 @@ func WrapErrParameterInvalidRange[T any](lower, upper, actual T, msg ...string) 
 }
 
 func WrapErrParameterInvalidMsg(fmt string, args ...any) error {
-	return errors.Wrapf(ErrParameterInvalid, fmt, args...)
+	return wrapMsg(ErrParameterInvalid, fmt, args...)
 }
 
 func WrapErrParameterMissing[T any](param T, msg ...string) error {
@@ -1073,6 +1274,10 @@ func WrapErrParameterMissing[T any](param T, msg ...string) error {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
 	return err
+}
+
+func WrapErrParameterMissingMsg(fmt string, args ...any) error {
+	return wrapMsg(ErrParameterMissing, fmt, args...)
 }
 
 func WrapErrParameterTooLarge(name string, msg ...string) error {
@@ -1110,24 +1315,44 @@ func WrapErrMqTopicNotEmpty(name string, msg ...string) error {
 }
 
 func WrapErrMqInternal(err error, msg ...string) error {
-	err = wrapFieldsWithDesc(ErrMqInternal, err.Error())
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "->"))
+	if err == nil {
+		return ErrMqInternal
 	}
-	return err
+	ctx := ErrMqInternal.msg
+	if len(msg) > 0 {
+		ctx = strings.Join(msg, "->") + ": " + ctx
+	}
+	return wrapInner(ErrMqInternal, ctx, err)
+}
+
+// WrapErrMqInternalMsg creates a new ErrMqInternal (code 1302) with a detail
+// message. Use this when there is no underlying Go error to wrap.
+func WrapErrMqInternalMsg(format string, args ...any) error {
+	return wrapMsg(ErrMqInternal, format, args...)
 }
 
 func WrapErrPrivilegeNotAuthenticated(fmt string, args ...any) error {
-	err := errors.Wrapf(ErrPrivilegeNotAuthenticated, fmt, args...)
+	err := wrapMsg(ErrPrivilegeNotAuthenticated, fmt, args...)
 	return err
 }
 
 func WrapErrPrivilegeNotPermitted(fmt string, args ...any) error {
-	err := errors.Wrapf(ErrPrivilegeNotPermitted, fmt, args...)
+	err := wrapMsg(ErrPrivilegeNotPermitted, fmt, args...)
 	return err
 }
 
-// Segcore related
+// WrapErrSegcoreMsg creates a new ErrSegcore (2000) with a Sprintf-formatted
+// message. Use for Go-side segcore invariants where there's no C++ errorCode
+// available. When a C++ errorCode is available (the CGO boundary), use
+// SegcoreError(code, msg) instead, which classifies the code via the shared
+// segcore code table (see segcore.go).
+func WrapErrSegcoreMsg(format string, args ...any) error {
+	return wrapMsg(ErrSegcore, format, args...)
+}
+
+// Deprecated: segcore error classification is now driven by the shared code
+// table; use WrapErrSegcoreMsg. Kept for backward compatibility of the exported
+// symbol.
 func WrapErrSegcore(code int32, msg ...string) error {
 	err := wrapFields(ErrSegcore, value("segcoreCode", code))
 	if len(msg) > 0 {
@@ -1136,6 +1361,9 @@ func WrapErrSegcore(code int32, msg ...string) error {
 	return err
 }
 
+// Deprecated: segcore error classification is now driven by the shared code
+// table; use WrapErrSegcoreMsg. Kept for backward compatibility of the exported
+// symbol.
 func WrapErrSegcoreUnsupported(code int32, msg ...string) error {
 	err := wrapFields(ErrSegcoreUnsupported, value("segcoreCode", code))
 	if len(msg) > 0 {
@@ -1226,12 +1454,53 @@ func WrapErrImportFailed(msg ...string) error {
 	return err
 }
 
+// WrapErrImportFailedMsg is the formatted variant of WrapErrImportFailed,
+// matching the standard merr Msg-factory convention (errors.Wrapf) so callers
+// pass a format string + args instead of an inline fmt.Sprintf.
+func WrapErrImportFailedMsg(fmt string, args ...any) error {
+	return wrapMsg(ErrImportFailed, fmt, args...)
+}
+
+// WrapErrImportSysFailed wraps ErrImportSysFailed: the server-side / object-IO
+// import failures (job orchestration, backpressure, reader open/read) that are
+// the operator's concern, not the caller's. Use it instead of
+// WrapErrImportFailed wherever the failure is not caused by malformed user data.
+func WrapErrImportSysFailed(msg ...string) error {
+	err := error(ErrImportSysFailed)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+// WrapErrImportSysFailedMsg is the formatted variant of WrapErrImportSysFailed.
+func WrapErrImportSysFailedMsg(fmt string, args ...any) error {
+	return wrapMsg(ErrImportSysFailed, fmt, args...)
+}
+
 func WrapErrInconsistentRequery(msg ...string) error {
 	err := error(ErrInconsistentRequery)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
 	return err
+}
+
+// WrapErrQueryPlanMsg creates a new ErrQueryPlan (code 2201) with a detail
+// message. Use this when query plan parsing/validation fails and there is no
+// underlying Go error to wrap.
+func WrapErrQueryPlanMsg(format string, args ...any) error {
+	return wrapMsg(ErrQueryPlan, format, args...)
+}
+
+// WrapErrQueryPlan wraps an existing underlying error with ErrQueryPlan
+// (code 2201), preserving the inner error chain so callers can still match
+// upstream sentinels via errors.Is/As.
+func WrapErrQueryPlan(err error, format string, args ...any) error {
+	if err == nil {
+		return WrapErrQueryPlanMsg(format, args...)
+	}
+	return wrapInner(ErrQueryPlan, formatMsg(format, args...), err)
 }
 
 func WrapErrKMSKeyRevoked(dbID int64, reason string) error {
@@ -1254,6 +1523,10 @@ func WrapErrIllegalCompactionPlan(msg ...string) error {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
 	return err
+}
+
+func WrapErrIllegalCompactionPlanMsg(format string, args ...any) error {
+	return wrapMsg(ErrIllegalCompactionPlan, format, args...)
 }
 
 func WrapErrCompactionPlanConflict(msg ...string) error {
@@ -1324,11 +1597,17 @@ func WrapErrAnalyzeTaskNotFound(id int64) error {
 }
 
 func WrapErrBuildCompactionRequestFail(err error) error {
-	return wrapFieldsWithDesc(ErrBuildCompactionRequestFail, err.Error())
+	if err == nil {
+		return ErrBuildCompactionRequestFail
+	}
+	return wrapInner(ErrBuildCompactionRequestFail, ErrBuildCompactionRequestFail.msg, err)
 }
 
 func WrapErrGetCompactionPlanResultFail(err error) error {
-	return wrapFieldsWithDesc(ErrGetCompactionPlanResultFail, err.Error())
+	if err == nil {
+		return ErrGetCompactionPlanResultFail
+	}
+	return wrapInner(ErrGetCompactionPlanResultFail, ErrGetCompactionPlanResultFail.msg, err)
 }
 
 func WrapErrCompactionResult(msg ...string) error {
@@ -1361,4 +1640,19 @@ func WrapErrOldSessionExists(msg ...string) error {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
 	return err
+}
+
+// WrapErrOperationNotSupportedMsg creates a new ErrOperationNotSupported with a detail message (Code 3000).
+// This is the primary replacement for fmt.Errorf/errors.New for operations that are
+// currently not supported by the system.
+func WrapErrOperationNotSupportedMsg(format string, args ...any) error {
+	return wrapMsg(ErrOperationNotSupported, format, args...)
+}
+
+// WrapErrOperationNotSupported wraps an existing error 'err' with ErrOperationNotSupported (Code 3000).
+func WrapErrOperationNotSupported(err error, format string, args ...any) error {
+	if err == nil {
+		return WrapErrOperationNotSupportedMsg(format, args...)
+	}
+	return wrapInner(ErrOperationNotSupported, formatMsg(format, args...), err)
 }

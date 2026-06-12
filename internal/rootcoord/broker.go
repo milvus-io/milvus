@@ -18,9 +18,7 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -82,7 +80,7 @@ func (b *ServerBroker) ReleaseCollection(ctx context.Context, collectionID Uniqu
 	}
 
 	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
-		return fmt.Errorf("failed to release collection, code: %s, reason: %s", resp.GetErrorCode(), resp.GetReason())
+		return merr.Error(resp)
 	}
 
 	log.Ctx(ctx).Info("done to release collection", zap.Int64("collection", collectionID))
@@ -105,7 +103,7 @@ func (b *ServerBroker) ReleasePartitions(ctx context.Context, collectionID Uniqu
 	}
 
 	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
-		return fmt.Errorf("release partition failed, reason: %s", resp.GetReason())
+		return merr.Error(resp)
 	}
 
 	log.Info("release partitions done")
@@ -125,7 +123,7 @@ func (b *ServerBroker) SyncNewCreatedPartition(ctx context.Context, collectionID
 	}
 
 	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
-		return fmt.Errorf("sync new partition failed, reason: %s", resp.GetReason())
+		return merr.Error(resp)
 	}
 
 	log.Info("sync new partition done")
@@ -180,7 +178,7 @@ func (b *ServerBroker) WatchChannels(ctx context.Context, info *watchInfo) error
 	}
 
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return fmt.Errorf("failed to watch channels, code: %s, reason: %s", resp.GetStatus().GetErrorCode(), resp.GetStatus().GetReason())
+		return merr.Error(resp.GetStatus())
 	}
 
 	log.Ctx(ctx).Info("done to watch channels", zap.Uint64("ts", info.ts), zap.Int64("collection", info.collectionID), zap.Strings("vChannels", info.vChannels))
@@ -209,7 +207,7 @@ func (b *ServerBroker) DropCollectionIndex(ctx context.Context, collID UniqueID,
 		return err
 	}
 	if rsp.ErrorCode != commonpb.ErrorCode_Success {
-		return fmt.Errorf("%s", rsp.Reason)
+		return merr.Error(rsp)
 	}
 
 	log.Ctx(ctx).Info("done to drop collection index", zap.Int64("collection", collID), zap.Int64s("partitions", partIDs))
@@ -267,7 +265,7 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, collectio
 	}
 
 	if resp.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(resp.Reason)
+		return merr.Error(resp)
 	}
 	log.Ctx(ctx).Info("done to broadcast request to alter collection", zap.String("collectionName", colMeta.Name), zap.Int64("collectionID", collectionID), zap.Any("props", colMeta.Properties), zap.Any("field", colMeta.Fields))
 	return nil

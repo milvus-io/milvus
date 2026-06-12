@@ -201,10 +201,14 @@ class TestIndexOperation(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params)
-        error = {ct.err_code: 65535, ct.err_msg: "CreateIndex failed: at most one "
-                                                 "distinct index is allowed per field"}
-        self.index_wrap.init_index(collection_w.collection, default_field_name, default_ivf_flat_index,
-                                   check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1100, ct.err_msg: "at most one distinct index is allowed per field"}
+        self.index_wrap.init_index(
+            collection_w.collection,
+            default_field_name,
+            default_ivf_flat_index,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         assert len(collection_w.indexes) == 1
         assert collection_w.indexes[0].params["index_type"] == default_index_params["index_type"]
@@ -1195,10 +1199,12 @@ class TestIndexInvalid(TestcaseBase):
         collection_w = self.init_collection_general(prefix, True, nb=100,
                                                     is_index=False, vector_data_type=vector_data_type)[0]
         scalar_index_params = {"index_type": scalar_index}
-        collection_w.create_index(ct.default_float_vec_field_name, index_params=scalar_index_params,
-                                  check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1100,
-                                               ct.err_msg: f"invalid index params"})
+        collection_w.create_index(
+            ct.default_float_vec_field_name,
+            index_params=scalar_index_params,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "metric type not set for vector index"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_scalar_index_on_binary_vector_field(self, scalar_index):
@@ -1394,7 +1400,7 @@ class TestIndexInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("ratio", [-0.5, 1, 3])
-    @pytest.mark.parametrize("index ", ct.all_index_types[10:12])
+    @pytest.mark.parametrize("index", ct.all_index_types[10:12])
     def test_invalid_sparse_ratio(self, ratio, index):
         """
         target: index creation for unsupported ratio parameter
@@ -1415,7 +1421,7 @@ class TestIndexInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("inverted_index_algo", ["INVALID_ALGO"])
-    @pytest.mark.parametrize("index ", ct.all_index_types[10:12])
+    @pytest.mark.parametrize("index", ct.all_index_types[10:12])
     def test_invalid_sparse_inverted_index_algo(self, inverted_index_algo, index):
         """
         target: index creation for unsupported ratio parameter
@@ -1631,10 +1637,13 @@ class TestIndexString(TestcaseBase):
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
         collection_w.create_index(default_string_field_name, default_string_index_params, index_name=index_name2)
-        collection_w.create_index(default_float_vec_field_name, default_index_params,
-                                  index_name=index_name2,
-                                  check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1, ct.err_msg: "CreateIndex failed"})
+        collection_w.create_index(
+            default_float_vec_field_name,
+            default_index_params,
+            index_name=index_name2,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "at most one distinct index is allowed per field"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_different_index_fields(self):

@@ -403,6 +403,35 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			dbName,
 			collectionName,
 		).Inc()
+
+		// Mirror the fail_input/fail_system metric split into the logs so a
+		// failed REST request can be filtered by error_type. System failures are
+		// logged at Warn (actionable); input failures at Info (expected user
+		// mistakes — keeping them at Warn would spam the logs).
+		if label == metrics.FailSystemLabel || label == metrics.FailInputLabel {
+			var status *commonpb.Status
+			switch r := resp.(type) {
+			case interface{ GetStatus() *commonpb.Status }:
+				status = r.GetStatus()
+			case *commonpb.Status:
+				status = r
+			}
+			errType := merr.SystemError
+			if label == metrics.FailInputLabel {
+				errType = merr.InputError
+			}
+			logger := log.Ctx(ctx).With(
+				zap.String("method", methodTag),
+				zap.String("error_type", errType.String()),
+				zap.Int32("code", status.GetCode()),
+				zap.String("reason", status.GetReason()),
+			)
+			if errType == merr.InputError {
+				logger.Info("restful request returned an input error")
+			} else {
+				logger.Warn("restful request returned a system error")
+			}
+		}
 	}
 }
 
@@ -536,6 +565,9 @@ func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, ch
 	}
 
 	if err != nil {
+		// Expose the exact classification (incl. boundary InputError marks) to
+		// the REST access log; key must match accesslog/info.ContextErrorType.
+		ginCtx.Set("error_type", merr.GetErrorType(err).String())
 		log.Ctx(ctx).Warn("high level restful api, grpc call failed", zap.Error(err))
 		if !ignoreErr {
 			HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
@@ -1442,7 +1474,7 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 					fieldName = field.Name
 					vectorField = field
 				} else {
-					return nil, errors.New("search without annsField, but already found multiple vector fields: [" + fieldName + ", " + field.Name + ",,,]")
+					return nil, merr.WrapErrParameterInvalidMsg("search without annsField, but already found multiple vector fields: [%s, %s,,,]", fieldName, field.Name)
 				}
 			}
 		}
@@ -1455,7 +1487,7 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 		}
 	}
 	if vectorField == nil {
-		return nil, errors.New("cannot find a vector field named: " + fieldName)
+		return nil, merr.WrapErrFieldNotFound(fieldName, "cannot find a vector field")
 	}
 	dim := int64(0)
 	if !typeutil.IsSparseFloatVectorType(vectorField.DataType) {

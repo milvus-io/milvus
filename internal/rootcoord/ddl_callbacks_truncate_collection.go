@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -79,12 +80,12 @@ func (c *DDLCallback) truncateCollectionV2AckCallback(ctx context.Context, resul
 
 	// Drop segments that were updated before the flush timestamp
 	if err := c.mixCoord.DropSegmentsByTime(ctx, header.CollectionId, flushTsList); err != nil {
-		return errors.Wrap(err, "when dropping segments by time")
+		return merr.Wrap(err, "when dropping segments by time")
 	}
 
 	// manually update current target to sync QueryCoord's view
 	if err := c.mixCoord.ManualUpdateCurrentTarget(ctx, header.CollectionId); err != nil {
-		return errors.Wrap(err, "when manually updating current target")
+		return merr.Wrap(err, "when manually updating current target")
 	}
 
 	if err := c.meta.TruncateCollection(ctx, result); err != nil {
@@ -92,12 +93,12 @@ func (c *DDLCallback) truncateCollectionV2AckCallback(ctx context.Context, resul
 			log.Ctx(ctx).Warn("truncate a non-existent collection, ignore it", log.FieldMessage(result.Message))
 			return nil
 		}
-		return errors.Wrap(err, "when truncating collection")
+		return merr.Wrap(err, "when truncating collection")
 	}
 
 	// notify datacoord to update their meta cache
 	if err := c.broker.BroadcastAlteredCollection(ctx, header.CollectionId); err != nil {
-		return errors.Wrap(err, "when broadcasting altered collection")
+		return merr.Wrap(err, "when broadcasting altered collection")
 	}
 	return nil
 }
@@ -117,12 +118,12 @@ func (c *DDLCallback) truncateCollectionV2AckOnceCallback(ctx context.Context, r
 			log.Ctx(ctx).Warn("begin to truncate a non-existent collection, ignore it", log.FieldMessage(result.Message))
 			return nil
 		}
-		return errors.Wrap(err, "when beginning truncate collection")
+		return merr.Wrap(err, "when beginning truncate collection")
 	}
 
 	// notify datacoord to update their meta cache
 	if err := c.broker.BroadcastAlteredCollection(ctx, collectionID); err != nil {
-		return errors.Wrap(err, "when broadcasting altered collection")
+		return merr.Wrap(err, "when broadcasting altered collection")
 	}
 	return nil
 }
