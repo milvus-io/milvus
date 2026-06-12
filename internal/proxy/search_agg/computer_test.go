@@ -811,6 +811,47 @@ func TestSearchAggregationComputerCountAll(t *testing.T) {
 	require.Equal(t, int64(1), n1)
 }
 
+func TestSearchAggregationComputerCountJSONField(t *testing.T) {
+	t.Parallel()
+
+	ctx := newTestAggregationContext(t, 1,
+		[]LevelContext{{
+			OwnFieldIDs: []int64{101},
+			Size:        100,
+			Metrics: map[string]MetricSpec{
+				"json_count": {Op: "count", FieldID: 108, FieldType: schemapb.DataType_JSON},
+			},
+			Order: []OrderCriterion{{Key: "_key", Dir: "asc"}},
+		}},
+		nil,
+		[]int64{108},
+	)
+
+	data := &schemapb.SearchResultData{
+		NumQueries: 1,
+		Topks:      []int64{4},
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4}}}},
+		Scores:     []float32{0.9, 0.8, 0.7, 0.6},
+		FieldsData: []*schemapb.FieldData{
+			testJSONFieldData(108, [][]byte{
+				[]byte(`{"tag":"a"}`),
+				[]byte(`{"tag":"b"}`),
+				[]byte(`{"tag":"c"}`),
+				[]byte(`{"tag":"d"}`),
+			}),
+		},
+		GroupByFieldValues: []*schemapb.FieldData{
+			testStringFieldData(101, []string{"A", "A", "A", "B"}),
+		},
+	}
+
+	result, err := NewSearchAggregationComputer(data, ctx).Compute(context.Background())
+	require.NoError(t, err)
+	require.Len(t, result[0], 2)
+	require.Equal(t, int64(3), result[0][0].Metrics["json_count"])
+	require.Equal(t, int64(1), result[0][1].Metrics["json_count"])
+}
+
 func TestSearchAggregationComputerScoreMetric(t *testing.T) {
 	t.Parallel()
 	// A metric whose source is the _score column (ScoreFieldID=-1). Exercises
@@ -1170,11 +1211,56 @@ func TestCompareValuesErrorPaths(t *testing.T) {
 	// the Compute() surface requires data that violates FieldData type
 	// invariants, which is not something production callers can synthesize.
 
+	t.Run("nil values use legacy nil-first ordering", func(t *testing.T) {
+		t.Parallel()
+		cmp, err := compareValues(nil, nil)
+		require.NoError(t, err)
+		require.Equal(t, 0, cmp)
+
+		cmp, err = compareValues(nil, int64(1))
+		require.NoError(t, err)
+		require.Equal(t, -1, cmp)
+
+		cmp, err = compareValues(int64(1), nil)
+		require.NoError(t, err)
+		require.Equal(t, 1, cmp)
+	})
+
 	t.Run("large int64 values keep integer precision", func(t *testing.T) {
 		t.Parallel()
 		cmp, err := compareValues(int64(1<<53), int64(1<<53+1))
 		require.NoError(t, err)
 		require.Equal(t, -1, cmp)
+	})
+
+	t.Run("float values compare without casting to integers", func(t *testing.T) {
+		t.Parallel()
+		cmp, err := compareValues(float64(1.25), float64(2.5))
+		require.NoError(t, err)
+		require.Equal(t, -1, cmp)
+
+		cmp, err = compareValues(float64(2.5), float64(1.25))
+		require.NoError(t, err)
+		require.Equal(t, 1, cmp)
+
+		cmp, err = compareValues(float64(2.5), float64(2.5))
+		require.NoError(t, err)
+		require.Equal(t, 0, cmp)
+	})
+
+	t.Run("bool values compare false before true", func(t *testing.T) {
+		t.Parallel()
+		cmp, err := compareValues(false, true)
+		require.NoError(t, err)
+		require.Equal(t, -1, cmp)
+
+		cmp, err = compareValues(true, false)
+		require.NoError(t, err)
+		require.Equal(t, 1, cmp)
+
+		cmp, err = compareValues(true, true)
+		require.NoError(t, err)
+		require.Equal(t, 0, cmp)
 	})
 
 	t.Run("large uint64 values keep integer precision", func(t *testing.T) {
@@ -1423,6 +1509,16 @@ func testNullableLongFieldData(fieldID int64, values []int64, validData []bool) 
 	fd := testLongFieldData(fieldID, values)
 	fd.ValidData = validData
 	return fd
+}
+
+func testJSONFieldData(fieldID int64, values [][]byte) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		FieldId: fieldID,
+		Type:    schemapb.DataType_JSON,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: values}},
+		}},
+	}
 }
 
 func testInt32FieldData(fieldID int64, values []int32) *schemapb.FieldData {

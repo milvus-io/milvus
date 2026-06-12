@@ -47,6 +47,7 @@ func TestBuildSearchAggregationContext(t *testing.T) {
 	require.False(t, ctx.IsGroupByField(103))
 	require.False(t, ctx.IsGroupByField(104))
 
+	require.Equal(t, []int64{101, 102}, ctx.AllGroupByFieldIDs())
 	require.Equal(t, []int64{103, 104}, ctx.ExtraOutputFieldIDs())
 	require.Equal(t, ScoreFieldID, ctx.Levels[0].TopHits.Sort[0].FieldID)
 	require.Equal(t, int64(2), ctx.DerivedGroupSize)
@@ -434,6 +435,42 @@ func TestBuildSearchAggregationContextRejectsJSONField(t *testing.T) {
 	})
 }
 
+func TestBuildSearchAggregationContextAllowsCountJSONMetric(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "agg_test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "brand", DataType: schemapb.DataType_VarChar},
+			{FieldID: 108, Name: "meta", DataType: schemapb.DataType_JSON},
+		},
+	}
+
+	ctx, err := BuildSearchAggregationContext(&commonpb.SearchAggregationSpec{
+		Fields: []string{"brand"},
+		Metrics: map[string]*commonpb.MetricAggSpec{
+			"field_count": {Op: "count", FieldName: "meta"},
+		},
+	}, schema, 1)
+
+	require.NoError(t, err)
+	require.Equal(t, []int64{108}, ctx.ExtraOutputFieldIDs())
+	require.Empty(t, ctx.DynamicOutputFields())
+}
+
+func TestBuildSearchAggregationContextAllowsScoreMetric(t *testing.T) {
+	ctx, err := BuildSearchAggregationContext(&commonpb.SearchAggregationSpec{
+		Fields: []string{"brand"},
+		Metrics: map[string]*commonpb.MetricAggSpec{
+			"avg_score": {Op: "avg", FieldName: "_score"},
+		},
+	}, testCollectionSchema(), 1)
+
+	require.NoError(t, err)
+	require.Empty(t, ctx.ExtraOutputFieldIDs())
+	require.Equal(t, ScoreFieldID, ctx.Levels[0].Metrics["avg_score"].FieldID)
+	require.Equal(t, schemapb.DataType_Float, ctx.Levels[0].Metrics["avg_score"].FieldType)
+}
+
 func TestBuildSearchAggregationContextRejectsTopHitsSortJSONPath(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Name: "agg_test",
@@ -580,6 +617,164 @@ func TestBuildSearchAggregationContextRejectsJSONDynamicTopHitsSortFields(t *tes
 	}
 }
 
+func TestBuildSearchAggregationContextTracksDynamicMetricFields(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name:               "agg_test",
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "brand", DataType: schemapb.DataType_VarChar},
+			{FieldID: 109, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+	}
+
+	for _, fieldName := range []string{"dynamic_brand", "$meta[\"dynamic_brand\"]"} {
+		t.Run(fieldName, func(t *testing.T) {
+			ctx, err := BuildSearchAggregationContext(&commonpb.SearchAggregationSpec{
+				Fields: []string{"brand"},
+				Metrics: map[string]*commonpb.MetricAggSpec{
+					"field_count": {Op: "count", FieldName: fieldName},
+				},
+			}, schema, 1)
+			require.NoError(t, err)
+			require.Equal(t, []int64{109}, ctx.ExtraOutputFieldIDs())
+			require.Equal(t, []string{"dynamic_brand"}, ctx.DynamicOutputFields())
+		})
+	}
+}
+
+func TestBuildSearchAggregationContextTracksDynamicTopHitsSortFields(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name:               "agg_test",
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "brand", DataType: schemapb.DataType_VarChar},
+			{FieldID: 109, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+	}
+
+	ctx, err := BuildSearchAggregationContext(&commonpb.SearchAggregationSpec{
+		Fields: []string{"brand"},
+		Metrics: map[string]*commonpb.MetricAggSpec{
+			"field_count": {Op: "count", FieldName: "$meta[\"zeta\"]"},
+		},
+		TopHits: &commonpb.TopHitsSpec{
+			Size: 2,
+			Sort: []*commonpb.SortSpec{
+				{FieldName: "alpha", Direction: "asc"},
+				{FieldName: "beta", Direction: "desc"},
+				{FieldName: "alpha", Direction: "desc"},
+			},
+		},
+	}, schema, 1)
+
+	require.NoError(t, err)
+	require.Equal(t, []int64{109}, ctx.ExtraOutputFieldIDs())
+	require.Equal(t, []string{"alpha", "beta", "zeta"}, ctx.DynamicOutputFields())
+}
+
+func TestBuildSearchAggregationContextRejectsNestedDynamicMetricPath(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name:               "agg_test",
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "brand", DataType: schemapb.DataType_VarChar},
+			{FieldID: 109, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+	}
+
+	_, err := BuildSearchAggregationContext(&commonpb.SearchAggregationSpec{
+		Fields: []string{"brand"},
+		Metrics: map[string]*commonpb.MetricAggSpec{
+			"field_count": {Op: "count", FieldName: "$meta[\"outer\"][\"inner\"]"},
+		},
+	}, schema, 1)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "must reference exactly one dynamic key")
+}
+
+func TestBuildSearchAggregationContextRejectsJSONPathMetric(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "agg_test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "brand", DataType: schemapb.DataType_VarChar},
+			{FieldID: 108, Name: "meta", DataType: schemapb.DataType_JSON},
+		},
+	}
+
+	_, err := BuildSearchAggregationContext(&commonpb.SearchAggregationSpec{
+		Fields: []string{"brand"},
+		Metrics: map[string]*commonpb.MetricAggSpec{
+			"field_count": {Op: "count", FieldName: "meta[\"category\"]"},
+		},
+	}, schema, 1)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "metric JSON path is not yet supported")
+}
+
+func TestBuildSearchAggregationContextCountDynamicJSONFieldDoesNotRequestKey(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name:               "agg_test",
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "brand", DataType: schemapb.DataType_VarChar},
+			{FieldID: 109, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+	}
+
+	ctx, err := BuildSearchAggregationContext(&commonpb.SearchAggregationSpec{
+		Fields: []string{"brand"},
+		Metrics: map[string]*commonpb.MetricAggSpec{
+			"field_count": {Op: "count", FieldName: "$meta"},
+		},
+	}, schema, 1)
+
+	require.NoError(t, err)
+	require.Equal(t, []int64{109}, ctx.ExtraOutputFieldIDs())
+	require.Empty(t, ctx.DynamicOutputFields())
+}
+
+func TestMergeDynamicOutputFields(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name:               "agg_test",
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "brand", DataType: schemapb.DataType_VarChar},
+			{FieldID: 109, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+	}
+	ctx, err := BuildSearchAggregationContext(&commonpb.SearchAggregationSpec{
+		Fields: []string{"brand"},
+		Metrics: map[string]*commonpb.MetricAggSpec{
+			"field_count": {Op: "count", FieldName: "dynamic_brand"},
+		},
+	}, schema, 1)
+	require.NoError(t, err)
+
+	merged := MergeDynamicOutputFields([]string{"user_field", "dynamic_brand"}, ctx)
+
+	require.Equal(t, []string{"user_field", "dynamic_brand"}, merged)
+}
+
+func TestMergeDynamicOutputFieldsHandlesEmptyAndDuplicateFields(t *testing.T) {
+	require.Equal(t, []string{"user_field"}, MergeDynamicOutputFields([]string{"user_field"}, nil))
+	require.Equal(t, []string{"user_field"}, MergeDynamicOutputFields([]string{"user_field"}, &SearchAggregationContext{}))
+
+	ctx := &SearchAggregationContext{
+		dynamicOutputFields: []string{"", "dynamic_brand", "user_field"},
+	}
+	merged := MergeDynamicOutputFields([]string{"", "user_field"}, ctx)
+
+	require.Equal(t, []string{"user_field", "dynamic_brand"}, merged)
+}
+
 func TestBuildSearchAggregationContextValidationMatrix(t *testing.T) {
 	schema := testCollectionSchema()
 	cases := []struct {
@@ -657,6 +852,15 @@ func TestBuildSearchAggregationContextValidationMatrix(t *testing.T) {
 			},
 			schema:  schema,
 			wantErr: "metric field_name is empty",
+		},
+		{
+			name: "unknown metric field",
+			spec: &commonpb.SearchAggregationSpec{
+				Fields:  []string{"brand"},
+				Metrics: map[string]*commonpb.MetricAggSpec{"bad": {Op: "sum", FieldName: "missing"}},
+			},
+			schema:  schema,
+			wantErr: "field \"missing\" not found in schema",
 		},
 		{
 			name: "non count star metric",

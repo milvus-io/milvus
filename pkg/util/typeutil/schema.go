@@ -3155,6 +3155,8 @@ func getScalarDataLen(field *schemapb.FieldData) int {
 		return len(field.GetScalars().GetTimestamptzData().GetData())
 	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return len(field.GetScalars().GetStringData().GetData())
+	case schemapb.DataType_JSON:
+		return len(field.GetScalars().GetJsonData().GetData())
 	}
 	return -1
 }
@@ -3175,6 +3177,8 @@ func getData(field *schemapb.FieldData, idx int) any {
 		return field.GetScalars().GetTimestamptzData().GetData()[idx]
 	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return field.GetScalars().GetStringData().GetData()[idx]
+	case schemapb.DataType_JSON:
+		return field.GetScalars().GetJsonData().GetData()[idx]
 	case schemapb.DataType_FloatVector:
 		dim := int(field.GetVectors().GetDim())
 		return field.GetVectors().GetFloatVector().GetData()[idx*dim : (idx+1)*dim]
