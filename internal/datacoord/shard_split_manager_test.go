@@ -38,12 +38,17 @@ func newSplitTestMeta(enableNamespace bool, vchannel string, namespaceRows map[i
 		segments:    NewSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
+	partitions := make([]int64, 0, len(namespaceRows))
+	for partitionID := range namespaceRows {
+		partitions = append(partitions, partitionID)
+	}
 	m.collections.Insert(1, &collectionInfo{
 		ID: 1,
 		Schema: &schemapb.CollectionSchema{
 			Name:            "split_test",
 			EnableNamespace: enableNamespace,
 		},
+		Partitions:    partitions,
 		VChannelNames: []string{vchannel},
 	})
 	segmentID := int64(1000)
@@ -71,7 +76,7 @@ func newSplitTestManager(t *testing.T, m *meta) (*shardSplitManager, *mocks.Data
 	catalog.EXPECT().ListSplitShardTask(mock.Anything).Return(nil, nil).Once()
 	alloc := allocator.NewMockAllocator(t)
 	alloc.EXPECT().AllocID(mock.Anything).Return(int64(100), nil).Maybe()
-	manager, err := newShardSplitManager(context.Background(), m, catalog, alloc)
+	manager, err := newShardSplitManager(context.Background(), m, catalog, alloc, nil, nil, nil)
 	assert.NoError(t, err)
 	return manager, catalog
 }
@@ -85,7 +90,7 @@ func TestShardSplitManagerRecovery(t *testing.T) {
 	}, nil).Once()
 	alloc := allocator.NewMockAllocator(t)
 
-	manager, err := newShardSplitManager(context.Background(), nil, catalog, alloc)
+	manager, err := newShardSplitManager(context.Background(), nil, catalog, alloc, nil, nil, nil)
 	assert.NoError(t, err)
 	// only the unfinished task counts as active.
 	assert.Equal(t, 1, manager.activeTaskCount())
@@ -95,7 +100,7 @@ func TestShardSplitManagerRecovery(t *testing.T) {
 	// recovery failure surfaces.
 	catalog = mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListSplitShardTask(mock.Anything).Return(nil, errors.New("mock list error")).Once()
-	_, err = newShardSplitManager(context.Background(), nil, catalog, alloc)
+	_, err = newShardSplitManager(context.Background(), nil, catalog, alloc, nil, nil, nil)
 	assert.Error(t, err)
 }
 
@@ -167,7 +172,7 @@ func TestShardSplitManagerDetect(t *testing.T) {
 			{TaskId: 1, State: datapb.SplitShardTaskState_SplitShardTaskRedistributing, SourceVchannel: "other"},
 		}, nil).Once()
 		alloc := allocator.NewMockAllocator(t)
-		manager, err := newShardSplitManager(context.Background(), m, catalog, alloc)
+		manager, err := newShardSplitManager(context.Background(), m, catalog, alloc, nil, nil, nil)
 		assert.NoError(t, err)
 
 		manager.detectOnce()
@@ -182,7 +187,7 @@ func TestShardSplitManagerDetect(t *testing.T) {
 		catalog.EXPECT().ListSplitShardTask(mock.Anything).Return(nil, nil).Once()
 		alloc := allocator.NewMockAllocator(t)
 		alloc.EXPECT().AllocID(mock.Anything).Return(int64(0), errors.New("mock alloc error")).Once()
-		manager, err := newShardSplitManager(context.Background(), m, catalog, alloc)
+		manager, err := newShardSplitManager(context.Background(), m, catalog, alloc, nil, nil, nil)
 		assert.NoError(t, err)
 		manager.detectOnce()
 		assert.Equal(t, 0, manager.activeTaskCount())
@@ -193,7 +198,7 @@ func TestShardSplitManagerDetect(t *testing.T) {
 		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(errors.New("mock save error")).Once()
 		alloc = allocator.NewMockAllocator(t)
 		alloc.EXPECT().AllocID(mock.Anything).Return(int64(100), nil).Once()
-		manager, err = newShardSplitManager(context.Background(), m, catalog, alloc)
+		manager, err = newShardSplitManager(context.Background(), m, catalog, alloc, nil, nil, nil)
 		assert.NoError(t, err)
 		manager.detectOnce()
 		assert.Equal(t, 0, manager.activeTaskCount())
