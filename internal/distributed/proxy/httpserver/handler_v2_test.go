@@ -3544,6 +3544,172 @@ func TestGetQuotaMetrics(t *testing.T) {
 	fmt.Println(w.Body.String())
 }
 
+func TestSearchAggregationV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+	paramtable.Get().Save(proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.Key, "true")
+	defer paramtable.Get().Reset(proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	mp.EXPECT().Search(mock.Anything, mock.MatchedBy(func(req *milvuspb.SearchRequest) bool {
+		agg := req.GetSearchAggregation()
+		return agg != nil &&
+			len(agg.GetFields()) == 1 &&
+			agg.GetFields()[0] == "brand" &&
+			agg.GetSize() == 2 &&
+			agg.GetSearchSize() == 4 &&
+			agg.GetMetrics()["avg_price"].GetOp() == "avg" &&
+			agg.GetMetrics()["avg_price"].GetFieldName() == "price" &&
+			agg.GetOrder()[0].GetKey() == "avg_price" &&
+			agg.GetOrder()[0].GetDirection() == "desc" &&
+			agg.GetTopHits().GetSize() == 1 &&
+			agg.GetTopHits().GetSort()[0].GetFieldName() == "_score" &&
+			agg.GetTopHits().GetSort()[0].GetDirection() == "asc" &&
+			agg.GetSubAggregation().GetFields()[0] == "color" &&
+			req.GetIds() == nil
+	})).Return(&milvuspb.SearchResults{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Code:      merr.Code(nil),
+			ExtraInfo: map[string]string{
+				"scanned_remote_bytes": "11",
+				"scanned_total_bytes":  "22",
+				"cache_hit_ratio":      "0.5",
+			},
+		},
+		Results: &schemapb.SearchResultData{
+			TopK:       0,
+			NumQueries: 1,
+			AggTopks:   []int64{1},
+			Recalls:    []float32{0.75},
+			AggBuckets: []*schemapb.AggBucket{
+				{
+					Key:     []*schemapb.BucketKeyEntry{{FieldId: 101, FieldName: "brand", Value: &schemapb.BucketKeyEntry_StringVal{StringVal: "acme"}}},
+					Count:   3,
+					Metrics: map[string]*schemapb.MetricValue{"avg_price": {Value: &schemapb.MetricValue_DoubleVal{DoubleVal: 12.5}}},
+					Hits: []*schemapb.AggHit{
+						{
+							Pk:    &schemapb.AggHit_IntPk{IntPk: 10},
+							Score: 0.9,
+							Fields: []*schemapb.AggHitField{
+								{FieldId: 201, FieldName: "price", Value: &schemapb.AggHitField_IntVal{IntVal: 99}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}, nil).Once()
+
+	testEngine := initHTTPServerV2(mp, false)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, SearchAction), bytes.NewReader([]byte(`{
+		"collectionName": "book",
+		"data": [[0.1, 0.2]],
+		"annsField": "book_intro",
+		"limit": 10,
+		"searchAggregation": {
+			"fields": [" brand "],
+			"size": 2,
+			"searchSize": 4,
+			"metrics": {" avg_price ": {"op": " avg ", "fieldName": " price "}},
+			"order": [{"key": " avg_price ", "direction": " desc "}],
+			"topHits": {"size": 1, "sort": [{"fieldName": " _score ", "direction": " asc "}]},
+			"subAggregation": {"fields": ["color"], "size": 1}
+		}
+	}`)))
+	req.Header.Set(HTTPHeaderAllowInt64, "true")
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	resp := map[string]interface{}{}
+	err := json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.NoError(t, err)
+	assert.Equal(t, float64(0), resp[HTTPReturnCode])
+	assert.Equal(t, []interface{}{float64(1)}, resp[HTTPReturnAggTopks])
+	assert.Equal(t, []interface{}{float64(0.75)}, resp[HTTPReturnRecalls])
+	assert.Equal(t, float64(11), resp[HTTPReturnScannedRemoteBytes])
+	assert.Equal(t, float64(22), resp[HTTPReturnScannedTotalBytes])
+	assert.Equal(t, float64(0.5), resp[HTTPReturnCacheHitRatio])
+	data := resp[HTTPReturnData].([]interface{})
+	buckets := data[0].(map[string]interface{})["buckets"].([]interface{})
+	bucket := buckets[0].(map[string]interface{})
+	assert.Equal(t, float64(3), bucket["count"])
+	assert.Equal(t, map[string]interface{}{"avg_price": float64(12.5)}, bucket["metrics"])
+	hits := bucket["hits"].([]interface{})
+	assert.Equal(t, float64(10), hits[0].(map[string]interface{})[FieldBookID])
+	assert.Equal(t, float64(99), hits[0].(map[string]interface{})["price"])
+}
+
+func TestSearchAggregationV2UnsupportedCombinations(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Times(5)
+	testEngine := initHTTPServerV2(mp, false)
+
+	searchAggregation := `"searchAggregation": {"fields": ["brand"], "size": 1}`
+	testCases := []requestBodyTestCase{
+		{
+			path:        SearchAction,
+			requestBody: []byte(`{"collectionName":"book","ids":[1],` + searchAggregation + `}`),
+			errCode:     1100,
+			errMsg:      "ids and searchAggregation cannot be used simultaneously",
+		},
+		{
+			path:        SearchAction,
+			requestBody: []byte(`{"collectionName":"book","data":[[0.1,0.2]],"annsField":"book_intro","limit":10,"offset":1,` + searchAggregation + `}`),
+			errCode:     1100,
+			errMsg:      "offset is not supported with searchAggregation",
+		},
+		{
+			path:        SearchAction,
+			requestBody: []byte(`{"collectionName":"book","data":[[0.1,0.2]],"annsField":"book_intro","limit":10,"groupingField":"brand",` + searchAggregation + `}`),
+			errCode:     1100,
+			errMsg:      "groupingField/groupSize/strictGroupSize and searchAggregation cannot be used simultaneously",
+		},
+		{
+			path:        SearchAction,
+			requestBody: []byte(`{"collectionName":"book","data":[[0.1,0.2]],"annsField":"book_intro","limit":10,"searchParams":{"offset":1},` + searchAggregation + `}`),
+			errCode:     1100,
+			errMsg:      "searchParams.offset is not supported with searchAggregation",
+		},
+		{
+			path:        SearchAction,
+			requestBody: []byte(`{"collectionName":"book","data":[[0.1,0.2]],"annsField":"book_intro","limit":10,"searchParams":{"params":{"group_by_fields":"[\"brand\"]"}},` + searchAggregation + `}`),
+			errCode:     1100,
+			errMsg:      "searchParams.group_by_field(s) and searchAggregation cannot be used simultaneously",
+		},
+		{
+			path:        HybridSearchAction,
+			requestBody: []byte(`{"collectionName":"book","search":[{"data":[[0.1,0.2]],"annsField":"book_intro","limit":10}],"rerank":{"strategy":"rrf","params":{}},` + searchAggregation + `}`),
+			errCode:     1100,
+			errMsg:      "searchAggregation is not supported for hybrid search",
+		},
+		{
+			path:        AdvancedSearchAction,
+			requestBody: []byte(`{"collectionName":"book","search":[{"data":[[0.1,0.2]],"annsField":"book_intro","limit":10,` + searchAggregation + `}],"rerank":{"strategy":"rrf","params":{}}}`),
+			errCode:     1100,
+			errMsg:      "searchAggregation is not supported for hybrid search",
+		},
+	}
+	validateTestCases(t, testEngine, testCases, false)
+}
+
 type AddCollectionFieldSuite struct {
 	suite.Suite
 	testEngine *gin.Engine

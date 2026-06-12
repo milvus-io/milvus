@@ -376,23 +376,24 @@ func parseFieldPartialUpdateOp(op string) (schemapb.FieldPartialUpdateOp_OpType,
 }
 
 type SearchReqV2 struct {
-	DbName           string                 `json:"dbName"`
-	CollectionName   string                 `json:"collectionName" binding:"required"`
-	Data             []interface{}          `json:"data"`
-	Ids              []interface{}          `json:"ids"`
-	AnnsField        string                 `json:"annsField"`
-	PartitionNames   []string               `json:"partitionNames"`
-	Filter           string                 `json:"filter"`
-	GroupByField     string                 `json:"groupingField"`
-	GroupSize        int32                  `json:"groupSize"`
-	StrictGroupSize  bool                   `json:"strictGroupSize"`
-	Limit            int32                  `json:"limit"`
-	Offset           int32                  `json:"offset"`
-	OutputFields     []string               `json:"outputFields"`
-	SearchParams     map[string]interface{} `json:"searchParams"`
-	ConsistencyLevel string                 `json:"consistencyLevel"`
-	ExprParams       map[string]interface{} `json:"exprParams"`
-	FunctionScore    FunctionScore          `json:"functionScore"`
+	DbName            string                 `json:"dbName"`
+	CollectionName    string                 `json:"collectionName" binding:"required"`
+	Data              []interface{}          `json:"data"`
+	Ids               []interface{}          `json:"ids"`
+	AnnsField         string                 `json:"annsField"`
+	PartitionNames    []string               `json:"partitionNames"`
+	Filter            string                 `json:"filter"`
+	GroupByField      string                 `json:"groupingField"`
+	GroupSize         int32                  `json:"groupSize"`
+	StrictGroupSize   bool                   `json:"strictGroupSize"`
+	Limit             int32                  `json:"limit"`
+	Offset            int32                  `json:"offset"`
+	OutputFields      []string               `json:"outputFields"`
+	SearchParams      map[string]interface{} `json:"searchParams"`
+	ConsistencyLevel  string                 `json:"consistencyLevel"`
+	ExprParams        map[string]interface{} `json:"exprParams"`
+	FunctionScore     FunctionScore          `json:"functionScore"`
+	SearchAggregation *SearchAggregationReq  `json:"searchAggregation"`
 	// not use Params any more, just for compatibility
 	Params map[string]float64 `json:"params"`
 }
@@ -400,37 +401,69 @@ type SearchReqV2 struct {
 func (req *SearchReqV2) GetDbName() string         { return req.DbName }
 func (req *SearchReqV2) GetCollectionName() string { return req.CollectionName }
 
+type SearchAggregationReq struct {
+	Fields         []string                        `json:"fields"`
+	Size           int64                           `json:"size"`
+	SearchSize     int64                           `json:"searchSize"`
+	Metrics        map[string]MetricAggregationReq `json:"metrics"`
+	Order          []AggregationOrderReq           `json:"order"`
+	TopHits        *TopHitsReq                     `json:"topHits"`
+	SubAggregation *SearchAggregationReq           `json:"subAggregation"`
+}
+
+type MetricAggregationReq struct {
+	Op        string `json:"op"`
+	FieldName string `json:"fieldName"`
+}
+
+type AggregationOrderReq struct {
+	Key       string `json:"key"`
+	Direction string `json:"direction"`
+}
+
+type TopHitsReq struct {
+	Size int64                `json:"size"`
+	Sort []AggregationSortReq `json:"sort"`
+}
+
+type AggregationSortReq struct {
+	FieldName string `json:"fieldName"`
+	Direction string `json:"direction"`
+}
+
 type Rand struct {
 	Strategy string                 `json:"strategy"`
 	Params   map[string]interface{} `json:"params"`
 }
 
 type SubSearchReq struct {
-	Data         []interface{}          `json:"data" binding:"required"`
-	AnnsField    string                 `json:"annsField"`
-	Filter       string                 `json:"filter"`
-	GroupByField string                 `json:"groupingField"`
-	MetricType   string                 `json:"metricType"`
-	Limit        int32                  `json:"limit"`
-	Offset       int32                  `json:"offset"`
-	SearchParams map[string]interface{} `json:"params"`
-	ExprParams   map[string]interface{} `json:"exprParams"`
+	Data              []interface{}          `json:"data" binding:"required"`
+	AnnsField         string                 `json:"annsField"`
+	Filter            string                 `json:"filter"`
+	GroupByField      string                 `json:"groupingField"`
+	MetricType        string                 `json:"metricType"`
+	Limit             int32                  `json:"limit"`
+	Offset            int32                  `json:"offset"`
+	SearchParams      map[string]interface{} `json:"params"`
+	ExprParams        map[string]interface{} `json:"exprParams"`
+	SearchAggregation *SearchAggregationReq  `json:"searchAggregation"`
 }
 
 type HybridSearchReq struct {
-	DbName           string         `json:"dbName"`
-	CollectionName   string         `json:"collectionName" binding:"required"`
-	PartitionNames   []string       `json:"partitionNames"`
-	Search           []SubSearchReq `json:"search"`
-	Rerank           Rand           `json:"rerank"`
-	Limit            int32          `json:"limit"`
-	Offset           int32          `json:"offset"`
-	GroupByField     string         `json:"groupingField"`
-	GroupSize        int32          `json:"groupSize"`
-	StrictGroupSize  bool           `json:"strictGroupSize"`
-	OutputFields     []string       `json:"outputFields"`
-	ConsistencyLevel string         `json:"consistencyLevel"`
-	FunctionScore    FunctionScore  `json:"functionScore"`
+	DbName            string                `json:"dbName"`
+	CollectionName    string                `json:"collectionName" binding:"required"`
+	PartitionNames    []string              `json:"partitionNames"`
+	Search            []SubSearchReq        `json:"search"`
+	Rerank            Rand                  `json:"rerank"`
+	Limit             int32                 `json:"limit"`
+	Offset            int32                 `json:"offset"`
+	GroupByField      string                `json:"groupingField"`
+	GroupSize         int32                 `json:"groupSize"`
+	StrictGroupSize   bool                  `json:"strictGroupSize"`
+	OutputFields      []string              `json:"outputFields"`
+	ConsistencyLevel  string                `json:"consistencyLevel"`
+	FunctionScore     FunctionScore         `json:"functionScore"`
+	SearchAggregation *SearchAggregationReq `json:"searchAggregation"`
 }
 
 func (req *HybridSearchReq) GetDbName() string         { return req.DbName }

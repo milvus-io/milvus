@@ -381,19 +381,25 @@ func convertFieldDataArray(input []*FieldData) ([]*schemapb.FieldData, error) {
 
 // SearchRequest is the RESTful request body for search
 type SearchRequest struct {
-	Base               *commonpb.MsgBase        `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbName             string                   `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	CollectionName     string                   `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	PartitionNames     []string                 `protobuf:"bytes,4,rep,name=partition_names,json=partitionNames,proto3" json:"partition_names,omitempty"`
-	Dsl                string                   `protobuf:"bytes,5,opt,name=dsl,proto3" json:"dsl,omitempty"`
-	DslType            commonpb.DslType         `protobuf:"varint,7,opt,name=dsl_type,json=dslType,proto3,enum=milvus.proto.common.DslType" json:"dsl_type,omitempty"`
-	BinaryVectors      [][]byte                 `json:"binary_vectors,omitempty"`
-	Vectors            [][]float32              `json:"vectors,omitempty"`
-	OutputFields       []string                 `protobuf:"bytes,8,rep,name=output_fields,json=outputFields,proto3" json:"output_fields,omitempty"`
-	SearchParams       []*commonpb.KeyValuePair `protobuf:"bytes,9,rep,name=search_params,json=searchParams,proto3" json:"search_params,omitempty"`
-	TravelTimestamp    uint64                   `protobuf:"varint,10,opt,name=travel_timestamp,json=travelTimestamp,proto3" json:"travel_timestamp,omitempty"`
-	GuaranteeTimestamp uint64                   `protobuf:"varint,11,opt,name=guarantee_timestamp,json=guaranteeTimestamp,proto3" json:"guarantee_timestamp,omitempty"`
-	Nq                 int64                    `protobuf:"varint,12,opt,name=nq,proto3" json:"nq,omitempty"`
+	Base                   *commonpb.MsgBase        `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	DbName                 string                   `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	CollectionName         string                   `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	PartitionNames         []string                 `protobuf:"bytes,4,rep,name=partition_names,json=partitionNames,proto3" json:"partition_names,omitempty"`
+	Dsl                    string                   `protobuf:"bytes,5,opt,name=dsl,proto3" json:"dsl,omitempty"`
+	DslType                commonpb.DslType         `protobuf:"varint,7,opt,name=dsl_type,json=dslType,proto3,enum=milvus.proto.common.DslType" json:"dsl_type,omitempty"`
+	BinaryVectors          [][]byte                 `json:"binary_vectors,omitempty"`
+	Vectors                [][]float32              `json:"vectors,omitempty"`
+	OutputFields           []string                 `protobuf:"bytes,8,rep,name=output_fields,json=outputFields,proto3" json:"output_fields,omitempty"`
+	SearchParams           []*commonpb.KeyValuePair `protobuf:"bytes,9,rep,name=search_params,json=searchParams,proto3" json:"search_params,omitempty"`
+	TravelTimestamp        uint64                   `protobuf:"varint,10,opt,name=travel_timestamp,json=travelTimestamp,proto3" json:"travel_timestamp,omitempty"`
+	GuaranteeTimestamp     uint64                   `protobuf:"varint,11,opt,name=guarantee_timestamp,json=guaranteeTimestamp,proto3" json:"guarantee_timestamp,omitempty"`
+	Nq                     int64                    `protobuf:"varint,12,opt,name=nq,proto3" json:"nq,omitempty"`
+	SearchAggregation      *SearchAggregationReq    `json:"searchAggregation,omitempty"`
+	SearchAggregationSnake *SearchAggregationReq    `json:"search_aggregation,omitempty"`
+}
+
+func (r *SearchRequest) HasSearchAggregation() bool {
+	return r.SearchAggregation != nil || r.SearchAggregationSnake != nil
 }
 
 func binaryVector2Bytes(vectors [][]byte) []byte {
