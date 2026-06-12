@@ -864,10 +864,9 @@ func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetCompon
 // GetRecoveryInfo get recovery info for segment.
 // Called by: QueryCoord.
 func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
-	log := mlog.With()
 	collectionID := req.GetCollectionID()
 	partitionID := req.GetPartitionID()
-	log = mlog.With(
+	log := mlog.With(
 		mlog.FieldCollectionID(collectionID),
 		mlog.FieldPartitionID(partitionID),
 	)
@@ -1012,10 +1011,9 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 // GetRecoveryInfoV2 get recovery info for segment
 // Called by: QueryCoord.
 func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryInfoRequestV2) (*datapb.GetRecoveryInfoResponseV2, error) {
-	log := mlog.With()
 	collectionID := req.GetCollectionID()
 	partitionIDs := req.GetPartitionIDs()
-	log = mlog.With(
+	log := mlog.With(
 		mlog.FieldCollectionID(collectionID),
 		mlog.Int64s("partitionIDs", partitionIDs),
 	)
