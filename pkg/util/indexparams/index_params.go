@@ -386,5 +386,12 @@ func AppendPrepareLoadParams(params *paramtable.ComponentParam, indexParams map[
 
 	params.KnowhereConfig.MergeIndexParams(indexParams[common.IndexTypeKey], paramtable.LoadStage, indexParams)
 
+	// Apply override_index_type: swap index_type and merge params for the override type.
+	// This mirrors the logic in UpdateIndexParams (build stage) but for the load stage map.
+	if overrideType := indexParams[paramtable.OverrideIndexTypeKey]; overrideType != "" {
+		indexParams[common.IndexTypeKey] = overrideType
+		params.KnowhereConfig.MergeIndexParams(overrideType, paramtable.LoadStage, indexParams)
+	}
+
 	return nil
 }
