@@ -658,6 +658,15 @@ dataCoord:
     # MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
     # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%. 
     expansionRate: 1.25
+  shardSplit:
+    # Master switch of online shard split. It gates the split trigger (automatic and manual);
+    # disabling it stops new split tasks but never interrupts a task already past the write fence.
+    enable: false
+    checkInterval: 60 # The interval in seconds the shard split trigger inspects the per-shard statistics.
+    maxShardSize: 2048 # The data size of one shard that triggers a split, unit: GB.
+    maxShardRows: 500000000 # The row count of one shard that triggers a split.
+    maxNamespaceCount: 100000 # The namespace (partition) count of one shard that triggers a split.
+    maxConcurrentTasks: 1 # The cluster-wide maximum number of concurrent shard split tasks.
   sealPolicy:
     channel:
       # The size threshold in MB, if the total size of growing segments of each shard
