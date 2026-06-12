@@ -106,10 +106,9 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
 // providing backpressure to producer threads while keeping them busy.
 constexpr double kChannelCapacityMultiplier = 1.5;
 
-// StorageV2 field-data loading uses one process-wide transient memory budget,
-// so all field-data translators must share one MCL overhead group.
-constexpr const char* kFieldDataLoadOverheadGroup =
-    "StorageV2FieldDataLoadOverhead";
+// Load-time readers use one process-wide transient memory budget, so all
+// translators backed by that budget must share one MCL overhead group.
+constexpr const char* kLoadTransientOverheadGroup = "LoadTransientOverhead";
 
 constexpr int64_t kDefaultFieldDataLoadBatchTargetBytes =
     DEFAULT_FIELD_MAX_MEMORY_LIMIT / 4;

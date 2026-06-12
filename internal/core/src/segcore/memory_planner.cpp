@@ -72,7 +72,7 @@ int64_t
 FieldDataLoadBatchSplitTargetBytes() {
     auto target = FieldDataLoadBatchTargetBytes();
     auto budget_capacity =
-        milvus::storage::TransientMemoryBudget::GetFieldDataLoadBudget()
+        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
             .CapacityBytes();
     if (budget_capacity == 0) {
         return target;
@@ -158,9 +158,11 @@ BatchReadParallelism(size_t batch_budget_bytes, int64_t total_rg_count) {
 
     auto read_window = std::max<int64_t>(FieldDataReadWindowBytes(), 1);
     auto budget_capacity =
-        milvus::storage::TransientMemoryBudget::GetFieldDataLoadBudget()
+        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
             .CapacityBytes();
-    auto bounded_budget = std::min(batch_budget_bytes, budget_capacity);
+    auto bounded_budget = budget_capacity == 0
+                              ? batch_budget_bytes
+                              : std::min(batch_budget_bytes, budget_capacity);
     auto parallelism_by_budget =
         std::max<size_t>(1, bounded_budget / static_cast<size_t>(read_window));
     auto max_parallelism = FieldDataMaxReadParallelism();
@@ -498,7 +500,7 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
         cell_specs.size(),
         batches.size(),
         memory_limit >> 20,
-        milvus::storage::TransientMemoryBudget::GetFieldDataLoadBudget()
+        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
                 .CapacityBytes() >>
             20,
         FieldDataReadWindowBytes() >> 20,
@@ -537,7 +539,7 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
             CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
 
             auto& budget = milvus::storage::TransientMemoryBudget::
-                GetFieldDataLoadBudget();
+                GetLoadTransientBudget();
             auto acquired = budget.AcquireUntil(batch_budget_bytes, [op_ctx]() {
                 return op_ctx &&
                        op_ctx->cancellation_token.isCancellationRequested();
@@ -613,7 +615,7 @@ ReleaseCellLoadResultBudget(
     if (cell_load_result->budget_bytes == 0) {
         return;
     }
-    milvus::storage::TransientMemoryBudget::GetFieldDataLoadBudget().Release(
+    milvus::storage::TransientMemoryBudget::GetLoadTransientBudget().Release(
         cell_load_result->budget_bytes);
     cell_load_result->budget_bytes = 0;
 }

@@ -39,7 +39,7 @@ void
 SetIndexSliceSize(const int64_t size);
 
 void
-SetEntryStreamBudgetBytes(int64_t bytes);
+SetLoadTransientBudgetBytes(int64_t bytes);
 
 void
 SetDefaultExecEvalExprBatchSize(int64_t val);

@@ -51,14 +51,14 @@ SetIndexSliceSize(const int64_t size) {
 }
 
 void
-SetEntryStreamBudgetBytes(int64_t bytes) {
+SetLoadTransientBudgetBytes(int64_t bytes) {
     if (bytes < 0) {
-        LOG_WARN("ignore invalid entry stream budget bytes: {}", bytes);
+        LOG_WARN("ignore invalid load transient budget bytes: {}", bytes);
         return;
     }
-    storage::TransientMemoryBudget::SetEntryStreamBudgetBytes(
+    storage::TransientMemoryBudget::SetLoadTransientBudgetBytes(
         static_cast<size_t>(bytes));
-    LOG_INFO("set entry stream budget bytes: {}", bytes);
+    LOG_INFO("set load transient budget bytes: {}", bytes);
 }
 
 void

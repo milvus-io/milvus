@@ -185,7 +185,7 @@ TEST(ParallelDegreeSplitStrategy, ContinuousExceedingAvgSize) {
 
 TEST(FieldDataLoadBatchSplitTargetBytes, UsesBatchTargetByDefault) {
     auto& budget =
-        milvus::storage::TransientMemoryBudget::GetFieldDataLoadBudget();
+        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
     auto old_capacity = budget.CapacityBytes();
     auto cleanup = folly::makeGuard(
         [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
@@ -199,7 +199,7 @@ TEST(FieldDataLoadBatchSplitTargetBytes, UsesBatchTargetByDefault) {
 TEST(FieldDataLoadBatchSplitTargetBytes, CapsTargetByConfiguredBudget) {
     constexpr int64_t MB = 1 << 20;
     auto& budget =
-        milvus::storage::TransientMemoryBudget::GetFieldDataLoadBudget();
+        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
     auto old_capacity = budget.CapacityBytes();
     auto cleanup = folly::makeGuard(
         [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
@@ -474,7 +474,7 @@ TEST(LoadCellBatchAsync, CancellationStopsMidBatchPush) {
 
 TEST(LoadCellBatchAsync, CancellationWhileWaitingForBudgetSkipsRead) {
     auto& budget =
-        milvus::storage::TransientMemoryBudget::GetFieldDataLoadBudget();
+        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
     auto old_capacity = budget.CapacityBytes();
     budget.SetCapacityBytes(1);
     budget.Acquire(1);

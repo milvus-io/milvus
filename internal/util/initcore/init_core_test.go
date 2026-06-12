@@ -149,10 +149,10 @@ func TestInitArrowReaderConfig(t *testing.T) {
 	assert.NoError(t, InitArrowReaderConfig(pt))
 }
 
-func TestUpdateStorageV2FieldDataLoadBudgetBytes(t *testing.T) {
+func TestUpdateLoadTransientBudgetBytes(t *testing.T) {
 	assert.NotPanics(t, func() {
-		UpdateStorageV2FieldDataLoadBudgetBytes(64 * 1024 * 1024)
-		UpdateStorageV2FieldDataLoadBudgetBytes(128 * 1024 * 1024)
+		UpdateLoadTransientBudgetBytes(0)
+		UpdateLoadTransientBudgetBytes(128 * 1024 * 1024)
 	})
 }
 
