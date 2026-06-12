@@ -1923,6 +1923,30 @@ func TestRBAC_Role(t *testing.T) {
 		assert.ErrorIs(t, err, loadErr)
 		kvmock.AssertNotCalled(t, "Save", mock.Anything, mock.Anything, mock.Anything)
 	})
+	t.Run("test AlterRole malformed stored role value", func(t *testing.T) {
+		var (
+			kvmock     = mocks.NewTxnKV(t)
+			c          = NewCatalog(kvmock)
+			roleName   = "role_malformed_alter"
+			newDesc    = "new description"
+			expectedKV string
+		)
+
+		expectedKV, err := model.MarshalRoleModel(&model.Role{
+			Name:        roleName,
+			Description: newDesc,
+		})
+		require.NoError(t, err)
+
+		kvmock.EXPECT().Load(mock.Anything, RolePrefix+"/"+roleName).Return("not-json", nil).Once()
+		kvmock.EXPECT().Save(mock.Anything, RolePrefix+"/"+roleName, expectedKV).Return(nil).Once()
+
+		err = c.AlterRole(ctx, tenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: newDesc,
+		})
+		require.NoError(t, err)
+	})
 	t.Run("test ListRole malformed exact role value", func(t *testing.T) {
 		var (
 			kvmock   = mocks.NewTxnKV(t)

@@ -401,6 +401,49 @@ func TestRbacRoleDescriptionLengthLimit(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
 
+func TestRbacRoleDescriptionApplyPathSkipsLengthLimit(t *testing.T) {
+	t.Run("create role apply path", func(t *testing.T) {
+		mt := generateMetaTable(t)
+		roleName := "role_desc_apply_create"
+
+		paramtable.Get().Save(Params.ProxyCfg.MaxRoleDescriptionLength.Key, "4")
+		defer paramtable.Get().Reset(Params.ProxyCfg.MaxRoleDescriptionLength.Key)
+
+		err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "12345",
+		})
+		require.NoError(t, err)
+
+		roles, err := mt.SelectRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: roleName}, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Equal(t, "12345", roles[0].GetRole().GetDescription())
+	})
+
+	t.Run("alter role apply path", func(t *testing.T) {
+		mt := generateMetaTable(t)
+		roleName := "role_desc_apply_alter"
+
+		err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: roleName})
+		require.NoError(t, err)
+
+		paramtable.Get().Save(Params.ProxyCfg.MaxRoleDescriptionLength.Key, "4")
+		defer paramtable.Get().Reset(Params.ProxyCfg.MaxRoleDescriptionLength.Key)
+
+		err = mt.AlterRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "12345",
+		})
+		require.NoError(t, err)
+
+		roles, err := mt.SelectRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: roleName}, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Equal(t, "12345", roles[0].GetRole().GetDescription())
+	})
+}
+
 func TestRbacDropRole(t *testing.T) {
 	mt := generateMetaTable(t)
 

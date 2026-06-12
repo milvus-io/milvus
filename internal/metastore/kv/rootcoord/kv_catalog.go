@@ -1195,7 +1195,10 @@ func (kc *Catalog) AlterRole(ctx context.Context, tenant string, entity *milvusp
 	}
 	role, err := model.UnmarshalRoleModel(entity.GetName(), value)
 	if err != nil {
-		return err
+		log.Ctx(ctx).Warn("undecodable role value, fallback to empty description",
+			zap.String("role", entity.GetName()),
+			zap.Error(err))
+		role = &model.Role{Name: entity.GetName()}
 	}
 	role.Description = entity.GetDescription()
 	newValue, err := model.MarshalRoleModel(role)
