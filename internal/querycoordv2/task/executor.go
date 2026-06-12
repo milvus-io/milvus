@@ -903,6 +903,9 @@ func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int
 				params[kv.GetKey()] = kv.GetValue()
 			}
 		}
+		if err := indexparams.AppendPrepareLoadParams(Params, params); err != nil {
+			return nil, nil, err
+		}
 		segmentIndex.IndexParams = funcutil.Map2KeyValuePair(params)
 		segmentIndex.IndexParams = append(segmentIndex.IndexParams,
 			&commonpb.KeyValuePair{Key: common.LoadPriorityKey, Value: priority.String()})
