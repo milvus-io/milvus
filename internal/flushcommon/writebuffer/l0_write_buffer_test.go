@@ -102,6 +102,10 @@ type fakeGrowingSourceReleaseHandoffProvider struct {
 	segments []syncmgr.GrowingSourceReleaseHandoffSegment
 }
 
+func (p *fakeGrowingSourceReleaseHandoffProvider) BeginGrowingSourceReleaseHandoff(segmentIDs []int64) func() {
+	return func() {}
+}
+
 func (p *fakeGrowingSourceReleaseHandoffProvider) PrepareGrowingSourceReleaseHandoff(ctx context.Context, fenceTs uint64, segments []syncmgr.GrowingSourceReleaseHandoffSegment) error {
 	p.fenceTs = fenceTs
 	p.segments = append([]syncmgr.GrowingSourceReleaseHandoffSegment(nil), segments...)
@@ -1594,6 +1598,47 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 		s.Equal(metacache.FlushSourceUnknown, progress[0].SourceMode)
 		s.Zero(handoffProvider.fenceTs)
 		s.Empty(handoffProvider.segments)
+	})
+
+	s.Run("requested_segments_are_merged_with_tracked_growing_progress", func() {
+		handoffProvider := &fakeGrowingSourceReleaseHandoffProvider{}
+		registration := syncmgr.DefaultGrowingSourceRegistry().Register(s.channelName, handoffProvider)
+		defer syncmgr.DefaultGrowingSourceRegistry().Unregister(registration)
+
+		textSchema := s.textSchema()
+		mc := s.newTextRealMetaCache(textSchema)
+		wb, err := NewL0WriteBuffer(s.channelName, mc, s.syncMgr, &writeBufferOption{
+			idAllocator: s.allocator,
+			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+				return fakeGrowingFlushSource{}, syncmgr.GrowingSourceUsable
+			},
+		})
+		s.NoError(err)
+
+		for _, segmentID := range []int64{1205, 1206} {
+			_, msg := s.composeTextInsertMsg(segmentID, 10)
+			insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
+			s.NoError(err)
+			err = wb.BufferData(insertData, nil, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
+			s.NoError(err)
+		}
+
+		progress, err := wb.GetGrowingFlushProgress(context.Background(), []int64{1204}, 200)
+		s.NoError(err)
+		progressBySegment := lo.SliceToMap(progress, func(progress GrowingFlushSegmentProgress) (int64, GrowingFlushSegmentProgress) {
+			return progress.SegmentID, progress
+		})
+		s.Contains(progressBySegment, int64(1204))
+		s.False(progressBySegment[1204].NeedReleaseHandoff)
+		for _, segmentID := range []int64{1205, 1206} {
+			s.True(progressBySegment[segmentID].NeedReleaseHandoff)
+			s.EqualValues(10, progressBySegment[segmentID].TargetOffset)
+			s.Equal(metacache.FlushSourceGrowing, progressBySegment[segmentID].SourceMode)
+		}
+		s.ElementsMatch([]syncmgr.GrowingSourceReleaseHandoffSegment{
+			{SegmentID: 1205, TargetOffset: 10},
+			{SegmentID: 1206, TargetOffset: 10},
+		}, handoffProvider.segments)
 	})
 }
 
