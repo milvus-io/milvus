@@ -122,17 +122,15 @@ func (s *CompactionTargetMetaSuite) TestSaveUpdateDrop() {
 	s.True(proto.Equal(record, meta.GetCompactionTarget(10)))
 	s.True(proto.Equal(record, records[10]))
 
-	s.Require().NoError(meta.UpdateCompactionTargetState(s.ctx, 10, datapb.TargetState_TARGET_STATE_INACTIVE, 50))
+	s.Require().NoError(meta.UpdateCompactionTargetState(s.ctx, 10, datapb.TargetState_TARGET_STATE_INACTIVE))
 	s.Equal(datapb.TargetState_TARGET_STATE_INACTIVE, meta.GetCompactionTarget(10).GetState())
-	s.Equal(uint64(50), meta.GetCompactionTarget(10).GetInactivatedAtTS())
+	s.NotZero(meta.GetCompactionTarget(10).GetInactivatedAtTS())
 	s.Require().Len(*updates, 1)
-	s.Equal(compactionTargetCatalogUpdate{
-		targetID:        10,
-		state:           datapb.TargetState_TARGET_STATE_INACTIVE,
-		inactivatedAtTS: 50,
-	}, (*updates)[0])
+	s.Equal(int64(10), (*updates)[0].targetID)
+	s.Equal(datapb.TargetState_TARGET_STATE_INACTIVE, (*updates)[0].state)
+	s.NotZero((*updates)[0].inactivatedAtTS)
 
-	s.Require().NoError(meta.UpdateCompactionTargetState(s.ctx, 10, datapb.TargetState_TARGET_STATE_ACTIVE, 50))
+	s.Require().NoError(meta.UpdateCompactionTargetState(s.ctx, 10, datapb.TargetState_TARGET_STATE_ACTIVE))
 	s.Equal(datapb.TargetState_TARGET_STATE_ACTIVE, meta.GetCompactionTarget(10).GetState())
 	s.Zero(meta.GetCompactionTarget(10).GetInactivatedAtTS())
 	s.Require().Len(*updates, 2)
@@ -142,7 +140,7 @@ func (s *CompactionTargetMetaSuite) TestSaveUpdateDrop() {
 		inactivatedAtTS: 0,
 	}, (*updates)[1])
 
-	s.Require().NoError(meta.DropCompactionTarget(s.ctx, record))
+	s.Require().NoError(meta.DropCompactionTarget(s.ctx, record.GetTargetID()))
 	s.Nil(meta.GetCompactionTarget(10))
 	s.Equal([]int64{10}, *dropped)
 }
@@ -183,13 +181,57 @@ func (s *CompactionTargetMetaSuite) TestMaterializesTargetsOnRecordMutation() {
 	s.True(activeTargets[0].Match(probe))
 	s.False(oldTarget.Match(probe))
 
-	s.Require().NoError(meta.UpdateCompactionTargetState(s.ctx, 10, datapb.TargetState_TARGET_STATE_INACTIVE, 0))
+	s.Require().NoError(meta.UpdateCompactionTargetState(s.ctx, 10, datapb.TargetState_TARGET_STATE_INACTIVE))
 	s.Empty(meta.GetActiveCompactionTargets())
 
 	s.Require().NoError(meta.SaveCompactionTarget(s.ctx, updatedRecord))
 	s.Require().Len(meta.GetActiveCompactionTargets(), 1)
-	s.Require().NoError(meta.DropCompactionTarget(s.ctx, updatedRecord))
+	s.Require().NoError(meta.DropCompactionTarget(s.ctx, updatedRecord.GetTargetID()))
 	s.Empty(meta.GetActiveCompactionTargets())
+}
+
+func (s *CompactionTargetMetaSuite) TestInvalidRewriteTargetPropertiesStayDurableButNotRuntimeActive() {
+	record := &datapb.CompactionTarget{
+		TargetID:     10,
+		CollectionID: 100,
+		Intent:       datapb.TargetIntent_INTENT_REWRITE,
+		Properties: map[string]string{
+			compactionTargetSegmentIDsProperty: "not-json",
+		},
+		ExpectedTS: 1000,
+		TailLimit:  0,
+		State:      datapb.TargetState_TARGET_STATE_ACTIVE,
+	}
+	catalog, _, _, _ := newCompactionTargetTestCatalog(s.T(), record)
+
+	meta, err := newCompactionTargetMeta(s.ctx, catalog)
+
+	s.Require().NoError(err)
+	s.Equal(datapb.TargetState_TARGET_STATE_ACTIVE, meta.GetCompactionTarget(10).GetState())
+	s.Empty(meta.GetActiveCompactionTargets())
+}
+
+func TestCompactionTargetFactoryRejectsUnsupportedIntent(t *testing.T) {
+	target, err := newCompactionTarget(&datapb.CompactionTarget{
+		Intent: datapb.TargetIntent_INTENT_SIZE,
+		State:  datapb.TargetState_TARGET_STATE_ACTIVE,
+	})
+
+	require.ErrorIs(t, err, errUnsupportedCompactionTarget)
+	require.Nil(t, target)
+}
+
+func TestCompactionTargetFactoryRejectsInvalidRewriteProperties(t *testing.T) {
+	target, err := newCompactionTarget(&datapb.CompactionTarget{
+		Intent: datapb.TargetIntent_INTENT_REWRITE,
+		Properties: map[string]string{
+			compactionTargetSegmentIDsProperty: "not-json",
+		},
+		State: datapb.TargetState_TARGET_STATE_ACTIVE,
+	})
+
+	require.Error(t, err)
+	require.Nil(t, target)
 }
 
 func TestFiniteCompactionTargetMatchUsesRewriteBoundaryPredicate(t *testing.T) {
@@ -199,15 +241,16 @@ func TestFiniteCompactionTargetMatchUsesRewriteBoundaryPredicate(t *testing.T) {
 		ExpectedTS:   1000,
 		TailLimit:    0,
 	}
-	target := newCompactionTarget(record)
+	target := mustNewCompactionTarget(t, record)
 
 	outOfScope := targetSegment(1, 200, 10, "ch-1", 900, false)
 	require.False(t, target.ScopeIn(outOfScope))
 	require.False(t, target.Match(outOfScope))
 	require.True(t, target.Match(targetSegmentWithDataTS(2, 100, 10, "ch-1", 0, 999, false)))
 	require.False(t, target.Match(targetSegmentWithDataTS(3, 100, 10, "ch-1", 1000, 999, false)))
-	require.False(t, target.Match(targetSegmentWithDataTS(4, 100, 10, "ch-1", 999, 1000, false)))
-	require.True(t, target.Match(targetSegmentWithDataTS(5, 100, 10, "ch-1", 999, 999, false)))
+	require.True(t, target.Match(targetSegmentWithDataTS(4, 100, 10, "ch-1", 999, 1000, false)))
+	require.False(t, target.Match(targetSegmentWithDataTS(5, 100, 10, "ch-1", 999, 1001, false)))
+	require.True(t, target.Match(targetSegmentWithDataTS(6, 100, 10, "ch-1", 999, 999, false)))
 }
 
 func TestCompactionTargetUsesCollectionOnly(t *testing.T) {
@@ -217,7 +260,7 @@ func TestCompactionTargetUsesCollectionOnly(t *testing.T) {
 		ExpectedTS:   1000,
 		TailLimit:    0,
 	}
-	target := newCompactionTarget(record)
+	target := mustNewCompactionTarget(t, record)
 
 	require.True(t, target.ScopeIn(targetSegment(1, 100, 10, "ch-1", 900, false)))
 	require.True(t, target.ScopeIn(targetSegment(2, 100, 20, "ch-2", 900, false)))
@@ -231,17 +274,51 @@ func TestFiniteCompactionTargetSatisfiedUsesAbsenceOfRewriteMatch(t *testing.T) 
 		ExpectedTS:   1000,
 		TailLimit:    0,
 	}
-	target := newCompactionTarget(record)
+	target := mustNewCompactionTarget(t, record)
 
-	require.False(t, target.Satisfied(target.SegmentsInScope([]*SegmentInfo{
+	require.False(t, targetSatisfied(target,
 		targetSegmentWithDataTS(1, 100, 10, "ch-1", 0, 999, false),
-	})))
-	require.True(t, target.Satisfied(target.SegmentsInScope([]*SegmentInfo{
+	))
+	require.True(t, targetSatisfied(target,
 		targetSegmentWithDataTS(1, 100, 10, "ch-1", 1001, 999, false),
-	})))
-	require.True(t, target.Satisfied(target.SegmentsInScope([]*SegmentInfo{
+	))
+	require.False(t, targetSatisfied(target,
 		targetSegmentWithDataTS(1, 100, 10, "ch-1", 0, 1000, false),
-	})))
+	))
+	require.True(t, targetSatisfied(target,
+		targetSegmentWithDataTS(1, 100, 10, "ch-1", 0, 1001, false),
+	))
+}
+
+func TestCompactionTargetSatisfiedUsesTailLimitPerLabel(t *testing.T) {
+	record := &datapb.CompactionTarget{
+		CollectionID: 100,
+		Intent:       datapb.TargetIntent_INTENT_REWRITE,
+		ExpectedTS:   1000,
+		TailLimit:    1,
+	}
+	target := mustNewCompactionTarget(t, record)
+
+	require.True(t, targetSatisfied(target,
+		targetSegmentWithDataTS(1, 100, 10, "ch-1", 0, 999, false),
+		targetSegmentWithDataTS(2, 100, 20, "ch-2", 0, 999, false),
+	))
+	require.False(t, targetSatisfied(target,
+		targetSegmentWithDataTS(1, 100, 10, "ch-1", 0, 999, false),
+		targetSegmentWithDataTS(2, 100, 10, "ch-1", 0, 998, false),
+	))
+}
+
+func TestCompactionTargetSatisfiedNeverCompletesStandingTarget(t *testing.T) {
+	record := &datapb.CompactionTarget{
+		CollectionID: 100,
+		Intent:       datapb.TargetIntent_INTENT_REWRITE,
+		ExpectedTS:   1000,
+		TailLimit:    -1,
+	}
+	target := mustNewCompactionTarget(t, record)
+
+	require.False(t, targetSatisfied(target))
 }
 
 func TestFiniteCompactionTargetSatisfiedDoesNotUseIsCompactingAsCompletionBlocker(t *testing.T) {
@@ -251,11 +328,11 @@ func TestFiniteCompactionTargetSatisfiedDoesNotUseIsCompactingAsCompletionBlocke
 		ExpectedTS:   1000,
 		TailLimit:    0,
 	}
-	target := newCompactionTarget(record)
+	target := mustNewCompactionTarget(t, record)
 
-	require.False(t, target.Satisfied(target.SegmentsInScope([]*SegmentInfo{
+	require.False(t, targetSatisfied(target,
 		targetSegment(1, 100, 10, "ch-1", 900, true),
-	})))
+	))
 }
 
 func TestRewriteCompactionTargetSegmentIDScopeUsesExactLiveSegmentID(t *testing.T) {
@@ -266,18 +343,29 @@ func TestRewriteCompactionTargetSegmentIDScopeUsesExactLiveSegmentID(t *testing.
 		ExpectedTS:   1000,
 		TailLimit:    0,
 	}
-	target := newCompactionTarget(record)
+	target := mustNewCompactionTarget(t, record)
 	oldSegment := targetSegment(1, 100, 10, "ch-1", 900, false)
 	replacement := targetSegment(10, 100, 10, "ch-1", 0, false, 1)
 
 	require.True(t, target.ScopeIn(oldSegment))
 	require.False(t, target.ScopeIn(replacement))
-	require.False(t, target.Satisfied(target.SegmentsInScope([]*SegmentInfo{
+	require.False(t, targetSatisfied(target,
 		oldSegment,
-	})))
-	require.True(t, target.Satisfied(target.SegmentsInScope([]*SegmentInfo{
+	))
+	require.True(t, targetSatisfied(target,
 		replacement,
-	})))
+	))
+}
+
+func mustNewCompactionTarget(t testing.TB, record *datapb.CompactionTarget) *compactionTarget {
+	t.Helper()
+	target, err := newCompactionTarget(record)
+	require.NoError(t, err)
+	return target
+}
+
+func targetSatisfied(target *compactionTarget, segments ...*SegmentInfo) bool {
+	return target.Satisfied(groupCompactionTargetSegmentsByLabel(target.SegmentsInScope(segments)))
 }
 
 type compactionTargetCatalogUpdate struct {

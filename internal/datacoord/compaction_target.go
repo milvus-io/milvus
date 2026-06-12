@@ -22,6 +22,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -31,9 +32,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 const compactionTargetSegmentIDsProperty = "segment_ids"
+
+var errUnsupportedCompactionTarget = errors.New("unsupported compaction target")
 
 type compactionTargetMeta struct {
 	sync.RWMutex
@@ -57,18 +61,18 @@ func newCompactionTargetMeta(ctx context.Context, catalog metastore.DataCoordCat
 }
 
 func (m *compactionTargetMeta) reloadFromKV() error {
-	record := timerecord.NewTimeRecorder("compactionTargetMeta-reloadFromKV")
-	records, err := m.catalog.ListCompactionTargets(m.ctx)
+	tr := timerecord.NewTimeRecorder("compactionTargetMeta-reloadFromKV")
+	targets, err := m.catalog.ListCompactionTargets(m.ctx)
 	if err != nil {
 		return err
 	}
-	loadedRecords := make(map[int64]*datapb.CompactionTarget, len(records))
-	for _, target := range records {
-		loadedRecords[target.GetTargetID()] = proto.Clone(target).(*datapb.CompactionTarget)
+	loadedTargets := make(map[int64]*datapb.CompactionTarget, len(targets))
+	for _, target := range targets {
+		loadedTargets[target.GetTargetID()] = proto.Clone(target).(*datapb.CompactionTarget)
 	}
-	m.records = loadedRecords
-	m.targets = newCompactionTargets(loadedRecords)
-	log.Info("DataCoord compactionTargetMeta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
+	m.records = loadedTargets
+	m.targets = newCompactionTargets(loadedTargets)
+	log.Info("DataCoord compactionTargetMeta reloadFromKV done", zap.Duration("duration", tr.ElapseSpan()))
 	return nil
 }
 
@@ -78,11 +82,11 @@ func (m *compactionTargetMeta) GetCompactionTarget(targetID int64) *datapb.Compa
 	m.RLock()
 	defer m.RUnlock()
 
-	record, ok := m.records[targetID]
+	target, ok := m.records[targetID]
 	if !ok {
 		return nil
 	}
-	return proto.Clone(record).(*datapb.CompactionTarget)
+	return proto.Clone(target).(*datapb.CompactionTarget)
 }
 
 // GetCompactionTargets returns cloned targets keyed by target ID.
@@ -90,14 +94,14 @@ func (m *compactionTargetMeta) GetCompactionTargets() map[int64]*datapb.Compacti
 	m.RLock()
 	defer m.RUnlock()
 
-	records := make(map[int64]*datapb.CompactionTarget, len(m.records))
-	for targetID, record := range m.records {
-		records[targetID] = proto.Clone(record).(*datapb.CompactionTarget)
+	targets := make(map[int64]*datapb.CompactionTarget, len(m.records))
+	for targetID, target := range m.records {
+		targets[targetID] = proto.Clone(target).(*datapb.CompactionTarget)
 	}
-	return records
+	return targets
 }
 
-func (m *compactionTargetMeta) GetActiveCompactionTargets() []compactionTarget {
+func (m *compactionTargetMeta) GetActiveCompactionTargets() []*compactionTarget {
 	m.RLock()
 	defer m.RUnlock()
 
@@ -105,36 +109,37 @@ func (m *compactionTargetMeta) GetActiveCompactionTargets() []compactionTarget {
 }
 
 // SaveCompactionTarget persists a target before updating the in-memory cache.
-func (m *compactionTargetMeta) SaveCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error {
+func (m *compactionTargetMeta) SaveCompactionTarget(ctx context.Context, target *datapb.CompactionTarget) error {
 	m.Lock()
 	defer m.Unlock()
 
-	if err := m.catalog.SaveCompactionTarget(ctx, record); err != nil {
+	if err := m.catalog.SaveCompactionTarget(ctx, target); err != nil {
 		log.Error("meta update: save compaction target failed",
-			zap.Int64("targetID", record.GetTargetID()),
-			zap.Int64("collectionID", record.GetCollectionID()),
+			zap.Int64("targetID", target.GetTargetID()),
+			zap.Int64("collectionID", target.GetCollectionID()),
 			zap.Error(err))
 		return err
 	}
-	cloned := proto.Clone(record).(*datapb.CompactionTarget)
-	m.records[record.GetTargetID()] = cloned
+	cloned := proto.Clone(target).(*datapb.CompactionTarget)
+	m.records[target.GetTargetID()] = cloned
 	m.targets.Upsert(cloned)
 	log.Info("meta update: save compaction target done",
-		zap.Int64("targetID", record.GetTargetID()),
-		zap.Int64("collectionID", record.GetCollectionID()),
-		zap.String("intent", record.GetIntent().String()),
-		zap.String("state", record.GetState().String()))
+		zap.Int64("targetID", target.GetTargetID()),
+		zap.Int64("collectionID", target.GetCollectionID()),
+		zap.String("intent", target.GetIntent().String()),
+		zap.String("state", target.GetState().String()))
 	return nil
 }
 
 // UpdateCompactionTargetState persists a state transition and mirrors it
-// into the in-memory cache when the record is loaded.
-func (m *compactionTargetMeta) UpdateCompactionTargetState(ctx context.Context, targetID int64, state datapb.TargetState, inactivatedAtTS uint64) error {
+// into the in-memory cache when the target is loaded.
+func (m *compactionTargetMeta) UpdateCompactionTargetState(ctx context.Context, targetID int64, state datapb.TargetState) error {
 	m.Lock()
 	defer m.Unlock()
 
-	if state != datapb.TargetState_TARGET_STATE_INACTIVE {
-		inactivatedAtTS = 0
+	inactivatedAtTS := uint64(0)
+	if state == datapb.TargetState_TARGET_STATE_INACTIVE {
+		inactivatedAtTS = tsoutil.GetCurrentTime()
 	}
 	if err := m.catalog.UpdateCompactionTargetState(ctx, targetID, state, inactivatedAtTS); err != nil {
 		log.Error("meta update: update compaction target state failed",
@@ -143,8 +148,8 @@ func (m *compactionTargetMeta) UpdateCompactionTargetState(ctx context.Context, 
 			zap.Error(err))
 		return err
 	}
-	if record, ok := m.records[targetID]; ok {
-		updated := proto.Clone(record).(*datapb.CompactionTarget)
+	if target, ok := m.records[targetID]; ok {
+		updated := proto.Clone(target).(*datapb.CompactionTarget)
 		updated.State = state
 		updated.InactivatedAtTS = inactivatedAtTS
 		m.records[targetID] = updated
@@ -158,45 +163,58 @@ func (m *compactionTargetMeta) UpdateCompactionTargetState(ctx context.Context, 
 }
 
 // DropCompactionTarget removes a target from KV and memory.
-func (m *compactionTargetMeta) DropCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error {
+func (m *compactionTargetMeta) DropCompactionTarget(ctx context.Context, targetID int64) error {
 	m.Lock()
 	defer m.Unlock()
 
-	if err := m.catalog.DropCompactionTarget(ctx, record); err != nil {
+	target, ok := m.records[targetID]
+	if !ok {
+		target = &datapb.CompactionTarget{TargetID: targetID}
+	}
+	if err := m.catalog.DropCompactionTarget(ctx, target); err != nil {
 		log.Error("meta update: drop compaction target failed",
-			zap.Int64("targetID", record.GetTargetID()),
-			zap.Int64("collectionID", record.GetCollectionID()),
+			zap.Int64("targetID", targetID),
+			zap.Int64("collectionID", target.GetCollectionID()),
 			zap.Error(err))
 		return err
 	}
-	delete(m.records, record.GetTargetID())
-	m.targets.Delete(record.GetTargetID())
+	delete(m.records, targetID)
+	m.targets.Delete(targetID)
+	log.Info("meta update: drop compaction target done",
+		zap.Int64("targetID", targetID),
+		zap.Int64("collectionID", target.GetCollectionID()))
 	return nil
 }
 
 type compactionTargets struct {
-	targets map[int64]compactionTarget
+	targets map[int64]*compactionTarget
 }
 
-func newCompactionTargets(records map[int64]*datapb.CompactionTarget) *compactionTargets {
-	targets := &compactionTargets{
-		targets: make(map[int64]compactionTarget, len(records)),
+func newCompactionTargets(targetsByID map[int64]*datapb.CompactionTarget) *compactionTargets {
+	runtimeTargets := &compactionTargets{
+		targets: make(map[int64]*compactionTarget, len(targetsByID)),
 	}
-	for _, record := range records {
-		targets.Upsert(record)
+	for _, target := range targetsByID {
+		runtimeTargets.Upsert(target)
 	}
-	return targets
+	return runtimeTargets
 }
 
-func (t *compactionTargets) Upsert(record *datapb.CompactionTarget) {
-	if t == nil || record == nil {
+func (t *compactionTargets) Upsert(target *datapb.CompactionTarget) {
+	if t == nil || target == nil {
 		return
 	}
-	if !isSupportedCompactionTarget(record) {
-		delete(t.targets, record.GetTargetID())
+	runtimeTarget, err := newCompactionTarget(target)
+	if err != nil {
+		delete(t.targets, target.GetTargetID())
+		log.Warn("skip materializing compaction target",
+			zap.Int64("targetID", target.GetTargetID()),
+			zap.Int64("collectionID", target.GetCollectionID()),
+			zap.String("intent", target.GetIntent().String()),
+			zap.Error(err))
 		return
 	}
-	t.targets[record.GetTargetID()] = newCompactionTarget(record)
+	t.targets[target.GetTargetID()] = runtimeTarget
 }
 
 func (t *compactionTargets) Delete(targetID int64) {
@@ -206,29 +224,20 @@ func (t *compactionTargets) Delete(targetID int64) {
 	delete(t.targets, targetID)
 }
 
-func (t *compactionTargets) Active() []compactionTarget {
+func (t *compactionTargets) Active() []*compactionTarget {
 	if t == nil {
 		return nil
 	}
-	active := make([]compactionTarget, 0, len(t.targets))
+	active := make([]*compactionTarget, 0, len(t.targets))
 	for _, target := range t.targets {
-		record := target.Record()
-		if record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE {
+		if target.target.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE {
 			active = append(active, target)
 		}
 	}
 	sort.Slice(active, func(i, j int) bool {
-		return active[i].Record().GetTargetID() < active[j].Record().GetTargetID()
+		return active[i].target.GetTargetID() < active[j].target.GetTargetID()
 	})
 	return active
-}
-
-type compactionTarget interface {
-	Record() *datapb.CompactionTarget
-	ScopeIn(segment *SegmentInfo) bool
-	Match(segment *SegmentInfo) bool
-	Satisfied(segmentsInScope []*SegmentInfo) bool
-	SegmentsInScope(candidates []*SegmentInfo) []*SegmentInfo
 }
 
 type compactionTargetFactory interface {
@@ -245,7 +254,7 @@ var _ compactionTargetFactory = (*manualRewriteCompactionTarget)(nil)
 func newManualRewriteCompactionTarget(collectionID int64, segmentIDs []int64) *manualRewriteCompactionTarget {
 	return &manualRewriteCompactionTarget{
 		collectionID: collectionID,
-		segmentIDs:   normalizedCompactionTargetSegmentIDs(segmentIDs),
+		segmentIDs:   sortedCompactionTargetSegmentIDs(segmentIDs),
 	}
 }
 
@@ -270,45 +279,95 @@ func (target *manualRewriteCompactionTarget) Properties() map[string]string {
 	return compactionTargetSegmentIDProperties(target.segmentIDs)
 }
 
-type compactionTargetBase struct {
-	record *datapb.CompactionTarget
+type matchRule interface {
+	Match(segment *SegmentInfo) bool
 }
 
-func newCompactionTarget(record *datapb.CompactionTarget) compactionTarget {
-	if record != nil {
-		record = proto.Clone(record).(*datapb.CompactionTarget)
+type compactionTarget struct {
+	target     *datapb.CompactionTarget
+	segmentIDs []int64
+	rule       matchRule
+}
+
+func newCompactionTarget(target *datapb.CompactionTarget) (*compactionTarget, error) {
+	if target == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("nil compaction target record")
 	}
-	return finiteCompactionTarget{compactionTargetBase: compactionTargetBase{record: record}}
+	switch target.GetIntent() {
+	case datapb.TargetIntent_INTENT_REWRITE:
+		return newRewriteCompactionTarget(target)
+	default:
+		return nil, errUnsupportedCompactionTarget
+	}
 }
 
-func (r compactionTargetBase) Record() *datapb.CompactionTarget {
-	if r.record == nil {
+func newRewriteCompactionTarget(target *datapb.CompactionTarget) (*compactionTarget, error) {
+	cloned := proto.Clone(target).(*datapb.CompactionTarget)
+	segmentIDs, err := parseCompactionTargetSegmentIDs(cloned)
+	if err != nil {
+		return nil, err
+	}
+	return &compactionTarget{
+		target:     cloned,
+		segmentIDs: segmentIDs,
+		rule:       rewriteRule{expectedTS: cloned.GetExpectedTS()},
+	}, nil
+}
+
+func (target *compactionTarget) Record() *datapb.CompactionTarget {
+	if target == nil || target.target == nil {
 		return nil
 	}
-	return proto.Clone(r.record).(*datapb.CompactionTarget)
+	return proto.Clone(target.target).(*datapb.CompactionTarget)
 }
 
-func (r compactionTargetBase) ScopeIn(segment *SegmentInfo) bool {
-	if r.record == nil || segment == nil {
+func (target *compactionTarget) finite() bool {
+	return target.target.GetTailLimit() >= 0
+}
+
+func (target *compactionTarget) ScopeIn(segment *SegmentInfo) bool {
+	if target == nil || target.target == nil || segment == nil {
 		return false
 	}
-	if r.record.GetCollectionID() != 0 && segment.GetCollectionID() != r.record.GetCollectionID() {
+	if target.target.GetCollectionID() != 0 && segment.GetCollectionID() != target.target.GetCollectionID() {
 		return false
 	}
-	segmentIDs, ok := compactionTargetSegmentIDs(r.record)
-	if !ok {
+	if len(target.segmentIDs) > 0 && !matchCompactionTargetSegmentIDScope(target.segmentIDs, segment) {
 		return false
 	}
-	if len(segmentIDs) > 0 && !matchCompactionTargetSegmentIDScope(segmentIDs, segment) {
+	if target.finite() && segment.GetDmlPosition().GetTimestamp() > target.target.GetExpectedTS() {
 		return false
 	}
 	return true
 }
 
-func (r compactionTargetBase) SegmentsInScope(candidates []*SegmentInfo) []*SegmentInfo {
+func (target *compactionTarget) Match(segment *SegmentInfo) bool {
+	return target.ScopeIn(segment) && target.rule.Match(segment)
+}
+
+func (target *compactionTarget) Satisfied(inScopeByLabel map[CompactionGroupLabel][]*SegmentInfo) bool {
+	tail := target.target.GetTailLimit()
+	if tail < 0 {
+		return false
+	}
+	for _, segments := range inScopeByLabel {
+		matched := int64(0)
+		for _, segment := range segments {
+			if target.Match(segment) {
+				matched++
+			}
+		}
+		if matched > int64(tail) {
+			return false
+		}
+	}
+	return true
+}
+
+func (target *compactionTarget) SegmentsInScope(candidates []*SegmentInfo) []*SegmentInfo {
 	segments := make([]*SegmentInfo, 0, len(candidates))
 	for _, segment := range candidates {
-		if r.ScopeIn(segment) {
+		if target.ScopeIn(segment) {
 			segments = append(segments, segment)
 		}
 	}
@@ -324,76 +383,54 @@ func matchCompactionTargetSegmentIDScope(segmentIDs []int64, segment *SegmentInf
 	return false
 }
 
-type finiteCompactionTarget struct {
-	compactionTargetBase
+type rewriteRule struct {
+	expectedTS uint64
 }
 
-func (r finiteCompactionTarget) Match(segment *SegmentInfo) bool {
-	return r.match(segment)
+func (rule rewriteRule) Match(segment *SegmentInfo) bool {
+	return segment != nil && segment.GetCreateTs() < rule.expectedTS
 }
 
-func (r finiteCompactionTarget) Satisfied(segmentsInScope []*SegmentInfo) bool {
-	if !isBaseRewriteCompactionTarget(r.record) {
-		return false
-	}
-	for _, segment := range segmentsInScope {
-		if r.match(segment) {
-			return false
-		}
-	}
-	return true
-}
-
-func (r finiteCompactionTarget) match(segment *SegmentInfo) bool {
-	if !isBaseRewriteCompactionTarget(r.record) || !r.ScopeIn(segment) {
-		return false
-	}
-	return segment.GetCreateTs() < r.record.GetExpectedTS() &&
-		segment.GetDmlPosition().GetTimestamp() < r.record.GetExpectedTS()
-}
-
-func normalizedCompactionTargetSegmentIDs(segmentIDs []int64) []int64 {
-	normalized := append([]int64(nil), segmentIDs...)
-	sort.Slice(normalized, func(i, j int) bool {
-		return normalized[i] < normalized[j]
+func sortedCompactionTargetSegmentIDs(segmentIDs []int64) []int64 {
+	sorted := append([]int64(nil), segmentIDs...)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i] < sorted[j]
 	})
-	return normalized
+	return sorted
 }
 
-func compactionTargetSegmentIDs(record *datapb.CompactionTarget) ([]int64, bool) {
-	if record.GetIntent() != datapb.TargetIntent_INTENT_REWRITE {
-		return nil, true
+func parseCompactionTargetSegmentIDs(target *datapb.CompactionTarget) ([]int64, error) {
+	if target.GetIntent() != datapb.TargetIntent_INTENT_REWRITE {
+		return nil, nil
 	}
-	raw := record.GetProperties()[compactionTargetSegmentIDsProperty]
+	raw := target.GetProperties()[compactionTargetSegmentIDsProperty]
 	if raw == "" {
-		return nil, true
+		return nil, nil
 	}
 	var segmentIDs []int64
 	if err := json.Unmarshal([]byte(raw), &segmentIDs); err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid compaction target segment_ids property: %v", err)
+	}
+	return sortedCompactionTargetSegmentIDs(segmentIDs), nil
+}
+
+func compactionTargetSegmentIDs(target *datapb.CompactionTarget) ([]int64, bool) {
+	segmentIDs, err := parseCompactionTargetSegmentIDs(target)
+	if err != nil {
 		return nil, false
 	}
-	return normalizedCompactionTargetSegmentIDs(segmentIDs), true
+	return segmentIDs, true
 }
 
 func compactionTargetSegmentIDProperties(segmentIDs []int64) map[string]string {
 	if len(segmentIDs) == 0 {
 		return nil
 	}
-	value, err := json.Marshal(normalizedCompactionTargetSegmentIDs(segmentIDs))
+	value, err := json.Marshal(sortedCompactionTargetSegmentIDs(segmentIDs))
 	if err != nil {
 		return nil
 	}
 	return map[string]string{compactionTargetSegmentIDsProperty: string(value)}
-}
-
-func isBaseRewriteCompactionTarget(record *datapb.CompactionTarget) bool {
-	return record != nil &&
-		record.GetIntent() == datapb.TargetIntent_INTENT_REWRITE &&
-		record.GetTailLimit() == 0
-}
-
-func isSupportedCompactionTarget(record *datapb.CompactionTarget) bool {
-	return isBaseRewriteCompactionTarget(record)
 }
 
 func allocCompactionTargetIdentity(ctx context.Context, alloc allocator.Allocator) (int64, uint64, error) {
