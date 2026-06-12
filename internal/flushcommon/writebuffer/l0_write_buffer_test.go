@@ -1582,6 +1582,18 @@ func (s *L0WriteBufferSuite) TestGrowingSourceRegistryResolveMultipleProviders()
 	s.Nil(resolved)
 }
 
+func (s *L0WriteBufferSuite) TestGrowingSourceRegistryResolveNilPendingProvider() {
+	registry := syncmgr.NewGrowingSourceRegistry()
+	channel := "by-dev-rootcoord-dml_1v0"
+
+	registry.Register(channel, fakeGrowingSourceProvider{state: syncmgr.GrowingSourcePending})
+	registry.Register(channel, fakeGrowingSourceProvider{state: syncmgr.GrowingSourceUnavailable})
+
+	resolved, state := registry.Resolve(channel, 1000, 10, &msgpb.MsgPosition{Timestamp: 200})
+	s.Equal(syncmgr.GrowingSourcePending, state)
+	s.Nil(resolved)
+}
+
 func (s *L0WriteBufferSuite) TestGrowingSourceRegistryResolveReleasesUnselectedSources() {
 	registry := syncmgr.NewGrowingSourceRegistry()
 	channel := "by-dev-rootcoord-dml_1v0"

@@ -38,6 +38,9 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	if err = proto.Unmarshal(req.Schema, fieldSchema); err != nil {
 		return errors.Wrap(err, "failed to unmarshal field schema")
 	}
+	if fieldSchema.GetDataType() == schemapb.DataType_Text && fieldSchema.GetDefaultValue() != nil {
+		return merr.WrapErrParameterInvalidMsg("default value is not supported when adding TEXT field, field name = %s", fieldSchema.GetName())
+	}
 	if err := checkFieldSchema([]*schemapb.FieldSchema{fieldSchema}); err != nil {
 		return errors.Wrap(err, "failed to check field schema")
 	}
@@ -50,7 +53,6 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 			return merr.WrapErrParameterInvalidMsg("invalid default value of field, name: %s, err: %w", fieldSchema.Name, err)
 		}
 	}
-
 	// check if the field already exists
 	fieldNames := typeutil.NewSet[string]()
 	for _, field := range coll.Fields {

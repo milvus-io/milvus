@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -2401,6 +2402,120 @@ func TestProxy_AddCollectionField_ExternalCollection(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.True(t, merr.Ok(resp))
+}
+
+func TestProxy_AddCollectionField_TextValidation(t *testing.T) {
+	baseSchema := &schemapb.CollectionSchema{
+		Name: "test_coll",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID:    101,
+				Name:       "vec",
+				DataType:   schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}},
+			},
+		},
+	}
+
+	for _, tc := range []struct {
+		name        string
+		storageV3   string
+		field       *schemapb.FieldSchema
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:      "text nullable allowed when storage v3 enabled",
+			storageV3: "true",
+			field: &schemapb.FieldSchema{
+				Name:     "text_field",
+				DataType: schemapb.DataType_Text,
+				Nullable: true,
+			},
+		},
+		{
+			name:      "text requires storage v3",
+			storageV3: "false",
+			field: &schemapb.FieldSchema{
+				Name:     "text_field",
+				DataType: schemapb.DataType_Text,
+				Nullable: true,
+			},
+			wantErr:     true,
+			errContains: "TEXT field requires StorageV3",
+		},
+		{
+			name:      "text must be nullable",
+			storageV3: "true",
+			field: &schemapb.FieldSchema{
+				Name:     "text_not_nullable",
+				DataType: schemapb.DataType_Text,
+				Nullable: false,
+			},
+			wantErr:     true,
+			errContains: "added field must be nullable",
+		},
+		{
+			name:      "text default value rejected",
+			storageV3: "true",
+			field: &schemapb.FieldSchema{
+				Name:     "text_default",
+				DataType: schemapb.DataType_Text,
+				Nullable: true,
+				DefaultValue: &schemapb.ValueField{
+					Data: &schemapb.ValueField_StringData{StringData: "default text"},
+				},
+			},
+			wantErr:     true,
+			errContains: "default value is not supported when adding TEXT field",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, tc.storageV3)
+			t.Cleanup(func() {
+				paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+			})
+
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockDescribe := mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: proto.Clone(baseSchema).(*schemapb.CollectionSchema),
+			}, nil).Build()
+			defer mockDescribe.UnPatch()
+
+			mockEnqueue := mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, queued task) error {
+				require.NoError(t, queued.OnEnqueue())
+				addTask := queued.(*addCollectionFieldTask)
+				err := addTask.PreExecute(context.Background())
+				if err != nil {
+					addTask.result = merr.Status(err)
+				} else {
+					addTask.result = merr.Success()
+				}
+				addTask.Notify(err)
+				return nil
+			}).Build()
+			defer mockEnqueue.UnPatch()
+
+			fieldBytes, err := proto.Marshal(tc.field)
+			require.NoError(t, err)
+			resp, err := node.AddCollectionField(context.Background(), &milvuspb.AddCollectionFieldRequest{
+				DbName:         "default",
+				CollectionName: "test_coll",
+				Schema:         fieldBytes,
+			})
+			require.NoError(t, err)
+			if tc.wantErr {
+				require.Error(t, merr.Error(resp))
+				require.Contains(t, resp.GetReason(), tc.errContains)
+				return
+			}
+			require.True(t, merr.Ok(resp), resp.GetReason())
+		})
+	}
 }
 
 func TestProxy_AddCollectionField_DoesNotBlockOnSchemaVersion(t *testing.T) {

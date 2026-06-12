@@ -276,6 +276,9 @@ func (r *GrowingSourceRegistry) Resolve(channel string, segmentID int64, targetO
 		}
 		source, state := provider.GetGrowingFlushSource(segmentID, targetOffset, endPos)
 		if source == nil {
+			if state == GrowingSourcePending {
+				hasPending = true
+			}
 			continue
 		}
 		switch state {
