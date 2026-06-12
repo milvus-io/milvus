@@ -52,7 +52,7 @@ namespace {
 class IndexEntryStreamConfigGuard {
  public:
     IndexEntryStreamConfigGuard()
-        : budget_(TransientMemoryBudget::GetEntryStreamBudget()),
+        : budget_(TransientMemoryBudget::GetLoadTransientBudget()),
           capacity_bytes_(budget_.CapacityBytes()) {
     }
 
@@ -1197,16 +1197,17 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamRejectsInvalidSliceSize) {
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamUsesDefaultSliceSize) {
     IndexEntryStreamConfigGuard guard;
     const size_t slice_size = DEFAULT_INDEX_FILE_SLICE_SIZE;
-    auto& budget = TransientMemoryBudget::GetEntryStreamBudget();
+    auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
 
     ASSERT_EQ(DefaultStreamSliceSize(), slice_size);
-    milvus::SetEntryStreamBudgetBytes(0);
+    milvus::SetLoadTransientBudgetBytes(0);
     ASSERT_EQ(budget.CapacityBytes(), 0);
     ASSERT_EQ(EntryStreamMaxTransientBytes(),
               std::numeric_limits<size_t>::max());
 
     const size_t configured_budget = 3 * slice_size;
-    milvus::SetEntryStreamBudgetBytes(static_cast<int64_t>(configured_budget));
+    milvus::SetLoadTransientBudgetBytes(
+        static_cast<int64_t>(configured_budget));
     ASSERT_EQ(budget.CapacityBytes(), configured_budget);
     ASSERT_EQ(EntryStreamMaxTransientBytes(),
               configured_budget + kTailMergeGrace);
@@ -1505,7 +1506,7 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamCancellationWhileWaitingBudget) {
         writer.Finish();
     }
 
-    auto& budget = TransientMemoryBudget::GetEntryStreamBudget();
+    auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
     auto old_capacity = budget.CapacityBytes();
     budget.SetCapacityBytes(slice_size);
     budget.Acquire(slice_size);

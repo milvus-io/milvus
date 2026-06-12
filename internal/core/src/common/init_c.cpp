@@ -52,8 +52,8 @@ SetIndexSliceSize(const int64_t size) {
 }
 
 void
-SetEntryStreamBudgetBytes(int64_t bytes) {
-    milvus::SetEntryStreamBudgetBytes(bytes);
+SetLoadTransientBudgetBytes(int64_t bytes) {
+    milvus::SetLoadTransientBudgetBytes(bytes);
 }
 
 void
@@ -215,18 +215,6 @@ UpdateArrowIOThreadPoolMetrics() {
 void
 SetStorageV2CellTargetSizeBytes(int64_t bytes) {
     milvus::segcore::storagev2translator::SetCellTargetSizeBytes(bytes);
-}
-
-void
-SetStorageV2FieldDataLoadBudgetBytes(int64_t bytes) {
-    if (bytes <= 0) {
-        LOG_WARN("ignore invalid storage v2 field data load budget bytes: {}",
-                 bytes);
-        return;
-    }
-    milvus::storage::TransientMemoryBudget::SetFieldDataLoadBudgetBytes(
-        static_cast<size_t>(bytes));
-    LOG_INFO("set storage v2 field data load budget bytes: {}", bytes);
 }
 
 void

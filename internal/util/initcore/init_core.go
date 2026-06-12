@@ -520,12 +520,8 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
-		paramtable.Get().CommonCfg.StreamBudgetBytes.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
-			bytes, err := strconv.ParseInt(newValue, 10, 64)
-			if err != nil {
-				return err
-			}
-			UpdateEntryStreamBudgetBytes(bytes)
+		paramtable.Get().CommonCfg.LoadTransientBudgetBytes.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			UpdateLoadTransientBudgetBytes(paramtable.Get().CommonCfg.LoadTransientBudgetBytes.GetAsInt64())
 			return nil
 		})
 

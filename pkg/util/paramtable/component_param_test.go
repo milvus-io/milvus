@@ -79,12 +79,12 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.IndexSliceSize.GetAsInt64(), int64(DefaultIndexSliceSize))
 		t.Logf("knowhere index slice size = %d", Params.IndexSliceSize.GetAsInt64())
 
-		defer params.Reset(Params.StreamBudgetBytes.Key)
-		assert.Equal(t, int64(DefaultEntryStreamBudgetBytes), Params.StreamBudgetBytes.GetAsInt64())
-		params.Save(Params.StreamBudgetBytes.Key, "-1")
-		assert.Equal(t, int64(DefaultEntryStreamBudgetBytes), Params.StreamBudgetBytes.GetAsInt64())
-		params.Save(Params.StreamBudgetBytes.Key, "67108864")
-		assert.Equal(t, int64(67108864), Params.StreamBudgetBytes.GetAsInt64())
+		defer params.Reset(Params.LoadTransientBudgetBytes.Key)
+		assert.Equal(t, int64(DefaultLoadTransientBudgetBytes), Params.LoadTransientBudgetBytes.GetAsInt64())
+		params.Save(Params.LoadTransientBudgetBytes.Key, "-1")
+		assert.Equal(t, int64(DefaultLoadTransientBudgetBytes), Params.LoadTransientBudgetBytes.GetAsInt64())
+		params.Save(Params.LoadTransientBudgetBytes.Key, "67108864")
+		assert.Equal(t, int64(67108864), Params.LoadTransientBudgetBytes.GetAsInt64())
 
 		assert.Equal(t, int64(0), Params.ArrowReaderHoleSizeLimitBytes.GetAsInt64())
 		assert.Equal(t, int64(0), Params.ArrowReaderRangeSizeLimitBytes.GetAsInt64())
@@ -494,13 +494,6 @@ func TestComponentParam(t *testing.T) {
 		// test query side config
 		chunkRows := Params.ChunkRows.GetAsInt64()
 		assert.Equal(t, int64(128), chunkRows)
-		defer params.Reset(Params.StorageV2FieldDataLoadBudgetBytes.Key)
-		assert.Equal(t, int64(DefaultStorageV2FieldDataLoadBudgetBytes), Params.StorageV2FieldDataLoadBudgetBytes.GetAsInt64())
-		params.Save(Params.StorageV2FieldDataLoadBudgetBytes.Key, "0")
-		assert.Equal(t, int64(DefaultStorageV2FieldDataLoadBudgetBytes), Params.StorageV2FieldDataLoadBudgetBytes.GetAsInt64())
-		params.Save(Params.StorageV2FieldDataLoadBudgetBytes.Key, "67108864")
-		assert.Equal(t, int64(67108864), Params.StorageV2FieldDataLoadBudgetBytes.GetAsInt64())
-
 		nlist := Params.InterimIndexNlist.GetAsInt64()
 		assert.Equal(t, int64(128), nlist)
 

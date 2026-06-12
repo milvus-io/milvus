@@ -67,25 +67,14 @@ struct StreamSliceResult {
 class TransientMemoryBudget {
  public:
     static TransientMemoryBudget&
-    GetEntryStreamBudget() {
+    GetLoadTransientBudget() {
         static TransientMemoryBudget instance;
         return instance;
     }
 
-    static TransientMemoryBudget&
-    GetFieldDataLoadBudget() {
-        static TransientMemoryBudget instance(DEFAULT_FIELD_MAX_MEMORY_LIMIT);
-        return instance;
-    }
-
     static void
-    SetEntryStreamBudgetBytes(size_t bytes) {
-        GetEntryStreamBudget().SetCapacityBytes(bytes);
-    }
-
-    static void
-    SetFieldDataLoadBudgetBytes(size_t bytes) {
-        GetFieldDataLoadBudget().SetCapacityBytes(bytes);
+    SetLoadTransientBudgetBytes(size_t bytes) {
+        GetLoadTransientBudget().SetCapacityBytes(bytes);
     }
 
     /// Block until enough budget is available. Safe to call when the calling
@@ -196,7 +185,7 @@ class TransientMemoryBudget {
 inline size_t
 EntryStreamMaxTransientBytes() {
     auto capacity =
-        TransientMemoryBudget::GetEntryStreamBudget().CapacityBytes();
+        TransientMemoryBudget::GetLoadTransientBudget().CapacityBytes();
     if (capacity == 0) {
         return std::numeric_limits<size_t>::max();
     }

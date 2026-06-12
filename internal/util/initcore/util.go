@@ -51,8 +51,8 @@ func UpdateIndexSliceSize(size int) {
 	C.SetIndexSliceSize(C.int64_t(size))
 }
 
-func UpdateEntryStreamBudgetBytes(bytes int64) {
-	C.SetEntryStreamBudgetBytes(C.int64_t(bytes))
+func UpdateLoadTransientBudgetBytes(bytes int64) {
+	C.SetLoadTransientBudgetBytes(C.int64_t(bytes))
 }
 
 func UpdateHighPriorityThreadCoreCoefficient(coefficient float64) {
@@ -187,10 +187,6 @@ func RegisterArrowReaderConfigWatchers(pt *paramtable.ComponentParam, source str
 
 func UpdateStorageV2CellTargetSizeBytes(bytes int64) {
 	C.SetStorageV2CellTargetSizeBytes(C.int64_t(bytes))
-}
-
-func UpdateStorageV2FieldDataLoadBudgetBytes(bytes int64) {
-	C.SetStorageV2FieldDataLoadBudgetBytes(C.int64_t(bytes))
 }
 
 func UpdateDefaultGrowingJSONKeyStatsEnable(enable bool) {

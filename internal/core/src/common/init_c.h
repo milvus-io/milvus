@@ -32,7 +32,7 @@ void
 SetIndexSliceSize(const int64_t);
 
 void
-SetEntryStreamBudgetBytes(int64_t bytes);
+SetLoadTransientBudgetBytes(int64_t bytes);
 
 void
 SetHighPriorityThreadCoreCoefficient(const float);
@@ -119,10 +119,6 @@ UpdateArrowIOThreadPoolMetrics();
 // packed into cells so that rgs_per_cell * avg_row_group_size ≈ this value.
 void
 SetStorageV2CellTargetSizeBytes(int64_t bytes);
-
-// Process-wide transient memory budget for storage v2 field-data load.
-void
-SetStorageV2FieldDataLoadBudgetBytes(int64_t bytes);
 
 #ifdef __cplusplus
 };

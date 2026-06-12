@@ -67,7 +67,7 @@ class TransientBudgetGuard {
         : bytes_(bytes) {
         ThrowIfCancelled(cancellation_token, operation);
         auto acquired =
-            TransientMemoryBudget::GetEntryStreamBudget().AcquireUntil(
+            TransientMemoryBudget::GetLoadTransientBudget().AcquireUntil(
                 bytes_, [&cancellation_token]() {
                     return cancellation_token.isCancellationRequested();
                 });
@@ -78,7 +78,7 @@ class TransientBudgetGuard {
     }
 
     ~TransientBudgetGuard() {
-        TransientMemoryBudget::GetEntryStreamBudget().Release(bytes_);
+        TransientMemoryBudget::GetLoadTransientBudget().Release(bytes_);
     }
 
     TransientBudgetGuard(const TransientBudgetGuard&) = delete;
@@ -168,7 +168,7 @@ ReadOrderedEntryStream(
     }
 
     auto& pool = ThreadPools::GetThreadPool(priority);
-    auto& budget = TransientMemoryBudget::GetEntryStreamBudget();
+    auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
     size_t max_active_tasks =
         std::min(num_slices, std::max<size_t>(1, pool.GetMaxThreadNum()));
 

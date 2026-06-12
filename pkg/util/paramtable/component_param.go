@@ -41,7 +41,7 @@ import (
 const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize                      = 16
-	DefaultEntryStreamBudgetBytes              = 0
+	DefaultLoadTransientBudgetBytes            = 0
 	DefaultGracefulTime                        = 5000 // ms
 	DefaultGracefulStopTimeout                 = 1800 // s, for node
 	DefaultProxyGracefulStopTimeout            = 30   // s，for proxy
@@ -51,7 +51,6 @@ const (
 	DefaultLowPriorityThreadCoreCoefficient    = 1
 	DefaultBM25LoadThreadCoreCoefficient       = 1
 	DefaultThreadPoolMaxThreadsSize            = 16
-	DefaultStorageV2FieldDataLoadBudgetBytes   = 128 << 20
 
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
@@ -233,7 +232,7 @@ type commonConfig struct {
 	DefaultIndexName     ParamItem `refreshable:"true"`
 
 	IndexSliceSize                      ParamItem `refreshable:"false"`
-	StreamBudgetBytes                   ParamItem `refreshable:"true"`
+	LoadTransientBudgetBytes            ParamItem `refreshable:"true"`
 	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"true"`
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
@@ -559,26 +558,27 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	}
 	p.IndexSliceSize.Init(base.mgr)
 
-	p.StreamBudgetBytes = ParamItem{
-		Key:          "common.entryStream.streamBudgetBytes",
+	p.LoadTransientBudgetBytes = ParamItem{
+		Key:          "common.loadTransientBudgetBytes",
 		Version:      "3.0.0",
-		DefaultValue: strconv.Itoa(DefaultEntryStreamBudgetBytes),
-		Doc: `Process-wide transient memory budget in bytes for entry stream ` +
-			`loading. It gates in-flight entry stream slices across concurrent ` +
-			`load tasks. Lower values reduce peak transient memory at the cost of ` +
-			`load throughput. Oversized slices are still allowed to proceed ` +
-			`exclusively to guarantee progress. Set to 0 to disable the limit.`,
+		DefaultValue: strconv.Itoa(DefaultLoadTransientBudgetBytes),
+		Doc: `Process-wide transient memory budget in bytes shared by scalar ` +
+			`index entry reading and storage v2 field-data loading. It gates ` +
+			`in-flight transient data across concurrent load tasks. Lower ` +
+			`values reduce peak transient memory at the cost of load throughput. ` +
+			`Oversized requests are still allowed to proceed exclusively to ` +
+			`guarantee progress. Set to 0 to disable the limit.`,
 		Export: true,
 		Formatter: func(v string) string {
 			if getAsInt64(v) < 0 {
-				log.Warn("common.entryStream.streamBudgetBytes must be non-negative, using unlimited",
+				log.Warn("common.loadTransientBudgetBytes must be non-negative, using unlimited",
 					zap.String("configured", v))
-				return strconv.Itoa(DefaultEntryStreamBudgetBytes)
+				return strconv.Itoa(DefaultLoadTransientBudgetBytes)
 			}
 			return v
 		},
 	}
-	p.StreamBudgetBytes.Init(base.mgr)
+	p.LoadTransientBudgetBytes.Init(base.mgr)
 
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",
@@ -3669,8 +3669,7 @@ type queryNodeConfig struct {
 
 	// Target average byte size per storage v2 cache cell. Parquet row groups
 	// are packed into cells so rgs_per_cell * avg_rg_size ≈ this value.
-	StorageV2CellTargetSizeBytes      ParamItem `refreshable:"true"`
-	StorageV2FieldDataLoadBudgetBytes ParamItem `refreshable:"true"`
+	StorageV2CellTargetSizeBytes ParamItem `refreshable:"true"`
 
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
@@ -4851,27 +4850,6 @@ user-task-polling:
 		},
 	}
 	p.StorageV2CellTargetSizeBytes.Init(base.mgr)
-
-	p.StorageV2FieldDataLoadBudgetBytes = ParamItem{
-		Key:          "queryNode.segcore.storageV2.fieldDataLoadBudgetBytes",
-		Version:      "3.0.0",
-		DefaultValue: strconv.Itoa(DefaultStorageV2FieldDataLoadBudgetBytes),
-		Doc: `Process-wide transient memory budget in bytes for storage v2 ` +
-			`field-data loading. It gates in-flight Arrow data across concurrent ` +
-			`load tasks. Lower values reduce peak transient memory at the cost of ` +
-			`load throughput. Oversized cells are still allowed to proceed ` +
-			`exclusively to guarantee progress. Default 128 MiB.`,
-		Export: true,
-		Formatter: func(v string) string {
-			if getAsInt64(v) <= 0 {
-				log.Warn("queryNode.segcore.storageV2.fieldDataLoadBudgetBytes must be positive, using default 128 MiB",
-					zap.String("configured", v))
-				return strconv.Itoa(DefaultStorageV2FieldDataLoadBudgetBytes)
-			}
-			return v
-		},
-	}
-	p.StorageV2FieldDataLoadBudgetBytes.Init(base.mgr)
 
 	p.EnableWorkerSQCostMetrics = ParamItem{
 		Key:          "queryNode.enableWorkerSQCostMetrics",
