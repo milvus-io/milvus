@@ -47,8 +47,10 @@ using namespace milvus::segcore;
  *   shared.
  *
  * Before fix: this test reliably crashes (SIGSEGV / ASan heap-use-after-free)
- * under the concurrent rehash. After fix: queries either succeed or throw
- * cleanly; no crash.
+ * under the concurrent rehash. After fix: every query must succeed — the
+ * readers target nullable_i64, which exists in the base schema and is not
+ * touched by the evolution, so the test asserts no exception at all (not
+ * merely "no crash").
  *
  * Reliability notes: a rehash only corrupts a concurrent reader during the
  * brief window the bucket array is reallocated, so the reproduction maximizes
