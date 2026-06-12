@@ -363,6 +363,8 @@ type commonConfig struct {
 
 	// group by
 	GroupByMaxGroups ParamItem `refreshable:"false"`
+
+	ShardingByNamespace ParamItem
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1498,6 +1500,15 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		},
 	}
 	p.GroupByMaxGroups.Init(base.mgr)
+
+	p.ShardingByNamespace = ParamItem{
+		Key:          "common.sharding.byNamespace",
+		Version:      "2.6.17",
+		DefaultValue: "false",
+		Doc:          "Indicates whether to use namespace as sharding key",
+		Export:       true,
+	}
+	p.ShardingByNamespace.Init(base.mgr)
 }
 
 type gpuConfig struct {

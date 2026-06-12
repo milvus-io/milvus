@@ -806,6 +806,68 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_with_multiple_namespaces(self):
+        """
+        target: test query with namespace enabled
+        method: create namespace-enabled collection with multiple shards, insert rows into multiple namespaces, then query by namespace
+        expected: query only returns rows from the requested namespace
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        shards_num = 4
+        self.create_collection(
+            client,
+            collection_name,
+            default_dim,
+            consistency_level="Strong",
+            enable_namespace=True,
+            shards_num=shards_num,
+        )
+
+        desc = self.describe_collection(client, collection_name)[0]
+        assert desc["enable_namespace"] is True
+        assert desc["num_shards"] == shards_num
+
+        rng = np.random.default_rng(seed=19530)
+        namespaces = [f"namespace_{i}" for i in range(8)]
+        nb_per_namespace = 10
+        ids_by_namespace = {
+            namespace: [idx * 1000 + i for i in range(nb_per_namespace)]
+            for idx, namespace in enumerate(namespaces)
+        }
+        for namespace, ids in ids_by_namespace.items():
+            rows = [
+                {
+                    default_primary_key_field_name: pk,
+                    default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                }
+                for pk in ids
+            ]
+            self.insert(client, collection_name, rows, namespace=namespace)
+
+        for namespace, expected_ids in ids_by_namespace.items():
+            res = self.query(
+                client,
+                collection_name,
+                filter=default_search_exp,
+                output_fields=[default_primary_key_field_name],
+                namespace=namespace,
+            )[0]
+            assert {r[default_primary_key_field_name] for r in res} == set(expected_ids)
+
+        first_id_per_namespace = [ids[0] for ids in ids_by_namespace.values()]
+        for namespace, expected_ids in ids_by_namespace.items():
+            filtered = self.query(
+                client,
+                collection_name,
+                filter=f"{default_primary_key_field_name} in {first_id_per_namespace}",
+                output_fields=[default_primary_key_field_name],
+                namespace=namespace,
+            )[0]
+            assert {r[default_primary_key_field_name] for r in filtered} == {expected_ids[0]}
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_query_output_fields(self):
         """
         target: test query (high level api) normal case

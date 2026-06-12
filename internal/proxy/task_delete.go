@@ -129,7 +129,14 @@ func (dt *deleteTask) getChannels() []pChan {
 }
 
 func (dt *deleteTask) PreExecute(ctx context.Context) error {
-	return nil
+	if dt.req.Namespace == nil {
+		return nil
+	}
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
+	if err != nil {
+		return err
+	}
+	return common.CheckNamespace(schema.CollectionSchema, dt.req.Namespace)
 }
 
 func (dt *deleteTask) PostExecute(ctx context.Context) error {
@@ -152,9 +159,20 @@ func repackDeleteMsgByHash(
 	partitionID int64,
 	partitionName string,
 	dbName string,
+	namespace *string,
 ) (map[uint32][]*msgstream.DeleteMsg, int64, error) {
 	maxSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
-	hashValues := typeutil.HashPK2Channels(primaryKeys, vChannels)
+	var hashValues []uint32
+	if namespace != nil && Params.CommonCfg.ShardingByNamespace.GetAsBool() {
+		size := typeutil.GetSizeOfIDs(primaryKeys)
+		channel := typeutil.HashNamespace2Channels(*namespace, vChannels)
+		hashValues = make([]uint32, size)
+		for i := 0; i < size; i++ {
+			hashValues[i] = channel
+		}
+	} else {
+		hashValues = typeutil.HashPK2Channels(primaryKeys, vChannels)
+	}
 	// repack delete msg by dmChannel
 	result := make(map[uint32][]*msgstream.DeleteMsg)
 	lastMessageSize := map[uint32]int{}
@@ -289,6 +307,9 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	if err := validateTextStorageV3Enabled(dr.schema.CollectionSchema); err != nil {
 		return ErrWithLog(log, "TEXT field requires StorageV3", err)
 	}
+	if err = common.CheckNamespace(dr.schema.CollectionSchema, dr.req.Namespace); err != nil {
+		return err
+	}
 
 	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, dr.req.GetDbName(), collName, dr.collectionID)
 	if err != nil {
@@ -309,9 +330,22 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
 	}
 
+	dr.plan.Namespace = dr.req.Namespace
 	// Set partitionIDs, could be empty if no partition name specified and no partition key
 	partName := dr.req.GetPartitionName()
-	if dr.schema.IsPartitionKeyCollection() {
+	if dr.req.Namespace != nil {
+		if len(partName) > 0 {
+			return errors.New("not support manually specifying the partition names if namespace is used")
+		}
+		hashedPartitionNames, err := assignNamespacePartitionKey(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), dr.req.Namespace)
+		if err != nil {
+			return err
+		}
+		dr.partitionIDs, err = getPartitionIDs(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
+		if err != nil {
+			return err
+		}
+	} else if dr.schema.IsPartitionKeyCollection() {
 		if len(partName) > 0 {
 			return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
 		}
@@ -549,13 +583,25 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 		return err
 	}
 
-	err = dr.lb.Execute(ctx, shardclient.CollectionWorkLoad{
-		Db:             dr.req.GetDbName(),
-		CollectionName: dr.req.GetCollectionName(),
-		CollectionID:   dr.collectionID,
-		Nq:             1,
-		Exec:           dr.getStreamingQueryAndDelteFunc(plan),
-	})
+	if dr.req.Namespace != nil && Params.CommonCfg.ShardingByNamespace.GetAsBool() {
+		channel := typeutil.HashNamespace2Channels(*dr.req.Namespace, dr.vChannels)
+		err = dr.lb.ExecuteWithRetry(ctx, shardclient.ChannelWorkload{
+			Db:             dr.req.GetDbName(),
+			CollectionName: dr.req.GetCollectionName(),
+			CollectionID:   dr.collectionID,
+			Channel:        dr.vChannels[channel],
+			Nq:             1,
+			Exec:           dr.getStreamingQueryAndDelteFunc(plan),
+		})
+	} else {
+		err = dr.lb.Execute(ctx, shardclient.CollectionWorkLoad{
+			Db:             dr.req.GetDbName(),
+			CollectionName: dr.req.GetCollectionName(),
+			CollectionID:   dr.collectionID,
+			Nq:             1,
+			Exec:           dr.getStreamingQueryAndDelteFunc(plan),
+		})
+	}
 	dr.result.DeleteCnt = dr.count.Load()
 	dr.result.Timestamp = dr.sessionTS.Load()
 	if err != nil {

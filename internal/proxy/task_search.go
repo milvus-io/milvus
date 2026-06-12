@@ -125,6 +125,8 @@ type searchTask struct {
 
 	hybridSubSearchInfos []hybridSubSearchInfo
 	hybridElementLevel   bool
+
+	chMgr channelsMgr
 }
 
 func (t *searchTask) CanSkipAllocTimestamp() bool {
@@ -1098,6 +1100,23 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 }
 
 func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int64, error) {
+	if t.request.Namespace != nil {
+		hashedPartitionNames, err := assignNamespacePartitionKey(t.ctx, t.request.GetDbName(), t.collectionName, t.request.Namespace)
+		if err != nil {
+			log.Ctx(t.ctx).Warn("failed to assign namespace partition key", zap.Error(err))
+			return nil, err
+		}
+		if len(hashedPartitionNames) > 0 {
+			PartitionIDs, err2 := getPartitionIDs(t.ctx, t.request.GetDbName(), t.collectionName, hashedPartitionNames)
+			if err2 != nil {
+				log.Ctx(t.ctx).Warn("failed to get namespace partition ids", zap.Error(err2))
+				return nil, err2
+			}
+			return PartitionIDs, nil
+		}
+		return nil, nil
+	}
+
 	expr, err := exprutil.ParseExprFromPlan(plan)
 	if err != nil {
 		log.Ctx(t.ctx).Warn("failed to parse expr", zap.Error(err))
@@ -1131,16 +1150,39 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	defer tr.CtxElapse(ctx, "done")
 
 	t.queryChannelsNode = typeutil.NewConcurrentMap[string, int64]()
-	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
-		Db:             t.request.GetDbName(),
-		CollectionID:   t.CollectionID,
-		CollectionName: t.collectionName,
-		Nq:             t.Nq,
-		Exec:           t.searchShard,
-	})
-	if err != nil {
-		log.Warn("search execute failed", zap.Error(err))
-		return errors.Wrap(err, "failed to search")
+
+	if t.request.Namespace != nil && Params.CommonCfg.ShardingByNamespace.GetAsBool() {
+		channelNames, err := t.chMgr.getVChannels(t.CollectionID)
+		if err != nil {
+			log.Warn("get vChannels failed", zap.Int64("collectionID", t.CollectionID), zap.Error(err))
+			return err
+		}
+		channel := typeutil.HashNamespace2Channels(*t.request.Namespace, channelNames)
+		err = t.lb.ExecuteWithRetry(ctx, shardclient.ChannelWorkload{
+			Db:              t.request.GetDbName(),
+			CollectionName:  t.collectionName,
+			CollectionID:    t.CollectionID,
+			Channel:         channelNames[channel],
+			Nq:              t.Nq,
+			Exec:            t.searchShard,
+			PreferredNodeID: 0,
+		})
+		if err != nil {
+			log.Warn("fail to execute search", zap.Error(err))
+			return errors.Wrap(err, "failed to search")
+		}
+	} else {
+		err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
+			Db:             t.request.GetDbName(),
+			CollectionID:   t.CollectionID,
+			CollectionName: t.collectionName,
+			Nq:             t.Nq,
+			Exec:           t.searchShard,
+		})
+		if err != nil {
+			log.Warn("search execute failed", zap.Error(err))
+			return errors.Wrap(err, "failed to search")
+		}
 	}
 
 	log.Debug("Search Execute done.",

@@ -47,6 +47,18 @@ func (s *SearchIteratorSuite) SetupSuite() {
 		WithField(entity.NewField().WithName("Vector").WithDataType(entity.FieldTypeFloatVector).WithDim(128))
 }
 
+func (s *SearchIteratorSuite) TestSearchIteratorOptionWithNamespace() {
+	namespace := "tenant_a"
+
+	opt := NewSearchIteratorOption("coll", entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
+		return rand.Float32()
+	}))).WithNamespace(namespace)
+	req, err := opt.SearchOption().Request()
+
+	s.Require().NoError(err)
+	s.Equal(namespace, req.GetNamespace())
+}
+
 func (s *SearchIteratorSuite) TestSearchIteratorInit() {
 	ctx := context.Background()
 	s.Run("success", func() {
@@ -429,6 +441,15 @@ func (s *QueryIteratorSuite) SetupSuite() {
 		WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
 		WithField(entity.NewField().WithName("Vector").WithDataType(entity.FieldTypeFloatVector).WithDim(128)).
 		WithField(entity.NewField().WithName("Name").WithDataType(entity.FieldTypeVarChar).WithMaxLength(256))
+}
+
+func (s *QueryIteratorSuite) TestQueryIteratorOptionWithNamespace() {
+	namespace := "tenant_a"
+
+	req, err := NewQueryIteratorOption("coll").WithNamespace(namespace).Request()
+
+	s.Require().NoError(err)
+	s.Equal(namespace, req.GetNamespace())
 }
 
 func (s *QueryIteratorSuite) TestQueryIteratorInit() {

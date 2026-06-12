@@ -123,6 +123,7 @@ func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherC
 		ut.upsertMsg.DeleteMsg.CollectionID, ut.upsertMsg.DeleteMsg.CollectionName,
 		ut.upsertMsg.DeleteMsg.PartitionID, ut.upsertMsg.DeleteMsg.PartitionName,
 		ut.req.GetDbName(),
+		ut.req.Namespace,
 	)
 	if err != nil {
 		return nil, err

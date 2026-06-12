@@ -51,6 +51,7 @@ var (
 type columnBasedDataOption struct {
 	collName      string
 	partitionName string
+	namespace     *string
 	columns       []column.Column
 	partialUpdate bool
 
@@ -379,6 +380,11 @@ func (opt *columnBasedDataOption) WithPartition(partitionName string) *columnBas
 	return opt
 }
 
+func (opt *columnBasedDataOption) WithNamespace(namespace string) *columnBasedDataOption {
+	opt.namespace = &namespace
+	return opt
+}
+
 func (opt *columnBasedDataOption) WithPartialUpdate(partialUpdate bool) *columnBasedDataOption {
 	opt.partialUpdate = partialUpdate
 	return opt
@@ -452,6 +458,7 @@ func (opt *columnBasedDataOption) InsertRequest(coll *entity.Collection) (*milvu
 	return &milvuspb.InsertRequest{
 		CollectionName:  opt.collName,
 		PartitionName:   opt.partitionName,
+		Namespace:       opt.namespace,
 		FieldsData:      fieldsData,
 		NumRows:         uint32(rowNum),
 		SchemaTimestamp: coll.UpdateTimestamp,
@@ -477,6 +484,7 @@ func (opt *columnBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvu
 	return &milvuspb.UpsertRequest{
 		CollectionName:  opt.collName,
 		PartitionName:   opt.partitionName,
+		Namespace:       opt.namespace,
 		FieldsData:      fieldsData,
 		NumRows:         uint32(rowNum),
 		SchemaTimestamp: coll.UpdateTimestamp,
@@ -522,6 +530,7 @@ func (opt *rowBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb
 	return &milvuspb.InsertRequest{
 		CollectionName: opt.collName,
 		PartitionName:  opt.partitionName,
+		Namespace:      opt.namespace,
 		FieldsData:     fieldsData,
 		NumRows:        uint32(rowNum),
 	}, nil
@@ -545,6 +554,7 @@ func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb
 	return &milvuspb.UpsertRequest{
 		CollectionName: opt.collName,
 		PartitionName:  opt.partitionName,
+		Namespace:      opt.namespace,
 		FieldsData:     fieldsData,
 		NumRows:        uint32(rowNum),
 		PartialUpdate:  partialUpdate,
@@ -586,6 +596,7 @@ type DeleteOption interface {
 type deleteOption struct {
 	collectionName string
 	partitionName  string
+	namespace      *string
 	expr           string
 }
 
@@ -593,6 +604,7 @@ func (opt *deleteOption) Request() *milvuspb.DeleteRequest {
 	return &milvuspb.DeleteRequest{
 		CollectionName: opt.collectionName,
 		PartitionName:  opt.partitionName,
+		Namespace:      opt.namespace,
 		Expr:           opt.expr,
 	}
 }
@@ -614,6 +626,11 @@ func (opt *deleteOption) WithStringIDs(fieldName string, ids []string) *deleteOp
 
 func (opt *deleteOption) WithPartition(partitionName string) *deleteOption {
 	opt.partitionName = partitionName
+	return opt
+}
+
+func (opt *deleteOption) WithNamespace(namespace string) *deleteOption {
+	opt.namespace = &namespace
 	return opt
 }
 
