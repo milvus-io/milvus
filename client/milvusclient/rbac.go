@@ -106,6 +106,13 @@ func (c *Client) CreateRole(ctx context.Context, opt CreateRoleOption, callOpts 
 	})
 }
 
+func (c *Client) AlterRole(ctx context.Context, opt AlterRoleOption, callOpts ...grpc.CallOption) error {
+	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.AlterRole(ctx, opt.Request(), callOpts...)
+		return merr.CheckRPCCall(resp, err)
+	})
+}
+
 func (c *Client) GrantRole(ctx context.Context, opt GrantRoleOption, callOpts ...grpc.CallOption) error {
 	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.OperateUserRole(ctx, opt.Request(), callOpts...)
@@ -140,7 +147,8 @@ func (c *Client) DescribeRole(ctx context.Context, option DescribeRoleOption, ca
 		}
 
 		role = &entity.Role{
-			RoleName: roleResp.GetResults()[0].GetRole().GetName(),
+			RoleName:    roleResp.GetResults()[0].GetRole().GetName(),
+			Description: roleResp.GetResults()[0].GetRole().GetDescription(),
 		}
 
 		resp, err := milvusService.SelectGrant(ctx, option.Request(), callOptions...)

@@ -212,10 +212,46 @@ func (s *RoleSuite) TestCreateRole() {
 		s.NoError(err)
 	})
 
+	s.Run("success with description", func() {
+		roleName := fmt.Sprintf("role_%s", s.randString(5))
+		s.mock.EXPECT().CreateRole(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
+			s.Equal(roleName, r.GetEntity().GetName())
+			s.Equal("test_description", r.GetEntity().GetDescription())
+			return merr.Success(), nil
+		}).Once()
+
+		err := s.client.CreateRole(ctx, NewCreateRoleOption(roleName).WithDescription("test_description"))
+		s.NoError(err)
+	})
+
 	s.Run("failure", func() {
 		s.mock.EXPECT().CreateRole(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
 
 		err := s.client.CreateRole(ctx, NewCreateRoleOption("role"))
+		s.Error(err)
+	})
+}
+
+func (s *RoleSuite) TestAlterRole() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("success", func() {
+		roleName := fmt.Sprintf("role_%s", s.randString(5))
+		s.mock.EXPECT().AlterRole(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+			s.Equal(roleName, r.GetRoleName())
+			s.Equal("new_description", r.GetDescription())
+			return merr.Success(), nil
+		}).Once()
+
+		err := s.client.AlterRole(ctx, NewAlterRoleOption(roleName).WithDescription("new_description"))
+		s.NoError(err)
+	})
+
+	s.Run("failure", func() {
+		s.mock.EXPECT().AlterRole(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		err := s.client.AlterRole(ctx, NewAlterRoleOption("role").WithDescription("desc"))
 		s.Error(err)
 	})
 }
@@ -304,7 +340,7 @@ func (s *RoleSuite) TestDescribeRole() {
 			return &milvuspb.SelectRoleResponse{
 				Results: []*milvuspb.RoleResult{
 					{
-						Role: &milvuspb.RoleEntity{Name: roleName},
+						Role: &milvuspb.RoleEntity{Name: roleName, Description: "role_description"},
 					},
 				},
 			}, nil
@@ -337,6 +373,7 @@ func (s *RoleSuite) TestDescribeRole() {
 		role, err := s.client.DescribeRole(ctx, NewDescribeRoleOption(roleName))
 		s.NoError(err)
 		s.Equal(roleName, role.RoleName)
+		s.Equal("role_description", role.Description)
 	})
 
 	s.Run("failure", func() {
