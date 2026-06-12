@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -109,6 +110,115 @@ func TestSplitShardAppendFailure(t *testing.T) {
 	assert.Nil(t, result)
 	assert.Error(t, err)
 	assert.NotErrorIs(t, err, streaming.ErrSourceVChannelFenced)
+}
+
+func newInitSplitTargetParam() streaming.InitSplitTargetVChannelsParam {
+	return streaming.InitSplitTargetVChannelsParam{
+		CollectionID:   1,
+		DBID:           2,
+		DBName:         "db",
+		CollectionName: "col",
+		Schema: &schemapb.CollectionSchema{
+			Name: "col",
+		},
+		PartitionIDs:    []int64{10, 11},
+		SplitTaskID:     100,
+		SourceVChannel:  "by-dev-rootcoord-dml_0_1v0",
+		SwitchTimeTick:  2000,
+		TargetVChannels: []string{"by-dev-rootcoord-dml_1_1v1", "by-dev-rootcoord-dml_2_1v2"},
+	}
+}
+
+func TestInitSplitTargetVChannels(t *testing.T) {
+	w := mock_streaming.NewMockWALAccesser(t)
+	param := newInitSplitTargetParam()
+
+	initialized := make(map[string]uint64, 2)
+	w.EXPECT().RawAppend(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, msg message.MutableMessage, opts ...streaming.AppendOption) (*types.AppendResult, error) {
+			assert.Equal(t, message.MessageTypeCreateCollection, msg.MessageType())
+			createMsg := message.MustAsMutableCreateCollectionMessageV1(msg)
+			header := createMsg.Header()
+			assert.Equal(t, int64(1), header.GetCollectionId())
+			assert.Equal(t, []int64{10, 11}, header.GetPartitionIds())
+			assert.Equal(t, int64(100), header.GetSplitTaskId())
+			assert.Equal(t, "by-dev-rootcoord-dml_0_1v0", header.GetSplitSourceVchannel())
+			body, err := createMsg.Body()
+			assert.NoError(t, err)
+			assert.Equal(t, "col", body.GetCollectionSchema().GetName())
+			assert.Equal(t, []string{msg.VChannel()}, body.GetVirtualChannelNames())
+			if len(opts) > 0 {
+				initialized[msg.VChannel()] = opts[0].BarrierTimeTick
+			}
+			return &types.AppendResult{MessageID: rmq.NewRmqID(1), TimeTick: 2100}, nil
+		}).Times(2)
+
+	err := streaming.InitSplitTargetVChannels(context.Background(), w, param)
+	assert.NoError(t, err)
+	// every target vchannel is initialized with T_switch as the barrier.
+	assert.Equal(t, map[string]uint64{
+		"by-dev-rootcoord-dml_1_1v1": 2000,
+		"by-dev-rootcoord-dml_2_1v2": 2000,
+	}, initialized)
+}
+
+func TestInitSplitTargetVChannelsAppendFailure(t *testing.T) {
+	w := mock_streaming.NewMockWALAccesser(t)
+	w.EXPECT().RawAppend(mock.Anything, mock.Anything, mock.Anything).Return(&types.AppendResult{
+		MessageID: rmq.NewRmqID(1),
+		TimeTick:  2100,
+	}, nil).Once()
+	w.EXPECT().RawAppend(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("mock append error")).Once()
+
+	err := streaming.InitSplitTargetVChannels(context.Background(), w, newInitSplitTargetParam())
+	assert.Error(t, err)
+}
+
+func TestInitSplitTargetVChannelsParamValidate(t *testing.T) {
+	param := newInitSplitTargetParam()
+	assert.NoError(t, param.Validate())
+
+	param = newInitSplitTargetParam()
+	param.CollectionID = 0
+	assert.Error(t, param.Validate())
+
+	param = newInitSplitTargetParam()
+	param.Schema = nil
+	assert.Error(t, param.Validate())
+
+	param = newInitSplitTargetParam()
+	param.PartitionIDs = nil
+	assert.Error(t, param.Validate())
+
+	param = newInitSplitTargetParam()
+	param.SourceVChannel = ""
+	assert.Error(t, param.Validate())
+
+	param = newInitSplitTargetParam()
+	param.SwitchTimeTick = 0
+	assert.Error(t, param.Validate())
+
+	param = newInitSplitTargetParam()
+	param.TargetVChannels = nil
+	assert.Error(t, param.Validate())
+
+	param = newInitSplitTargetParam()
+	param.TargetVChannels[0] = ""
+	assert.Error(t, param.Validate())
+
+	// the target must not duplicate the source.
+	param = newInitSplitTargetParam()
+	param.TargetVChannels[0] = param.SourceVChannel
+	assert.Error(t, param.Validate())
+
+	// the targets must not duplicate each other.
+	param = newInitSplitTargetParam()
+	param.TargetVChannels[1] = param.TargetVChannels[0]
+	assert.Error(t, param.Validate())
+
+	// validation failure happens before any append.
+	w := mock_streaming.NewMockWALAccesser(t)
+	assert.Error(t, streaming.InitSplitTargetVChannels(context.Background(), w, param))
 }
 
 func TestSplitShardParamValidate(t *testing.T) {

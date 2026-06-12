@@ -249,6 +249,12 @@ message CreateCollectionMessageHeader {
     int64 collection_id          = 1;
     repeated int64 partition_ids = 2;
     int64 db_id                  = 3;
+    // The two fields below are set only when the vchannel is created as the
+    // target of a shard split instead of at collection creation: the message
+    // is then the genesis entry of the target vchannel, carrying the current
+    // schema and partition snapshot of the collection.
+    int64 split_task_id          = 4; // 0 means not born by shard split.
+    string split_source_vchannel = 5; // the fenced source vchannel of the split.
 }
 
 // DropCollectionMessageHeader is the header of drop collection message.
