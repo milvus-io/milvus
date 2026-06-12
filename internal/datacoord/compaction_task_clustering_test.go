@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
@@ -41,8 +42,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestClusteringCompactionTaskSuite(t *testing.T) {
@@ -347,9 +350,85 @@ func (s *ClusteringCompactionTaskSuite) generateBasicTask(vectorClusteringKey bo
 		ResultSegments:     []int64{1000, 1100},
 	}
 
-	task := newClusteringCompactionTask(compactionTask, s.mockAlloc, s.meta, s.handler, s.analyzeScheduler)
+	task := newClusteringCompactionTask(compactionTask, s.mockAlloc, s.meta, s.handler, s.analyzeScheduler, newMockVersionManager())
 	task.maxRetryTimes = 0
 	return task
+}
+
+// newNamespaceClusteringTask builds a clustering task whose plan would be routed to the
+// namespace compactor on the DataNode (text index is built inline for sorted-by-namespace outputs).
+func (s *ClusteringCompactionTaskSuite) newNamespaceClusteringTask(enableNamespace bool, fileResourceIDs []int64) *clusteringCompactionTask {
+	for _, segID := range []int64{101, 102} {
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            segID,
+			CollectionID:  1,
+			PartitionID:   10,
+			InsertChannel: "ch-1",
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L1,
+		}})
+	}
+
+	schema := ConstructClusteringSchema("TestNamespaceClustering", 32, true, false)
+	schema.EnableNamespace = enableNamespace
+	schema.FileResourceIds = fileResourceIDs
+
+	compactionTask := &datapb.CompactionTask{
+		PlanID:        1,
+		TriggerID:     19530,
+		CollectionID:  1,
+		PartitionID:   10,
+		Type:          datapb.CompactionType_ClusteringCompaction,
+		NodeID:        1,
+		State:         datapb.CompactionTaskState_pipelining,
+		Schema:        schema,
+		InputSegments: []int64{101, 102},
+		ClusteringKeyField: &schemapb.FieldSchema{
+			FieldID:         100,
+			Name:            Int64Field,
+			IsPrimaryKey:    true,
+			DataType:        schemapb.DataType_Int64,
+			IsClusteringKey: true,
+		},
+		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 1, End: 100},
+	}
+	return newClusteringCompactionTask(compactionTask, s.mockAlloc, s.meta, s.handler, s.analyzeScheduler, newMockVersionManager())
+}
+
+// TestBuildCompactionRequest_NamespaceFileResourcesInRefMode verifies that a namespace-enabled
+// clustering plan carries both FileResources (for inline text-index analyzer resources in ref mode)
+// and CurrentScalarIndexVersion (issue #50145, PR #50140).
+func (s *ClusteringCompactionTaskSuite) TestBuildCompactionRequest_NamespaceFileResourcesInRefMode() {
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.DNFileResourceMode.Key, "ref")
+	defer pt.Reset(pt.CommonCfg.DNFileResourceMode.Key)
+
+	expectedResources := []*internalpb.FileResourceInfo{
+		{Id: 7, Name: "dict", Path: "dict.jieba"},
+	}
+
+	mockVer := mockey.Mock((*versionManagerImpl).ResolveScalarIndexVersion).Return(int32(42)).Build()
+	defer mockVer.UnPatch()
+
+	s.Run("namespace_enabled", func() {
+		s.NoError(s.meta.UpdateFileResources(context.TODO(), expectedResources, 1))
+		task := s.newNamespaceClusteringTask(true, []int64{7})
+		plan, err := task.BuildCompactionRequest()
+		s.Require().NoError(err)
+		s.Equal(expectedResources, plan.GetFileResources(),
+			"namespace clustering must carry FileResources in ref mode (issue #50145, PR #50140)")
+		s.Equal(int32(42), plan.GetCurrentScalarIndexVersion(),
+			"clustering plan must carry CurrentScalarIndexVersion for inline text index metadata")
+	})
+
+	s.Run("namespace_disabled_skips_file_resources", func() {
+		task := s.newNamespaceClusteringTask(false, []int64{7})
+		plan, err := task.BuildCompactionRequest()
+		s.Require().NoError(err)
+		s.Empty(plan.GetFileResources(),
+			"non-namespace clustering does not build text index inline, so no FileResources are fetched")
+		s.Equal(int32(42), plan.GetCurrentScalarIndexVersion())
+	})
 }
 
 func (s *ClusteringCompactionTaskSuite) TestProcessRetryLogic() {

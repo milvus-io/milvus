@@ -250,6 +250,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		task = compactor.NewMixCompactionTask(
 			taskCtx,
 			io.NewBinlogIO(cm),
+			cm,
 			req,
 			compactionParams,
 			sortFields,
@@ -270,7 +271,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 				return merr.Status(err), err
 			}
 			sortFields = append(sortFields, pk.GetFieldID())
-			task = compactor.NewNamespaceCompactor(taskCtx, req, binlogIO, compactionParams, sortFields)
+			task = compactor.NewNamespaceCompactor(taskCtx, req, binlogIO, cm, compactionParams, sortFields)
 		} else {
 			task = compactor.NewClusteringCompactionTask(
 				taskCtx,
