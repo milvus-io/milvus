@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -196,7 +197,9 @@ func TestDQLBackpressureControllerWaitDurationMetric(t *testing.T) {
 	defer metrics.ProxyDQLBackpressureEventsTotal.Reset()
 	defer metrics.ProxyDQLBackpressureWaitDuration.Reset()
 
-	now := time.Unix(100, 0)
+	baseTime := time.Unix(100, 0)
+	var now atomic.Int64
+	now.Store(baseTime.UnixNano())
 	controller := newDQLBackpressureController(dqlBackpressureControllerConfig{
 		enabled:                true,
 		maxConcurrency:         1,
@@ -204,7 +207,7 @@ func TestDQLBackpressureControllerWaitDurationMetric(t *testing.T) {
 		slowdownRatio:          0.5,
 	})
 	controller.now = func() time.Time {
-		return now
+		return time.Unix(0, now.Load())
 	}
 
 	require.True(t, controller.Acquire(context.Background()))
@@ -220,7 +223,7 @@ func TestDQLBackpressureControllerWaitDurationMetric(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	now = now.Add(25 * time.Millisecond)
+	now.Store(baseTime.Add(25 * time.Millisecond).UnixNano())
 	controller.Release()
 
 	select {
