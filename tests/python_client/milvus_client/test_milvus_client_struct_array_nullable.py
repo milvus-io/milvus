@@ -2005,11 +2005,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
                 assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(
-        reason="issue: https://github.com/milvus-io/milvus/issues/50081 - "
-        "StructArray parent is not registered for direct IS NULL/IS NOT NULL or array_length expressions",
-        strict=True,
-    )
     def test_create_scalar_struct_array_field_nullable_parent_null_expression(self):
         """
         target: test direct null expressions on a nullable scalar Struct Array parent
@@ -2045,11 +2040,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             assert_expression_rows_match_source(actual_rows, source_by_id)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(
-        reason="issue: https://github.com/milvus-io/milvus/issues/49438 - "
-        "normal-vector search should reject element_filter instead of returning false positives",
-        strict=True,
-    )
     def test_create_scalar_struct_array_field_nullable_element_filter_search(self):
         """
         target: test normal-vector search rejects element_filter on a nullable scalar Struct Array

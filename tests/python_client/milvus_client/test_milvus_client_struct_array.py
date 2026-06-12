@@ -172,16 +172,8 @@ EMB_LIST_STRATEGY_INDEX_CONFIGS = {
 }
 EMB_LIST_STRATEGY_INDEX_CASES = [
     ("tokenann", "HNSW"),
-    pytest.param(
-        "muvera",
-        "HNSW",
-        marks=pytest.mark.skip(reason="milvus-io/milvus#49748: muvera+HNSW can fail to load emb-list index"),
-    ),
-    pytest.param(
-        "lemur",
-        "HNSW",
-        marks=pytest.mark.skip(reason="milvus-io/milvus#49748: lemur+HNSW can fail to load emb-list index"),
-    ),
+    ("muvera", "HNSW"),
+    ("lemur", "HNSW"),
     ("tokenann", "DISKANN"),
 ]
 
