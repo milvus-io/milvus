@@ -3284,7 +3284,7 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	// Re-validate segment health to prevent race condition with drop collection
 	// between ValidateSegmentStateBeforeCompleteCompactionMutation and here
 	if !isSegmentHealthy(oldSegment) {
-		mlog.Warn(m.ctx, "input segment was dropped during compaction mutation",
+		log.Warn(m.ctx, "input segment was dropped during compaction mutation",
 			mlog.Int64("planID", t.GetPlanID()),
 			mlog.FieldSegmentID(segmentID),
 			mlog.String("state", oldSegment.GetState().String()))
@@ -3337,7 +3337,7 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	cloned.Binlogs = resultSegment.GetInsertLogs()
 	if newSchemaVersion > cloned.GetSchemaVersion() {
 		cloned.SchemaVersion = newSchemaVersion
-		mlog.Info(m.ctx, "meta update: update schema version for schema bump compaction",
+		log.Info(m.ctx, "meta update: update schema version for schema bump compaction",
 			mlog.FieldSegmentID(segmentID),
 			mlog.Int32("oldSchemaVersion", oldSegment.GetSchemaVersion()),
 			mlog.Int32("newSchemaVersion", newSchemaVersion))
@@ -3359,18 +3359,18 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 		mlog.Int32("newSchemaVersion", cloned.GetSchemaVersion()),
 		mlog.Int("newInsertLogsCount", len(resultSegment.GetInsertLogs())))
 
-	mlog.Info(m.ctx, "meta update: prepare for complete schema bump compaction mutation - complete",
+	log.Info(m.ctx, "meta update: prepare for complete schema bump compaction mutation - complete",
 		mlog.Int64("num rows", cloned.GetNumOfRows()))
 
 	// Save to catalog
 	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo}, binlogsIncrement); err != nil {
-		mlog.Warn(m.ctx, "fail to alter segment for schema bump compaction", mlog.Err(err))
+		log.Warn(m.ctx, "fail to alter segment for schema bump compaction", mlog.Err(err))
 		return nil, nil, err
 	}
 
 	// Update in-memory meta
 	m.segments.SetSegment(segmentID, cloned)
-	mlog.Info(m.ctx, "meta update: alter in memory meta after schema bump compaction - complete")
+	log.Info(m.ctx, "meta update: alter in memory meta after schema bump compaction - complete")
 
 	return []*SegmentInfo{cloned}, metricMutation, nil
 }
