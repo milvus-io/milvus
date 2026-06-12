@@ -147,6 +147,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
                                   size_t reserved_offset,
                                   const FieldMeta& field_meta);
 
+    // Test-only: inject TEXT LOB base path.
+    void
+    SetTextLobPathForTesting(FieldId field_id, std::string lob_base_path) {
+        text_lob_paths_[field_id] = std::move(lob_base_path);
+    }
+
     void
     Reopen(SchemaPtr sch) override;
 
