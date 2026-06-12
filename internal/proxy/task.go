@@ -418,6 +418,9 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	if err := validateCollectionName(t.schema.Name); err != nil {
 		return err
 	}
+	if err := validateCollectionDescription(t.schema.GetDescription()); err != nil {
+		return err
+	}
 
 	// validate primary key definition
 	if err := validatePrimaryKey(t.schema); err != nil {
@@ -1443,6 +1446,15 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 				if hasWarmup {
 					return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter warmup properties if collection loaded")
 				}
+			}
+		}
+
+		for _, property := range t.Properties {
+			if property.GetKey() != common.CollectionDescription {
+				continue
+			}
+			if err := validateCollectionDescription(property.GetValue()); err != nil {
+				return err
 			}
 		}
 
