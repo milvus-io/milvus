@@ -51,8 +51,8 @@ func UpdateIndexSliceSize(size int) {
 	C.SetIndexSliceSize(C.int64_t(size))
 }
 
-func UpdateStreamBudgetRatio(ratio float64) {
-	C.SetStreamBudgetRatio(C.double(ratio))
+func UpdateEntryStreamBudgetBytes(bytes int64) {
+	C.SetEntryStreamBudgetBytes(C.int64_t(bytes))
 }
 
 func UpdateHighPriorityThreadCoreCoefficient(coefficient float64) {

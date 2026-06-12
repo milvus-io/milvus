@@ -52,8 +52,8 @@ SetIndexSliceSize(const int64_t size) {
 }
 
 void
-SetStreamBudgetRatio(const double ratio) {
-    milvus::SetStreamBudgetRatio(ratio);
+SetEntryStreamBudgetBytes(int64_t bytes) {
+    milvus::SetEntryStreamBudgetBytes(bytes);
 }
 
 void

@@ -41,7 +41,7 @@ import (
 const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize                      = 16
-	DefaultStreamBudgetRatio                   = 3.0
+	DefaultEntryStreamBudgetBytes              = 0
 	DefaultGracefulTime                        = 5000 // ms
 	DefaultGracefulStopTimeout                 = 1800 // s, for node
 	DefaultProxyGracefulStopTimeout            = 30   // s，for proxy
@@ -233,7 +233,7 @@ type commonConfig struct {
 	DefaultIndexName     ParamItem `refreshable:"true"`
 
 	IndexSliceSize                      ParamItem `refreshable:"false"`
-	StreamBudgetRatio                   ParamItem `refreshable:"true"`
+	StreamBudgetBytes                   ParamItem `refreshable:"true"`
 	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"true"`
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
@@ -559,14 +559,26 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	}
 	p.IndexSliceSize.Init(base.mgr)
 
-	p.StreamBudgetRatio = ParamItem{
-		Key:          "common.entryStream.streamBudgetRatio",
+	p.StreamBudgetBytes = ParamItem{
+		Key:          "common.entryStream.streamBudgetBytes",
 		Version:      "3.0.0",
-		DefaultValue: fmt.Sprintf("%f", DefaultStreamBudgetRatio),
-		Doc:          "Multiplier for entry stream transient memory budget, relative to CPU core count",
-		Export:       true,
+		DefaultValue: strconv.Itoa(DefaultEntryStreamBudgetBytes),
+		Doc: `Process-wide transient memory budget in bytes for entry stream ` +
+			`loading. It gates in-flight entry stream slices across concurrent ` +
+			`load tasks. Lower values reduce peak transient memory at the cost of ` +
+			`load throughput. Oversized slices are still allowed to proceed ` +
+			`exclusively to guarantee progress. Set to 0 to disable the limit.`,
+		Export: true,
+		Formatter: func(v string) string {
+			if getAsInt64(v) < 0 {
+				log.Warn("common.entryStream.streamBudgetBytes must be non-negative, using unlimited",
+					zap.String("configured", v))
+				return strconv.Itoa(DefaultEntryStreamBudgetBytes)
+			}
+			return v
+		},
 	}
-	p.StreamBudgetRatio.Init(base.mgr)
+	p.StreamBudgetBytes.Init(base.mgr)
 
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",

@@ -520,12 +520,12 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
-		paramtable.Get().CommonCfg.StreamBudgetRatio.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
-			ratio, err := strconv.ParseFloat(newValue, 64)
+		paramtable.Get().CommonCfg.StreamBudgetBytes.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			bytes, err := strconv.ParseInt(newValue, 10, 64)
 			if err != nil {
 				return err
 			}
-			UpdateStreamBudgetRatio(ratio)
+			UpdateEntryStreamBudgetBytes(bytes)
 			return nil
 		})
 

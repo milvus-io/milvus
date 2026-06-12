@@ -981,7 +981,7 @@ common:
   defaultIndexName: _default_idx # Name of the index when it is created with name unspecified
   indexSliceSize: 16 # Index slice size in MB
   entryStream:
-    streamBudgetRatio: 3 # Multiplier for entry stream transient memory budget, relative to CPU core count
+    streamBudgetBytes: 0 # Process-wide transient memory budget in bytes for entry stream loading. Set to 0 to disable the limit.
   threadCoreCoefficient:
     highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority pool
     middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority pool

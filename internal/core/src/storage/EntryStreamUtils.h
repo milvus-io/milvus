@@ -46,12 +46,6 @@ DefaultStreamSliceSize() {
     return DEFAULT_INDEX_FILE_SLICE_SIZE;
 }
 
-inline double
-StreamBudgetRatio() {
-    auto ratio = milvus::ENTRY_STREAM_BUDGET_RATIO.load();
-    return ratio > 0 ? ratio : 1.0;
-}
-
 /// A slice read from a V3 entry. `error` carries an exception captured in
 /// the producer task so the consumer can rethrow instead of hanging.
 struct StreamSliceResult {
@@ -61,7 +55,7 @@ struct StreamSliceResult {
 };
 
 /// Byte budget for transient data that has been submitted for async work but
-/// has not been consumed yet.
+/// has not been consumed yet. Capacity 0 means unlimited.
 ///
 /// Usage:
 ///   - Call Acquire(bytes) to block until budget is available.
@@ -82,6 +76,11 @@ class TransientMemoryBudget {
     GetFieldDataLoadBudget() {
         static TransientMemoryBudget instance(DEFAULT_FIELD_MAX_MEMORY_LIMIT);
         return instance;
+    }
+
+    static void
+    SetEntryStreamBudgetBytes(size_t bytes) {
+        GetEntryStreamBudget().SetCapacityBytes(bytes);
     }
 
     static void
@@ -153,7 +152,7 @@ class TransientMemoryBudget {
     SetCapacityBytes(size_t bytes) {
         {
             std::lock_guard<std::mutex> lock(mu_);
-            capacity_bytes_ = std::max<size_t>(bytes, 1);
+            capacity_bytes_ = bytes;
         }
         cv_.notify_all();
     }
@@ -167,28 +166,20 @@ class TransientMemoryBudget {
     TransientMemoryBudget() = default;
 
     explicit TransientMemoryBudget(size_t capacity_bytes)
-        : capacity_bytes_(std::max<size_t>(capacity_bytes, 1)) {
-    }
-
-    static size_t
-    EntryStreamBudgetBytes() {
-        auto core_num = std::max(1, milvus::CPU_NUM);
-        auto capacity = static_cast<size_t>(core_num * StreamBudgetRatio()) *
-                        DefaultStreamSliceSize();
-        return std::max<size_t>(capacity, DefaultStreamSliceSize());
+        : capacity_bytes_(capacity_bytes) {
     }
 
     size_t
     CapacityBytesLocked() const {
-        if (capacity_bytes_ > 0) {
-            return capacity_bytes_;
-        }
-        return EntryStreamBudgetBytes();
+        return capacity_bytes_;
     }
 
     bool
     CanAcquireLocked(size_t bytes) const {
         auto capacity_bytes = CapacityBytesLocked();
+        if (capacity_bytes == 0) {
+            return true;
+        }
         if (bytes > capacity_bytes) {
             return inflight_bytes_ == 0;
         }
@@ -206,6 +197,9 @@ inline size_t
 EntryStreamMaxTransientBytes() {
     auto capacity =
         TransientMemoryBudget::GetEntryStreamBudget().CapacityBytes();
+    if (capacity == 0) {
+        return std::numeric_limits<size_t>::max();
+    }
     if (capacity > std::numeric_limits<size_t>::max() - kTailMergeGrace) {
         return std::numeric_limits<size_t>::max();
     }
