@@ -204,13 +204,31 @@ func (suite *HTTPServerTestSuite) TestExprHandler() {
 	expr.Init()
 	expr.Register("foo", "hello")
 
+	// /expr is wrapped by AuthAlways, so unauthenticated callers receive 401
+	// regardless of feature flag or node role. The inner handler's "disabled"
+	// or "non-proxy" 403 is only reachable after credentials check out — this
+	// is deliberate: don't leak feature-flag state to unauthenticated probes.
+	RegisterPasswordVerifyFunc(func(ctx context.Context, username, password string) bool {
+		return username == "root" && password == "Milvus"
+	})
+	rootAuth := func(req *http.Request) { req.SetBasicAuth("root", "Milvus") }
+
 	suite.Run("disabled_by_default", func() {
-		// By default, exprEnabled is false, should return 403
+		// Unauthenticated request: 401 from wrapper (the inner handler is
+		// never reached so the "disabled" message is not emitted).
 		paramtable.Get().Save("common.security.exprEnabled", "false")
 		url := "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo&auth=by-dev"
 		client := http.Client{}
 		req, _ := http.NewRequest(http.MethodGet, url, nil)
 		resp, err := client.Do(req)
+		suite.Nil(err)
+		resp.Body.Close()
+		suite.Equal(http.StatusUnauthorized, resp.StatusCode)
+
+		// Authenticated request: 403 from inner handler with "disabled" message.
+		req, _ = http.NewRequest(http.MethodGet, url, nil)
+		rootAuth(req)
+		resp, err = client.Do(req)
 		suite.Nil(err)
 		defer resp.Body.Close()
 		suite.Equal(http.StatusForbidden, resp.StatusCode)
@@ -219,14 +237,15 @@ func (suite *HTTPServerTestSuite) TestExprHandler() {
 	})
 
 	suite.Run("disabled_on_non_proxy_nodes", func() {
-		// When enabled but not on Proxy node (no proxy registered, no passwordVerifyFunc),
-		// it should return 403 Forbidden
+		// With exprEnabled=true but no proxy registered, an authenticated
+		// caller still gets 403 "only available on Proxy nodes" from the
+		// inner handler. Unauthenticated callers stop at the wrapper (401).
 		paramtable.Get().Save("common.security.exprEnabled", "true")
 
-		// Should be forbidden on non-Proxy nodes
 		url := "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo&auth=by-dev"
 		client := http.Client{}
 		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		rootAuth(req)
 		resp, err := client.Do(req)
 		suite.Nil(err)
 		defer resp.Body.Close()
@@ -323,8 +342,11 @@ func TestRegisterWebUIHandler(t *testing.T) {
 		RegisterWebUIHandler()
 	}()
 
-	// Create a test server
-	ts := httptest.NewServer(http.DefaultServeMux)
+	// Register() now always uses a private ServeMux instead of opportunistically
+	// falling back to http.DefaultServeMux when pprof is enabled, so the test
+	// server must be backed by the package-level metricsServer that
+	// RegisterWebUIHandler populates.
+	ts := httptest.NewServer(metricsServer)
 	defer ts.Close()
 
 	// Test cases

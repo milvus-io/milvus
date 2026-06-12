@@ -1025,10 +1025,18 @@ common:
     lowPriorityRatio: -1 # amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
   security:
     authorizationEnabled: false
+    # Whether to require HTTP Basic Auth with root credentials for /management/*
+    # endpoints and /debug/pprof/* on the metrics port (default 9091).
+    # When false (default), these endpoints are unauthenticated, matching the
+    # historical behavior; this assumes the metrics port is reachable only from
+    # trusted networks.
+    # Recommended: true for any deployment where the metrics port is reachable
+    # from untrusted networks.
+    adminAuthEnabled: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
-    superUsers: 
-    # default password for root user. The maximum length is 72 characters. 
+    superUsers:
+    # default password for root user. The maximum length is 72 characters.
     # Large numeric passwords require double quotes to avoid yaml parsing precision issues.
     defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.

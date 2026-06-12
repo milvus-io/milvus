@@ -21,6 +21,7 @@ import (
 	"embed"
 	"fmt"
 	"net/http"
+	netpprof "net/http/pprof"
 	"os"
 	"runtime"
 	"strconv"
@@ -74,6 +75,14 @@ type Handler struct {
 	Path        string
 	HandlerFunc http.HandlerFunc
 	Handler     http.Handler
+	// AuthPolicy, when set, gates this handler behind an HTTP Basic Auth check
+	// for the milvus root user. A nil AuthPolicy (the default) leaves the
+	// handler unauthenticated — appropriate for /healthz, /metrics, k8s probes,
+	// and other endpoints that must remain reachable without credentials.
+	//
+	// See AuthAlways (e.g. /expr) and AuthByAdminFlag (e.g. /management/*)
+	// in auth.go for the predefined policies.
+	AuthPolicy AuthPolicy
 }
 
 func registerDefaults() {
@@ -105,26 +114,19 @@ func registerDefaults() {
 				return
 			}
 
-			code := req.URL.Query().Get("code")
-			var auth string
-
-			// Only Proxy nodes can access /expr endpoint
-			if !expr.HasRegistered("proxy") || passwordVerifyFunc == nil {
+			// Only Proxy nodes can access /expr endpoint. (The auth wrapper
+			// above already verified credentials; if we got here on a non-proxy
+			// node it means the wrapper accepted root creds but the endpoint
+			// itself isn't backed by an executor on this node.)
+			if !expr.HasRegistered("proxy") {
 				w.WriteHeader(http.StatusForbidden)
 				w.Write([]byte(`{"msg": "/expr endpoint is only available on Proxy nodes"}`))
 				return
 			}
 
-			// On Proxy node: require root user authentication via HTTP Basic Auth
-			if err := checkExprRootAuth(req); err != nil {
-				w.WriteHeader(http.StatusUnauthorized)
-				fmt.Fprintf(w, `{"msg": "%s"}`, err.Error())
-				return
-			}
-			// Use bypass since we've already authenticated
-			auth = expr.AuthBypass
-
-			output, err := expr.Exec(code, auth)
+			code := req.URL.Query().Get("code")
+			// Use bypass since the wrapper already authenticated the caller as root.
+			output, err := expr.Exec(code, expr.AuthBypass)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				fmt.Fprintf(w, `{"msg": "failed to execute expression, %s"}`, err.Error()) //nolint:gosec // error message is safe to include in response
@@ -136,6 +138,10 @@ func registerDefaults() {
 			resp["output"] = output
 			json.NewEncoder(w).Encode(resp)
 		}),
+		// /expr executes arbitrary Go expressions, so authentication is
+		// mandatory whenever the endpoint is enabled — not gated by
+		// adminAuthEnabled.
+		AuthPolicy: AuthAlways,
 	})
 	Register(&Handler{
 		Path:    StaticPath,
@@ -145,6 +151,53 @@ func registerDefaults() {
 	if paramtable.Get().HTTPCfg.EnableWebUI.GetAsBool() {
 		RegisterWebUIHandler()
 	}
+
+	if paramtable.Get().HTTPCfg.EnablePprof.GetAsBool() {
+		registerPprof()
+	}
+}
+
+// registerPprof attaches the standard net/http/pprof handlers explicitly,
+// gated by adminAuthEnabled. Previously they were attached via a blank import
+// of net/http/pprof in pkg/metrics, which relied on package-init registration
+// to http.DefaultServeMux and Register() opportunistically using that mux.
+// That arrangement made the auth posture invisible at registration sites and
+// allowed any third-party init-time registration to slip onto port 9091.
+//
+// Pprof endpoints expose process internals (heap dumps, goroutine stacks,
+// CPU profiles) that can reveal cached credentials and query data; they are
+// gated by AuthByAdminFlag so deployments with adminAuthEnabled=true require
+// root credentials.
+func registerPprof() {
+	// /debug/pprof/ is the index page; the standard pprof.Index handler also
+	// dispatches /debug/pprof/heap, /goroutine, /allocs, /threadcreate,
+	// /block, /mutex via path inspection — so we only need to register the
+	// prefix entry plus the four endpoints that have dedicated handlers.
+	Register(&Handler{
+		Path:        "/debug/pprof/",
+		HandlerFunc: netpprof.Index,
+		AuthPolicy:  AuthByAdminFlag,
+	})
+	Register(&Handler{
+		Path:        "/debug/pprof/cmdline",
+		HandlerFunc: netpprof.Cmdline,
+		AuthPolicy:  AuthByAdminFlag,
+	})
+	Register(&Handler{
+		Path:        "/debug/pprof/profile",
+		HandlerFunc: netpprof.Profile,
+		AuthPolicy:  AuthByAdminFlag,
+	})
+	Register(&Handler{
+		Path:        "/debug/pprof/symbol",
+		HandlerFunc: netpprof.Symbol,
+		AuthPolicy:  AuthByAdminFlag,
+	})
+	Register(&Handler{
+		Path:        "/debug/pprof/trace",
+		HandlerFunc: netpprof.Trace,
+		AuthPolicy:  AuthByAdminFlag,
+	})
 }
 
 func RegisterStopComponent(triggerComponentStop func(role string) error) {
@@ -164,6 +217,10 @@ func RegisterStopComponent(triggerComponentStop func(role string) error) {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"msg": "OK"}`))
 		},
+		// /management/stop can DoS a running component, so it is gated by
+		// adminAuthEnabled. /management/check/ready below stays open because
+		// k8s probes cannot present credentials.
+		AuthPolicy: AuthByAdminFlag,
 	})
 }
 
@@ -269,19 +326,24 @@ func acceptsHTML(r *http.Request) bool {
 
 func Register(h *Handler) {
 	if metricsServer == nil {
-		if paramtable.Get().HTTPCfg.EnablePprof.GetAsBool() {
-			metricsServer = http.DefaultServeMux
-		} else {
-			metricsServer = http.NewServeMux()
-		}
+		// Always use a dedicated mux. We no longer fall back to
+		// http.DefaultServeMux when pprof is enabled — pprof endpoints are
+		// now registered explicitly (see registerPprof) so that third-party
+		// init() hooks cannot smuggle extra routes onto the metrics port.
+		metricsServer = http.NewServeMux()
 	}
+
+	var handler http.Handler = h.Handler
 	if h.HandlerFunc != nil {
-		metricsServer.HandleFunc(h.Path, h.HandlerFunc)
+		handler = http.HandlerFunc(h.HandlerFunc)
+	}
+	if handler == nil {
 		return
 	}
-	if h.Handler != nil {
-		metricsServer.Handle(h.Path, h.Handler)
+	if h.AuthPolicy != nil {
+		handler = wrapBasicRootAuth(handler, h.AuthPolicy)
 	}
+	metricsServer.Handle(h.Path, handler)
 }
 
 func ServeHTTP() {
@@ -314,41 +376,3 @@ func getHTTPAddr() string {
 	return fmt.Sprintf(":%s", port)
 }
 
-// checkExprRootAuth verifies that the request is from the root user.
-// It supports HTTP Basic Auth and Bearer token formats.
-func checkExprRootAuth(req *http.Request) error {
-	// Try HTTP Basic Auth first
-	username, password, ok := req.BasicAuth()
-	if !ok {
-		// Try Bearer token format: "user:password"
-		auth := req.Header.Get("Authorization")
-		auth = strings.TrimPrefix(auth, "Bearer ")
-		parts := strings.SplitN(auth, ":", 2)
-		if len(parts) == 2 {
-			username, password = parts[0], parts[1]
-			ok = true
-		}
-	}
-
-	if !ok || username == "" || password == "" {
-		return fmt.Errorf("authentication required. Use HTTP Basic Auth with root credentials")
-	}
-
-	// Only root user can access /expr
-	if username != "root" {
-		log.Warn("non-root user attempted to access /expr", zap.String("username", username))
-		return fmt.Errorf("only root user can access /expr endpoint")
-	}
-
-	// Verify root password
-	if passwordVerifyFunc == nil {
-		return fmt.Errorf("password verification not available")
-	}
-	if !passwordVerifyFunc(context.Background(), username, password) {
-		log.Warn("invalid root password for /expr access")
-		return fmt.Errorf("invalid root password")
-	}
-
-	log.Info("root user authenticated for /expr access")
-	return nil
-}

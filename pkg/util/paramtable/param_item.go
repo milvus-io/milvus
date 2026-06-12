@@ -46,6 +46,10 @@ type ParamItem struct {
 	Formatter func(originValue string) string
 	Forbidden bool
 	Immutable bool
+	// Sensitive marks this parameter as containing sensitive material (credentials,
+	// infrastructure topology, security posture). Sensitive parameters are redacted
+	// by the /management/config/get endpoint regardless of caller privilege.
+	Sensitive bool
 
 	manager *config.Manager
 
@@ -63,6 +67,9 @@ func (pi *ParamItem) Init(manager *config.Manager) {
 	}
 	if pi.Immutable {
 		pi.manager.ImmutableUpdate(pi.Key)
+	}
+	if pi.Sensitive {
+		pi.manager.SensitiveUpdate(pi.Key)
 	}
 
 	currentValue := pi.GetValue()

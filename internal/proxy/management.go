@@ -41,66 +41,37 @@ var mgrRouteRegisterOnce sync.Once
 
 func RegisterMgrRoute(proxy *Proxy) {
 	mgrRouteRegisterOnce.Do(func() {
-		management.Register(&management.Handler{
-			Path:        management.RouteGcPause,
-			HandlerFunc: proxy.PauseDatacoordGC,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteGcResume,
-			HandlerFunc: proxy.ResumeDatacoordGC,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteCommitBackfill,
-			HandlerFunc: proxy.CommitBackfillResult,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteListQueryNode,
-			HandlerFunc: proxy.ListQueryNode,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteGetQueryNodeDistribution,
-			HandlerFunc: proxy.GetQueryNodeDistribution,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteSuspendQueryCoordBalance,
-			HandlerFunc: proxy.SuspendQueryCoordBalance,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteResumeQueryCoordBalance,
-			HandlerFunc: proxy.ResumeQueryCoordBalance,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteSuspendQueryNode,
-			HandlerFunc: proxy.SuspendQueryNode,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteResumeQueryNode,
-			HandlerFunc: proxy.ResumeQueryNode,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteTransferSegment,
-			HandlerFunc: proxy.TransferSegment,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteTransferChannel,
-			HandlerFunc: proxy.TransferChannel,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteCheckQueryNodeDistribution,
-			HandlerFunc: proxy.CheckQueryNodeDistribution,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteClearReadTaskQueue,
-			HandlerFunc: proxy.ClearReadTaskQueueManagement,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteQueryCoordBalanceStatus,
-			HandlerFunc: proxy.CheckQueryCoordBalanceStatus,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteBackupEZ,
-			HandlerFunc: proxy.BackupEZ,
-		})
+		// All /management/* routes are gated by common.security.adminAuthEnabled.
+		// When the flag is true, requests must present HTTP Basic Auth with
+		// the milvus root user's credentials; when false (default), behavior
+		// is unchanged from earlier releases.
+		routes := []struct {
+			path    string
+			handler http.HandlerFunc
+		}{
+			{management.RouteGcPause, proxy.PauseDatacoordGC},
+			{management.RouteGcResume, proxy.ResumeDatacoordGC},
+			{management.RouteCommitBackfill, proxy.CommitBackfillResult},
+			{management.RouteListQueryNode, proxy.ListQueryNode},
+			{management.RouteGetQueryNodeDistribution, proxy.GetQueryNodeDistribution},
+			{management.RouteSuspendQueryCoordBalance, proxy.SuspendQueryCoordBalance},
+			{management.RouteResumeQueryCoordBalance, proxy.ResumeQueryCoordBalance},
+			{management.RouteSuspendQueryNode, proxy.SuspendQueryNode},
+			{management.RouteResumeQueryNode, proxy.ResumeQueryNode},
+			{management.RouteTransferSegment, proxy.TransferSegment},
+			{management.RouteTransferChannel, proxy.TransferChannel},
+			{management.RouteCheckQueryNodeDistribution, proxy.CheckQueryNodeDistribution},
+			{management.RouteClearReadTaskQueue, proxy.ClearReadTaskQueueManagement},
+			{management.RouteQueryCoordBalanceStatus, proxy.CheckQueryCoordBalanceStatus},
+			{management.RouteBackupEZ, proxy.BackupEZ},
+		}
+		for _, r := range routes {
+			management.Register(&management.Handler{
+				Path:        r.path,
+				HandlerFunc: r.handler,
+				AuthPolicy:  management.AuthByAdminFlag,
+			})
+		}
 	})
 }
 

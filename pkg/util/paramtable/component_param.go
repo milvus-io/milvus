@@ -272,6 +272,7 @@ type commonConfig struct {
 	DiskWriteRateLimiterLowPriorityRatio    ParamItem `refreshable:"true"`
 
 	AuthorizationEnabled  ParamItem `refreshable:"false"`
+	AdminAuthEnabled      ParamItem `refreshable:"true"`
 	SuperUsers            ParamItem `refreshable:"true"`
 	DefaultRootPassword   ParamItem `refreshable:"false"`
 	RootShouldBindRole    ParamItem `refreshable:"true"`
@@ -885,6 +886,28 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 	}
 	p.AuthorizationEnabled.Init(base.mgr)
 
+	p.AdminAuthEnabled = ParamItem{
+		Key:          "common.security.adminAuthEnabled",
+		Version:      "2.6.16",
+		DefaultValue: "false",
+		Doc: `Whether to require HTTP Basic Auth with root credentials for
+/management/* endpoints and /debug/pprof/* on the metrics port (default 9091).
+When false (default), these endpoints are unauthenticated, matching the
+historical behavior; this assumes the metrics port is reachable only from
+trusted networks.
+When true, requests must provide the milvus root user's credentials via HTTP
+Basic Auth. The auth check is independent of common.security.authorizationEnabled,
+so deployments may run with the data-plane (gRPC, /api/v1/*) authenticated
+while leaving the management plane open, or vice versa.
+
+Recommended: true for any deployment where the metrics port is reachable from
+untrusted networks. This is Immutable to prevent an attacker with stolen root
+credentials from disabling the gate via /management/config/alter.`,
+		Export:    true,
+		Immutable: true,
+	}
+	p.AdminAuthEnabled.Init(base.mgr)
+
 	p.SuperUsers = ParamItem{
 		Key:     "common.security.superUsers",
 		Version: "2.2.1",
@@ -892,16 +915,20 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 like the old password verification when updating the credential`,
 		DefaultValue: "",
 		Export:       true,
+		Immutable:    true,
+		Sensitive:    true,
 	}
 	p.SuperUsers.Init(base.mgr)
 
 	p.DefaultRootPassword = ParamItem{
 		Key:     "common.security.defaultRootPassword",
 		Version: "2.4.7",
-		Doc: `default password for root user. The maximum length is 72 characters. 
+		Doc: `default password for root user. The maximum length is 72 characters.
 Large numeric passwords require double quotes to avoid yaml parsing precision issues.`,
 		DefaultValue: "Milvus",
 		Export:       true,
+		Immutable:    true,
+		Sensitive:    true,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
 
@@ -936,6 +963,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		DefaultValue: "false",
 		Doc:          "Whether to enable the /expr endpoint for debugging. When enabled, only root user can access it via HTTP Basic Auth on Proxy nodes.",
 		Export:       true,
+		Immutable:    true,
 	}
 	p.ExprEnabled.Init(base.mgr)
 
@@ -1578,10 +1606,11 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 	t.JaegerURL.Init(base.mgr)
 
 	t.OtlpEndpoint = ParamItem{
-		Key:     "trace.otlp.endpoint",
-		Version: "2.3.0",
-		Doc:     `example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http`,
-		Export:  true,
+		Key:       "trace.otlp.endpoint",
+		Version:   "2.3.0",
+		Doc:       `example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http`,
+		Export:    true,
+		Sensitive: true,
 	}
 	t.OtlpEndpoint.Init(base.mgr)
 
