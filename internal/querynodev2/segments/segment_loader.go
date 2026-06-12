@@ -238,14 +238,14 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	)
 
 	if len(segments) == 0 {
-		mlog.Info(ctx, "no segment to load")
+		log.Info(ctx, "no segment to load")
 		return nil, nil
 	}
 
 	collection := loader.manager.Collection.Get(collectionID)
 	if collection == nil {
 		err := merr.WrapErrCollectionNotFound(collectionID)
-		mlog.Warn(ctx, "failed to get collection", mlog.Err(err))
+		log.Warn(ctx, "failed to get collection", mlog.Err(err))
 		return nil, err
 	}
 	for _, segment := range segments {
@@ -256,7 +256,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	defer loader.unregister(infos...)
 
 	// continue to wait other task done
-	mlog.Info(ctx, "start loading...", mlog.Int("segmentNum", len(segments)), mlog.Int("afterFilter", len(infos)))
+	log.Info(ctx, "start loading...", mlog.Int("segmentNum", len(segments)), mlog.Int("afterFilter", len(infos)))
 
 	var err error
 	var requestResourceResult requestResourceResult
@@ -265,7 +265,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	// no need to check resource for lazy load here
 	requestResourceResult, err = loader.requestResource(ctx, infos...)
 	if err != nil {
-		mlog.Warn(ctx, "request resource failed", mlog.Err(err))
+		log.Warn(ctx, "request resource failed", mlog.Err(err))
 		return nil, err
 	}
 	defer loader.freeRequestResource(requestResourceResult)
@@ -274,7 +274,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	loaded := typeutil.NewConcurrentMap[int64, Segment]()
 	defer func() {
 		newSegments.Range(func(segmentID int64, s Segment) bool {
-			mlog.Warn(ctx, "release new segment created due to load failure",
+			log.Warn(ctx, "release new segment created due to load failure",
 				mlog.FieldSegmentID(segmentID),
 				mlog.Err(err),
 			)
@@ -317,7 +317,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			loadInfo,
 		)
 		if err != nil {
-			mlog.Warn(ctx, "load segment failed when create new segment",
+			log.Warn(ctx, "load segment failed when create new segment",
 				mlog.FieldPartitionID(loadInfo.GetPartitionID()),
 				mlog.FieldSegmentID(loadInfo.GetSegmentID()),
 				mlog.Err(err),
@@ -363,7 +363,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		}
 
 		if !segment.PkCandidateExist() {
-			mlog.Debug(ctx, "loading PK candidate for segment", mlog.FieldSegmentID(segment.ID()))
+			log.Debug(ctx, "loading PK candidate for segment", mlog.FieldSegmentID(segment.ID()))
 			// For external collections, use ExternalSegmentCandidate instead of BloomFilterSet
 			if typeutil.IsExternalCollection(collection.Schema()) {
 				candidate := pkoracle.NewExternalSegmentCandidate(
@@ -372,13 +372,13 @@ func (loader *segmentLoader) Load(ctx context.Context,
 					segment.Type(),
 				)
 				segment.SetPKCandidate(candidate)
-				mlog.Info(ctx, "using ExternalSegmentCandidate for external collection",
+				log.Info(ctx, "using ExternalSegmentCandidate for external collection",
 					mlog.FieldSegmentID(loadInfo.GetSegmentID()))
 
 				// Check for truncated segment ID collision with other segments being loaded.
 				collisions := detectVirtualPKCollisions(loadInfo.GetSegmentID(), infos)
 				for _, collidingID := range collisions {
-					mlog.Warn(ctx, "virtual PK collision detected: two segments share truncated segment ID",
+					log.Warn(ctx, "virtual PK collision detected: two segments share truncated segment ID",
 						mlog.Int64("segmentID1", loadInfo.GetSegmentID()),
 						mlog.Int64("segmentID2", collidingID),
 						mlog.Int64("truncatedID", loadInfo.GetSegmentID()&0xFFFFFFFF))
@@ -407,25 +407,25 @@ func (loader *segmentLoader) Load(ctx context.Context,
 
 	// Start to load,
 	// Make sure we can always benefit from concurrency, and not spawn too many idle goroutines
-	mlog.Info(ctx, "start to load segments in parallel",
+	log.Info(ctx, "start to load segments in parallel",
 		mlog.Int("segmentNum", len(infos)),
 		mlog.Int("concurrencyLevel", requestResourceResult.ConcurrencyLevel))
 
 	err = funcutil.ProcessFuncParallel(len(infos),
 		requestResourceResult.ConcurrencyLevel, loadSegmentFunc, "loadSegmentFunc")
 	if err != nil {
-		mlog.Warn(ctx, "failed to load some segments", mlog.Err(err))
+		log.Warn(ctx, "failed to load some segments", mlog.Err(err))
 		return nil, err
 	}
 
 	// Wait for all segments loaded
 	segmentIDs := lo.Map(segments, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })
 	if err := loader.waitSegmentLoadDone(ctx, segmentType, segmentIDs, version); err != nil {
-		mlog.Warn(ctx, "failed to wait the filtered out segments load done", mlog.Err(err))
+		log.Warn(ctx, "failed to wait the filtered out segments load done", mlog.Err(err))
 		return nil, err
 	}
 
-	mlog.Info(ctx, "all segment load done")
+	log.Info(ctx, "all segment load done")
 	var result []Segment
 	loaded.Range(func(_ int64, s Segment) bool {
 		result = append(result, s)
@@ -451,7 +451,7 @@ func (loader *segmentLoader) prepare(ctx context.Context, segmentType SegmentTyp
 			infos = append(infos, segment)
 			loader.loadingSegments.Insert(segment.GetSegmentID(), newLoadResult())
 		} else {
-			mlog.Info(ctx, "skip loaded/loading segment",
+			log.Info(ctx, "skip loaded/loading segment",
 				mlog.Int64("segmentID", segment.GetSegmentID()),
 				mlog.Bool("isLoaded", isLoaded),
 				mlog.Bool("isLoading", isLoading),
@@ -535,14 +535,14 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	// TODO: disable logical resource checking for now
 	// lmu, ldu, err := loader.checkLogicalSegmentSize(ctx, infos, totalMemory)
 	// if err != nil {
-	// 	mlog.Warn("no sufficient logical resource to load segments", mlog.Err(err))
+	// 	log.Warn("no sufficient logical resource to load segments", mlog.Err(err))
 	// 	return result, err
 	// }
 
 	// then get physical resource usage for loading segments
 	mu, du, err := loader.checkSegmentSize(ctx, infos, totalMemory, physicalMemoryUsage, physicalDiskUsage)
 	if err != nil {
-		mlog.Warn(ctx, "no sufficient physical resource to load segments", mlog.Err(err))
+		log.Warn(ctx, "no sufficient physical resource to load segments", mlog.Err(err))
 		return result, err
 	}
 
@@ -553,7 +553,7 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 
 	loader.committedResource.Add(result.Resource)
 	// loader.committedLogicalResource.Add(result.LogicalResource)
-	mlog.Info(ctx, "request resource for loading segments (unit in MiB)",
+	log.Info(ctx, "request resource for loading segments (unit in MiB)",
 		mlog.Float64("memory", logutil.ToMB(float64(result.Resource.MemorySize))),
 		mlog.Float64("committedMemory", logutil.ToMB(float64(loader.committedResource.MemorySize))),
 		mlog.Float64("disk", logutil.ToMB(float64(result.Resource.DiskSize))),
@@ -595,11 +595,11 @@ func (loader *segmentLoader) waitSegmentLoadDone(ctx context.Context, segmentTyp
 
 		result, ok := loader.loadingSegments.Get(segmentID)
 		if !ok {
-			mlog.Warn(ctx, "segment was removed from the loading map early", mlog.FieldSegmentID(segmentID))
+			log.Warn(ctx, "segment was removed from the loading map early", mlog.FieldSegmentID(segmentID))
 			return errors.New("segment was removed from the loading map early")
 		}
 
-		mlog.Info(ctx, "wait segment loaded...", mlog.FieldSegmentID(segmentID))
+		log.Info(ctx, "wait segment loaded...", mlog.FieldSegmentID(segmentID))
 
 		signal := make(chan struct{})
 		go func() {
@@ -617,19 +617,19 @@ func (loader *segmentLoader) waitSegmentLoadDone(ctx context.Context, segmentTyp
 		close(signal)
 
 		if ctx.Err() != nil {
-			mlog.Warn(ctx, "failed to wait segment loaded due to context done", mlog.FieldSegmentID(segmentID))
+			log.Warn(ctx, "failed to wait segment loaded due to context done", mlog.FieldSegmentID(segmentID))
 			return ctx.Err()
 		}
 
 		if result.status.Load() == failure {
-			mlog.Warn(ctx, "failed to wait segment loaded", mlog.FieldSegmentID(segmentID))
+			log.Warn(ctx, "failed to wait segment loaded", mlog.FieldSegmentID(segmentID))
 			return merr.WrapErrSegmentLack(segmentID, "failed to wait segment loaded")
 		}
 
 		// try to update segment version after wait segment loaded
 		loader.manager.Segment.UpdateBy(IncreaseVersion(version), WithType(segmentType), WithID(segmentID))
 
-		mlog.Info(ctx, "segment loaded...", mlog.FieldSegmentID(segmentID))
+		log.Info(ctx, "segment loaded...", mlog.FieldSegmentID(segmentID))
 	}
 	return nil
 }
@@ -649,19 +649,19 @@ func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, colle
 	bfs := pkoracle.NewBloomFilterSet(segmentID, partitionID, segtype)
 
 	if !paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() {
-		mlog.Info(ctx, "skip loading bloom filter for remote segment because bloom filter is disabled")
+		log.Info(ctx, "skip loading bloom filter for remote segment because bloom filter is disabled")
 		return bfs, nil
 	}
 
 	collection := loader.manager.Collection.Get(collectionID)
 	if collection == nil {
 		err := merr.WrapErrCollectionNotFound(collectionID)
-		mlog.Warn(ctx, "failed to get collection while loading segment", mlog.Err(err))
+		log.Warn(ctx, "failed to get collection while loading segment", mlog.Err(err))
 		return nil, err
 	}
 	pkField := GetPkField(collection.Schema())
 
-	mlog.Info(ctx, "start loading remote...", mlog.Int("segmentNum", 1))
+	log.Info(ctx, "start loading remote...", mlog.Int("segmentNum", 1))
 
 	// For external collections, return empty bloom filter set.
 	// External collections use ExternalSegmentCandidate for PK checking (set on segment)
@@ -669,18 +669,18 @@ func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, colle
 	// NOTE: This is a defensive guard. Normal external collection load path uses
 	// ExternalSegmentCandidate directly and should not reach here.
 	if typeutil.IsExternalCollection(collection.Schema()) {
-		mlog.Debug(ctx, "external collection: returning empty bloom filter set (defensive path)")
+		log.Debug(ctx, "external collection: returning empty bloom filter set (defensive path)")
 		return bfs, nil
 	}
 
-	mlog.Info(ctx, "loading bloom filter for remote...")
+	log.Info(ctx, "loading bloom filter for remote...")
 	pkStatsBinlogs, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BloomFilterPaths(pkField.GetFieldID())
 	if err != nil {
 		return nil, err
 	}
 	err = loader.loadBloomFilter(ctx, segmentID, bfs, pkStatsBinlogs)
 	if err != nil {
-		mlog.Warn(ctx, "load remote segment bloom filter failed",
+		log.Warn(ctx, "load remote segment bloom filter failed",
 			mlog.FieldPartitionID(partitionID),
 			mlog.FieldSegmentID(segmentID),
 			mlog.Err(err),
@@ -701,7 +701,7 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 
 	segmentNum := len(infos)
 	if segmentNum == 0 {
-		mlog.Info(ctx, "no segment to load")
+		log.Info(ctx, "no segment to load")
 		return nil, nil
 	}
 
@@ -715,14 +715,14 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 
 	// Phase 2: load BF stats into the stubs (skip when disabled or external collection).
 	if !paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() {
-		mlog.Info(ctx, "bloom filter disabled: returning metadata-only stubs")
+		log.Info(ctx, "bloom filter disabled: returning metadata-only stubs")
 		return bfSets, nil
 	}
 
 	collection := loader.manager.Collection.Get(collectionID)
 	if collection == nil {
 		err := merr.WrapErrCollectionNotFound(collectionID)
-		mlog.Warn(ctx, "failed to get collection while loading segment", mlog.Err(err))
+		log.Warn(ctx, "failed to get collection while loading segment", mlog.Err(err))
 		return nil, err
 	}
 	pkField := GetPkField(collection.Schema())
@@ -750,7 +750,7 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 			return nil, fmt.Errorf("failed to reserve loading resource for bloom filters, totalMemorySize = %v MB",
 				logutil.ToMB(float64(totalMemorySize)))
 		}
-		mlog.Info(ctx, "reserved loading resource for bloom filters", mlog.Float64("totalMemorySizeMB", logutil.ToMB(float64(totalMemorySize))))
+		log.Info(ctx, "reserved loading resource for bloom filters", mlog.Float64("totalMemorySizeMB", logutil.ToMB(float64(totalMemorySize))))
 	}
 
 	defer func() {
@@ -759,24 +759,24 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 				memory_bytes: C.int64_t(totalMemorySize * 2),
 				disk_bytes:   C.int64_t(0),
 			})
-			mlog.Info(ctx, "released loading resource for bloom filters", mlog.Float64("totalMemorySizeMB", logutil.ToMB(float64(totalMemorySize))))
+			log.Info(ctx, "released loading resource for bloom filters", mlog.Float64("totalMemorySizeMB", logutil.ToMB(float64(totalMemorySize))))
 		}
 	}()
 
-	mlog.Info(ctx, "start loading remote...", mlog.Int("segmentNum", segmentNum))
+	log.Info(ctx, "start loading remote...", mlog.Int("segmentNum", segmentNum))
 
 	loadRemoteFunc := func(idx int) error {
 		loadInfo := infos[idx]
 		bfs := bfSets[idx]
 
-		mlog.Info(ctx, "loading bloom filter for remote...")
+		log.Info(ctx, "loading bloom filter for remote...")
 		pkStatsBinlogs, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BloomFilterPaths(pkFieldID)
 		if err != nil {
 			return err
 		}
 		err = loader.loadBloomFilter(ctx, bfs.ID(), bfs, pkStatsBinlogs)
 		if err != nil {
-			mlog.Warn(ctx, "load remote segment bloom filter failed",
+			log.Warn(ctx, "load remote segment bloom filter failed",
 				mlog.FieldPartitionID(bfs.Partition()),
 				mlog.FieldSegmentID(bfs.ID()),
 				mlog.Err(err),
@@ -789,7 +789,7 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 	err := funcutil.ProcessFuncParallel(segmentNum, segmentNum, loadRemoteFunc, "loadRemoteFunc")
 	if err != nil {
 		// no partial success here
-		mlog.Warn(ctx, "failed to load remote segment", mlog.Err(err))
+		log.Warn(ctx, "failed to load remote segment", mlog.Err(err))
 		return nil, err
 	}
 
@@ -1052,7 +1052,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 
 	log := mlog.With(mlog.FieldSegmentID(segment.ID()))
 	tr := timerecord.NewTimeRecorder("segmentLoader.loadSealedSegment")
-	mlog.Info(ctx, "Start loading fields...",
+	log.Info(ctx, "Start loading fields...",
 		mlog.Int("indexedFields count", len(indexedFieldInfos)),
 		mlog.Int64s("indexed text fields", lo.Keys(textIndexes)),
 		mlog.Int64s("unindexed text fields", lo.Keys(unindexedTextFields)),
@@ -1086,7 +1086,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		return err
 	}
 	patchEntryNumberSpan := tr.RecordSpan()
-	mlog.Info(ctx, "Finish loading segment",
+	log.Info(ctx, "Finish loading segment",
 		mlog.Duration("patchEntryNumberSpan", patchEntryNumberSpan),
 	)
 	return nil
@@ -1107,7 +1107,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 		mlog.FieldSegmentID(segment.ID()),
 	)
 
-	mlog.Info(ctx, "start loading segment files",
+	log.Info(ctx, "start loading segment files",
 		mlog.Int64("rowNum", loadInfo.GetNumOfRows()),
 		mlog.String("segmentType", segment.Type().String()),
 		mlog.Int32("priority", int32(loadInfo.GetPriority())))
@@ -1115,7 +1115,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	collection := loader.manager.Collection.Get(segment.Collection())
 	if collection == nil {
 		err := merr.WrapErrCollectionNotFound(segment.Collection())
-		mlog.Warn(ctx, "failed to get collection while loading segment", mlog.Err(err))
+		log.Warn(ctx, "failed to get collection while loading segment", mlog.Err(err))
 		return err
 	}
 	pkField := GetPkField(collection.Schema())
@@ -1137,7 +1137,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	// load statslog if it's growing segment
 	if segment.segmentType == SegmentTypeGrowing {
 		if bf, ok := segment.pkCandidate.(*pkoracle.BloomFilterSet); ok {
-			mlog.Info(ctx, "loading statslog...")
+			log.Info(ctx, "loading statslog...")
 			resolver := packed.NewStatsResolverFromLoadInfo(loadInfo)
 			bfPaths, err := resolver.BloomFilterPaths(pkField.GetFieldID())
 			if err != nil {
@@ -1206,7 +1206,7 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 			return err
 		}
 
-		mlog.Info(ctx, "load field binlogs done for sealed segment with index",
+		log.Info(ctx, "load field binlogs done for sealed segment with index",
 			mlog.FieldFieldID(fieldID),
 			mlog.Any("binlog", fieldInfo.FieldBinlog.Binlogs),
 			mlog.Int32("current_index_version", fieldInfo.IndexInfo.GetCurrentIndexVersion()),
@@ -1234,7 +1234,7 @@ func (loader *segmentLoader) loadBm25Stats(ctx context.Context, segmentID int64,
 		mlog.FieldSegmentID(segmentID),
 	)
 	if len(binlogPaths) == 0 {
-		mlog.Info(ctx, "there are no bm25 stats logs saved with segment")
+		log.Info(ctx, "there are no bm25 stats logs saved with segment")
 		return nil
 	}
 
@@ -1268,7 +1268,7 @@ func (loader *segmentLoader) loadBm25Stats(ctx context.Context, segmentID int64,
 			}
 		}
 		cnt += fieldOffset[i]
-		mlog.Info(ctx, "Successfully load bm25 stats", mlog.Duration("time", time.Since(startTs)), mlog.Int64("numRow", newStats.NumRow()), mlog.FieldFieldID(fieldID))
+		log.Info(ctx, "Successfully load bm25 stats", mlog.Duration("time", time.Since(startTs)), mlog.Int64("numRow", newStats.NumRow()), mlog.FieldFieldID(fieldID))
 	}
 
 	return nil
@@ -1304,7 +1304,7 @@ func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int6
 		mlog.FieldSegmentID(segmentID),
 	)
 	if len(binlogPaths) == 0 {
-		mlog.Info(ctx, "there are no stats logs saved with segment")
+		log.Info(ctx, "there are no stats logs saved with segment")
 		return nil
 	}
 
@@ -1320,7 +1320,7 @@ func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int6
 
 	stats, err := storage.DeserializeBloomFilterStats(binlogPaths, blobs)
 	if err != nil {
-		mlog.Warn(ctx, "failed to deserialize bloom filter stats", mlog.Err(err))
+		log.Warn(ctx, "failed to deserialize bloom filter stats", mlog.Err(err))
 		return err
 	}
 
@@ -1334,7 +1334,7 @@ func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int6
 		size += stat.BF.Cap()
 		bfs.AddHistoricalStats(pkStat)
 	}
-	mlog.Info(ctx, "Successfully load pk stats", mlog.Duration("time", time.Since(startTs)), mlog.Uint("size", size))
+	log.Info(ctx, "Successfully load pk stats", mlog.Duration("time", time.Since(startTs)), mlog.Uint("size", size))
 	return nil
 }
 
@@ -1348,7 +1348,7 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		mlog.FieldSegmentID(segment.ID()),
 		mlog.Int("deltaNum", len(deltaLogs)),
 	)
-	mlog.Info(ctx, "loading delta...")
+	log.Info(ctx, "loading delta...")
 
 	var rowNums int64
 	valid := func(binlog *datapb.Binlog, _ int) bool {
@@ -1447,7 +1447,7 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		return err
 	}
 
-	mlog.Info(ctx, "load delta logs done", mlog.Int64("deleteCount", deltaData.DeleteRowCount()))
+	log.Info(ctx, "load delta logs done", mlog.Int64("deleteCount", deltaData.DeleteRowCount()))
 	return nil
 }
 
@@ -1608,14 +1608,14 @@ func (loader *segmentLoader) checkLogicalSegmentSize(ctx context.Context, segmen
 		collection := loader.manager.Collection.Get(loadInfo.GetCollectionID())
 		finalUsage, err := estimateLogicalResourceUsageOfSegment(collection.Schema(), loadInfo, finalFactor)
 		if err != nil {
-			mlog.Warn(ctx, "failed to estimate final resource usage of segment",
+			log.Warn(ctx, "failed to estimate final resource usage of segment",
 				mlog.FieldCollectionID(loadInfo.GetCollectionID()),
 				mlog.FieldSegmentID(loadInfo.GetSegmentID()),
 				mlog.Err(err))
 			return 0, 0, err
 		}
 
-		mlog.Debug(ctx, "segment logical resource for loading",
+		log.Debug(ctx, "segment logical resource for loading",
 			mlog.FieldSegmentID(loadInfo.GetSegmentID()),
 			mlog.Float64("memoryUsage(MB)", logutil.ToMB(float64(finalUsage.MemorySize))),
 			mlog.Float64("diskUsage(MB)", logutil.ToMB(float64(finalUsage.DiskSize))),
@@ -1624,7 +1624,7 @@ func (loader *segmentLoader) checkLogicalSegmentSize(ctx context.Context, segmen
 		predictLogicalMemUsage += finalUsage.MemorySize
 	}
 
-	mlog.Info(ctx, "predict memory and disk logical usage after loaded (in MiB)",
+	log.Info(ctx, "predict memory and disk logical usage after loaded (in MiB)",
 		mlog.Float64("predictLogicalMemUsage(MB)", logutil.ToMB(float64(predictLogicalMemUsage))),
 		mlog.Float64("predictLogicalDiskUsage(MB)", logutil.ToMB(float64(predictLogicalDiskUsage))),
 	)
@@ -1633,7 +1633,7 @@ func (loader *segmentLoader) checkLogicalSegmentSize(ctx context.Context, segmen
 	logicalDiskUsageLimit := uint64(float64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()) * paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat())
 
 	if predictLogicalMemUsage > logicalMemUsageLimit {
-		mlog.Warn(ctx, "logical memory usage checking for segment loading failed",
+		log.Warn(ctx, "logical memory usage checking for segment loading failed",
 			mlog.String("resourceType", "Memory"),
 			mlog.Float64("predictLogicalMemUsageMB", logutil.ToMB(float64(predictLogicalMemUsage))),
 			mlog.Float64("logicalMemUsageLimitMB", logutil.ToMB(float64(logicalMemUsageLimit))),
@@ -1643,7 +1643,7 @@ func (loader *segmentLoader) checkLogicalSegmentSize(ctx context.Context, segmen
 	}
 
 	if predictLogicalDiskUsage > logicalDiskUsageLimit {
-		mlog.Warn(ctx, fmt.Sprintf("Logical disk usage checking for segment loading failed, predictLogicalDiskUsage = %v MB, LogicalDiskUsageLimit = %v MB, decrease the evictableDiskCacheRatio (current: %v) if you want to load more segments",
+		log.Warn(ctx, fmt.Sprintf("Logical disk usage checking for segment loading failed, predictLogicalDiskUsage = %v MB, LogicalDiskUsageLimit = %v MB, decrease the evictableDiskCacheRatio (current: %v) if you want to load more segments",
 			logutil.ToMB(float64(predictLogicalDiskUsage)),
 			logutil.ToMB(float64(logicalDiskUsageLimit)),
 			paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
@@ -1693,14 +1693,14 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		collection := loader.manager.Collection.Get(loadInfo.GetCollectionID())
 		loadingUsage, err := estimateLoadingResourceUsageOfSegment(collection.Schema(), loadInfo, maxFactor)
 		if err != nil {
-			mlog.Warn(ctx, "failed to estimate max resource usage of segment",
+			log.Warn(ctx, "failed to estimate max resource usage of segment",
 				mlog.FieldCollectionID(loadInfo.GetCollectionID()),
 				mlog.FieldSegmentID(loadInfo.GetSegmentID()),
 				mlog.Err(err))
 			return 0, 0, err
 		}
 
-		mlog.Debug(ctx, "segment resource for loading",
+		log.Debug(ctx, "segment resource for loading",
 			mlog.FieldSegmentID(loadInfo.GetSegmentID()),
 			mlog.Float64("loadingMemoryUsage(MB)", logutil.ToMB(float64(loadingUsage.MemorySize))),
 			mlog.Float64("loadingDiskUsage(MB)", logutil.ToMB(float64(loadingUsage.DiskSize))),
@@ -1715,7 +1715,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		}
 	}
 
-	mlog.Info(ctx, "predict memory and disk usage while loading (in MiB)",
+	log.Info(ctx, "predict memory and disk usage while loading (in MiB)",
 		mlog.Float64("maxSegmentSize(MB)", logutil.ToMB(float64(maxSegmentSize))),
 		mlog.Float64("committedMemSize(MB)", logutil.ToMB(float64(loader.committedResource.MemorySize))),
 		mlog.Float64("memLimit(MB)", logutil.ToMB(float64(totalMem))),
@@ -1745,7 +1745,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	} else {
 		// fallback to original segment loading logic
 		if predictMemUsage > uint64(float64(totalMem)*paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
-			mlog.Warn(ctx, "load segment failed, OOM if load",
+			log.Warn(ctx, "load segment failed, OOM if load",
 				mlog.String("resourceType", "Memory"),
 				mlog.Float64("maxSegmentSizeMB", logutil.ToMB(float64(maxSegmentSize))),
 				mlog.Float64("memUsageMB", logutil.ToMB(float64(memUsage))),
@@ -1757,7 +1757,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		}
 
 		if predictDiskUsage > uint64(float64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())*paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()) {
-			mlog.Warn(ctx, "load segment failed, disk space is not enough",
+			log.Warn(ctx, "load segment failed, disk space is not enough",
 				mlog.String("resourceType", "Disk"),
 				mlog.Float64("diskUsageMB", logutil.ToMB(float64(diskUsage))),
 				mlog.Float64("predictDiskUsageMB", logutil.ToMB(float64(predictDiskUsage))),
@@ -2347,7 +2347,7 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 	}
 	defer loader.freeRequestResource(requestResourceResult)
 
-	mlog.Info(ctx, "segment loader start to load index", mlog.Int("segmentNumAfterFilter", len(infos)))
+	log.Info(ctx, "segment loader start to load index", mlog.Int("segmentNumAfterFilter", len(infos)))
 	metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(paramtable.GetStringNodeID(), "LoadIndex").Inc()
 	defer metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(paramtable.GetStringNodeID(), "LoadIndex").Dec()
 
@@ -2356,13 +2356,13 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 	for _, loadInfo := range infos {
 		for _, info := range loadInfo.GetIndexInfos() {
 			if len(info.GetIndexFilePaths()) == 0 {
-				mlog.Warn(ctx, "failed to add index for segment, index file list is empty, the segment may be too small")
+				log.Warn(ctx, "failed to add index for segment, index file list is empty, the segment may be too small")
 				return merr.WrapErrIndexNotFound("index file list empty")
 			}
 
 			err := loader.loadFieldIndex(ctx, segment, info)
 			if err != nil {
-				mlog.Warn(ctx, "failed to load index for segment", mlog.Err(err))
+				log.Warn(ctx, "failed to load index for segment", mlog.Err(err))
 				return err
 			}
 		}

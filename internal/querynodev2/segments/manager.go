@@ -62,7 +62,7 @@ func IncreaseVersion(version int64) SegmentAction {
 				return true
 			}
 		}
-		mlog.Warn(context.TODO(), "segment version cannot go backwards, skip update")
+		log.Warn(context.TODO(), "segment version cannot go backwards, skip update")
 		return false
 	}
 }
