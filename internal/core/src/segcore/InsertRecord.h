@@ -790,6 +790,7 @@ class InsertRecordGrowing {
         {
             std::unique_lock<std::shared_mutex> lck(field_map_mutex_);
             data_.clear();
+            valid_data_.clear();
         }
         ack_responder_.clear();
     }
@@ -1120,6 +1121,15 @@ class InsertRecordGrowing {
     // take it unique, lookups (get_data_base/get_valid_data/...) take it shared.
     // Kept separate from shared_mutex_ so frequent reads do not contend with
     // pk inserts.
+    //
+    // PRECONDITION: this lock only protects the map structure, NOT element
+    // lifetime. The raw VectorBase* returned by get_data_base() escapes the
+    // shared lock, so callers rely on no concurrent erase()/clear() of the
+    // entry they hold (append-only mutation is safe). Today that holds because
+    // drop_field_data() has no callers and clear() is never called
+    // concurrently with reads; whoever adds drop-field support (e.g. schema
+    // evolution dropping fields) must also fence element lifetime, this lock
+    // alone will not save the escaped pointers.
     mutable std::shared_mutex field_map_mutex_{};
 };
 
