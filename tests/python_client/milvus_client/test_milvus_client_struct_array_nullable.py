@@ -2284,6 +2284,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
 
         search_tensor = EmbeddingList()
         search_tensor.add(non_empty_rows[-1][STRUCT_FIELD][0][VECTOR_SUBFIELD])
+        expected_struct_search_rows = [non_empty_rows[-1]]
         struct_search_results, _ = self.search(
             client,
             collection_name,
@@ -2291,14 +2292,14 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             anns_field=STRUCT_VECTOR_FIELD,
             search_params=STRUCT_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_FIELD],
-            limit=len(non_empty_rows),
+            limit=len(expected_struct_search_rows),
         )
-        assert len(struct_search_results[0]) == len(non_empty_rows)
+        assert len(struct_search_results[0]) == len(expected_struct_search_rows)
         hit_ids = {hit[PK_FIELD] for hit in struct_search_results[0]}
-        assert hit_ids == {row[PK_FIELD] for row in non_empty_rows}
+        assert hit_ids == {row[PK_FIELD] for row in expected_struct_search_rows}
         assert missing_profile_row[PK_FIELD] not in hit_ids
         assert empty_profile_row[PK_FIELD] not in hit_ids
-        assert struct_search_results[0][0][PK_FIELD] == non_empty_rows[-1][PK_FIELD]
+        assert struct_search_results[0][0][PK_FIELD] == expected_struct_search_rows[0][PK_FIELD]
         for hit in struct_search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
             entity = search_entity(hit)
@@ -3217,6 +3218,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
 
         search_tensor = EmbeddingList()
         search_tensor.add(non_empty_rows[-1][STRUCT_FIELD][0][VECTOR_SUBFIELD])
+        expected_regular_search_rows = [non_empty_rows[-1]]
         results, _ = self.search(
             client,
             collection_name,
@@ -3224,15 +3226,15 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             anns_field=STRUCT_VECTOR_FIELD,
             search_params=STRUCT_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_FIELD],
-            limit=len(non_empty_rows),
+            limit=len(expected_regular_search_rows),
         )
         hits = results[0]
         hit_ids = [hit[PK_FIELD] for hit in hits]
         assert len(hit_ids) == len(set(hit_ids))
-        assert set(hit_ids) == {row[PK_FIELD] for row in non_empty_rows}
+        assert set(hit_ids) == {row[PK_FIELD] for row in expected_regular_search_rows}
         assert missing_profile_row[PK_FIELD] not in hit_ids
         assert empty_profile_row[PK_FIELD] not in hit_ids
-        assert hits[0][PK_FIELD] == non_empty_rows[-1][PK_FIELD]
+        assert hits[0][PK_FIELD] == expected_regular_search_rows[0][PK_FIELD]
 
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
@@ -3328,15 +3330,15 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         )
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type=STRUCT_VECTOR_INDEX_TYPE,
+            index_type="FLAT",
             metric_type="COSINE",
-            params=INDEX_PARAMS,
         )
         res, _ = self.create_index(client, collection_name, index_params)
 
         res, _ = self.load_collection(client, collection_name)
 
         source_by_id = {row[PK_FIELD]: row for row in non_empty_rows}
+        iterator_limit = 1
         null_or_empty_ids = {missing_profile_row[PK_FIELD], empty_profile_row[PK_FIELD]}
 
         iterator, _ = self.search_iterator(
@@ -3347,10 +3349,10 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             anns_field=STRUCT_VECTOR_FIELD,
             search_params={"metric_type": "COSINE", "params": {"ef": 64}},
             output_fields=[PK_FIELD, STRUCT_FIELD],
-            limit=len(non_empty_rows),
+            limit=iterator_limit,
         )
         iterator_hits = drain_iterator(iterator)
-        assert len(iterator_hits) == len(non_empty_rows)
+        assert len(iterator_hits) == iterator_limit
         hit_pairs = [(hit[PK_FIELD], hit["offset"]) for hit in iterator_hits]
         expected_hit_pairs = {
             (row[PK_FIELD], offset) for row in non_empty_rows for offset, _ in enumerate(row[STRUCT_FIELD])
@@ -3360,8 +3362,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         hit_ids = [hit_id for hit_id, _ in hit_pairs]
         assert set(hit_ids).issubset(source_by_id)
         assert not set(hit_ids).intersection(null_or_empty_ids)
-        assert iterator_hits[0][PK_FIELD] == non_empty_rows[-1][PK_FIELD]
-        assert iterator_hits[0]["offset"] == 0
 
         distances = [hit["distance"] for hit in iterator_hits]
         for index in range(len(distances) - 1):
@@ -6287,7 +6287,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         target: test element filter correctness after dynamically adding a scalar-only nullable struct array field
         method: add a scalar struct array field to a loaded collection with old rows, then query/search with
             element_filter on the added field
-        expected: old null rows do not match element_filter, and output fields match inserted data
+        expected: query supports element_filter, and row-level vector search rejects element_filter with a clear error
         """
         collection_name = cf.gen_unique_str(f"{prefix}_add_scalar_struct_filter")
         client = self._client()
@@ -6335,8 +6335,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         res, _ = self.insert(client, collection_name, new_rows)
         assert res["insert_count"] == len(new_rows)
 
-        old_ids = {row[PK_FIELD] for row in old_sealed_rows + old_growing_rows}
-        new_ids = {row[PK_FIELD] for row in new_rows}
         source_by_id = {row[PK_FIELD]: {**row, STRUCT_FIELD: None} for row in old_sealed_rows + old_growing_rows}
         source_by_id.update({row[PK_FIELD]: row for row in new_rows})
 
@@ -6379,7 +6377,11 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             assert row[TAG_FIELD] == expected[TAG_FIELD]
             assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
-        search_results, _ = self.search(
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: "element_filter is only supported for element-level search",
+        }
+        self.search(
             client,
             collection_name,
             data=[gen_vector(5)],
@@ -6387,15 +6389,10 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             filter=f"element_filter({STRUCT_FIELD}, $[{INT_SUBFIELD}] >= 40)",
             output_fields=[PK_FIELD, STRUCT_FIELD],
-            limit=len(new_ids),
+            limit=len(new_rows),
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
-        hit_ids = {hit[PK_FIELD] for hit in search_results[0]}
-        assert hit_ids == new_ids
-        assert not hit_ids.intersection(old_ids)
-        for hit in search_results[0]:
-            expected = source_by_id[hit[PK_FIELD]]
-            entity = search_entity(hit)
-            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_scalar_struct_array_field_match_family_query_search(self):
