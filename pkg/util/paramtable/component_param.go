@@ -2069,29 +2069,30 @@ type proxyConfig struct {
 	// Alias  string
 	SoPath ParamItem `refreshable:"false"`
 
-	TimeTickInterval                      ParamItem `refreshable:"false"`
-	HealthCheckTimeout                    ParamItem `refreshable:"true"`
-	MsgStreamTimeTickBufSize              ParamItem `refreshable:"true"`
-	MaxNameLength                         ParamItem `refreshable:"true"`
-	MaxCollectionDescriptionLength        ParamItem `refreshable:"true"`
-	MaxUsernameLength                     ParamItem `refreshable:"true"`
-	MaxUserDescriptionLength              ParamItem `refreshable:"true"`
-	MinPasswordLength                     ParamItem `refreshable:"true"`
-	MaxPasswordLength                     ParamItem `refreshable:"true"`
-	MaxFieldNum                           ParamItem `refreshable:"true"`
-	MaxVectorFieldNum                     ParamItem `refreshable:"true"`
-	MaxShardNum                           ParamItem `refreshable:"true"`
-	MaxDimension                          ParamItem `refreshable:"true"`
-	GinLogging                            ParamItem `refreshable:"false"`
-	GinLogSkipPaths                       ParamItem `refreshable:"false"`
-	MaxUserNum                            ParamItem `refreshable:"true"`
-	MaxRoleNum                            ParamItem `refreshable:"true"`
-	MaxRoleDescriptionLength              ParamItem `refreshable:"true"`
-	NameValidationAllowedChars            ParamItem `refreshable:"true"`
-	RoleNameValidationAllowedChars        ParamItem `refreshable:"true"`
-	MaxTaskNum                            ParamItem `refreshable:"false"`
-	DDLConcurrency                        ParamItem `refreshable:"true"`
-	DCLConcurrency                        ParamItem `refreshable:"true"`
+	TimeTickInterval               ParamItem `refreshable:"false"`
+	HealthCheckTimeout             ParamItem `refreshable:"true"`
+	MsgStreamTimeTickBufSize       ParamItem `refreshable:"true"`
+	MaxNameLength                  ParamItem `refreshable:"true"`
+	MaxCollectionDescriptionLength ParamItem `refreshable:"true"`
+	MaxUsernameLength              ParamItem `refreshable:"true"`
+	MaxUserDescriptionLength       ParamItem `refreshable:"true"`
+	MinPasswordLength              ParamItem `refreshable:"true"`
+	MaxPasswordLength              ParamItem `refreshable:"true"`
+	MaxFieldNum                    ParamItem `refreshable:"true"`
+	MaxVectorFieldNum              ParamItem `refreshable:"true"`
+	MaxShardNum                    ParamItem `refreshable:"true"`
+	MaxDimension                   ParamItem `refreshable:"true"`
+	GinLogging                     ParamItem `refreshable:"false"`
+	GinLogSkipPaths                ParamItem `refreshable:"false"`
+	MaxUserNum                     ParamItem `refreshable:"true"`
+	MaxRoleNum                     ParamItem `refreshable:"true"`
+	MaxRoleDescriptionLength       ParamItem `refreshable:"true"`
+	NameValidationAllowedChars     ParamItem `refreshable:"true"`
+	RoleNameValidationAllowedChars ParamItem `refreshable:"true"`
+	MaxTaskNum                     ParamItem `refreshable:"false"`
+	DDLConcurrency                 ParamItem `refreshable:"true"`
+	DCLConcurrency                 ParamItem `refreshable:"true"`
+
 	DQLBackpressureEnabled                ParamItem `refreshable:"true"`
 	DQLBackpressureSlowdownMinConcurrency ParamItem `refreshable:"true"`
 	DQLBackpressureSlowdownRatio          ParamItem `refreshable:"true"`
@@ -2099,28 +2100,29 @@ type proxyConfig struct {
 	DQLBackpressureRecoverInterval        ParamItem `refreshable:"true"`
 	DQLBackpressureRecoverStep            ParamItem `refreshable:"true"`
 	DQLBackpressureRecoverQuietPeriod     ParamItem `refreshable:"true"`
-	ShardLeaderCacheInterval              ParamItem `refreshable:"false"`
-	ReplicaSelectionPolicy                ParamItem `refreshable:"false"`
-	CheckQueryNodeHealthInterval          ParamItem `refreshable:"false"`
-	CostMetricsExpireTime                 ParamItem `refreshable:"false"`
-	CheckWorkloadRequestNum               ParamItem `refreshable:"false"`
-	WorkloadToleranceFactor               ParamItem `refreshable:"false"`
-	RetryTimesOnReplica                   ParamItem `refreshable:"true"`
-	RetryTimesOnHealthCheck               ParamItem `refreshable:"true"`
-	ReplicaBlacklistDuration              ParamItem `refreshable:"true"`
-	ReplicaBlacklistCleanupInterval       ParamItem `refreshable:"true"`
-	PartitionNameRegexp                   ParamItem `refreshable:"true"`
-	MustUsePartitionKey                   ParamItem `refreshable:"true"`
-	SkipAutoIDCheck                       ParamItem `refreshable:"true"`
-	SkipPartitionKeyCheck                 ParamItem `refreshable:"true"`
-	ResolveAliasForPrivilege              ParamItem `refreshable:"true"`
-	MaxVarCharLength                      ParamItem `refreshable:"false"`
-	MaxTextLength                         ParamItem `refreshable:"false"`
-	MaxArrayCapacity                      ParamItem `refreshable:"true"`
-	MaxIndexParamsSize                    ParamItem `refreshable:"true"`
-	MaxResultEntries                      ParamItem `refreshable:"true"`
-	EnableCachedServiceProvider           ParamItem `refreshable:"true"`
-	MaxSearchAggregationResultEntries     ParamItem `refreshable:"true"`
+
+	ShardLeaderCacheInterval          ParamItem `refreshable:"false"`
+	ReplicaSelectionPolicy            ParamItem `refreshable:"false"`
+	CheckQueryNodeHealthInterval      ParamItem `refreshable:"false"`
+	CostMetricsExpireTime             ParamItem `refreshable:"false"`
+	CheckWorkloadRequestNum           ParamItem `refreshable:"false"`
+	WorkloadToleranceFactor           ParamItem `refreshable:"false"`
+	RetryTimesOnReplica               ParamItem `refreshable:"true"`
+	RetryTimesOnHealthCheck           ParamItem `refreshable:"true"`
+	ReplicaBlacklistDuration          ParamItem `refreshable:"true"`
+	ReplicaBlacklistCleanupInterval   ParamItem `refreshable:"true"`
+	PartitionNameRegexp               ParamItem `refreshable:"true"`
+	MustUsePartitionKey               ParamItem `refreshable:"true"`
+	SkipAutoIDCheck                   ParamItem `refreshable:"true"`
+	SkipPartitionKeyCheck             ParamItem `refreshable:"true"`
+	ResolveAliasForPrivilege          ParamItem `refreshable:"true"`
+	MaxVarCharLength                  ParamItem `refreshable:"false"`
+	MaxTextLength                     ParamItem `refreshable:"false"`
+	MaxArrayCapacity                  ParamItem `refreshable:"true"`
+	MaxIndexParamsSize                ParamItem `refreshable:"true"`
+	MaxResultEntries                  ParamItem `refreshable:"true"`
+	EnableCachedServiceProvider       ParamItem `refreshable:"true"`
+	MaxSearchAggregationResultEntries ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
