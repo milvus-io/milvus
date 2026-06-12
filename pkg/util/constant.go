@@ -73,6 +73,8 @@ const (
 	RoleConfigPrivilege  = "privilege"
 
 	PreserveFieldIdsKey = "preserve_field_ids"
+
+	PrivilegeExpr = "PrivilegeExpr"
 )
 
 var (
@@ -171,6 +173,8 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionReadWrite.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionAdmin.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String()),
+
+			MetaStore2API(PrivilegeExpr),
 		},
 		commonpb.ObjectType_User.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateUser.String()),
@@ -423,6 +427,7 @@ var (
 			commonpb.ObjectPrivilege_PrivilegeDropPrivilegeGroup.String(),
 			commonpb.ObjectPrivilege_PrivilegeOperatePrivilegeGroup.String(),
 			commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String(),
+			PrivilegeExpr,
 		})...,
 	)
 )
@@ -477,8 +482,7 @@ func MetaStore2API(name string) string {
 }
 
 func PrivilegeNameForAPI(name string) string {
-	_, ok := commonpb.ObjectPrivilege_value[name]
-	if !ok {
+	if !isPrivilegeNameForMetastoreDefined(name) {
 		if strings.HasPrefix(name, PrivilegeGroupWord) {
 			return typeutil.After(name, PrivilegeGroupWord)
 		}
@@ -490,17 +494,24 @@ func PrivilegeNameForAPI(name string) string {
 func PrivilegeNameForMetastore(name string) string {
 	// check if name is single privilege
 	dbPrivilege := PrivilegeWord + name
-	_, ok := commonpb.ObjectPrivilege_value[dbPrivilege]
-	if !ok {
+	if !isPrivilegeNameForMetastoreDefined(dbPrivilege) {
 		// check if name is privilege group
 		dbPrivilege := PrivilegeGroupWord + name
-		_, ok := commonpb.ObjectPrivilege_value[dbPrivilege]
-		if !ok {
+		if !isPrivilegeNameForMetastoreDefined(dbPrivilege) {
 			return ""
 		}
 		return dbPrivilege
 	}
 	return dbPrivilege
+}
+
+func isPrivilegeNameForMetastoreDefined(name string) bool {
+	if _, ok := commonpb.ObjectPrivilege_value[name]; ok {
+		return true
+	}
+	// TODO: drop this special case once PrivilegeExpr is promoted to a proto enum value
+	// in milvus-io/milvus-proto (commonpb.ObjectPrivilege_PrivilegeExpr).
+	return name == PrivilegeExpr
 }
 
 // check if the name is defined by built in privileges or privilege groups in system
