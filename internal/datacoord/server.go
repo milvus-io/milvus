@@ -35,11 +35,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -130,6 +132,7 @@ type Server struct {
 	snapshotManager SnapshotManager
 
 	compactionTrigger        trigger
+	shardSplitManager        *shardSplitManager
 	compactionInspector      CompactionInspector
 	compactionTriggerManager TriggerManager
 
@@ -319,6 +322,11 @@ func (s *Server) initDataCoord() error {
 	if err != nil {
 		return err
 	}
+	if err = s.initShardSplitManager(); err != nil {
+		return err
+	}
+	log.Info("init shard split manager done")
+
 	s.initCompaction()
 	mlog.Info(s.ctx, "init compaction done")
 
@@ -671,11 +679,32 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 
 func (s *Server) initCompaction() {
 	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
+	if s.shardSplitManager != nil {
+		// freeze compaction on the channels referenced by an active shard
+		// split task for the whole split window, and let the split preempt
+		// the in-flight compaction instead of waiting behind it.
+		cph.setChannelSplittingChecker(s.shardSplitManager.IsVChannelSplitting)
+		s.shardSplitManager.setCompactionPreempter(cph)
+	}
 	cph.loadMeta()
 	s.compactionInspector = cph
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexEngineVersionManager)
 	s.compactionTriggerManager.InitForceMergeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
 	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
+}
+
+// initShardSplitManager creates the shard split manager. The split tasks
+// are recovered from the catalog, so an in-flight split resumes after a
+// datacoord restart. The range-routing planner is not wired yet: tasks
+// stay in the abortable Preparing state until it lands.
+func (s *Server) initShardSplitManager() error {
+	manager, err := newShardSplitManager(s.ctx, s.meta, s.meta.catalog, s.allocator,
+		streaming.WAL(), snmanager.StaticStreamingNodeManager, nil)
+	if err != nil {
+		return err
+	}
+	s.shardSplitManager = manager
+	return nil
 }
 
 func (s *Server) stopCompaction() {
@@ -698,6 +727,10 @@ func (s *Server) startCompaction() {
 
 	if s.compactionTrigger != nil {
 		s.compactionTrigger.start()
+	}
+
+	if s.shardSplitManager != nil {
+		s.shardSplitManager.Start()
 	}
 
 	if s.compactionTriggerManager != nil {
@@ -1065,6 +1098,9 @@ func (s *Server) Stop() error {
 	s.copySegmentChecker.Close()
 	mlog.Info(s.ctx, "datacoord copy segment inspector and checker stopped")
 
+	if s.shardSplitManager != nil {
+		s.shardSplitManager.Stop()
+	}
 	s.stopCompaction()
 	mlog.Info(s.ctx, "datacoord compaction stopped")
 
