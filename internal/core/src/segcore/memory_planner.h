@@ -124,6 +124,9 @@ int64_t
 FieldDataLoadBatchTargetBytes();
 
 int64_t
+FieldDataLoadBatchSplitTargetBytes();
+
+int64_t
 FieldDataReadWindowBytes();
 
 int64_t

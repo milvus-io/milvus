@@ -17,8 +17,10 @@
 #include <nlohmann/json.hpp>
 #include <stdint.h>
 #include <stdlib.h>
+#include <algorithm>
 #include <cstddef>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <string>
@@ -708,11 +710,17 @@ TYPED_TEST_SUITE_P(HybridIndexTestInverted);
 
 TYPED_TEST_P(HybridIndexTestInverted,
              ResourceEstimateUsesInternalInvertedIndexType) {
-    auto stream_budget =
-        storage::TransientMemoryBudget::GetEntryStreamBudget().CapacityBytes();
-    auto stream_overhead =
-        static_cast<uint64_t>(stream_budget + storage::kTailMergeGrace);
-    auto index_size = stream_overhead + 1024;
+    auto stream_budget = storage::EntryStreamMaxTransientBytes();
+    auto index_size = static_cast<uint64_t>(stream_budget);
+    if (stream_budget == std::numeric_limits<size_t>::max() ||
+        index_size > std::numeric_limits<uint64_t>::max() -
+                         storage::kTailMergeGrace - 1024) {
+        index_size = storage::kTailMergeGrace + 1024;
+    } else {
+        index_size += 1024;
+    }
+    auto stream_overhead = static_cast<uint64_t>(
+        std::min<size_t>(index_size, storage::EntryStreamMaxTransientBytes()));
     std::map<std::string, std::string> index_params{
         {"index_type", milvus::index::HYBRID_INDEX_TYPE},
         {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
