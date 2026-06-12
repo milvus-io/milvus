@@ -24,12 +24,20 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// splitVChannelAllocator allocates additional vchannels for an existing
+// collection; implemented by snmanager.StaticStreamingNodeManager.
+type splitVChannelAllocator interface {
+	AllocVirtualChannels(ctx context.Context, param balancer.AllocVChannelParam) ([]string, error)
+}
 
 // shardSplitManager detects the shards that need a split and drives the
 // persisted split task FSM. Every threshold it relies on is a refreshable
@@ -39,9 +47,12 @@ type shardSplitManager struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	meta      *meta
-	catalog   metastore.DataCoordCatalog
-	allocator allocator.Allocator
+	meta              *meta
+	catalog           metastore.DataCoordCatalog
+	allocator         allocator.Allocator
+	wal               streaming.WALAccesser
+	vchannelAllocator splitVChannelAllocator
+	planner           splitPlanner
 
 	tasks *typeutil.ConcurrentMap[int64, *datapb.SplitShardTask] // task id -> task
 }
@@ -56,19 +67,33 @@ type shardStats struct {
 
 // newShardSplitManager recovers the split tasks from the catalog so an
 // in-flight task resumes after a datacoord restart.
-func newShardSplitManager(ctx context.Context, meta *meta, catalog metastore.DataCoordCatalog, allocator allocator.Allocator) (*shardSplitManager, error) {
+func newShardSplitManager(
+	ctx context.Context,
+	meta *meta,
+	catalog metastore.DataCoordCatalog,
+	allocator allocator.Allocator,
+	wal streaming.WALAccesser,
+	vchannelAllocator splitVChannelAllocator,
+	planner splitPlanner,
+) (*shardSplitManager, error) {
 	tasks, err := catalog.ListSplitShardTask(ctx)
 	if err != nil {
 		return nil, err
 	}
+	if planner == nil {
+		planner = unimplementedSplitPlanner{}
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	m := &shardSplitManager{
-		ctx:       ctx,
-		cancel:    cancel,
-		meta:      meta,
-		catalog:   catalog,
-		allocator: allocator,
-		tasks:     typeutil.NewConcurrentMap[int64, *datapb.SplitShardTask](),
+		ctx:               ctx,
+		cancel:            cancel,
+		meta:              meta,
+		catalog:           catalog,
+		allocator:         allocator,
+		wal:               wal,
+		vchannelAllocator: vchannelAllocator,
+		planner:           planner,
+		tasks:             typeutil.NewConcurrentMap[int64, *datapb.SplitShardTask](),
 	}
 	for _, task := range tasks {
 		m.tasks.Insert(task.GetTaskId(), task)
@@ -91,6 +116,7 @@ func (m *shardSplitManager) Start() {
 				return
 			case <-time.After(interval):
 				m.detectOnce()
+				m.advanceTasks()
 			}
 		}
 	}()
