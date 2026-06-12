@@ -108,8 +108,7 @@ WriteVortexFile(const std::string& path,
 
 std::vector<int32_t>
 CollectIntScanValues(VortexColumn& column, int64_t start, int64_t length) {
-    auto options =
-        ChunkedColumnInterface::ScanOptions::ForData(start, length, 3);
+    auto options = ChunkedColumnInterface::ScanOptions::ForData(start, length);
 
     auto result = column.Scan(nullptr, options);
     EXPECT_NE(result, nullptr);
@@ -131,7 +130,6 @@ CollectStringScanValues(VortexColumn& column, int64_t start, int64_t length) {
     auto options = ChunkedColumnInterface::ScanOptions::ForData(
         start,
         length,
-        3,
         ChunkedColumnInterface::ScanProjection::Data,
         ChunkedColumnInterface::ScanValueKind::StringView);
 
@@ -201,7 +199,7 @@ ExpectedValid(int64_t row) {
 void
 CheckNullableFilteredScanReturnsValidity(VortexColumn& column) {
     auto options = ChunkedColumnInterface::ScanOptions::ForUnary(
-        0, kNullableRows, proto::plan::OpType::GreaterThan, IntValue(7000), 2);
+        0, kNullableRows, proto::plan::OpType::GreaterThan, IntValue(7000));
     auto scan_result = column.Scan(nullptr, options);
     ASSERT_NE(scan_result, nullptr);
 
@@ -230,7 +228,7 @@ CheckNullableFilteredScanReturnsValidity(VortexColumn& column) {
               (std::vector<int64_t>{1, 5, 8, 9, 10, 11, 12, 13, 14, 15}));
 
     auto offset_options = ChunkedColumnInterface::ScanOptions::ForUnary(
-        3, 10, proto::plan::OpType::GreaterThan, IntValue(7000), 2);
+        3, 10, proto::plan::OpType::GreaterThan, IntValue(7000));
     EXPECT_EQ(CollectFilteredRowIdPayload(column, offset_options),
               (std::vector<int64_t>{5, 8, 9, 10, 11, 12}));
 
@@ -590,9 +588,9 @@ MakeNullableColumn(
 }
 
 void
-CheckValidityOnlyScan(VortexColumn& column) {
-    auto options = ChunkedColumnInterface::ScanOptions::ForValidityOnly(
-        0, kNullableRows, 3);
+CheckNoDataScan(VortexColumn& column) {
+    auto options =
+        ChunkedColumnInterface::ScanOptions::ForNoData(0, kNullableRows);
 
     auto result = column.Scan(nullptr, options);
     ASSERT_NE(result, nullptr);
@@ -689,7 +687,6 @@ CheckDataScan(VortexColumn& column, DataType type) {
     auto options = ChunkedColumnInterface::ScanOptions::ForData(
         0,
         kNullableRows,
-        5,
         ChunkedColumnInterface::ScanProjection::Data,
         ScanKindForType(type));
 
@@ -830,13 +827,13 @@ TEST(VortexColumnTest, UnsupportedInt32FilteredScanThrows) {
         FieldId(kIntFieldId), int_meta, properties, column_group);
 
     auto unary_options = ChunkedColumnInterface::ScanOptions::ForUnary(
-        3, 10, proto::plan::OpType::GreaterThan, IntValue(80), 2);
+        3, 10, proto::plan::OpType::GreaterThan, IntValue(80));
     EXPECT_FALSE(int_column.SupportsScanPushdown(unary_options));
     EXPECT_THROW(CollectFilteredRowIdPayload(int_column, unary_options),
                  std::exception);
 
     auto range_options = ChunkedColumnInterface::ScanOptions::ForBinaryRange(
-        2, 10, IntValue(40), false, IntValue(90), true, 2);
+        2, 10, IntValue(40), false, IntValue(90), true);
     EXPECT_FALSE(int_column.SupportsScanPushdown(range_options));
     EXPECT_THROW(CollectFilteredRowIdPayload(int_column, range_options),
                  std::exception);
@@ -884,7 +881,7 @@ TEST(VortexColumnTest, MultiFileTakeAndScan) {
     EXPECT_EQ(scan_values, (std::vector<int32_t>{180, 190, 200, 210}));
 
     auto cross_chunk_options =
-        ChunkedColumnInterface::ScanOptions::ForData(14, 5, 2);
+        ChunkedColumnInterface::ScanOptions::ForData(14, 5);
     auto scan_result = int_column.Scan(nullptr, cross_chunk_options);
     ASSERT_NE(scan_result, nullptr);
 
@@ -899,13 +896,13 @@ TEST(VortexColumnTest, MultiFileTakeAndScan) {
         cross_chunk_values.insert(
             cross_chunk_values.end(), data, data + batch.size);
     }
-    EXPECT_EQ(batch_starts, (std::vector<int64_t>{14, 16, 18}));
-    EXPECT_EQ(batch_sizes, (std::vector<int64_t>{2, 2, 1}));
+    EXPECT_EQ(batch_starts, (std::vector<int64_t>{14, 16}));
+    EXPECT_EQ(batch_sizes, (std::vector<int64_t>{2, 3}));
     EXPECT_EQ(cross_chunk_values,
               (std::vector<int32_t>{140, 150, 160, 170, 180}));
 
     auto filter_options = ChunkedColumnInterface::ScanOptions::ForUnary(
-        14, 6, proto::plan::OpType::GreaterThan, IntValue(160), 2);
+        14, 6, proto::plan::OpType::GreaterThan, IntValue(160));
     EXPECT_THROW(CollectFilteredRowIdPayload(int_column, filter_options),
                  std::exception);
 
@@ -958,11 +955,11 @@ TEST(VortexColumnTest, MultiFieldColumnsShareColumnGroup) {
               (std::vector<std::string>{"v4", "v5", "v6", "v7"}));
 
     auto string_filter_options = ChunkedColumnInterface::ScanOptions::ForUnary(
-        0, 16, proto::plan::OpType::Equal, StringValue("v4"), 2);
+        0, 16, proto::plan::OpType::Equal, StringValue("v4"));
     EXPECT_TRUE(string_column.SupportsScanPushdown(string_filter_options));
 
     auto filter_options = ChunkedColumnInterface::ScanOptions::ForBinaryRange(
-        0, 16, IntValue(30), true, IntValue(60), true, 2);
+        0, 16, IntValue(30), true, IntValue(60), true);
     EXPECT_FALSE(int_column.SupportsScanPushdown(filter_options));
     EXPECT_THROW(CollectFilteredRowIdPayload(int_column, filter_options),
                  std::exception);
@@ -992,7 +989,7 @@ TEST(VortexColumnTest, NullableAllScalarTypesScanCorrectness) {
 
         ASSERT_EQ(column.NumRows(), kNullableRows);
         ASSERT_TRUE(column.IsNullable());
-        CheckValidityOnlyScan(column);
+        CheckNoDataScan(column);
         CheckDataScan(column, type);
         if (type == DataType::INT64) {
             CheckNullableFilteredScanReturnsValidity(column);

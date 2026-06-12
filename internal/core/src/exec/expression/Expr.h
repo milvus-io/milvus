@@ -323,7 +323,7 @@ class Expr {
 
     static bool
     IsDenseOffsetInputForScan(const OffsetVector* input,
-                              int64_t max_batch_rows) {
+                              int64_t max_scan_span_hint) {
         if (input == nullptr || input->empty()) {
             return false;
         }
@@ -333,7 +333,7 @@ class Expr {
         const auto span = static_cast<int64_t>((*input)[input->size() - 1]) -
                           static_cast<int64_t>((*input)[0]) + 1;
         return span <=
-               std::max<int64_t>(max_batch_rows,
+               std::max<int64_t>(max_scan_span_hint,
                                  4 * static_cast<int64_t>(input->size()));
     }
 
@@ -567,7 +567,6 @@ class SegmentExpr : public Expr {
         auto options = ChunkedColumnInterface::ScanOptions::ForData(
             current_data_global_pos_,
             active_count_ - current_data_global_pos_,
-            batch_size_,
             projection,
             DataScanValueKind<T>());
         data_scan_cursor_ = column->Scan(op_ctx_, options);
@@ -1081,7 +1080,6 @@ class SegmentExpr : public Expr {
         auto options = ChunkedColumnInterface::ScanOptions::ForData(
             scan_start,
             scan_length,
-            batch_size_,
             ChunkedColumnInterface::ScanProjection::Data,
             DataScanValueKind<T>());
         auto cursor = column->Scan(op_ctx_, options);
@@ -2437,7 +2435,7 @@ class SegmentExpr : public Expr {
         TargetBitmap valid_result(batch_size);
         valid_result.set();
         if (!InitDataScanCursorIfNeeded<T>(
-                ChunkedColumnInterface::ScanProjection::ValidityOnly)) {
+                ChunkedColumnInterface::ScanProjection::NoData)) {
             return ProcessDataChunksForValidByChunkFallback<T>();
         }
         int64_t processed_size = 0;

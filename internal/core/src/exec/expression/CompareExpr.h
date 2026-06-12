@@ -374,13 +374,11 @@ class PhyCompareFilterExpr : public Expr {
         auto left_options = ChunkedColumnInterface::ScanOptions::ForData(
             scan_start,
             scan_length,
-            batch_size_,
             ChunkedColumnInterface::ScanProjection::Data,
             DataScanValueKind<T>());
         auto right_options = ChunkedColumnInterface::ScanOptions::ForData(
             scan_start,
             scan_length,
-            batch_size_,
             ChunkedColumnInterface::ScanProjection::Data,
             DataScanValueKind<U>());
         auto left_cursor = left_column->Scan(op_ctx_, left_options);
@@ -760,14 +758,12 @@ class PhyCompareFilterExpr : public Expr {
                     ChunkedColumnInterface::ScanOptions::ForData(
                         start,
                         length,
-                        batch_size_,
                         ChunkedColumnInterface::ScanProjection::Data,
                         DataScanValueKind<T>());
                 auto right_options =
                     ChunkedColumnInterface::ScanOptions::ForData(
                         start,
                         length,
-                        batch_size_,
                         ChunkedColumnInterface::ScanProjection::Data,
                         DataScanValueKind<U>());
                 left_data_cursor_ = left_column->Scan(op_ctx_, left_options);

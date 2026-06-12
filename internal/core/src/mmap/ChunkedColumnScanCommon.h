@@ -123,6 +123,9 @@ class ScanCursor {
  public:
     virtual ~ScanCursor() = default;
 
+    // Return the next natural batch from the underlying source. ScanOptions
+    // does not carry an upper-layer batch-size hint; callers should consume
+    // the returned batch directly or keep their own position inside it.
     virtual bool
     Next(ScanBatch* out) = 0;
 };
@@ -132,13 +135,17 @@ enum class ScanOutput {
     // unknown rows; ScanBatch::validity is aligned with row_ids.
     RowIds,
     // Dense data payload: ScanBatch::values contains values over the batch
-    // range, optionally with validity only when requested by projection.
+    // range unless projection asks to omit data.
     Data,
 };
 
 enum class ScanProjection {
+    // Return ScanBatch::values for dense data scans.
     Data,
-    ValidityOnly,
+    // Omit ScanBatch::values. Dense data scans still return validity over the
+    // batch range; filter pushdown scans return row_ids plus row-aligned
+    // validity.
+    NoData,
 };
 
 enum class ScanPredicate {
@@ -154,7 +161,6 @@ struct ScanOptions {
                 ScanPredicate predicate,
                 int64_t start_offset,
                 int64_t length,
-                int64_t max_batch_rows,
                 ScanProjection projection = ScanProjection::Data,
                 ScanValueKind value_kind = ScanValueKind::Default,
                 proto::plan::OpType op_type = proto::plan::OpType::Invalid,
@@ -167,7 +173,6 @@ struct ScanOptions {
           predicate(predicate),
           start_offset(start_offset),
           length(length),
-          max_batch_rows(max_batch_rows),
           projection(projection),
           value_kind(value_kind),
           op_type(op_type),
@@ -181,27 +186,23 @@ struct ScanOptions {
     static ScanOptions
     ForData(int64_t start_offset,
             int64_t length,
-            int64_t max_batch_rows,
             ScanProjection projection = ScanProjection::Data,
             ScanValueKind value_kind = ScanValueKind::Default) {
         return ScanOptions(ScanOutput::Data,
                            ScanPredicate::None,
                            start_offset,
                            length,
-                           max_batch_rows,
                            projection,
                            value_kind);
     }
 
     static ScanOptions
-    ForValidityOnly(int64_t start_offset,
-                    int64_t length,
-                    int64_t max_batch_rows,
-                    ScanValueKind value_kind = ScanValueKind::Default) {
+    ForNoData(int64_t start_offset,
+              int64_t length,
+              ScanValueKind value_kind = ScanValueKind::Default) {
         return ForData(start_offset,
                        length,
-                       max_batch_rows,
-                       ScanProjection::ValidityOnly,
+                       ScanProjection::NoData,
                        value_kind);
     }
 
@@ -209,14 +210,12 @@ struct ScanOptions {
     ForUnary(int64_t start_offset,
              int64_t length,
              proto::plan::OpType op_type,
-             const proto::plan::GenericValue& value,
-             int64_t max_batch_rows = 8192) {
+             const proto::plan::GenericValue& value) {
         return ScanOptions(ScanOutput::RowIds,
                            ScanPredicate::Unary,
                            start_offset,
                            length,
-                           max_batch_rows,
-                           ScanProjection::Data,
+                           ScanProjection::NoData,
                            ScanValueKind::Default,
                            op_type,
                            value);
@@ -228,14 +227,12 @@ struct ScanOptions {
                    const proto::plan::GenericValue& lower_value,
                    bool lower_inclusive,
                    const proto::plan::GenericValue& upper_value,
-                   bool upper_inclusive,
-                   int64_t max_batch_rows = 8192) {
+                   bool upper_inclusive) {
         return ScanOptions(ScanOutput::RowIds,
                            ScanPredicate::BinaryRange,
                            start_offset,
                            length,
-                           max_batch_rows,
-                           ScanProjection::Data,
+                           ScanProjection::NoData,
                            ScanValueKind::Default,
                            proto::plan::OpType::Invalid,
                            {},
@@ -249,7 +246,6 @@ struct ScanOptions {
     ScanPredicate predicate = ScanPredicate::None;
     int64_t start_offset = 0;
     int64_t length = 0;
-    int64_t max_batch_rows = 8192;
     ScanProjection projection = ScanProjection::Data;
     ScanValueKind value_kind = ScanValueKind::Default;
     proto::plan::OpType op_type = proto::plan::OpType::Invalid;
