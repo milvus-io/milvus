@@ -1760,7 +1760,7 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).Return(&model.Database{
 			Name: "foo",
 			ID:   1,
-		}, nil).Once()
+		}, nil).Twice()
 		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{
 			util.DefaultDBID: {1, 2},
 		}).Once()
