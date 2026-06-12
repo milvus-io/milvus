@@ -701,6 +701,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	operators = append(operators,
 		UpdateManifest(req.GetSegmentID(), req.GetManifestPath()),
 		UpdateStartPosition(req.GetStartPositions()),
+		UpdateDeleteApplyStartAfterTimetick(req.GetSegmentID(), req.GetDeleteApplyStartAfterTimetick()),
 		UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
 		// The request ships the complete cumulative Statistics published
 		// from the growing-segment collector; the receiver stores it
@@ -822,15 +823,16 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 	segments := make([]*SegmentInfo, 0, len(req.GetSegments()))
 	for _, seg2Drop := range req.GetSegments() {
 		info := &datapb.SegmentInfo{
-			ID:            seg2Drop.GetSegmentID(),
-			CollectionID:  seg2Drop.GetCollectionID(),
-			InsertChannel: channel,
-			Binlogs:       seg2Drop.GetField2BinlogPaths(),
-			Statslogs:     seg2Drop.GetField2StatslogPaths(),
-			Deltalogs:     seg2Drop.GetDeltalogs(),
-			StartPosition: seg2Drop.GetStartPosition(),
-			DmlPosition:   seg2Drop.GetCheckPoint(),
-			NumOfRows:     seg2Drop.GetNumOfRows(),
+			ID:                            seg2Drop.GetSegmentID(),
+			CollectionID:                  seg2Drop.GetCollectionID(),
+			InsertChannel:                 channel,
+			Binlogs:                       seg2Drop.GetField2BinlogPaths(),
+			Statslogs:                     seg2Drop.GetField2StatslogPaths(),
+			Deltalogs:                     seg2Drop.GetDeltalogs(),
+			StartPosition:                 seg2Drop.GetStartPosition(),
+			DmlPosition:                   seg2Drop.GetCheckPoint(),
+			NumOfRows:                     seg2Drop.GetNumOfRows(),
+			DeleteApplyStartAfterTimetick: seg2Drop.GetStartPosition().GetTimestamp(),
 		}
 		segment := NewSegmentInfo(info)
 		segments = append(segments, segment)
@@ -1127,16 +1129,17 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 		}
 
 		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
-			ID:                  segment.ID,
-			PartitionID:         segment.PartitionID,
-			CollectionID:        segment.CollectionID,
-			InsertChannel:       segment.InsertChannel,
-			NumOfRows:           rowCount,
-			Level:               segment.GetLevel(),
-			IsSorted:            segment.GetIsSorted(),
-			IsSortedByNamespace: segment.GetIsSortedByNamespace(),
-			ManifestPath:        segment.GetManifestPath(),
-			DataVersion:         segment.GetDataVersion(),
+			ID:                            segment.ID,
+			PartitionID:                   segment.PartitionID,
+			CollectionID:                  segment.CollectionID,
+			InsertChannel:                 segment.InsertChannel,
+			NumOfRows:                     rowCount,
+			Level:                         segment.GetLevel(),
+			IsSorted:                      segment.GetIsSorted(),
+			IsSortedByNamespace:           segment.GetIsSortedByNamespace(),
+			ManifestPath:                  segment.GetManifestPath(),
+			DataVersion:                   segment.GetDataVersion(),
+			DeleteApplyStartAfterTimetick: segment.GetDeleteApplyStartAfterTimetick(),
 		})
 	}
 

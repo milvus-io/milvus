@@ -679,16 +679,17 @@ func toMsgPositionWithWALNames(channel string, startPositions []*commonpb.KeyDat
 // trimSegmentInfo returns a shallow copy of datapb.SegmentInfo and sets ALL binlog info to nil
 func trimSegmentInfo(info *datapb.SegmentInfo) *datapb.SegmentInfo {
 	return &datapb.SegmentInfo{
-		ID:             info.ID,
-		CollectionID:   info.CollectionID,
-		PartitionID:    info.PartitionID,
-		InsertChannel:  info.InsertChannel,
-		NumOfRows:      info.NumOfRows,
-		State:          info.State,
-		MaxRowNum:      info.MaxRowNum,
-		LastExpireTime: info.LastExpireTime,
-		StartPosition:  info.StartPosition,
-		DmlPosition:    info.DmlPosition,
+		ID:                            info.ID,
+		CollectionID:                  info.CollectionID,
+		PartitionID:                   info.PartitionID,
+		InsertChannel:                 info.InsertChannel,
+		NumOfRows:                     info.NumOfRows,
+		State:                         info.State,
+		MaxRowNum:                     info.MaxRowNum,
+		LastExpireTime:                info.LastExpireTime,
+		StartPosition:                 info.StartPosition,
+		DmlPosition:                   info.DmlPosition,
+		DeleteApplyStartAfterTimetick: info.DeleteApplyStartAfterTimetick,
 	}
 }
 
@@ -991,23 +992,24 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 			uncompressedJSONStats[id] = uncompressJSONStats(h, segInfo, jsonStats)
 		}
 		return &datapb.SegmentDescription{
-			SegmentId:         segInfo.GetID(),
-			SegmentLevel:      segInfo.GetLevel(),
-			PartitionId:       segInfo.GetPartitionID(),
-			ChannelName:       segInfo.GetInsertChannel(),
-			NumOfRows:         segInfo.GetNumOfRows(),
-			StartPosition:     segInfo.GetStartPosition(),
-			DmlPosition:       segInfo.GetDmlPosition(),
-			StorageVersion:    segInfo.GetStorageVersion(),
-			IsSorted:          segInfo.GetIsSorted(),
-			Binlogs:           segInfo.GetBinlogs(),
-			Deltalogs:         segInfo.GetDeltalogs(),
-			Statslogs:         segInfo.GetStatslogs(),
-			Bm25Statslogs:     segInfo.GetBm25Statslogs(),
-			IndexFiles:        indexesFiles,
-			JsonKeyIndexFiles: uncompressedJSONStats,
-			TextIndexFiles:    segInfo.GetTextStatsLogs(),
-			ManifestPath:      segInfo.GetManifestPath(),
+			SegmentId:                     segInfo.GetID(),
+			SegmentLevel:                  segInfo.GetLevel(),
+			PartitionId:                   segInfo.GetPartitionID(),
+			ChannelName:                   segInfo.GetInsertChannel(),
+			NumOfRows:                     segInfo.GetNumOfRows(),
+			StartPosition:                 segInfo.GetStartPosition(),
+			DmlPosition:                   segInfo.GetDmlPosition(),
+			DeleteApplyStartAfterTimetick: segInfo.GetDeleteApplyStartAfterTimetick(),
+			StorageVersion:                segInfo.GetStorageVersion(),
+			IsSorted:                      segInfo.GetIsSorted(),
+			Binlogs:                       segInfo.GetBinlogs(),
+			Deltalogs:                     segInfo.GetDeltalogs(),
+			Statslogs:                     segInfo.GetStatslogs(),
+			Bm25Statslogs:                 segInfo.GetBm25Statslogs(),
+			IndexFiles:                    indexesFiles,
+			JsonKeyIndexFiles:             uncompressedJSONStats,
+			TextIndexFiles:                segInfo.GetTextStatsLogs(),
+			ManifestPath:                  segInfo.GetManifestPath(),
 		}
 	})
 

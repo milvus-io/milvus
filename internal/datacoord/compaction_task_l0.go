@@ -651,10 +651,10 @@ func (t *l0CompactionTask) publishDataViewAfterL0Compact(ctx context.Context) {
 	if _, err := meta.dataViewManager.OnL0Compact(ctx, L0CompactDataViewEvent{
 		CollectionID: task.GetCollectionID(),
 	}); err != nil {
-		log.Ctx(ctx).Warn("failed to refresh DataView delete timetick after L0 compaction",
-			zap.Int64("planID", task.GetPlanID()),
-			zap.Int64("collectionID", task.GetCollectionID()),
-			zap.Error(err))
+		mlog.Warn(ctx, "failed to refresh DataView delete timetick after L0 compaction",
+			mlog.Int64("planID", task.GetPlanID()),
+			mlog.FieldCollectionID(task.GetCollectionID()),
+			mlog.Err(err))
 	}
 }
 

@@ -160,10 +160,15 @@ func newDataViewTestSegment(collectionID, partitionID, segmentID int64, channel 
 		InsertChannel: channel,
 		State:         commonpb.SegmentState_Flushed,
 		Level:         datapb.SegmentLevel_L1,
+		StartPosition: &msgpb.MsgPosition{
+			ChannelName: channel,
+			Timestamp:   dmlTs,
+		},
 		DmlPosition: &msgpb.MsgPosition{
 			ChannelName: channel,
 			Timestamp:   dmlTs,
 		},
+		DeleteApplyStartAfterTimetick: dmlTs,
 	}
 }
 
@@ -427,7 +432,7 @@ func TestDataViewManagerL0CompactRefreshesDeleteTimetickWithoutVersionBump(t *te
 	store.segments[101] = newDataViewTestSegment(1, 10, 101, "ch-1", 900)
 	require.NoError(t, noErrorVersion(manager.OnFlush(ctx, FlushDataViewEvent{CollectionID: 1, SegmentIDs: []int64{100, 101}})))
 
-	store.segments[101].DmlPosition.Timestamp = 800
+	store.segments[101].DeleteApplyStartAfterTimetick = 800
 	version, err := manager.OnL0Compact(ctx, L0CompactDataViewEvent{CollectionID: 1})
 	require.NoError(t, err)
 	requireDataVersion(t, version, 1, 0)
@@ -439,6 +444,38 @@ func TestDataViewManagerL0CompactRefreshesDeleteTimetickWithoutVersionBump(t *te
 	require.Equal(t, uint64(800), view.GetShards()[0].GetDeleteApplyStartAfterTimetick())
 	require.Equal(t, int64(1), view.GetDataVersion().GetStreamingVersion())
 	require.Equal(t, int64(0), view.GetDataVersion().GetCompactVersion())
+}
+
+func TestDataViewManagerDeleteTimetickUsesSegmentFieldBeforeDmlPosition(t *testing.T) {
+	ctx := context.Background()
+	manager, _, store := newTestDataViewManager()
+	store.segments[100] = newDataViewTestSegment(1, 10, 100, "ch-1", 1000)
+	store.segments[100].DmlPosition.Timestamp = 5000
+	store.segments[100].DeleteApplyStartAfterTimetick = 900
+
+	require.NoError(t, noErrorVersion(manager.OnFlush(ctx, FlushDataViewEvent{CollectionID: 1, SegmentIDs: []int64{100}})))
+
+	view, err := manager.LatestVisibleDataView(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, uint64(900), view.GetShards()[0].GetDeleteApplyStartAfterTimetick())
+}
+
+func TestDataViewManagerDeleteTimetickFallbackForLegacySegments(t *testing.T) {
+	ctx := context.Background()
+	manager, _, store := newTestDataViewManager()
+	store.segments[100] = newDataViewTestSegment(1, 10, 100, "ch-1", 1000)
+	store.segments[100].DeleteApplyStartAfterTimetick = 0
+	store.segments[100].CommitTimestamp = 900
+	store.segments[101] = newDataViewTestSegment(1, 10, 101, "ch-1", 1100)
+	store.segments[101].DeleteApplyStartAfterTimetick = 0
+	store.segments[101].StartPosition.Timestamp = 800
+	store.segments[101].DmlPosition.Timestamp = 7000
+
+	require.NoError(t, noErrorVersion(manager.OnFlush(ctx, FlushDataViewEvent{CollectionID: 1, SegmentIDs: []int64{100, 101}})))
+
+	view, err := manager.LatestVisibleDataView(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, uint64(800), view.GetShards()[0].GetDeleteApplyStartAfterTimetick())
 }
 
 func TestDataViewManagerDropPartitionAdvancesCompactVersion(t *testing.T) {

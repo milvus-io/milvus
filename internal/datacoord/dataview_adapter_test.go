@@ -47,13 +47,15 @@ func TestDataViewSegmentStoreSelectSegmentsSkipsDroppedPartition(t *testing.T) {
 		Partitions: []int64{10},
 	})
 	m.segments.SetSegment(100, NewSegmentInfo(&datapb.SegmentInfo{
-		ID:            100,
-		CollectionID:  1,
-		PartitionID:   10,
-		InsertChannel: "ch-1",
-		State:         commonpb.SegmentState_Flushed,
-		Level:         datapb.SegmentLevel_L1,
-		DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 1000},
+		ID:                            100,
+		CollectionID:                  1,
+		PartitionID:                   10,
+		InsertChannel:                 "ch-1",
+		State:                         commonpb.SegmentState_Flushed,
+		Level:                         datapb.SegmentLevel_L1,
+		StartPosition:                 &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
+		DmlPosition:                   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 1000},
+		DeleteApplyStartAfterTimetick: 500,
 	}))
 	m.segments.SetSegment(101, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            101,
@@ -70,6 +72,8 @@ func TestDataViewSegmentStoreSelectSegmentsSkipsDroppedPartition(t *testing.T) {
 
 	require.Len(t, segments, 1)
 	require.Equal(t, int64(100), segments[0].GetID())
+	require.Equal(t, uint64(500), segments[0].GetStartPosition().GetTimestamp())
+	require.Equal(t, uint64(500), segments[0].GetDeleteApplyStartAfterTimetick())
 }
 
 func TestDataViewRecoveryUsesCollectionPartitions(t *testing.T) {

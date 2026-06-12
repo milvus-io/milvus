@@ -87,17 +87,19 @@ func newDataViewSegment(segment *SegmentInfo) *dataview.Segment {
 		return nil
 	}
 	return &dataview.Segment{
-		ID:                  segment.GetID(),
-		CollectionID:        segment.GetCollectionID(),
-		PartitionID:         segment.GetPartitionID(),
-		InsertChannel:       segment.GetInsertChannel(),
-		State:               segment.GetState(),
-		Level:               segment.GetLevel(),
-		IsImporting:         segment.GetIsImporting(),
-		IsInvisible:         segment.GetIsInvisible(),
-		DmlPosition:         segment.GetDmlPosition(),
-		CommitTimestamp:     segment.GetCommitTimestamp(),
-		CreatedByCompaction: segment.GetCreatedByCompaction(),
-		CompactionFrom:      append([]int64(nil), segment.GetCompactionFrom()...),
+		ID:                            segment.GetID(),
+		CollectionID:                  segment.GetCollectionID(),
+		PartitionID:                   segment.GetPartitionID(),
+		InsertChannel:                 segment.GetInsertChannel(),
+		State:                         segment.GetState(),
+		Level:                         segment.GetLevel(),
+		IsImporting:                   segment.GetIsImporting(),
+		IsInvisible:                   segment.GetIsInvisible(),
+		StartPosition:                 segment.GetStartPosition(),
+		DmlPosition:                   segment.GetDmlPosition(),
+		CommitTimestamp:               segment.GetCommitTimestamp(),
+		DeleteApplyStartAfterTimetick: segment.GetDeleteApplyStartAfterTimetick(),
+		CreatedByCompaction:           segment.GetCreatedByCompaction(),
+		CompactionFrom:                append([]int64(nil), segment.GetCompactionFrom()...),
 	}
 }

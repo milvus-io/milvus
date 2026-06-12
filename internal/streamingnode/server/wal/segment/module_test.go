@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
@@ -41,4 +42,48 @@ func TestCleanupDeleteSnapshotKeepsStableInFlightView(t *testing.T) {
 	first[0].MarkPersisted()
 	assert.Empty(t, module.ConsumeDirtySnapshots())
 	assert.Empty(t, module.snapshotSegments())
+}
+
+func TestBuildCommitL1SegmentRequestUsesCreateSegmentTimetickForDeleteApply(t *testing.T) {
+	meta := &streamingpb.SegmentAssignmentMeta{
+		CollectionId:           1,
+		PartitionId:            10,
+		SegmentId:              100,
+		Vchannel:               "v1",
+		DataCheckpointTimeTick: 3000,
+		StorageVersion:         3,
+		PersistedStorage:       &streamingpb.L1SegmentPersistedStorage{ManifestPath: "manifest"},
+		Stat: &streamingpb.SegmentAssignmentStat{
+			CreateSegmentTimeTick: 1000,
+			ModifiedRows:          10,
+			Level:                 datapb.SegmentLevel_L1,
+		},
+	}
+
+	req := buildCommitL1SegmentRequest(1, meta)
+
+	assert.Equal(t, uint64(1000), req.GetDeleteApplyStartAfterTimetick())
+	assert.Equal(t, int64(10), req.GetCheckPoints()[0].GetNumOfRows())
+}
+
+func TestNewGrowingSegmentInfoUsesCreateSegmentTimetickForDeleteApply(t *testing.T) {
+	meta := &streamingpb.SegmentAssignmentMeta{
+		CollectionId:           1,
+		PartitionId:            10,
+		SegmentId:              100,
+		Vchannel:               "v1",
+		DataCheckpointTimeTick: 3000,
+		StorageVersion:         3,
+		Stat: &streamingpb.SegmentAssignmentStat{
+			CreateSegmentTimeTick: 1000,
+			ModifiedRows:          10,
+			Level:                 datapb.SegmentLevel_L1,
+		},
+	}
+
+	segmentInfo := newGrowingSegmentInfo(meta)
+
+	assert.Equal(t, uint64(1000), segmentInfo.GetDeleteApplyStartAfterTimetick())
+	assert.Equal(t, uint64(1000), segmentInfo.GetStartPosition().GetTimestamp())
+	assert.Equal(t, uint64(3000), segmentInfo.GetDmlPosition().GetTimestamp())
 }

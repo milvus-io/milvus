@@ -117,18 +117,20 @@ type dataViewManager struct {
 }
 
 type Segment struct {
-	ID                  int64
-	CollectionID        int64
-	PartitionID         int64
-	InsertChannel       string
-	State               commonpb.SegmentState
-	Level               datapb.SegmentLevel
-	IsImporting         bool
-	IsInvisible         bool
-	DmlPosition         *msgpb.MsgPosition
-	CommitTimestamp     uint64
-	CreatedByCompaction bool
-	CompactionFrom      []int64
+	ID                            int64
+	CollectionID                  int64
+	PartitionID                   int64
+	InsertChannel                 string
+	State                         commonpb.SegmentState
+	Level                         datapb.SegmentLevel
+	IsImporting                   bool
+	IsInvisible                   bool
+	StartPosition                 *msgpb.MsgPosition
+	DmlPosition                   *msgpb.MsgPosition
+	CommitTimestamp               uint64
+	DeleteApplyStartAfterTimetick uint64
+	CreatedByCompaction           bool
+	CompactionFrom                []int64
 }
 
 func (s *Segment) GetID() int64 {
@@ -188,11 +190,25 @@ func (s *Segment) GetDmlPosition() *msgpb.MsgPosition {
 	return s.DmlPosition
 }
 
+func (s *Segment) GetStartPosition() *msgpb.MsgPosition {
+	if s == nil {
+		return nil
+	}
+	return s.StartPosition
+}
+
 func (s *Segment) GetCommitTimestamp() uint64 {
 	if s == nil {
 		return 0
 	}
 	return s.CommitTimestamp
+}
+
+func (s *Segment) GetDeleteApplyStartAfterTimetick() uint64 {
+	if s == nil {
+		return 0
+	}
+	return s.DeleteApplyStartAfterTimetick
 }
 
 func (s *Segment) GetCreatedByCompaction() bool {
@@ -683,10 +699,7 @@ func (m *dataViewManager) withDeleteTimetick(ctx context.Context, view *viewpb.D
 			for _, segmentID := range partition.GetSegmentIds() {
 				hasSegment = true
 				segment := m.segments.GetSegment(ctx, segmentID)
-				ts := uint64(0)
-				if segment != nil && segment.GetDmlPosition() != nil {
-					ts = segment.GetDmlPosition().GetTimestamp()
-				}
+				ts := segmentDeleteApplyStartAfterTimetick(segment)
 				if ts < minTs {
 					minTs = ts
 				}
@@ -765,6 +778,22 @@ func segmentEffectiveDmlTs(segment *Segment) uint64 {
 		return 0
 	}
 	return segment.GetDmlPosition().GetTimestamp()
+}
+
+func segmentDeleteApplyStartAfterTimetick(segment *Segment) uint64 {
+	if segment == nil {
+		return 0
+	}
+	if ts := segment.GetDeleteApplyStartAfterTimetick(); ts != 0 {
+		return ts
+	}
+	if ts := segment.GetCommitTimestamp(); ts != 0 {
+		return ts
+	}
+	if segment.GetStartPosition() != nil {
+		return segment.GetStartPosition().GetTimestamp()
+	}
+	return 0
 }
 
 func nextDataVersion(base *viewpb.DataViewOfCollection, advance dataViewAdvance) *viewpb.DataVersion {

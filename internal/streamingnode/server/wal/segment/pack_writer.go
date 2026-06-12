@@ -229,20 +229,21 @@ func newGrowingSegmentMetaCache(meta *streamingpb.SegmentAssignmentMeta, schema 
 func newGrowingSegmentInfo(meta *streamingpb.SegmentAssignmentMeta) *datapb.SegmentInfo {
 	persistedStorage := meta.GetPersistedStorage()
 	return &datapb.SegmentInfo{
-		ID:             meta.GetSegmentId(),
-		CollectionID:   meta.GetCollectionId(),
-		PartitionID:    meta.GetPartitionId(),
-		InsertChannel:  meta.GetVchannel(),
-		NumOfRows:      int64(meta.GetStat().GetModifiedRows()),
-		State:          commonpb.SegmentState_Growing,
-		Level:          meta.GetStat().GetLevel(),
-		StorageVersion: meta.GetStorageVersion(),
-		Binlogs:        persistedFieldBinlogs(persistedStorage, func(binlog *streamingpb.L1SegmentBinLogs) []*datapb.FieldBinlog { return binlog.GetFieldBinlog() }),
-		Statslogs:      persistedFieldBinlogs(persistedStorage, func(binlog *streamingpb.L1SegmentBinLogs) []*datapb.FieldBinlog { return binlog.GetStatsBinlog() }),
-		Bm25Statslogs:  persistedFieldBinlogs(persistedStorage, func(binlog *streamingpb.L1SegmentBinLogs) []*datapb.FieldBinlog { return binlog.GetBm25Binlog() }),
-		ManifestPath:   manifestPathForGrowingPack(meta),
-		StartPosition:  &msgpb.MsgPosition{ChannelName: meta.GetVchannel(), Timestamp: meta.GetStat().GetCreateSegmentTimeTick()},
-		DmlPosition:    &msgpb.MsgPosition{ChannelName: meta.GetVchannel(), Timestamp: meta.GetDataCheckpointTimeTick()},
+		ID:                            meta.GetSegmentId(),
+		CollectionID:                  meta.GetCollectionId(),
+		PartitionID:                   meta.GetPartitionId(),
+		InsertChannel:                 meta.GetVchannel(),
+		NumOfRows:                     int64(meta.GetStat().GetModifiedRows()),
+		State:                         commonpb.SegmentState_Growing,
+		Level:                         meta.GetStat().GetLevel(),
+		StorageVersion:                meta.GetStorageVersion(),
+		Binlogs:                       persistedFieldBinlogs(persistedStorage, func(binlog *streamingpb.L1SegmentBinLogs) []*datapb.FieldBinlog { return binlog.GetFieldBinlog() }),
+		Statslogs:                     persistedFieldBinlogs(persistedStorage, func(binlog *streamingpb.L1SegmentBinLogs) []*datapb.FieldBinlog { return binlog.GetStatsBinlog() }),
+		Bm25Statslogs:                 persistedFieldBinlogs(persistedStorage, func(binlog *streamingpb.L1SegmentBinLogs) []*datapb.FieldBinlog { return binlog.GetBm25Binlog() }),
+		ManifestPath:                  manifestPathForGrowingPack(meta),
+		StartPosition:                 &msgpb.MsgPosition{ChannelName: meta.GetVchannel(), Timestamp: meta.GetStat().GetCreateSegmentTimeTick()},
+		DmlPosition:                   &msgpb.MsgPosition{ChannelName: meta.GetVchannel(), Timestamp: meta.GetDataCheckpointTimeTick()},
+		DeleteApplyStartAfterTimetick: meta.GetStat().GetCreateSegmentTimeTick(),
 	}
 }
 
