@@ -3288,6 +3288,140 @@ func TestGenerateSearchParams(t *testing.T) {
 	})
 }
 
+func TestConvertSearchAggregationReq(t *testing.T) {
+	req := &SearchAggregationReq{
+		Fields:     []string{" brand "},
+		Size:       3,
+		SearchSize: 5,
+		Metrics: map[string]MetricAggregationReq{
+			" avg_price ": {Op: " avg ", FieldName: " price "},
+		},
+		Order: []AggregationOrderReq{{Key: " avg_price ", Direction: " desc "}},
+		TopHits: &TopHitsReq{
+			Size: 2,
+			Sort: []AggregationSortReq{{FieldName: " _score ", Direction: " asc "}},
+		},
+		SubAggregation: &SearchAggregationReq{
+			Fields: []string{"color"},
+			Size:   2,
+		},
+	}
+
+	spec, err := convertSearchAggregationReq(req)
+	require.NoError(t, err)
+	require.Equal(t, []string{"brand"}, spec.GetFields())
+	require.EqualValues(t, 3, spec.GetSize())
+	require.EqualValues(t, 5, spec.GetSearchSize())
+	require.Equal(t, "avg", spec.GetMetrics()["avg_price"].GetOp())
+	require.Equal(t, "price", spec.GetMetrics()["avg_price"].GetFieldName())
+	require.Equal(t, "avg_price", spec.GetOrder()[0].GetKey())
+	require.Equal(t, "desc", spec.GetOrder()[0].GetDirection())
+	require.EqualValues(t, 2, spec.GetTopHits().GetSize())
+	require.Equal(t, "_score", spec.GetTopHits().GetSort()[0].GetFieldName())
+	require.Equal(t, "color", spec.GetSubAggregation().GetFields()[0])
+
+	testCases := []struct {
+		name string
+		req  *SearchAggregationReq
+		msg  string
+	}{
+		{name: "empty fields", req: &SearchAggregationReq{Size: 1}, msg: "fields must be non-empty"},
+		{name: "blank field", req: &SearchAggregationReq{Fields: []string{" "}, Size: 1}, msg: "non-empty field names"},
+		{name: "bad size", req: &SearchAggregationReq{Fields: []string{"brand"}, Size: 0}, msg: "size must be positive"},
+		{name: "bad search size", req: &SearchAggregationReq{Fields: []string{"brand"}, Size: 2, SearchSize: 1}, msg: "greater than or equal to size"},
+		{name: "blank metric op", req: &SearchAggregationReq{Fields: []string{"brand"}, Size: 1, Metrics: map[string]MetricAggregationReq{"m": {FieldName: "price"}}}, msg: "op must be non-empty"},
+		{name: "blank order direction", req: &SearchAggregationReq{Fields: []string{"brand"}, Size: 1, Order: []AggregationOrderReq{{Key: "_count"}}}, msg: "direction must be non-empty"},
+		{name: "bad top hits size", req: &SearchAggregationReq{Fields: []string{"brand"}, Size: 1, TopHits: &TopHitsReq{}}, msg: "topHits.size must be positive"},
+	}
+
+	for _, testcase := range testCases {
+		t.Run(testcase.name, func(t *testing.T) {
+			_, err := convertSearchAggregationReq(testcase.req)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), testcase.msg)
+		})
+	}
+}
+
+func TestBuildSearchAggregationResp(t *testing.T) {
+	results := &schemapb.SearchResultData{
+		NumQueries: 1,
+		AggTopks:   []int64{1},
+		AggBuckets: []*schemapb.AggBucket{
+			{
+				Key: []*schemapb.BucketKeyEntry{
+					{FieldId: 101, FieldName: "brand", Value: &schemapb.BucketKeyEntry_StringVal{StringVal: "acme"}},
+					{FieldId: 102, FieldName: "model_id", Value: &schemapb.BucketKeyEntry_IntVal{IntVal: 9}},
+				},
+				Count: 3,
+				Metrics: map[string]*schemapb.MetricValue{
+					"avg_price": {Value: &schemapb.MetricValue_DoubleVal{DoubleVal: 12.5}},
+					"stock":     {Value: &schemapb.MetricValue_IntVal{IntVal: 7}},
+				},
+				Hits: []*schemapb.AggHit{
+					{
+						Pk:    &schemapb.AggHit_IntPk{IntPk: 1001},
+						Score: 0.8,
+						Fields: []*schemapb.AggHitField{
+							{FieldId: 201, FieldName: "price", Value: &schemapb.AggHitField_IntVal{IntVal: 99}},
+							{FieldId: 202, FieldName: "title", Value: &schemapb.AggHitField_StringVal{StringVal: "item"}},
+						},
+					},
+				},
+				SubGroups: []*schemapb.AggBucket{
+					{
+						Key:   []*schemapb.BucketKeyEntry{{FieldId: 103, FieldName: "color", Value: &schemapb.BucketKeyEntry_StringVal{StringVal: "red"}}},
+						Count: 1,
+					},
+				},
+			},
+		},
+	}
+
+	resp, err := buildSearchAggregationResp(results, false, generateCollectionSchema(schemapb.DataType_Int64, false, true))
+	require.NoError(t, err)
+	require.Len(t, resp, 1)
+	buckets := resp[0]["buckets"].([]gin.H)
+	require.Len(t, buckets, 1)
+	bucket := buckets[0]
+	require.Equal(t, "3", bucket["count"])
+
+	keys := bucket["key"].([]gin.H)
+	require.Equal(t, "brand", keys[0]["fieldName"])
+	require.Equal(t, "101", keys[0]["fieldId"])
+	require.Equal(t, "acme", keys[0]["value"])
+	require.Equal(t, "9", keys[1]["value"])
+
+	metrics := bucket["metrics"].(gin.H)
+	require.Equal(t, 12.5, metrics["avg_price"])
+	require.Equal(t, "7", metrics["stock"])
+
+	hits := bucket["hits"].([]gin.H)
+	require.Equal(t, "1001", hits[0][FieldBookID])
+	require.Equal(t, float32(0.8), hits[0][HTTPReturnDistance])
+	require.Equal(t, "99", hits[0]["price"])
+	require.Equal(t, "item", hits[0]["title"])
+
+	subGroups := bucket["subGroups"].([]gin.H)
+	require.Equal(t, "1", subGroups[0]["count"])
+
+	_, err = buildSearchAggregationResp(&schemapb.SearchResultData{NumQueries: 1, AggBuckets: results.GetAggBuckets()}, true, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "missing agg_topks")
+
+	_, err = buildSearchAggregationResp(&schemapb.SearchResultData{AggTopks: []int64{1}, AggBuckets: results.GetAggBuckets()}, true, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "missing nq")
+
+	_, err = buildSearchAggregationResp(&schemapb.SearchResultData{NumQueries: 2, AggTopks: []int64{1}, AggBuckets: results.GetAggBuckets()}, true, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not match nq")
+
+	_, err = buildSearchAggregationResp(&schemapb.SearchResultData{NumQueries: 1, AggTopks: []int64{2}, AggBuckets: results.GetAggBuckets()}, true, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not match bucket count")
+}
+
 func TestGenFunctionSchem(t *testing.T) {
 	{
 		funcSchema := &FunctionSchema{

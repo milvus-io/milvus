@@ -1603,6 +1603,40 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, merr.ErrMissingRequiredParameters
 	}
 
+	if httpReq.SearchAggregation != nil {
+		if hasIDs {
+			err := merr.WrapErrParameterInvalidMsg("ids and searchAggregation cannot be used simultaneously")
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
+		if httpReq.Offset != 0 {
+			err := merr.WrapErrParameterInvalidMsg("offset is not supported with searchAggregation")
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
+		if searchParamsContainAny(httpReq.SearchParams, proxy.OffsetKey) {
+			err := merr.WrapErrParameterInvalidMsg("searchParams.offset is not supported with searchAggregation")
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
+		if httpReq.GroupByField != "" || httpReq.GroupSize != 0 || httpReq.StrictGroupSize {
+			err := merr.WrapErrParameterInvalidMsg("groupingField/groupSize/strictGroupSize and searchAggregation cannot be used simultaneously")
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
+		if searchParamsContainAny(httpReq.SearchParams, proxy.GroupByFieldKey, proxy.GroupByFieldsKey) {
+			err := merr.WrapErrParameterInvalidMsg("searchParams.group_by_field(s) and searchAggregation cannot be used simultaneously")
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
+		req.SearchAggregation, err = convertSearchAggregationReq(httpReq.SearchAggregation)
+		if err != nil {
+			log.Ctx(ctx).Warn("high level restful api, convert SearchAggregation failed", zap.Error(err))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
+	}
+
 	searchParams, err := generateSearchParams(httpReq.SearchParams)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, generate SearchParams failed", zap.Error(err))
@@ -1685,7 +1719,33 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		searchResp := resp.(*milvuspb.SearchResults)
 		cost := proxy.GetCostValue(searchResp.GetStatus())
 		scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, isValid := proxy.GetStorageCost(searchResp.GetStatus())
-		if searchResp.Results.TopK == int64(0) {
+		if hasSearchAggregationResult(searchResp.Results) {
+			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
+			outputData, err := buildSearchAggregationResp(searchResp.Results, allowJS, collSchema)
+			if err != nil {
+				log.Ctx(ctx).Warn("high level restful api, fail to deal with search aggregation result", zap.Any("result", searchResp.Results), zap.Error(err))
+				HTTPReturn(c, http.StatusOK, gin.H{
+					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
+					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
+				})
+			} else {
+				respBody := gin.H{
+					HTTPReturnCode:     merr.Code(nil),
+					HTTPReturnData:     outputData,
+					HTTPReturnCost:     cost,
+					HTTPReturnAggTopks: searchResp.Results.GetAggTopks(),
+				}
+				if len(searchResp.Results.Recalls) > 0 {
+					respBody[HTTPReturnRecalls] = searchResp.Results.Recalls
+				}
+				if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
+					respBody[HTTPReturnScannedRemoteBytes] = scannedRemoteBytes
+					respBody[HTTPReturnScannedTotalBytes] = scannedTotalBytes
+					respBody[HTTPReturnCacheHitRatio] = cacheHitRatio
+				}
+				HTTPReturnStream(c, http.StatusOK, respBody)
+			}
+		} else if searchResp.Results.TopK == int64(0) {
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
@@ -1763,6 +1823,19 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		return nil, err
 	}
 	c.Set(ContextRequest, req)
+
+	if httpReq.SearchAggregation != nil {
+		err := merr.WrapErrParameterInvalidMsg("searchAggregation is not supported for hybrid search")
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+	for _, subReq := range httpReq.Search {
+		if subReq.SearchAggregation != nil {
+			err := merr.WrapErrParameterInvalidMsg("searchAggregation is not supported for hybrid search")
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
+	}
 
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {

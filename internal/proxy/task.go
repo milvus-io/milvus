@@ -489,6 +489,9 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	if err := validateCollectionName(t.schema.Name); err != nil {
 		return err
 	}
+	if err := validateCollectionDescription(t.schema.GetDescription()); err != nil {
+		return err
+	}
 
 	// Reject reserved system field names supplied by the user before any
 	// server-side injection runs. __virtual_pk__ is the internal PK name
@@ -2199,6 +2202,15 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 				if hasWarmup {
 					return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter warmup properties if collection loaded")
 				}
+			}
+		}
+
+		for _, property := range t.Properties {
+			if property.GetKey() != common.CollectionDescription {
+				continue
+			}
+			if err := validateCollectionDescription(property.GetValue()); err != nil {
+				return err
 			}
 		}
 

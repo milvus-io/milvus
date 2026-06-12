@@ -353,6 +353,24 @@ class SegmentInternalInterface : public SegmentInterface {
         // do nothing
     }
 
+    // Apply field nullability to an already-initialized valid_result bitmap.
+    // Implementations only clear invalid rows and leave valid rows unchanged.
+    virtual void
+    ApplyFieldValidData(milvus::OpContext* op_ctx,
+                        FieldId field_id,
+                        int64_t chunk_id,
+                        int64_t offset,
+                        int64_t size,
+                        TargetBitmapView valid_result) const = 0;
+
+    // Offsets are segment-level row offsets. valid_result must have count bits.
+    virtual void
+    ApplyFieldValidDataByOffsets(milvus::OpContext* op_ctx,
+                                 FieldId field_id,
+                                 const int64_t* offsets,
+                                 int64_t count,
+                                 TargetBitmapView valid_result) const = 0;
+
     template <typename T>
     PinWrapper<Span<T>>
     chunk_data(milvus::OpContext* op_ctx,
