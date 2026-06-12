@@ -311,7 +311,6 @@ class VectorArrayChunkWriter : public ChunkWriterBase {
 
  private:
     const milvus::DataType element_type_;
-    size_t valid_row_nums_ = 0;
 };
 
 class SparseFloatVectorChunkWriter : public ChunkWriterBase {

@@ -405,21 +405,20 @@ TEST_P(VectorArrayChunkWriterParameterizedTest, SizeConsistencyWithSlice) {
 TEST(VectorArrayChunkWriterTest, NullableRowsRoundTripThroughChunkViews) {
     constexpr int dim = 2;
     auto list_array =
-        BuildNullableFloatVectorArrayListArray({1, std::nullopt, 2}, dim);
-    ASSERT_EQ(list_array->length(), 3);
+        BuildNullableFloatVectorArrayListArray({1, std::nullopt, 0, 2}, dim);
+    ASSERT_EQ(list_array->length(), 4);
     ASSERT_EQ(list_array->null_count(), 1);
 
     arrow::ArrayVector vec{list_array};
     VectorArrayChunkWriter writer(dim, DataType::VECTOR_FLOAT, true);
     auto [calculated_size, row_count] = writer.calculate_size(vec);
 
-    const int expected_valid_rows = 2;
     const int expected_vectors = 3;
     const int expected_size =
-        (row_count + 7) / 8 + sizeof(uint32_t) * (expected_valid_rows * 2 + 1) +
+        (row_count + 7) / 8 + sizeof(uint32_t) * (row_count * 2 + 1) +
         expected_vectors * dim * sizeof(float) + MMAP_ARRAY_PADDING;
     EXPECT_EQ(calculated_size, expected_size);
-    EXPECT_EQ(row_count, 3);
+    EXPECT_EQ(row_count, 4);
 
     auto target = std::make_shared<MemChunkTarget>(calculated_size);
     writer.write_to_target(vec, target);
@@ -433,14 +432,26 @@ TEST(VectorArrayChunkWriterTest, NullableRowsRoundTripThroughChunkViews) {
                            nullptr,
                            true);
     auto [views, valid] = chunk.Views();
-    ASSERT_EQ(views.size(), 3);
-    ASSERT_EQ(valid.size(), 3);
+    ASSERT_EQ(views.size(), 4);
+    ASSERT_EQ(valid.size(), 4);
     EXPECT_TRUE(valid[0]);
     EXPECT_FALSE(valid[1]);
     EXPECT_TRUE(valid[2]);
+    EXPECT_TRUE(valid[3]);
     EXPECT_EQ(views[0].length(), 1);
     EXPECT_EQ(views[1].length(), 0);
-    EXPECT_EQ(views[2].length(), 2);
+    EXPECT_EQ(views[2].length(), 0);
+    EXPECT_EQ(views[3].length(), 2);
+
+    const auto* offsets = chunk.Offsets();
+    EXPECT_EQ(offsets[0], 0);
+    EXPECT_EQ(offsets[1], 1);
+    EXPECT_EQ(offsets[2], 1);
+    EXPECT_EQ(offsets[3], 1);
+    EXPECT_EQ(offsets[4], 3);
+
+    EXPECT_ANY_THROW(chunk.View(1));
+    EXPECT_EQ(chunk.View(2).length(), 0);
 }
 
 // Instantiate parameterized tests for all vector types
