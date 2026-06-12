@@ -51,6 +51,8 @@ type BufferManager interface {
 	UseGrowingSourceFlush(channel string) bool
 	// GetGrowingFlushProgress returns growing-source progress for the given channel.
 	// If segmentIDs is empty, all tracked growing-source segments are returned.
+	// Otherwise, the requested segmentIDs are returned together with all tracked
+	// growing-source segments so release handoff cannot miss existing source progress.
 	GetGrowingFlushProgress(ctx context.Context, channel string, segmentIDs []int64, fenceTs uint64) ([]GrowingFlushSegmentProgress, error)
 
 	// Start makes the background check start to work.

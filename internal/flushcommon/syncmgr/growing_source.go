@@ -108,6 +108,7 @@ type GrowingSourceReleaseHandoffSegment struct {
 }
 
 type GrowingSourceReleaseHandoffProvider interface {
+	BeginGrowingSourceReleaseHandoff(segmentIDs []int64) func()
 	PrepareGrowingSourceReleaseHandoff(ctx context.Context, fenceTs uint64, segments []GrowingSourceReleaseHandoffSegment) error
 	IsReleaseAllowed(segmentID int64, checkpointTs uint64) bool
 	IsReleasePrepared(segmentID int64, checkpointTs uint64) bool
@@ -191,6 +192,33 @@ func (r *GrowingSourceRegistry) getProviders(channel string) []GrowingSourceProv
 	}
 	r.mu.RUnlock()
 	return providers
+}
+
+func (r *GrowingSourceRegistry) BeginGrowingSourceReleaseHandoff(channel string, segmentIDs []int64) (func(), error) {
+	handoffProviders := make([]GrowingSourceReleaseHandoffProvider, 0)
+	for _, provider := range r.getProviders(channel) {
+		handoffProvider, ok := provider.(GrowingSourceReleaseHandoffProvider)
+		if !ok {
+			continue
+		}
+		handoffProviders = append(handoffProviders, handoffProvider)
+	}
+	if len(handoffProviders) == 0 {
+		return nil, merr.WrapErrChannelNotAvailable(channel, "no local growing-source release handoff provider")
+	}
+
+	rollbacks := make([]func(), 0, len(handoffProviders))
+	for _, handoffProvider := range handoffProviders {
+		rollback := handoffProvider.BeginGrowingSourceReleaseHandoff(segmentIDs)
+		if rollback != nil {
+			rollbacks = append(rollbacks, rollback)
+		}
+	}
+	return func() {
+		for i := len(rollbacks) - 1; i >= 0; i-- {
+			rollbacks[i]()
+		}
+	}, nil
 }
 
 func (r *GrowingSourceRegistry) PrepareGrowingSourceReleaseHandoff(ctx context.Context, channel string, fenceTs uint64, segments []GrowingSourceReleaseHandoffSegment) error {
