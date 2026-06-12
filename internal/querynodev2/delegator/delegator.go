@@ -1506,7 +1506,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		}, sd.GetTSafe)
 		sd.growingSourceRegistration = syncmgr.DefaultGrowingSourceRegistry().Register(sd.vchannelName, sd.growingSourceProvider)
 		sd.growingSourceProvider.SetRegistration(sd.growingSourceRegistration)
-		log.Info("registered growing-source source support")
+		log.Info(ctx, "registered growing-source source support")
 	}
 
 	sd.tsCond = syncutil.NewContextCond(&sync.Mutex{})
