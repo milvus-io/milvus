@@ -68,6 +68,7 @@ set(MILVUS_TEST_FILES
         test_arrow_canonicalize.cpp
         TextLobSpilloverTest.cpp
         test_commit_timestamp.cpp
+        test_schema_reopen.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )

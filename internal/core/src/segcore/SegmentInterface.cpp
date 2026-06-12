@@ -785,9 +785,11 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
 
     auto result = CreateEmptyScalarDataArray(count, field_meta);
     if (field_meta.default_value().has_value()) {
-        auto res = result->mutable_valid_data()->mutable_data();
-        for (int64_t i = 0; i < count; ++i) {
-            res[i] = true;
+        if (field_meta.is_nullable()) {
+            auto res = result->mutable_valid_data()->mutable_data();
+            for (int64_t i = 0; i < count; ++i) {
+                res[i] = true;
+            }
         }
         switch (field_meta.get_data_type()) {
             case DataType::BOOL: {
@@ -897,11 +899,12 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
             }
         }
         return result;
-    };
-    for (int64_t i = 0; i < count; ++i) {
-        auto res = result->mutable_valid_data()->mutable_data();
-        res[i] = false;
     }
+    // Without a default value the column can only read as all-null;
+    // CreateEmptyScalarDataArray already sized valid_data to all-false.
+    AssertInfo(field_meta.is_nullable(),
+               "Non-nullable scalar field without default value should not "
+               "reach here");
     return result;
 }
 
