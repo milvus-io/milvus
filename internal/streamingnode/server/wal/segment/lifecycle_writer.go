@@ -82,12 +82,13 @@ func buildCommitL1SegmentRequest(serverID int64, meta *streamingpb.SegmentAssign
 				NumOfRows: int64(meta.GetStat().GetModifiedRows()),
 			},
 		},
-		Flushed:         true,
-		Channel:         meta.GetVchannel(),
-		SegLevel:        meta.GetStat().GetLevel(),
-		StorageVersion:  meta.GetStorageVersion(),
-		WithFullBinlogs: true,
-		ManifestPath:    storage.GetManifestPath(),
+		Flushed:                       true,
+		Channel:                       meta.GetVchannel(),
+		SegLevel:                      meta.GetStat().GetLevel(),
+		StorageVersion:                meta.GetStorageVersion(),
+		WithFullBinlogs:               true,
+		ManifestPath:                  storage.GetManifestPath(),
+		DeleteApplyStartAfterTimetick: meta.GetStat().GetCreateSegmentTimeTick(),
 	}
 }
 

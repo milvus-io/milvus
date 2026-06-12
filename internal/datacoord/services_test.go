@@ -6309,6 +6309,13 @@ func TestHandleCommitVchannelRPC_StoresCommitTimestamp(t *testing.T) {
 	ctx := context.Background()
 
 	importMetaMock := NewMockImportMeta(t)
+	importMetaMock.EXPECT().GetJob(mock.Anything, int64(3001)).Return(&importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        3001,
+			CollectionID: 100,
+			State:        internalpb.ImportJobState_Committing,
+		},
+	})
 	importMetaMock.EXPECT().HandleCommitVchannel(mock.Anything, int64(3001), "vchan-0", mock.AnythingOfType("func() error")).
 		RunAndReturn(func(ctx context.Context, jobID int64, vchannel string, callback func() error) error {
 			return callback()
@@ -6358,6 +6365,7 @@ func TestHandleCommitVchannelRPC_StoresCommitTimestamp(t *testing.T) {
 		seg := server.meta.GetSegment(ctx, segID)
 		require.NotNil(t, seg)
 		assert.EqualValues(t, 500, seg.GetCommitTimestamp())
+		assert.EqualValues(t, 500, seg.GetDeleteApplyStartAfterTimetick())
 		assert.False(t, seg.GetIsImporting())
 	}
 }

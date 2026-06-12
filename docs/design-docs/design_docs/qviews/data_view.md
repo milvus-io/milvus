@@ -133,7 +133,8 @@ increments.
 
 ## 3. Data Structures
 
-The persisted DataView uses the proto definitions in `view.proto`:
+DataView uses the proto definitions in `view.proto` for persistence and
+transport:
 
 ```proto
 message DataViewOfCollection {
@@ -154,16 +155,21 @@ message DataViewOfPartition {
 }
 ```
 
-DataView stores membership only. Segment metadata such as row count, memory
-size, binlogs, manifest path, schema version, storage version, and segment-level
-data version remain in DataCoord segment metadata. QueryCoord may fetch that
-metadata separately for balancer scoring, but it must not recompute DataView
-membership from it.
+The durable DataView record stores membership and DataVersion only. Segment
+metadata such as row count, memory size, binlogs, manifest path, schema version,
+storage version, segment-level data version, and segment-level
+`delete_apply_start_after_timetick` remain in DataCoord segment metadata.
+QueryCoord may fetch that metadata separately for balancer scoring, but it must
+not recompute DataView membership from it.
 
 `DataViewOfShard.delete_apply_start_after_timetick` is a snapshot/transport
 field derived from the current loadable membership. It does not need to be
 stored durably with DataView; DataCoord may recompute it from segment metadata
-when publishing snapshots or syncing StreamingNode.
+when publishing snapshots or syncing StreamingNode. If the serialized proto
+contains this field in a persisted DataView value, DataCoord still treats it as
+derived cache and recomputes it from segment metadata on load/recovery. The
+source value is a separate persisted field on each segment metadata record, not
+`segment.dml_position.Timestamp`.
 
 ## 4. Ownership
 
@@ -337,20 +343,25 @@ Suggested interface shape:
 
 ```go
 type DataViewManager interface {
-    OnFlush(ctx context.Context, event FlushDataViewEvent) error
-    OnImport(ctx context.Context, event ImportDataViewEvent) error
-    OnCopySegmentComplete(ctx context.Context, event CopySegmentCompleteDataViewEvent) error
-    OnCompact(ctx context.Context, event CompactDataViewEvent) error
-    OnL0Compact(ctx context.Context, event L0CompactDataViewEvent) error
-    OnExternalRefresh(ctx context.Context, event ExternalRefreshDataViewEvent) error
-    OnDropPartition(ctx context.Context, event DropPartitionDataViewEvent) error
-    OnTruncate(ctx context.Context, event TruncateDataViewEvent) error
-    OnDropCollection(ctx context.Context, collectionID int64) error
+    OnFlush(ctx context.Context, event FlushDataViewEvent) (*viewpb.DataVersion, error)
+    OnImport(ctx context.Context, event ImportDataViewEvent) (*viewpb.DataVersion, error)
+    OnCopySegmentComplete(ctx context.Context, event CopySegmentCompleteDataViewEvent) (*viewpb.DataVersion, error)
+    OnCompact(ctx context.Context, event CompactDataViewEvent) (*viewpb.DataVersion, error)
+    OnL0Compact(ctx context.Context, event L0CompactDataViewEvent) (*viewpb.DataVersion, error)
+    OnExternalRefresh(ctx context.Context, event ExternalRefreshDataViewEvent) (*viewpb.DataVersion, error)
+    OnDropPartition(ctx context.Context, event DropPartitionDataViewEvent) (*viewpb.DataVersion, error)
+    OnTruncate(ctx context.Context, event TruncateDataViewEvent) (*viewpb.DataVersion, error)
+    OnDropCollection(ctx context.Context, collectionID int64) (*viewpb.DataVersion, error)
 
     LatestVisibleDataView(ctx context.Context, collectionID int64) (*viewpb.DataViewOfCollection, error)
     Snapshot(ctx context.Context, collectionIDs []int64) ([]*viewpb.DataViewOfCollection, error)
 }
 ```
+
+Every `On*` method returns the DataVersion generated or affected by the event.
+If the event only refreshes derived metadata, for example L0 compaction changing
+`delete_apply_start_after_timetick`, it returns the current DataVersion without
+advancing it.
 
 Internal helpers should keep the normal path event-driven:
 
@@ -654,13 +665,85 @@ Conceptually, for one shard:
 
 ```
 delete_apply_start_after_timetick =
-    min(segment.dmlPosition.Timestamp for every segment in the current DataView shard)
+    min(segment.delete_apply_start_after_timetick for every segment in the current DataView shard)
 ```
 
 The calculation does not re-check whether those segments are currently
-loadable, and it does not include historical retained DataViews. The exact
-source field is owned by DataCoord segment metadata. L0 delete state can affect
-this derived frontier, but L0 segments still do not join DataView membership.
+loadable, and it does not include historical retained DataViews. It only uses
+the segment IDs already present in the current DataView membership.
+
+`segment.dml_position.Timestamp` must not be used as this source. Its existing
+meaning is overloaded:
+
+- normal flush updates it as the segment checkpoint / end position;
+- import sets it from imported row timestamp range;
+- compaction recalculates it from output binlog timestamp range or input
+  fallback positions;
+- GC and truncate already apply their own effective timestamp rules.
+
+DataCoord therefore owns a separate persisted segment metadata field:
+
+```proto
+message SegmentInfo {
+    // Exclusive lower bound for delete data that must be retained/applied when
+    // this segment is loaded. DataView derives shard-level
+    // delete_apply_start_after_timetick from this field.
+    uint64 delete_apply_start_after_timetick = 37;
+}
+```
+
+New segment-producing paths must populate this field explicitly:
+
+- **Flush / StreamingNode flush**: use the segment start position or create
+  segment timetick. For StreamingNode-managed L1 segments this is the segment
+  assignment's create-segment timetick, not the data checkpoint timetick.
+- **Import**: import segments join DataView only after commit. Use the import
+  commit timestamp, matching the QueryNode rule that an import segment becomes
+  visible at its commit fence.
+- **Copy / snapshot restore**: copy the source segment's
+  `delete_apply_start_after_timetick`.
+- **Non-L0 compaction**: inherit the minimum
+  `delete_apply_start_after_timetick` from all input segments. Compaction
+  replaces membership and must not shorten the delete retention window by using
+  output binlog timestamp ranges.
+- **Sort compaction**: inherit the input segment's
+  `delete_apply_start_after_timetick`, even if row timestamps or positions are
+  rewritten in the output segment.
+- **L0 compaction**: L0 segments do not join DataView membership. L0 compaction
+  can refresh the derived shard timetick, but it does not write membership for
+  a loadable segment and does not advance DataVersion by itself.
+
+For existing segment metadata that predates this field, DataCoord derives a
+compatible value when building or recovering DataView:
+
+```go
+func segmentDeleteApplyStartAfterTimetick(segment) uint64 {
+    if segment.delete_apply_start_after_timetick != 0 {
+        return segment.delete_apply_start_after_timetick
+    }
+    if segment.commit_timestamp != 0 {
+        return segment.commit_timestamp
+    }
+    if segment.start_position != nil {
+        return segment.start_position.Timestamp
+    }
+    return 0
+}
+```
+
+This fallback is intentionally conservative. Old normal flushed segments fall
+back to their start position, old committed import segments fall back to their
+commit timestamp, and very old segments without start position fall back to
+`0`, which may retain more delete data but will not evict required deletes.
+
+Snapshot/restore metadata must persist the new segment field. If an older
+snapshot manifest does not contain it, restored segments use the same fallback
+rules above. The DataView record itself still does not need to persist
+`delete_apply_start_after_timetick`; it is derived from segment metadata when
+DataView is returned or synced.
+
+L0 delete state can affect this derived frontier, but L0 segments still do not
+join DataView membership.
 
 StreamingNode delete eviction is safe without depending on the latest DataView
 alone because StreamingNode applies its own minimum across the DataView
@@ -779,8 +862,10 @@ There is no separate durable unpublished-version namespace in the first
 implementation. QueryCoord visibility for temporary flush snapshots is an
 in-memory DataCoord state recovered from segment metadata.
 
-`delete_apply_start_after_timetick` is recomputed during recovery from segment
-metadata and does not need its own durable recovery path.
+DataView's shard-level `delete_apply_start_after_timetick` is recomputed during
+recovery from segment metadata. The per-segment source field is durable segment
+metadata; if it is absent on old segment records or old snapshot manifests,
+DataCoord uses the compatibility fallback from Section 8.
 
 On QueryCoord startup:
 
