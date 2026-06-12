@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/models/cohere"
 	"github.com/milvus-io/milvus/internal/util/function/models/gemini"
 	"github.com/milvus-io/milvus/internal/util/function/models/openai"
+	"github.com/milvus-io/milvus/internal/util/function/models/qianfan"
 	"github.com/milvus-io/milvus/internal/util/function/models/siliconflow"
 	"github.com/milvus-io/milvus/internal/util/function/models/tei"
 	"github.com/milvus-io/milvus/internal/util/function/models/vertexai"
@@ -285,6 +286,37 @@ func CreateYCEmbeddingServer() *httptest.Server {
 		if len(embs) == 1 {
 			res.Embedding = embs[0]
 			res.Embeddings = nil
+		}
+
+		w.WriteHeader(http.StatusOK)
+		data, _ := json.Marshal(res)
+		w.Write(data)
+	}))
+	return ts
+}
+
+func CreateQianfanEmbeddingServer(dim int) *httptest.Server {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req qianfan.EmbeddingRequest
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+		_ = json.Unmarshal(body, &req)
+
+		embs := mockEmbedding[float32](req.Input, dim)
+		res := qianfan.EmbeddingResponse{
+			Object: "list",
+			Model:  req.Model,
+			Usage: qianfan.Usage{
+				PromptTokens: len(req.Input),
+				TotalTokens:  len(req.Input),
+			},
+		}
+		for i := 0; i < len(req.Input); i++ {
+			res.Data = append(res.Data, qianfan.EmbeddingData{
+				Object:    "embedding",
+				Embedding: embs[i],
+				Index:     i,
+			})
 		}
 
 		w.WriteHeader(http.StatusOK)
