@@ -90,6 +90,57 @@ def pytest_addoption(parser):
         default="chaos-testing",
         help="Kubernetes namespace for Milvus deployment",
     )
+    parser.addoption(
+        "--import-2pc-workload",
+        action="store",
+        default="true",
+        help="Whether CDC stability suites should include Import 2PC workload",
+    )
+    parser.addoption(
+        "--import-2pc-minio-host",
+        action="store",
+        default="",
+        help="Upstream MinIO host or host:port used by Import 2PC workload",
+    )
+    parser.addoption(
+        "--import-2pc-minio-bucket",
+        action="store",
+        default="",
+        help="Upstream MinIO bucket used by Import 2PC workload",
+    )
+    parser.addoption(
+        "--import-2pc-downstream-minio-host",
+        action="store",
+        default="",
+        help="Downstream MinIO host or host:port used by CDC Import 2PC workload",
+    )
+    parser.addoption(
+        "--import-2pc-downstream-minio-bucket",
+        action="store",
+        default="",
+        help="Downstream MinIO bucket used by CDC Import 2PC workload",
+    )
+    parser.addoption(
+        "--import-2pc-rows",
+        action="store",
+        default="20",
+        help="Rows per Import 2PC checker operation",
+    )
+
+
+def _as_bool(value):
+    if isinstance(value, bool):
+        return value
+    return str(value).lower() in ("1", "true", "yes", "y")
+
+
+def _minio_endpoint(host):
+    host = (host or "").strip()
+    if not host:
+        return ""
+    if ":" in host:
+        return host
+    return f"{host}:9000"
 
 
 @pytest.fixture(scope="session")
@@ -178,6 +229,46 @@ def is_check(request):
 @pytest.fixture(scope="session")
 def milvus_ns(request):
     return request.config.getoption("--milvus-ns")
+
+
+@pytest.fixture(scope="session")
+def import_2pc_workload(request):
+    return _as_bool(request.config.getoption("--import-2pc-workload"))
+
+
+@pytest.fixture(scope="session")
+def import_2pc_minio_endpoint(request):
+    host = request.config.getoption("--import-2pc-minio-host") or request.config.getoption("--minio_host")
+    return _minio_endpoint(host)
+
+
+@pytest.fixture(scope="session")
+def import_2pc_minio_bucket(request):
+    return request.config.getoption("--import-2pc-minio-bucket") or request.config.getoption("--minio_bucket")
+
+
+@pytest.fixture(scope="session")
+def import_2pc_downstream_minio_endpoint(request):
+    host = (
+        request.config.getoption("--import-2pc-downstream-minio-host")
+        or request.config.getoption("--import-2pc-minio-host")
+        or request.config.getoption("--minio_host")
+    )
+    return _minio_endpoint(host)
+
+
+@pytest.fixture(scope="session")
+def import_2pc_downstream_minio_bucket(request):
+    return (
+        request.config.getoption("--import-2pc-downstream-minio-bucket")
+        or request.config.getoption("--import-2pc-minio-bucket")
+        or request.config.getoption("--minio_bucket")
+    )
+
+
+@pytest.fixture(scope="session")
+def import_2pc_rows(request):
+    return int(request.config.getoption("--import-2pc-rows"))
 
 
 @pytest.fixture(scope="session")

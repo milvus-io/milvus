@@ -11,6 +11,7 @@ def pytest_addoption(parser):
     parser.addoption("--release_name", action="store", default="my-release", help="release name")
     parser.addoption("--secondary_endpoint", action="store", default=None, help="secondary Milvus endpoint")
     parser.addoption("--secondary_token", action="store", default="root:Milvus", help="secondary Milvus token")
+    parser.addoption("--secondary_release_name", action="store", default=None, help="secondary Milvus release name")
     parser.addoption("--secondary_minio_host", action="store", default=None, help="secondary MinIO host")
     parser.addoption("--secondary_bucket_name", action="store", default=None, help="secondary MinIO bucket name")
     parser.addoption("--secondary_root_path", action="store", default="file", help="secondary MinIO root path")
@@ -76,6 +77,11 @@ def secondary_endpoint(request):
 @pytest.fixture
 def secondary_token(request):
     return request.config.getoption("--secondary_token")
+
+
+@pytest.fixture
+def secondary_release_name(request):
+    return request.config.getoption("--secondary_release_name")
 
 
 @pytest.fixture

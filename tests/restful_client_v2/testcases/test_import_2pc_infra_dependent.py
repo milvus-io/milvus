@@ -5,9 +5,9 @@ import subprocess
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, wait
+from urllib.parse import urlparse
 from uuid import uuid4
 
-import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -15,7 +15,6 @@ from api.milvus import CollectionClient, ImportJobClient, StorageClient, VectorC
 from base.testbase import TestBase
 from pymilvus import MilvusClient
 from utils.utils import gen_collection_name
-
 
 IMPORT_2PC_TIMEOUT = 360
 
@@ -173,9 +172,7 @@ class Import2PCInfraBase(TestBase):
         complete_partitions = []
         for partition_prefix, segments in partition_segments.items():
             complete_segments = [
-                segment_prefix
-                for segment_prefix, groups in segments.items()
-                if "0" in groups and len(groups) >= 2
+                segment_prefix for segment_prefix, groups in segments.items() if "0" in groups and len(groups) >= 2
             ]
             if complete_segments:
                 complete_partitions.append((partition_prefix, len(complete_segments)))
@@ -203,9 +200,7 @@ class Import2PCInfraBase(TestBase):
             segment_groups.setdefault(segment_prefix, set()).add(group_id)
 
         complete_segments = [
-            segment_prefix
-            for segment_prefix, groups in segment_groups.items()
-            if "0" in groups and len(groups) >= 2
+            segment_prefix for segment_prefix, groups in segment_groups.items() if "0" in groups and len(groups) >= 2
         ]
         assert complete_segments, {
             "reason": "no complete insert segment found",
@@ -248,15 +243,80 @@ class Import2PCInfraBase(TestBase):
             "insert_log", source_collection_id
         )
         assert has_insert, {"collection_id": source_collection_id, "checked_prefixes": insert_objects}
-        partition_prefix = self._select_insert_partition_prefix(insert_objects)
+        source_segment_prefix = self._select_insert_segment_prefix(insert_objects)
+        source_segment_id = source_segment_prefix.rstrip("/").split("/")[-1]
+        target_partition_prefix = (
+            f"{(self.storage_client.root_path or 'file').strip('/')}/"
+            f"import_2pc_backup_fixture/{uuid4().hex}/insert_log/{source_collection_id}/_default"
+        )
+        target_segment_prefix = f"{target_partition_prefix}/{source_segment_id}"
+        copied = self._copy_storage_prefix_between_clients(
+            self.storage_client,
+            self.storage_client,
+            source_segment_prefix,
+            target_segment_prefix,
+        )
+        assert copied, {"source_prefix": source_segment_prefix, "target_prefix": target_segment_prefix}
         storage_version = int(os.getenv("IMPORT_2PC_GENERATED_STORAGE_VERSION", "2"))
         return {
-            "files": [[partition_prefix]],
+            "files": [[target_partition_prefix + "/"]],
             "storageVersion": storage_version,
             "partitionName": "_default",
             "expectedIds": [row["id"] for row in rows],
-            "expectedCount": None,
-            "expectedCountFromJob": True,
+            "expectedCount": len(rows),
+            "copiedPrefixes": [target_partition_prefix],
+        }
+
+    def _hybrid_ts_now(self, offset_ms=0):
+        return str((int(time.time() * 1000) + offset_ms) << 18)
+
+    def _build_generated_backup_window_fixture(self, source_collection_name, old_rows, included_rows, late_rows):
+        def build_source_prefix(suffix, rows):
+            collection_name = f"{source_collection_name}_{suffix}"
+            self._create_base_collection(collection_name)
+            self._insert_rows(collection_name, rows)
+            flush_rsp, flushed = self._flush_collection_with_retry(collection_name)
+            assert flushed, flush_rsp
+            collection_id = self._get_collection_id(collection_name)
+            _, insert_objects, has_insert = self._wait_storage_log_prefix_non_empty("insert_log", collection_id)
+            assert has_insert, {"collection_id": collection_id, "checked_prefixes": insert_objects}
+            source_segment_prefix = self._select_insert_segment_prefix(insert_objects)
+            source_segment_id = source_segment_prefix.rstrip("/").split("/")[-1]
+            target_partition_prefix = (
+                f"{(self.storage_client.root_path or 'file').strip('/')}/"
+                f"import_2pc_backup_window_fixture/{uuid4().hex}/insert_log/{collection_id}/_default"
+            )
+            target_segment_prefix = f"{target_partition_prefix}/{source_segment_id}"
+            copied = self._copy_storage_prefix_between_clients(
+                self.storage_client,
+                self.storage_client,
+                source_segment_prefix,
+                target_segment_prefix,
+            )
+            assert copied, {"source_prefix": source_segment_prefix, "target_prefix": target_segment_prefix}
+            return target_partition_prefix + "/", target_partition_prefix
+
+        old_prefix, old_copied_prefix = build_source_prefix("old", old_rows)
+
+        time.sleep(2)
+        start_ts = self._hybrid_ts_now(-500)
+        included_prefix, included_copied_prefix = build_source_prefix("included", included_rows)
+
+        end_ts = self._hybrid_ts_now(500)
+        time.sleep(2)
+        late_prefix, late_copied_prefix = build_source_prefix("late", late_rows)
+
+        storage_version = int(os.getenv("IMPORT_2PC_GENERATED_STORAGE_VERSION", "2"))
+        return {
+            "files": [[old_prefix], [included_prefix], [late_prefix]],
+            "storageVersion": storage_version,
+            "partitionName": "_default",
+            "start_ts": start_ts,
+            "end_ts": end_ts,
+            "expectedIds": [row["id"] for row in included_rows],
+            "excludedIds": [row["id"] for row in old_rows + late_rows],
+            "expectedCount": len(included_rows),
+            "copiedPrefixes": [old_copied_prefix, included_copied_prefix, late_copied_prefix],
         }
 
     def _build_generated_l0_fixture(self, source_collection_name, seed_rows, delete_ids):
@@ -285,6 +345,56 @@ class Import2PCInfraBase(TestBase):
             "storageVersion": 2,
             "seedRows": seed_rows,
             "deleteIds": sorted(delete_ids),
+            "partitionName": None,
+        }
+
+    def _build_generated_l0_window_fixture(
+        self,
+        source_collection_name,
+        seed_rows,
+        old_delete_ids,
+        included_delete_ids,
+        late_delete_ids,
+    ):
+        def build_delete_prefix(suffix, ids):
+            collection_name = f"{source_collection_name}_{suffix}"
+            self._create_base_collection(collection_name)
+            self._insert_rows(collection_name, seed_rows)
+            flush_rsp, flushed = self._flush_collection_with_retry(collection_name)
+            assert flushed, flush_rsp
+            delete_rsp = self.vector_client.vector_delete(
+                {
+                    "collectionName": collection_name,
+                    "filter": f"id in {sorted(ids)}",
+                }
+            )
+            assert delete_rsp["code"] == 0, delete_rsp
+            flush_rsp, flushed = self._flush_collection_with_retry(collection_name)
+            assert flushed, flush_rsp
+            collection_id = self._get_collection_id(collection_name)
+            delta_prefix, delta_objects, has_delta = self._wait_storage_log_prefix_non_empty("delta_log", collection_id)
+            assert has_delta, {"collection_id": collection_id, "checked_prefixes": delta_objects}
+            return delta_prefix
+
+        old_delta_prefix = build_delete_prefix("old", old_delete_ids)
+
+        time.sleep(2)
+        start_ts = self._hybrid_ts_now(-500)
+        included_delta_prefix = build_delete_prefix("included", included_delete_ids)
+
+        end_ts = self._hybrid_ts_now(500)
+        time.sleep(2)
+        late_delta_prefix = build_delete_prefix("late", late_delete_ids)
+
+        storage_version = int(os.getenv("IMPORT_2PC_GENERATED_STORAGE_VERSION", "2"))
+        return {
+            "files": [[old_delta_prefix], [included_delta_prefix], [late_delta_prefix]],
+            "storageVersion": storage_version,
+            "seedRows": seed_rows,
+            "deleteIds": sorted(included_delete_ids),
+            "nonDeleteIds": sorted(set(old_delete_ids) | set(late_delete_ids)),
+            "start_ts": start_ts,
+            "end_ts": end_ts,
             "partitionName": None,
         }
 
@@ -502,7 +612,9 @@ class Import2PCInfraBase(TestBase):
         missing = [name for name, value in required.items() if not value]
         assert not missing, f"{case_id} requires CDC REST options: {', '.join(missing)}"
 
-    def _apply_cdc_topology(self, secondary_endpoint, secondary_token, source_cluster_id, target_cluster_id, pchannel_num):
+    def _apply_cdc_topology(
+        self, secondary_endpoint, secondary_token, source_cluster_id, target_cluster_id, pchannel_num
+    ):
         config = {
             "clusters": [
                 {
@@ -564,6 +676,8 @@ class Import2PCInfraBase(TestBase):
     def _build_fixture_source_clients(self, endpoint, token, minio_host, bucket_name, root_path):
         minio_endpoint = minio_host if ":" in minio_host else f"{minio_host}:9000"
         return {
+            "endpoint": endpoint,
+            "token": token,
             "collection": CollectionClient(endpoint, token),
             "vector": VectorClient(endpoint, token),
             "storage": StorageClient(
@@ -842,10 +956,7 @@ class Import2PCInfraBase(TestBase):
     def _restart_release_for_config(self, release_name, namespace="chaos-testing"):
         pods = self._kubectl_get_release_pods(release_name, namespace=namespace)
         components = sorted(
-            {
-                pod.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/component", "")
-                for pod in pods
-            }
+            {pod.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/component", "") for pod in pods}
         )
         component = "mixcoord" if "mixcoord" in components else "standalone" if "standalone" in components else None
         assert component is not None, {"release": release_name, "components": components}
@@ -925,13 +1036,7 @@ class Import2PCInfraBase(TestBase):
             cr_status, healthy = self._wait_milvus_cr_healthy(release_name, namespace=namespace, timeout=600)
             assert healthy, cr_status
             if use_loon_ffi is not None:
-                observed = (
-                    cr.get("spec", {})
-                    .get("config", {})
-                    .get("common", {})
-                    .get("storage", {})
-                    .get("useLoonFFI")
-                )
+                observed = cr.get("spec", {}).get("config", {}).get("common", {}).get("storage", {}).get("useLoonFFI")
                 if observed is not bool(use_loon_ffi):
                     self._kubectl_patch_milvus_config(
                         release_name,
@@ -972,9 +1077,7 @@ class Import2PCInfraBase(TestBase):
             f"{(self.storage_client.root_path or 'file').strip('/')}/"
             f"import_2pc_storage_fixture/{uuid4().hex}/insert_log/{source_collection_id}/_default"
         )
-        target_segment_prefix = (
-            f"{target_partition_prefix}/{source_segment_id}"
-        )
+        target_segment_prefix = f"{target_partition_prefix}/{source_segment_id}"
         copied = self._copy_storage_prefix_between_clients(
             source["storage"],
             self.storage_client,
@@ -1054,8 +1157,25 @@ class Import2PCInfraBase(TestBase):
             pytest.fail(f"cannot inspect release {release_name} pods: {result.stderr.strip()}")
         return json.loads(result.stdout).get("items", [])
 
-    def _skip_if_release_has_no_component(self, release_name, component, case_id):
-        pods = self._kubectl_get_release_pods(release_name)
+    def _resolve_secondary_release_name(self, secondary_release_name, case_id):
+        release_name = secondary_release_name or os.environ.get("IMPORT_2PC_SECONDARY_RELEASE_NAME")
+        assert release_name, (
+            f"{case_id} requires --secondary_release_name or IMPORT_2PC_SECONDARY_RELEASE_NAME "
+            "so the test can pause and restore the secondary cluster component"
+        )
+        return release_name
+
+    def _resolve_primary_release_name(self, release_name, case_id, namespace="chaos-testing"):
+        resolved = os.environ.get("IMPORT_2PC_PRIMARY_RELEASE_NAME") or release_name
+        pods = self._kubectl_get_release_pods(resolved, namespace=namespace)
+        assert pods, (
+            f"{case_id} requires --release_name or IMPORT_2PC_PRIMARY_RELEASE_NAME "
+            "to select the primary cluster pods for Chaos Mesh network partition"
+        )
+        return resolved
+
+    def _skip_if_release_has_no_component(self, release_name, component, case_id, namespace="chaos-testing"):
+        pods = self._kubectl_get_release_pods(release_name, namespace=namespace)
         components = sorted(
             {pod.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/component", "") for pod in pods}
         )
@@ -1063,6 +1183,168 @@ class Import2PCInfraBase(TestBase):
             f"{case_id} requires separate {component} pods; "
             f"{release_name} exposes components={components or ['<none>']}"
         )
+
+    def _kubectl_get_component_workloads(self, release_name, component, namespace="chaos-testing"):
+        if not shutil.which("kubectl"):
+            pytest.fail("kubectl is required for import 2PC infra-dependent tests")
+        env = os.environ.copy()
+        env.setdefault("KUBECONFIG", os.path.expanduser("~/.kube/config"))
+        selector = (
+            f"app.kubernetes.io/instance={release_name},"
+            f"app.kubernetes.io/name=milvus,"
+            f"app.kubernetes.io/component={component}"
+        )
+        result = subprocess.run(
+            ["kubectl", "get", "deploy,statefulset", "-n", namespace, "-l", selector, "-o", "json"],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+            check=False,
+        )
+        if result.returncode != 0:
+            pytest.fail(
+                f"cannot inspect {component} workloads for release {release_name}: "
+                f"stdout={result.stdout.strip()} stderr={result.stderr.strip()}"
+            )
+        workloads = []
+        for item in json.loads(result.stdout).get("items", []):
+            kind = item.get("kind", "").lower()
+            name = item.get("metadata", {}).get("name")
+            replicas = item.get("spec", {}).get("replicas", 1)
+            if kind and name:
+                workloads.append({"kind": kind, "name": name, "replicas": replicas})
+        assert workloads, f"release {release_name} has no {component} deployment/statefulset workloads"
+        return workloads
+
+    def _kubectl_wait_workloads_replicas(self, workloads, replicas, namespace="chaos-testing", timeout=300):
+        if not shutil.which("kubectl"):
+            pytest.fail("kubectl is required for import 2PC infra-dependent tests")
+        env = os.environ.copy()
+        env.setdefault("KUBECONFIG", os.path.expanduser("~/.kube/config"))
+        deadline = time.time() + timeout
+        last = {}
+        while time.time() < deadline:
+            all_ready = True
+            for workload in workloads:
+                result = subprocess.run(
+                    [
+                        "kubectl",
+                        "get",
+                        f"{workload['kind']}/{workload['name']}",
+                        "-n",
+                        namespace,
+                        "-o",
+                        "json",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    timeout=30,
+                    check=False,
+                )
+                if result.returncode != 0:
+                    all_ready = False
+                    last[workload["name"]] = {"stdout": result.stdout, "stderr": result.stderr}
+                    continue
+                item = json.loads(result.stdout)
+                status = item.get("status", {})
+                observed_replicas = status.get("replicas", 0) or 0
+                ready_replicas = status.get("readyReplicas", status.get("availableReplicas", 0)) or 0
+                last[workload["name"]] = {
+                    "replicas": observed_replicas,
+                    "readyReplicas": ready_replicas,
+                    "desired": item.get("spec", {}).get("replicas"),
+                }
+                if replicas == 0:
+                    all_ready = all_ready and observed_replicas == 0 and ready_replicas == 0
+                else:
+                    all_ready = all_ready and ready_replicas >= replicas
+            if all_ready:
+                return last, True
+            time.sleep(3)
+        return last, False
+
+    def _kubectl_scale_workloads(self, workloads, replicas, namespace="chaos-testing", timeout=300):
+        if not shutil.which("kubectl"):
+            pytest.fail("kubectl is required for import 2PC infra-dependent tests")
+        env = os.environ.copy()
+        env.setdefault("KUBECONFIG", os.path.expanduser("~/.kube/config"))
+        for workload in workloads:
+            result = subprocess.run(
+                [
+                    "kubectl",
+                    "scale",
+                    f"{workload['kind']}/{workload['name']}",
+                    "-n",
+                    namespace,
+                    "--replicas",
+                    str(replicas),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+                check=False,
+            )
+            assert result.returncode == 0, {
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "workload": workload,
+                "replicas": replicas,
+            }
+        observed, ready = self._kubectl_wait_workloads_replicas(
+            workloads,
+            replicas,
+            namespace=namespace,
+            timeout=timeout,
+        )
+        assert ready, {"workloads": workloads, "replicas": replicas, "last": observed}
+        return observed
+
+    def _kubectl_restore_workloads(self, workloads, namespace="chaos-testing", timeout=300):
+        if not workloads:
+            return
+        env = os.environ.copy()
+        env.setdefault("KUBECONFIG", os.path.expanduser("~/.kube/config"))
+        for workload in workloads:
+            result = subprocess.run(
+                [
+                    "kubectl",
+                    "scale",
+                    f"{workload['kind']}/{workload['name']}",
+                    "-n",
+                    namespace,
+                    "--replicas",
+                    str(workload["replicas"]),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+                check=False,
+            )
+            assert result.returncode == 0, {
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "workload": workload,
+            }
+        deadline = time.time() + timeout
+        last = {}
+        while time.time() < deadline:
+            all_ready = True
+            for workload in workloads:
+                observed, ready = self._kubectl_wait_workloads_replicas(
+                    [workload],
+                    workload["replicas"],
+                    namespace=namespace,
+                    timeout=10,
+                )
+                last.update(observed)
+                all_ready = all_ready and ready
+            if all_ready:
+                return
+        assert False, {"workloads": workloads, "last": last}
 
     def _kubectl_delete_one_component_pod_and_wait_ready(
         self,
@@ -1077,6 +1359,11 @@ class Import2PCInfraBase(TestBase):
             for pod in pods
             if pod.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/component") == component
             and pod.get("status", {}).get("phase") == "Running"
+            and pod.get("metadata", {}).get("deletionTimestamp") is None
+            and any(
+                condition.get("type") == "Ready" and condition.get("status") == "True"
+                for condition in pod.get("status", {}).get("conditions", [])
+            )
         ]
         if not component_pods:
             pytest.fail(f"release {release_name} has no running {component} pod")
@@ -1100,6 +1387,8 @@ class Import2PCInfraBase(TestBase):
             for pod in last_pods:
                 labels = pod.get("metadata", {}).get("labels", {})
                 if labels.get("app.kubernetes.io/component") != component:
+                    continue
+                if pod.get("metadata", {}).get("deletionTimestamp") is not None:
                     continue
                 if pod.get("metadata", {}).get("name") == pod_name:
                     continue
@@ -1169,14 +1458,33 @@ class Import2PCInfraBase(TestBase):
         assert healthy, cr_status
         return result
 
-    def _restart_mixcoord_for_config(self, release_name, namespace="chaos-testing"):
-        old_pod, new_pod = self._kubectl_delete_one_component_pod_and_wait_ready(
-            release_name, "mixcoord", namespace=namespace, timeout=300
-        )
-        assert old_pod != new_pod
+    def _restart_config_components(self, release_name, requested_components, namespace="chaos-testing"):
+        pods = self._kubectl_get_release_pods(release_name, namespace=namespace)
+        available_components = {
+            pod.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/component") for pod in pods
+        }
+        if "standalone" in available_components:
+            restart_components = ["standalone"]
+        else:
+            restart_components = [component for component in requested_components if component in available_components]
+        if not restart_components:
+            pytest.fail(
+                f"release {release_name} has none of {list(requested_components)} and no standalone pod for config restart"
+            )
+        restarted = []
+        for component in restart_components:
+            old_pod, new_pod = self._kubectl_delete_one_component_pod_and_wait_ready(
+                release_name, component, namespace=namespace, timeout=300
+            )
+            assert old_pod != new_pod
+            restarted.append((old_pod, new_pod))
         cr_status, healthy = self._wait_milvus_cr_healthy(release_name, namespace=namespace, timeout=300)
         assert healthy, cr_status
-        return old_pod, new_pod
+        return restarted
+
+    def _restart_mixcoord_for_config(self, release_name, namespace="chaos-testing"):
+        restarted = self._restart_config_components(release_name, ("mixcoord",), namespace=namespace)
+        return restarted[0]
 
     def _load_json_fixture_from_env(self, env_name):
         raw = os.environ.get(env_name)
@@ -1195,6 +1503,144 @@ class Import2PCInfraBase(TestBase):
                 return json.load(fixture_file)
         return json.loads(raw)
 
+    def _require_networkchaos_crd(self):
+        self._kubectl_json(
+            ["get", "crd", "networkchaos.chaos-mesh.org", "-o", "json"],
+            timeout=30,
+            fail_message="Chaos Mesh NetworkChaos CRD is required",
+        )
+
+    def _build_cdc_proxy_network_partition_manifest(
+        self,
+        chaos_name,
+        namespace,
+        primary_release,
+        secondary_release,
+        external_targets=None,
+        duration="10m",
+    ):
+        spec = {
+            "action": "partition",
+            "mode": "all",
+            "selector": {
+                "namespaces": [namespace],
+                "labelSelectors": {
+                    "app.kubernetes.io/instance": primary_release,
+                    "app.kubernetes.io/name": "milvus",
+                },
+                "expressionSelectors": [
+                    {
+                        "key": "app.kubernetes.io/component",
+                        "operator": "In",
+                        "values": ["cdc", "streamingnode"],
+                    }
+                ],
+            },
+            "direction": "both",
+            "duration": duration,
+        }
+        if external_targets:
+            spec["externalTargets"] = list(external_targets)
+        else:
+            spec["target"] = {
+                "mode": "all",
+                "selector": {
+                    "namespaces": [namespace],
+                    "labelSelectors": {
+                        "app.kubernetes.io/instance": secondary_release,
+                        "app.kubernetes.io/name": "milvus",
+                        "app.kubernetes.io/component": "proxy",
+                    },
+                },
+            }
+
+        return {
+            "apiVersion": "chaos-mesh.org/v1alpha1",
+            "kind": "NetworkChaos",
+            "metadata": {
+                "name": chaos_name,
+                "namespace": namespace,
+                "labels": {
+                    "app.kubernetes.io/part-of": "import-2pc",
+                    "import-2pc-case": "cdc-commit-replay",
+                },
+            },
+            "spec": spec,
+        }
+
+    def _kubectl_delete_resource(self, kind, name, namespace="chaos-testing", timeout=60):
+        if not shutil.which("kubectl"):
+            pytest.fail("kubectl is required for import 2PC infra-dependent tests")
+        env = os.environ.copy()
+        env.setdefault("KUBECONFIG", os.path.expanduser("~/.kube/config"))
+        result = subprocess.run(
+            ["kubectl", "delete", kind, name, "-n", namespace, "--ignore-not-found=true"],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=timeout,
+            check=False,
+        )
+        assert result.returncode == 0, {"stdout": result.stdout, "stderr": result.stderr, "kind": kind, "name": name}
+        return result
+
+    def _wait_networkchaos_injected(self, chaos_name, namespace="chaos-testing", timeout=90):
+        deadline = time.time() + timeout
+        last = None
+        while time.time() < deadline:
+            chaos = self._kubectl_json(
+                ["get", "networkchaos", chaos_name, "-n", namespace, "-o", "json"],
+                namespace=namespace,
+                timeout=30,
+                fail_message=f"cannot inspect NetworkChaos {chaos_name}",
+            )
+            status = chaos.get("status", {})
+            experiment = status.get("experiment", {})
+            records = experiment.get("containerRecords", [])
+            injected = sum(int(record.get("injectedCount", 0) or 0) for record in records)
+            instances = status.get("instances", {})
+            last = {
+                "desiredPhase": experiment.get("desiredPhase"),
+                "injectedCount": injected,
+                "instances": instances,
+                "conditions": status.get("conditions", []),
+            }
+            if injected > 0 or instances:
+                return chaos, True
+            time.sleep(3)
+        return last, False
+
+    def _assert_secondary_not_committed_during_partition(
+        self,
+        secondary,
+        collection_name,
+        job_id,
+        expected_ids,
+        timeout=20,
+    ):
+        deadline = time.time() + timeout
+        last_progress = None
+        last_seen = set()
+        while time.time() < deadline:
+            last_progress = secondary["import_job"].get_import_job_progress(job_id)
+            state = last_progress.get("data", {}).get("state") if last_progress.get("code") == 0 else None
+            assert state != "Completed", {
+                "reason": "secondary completed while CDC NetworkChaos partition was still active",
+                "progress": last_progress,
+            }
+            last_seen = self._query_imported_ids_with_client(
+                secondary["vector"],
+                collection_name,
+                sorted(expected_ids),
+            )
+            assert not last_seen, {
+                "reason": "secondary exposed import rows while CDC NetworkChaos partition was still active",
+                "seen": last_seen,
+                "progress": last_progress,
+            }
+            time.sleep(2)
+        return last_progress, last_seen
+
 
 @pytest.mark.BulkInsert
 @pytest.mark.L3
@@ -1203,6 +1649,7 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
         self,
         secondary_endpoint,
         secondary_token,
+        secondary_release_name,
         secondary_minio_host,
         secondary_bucket_name,
         secondary_root_path,
@@ -1284,9 +1731,7 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
             commit_rsp = self.import_job_client.commit_import_job(first_job_id)
             assert commit_rsp["code"] == 0, commit_rsp
             for client in (self.import_job_client, secondary["import_job"]):
-                rsp, completed = client.wait_import_job_state(
-                    first_job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-                )
+                rsp, completed = client.wait_import_job_state(first_job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
                 assert completed, rsp
 
             seen, visible = self._wait_imported_ids_visible(collection_name, first_ids, timeout=180)
@@ -1297,9 +1742,7 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
             commit_rsp = self.import_job_client.commit_import_job(second_job_id)
             assert commit_rsp["code"] == 0, commit_rsp
             for client in (self.import_job_client, secondary["import_job"]):
-                rsp, completed = client.wait_import_job_state(
-                    second_job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
-                )
+                rsp, completed = client.wait_import_job_state(second_job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
                 assert completed, rsp
 
             primary_seen, primary_visible = self._wait_imported_ids_visible(collection_name, all_ids, timeout=180)
@@ -1327,6 +1770,409 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
                 if file_path and os.path.exists(file_path):
                     os.remove(file_path)
 
+    def test_import_2pc_cdc_commit_replays_after_secondary_proxy_outage(
+        self,
+        secondary_endpoint,
+        secondary_token,
+        secondary_release_name,
+        secondary_minio_host,
+        secondary_bucket_name,
+        secondary_root_path,
+        source_cluster_id,
+        target_cluster_id,
+        pchannel_num,
+    ):
+        """
+        target: verify CDC replays CommitImportMessage when secondary proxy is unavailable during primary commit
+        method: wait until both clusters hold the import job at Uncommitted, scale secondary proxy workloads to zero,
+                commit on primary, then restore secondary proxy workloads
+        expected: primary completes while secondary misses the live commit delivery; after proxy restore,
+                  CDC replay advances the same job to Completed and primary/secondary PK sets match
+        """
+        self._require_cdc_rest_env(
+            "IMP-REP-102",
+            secondary_endpoint,
+            secondary_minio_host,
+            secondary_bucket_name,
+            source_cluster_id,
+            target_cluster_id,
+        )
+        secondary_release = self._resolve_secondary_release_name(secondary_release_name, "IMP-REP-102")
+        self._apply_cdc_topology(
+            secondary_endpoint,
+            secondary_token,
+            source_cluster_id,
+            target_cluster_id,
+            pchannel_num,
+        )
+        secondary = self._build_secondary_cdc_clients(
+            secondary_endpoint,
+            secondary_token,
+            secondary_minio_host,
+            secondary_bucket_name,
+            secondary_root_path,
+        )
+
+        collection_name = gen_collection_name(prefix="import_2pc_cdc_commit_replay")
+        rows = self._make_rows(32000, 24, phase=320)
+        expected_ids = {row["id"] for row in rows}
+        file_name = f"import_2pc_cdc_commit_replay_{uuid4()}.parquet"
+        file_path = None
+        job_id = None
+        secondary_proxy_workloads = []
+
+        try:
+            self._create_base_collection(collection_name, shards_num=4)
+            rsp, synced = self._wait_collection_exists_with_client(secondary["collection"], collection_name)
+            assert synced, rsp
+            rsp, loaded = self._wait_collection_loaded_with_client(secondary["collection"], collection_name)
+            assert loaded, rsp
+            file_path = self._write_parquet_and_upload_to_both_clusters(rows, file_name, secondary["storage"])
+
+            job_id = self._create_manual_import_job(collection_name, file_name)
+            primary_rsp, primary_ready = self.import_job_client.wait_import_job_state(
+                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert primary_ready, primary_rsp
+            secondary_rsp, secondary_ready = secondary["import_job"].wait_import_job_state(
+                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert secondary_ready, secondary_rsp
+
+            secondary_proxy_workloads = self._kubectl_get_component_workloads(secondary_release, "proxy")
+            self._kubectl_scale_workloads(secondary_proxy_workloads, 0, timeout=300)
+
+            commit_rsp = self.import_job_client.commit_import_job(job_id)
+            assert commit_rsp["code"] == 0, commit_rsp
+            primary_rsp, primary_completed = self.import_job_client.wait_import_job_state(
+                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert primary_completed, primary_rsp
+            primary_seen, primary_visible = self._wait_imported_ids_visible(
+                collection_name,
+                expected_ids,
+                timeout=180,
+            )
+            assert primary_visible, {"expected": expected_ids, "seen": primary_seen}
+
+            self._kubectl_restore_workloads(secondary_proxy_workloads, timeout=300)
+            secondary_proxy_workloads = []
+            cr_status, healthy = self._wait_milvus_cr_healthy(secondary_release, timeout=300)
+            assert healthy, cr_status
+
+            secondary_rsp, secondary_completed = secondary["import_job"].wait_import_job_state(
+                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert secondary_completed, secondary_rsp
+            secondary_seen, secondary_visible = self._wait_imported_ids_visible_with_clients(
+                secondary["collection"],
+                secondary["vector"],
+                collection_name,
+                expected_ids,
+                timeout=180,
+            )
+            assert secondary_visible, {"expected": expected_ids, "seen": secondary_seen}
+            assert primary_seen == secondary_seen == expected_ids
+
+        finally:
+            if secondary_proxy_workloads:
+                self._kubectl_restore_workloads(secondary_proxy_workloads, timeout=300)
+            if job_id is not None:
+                progress_rsp = self.import_job_client.get_import_job_progress(job_id)
+                state = progress_rsp.get("data", {}).get("state") if progress_rsp.get("code") == 0 else None
+                if state in ("Pending", "PreImporting", "Importing", "Sorting", "IndexBuilding", "Uncommitted"):
+                    self.import_job_client.abort_import_job(job_id)
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
+
+    def test_import_2pc_cdc_commit_replays_after_chaos_mesh_network_partition(
+        self,
+        release_name,
+        secondary_endpoint,
+        secondary_token,
+        secondary_release_name,
+        secondary_minio_host,
+        secondary_bucket_name,
+        secondary_root_path,
+        source_cluster_id,
+        target_cluster_id,
+        pchannel_num,
+    ):
+        """
+        target: verify CDC replays CommitImportMessage after a Chaos Mesh partition blocks primary replication traffic to secondary
+        method: hold a manual import job at Uncommitted on both clusters, apply Chaos Mesh NetworkChaos partition
+                from primary cdc/streamingnode pods to the secondary Milvus endpoint IP, commit on primary, then remove partition
+        expected: primary completes while secondary remains Uncommitted/invisible during the partition; after partition removal,
+                  CDC reconnects from checkpoint, replays CommitImportMessage, and primary/secondary PK sets match
+        """
+        case_id = "IMP-REP-103"
+        self._require_cdc_rest_env(
+            case_id,
+            secondary_endpoint,
+            secondary_minio_host,
+            secondary_bucket_name,
+            source_cluster_id,
+            target_cluster_id,
+        )
+        self._require_networkchaos_crd()
+        namespace = os.environ.get("IMPORT_2PC_CHAOS_NAMESPACE", "chaos-testing")
+        primary_release = self._resolve_primary_release_name(release_name, case_id, namespace=namespace)
+        secondary_release = self._resolve_secondary_release_name(secondary_release_name, case_id)
+        self._skip_if_release_has_no_component(primary_release, "streamingnode", case_id, namespace=namespace)
+        self._skip_if_release_has_no_component(secondary_release, "proxy", case_id, namespace=namespace)
+        secondary_partition_target = os.environ.get("IMPORT_2PC_CHAOS_SECONDARY_TARGET")
+        if not secondary_partition_target:
+            secondary_partition_target = urlparse(secondary_endpoint).hostname
+        assert secondary_partition_target, {
+            "reason": "cannot infer secondary endpoint host for Chaos Mesh externalTargets",
+            "secondary_endpoint": secondary_endpoint,
+        }
+
+        chaos_duration = os.environ.get("IMPORT_2PC_CHAOS_DURATION", "10m")
+        chaos_settle_seconds = int(os.environ.get("IMPORT_2PC_CHAOS_SETTLE_SECONDS", "15"))
+        chaos_hold_seconds = int(os.environ.get("IMPORT_2PC_CHAOS_HOLD_SECONDS", "20"))
+        chaos_name = f"import-2pc-cdc-net-{uuid4().hex[:10]}"
+        chaos_applied = False
+
+        primary_status, primary_healthy = self._wait_milvus_cr_healthy(
+            primary_release, namespace=namespace, timeout=120
+        )
+        assert primary_healthy, primary_status
+        secondary_status, secondary_healthy = self._wait_milvus_cr_healthy(
+            secondary_release, namespace=namespace, timeout=120
+        )
+        assert secondary_healthy, secondary_status
+
+        self._apply_cdc_topology(
+            secondary_endpoint,
+            secondary_token,
+            source_cluster_id,
+            target_cluster_id,
+            pchannel_num,
+        )
+        secondary = self._build_secondary_cdc_clients(
+            secondary_endpoint,
+            secondary_token,
+            secondary_minio_host,
+            secondary_bucket_name,
+            secondary_root_path,
+        )
+
+        collection_name = gen_collection_name(prefix="import_2pc_cdc_net_partition")
+        rows = self._make_rows(32200, 24, phase=322)
+        expected_ids = {row["id"] for row in rows}
+        file_name = f"import_2pc_cdc_net_partition_{uuid4()}.parquet"
+        file_path = None
+        job_id = None
+
+        try:
+            self._create_base_collection(collection_name, shards_num=4)
+            rsp, synced = self._wait_collection_exists_with_client(secondary["collection"], collection_name)
+            assert synced, rsp
+            rsp, loaded = self._wait_collection_loaded_with_client(secondary["collection"], collection_name)
+            assert loaded, rsp
+            file_path = self._write_parquet_and_upload_to_both_clusters(rows, file_name, secondary["storage"])
+
+            job_id = self._create_manual_import_job(collection_name, file_name)
+            primary_rsp, primary_ready = self.import_job_client.wait_import_job_state(
+                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert primary_ready, primary_rsp
+            secondary_rsp, secondary_ready = secondary["import_job"].wait_import_job_state(
+                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert secondary_ready, secondary_rsp
+
+            chaos_manifest = self._build_cdc_proxy_network_partition_manifest(
+                chaos_name,
+                namespace,
+                primary_release,
+                secondary_release,
+                external_targets=[secondary_partition_target],
+                duration=chaos_duration,
+            )
+            self._kubectl_apply_manifest(chaos_manifest)
+            chaos_applied = True
+            chaos_status, injected = self._wait_networkchaos_injected(
+                chaos_name,
+                namespace=namespace,
+                timeout=90,
+            )
+            assert injected, {"networkchaos": chaos_name, "last_status": chaos_status}
+            time.sleep(chaos_settle_seconds)
+
+            commit_rsp = self.import_job_client.commit_import_job(job_id)
+            assert commit_rsp["code"] == 0, commit_rsp
+            primary_rsp, primary_completed = self.import_job_client.wait_import_job_state(
+                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert primary_completed, primary_rsp
+            primary_seen, primary_visible = self._wait_imported_ids_visible(
+                collection_name,
+                expected_ids,
+                timeout=180,
+            )
+            assert primary_visible, {"expected": expected_ids, "seen": primary_seen}
+
+            self._assert_secondary_not_committed_during_partition(
+                secondary,
+                collection_name,
+                job_id,
+                expected_ids,
+                timeout=chaos_hold_seconds,
+            )
+
+            self._kubectl_delete_resource("networkchaos", chaos_name, namespace=namespace, timeout=60)
+            chaos_applied = False
+            time.sleep(10)
+
+            secondary_rsp, secondary_completed = secondary["import_job"].wait_import_job_state(
+                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert secondary_completed, secondary_rsp
+            secondary_seen, secondary_visible = self._wait_imported_ids_visible_with_clients(
+                secondary["collection"],
+                secondary["vector"],
+                collection_name,
+                expected_ids,
+                timeout=180,
+            )
+            assert secondary_visible, {"expected": expected_ids, "seen": secondary_seen}
+            assert primary_seen == secondary_seen == expected_ids
+
+        finally:
+            if chaos_applied:
+                self._kubectl_delete_resource("networkchaos", chaos_name, namespace=namespace, timeout=60)
+                time.sleep(10)
+            if job_id is not None:
+                progress_rsp = self.import_job_client.get_import_job_progress(job_id)
+                state = progress_rsp.get("data", {}).get("state") if progress_rsp.get("code") == 0 else None
+                if state in ("Pending", "PreImporting", "Importing", "Sorting", "IndexBuilding", "Uncommitted"):
+                    self.import_job_client.abort_import_job(job_id)
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
+
+    def test_import_2pc_cdc_commit_before_secondary_import_ready_recovers_after_datanode_restore(
+        self,
+        secondary_endpoint,
+        secondary_token,
+        secondary_release_name,
+        secondary_minio_host,
+        secondary_bucket_name,
+        secondary_root_path,
+        source_cluster_id,
+        target_cluster_id,
+        pchannel_num,
+    ):
+        """
+        target: verify primary CommitImport does not permanently lose secondary import data when secondary import is not ready
+        method: pause secondary datanode workloads before creating a manual import, wait for primary Uncommitted,
+                commit primary while secondary cannot finish import, then restore secondary datanode workloads
+        expected: primary data becomes visible; secondary does not expose partial import data while datanode is paused,
+                  and eventually reaches Completed with the same PK set after datanode restore
+        """
+        self._require_cdc_rest_env(
+            "IMP-REP-101",
+            secondary_endpoint,
+            secondary_minio_host,
+            secondary_bucket_name,
+            source_cluster_id,
+            target_cluster_id,
+        )
+        secondary_release = self._resolve_secondary_release_name(secondary_release_name, "IMP-REP-101")
+        self._apply_cdc_topology(
+            secondary_endpoint,
+            secondary_token,
+            source_cluster_id,
+            target_cluster_id,
+            pchannel_num,
+        )
+        secondary = self._build_secondary_cdc_clients(
+            secondary_endpoint,
+            secondary_token,
+            secondary_minio_host,
+            secondary_bucket_name,
+            secondary_root_path,
+        )
+
+        collection_name = gen_collection_name(prefix="import_2pc_cdc_secondary_not_ready")
+        rows = self._make_rows(32100, 24, phase=321)
+        expected_ids = {row["id"] for row in rows}
+        file_name = f"import_2pc_cdc_secondary_not_ready_{uuid4()}.parquet"
+        file_path = None
+        job_id = None
+        secondary_datanode_workloads = []
+
+        try:
+            self._create_base_collection(collection_name, shards_num=4)
+            rsp, synced = self._wait_collection_exists_with_client(secondary["collection"], collection_name)
+            assert synced, rsp
+            rsp, loaded = self._wait_collection_loaded_with_client(secondary["collection"], collection_name)
+            assert loaded, rsp
+            file_path = self._write_parquet_and_upload_to_both_clusters(rows, file_name, secondary["storage"])
+
+            secondary_datanode_workloads = self._kubectl_get_component_workloads(secondary_release, "datanode")
+            self._kubectl_scale_workloads(secondary_datanode_workloads, 0, timeout=300)
+
+            job_id = self._create_manual_import_job(collection_name, file_name)
+            primary_rsp, primary_ready = self.import_job_client.wait_import_job_state(
+                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert primary_ready, primary_rsp
+
+            commit_rsp = self.import_job_client.commit_import_job(job_id)
+            assert commit_rsp["code"] == 0, commit_rsp
+            primary_rsp, primary_completed = self.import_job_client.wait_import_job_state(
+                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert primary_completed, primary_rsp
+            primary_seen, primary_visible = self._wait_imported_ids_visible(
+                collection_name,
+                expected_ids,
+                timeout=180,
+            )
+            assert primary_visible, {"expected": expected_ids, "seen": primary_seen}
+
+            secondary_seen = self._query_imported_ids_with_client(
+                secondary["vector"],
+                collection_name,
+                sorted(expected_ids),
+            )
+            assert not secondary_seen, {
+                "reason": "secondary exposed import rows before local import completed",
+                "seen": secondary_seen,
+            }
+
+            self._kubectl_restore_workloads(secondary_datanode_workloads, timeout=300)
+            secondary_datanode_workloads = []
+            cr_status, healthy = self._wait_milvus_cr_healthy(secondary_release, timeout=300)
+            assert healthy, cr_status
+
+            secondary_rsp, secondary_completed = secondary["import_job"].wait_import_job_state(
+                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert secondary_completed, secondary_rsp
+            secondary_seen, secondary_visible = self._wait_imported_ids_visible_with_clients(
+                secondary["collection"],
+                secondary["vector"],
+                collection_name,
+                expected_ids,
+                timeout=180,
+            )
+            assert secondary_visible, {"expected": expected_ids, "seen": secondary_seen}
+            assert primary_seen == secondary_seen == expected_ids
+
+        finally:
+            if secondary_datanode_workloads:
+                self._kubectl_restore_workloads(secondary_datanode_workloads, timeout=300)
+            if job_id is not None:
+                progress_rsp = self.import_job_client.get_import_job_progress(job_id)
+                state = progress_rsp.get("data", {}).get("state") if progress_rsp.get("code") == 0 else None
+                if state in ("Pending", "PreImporting", "Importing", "Sorting", "IndexBuilding", "Uncommitted"):
+                    self.import_job_client.abort_import_job(job_id)
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
+
     def test_import_2pc_mixcoord_restart_during_committing_recovers_to_completed(self, release_name):
         """
         target: verify a manual import can finish after MixCoord restarts immediately after CommitImport
@@ -1346,9 +2192,7 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
         try:
             file_path = self._write_parquet_and_upload(rows, file_name)
             job_id = self._create_manual_import_job(collection_name, file_name)
-            rsp, ready = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ready = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ready, rsp
 
             commit_rsp = self.import_job_client.commit_import_job(job_id)
@@ -1407,9 +2251,7 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
             self._create_base_collection(collection_name, shards_num=4)
             file_path = self._write_parquet_and_upload(rows, file_name)
             job_id = self._create_manual_import_job(collection_name, file_name)
-            rsp, ready = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ready = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ready, rsp
             assert rsp["data"]["importedRows"] == len(rows), rsp
 
@@ -1472,9 +2314,7 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
         try:
             file_path = self._write_parquet_and_upload(rows, file_name)
             job_id = self._create_manual_import_job(collection_name, file_name)
-            rsp, ready = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ready = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ready, rsp
 
             commit_rsp = self.import_job_client.commit_import_job(job_id)
@@ -1534,9 +2374,7 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
                 options,
                 partition_name=fixture.get("partitionName", "_default"),
             )
-            rsp, ready = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ready = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ready, rsp
             if expected_count is None and fixture.get("expectedCountFromJob"):
                 expected_count = rsp["data"].get("importedRows")
@@ -1549,6 +2387,129 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
             elif expected_count is not None:
                 count, count_ok = self._wait_count(collection_name, 0, timeout=20)
                 assert count_ok, {"expected_count": 0, "last_count": count}
+
+            commit_rsp = self.import_job_client.commit_import_job(job_id)
+            assert commit_rsp["code"] == 0, commit_rsp
+            rsp, completed = self.import_job_client.wait_import_job_state(
+                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert completed, rsp
+
+            if expected_ids:
+                seen, visible = self._wait_imported_ids_visible(collection_name, expected_ids, timeout=180)
+                assert visible, {"expected": expected_ids, "seen": seen}
+            if expected_count is not None:
+                count, count_ok = self._wait_count(collection_name, expected_count, timeout=180)
+                assert count_ok, {"expected_count": expected_count, "last_count": count}
+
+        finally:
+            if job_id is not None:
+                progress_rsp = self.import_job_client.get_import_job_progress(job_id)
+                state = progress_rsp.get("data", {}).get("state") if progress_rsp.get("code") == 0 else None
+                if state in ("Pending", "PreImporting", "Importing", "Sorting", "IndexBuilding", "Uncommitted"):
+                    self.import_job_client.abort_import_job(job_id)
+
+    def test_import_2pc_backup_start_end_ts_filters_real_insert_binlog_window(self):
+        """
+        target: verify backup import start_ts/end_ts filters real insert binlog rows by timestamp window
+        method: generate old, in-window, and late insert binlogs in a source collection, then import the whole
+                partition prefix with backup=true, auto_commit=false, and start_ts/end_ts covering only the middle batch
+        expected: only in-window PKs are counted and visible after CommitImport; old and late PKs remain absent
+        """
+        old_rows = self._make_rows(33000, 6, phase=330)
+        included_rows = self._make_rows(33100, 6, phase=331)
+        late_rows = self._make_rows(33200, 6, phase=332)
+        fixture = self._build_generated_backup_window_fixture(
+            gen_collection_name(prefix="import_2pc_backup_window_src"),
+            old_rows,
+            included_rows,
+            late_rows,
+        )
+        collection_name = gen_collection_name(prefix="import_2pc_backup_window")
+        self._create_base_collection(collection_name)
+
+        expected_ids = set(fixture["expectedIds"])
+        excluded_ids = set(fixture["excludedIds"])
+        job_id = None
+        try:
+            job_id = self._create_manual_import_job_with_files(
+                collection_name,
+                fixture["files"],
+                {
+                    "backup": "true",
+                    "storage_version": str(fixture["storageVersion"]),
+                    "start_ts": fixture["start_ts"],
+                    "end_ts": fixture["end_ts"],
+                },
+                partition_name=fixture["partitionName"],
+            )
+            rsp, ready = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
+            assert ready, rsp
+            assert rsp["data"]["importedRows"] == fixture["expectedCount"], rsp
+
+            seen, absent = self._wait_imported_ids_absent(collection_name, expected_ids, timeout=20)
+            assert absent, {"unexpected_visible_ids_before_commit": seen}
+
+            commit_rsp = self.import_job_client.commit_import_job(job_id)
+            assert commit_rsp["code"] == 0, commit_rsp
+            rsp, completed = self.import_job_client.wait_import_job_state(
+                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert completed, rsp
+
+            seen, visible = self._wait_imported_ids_visible(collection_name, expected_ids, timeout=180)
+            assert visible, {"expected": expected_ids, "seen": seen, "fixture": fixture}
+            excluded_seen = self._query_imported_ids(collection_name, sorted(excluded_ids))
+            assert not excluded_seen, {"excluded_ids": excluded_ids, "seen": excluded_seen, "fixture": fixture}
+            count, count_ok = self._wait_count(collection_name, len(expected_ids), timeout=180)
+            assert count_ok, {"expected_count": len(expected_ids), "last_count": count}
+
+        finally:
+            if job_id is not None:
+                progress_rsp = self.import_job_client.get_import_job_progress(job_id)
+                state = progress_rsp.get("data", {}).get("state") if progress_rsp.get("code") == 0 else None
+                if state in ("Pending", "PreImporting", "Importing", "Sorting", "IndexBuilding", "Uncommitted"):
+                    self.import_job_client.abort_import_job(job_id)
+            for prefix in fixture.get("copiedPrefixes", []):
+                self._delete_storage_prefix(self.storage_client, prefix)
+
+    def test_import_2pc_encrypted_backup_ezk_fixture_manual_commit_restores_rows(self):
+        """
+        target: verify encrypted backup import with ezk follows 2PC visibility and restores rows
+        method: load an encrypted backup fixture from IMPORT_2PC_ENCRYPTED_BACKUP_FIXTURE, submit backup=true
+                with ezk and auto_commit=false, then CommitImport
+        expected: rows are invisible while Uncommitted and become visible only after CommitImport
+        """
+        fixture = self._load_json_fixture_from_env("IMPORT_2PC_ENCRYPTED_BACKUP_FIXTURE")
+        assert fixture.get("ezk"), "IMPORT_2PC_ENCRYPTED_BACKUP_FIXTURE must contain ezk"
+        collection_name = gen_collection_name(prefix="import_2pc_encrypted_backup_ezk")
+        self._create_collection_from_fixture(collection_name, fixture)
+
+        expected_ids = set(fixture.get("expectedIds", []))
+        expected_count = fixture.get("expectedCount", len(expected_ids) if expected_ids else None)
+        options = {"backup": "true", "ezk": str(fixture["ezk"])}
+        if fixture.get("storageVersion") is not None:
+            options["storage_version"] = str(fixture["storageVersion"])
+        for key in ("start_ts", "end_ts", "skip_disk_quota_check"):
+            if key in fixture:
+                options[key] = str(fixture[key])
+
+        job_id = None
+        try:
+            job_id = self._create_manual_import_job_with_files(
+                collection_name,
+                fixture["files"],
+                options,
+                partition_name=fixture.get("partitionName", "_default"),
+            )
+            rsp, ready = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
+            assert ready, rsp
+            if expected_count is not None:
+                assert rsp["data"]["importedRows"] == expected_count, rsp
+
+            if expected_ids:
+                seen, absent = self._wait_imported_ids_absent(collection_name, expected_ids, timeout=20)
+                assert absent, {"unexpected_visible_ids_before_commit": seen}
 
             commit_rsp = self.import_job_client.commit_import_job(job_id)
             assert commit_rsp["code"] == 0, commit_rsp
@@ -1619,9 +2580,7 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
                 options,
                 partition_name=fixture.get("partitionName"),
             )
-            rsp, ready = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ready = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ready, rsp
 
             load_rsp = self.collection_client.collection_load(collection_name=collection_name)
@@ -1644,6 +2603,92 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
             assert visible, {"expected_survivors": survivor_ids, "seen": seen}
             count, count_ok = self._wait_count(collection_name, len(survivor_ids), timeout=180)
             assert count_ok, {"expected_count": len(survivor_ids), "last_count": count}
+
+        finally:
+            if job_id is not None:
+                progress_rsp = self.import_job_client.get_import_job_progress(job_id)
+                state = progress_rsp.get("data", {}).get("state") if progress_rsp.get("code") == 0 else None
+                if state in ("Pending", "PreImporting", "Importing", "Sorting", "IndexBuilding", "Uncommitted"):
+                    self.import_job_client.abort_import_job(job_id)
+
+    def test_import_2pc_l0_start_end_ts_filters_real_delta_binlog_window(self):
+        """
+        target: verify L0 import start_ts/end_ts filters real delete binlog rows by timestamp window
+        method: generate old, in-window, and late delete logs in a source collection, seed all rows into the target,
+                then import the whole delta prefix with l0_import=true, auto_commit=false, and start_ts/end_ts
+        expected: only in-window delete PKs disappear after CommitImport; old and late delete PKs remain visible
+        """
+        seed_rows = self._make_rows(33300, 18, phase=333)
+        old_delete_ids = {row["id"] for row in seed_rows[0:4]}
+        included_delete_ids = {row["id"] for row in seed_rows[4:10]}
+        late_delete_ids = {row["id"] for row in seed_rows[10:14]}
+        survivor_ids = {row["id"] for row in seed_rows} - included_delete_ids
+        collection_name = gen_collection_name(prefix="import_2pc_l0_window")
+        self._create_base_collection(collection_name)
+
+        job_id = None
+        try:
+            self._insert_rows(collection_name, seed_rows)
+            seen, visible = self._wait_imported_ids_visible(
+                collection_name,
+                {row["id"] for row in seed_rows},
+                timeout=120,
+            )
+            assert visible, {"expected": {row["id"] for row in seed_rows}, "seen": seen}
+            flush_rsp, flushed = self._flush_collection_with_retry(collection_name)
+            assert flushed, flush_rsp
+
+            fixture = self._build_generated_l0_window_fixture(
+                gen_collection_name(prefix="import_2pc_l0_window_src"),
+                seed_rows,
+                old_delete_ids,
+                included_delete_ids,
+                late_delete_ids,
+            )
+
+            release_rsp = self.collection_client.collection_release(collection_name=collection_name)
+            assert release_rsp["code"] == 0, release_rsp
+            job_id = self._create_manual_import_job_with_files(
+                collection_name,
+                fixture["files"],
+                {
+                    "l0_import": "true",
+                    "storage_version": str(fixture["storageVersion"]),
+                    "start_ts": fixture["start_ts"],
+                    "end_ts": fixture["end_ts"],
+                },
+                partition_name=fixture["partitionName"],
+            )
+            rsp, ready = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
+            assert ready, rsp
+
+            load_rsp = self.collection_client.collection_load(collection_name=collection_name)
+            assert load_rsp["code"] == 0, load_rsp
+            self.wait_load_completed(collection_name, timeout=120)
+
+            seen_before_commit = self._query_imported_ids(collection_name, included_delete_ids)
+            assert seen_before_commit == included_delete_ids, {
+                "expected_still_visible_before_commit": included_delete_ids,
+                "seen": seen_before_commit,
+            }
+
+            commit_rsp = self.import_job_client.commit_import_job(job_id)
+            assert commit_rsp["code"] == 0, commit_rsp
+            rsp, completed = self.import_job_client.wait_import_job_state(
+                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
+            )
+            assert completed, rsp
+
+            seen, deleted = self._wait_imported_ids_absent(collection_name, included_delete_ids, timeout=180)
+            assert deleted, {"expected_deleted": included_delete_ids, "last_seen": seen, "fixture": fixture}
+            seen, visible = self._wait_imported_ids_visible(collection_name, survivor_ids, timeout=180)
+            assert visible, {"expected_survivors": survivor_ids, "seen": seen, "fixture": fixture}
+            non_window_seen = self._query_imported_ids(collection_name, fixture["nonDeleteIds"])
+            assert non_window_seen == set(fixture["nonDeleteIds"]), {
+                "expected_non_window_delete_ids_to_survive": fixture["nonDeleteIds"],
+                "seen": non_window_seen,
+                "fixture": fixture,
+            }
 
         finally:
             if job_id is not None:
@@ -1680,9 +2725,7 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
                 {"backup": "true", "storage_version": str(storage_version)},
                 partition_name=fixture["partitionName"],
             )
-            rsp, ready = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ready = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ready, rsp
             assert rsp["data"]["importedRows"] == fixture["expectedCount"], rsp
 
@@ -1765,6 +2808,109 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
                     self.import_job_client.abort_import_job(job_id)
             self._delete_storage_prefix(self.storage_client, fixture["copiedPrefix"])
 
+    def test_import_2pc_storage_v3_manifest_snapshot_restore_happy_path(self, release_name):
+        """
+        target: verify StorageV3 manifest data can be restored through the manifest-aware copy-segment path
+        method: deploy or reuse a StorageV3 fixture source with common.storage.useLoonFFI=true, insert and flush rows,
+                create a snapshot, restore it to a new collection, and query the restored rows
+        expected: snapshot restore completes and restored collection exposes the exact source PK set
+        """
+        source = self._ensure_storage_fixture_source(3, release_name)
+        source_collection_name = gen_collection_name(prefix="import_2pc_v3_snapshot_src")
+        restored_collection_name = gen_collection_name(prefix="import_2pc_v3_snapshot_dst")
+        snapshot_name = f"import_2pc_v3_snapshot_{uuid4().hex}"
+        rows = self._make_rows(30400, 12, phase=304)
+        expected_ids = {row["id"] for row in rows}
+        source_client = MilvusClient(uri=source["endpoint"], token=source["token"])
+
+        try:
+            self._create_base_collection_with_clients(source["collection"], source_collection_name)
+            self._insert_rows_with_client(source["vector"], source_collection_name, rows)
+            flush_rsp, flushed = self._flush_collection_with_client_retry(
+                source["collection"],
+                source_collection_name,
+            )
+            assert flushed, flush_rsp
+
+            source_client.create_snapshot(
+                snapshot_name,
+                source_collection_name,
+                description="import 2pc storage v3 manifest restore coverage",
+                compaction_protection_seconds=0,
+                timeout=IMPORT_2PC_TIMEOUT,
+            )
+            snapshot = source_client.describe_snapshot(
+                snapshot_name,
+                source_collection_name,
+                timeout=IMPORT_2PC_TIMEOUT,
+            )
+            assert snapshot.name == snapshot_name, snapshot
+            assert snapshot.collection_name == source_collection_name, snapshot
+            assert snapshot.s3_location, snapshot
+
+            restore_job_id = source_client.restore_snapshot(
+                snapshot_name,
+                source_collection_name,
+                restored_collection_name,
+                timeout=IMPORT_2PC_TIMEOUT,
+            )
+            deadline = time.time() + IMPORT_2PC_TIMEOUT
+            restore_info = None
+            while time.time() < deadline:
+                restore_info = source_client.get_restore_snapshot_state(
+                    restore_job_id,
+                    timeout=30,
+                )
+                if restore_info.state == "RestoreSnapshotCompleted":
+                    break
+                if restore_info.state == "RestoreSnapshotFailed":
+                    pytest.fail(f"StorageV3 snapshot restore failed: {restore_info}")
+                time.sleep(2)
+            assert restore_info is not None and restore_info.state == "RestoreSnapshotCompleted", restore_info
+
+            rsp, exists = self._wait_collection_exists_with_client(
+                source["collection"],
+                restored_collection_name,
+                timeout=180,
+            )
+            assert exists, rsp
+            rsp = source["collection"].collection_load(collection_name=restored_collection_name)
+            assert rsp["code"] == 0, rsp
+            rsp, loaded = self._wait_collection_loaded_with_client(
+                source["collection"],
+                restored_collection_name,
+                timeout=180,
+            )
+            assert loaded, rsp
+            seen, visible = self._wait_imported_ids_visible_with_clients(
+                source["collection"],
+                source["vector"],
+                restored_collection_name,
+                expected_ids,
+                timeout=180,
+            )
+            assert visible, {"expected": expected_ids, "seen": seen, "restore_info": restore_info}
+            count, count_ok = self._wait_count_with_clients(
+                source["collection"],
+                source["vector"],
+                restored_collection_name,
+                len(expected_ids),
+                timeout=180,
+            )
+            assert count_ok, {"expected_count": len(expected_ids), "last_count": count}
+
+        finally:
+            try:
+                source_client.drop_snapshot(snapshot_name, source_collection_name, timeout=60)
+            except Exception:
+                pass
+            for collection_name in (restored_collection_name, source_collection_name):
+                try:
+                    source["collection"].collection_drop({"collectionName": collection_name})
+                except Exception:
+                    pass
+            source_client.close()
+
     @pytest.mark.parametrize("storage_version", [0, 2, 3], ids=["storage_v1", "storage_v2", "storage_v3"])
     def test_import_2pc_real_source_l0_storage_version_manual_commit_applies_delete(
         self,
@@ -1805,9 +2951,7 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
                 {"l0_import": "true", "storage_version": str(storage_version)},
                 partition_name=fixture["partitionName"],
             )
-            rsp, ready = self.import_job_client.wait_import_job_state(
-                job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
-            )
+            rsp, ready = self.import_job_client.wait_import_job_state(job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
             assert ready, rsp
 
             load_rsp = self.collection_client.collection_load(collection_name=collection_name)
@@ -1843,6 +2987,151 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
                     self.import_job_client.abort_import_job(job_id)
             if fixture is not None:
                 self._delete_storage_prefix(self.storage_client, fixture["copiedPrefix"])
+
+    def test_import_2pc_long_stability_fresh_and_accumulate_manual_commit(self):
+        """
+        target: verify Import 2PC remains stable over a long fresh+accumulate loop
+        method: for IMPORT_2PC_STABILITY_SECONDS seconds, repeatedly create manual import jobs on one collection,
+                hold each at Uncommitted, verify invisibility, commit, and verify cumulative visibility/count
+        expected: every iteration preserves Uncommitted invisibility, Completed visibility, and cumulative row count
+        """
+        duration_seconds = int(os.environ.get("IMPORT_2PC_STABILITY_SECONDS", "1800"))
+        rows_per_job = int(os.environ.get("IMPORT_2PC_STABILITY_ROWS_PER_JOB", "20"))
+        assert duration_seconds > 0, "IMPORT_2PC_STABILITY_SECONDS must be positive"
+        assert rows_per_job > 0, "IMPORT_2PC_STABILITY_ROWS_PER_JOB must be positive"
+
+        collection_name = gen_collection_name(prefix="import_2pc_long_stability")
+        self._create_base_collection(collection_name, shards_num=4)
+        deadline = time.time() + duration_seconds
+        cumulative_ids = set()
+        local_files = []
+        job_ids = []
+        iteration = 0
+
+        try:
+            while time.time() < deadline or iteration == 0:
+                base_id = 34000 + iteration * 1000
+                rows = self._make_rows(base_id, rows_per_job, phase=340 + iteration)
+                ids = {row["id"] for row in rows}
+                file_name = f"import_2pc_long_stability_{iteration}_{uuid4()}.parquet"
+                local_files.append(self._write_parquet_and_upload(rows, file_name))
+
+                job_id = self._create_manual_import_job(collection_name, file_name)
+                job_ids.append(job_id)
+                rsp, ready = self.import_job_client.wait_import_job_state(
+                    job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT
+                )
+                assert ready, {"iteration": iteration, "rsp": rsp}
+                assert rsp["data"]["importedRows"] == rows_per_job, rsp
+
+                seen, absent = self._wait_imported_ids_absent(collection_name, ids, timeout=20)
+                assert absent, {"iteration": iteration, "unexpected_visible_ids": seen}
+
+                commit_rsp = self.import_job_client.commit_import_job(job_id)
+                assert commit_rsp["code"] == 0, {"iteration": iteration, "rsp": commit_rsp}
+                rsp, completed = self.import_job_client.wait_import_job_state(
+                    job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
+                )
+                assert completed, {"iteration": iteration, "rsp": rsp}
+
+                cumulative_ids.update(ids)
+                seen, visible = self._wait_imported_ids_visible(collection_name, ids, timeout=180)
+                assert visible, {"iteration": iteration, "expected": ids, "seen": seen}
+                count, count_ok = self._wait_count(collection_name, len(cumulative_ids), timeout=180)
+                assert count_ok, {
+                    "iteration": iteration,
+                    "expected_count": len(cumulative_ids),
+                    "last_count": count,
+                }
+                iteration += 1
+
+            assert iteration > 0
+
+        finally:
+            for job_id in job_ids:
+                progress_rsp = self.import_job_client.get_import_job_progress(job_id)
+                state = progress_rsp.get("data", {}).get("state") if progress_rsp.get("code") == 0 else None
+                if state in ("Pending", "PreImporting", "Importing", "Sorting", "IndexBuilding", "Uncommitted"):
+                    self.import_job_client.abort_import_job(job_id)
+            for file_path in local_files:
+                if file_path and os.path.exists(file_path):
+                    os.remove(file_path)
+
+    def test_import_2pc_throughput_baseline_records_import_index_commit_latency(self):
+        """
+        target: record Import 2PC throughput and phase latency baseline on a real instance
+        method: import IMPORT_2PC_PERF_ROWS rows with auto_commit=false and record create->Uncommitted,
+                commit->Completed, commit->query-visible, and total elapsed durations
+        expected: job completes, all rows become visible, and timing metrics are emitted to a JSON result file
+        """
+        row_count = int(os.environ.get("IMPORT_2PC_PERF_ROWS", "5000"))
+        assert row_count > 0, "IMPORT_2PC_PERF_ROWS must be positive"
+        result_path = os.environ.get(
+            "IMPORT_2PC_PERF_RESULT_PATH",
+            f"/tmp/import_2pc_perf_baseline_{uuid4().hex}.json",
+        )
+        collection_name = gen_collection_name(prefix="import_2pc_perf_baseline")
+        rows = self._make_rows(36000, row_count, phase=360)
+        sample_ids = {row["id"] for row in rows[: min(20, row_count)]}
+        file_name = f"import_2pc_perf_baseline_{uuid4()}.parquet"
+        file_path = None
+        job_id = None
+
+        try:
+            self._create_base_collection(collection_name, shards_num=4)
+            file_path = self._write_parquet_and_upload(rows, file_name)
+
+            t_create = time.time()
+            job_id = self._create_manual_import_job(collection_name, file_name)
+            rsp, ready = self.import_job_client.wait_import_job_state(
+                job_id, "Uncommitted", timeout=max(IMPORT_2PC_TIMEOUT, 900)
+            )
+            t_uncommitted = time.time()
+            assert ready, rsp
+            assert rsp["data"]["importedRows"] == row_count, rsp
+
+            seen, absent = self._wait_imported_ids_absent(collection_name, sample_ids, timeout=20)
+            assert absent, {"unexpected_visible_ids_before_commit": seen}
+
+            t_commit_start = time.time()
+            commit_rsp = self.import_job_client.commit_import_job(job_id)
+            t_commit_return = time.time()
+            assert commit_rsp["code"] == 0, commit_rsp
+            rsp, completed = self.import_job_client.wait_import_job_state(
+                job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT
+            )
+            t_completed = time.time()
+            assert completed, rsp
+
+            seen, visible = self._wait_imported_ids_visible(collection_name, sample_ids, timeout=300)
+            t_visible = time.time()
+            assert visible, {"expected_sample": sample_ids, "seen": seen}
+            count, count_ok = self._wait_count(collection_name, row_count, timeout=300)
+            assert count_ok, {"expected_count": row_count, "last_count": count}
+
+            metrics = {
+                "collection": collection_name,
+                "job_id": job_id,
+                "rows": row_count,
+                "create_to_uncommitted_seconds": round(t_uncommitted - t_create, 3),
+                "commit_rpc_seconds": round(t_commit_return - t_commit_start, 3),
+                "commit_to_completed_seconds": round(t_completed - t_commit_return, 3),
+                "commit_to_visible_seconds": round(t_visible - t_commit_return, 3),
+                "total_seconds": round(t_visible - t_create, 3),
+                "rows_per_second_to_visible": round(row_count / max(t_visible - t_create, 0.001), 3),
+            }
+            with open(result_path, "w", encoding="utf-8") as result_file:
+                json.dump(metrics, result_file, indent=2, sort_keys=True)
+            print(json.dumps(metrics, sort_keys=True))
+
+        finally:
+            if job_id is not None:
+                progress_rsp = self.import_job_client.get_import_job_progress(job_id)
+                state = progress_rsp.get("data", {}).get("state") if progress_rsp.get("code") == 0 else None
+                if state in ("Pending", "PreImporting", "Importing", "Sorting", "IndexBuilding", "Uncommitted"):
+                    self.import_job_client.abort_import_job(job_id)
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
 
     def test_import_2pc_max_active_job_limit_on_configured_instance(self, release_name):
         """
@@ -1911,15 +3200,19 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
 
     def test_import_2pc_disk_quota_failure_on_configured_instance(self, release_name):
         """
-        target: verify import is rejected or fails when cluster and collection disk quota are already exhausted
+        target: verify import is rejected or fails when the requested import file size exceeds disk quota
         method: set quotaAndLimits.limitWriting.diskProtection quota to a tiny value in the Milvus CR,
-                wait until normal DML is denied by disk quota, then submit a manual import
-        expected: import create or job execution fails with quota reason and no rows become visible
+                generate and upload a real parquet file larger than that quota, then submit a manual import
+        expected: import create or job execution fails with quota/disk reason and no imported rows become visible
         """
         disk_quota_mb = int(os.environ.get("IMPORT_2PC_DISK_QUOTA_MB", "1"))
+        row_count = int(os.environ.get("IMPORT_2PC_DISK_QUOTA_ROWS", "50000"))
         assert 1 <= disk_quota_mb <= 100, "IMPORT_2PC_DISK_QUOTA_MB must be 1..100 for this L3 test"
+        assert row_count > 0, "IMPORT_2PC_DISK_QUOTA_ROWS must be positive"
         collection_name = gen_collection_name(prefix="import_2pc_disk_quota")
-        rows = self._make_rows(25000, 1000, phase=250)
+        rows = self._make_rows(25000, row_count, phase=250)
+        for row in rows:
+            row["tag"] = f"quota_{row['id']}_{uuid4().hex}_{uuid4().hex}"
         expected_ids = {row["id"] for row in rows[:10]}
         file_name = f"import_2pc_disk_quota_{uuid4()}.parquet"
         file_path = None
@@ -1931,25 +3224,29 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
                 release_name,
                 {
                     "quotaAndLimits": {
+                        "enabled": True,
                         "limitWriting": {
                             "diskProtection": {
                                 "enabled": True,
                                 "diskQuota": disk_quota_mb,
                                 "diskQuotaPerCollection": disk_quota_mb,
                             }
-                        }
+                        },
                     }
                 },
             )
             disk_quota_config_applied = True
+            self._restart_config_components(release_name, ("mixcoord", "proxy"))
 
             self._create_base_collection(collection_name)
-            quota_rsp, quota_active = self._wait_disk_quota_write_denied(collection_name)
-            assert quota_active, {
-                "reason": "disk quota precondition did not become active before import",
-                "last_rsp": quota_rsp,
-            }
             file_path = self._write_parquet_and_upload(rows, file_name)
+            file_size = os.path.getsize(file_path)
+            assert file_size > disk_quota_mb * 1024 * 1024, {
+                "reason": "generated import file must exceed configured disk quota",
+                "file_size": file_size,
+                "disk_quota_mb": disk_quota_mb,
+                "row_count": row_count,
+            }
             create_rsp = self.import_job_client.create_import_jobs(
                 {
                     "collectionName": collection_name,
@@ -1969,10 +3266,7 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
                         failed = True
                         break
                     if state in ("Uncommitted", "Committing", "Completed"):
-                        pytest.fail(
-                            "disk quota exhausted import job became commit-capable instead of failing: "
-                            f"{rsp}"
-                        )
+                        pytest.fail(f"disk quota exhausted import job became commit-capable instead of failing: {rsp}")
                     time.sleep(2)
                 assert failed, rsp
                 reason = str(rsp.get("data", {}).get("reason", rsp)).lower()
@@ -1992,3 +3286,4 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
                 os.remove(file_path)
             if disk_quota_config_applied:
                 self._kubectl_patch_milvus_config(release_name, {"quotaAndLimits": None})
+                self._restart_config_components(release_name, ("mixcoord", "proxy"))
