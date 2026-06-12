@@ -73,11 +73,10 @@ const (
 )
 
 type LBPolicyImpl struct {
-	getBalancer    func() LBBalancer
-	clientMgr      ShardClientMgr
-	balancerMap    map[string]LBBalancer
-	retryOnReplica int
-	blacklist      *ChannelBlacklist
+	getBalancer func() LBBalancer
+	clientMgr   ShardClientMgr
+	balancerMap map[string]LBBalancer
+	blacklist   *ChannelBlacklist
 }
 
 func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
@@ -93,14 +92,11 @@ func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
 		return balancerMap[balancePolicy]
 	}
 
-	retryOnReplica := paramtable.Get().ProxyCfg.RetryTimesOnReplica.GetAsInt()
-
 	return &LBPolicyImpl{
-		getBalancer:    getBalancer,
-		clientMgr:      clientMgr,
-		balancerMap:    balancerMap,
-		retryOnReplica: retryOnReplica,
-		blacklist:      NewChannelBlacklist(),
+		getBalancer: getBalancer,
+		clientMgr:   clientMgr,
+		balancerMap: balancerMap,
+		blacklist:   NewChannelBlacklist(),
 	}
 }
 
@@ -361,8 +357,8 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		log.Warn("failed to get shard leaders", zap.Error(err))
 		return err
 	}
-	// Sweep all shard leaders once, then allow configured request-level retries after every leader returns a retriable error.
-	retryTimes := len(shardLeaders) + max(lb.retryOnReplica, 1)
+	// Bound request-level attempts by both visible replicas and the configured limit.
+	retryTimes := max(1, min(paramtable.Get().ProxyCfg.RetryTimesOnReplica.GetAsInt(), len(shardLeaders)))
 	err = retry.Handle(ctx, tryExecute, retry.Attempts(uint(retryTimes)))
 	if err != nil {
 		log.Warn("failed to execute",
