@@ -185,6 +185,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         const bool is_element_level_search =
             data_type == DataType::VECTOR_ARRAY &&
             info.array_offsets_ != nullptr;
+        search_result.element_level_ = is_element_level_search;
         const auto has_offset_mapping =
             offset_mapping.IsEnabled() && !is_element_level_search;
 
@@ -370,6 +371,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                         info.array_offsets_.get());
                 search_result.seg_offsets_ = std::move(seg_offsets);
                 search_result.element_indices_ = std::move(elem_indicies);
+                search_result.element_level_ = true;
             } else {
                 if (has_offset_mapping) {
                     offset_mapping.TransformOffsets(final_qr.mutable_offsets());
