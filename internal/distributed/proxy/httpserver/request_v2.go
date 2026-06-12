@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -642,6 +643,7 @@ func (req *DropIndexPropertiesReq) GetIndexName() string {
 
 type FieldSchema struct {
 	FieldName         string                 `json:"fieldName" binding:"required"`
+	Description       string                 `json:"description"`
 	DataType          string                 `json:"dataType" binding:"required"`
 	ElementDataType   string                 `json:"elementDataType"`
 	ExternalField     string                 `json:"externalField"`
@@ -649,6 +651,8 @@ type FieldSchema struct {
 	IsPartitionKey    bool                   `json:"isPartitionKey"`
 	IsClusteringKey   bool                   `json:"isClusteringKey"`
 	ElementTypeParams map[string]interface{} `json:"elementTypeParams"`
+	TypeParams        map[string]interface{} `json:"typeParams"`
+	Fields            []FieldSchema          `json:"fields"`
 	Nullable          bool                   `json:"nullable"`
 	DefaultValue      interface{}            `json:"defaultValue"`
 }
@@ -662,6 +666,7 @@ func (field *FieldSchema) GetProto(ctx context.Context) (*schemapb.FieldSchema, 
 	dataType := schemapb.DataType(fieldDataType)
 	fieldSchema := &schemapb.FieldSchema{
 		Name:            field.FieldName,
+		Description:     field.Description,
 		IsPrimaryKey:    field.IsPrimary,
 		IsPartitionKey:  field.IsPartitionKey,
 		IsClusteringKey: field.IsClusteringKey,
@@ -694,6 +699,39 @@ func (field *FieldSchema) GetProto(ctx context.Context) (*schemapb.FieldSchema, 
 	return fieldSchema, nil
 }
 
+func (field *FieldSchema) IsStructArrayField() bool {
+	if field == nil {
+		return false
+	}
+	return field.DataType == schemapb.DataType_ArrayOfStruct.String() ||
+		field.DataType == schemapb.DataType_Array.String() && field.ElementDataType == schemapb.DataType_Struct.String()
+}
+
+func (field *FieldSchema) GetStructArrayProto(ctx context.Context) (*schemapb.StructArrayFieldSchema, error) {
+	if field == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("StructArray field schema is required")
+	}
+	if !field.IsStructArrayField() {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"StructArray field must use ArrayOfStruct or Array with Struct element, got dataType %s and elementDataType %s",
+			field.DataType, field.ElementDataType)
+	}
+	typeParams := make(map[string]interface{}, len(field.TypeParams)+len(field.ElementTypeParams))
+	for key, param := range field.ElementTypeParams {
+		typeParams[key] = param
+	}
+	for key, param := range field.TypeParams {
+		typeParams[key] = param
+	}
+	return (&StructArrayFieldSchema{
+		FieldName:   field.FieldName,
+		Description: field.Description,
+		Fields:      field.Fields,
+		TypeParams:  typeParams,
+		Nullable:    field.Nullable,
+	}).GetProto(ctx)
+}
+
 // StructArrayFieldSchema describes a struct array field in RESTful v2 API.
 // Each struct array field contains multiple sub-fields; every sub-field must
 // be declared as either Array (scalar element) or ArrayOfVector (vector element).
@@ -702,6 +740,7 @@ type StructArrayFieldSchema struct {
 	Description string                 `json:"description"`
 	Fields      []FieldSchema          `json:"fields" binding:"required"`
 	TypeParams  map[string]interface{} `json:"typeParams"`
+	Nullable    bool                   `json:"nullable"`
 }
 
 // GetProto converts the RESTful StructArrayFieldSchema to its proto counterpart.
@@ -714,6 +753,16 @@ func (sf *StructArrayFieldSchema) GetProto(ctx context.Context) (*schemapb.Struc
 		Name:        sf.FieldName,
 		Description: sf.Description,
 		TypeParams:  []*commonpb.KeyValuePair{},
+		Nullable:    sf.Nullable,
+	}
+	parentTypeParams := make(map[string]string, len(sf.TypeParams))
+	for key, param := range sf.TypeParams {
+		value, err := getElementTypeParams(param)
+		if err != nil {
+			return nil, err
+		}
+		parentTypeParams[key] = value
+		proto.TypeParams = append(proto.TypeParams, &commonpb.KeyValuePair{Key: key, Value: value})
 	}
 	subNames := map[string]struct{}{}
 	for i := range sf.Fields {
@@ -747,16 +796,21 @@ func (sf *StructArrayFieldSchema) GetProto(ctx context.Context) (*schemapb.Struc
 				"duplicated sub-field name %s in struct %s", subProto.Name, sf.FieldName)
 		}
 		subNames[subProto.Name] = struct{}{}
+		if maxCapacity, ok := parentTypeParams[common.MaxCapacityKey]; ok && !hasTypeParam(subProto.TypeParams, common.MaxCapacityKey) {
+			subProto.TypeParams = append(subProto.TypeParams, &commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: maxCapacity})
+		}
 		proto.Fields = append(proto.Fields, subProto)
 	}
-	for key, param := range sf.TypeParams {
-		value, err := getElementTypeParams(param)
-		if err != nil {
-			return nil, err
-		}
-		proto.TypeParams = append(proto.TypeParams, &commonpb.KeyValuePair{Key: key, Value: value})
-	}
 	return proto, nil
+}
+
+func hasTypeParam(typeParams []*commonpb.KeyValuePair, key string) bool {
+	for _, typeParam := range typeParams {
+		if typeParam.GetKey() == key {
+			return true
+		}
+	}
+	return false
 }
 
 type FunctionScore struct {

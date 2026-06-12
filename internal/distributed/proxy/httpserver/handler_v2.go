@@ -95,6 +95,7 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 
 	"/v2/vectordb/collections/fields/alter_properties": "AlterCollectionField",
 	"/v2/vectordb/collections/fields/add":              "AddCollectionField",
+	"/v2/vectordb/collections/struct_fields/add":       "AddCollectionStructField",
 
 	"/v2/vectordb/databases/create":           "CreateDatabase",
 	"/v2/vectordb/databases/drop":             "DropDatabase",
@@ -207,6 +208,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 
 	// /collections/fields/add
 	router.POST(CollectionFieldCategory+AddAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionFieldReqWithSchema{} }, wrapperTraceLog(h.addCollectionField))))
+	router.POST(CollectionStructFieldCategory+AddAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionFieldReqWithSchema{} }, wrapperTraceLog(h.addCollectionStructField))))
 
 	router.POST(DataBaseCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.createDatabase))))
 	router.POST(DataBaseCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqRequiredName{} }, wrapperTraceLog(h.dropDatabase))))
@@ -1077,6 +1079,12 @@ func (h *HandlersV2) alterCollectionFieldProperties(ctx context.Context, c *gin.
 func (h *HandlersV2) addCollectionField(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*CollectionFieldReqWithSchema)
 
+	if httpReq.Schema.IsStructArrayField() {
+		err := merr.WrapErrParameterInvalidMsg("StructArray field must be added through /v2/vectordb/collections/struct_fields/add")
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+
 	schemaProto, err := httpReq.Schema.GetProto(ctx)
 	if err != nil {
 		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
@@ -1097,6 +1105,32 @@ func (h *HandlersV2) addCollectionField(ctx context.Context, c *gin.Context, any
 	c.Set(ContextRequest, req)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AddCollectionField", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.AddCollectionField(reqCtx, req.(*milvuspb.AddCollectionFieldRequest))
+	})
+
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) addCollectionStructField(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CollectionFieldReqWithSchema)
+
+	schemaProto, err := httpReq.Schema.GetStructArrayProto(ctx)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+
+	req := &milvuspb.AddCollectionStructFieldRequest{
+		DbName:                 dbName,
+		CollectionName:         httpReq.CollectionName,
+		StructArrayFieldSchema: schemaProto,
+	}
+
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AddCollectionStructField", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.AddCollectionStructField(reqCtx, req.(*milvuspb.AddCollectionStructFieldRequest))
 	})
 
 	if err == nil {
