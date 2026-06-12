@@ -77,6 +77,10 @@ class ProtoParser {
         const proto::plan::BinaryArithOpEvalRangeExpr& expr_pb);
 
     expr::TypedExprPtr
+    ParseBinaryArithOpEvalRangeExprsWithFields(
+        const proto::plan::BinaryArithOpEvalRangeExprWithFields& expr_pb);
+
+    expr::TypedExprPtr
     ParseBinaryRangeExprs(const proto::plan::BinaryRangeExpr& expr_pb);
 
     expr::TypedExprPtr

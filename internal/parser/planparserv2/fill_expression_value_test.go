@@ -895,6 +895,9 @@ func (s *FillExpressionValueSuite) assertNoUnfilledPlaceholder(e *planpb.Expr) {
 		bao := x.BinaryArithOpEvalRangeExpr
 		s.NotNil(bao.GetValue().GetVal(), "BinaryArithOpEvalRangeExpr value must be filled")
 		s.NotNil(bao.GetRightOperand().GetVal(), "BinaryArithOpEvalRangeExpr right operand must be filled")
+	case *planpb.Expr_BinaryArithOpEvalRangeExprWithFields:
+		bao := x.BinaryArithOpEvalRangeExprWithFields
+		s.NotNil(bao.GetValue().GetVal(), "BinaryArithOpEvalRangeExprWithFields value must be filled")
 	case *planpb.Expr_JsonContainsExpr:
 		jc := x.JsonContainsExpr
 		s.NotEmpty(jc.GetElements(), "JSONContainsExpr elements should be filled (template=%q)", jc.GetTemplateVariableName())
@@ -910,6 +913,21 @@ func (s *FillExpressionValueSuite) assertNoUnfilledPlaceholder(e *planpb.Expr) {
 		s.assertNoUnfilledPlaceholder(x.BinaryArithExpr.GetLeft())
 		s.assertNoUnfilledPlaceholder(x.BinaryArithExpr.GetRight())
 	}
+}
+
+func (s *FillExpressionValueSuite) TestBinaryArithWithFieldsTemplateValue() {
+	schemaH := newTestSchemaHelper(s.T())
+
+	expr, err := ParseExpr(schemaH, `Int64Field + Int32Field > {target}`, map[string]*schemapb.TemplateValue{
+		"target": generateTemplateValue(schemapb.DataType_Int64, int64(100)),
+	})
+	s.NoError(err)
+	s.NotNil(expr)
+
+	arithExpr := expr.GetBinaryArithOpEvalRangeExprWithFields()
+	s.NotNil(arithExpr)
+	s.Equal(int64(100), arithExpr.GetValue().GetInt64Val())
+	s.assertNoUnfilledPlaceholder(expr)
 }
 
 // TestUnaryNotWithTemplate regression-tests issue #49141: templated
