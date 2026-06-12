@@ -119,6 +119,15 @@ func fencingTask() *datapb.SplitShardTask {
 	}
 }
 
+// fakeCompactionPreempter records the channels preempted.
+type fakeCompactionPreempter struct {
+	channels []string
+}
+
+func (f *fakeCompactionPreempter) preemptTasksByChannel(channel string) {
+	f.channels = append(f.channels, channel)
+}
+
 func TestAdvancePreparing(t *testing.T) {
 	paramtable.Init()
 
@@ -127,12 +136,17 @@ func TestAdvancePreparing(t *testing.T) {
 		manager, catalog := newSplitExecutorManager(t, m, preparingTask(),
 			nil, &fakeVChannelAllocator{vchannels: []string{"v1", "v2"}}, &fakeSplitPlanner{})
 		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Once()
+		preempter := &fakeCompactionPreempter{}
+		manager.setCompactionPreempter(preempter)
 
 		manager.advanceTasks()
 		task := manager.mustGetTask(100)
 		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskFencing, task.GetState())
 		assert.Len(t, task.GetTargets(), 2)
 		assert.Equal(t, "v1", task.GetTargets()[0].GetVchannel())
+		// the in-flight compaction of the source shard is preempted so the
+		// split never waits behind it.
+		assert.Equal(t, []string{"v0"}, preempter.channels)
 	})
 
 	t.Run("planner not ready, stay in preparing", func(t *testing.T) {
@@ -276,6 +290,24 @@ func TestAdvanceRedistributing(t *testing.T) {
 	// round 3: the source shard is empty, advance to adopting.
 	manager.advanceTasks()
 	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, manager.mustGetTask(100).GetState())
+
+	// a compacting segment is skipped defensively and retried on the next
+	// round once the flag is released.
+	taskC := fencingTask()
+	taskC.TaskId = 300
+	taskC.SourceVchannel = "v8"
+	taskC.State = datapb.SplitShardTaskState_SplitShardTaskRedistributing
+	taskC.SwitchTimeTick = 2000
+	mC := newSplitTestMeta(true, "v8", map[int64]int64{10: 10})
+	segmentID := mC.GetSegmentsByChannel("v8")[0].GetID()
+	mC.segments.SetIsCompacting(segmentID, true)
+	managerC, catalogC := newSplitExecutorManager(t, mC, taskC, nil, nil, &fakeSplitPlanner{})
+	managerC.advanceTasks()
+	assert.Len(t, mC.GetSegmentsByChannel("v8"), 1) // skipped, not relabeled
+	mC.segments.SetIsCompacting(segmentID, false)
+	catalogC.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Once()
+	managerC.advanceTasks()
+	assert.Len(t, mC.GetSegmentsByChannel("v8"), 0)
 
 	// assignment failure keeps the round for the next tick.
 	task2 := fencingTask()

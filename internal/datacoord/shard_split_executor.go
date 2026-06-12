@@ -70,6 +70,14 @@ func (m *shardSplitManager) advancePreparing(task *datapb.SplitShardTask) {
 		return
 	}
 
+	// Preempt the in-flight compaction of the source shard, so the split
+	// never waits behind a long compaction (e.g. clustering): the enqueue
+	// freeze rejects new tasks from the moment this task exists, and the
+	// preemption kills the queued/executing ones. Idempotent per tick.
+	if m.preempter != nil {
+		m.preempter.preemptTasksByChannel(task.GetSourceVchannel())
+	}
+
 	vchannels, err := m.vchannelAllocator.AllocVirtualChannels(m.ctx, balancer.AllocVChannelParam{
 		CollectionID:      task.GetCollectionId(),
 		Num:               2,
@@ -200,9 +208,17 @@ func (m *shardSplitManager) advanceRedistributing(task *datapb.SplitShardTask) {
 	batchSize := paramtable.Get().DataCoordCfg.ShardSplitRelabelBatchSize.GetAsInt()
 	operators := make([]UpdateOperator, 0, batchSize)
 	relabeled := make([]int64, 0, batchSize)
+	skippedCompacting := 0
 	for _, segment := range segments {
 		if len(operators) >= batchSize {
 			break
+		}
+		if segment.isCompacting {
+			// Defensive: the preemption of advancePreparing plus the enqueue
+			// freeze should leave no compacting segment on the source shard;
+			// a leftover one is skipped and retried on the next round.
+			skippedCompacting++
+			continue
 		}
 		idx, err := m.planner.AssignSegment(segment, task.GetTargets())
 		if err != nil {
@@ -212,6 +228,13 @@ func (m *shardSplitManager) advanceRedistributing(task *datapb.SplitShardTask) {
 		}
 		operators = append(operators, UpdateInsertChannelOperator(segment.GetID(), task.GetTargets()[idx].GetVchannel()))
 		relabeled = append(relabeled, segment.GetID())
+	}
+	if skippedCompacting > 0 {
+		logger.Warn("skipped compacting segments during relabel, retry on the next round",
+			zap.Int("skipped", skippedCompacting))
+	}
+	if len(operators) == 0 {
+		return
 	}
 	if err := m.meta.UpdateSegmentsInfo(m.ctx, operators...); err != nil {
 		logger.Warn("relabel a batch of segments failed", zap.Error(err))

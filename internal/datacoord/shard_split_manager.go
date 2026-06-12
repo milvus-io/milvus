@@ -39,6 +39,14 @@ type splitVChannelAllocator interface {
 	AllocVirtualChannels(ctx context.Context, param balancer.AllocVChannelParam) ([]string, error)
 }
 
+// compactionPreempter kills the queued and executing compaction tasks of a
+// channel; implemented by the compaction inspector. Together with the
+// enqueue-time freeze it guarantees a shard split preempts compaction
+// instead of waiting behind it.
+type compactionPreempter interface {
+	preemptTasksByChannel(channel string)
+}
+
 // shardSplitManager detects the shards that need a split and drives the
 // persisted split task FSM. Every threshold it relies on is a refreshable
 // configuration under `dataCoord.shardSplit`.
@@ -53,8 +61,16 @@ type shardSplitManager struct {
 	wal               streaming.WALAccesser
 	vchannelAllocator splitVChannelAllocator
 	planner           splitPlanner
+	preempter         compactionPreempter // set after the compaction inspector is built.
 
 	tasks *typeutil.ConcurrentMap[int64, *datapb.SplitShardTask] // task id -> task
+}
+
+// setCompactionPreempter wires the compaction inspector in; it is called
+// once during the server initialization (the inspector is built after the
+// shard split manager because it also consumes the freeze predicate).
+func (m *shardSplitManager) setCompactionPreempter(preempter compactionPreempter) {
+	m.preempter = preempter
 }
 
 // shardStats is the aggregated statistics of one shard (vchannel).
@@ -223,6 +239,33 @@ func (m *shardSplitManager) activeTaskCount() int {
 		return true
 	})
 	return count
+}
+
+// IsVChannelSplitting returns true if an unfinished split task references
+// the vchannel as the source or as a target. Such a vchannel is excluded
+// from compaction, clustering and GC during the split window: compaction
+// would churn the redistribution work list and replace the segment IDs the
+// in-place delegator handoff relies on.
+func (m *shardSplitManager) IsVChannelSplitting(vchannel string) bool {
+	return m.hasActiveTaskOnVChannel(vchannel)
+}
+
+// SplitTargetsOfSource returns the target vchannels of the unfinished split
+// task whose source is the given vchannel, or nil. It powers the merged
+// recovery view: while the source shard is splitting, its recovery info
+// reports the union of its remaining segments and the segments already
+// relabeled to the targets, so a target refresh never sees a segment
+// disappear mid-window.
+func (m *shardSplitManager) SplitTargetsOfSource(vchannel string) []string {
+	var targets []string
+	m.tasks.Range(func(_ int64, task *datapb.SplitShardTask) bool {
+		if !isSplitShardTaskActive(task) || task.GetSourceVchannel() != vchannel {
+			return true
+		}
+		targets = splitTargetVChannels(task.GetTargets())
+		return false
+	})
+	return targets
 }
 
 // hasActiveTaskOnVChannel returns true if an unfinished task already works
