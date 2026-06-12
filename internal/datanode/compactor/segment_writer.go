@@ -75,6 +75,8 @@ type compactionAlloactor struct {
 	logIDAlloc   allocator.Interface
 }
 
+var errCompactionSegmentIDsExhausted = errors.New("pre-allocated compaction segment IDs exhausted")
+
 func NewCompactionAllocator(segmentAlloc, logIDAlloc allocator.Interface) *compactionAlloactor {
 	return &compactionAlloactor{
 		segmentAlloc: segmentAlloc,
@@ -153,6 +155,9 @@ func (w *MultiSegmentWriter) closeWriter() error {
 func (w *MultiSegmentWriter) rotateWriter() error {
 	newSegmentID, err := w.allocator.allocSegmentID()
 	if err != nil {
+		if errors.Is(err, allocator.ErrIDExhausted) {
+			return errors.Mark(err, errCompactionSegmentIDsExhausted)
+		}
 		return err
 	}
 
@@ -189,7 +194,7 @@ func (w *MultiSegmentWriter) rotateWriterOrGrowCurrent() error {
 	}
 
 	if err := w.rotateWriter(); err != nil {
-		if !errors.Is(err, allocator.ErrIDExhausted) {
+		if !errors.Is(err, errCompactionSegmentIDsExhausted) {
 			return err
 		}
 

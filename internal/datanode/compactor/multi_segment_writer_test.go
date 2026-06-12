@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
@@ -66,6 +67,10 @@ type closeErrSerializeWriter struct {
 	err error
 }
 
+type closeErrBinlogRecordWriter struct {
+	writtenUncompressed uint64
+}
+
 func (w closeErrSerializeWriter) WriteValue(*storage.Value) error {
 	return nil
 }
@@ -76,6 +81,44 @@ func (w closeErrSerializeWriter) Flush() error {
 
 func (w closeErrSerializeWriter) Close() error {
 	return w.err
+}
+
+func (w closeErrBinlogRecordWriter) Write(storage.Record) error {
+	return nil
+}
+
+func (w closeErrBinlogRecordWriter) GetWrittenUncompressed() uint64 {
+	return w.writtenUncompressed
+}
+
+func (w closeErrBinlogRecordWriter) Close() error {
+	return nil
+}
+
+func (w closeErrBinlogRecordWriter) GetLogs() (
+	map[storage.FieldID]*datapb.FieldBinlog,
+	*datapb.FieldBinlog,
+	map[storage.FieldID]*datapb.FieldBinlog,
+	string,
+	[]int64,
+) {
+	return nil, nil, nil, "", nil
+}
+
+func (w closeErrBinlogRecordWriter) GetRowNum() int64 {
+	return 0
+}
+
+func (w closeErrBinlogRecordWriter) FlushChunk() error {
+	return nil
+}
+
+func (w closeErrBinlogRecordWriter) GetBufferUncompressed() uint64 {
+	return w.writtenUncompressed
+}
+
+func (w closeErrBinlogRecordWriter) Schema() *schemapb.CollectionSchema {
+	return nil
 }
 
 func (a *testCompactionAllocator) Alloc(count uint32) (int64, int64, error) {
@@ -454,6 +497,31 @@ func (s *MultiSegmentWriterSuite) TestRotateAllocFailureKeepsCurrentWriterOpen()
 	err = writer.Close()
 	s.NoError(err)
 	s.Len(writer.GetCompactionSegments(), 1)
+}
+
+func (s *MultiSegmentWriterSuite) TestLogIDExhaustionDuringRotationReturnsError() {
+	segmentAlloc := &testCompactionAllocator{next: 1000}
+	logAlloc := &testCompactionAllocator{next: 2000}
+	writer := &MultiSegmentWriter{
+		allocator: NewCompactionAllocator(segmentAlloc, logAlloc),
+		writer: &storage.BinlogValueWriter{
+			BinlogRecordWriter: closeErrBinlogRecordWriter{writtenUncompressed: 2},
+			SerializeWriter:    closeErrSerializeWriter{err: allocator.ErrIDExhausted},
+		},
+		segmentSize:      1,
+		currentSegmentID: 1000,
+		collectionID:     s.collectionID,
+		partitionID:      s.partitionID,
+		channel:          s.channel,
+	}
+
+	var err error
+	s.NotPanics(func() {
+		err = writer.rotateWriterOrGrowCurrent()
+	})
+	s.ErrorIs(err, allocator.ErrIDExhausted)
+	s.Nil(writer.writer)
+	s.Empty(writer.GetCompactionSegments())
 }
 
 func (s *MultiSegmentWriterSuite) TestCloseFailureClearsWriter() {
