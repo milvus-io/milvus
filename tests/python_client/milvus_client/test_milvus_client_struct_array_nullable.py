@@ -333,8 +333,7 @@ def gen_row_by_schema(
     return row
 
 
-def _scalar_struct_profile_arrow_type(
-):
+def _scalar_struct_profile_arrow_type():
     return pa.list_(
         pa.struct(
             [
@@ -395,9 +394,7 @@ def gen_scalar_index_filler_rows(
         include_struct=True,
         normal_vector_dim=vector_dim,
     )
-    profiles = [
-        [{INT_SUBFIELD: -(start_id + i), TAG_SUBFIELD: f"{tag_prefix}_profile_{i}"}] for i in range(count)
-    ]
+    profiles = [[{INT_SUBFIELD: -(start_id + i), TAG_SUBFIELD: f"{tag_prefix}_profile_{i}"}] for i in range(count)]
     return gen_rows_by_schema(
         schema,
         count,
@@ -522,9 +519,7 @@ def gen_expression_fixture(
 
     res, _ = case.create_collection(client, collection_name, schema=schema)
 
-    sealed_explicit_null_profile_row = gen_row_by_schema(
-        schema, 0, "sealed_explicit_null_profile", profile=None
-    )
+    sealed_explicit_null_profile_row = gen_row_by_schema(schema, 0, "sealed_explicit_null_profile", profile=None)
     sealed_omitted_profile_row = gen_row_by_schema(schema, 1, "sealed_omit_profile")
     sealed_empty_profile_row = gen_row_by_schema(schema, 2, "sealed_empty_profile", profile=[])
     sealed_one_match_profile_row = gen_row_by_schema(
@@ -585,9 +580,7 @@ def gen_expression_fixture(
 
     res, _ = case.load_collection(client, collection_name)
 
-    growing_explicit_null_profile_row = gen_row_by_schema(
-        schema, 7000, "growing_explicit_null_profile", profile=None
-    )
+    growing_explicit_null_profile_row = gen_row_by_schema(schema, 7000, "growing_explicit_null_profile", profile=None)
     growing_omitted_profile_row = gen_row_by_schema(schema, 7001, "growing_omit_profile")
     growing_empty_profile_row = gen_row_by_schema(schema, 7002, "growing_empty_profile", profile=[])
     growing_one_match_profile_row = gen_row_by_schema(
@@ -909,8 +902,7 @@ def gt_struct_array_expression_rows(
         return [
             output_row(row)
             for row in scoped_rows
-            if row.get(STRUCT_FIELD) is not None
-            and _compare_expression_values(len(row[STRUCT_FIELD]), op, expected)
+            if row.get(STRUCT_FIELD) is not None and _compare_expression_values(len(row[STRUCT_FIELD]), op, expected)
         ]
 
     array_contains_match = re.match(
@@ -6725,9 +6717,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             TAG_FIELD: "new_non_empty_profile",
             STRUCT_FIELD: gen_scalar_profile(6),
         }
-        res, _ = self.insert(
-            client, collection_name, [omitted_profile_row, empty_profile_row, non_empty_profile_row]
-        )
+        res, _ = self.insert(client, collection_name, [omitted_profile_row, empty_profile_row, non_empty_profile_row])
         assert res["insert_count"] == 3
 
         source_by_id = {row[PK_FIELD]: {**row, STRUCT_FIELD: None} for row in old_sealed_rows + old_growing_rows}
@@ -8101,13 +8091,9 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             VECTOR_FIELD: gen_vector(103),
             TAG_FIELD: "b_sealed_omit",
         }
-        res, _ = self.insert(
-            client, collection_name, [sealed_non_empty_a, sealed_null_a], partition_name=partition_a
-        )
+        res, _ = self.insert(client, collection_name, [sealed_non_empty_a, sealed_null_a], partition_name=partition_a)
         assert res["insert_count"] == 2
-        res, _ = self.insert(
-            client, collection_name, [sealed_non_empty_b, sealed_omit_b], partition_name=partition_b
-        )
+        res, _ = self.insert(client, collection_name, [sealed_non_empty_b, sealed_omit_b], partition_name=partition_b)
         assert res["insert_count"] == 2
 
         res, _ = self.flush(client, collection_name)
@@ -8140,9 +8126,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             client, collection_name, [growing_empty_a, growing_non_empty_a], partition_name=partition_a
         )
         assert res["insert_count"] == 2
-        res, _ = self.insert(
-            client, collection_name, [growing_null_b, growing_non_empty_b], partition_name=partition_b
-        )
+        res, _ = self.insert(client, collection_name, [growing_null_b, growing_non_empty_b], partition_name=partition_b)
         assert res["insert_count"] == 2
 
         source_a = {row[PK_FIELD]: {**row, STRUCT_FIELD: None} for row in all_old_sealed_a + [old_growing_a]}
