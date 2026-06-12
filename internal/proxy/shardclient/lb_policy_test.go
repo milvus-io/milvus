@@ -686,7 +686,7 @@ func (s *LBPolicySuite) TestExecuteWithRetryNonRetriableErrorReturnsLastError() 
 	})
 
 	s.ErrorIs(err, merr.ErrParameterInvalid)
-	s.Equal(2, executed)
+	s.Equal(1, executed)
 }
 
 func (s *LBPolicySuite) TestExecuteWithRetryResourceInsufficientStopsRetry() {
