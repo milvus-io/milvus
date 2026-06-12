@@ -11,6 +11,7 @@
 
 #include <folly/CancellationToken.h>
 #include <folly/FBVector.h>
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -198,6 +199,94 @@ TEST(Util_Segcore, MergeDataArrayWithNullableVectors) {
     ASSERT_TRUE(merged_result->valid_data(2));
     ASSERT_TRUE(merged_result->valid_data(3));
     ASSERT_TRUE(merged_result->valid_data(4));
+}
+
+TEST(Util_Segcore, MergeDataArrayWithNullableByteVectorsAppendsRows) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    struct TestCase {
+        DataType data_type;
+        int64_t dim;
+        std::string metric_type;
+        int64_t bytes_per_row;
+    };
+
+    std::vector<TestCase> test_cases = {
+        {DataType::VECTOR_BINARY, 16, knowhere::metric::HAMMING, 2},
+        {DataType::VECTOR_FLOAT16, 2, knowhere::metric::L2, 4},
+        {DataType::VECTOR_BFLOAT16, 2, knowhere::metric::L2, 4},
+        {DataType::VECTOR_INT8, 3, knowhere::metric::L2, 3},
+    };
+
+    for (const auto& test_case : test_cases) {
+        SCOPED_TRACE(fmt::format("data_type={}", test_case.data_type));
+
+        auto schema = std::make_shared<Schema>();
+        auto vec = schema->AddDebugField("embeddings",
+                                         test_case.data_type,
+                                         test_case.dim,
+                                         test_case.metric_type,
+                                         true);
+        auto& field_meta = (*schema)[vec];
+
+        constexpr int64_t total_count = 4;
+        constexpr int64_t valid_count = 3;
+        std::array<bool, total_count> valid_flags = {true, false, true, true};
+
+        std::string compact_data(valid_count * test_case.bytes_per_row, '\0');
+        for (size_t i = 0; i < compact_data.size(); ++i) {
+            compact_data[i] = static_cast<char>(i + 1);
+        }
+
+        auto data_array = CreateVectorDataArrayFrom(compact_data.data(),
+                                                    valid_flags.data(),
+                                                    total_count,
+                                                    valid_count,
+                                                    field_meta);
+
+        std::map<FieldId, std::unique_ptr<milvus::DataArray>>
+            output_fields_data;
+        output_fields_data[vec] = std::move(data_array);
+
+        std::vector<MergeBase> merge_bases;
+        std::array<size_t, total_count> physical_offsets = {0, 0, 1, 2};
+        for (size_t i = 0; i < total_count; ++i) {
+            merge_bases.emplace_back(&output_fields_data, i);
+            if (valid_flags[i]) {
+                merge_bases.back().setValidDataOffset(vec, physical_offsets[i]);
+            }
+        }
+
+        auto merged_result = MergeDataArray(merge_bases, field_meta);
+
+        ASSERT_EQ(merged_result->valid_data().size(), total_count);
+        EXPECT_TRUE(merged_result->valid_data(0));
+        EXPECT_FALSE(merged_result->valid_data(1));
+        EXPECT_TRUE(merged_result->valid_data(2));
+        EXPECT_TRUE(merged_result->valid_data(3));
+
+        std::string actual;
+        switch (test_case.data_type) {
+            case DataType::VECTOR_BINARY:
+                actual = merged_result->vectors().binary_vector();
+                break;
+            case DataType::VECTOR_FLOAT16:
+                actual = merged_result->vectors().float16_vector();
+                break;
+            case DataType::VECTOR_BFLOAT16:
+                actual = merged_result->vectors().bfloat16_vector();
+                break;
+            case DataType::VECTOR_INT8:
+                actual = merged_result->vectors().int8_vector();
+                break;
+            default:
+                ThrowInfo(DataTypeInvalid, "unexpected test vector type");
+        }
+
+        ASSERT_EQ(actual.size(), compact_data.size());
+        EXPECT_EQ(actual, compact_data);
+    }
 }
 
 // Tests for CheckCancellation utility function
