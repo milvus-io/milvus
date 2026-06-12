@@ -1699,7 +1699,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		}
 		req.SearchAggregation, err = convertSearchAggregationReq(httpReq.SearchAggregation)
 		if err != nil {
-			log.Ctx(ctx).Warn("high level restful api, convert SearchAggregation failed", zap.Error(err))
+			mlog.Warn(ctx, "high level restful api, convert SearchAggregation failed", mlog.Err(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return nil, err
 		}
@@ -1791,7 +1791,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			outputData, err := buildSearchAggregationResp(searchResp.Results, allowJS, collSchema)
 			if err != nil {
-				log.Ctx(ctx).Warn("high level restful api, fail to deal with search aggregation result", zap.Any("result", searchResp.Results), zap.Error(err))
+				mlog.Warn(ctx, "high level restful api, fail to deal with search aggregation result", mlog.Any("result", searchResp.Results), mlog.Err(err))
 				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),

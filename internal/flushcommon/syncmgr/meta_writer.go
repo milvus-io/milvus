@@ -175,14 +175,14 @@ func (b *brokerMetaWriter) UpdateGrowingSourceSync(ctx context.Context, task *Gr
 		Position:  task.checkpoint,
 	}}
 
-	log.Info("SaveBinlogPath for growing source sync",
-		zap.Int64("SegmentID", task.segmentID),
-		zap.Int64("CollectionID", task.collectionID),
-		zap.Int64("ParitionID", task.partitionID),
-		zap.Any("startPos", startPos),
-		zap.Any("checkPoints", checkPoints),
-		zap.String("manifestPath", task.manifestPath),
-		zap.String("vChannelName", task.channelName),
+	mlog.Info(ctx, "SaveBinlogPath for growing source sync",
+		mlog.Int64("SegmentID", task.segmentID),
+		mlog.Int64("CollectionID", task.collectionID),
+		mlog.Int64("ParitionID", task.partitionID),
+		mlog.Any("startPos", startPos),
+		mlog.Any("checkPoints", checkPoints),
+		mlog.String("manifestPath", task.manifestPath),
+		mlog.String("vChannelName", task.channelName),
 	)
 
 	req := &datapb.SaveBinlogPathsRequest{
@@ -208,10 +208,10 @@ func (b *brokerMetaWriter) UpdateGrowingSourceSync(ctx context.Context, task *Gr
 	err := retry.Handle(ctx, func() (bool, error) {
 		err := b.broker.SaveBinlogPaths(ctx, req)
 		if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
-			log.Warn("meta error found, fail growing source sync",
-				zap.String("channel", task.channelName),
-				zap.Int64("segmentID", task.segmentID),
-				zap.Error(err))
+			mlog.Warn(ctx, "meta error found, fail growing source sync",
+				mlog.String("channel", task.channelName),
+				mlog.Int64("segmentID", task.segmentID),
+				mlog.Err(err))
 			return false, err
 		}
 		if err != nil {
@@ -220,9 +220,9 @@ func (b *brokerMetaWriter) UpdateGrowingSourceSync(ctx context.Context, task *Gr
 		return false, nil
 	}, b.opts...)
 	if err != nil {
-		log.Warn("failed to SaveBinlogPaths for growing source sync",
-			zap.Int64("segmentID", task.segmentID),
-			zap.Error(err))
+		mlog.Warn(ctx, "failed to SaveBinlogPaths for growing source sync",
+			mlog.Int64("segmentID", task.segmentID),
+			mlog.Err(err))
 		return err
 	}
 

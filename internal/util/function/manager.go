@@ -11,13 +11,12 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/bm25"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -135,12 +134,12 @@ func (e *functionRunnerCollectionEntry) allocOrUpdate(vchannel string, schema *s
 		schemaVersion = schema.GetVersion()
 	}
 	warnInitFailure := func(err error) {
-		log.Warn("failed to initialize function runners, will retry on next request",
-			zap.String("operation", operation),
-			zap.Int64("collectionID", e.collectionID),
-			zap.String("vchannel", vchannel),
-			zap.Int32("schemaVersion", schemaVersion),
-			zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to initialize function runners, will retry on next request",
+			mlog.String("operation", operation),
+			mlog.Int64("collectionID", e.collectionID),
+			mlog.String("vchannel", vchannel),
+			mlog.Int32("schemaVersion", schemaVersion),
+			mlog.Err(err))
 	}
 	runnerEntries, err := e.ensureVersion(vchannel, schema)
 	if err != nil {

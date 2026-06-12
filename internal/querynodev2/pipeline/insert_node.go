@@ -76,7 +76,7 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 	}
 
 	if err := iNode.appendBM25Stats(iData, msg, collection.Schema()); err != nil {
-		log.Error("failed to append BM25 stats from insert message", zap.String("channel", iNode.channel), zap.Error(err))
+		mlog.Error(context.TODO(), "failed to append BM25 stats from insert message", mlog.String("channel", iNode.channel), mlog.Err(err))
 		panic(err)
 	}
 
@@ -161,13 +161,13 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 
 		collection := iNode.manager.Collection.Get(iNode.collectionID)
 		if collection == nil {
-			log.Error("insertNode with collection not exist", zap.Int64("collection", iNode.collectionID))
+			mlog.Error(context.TODO(), "insertNode with collection not exist", mlog.Int64("collection", iNode.collectionID))
 			panic("insertNode with collection not exist")
 		}
 		schema := collection.Schema()
 		functionOutputFieldIDs, err := iNode.getEmbeddingOutputFieldIDs(schema)
 		if err != nil {
-			log.Error("failed to get embedding output fields", zap.String("channel", iNode.channel), zap.Error(err))
+			mlog.Error(context.TODO(), "failed to get embedding output fields", mlog.String("channel", iNode.channel), mlog.Err(err))
 			panic(err)
 		}
 
@@ -175,7 +175,7 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 		for _, msg := range nodeMsg.insertMsgs {
 			if len(functionOutputFieldIDs) > 0 && !function.HasAllFieldDataByID(msg.GetFieldsData(), functionOutputFieldIDs) {
 				if err := iNode.fillEmbeddingData(schema, msg); err != nil {
-					log.Error("failed to fill embedding data for insert message", zap.String("channel", iNode.channel), zap.Error(err))
+					mlog.Error(context.TODO(), "failed to fill embedding data for insert message", mlog.String("channel", iNode.channel), mlog.Err(err))
 					panic(err)
 				}
 			}

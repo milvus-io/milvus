@@ -75,10 +75,10 @@ func segmentColumnGroupFormatsAllEqual(segment *SegmentInfo, targetFormat string
 
 	binlogs := segment.GetBinlogs()
 	if len(binlogs) == 0 {
-		log.Warn("unexpected empty binlogs for V3 segment during storage format compaction",
-			zap.Int64("segmentID", segment.GetID()),
-			zap.Int64("collectionID", segment.GetCollectionID()),
-			zap.String("targetFormat", targetFormat))
+		mlog.Warn(context.TODO(), "unexpected empty binlogs for V3 segment during storage format compaction",
+			mlog.Int64("segmentID", segment.GetID()),
+			mlog.Int64("collectionID", segment.GetCollectionID()),
+			mlog.String("targetFormat", targetFormat))
 		return false
 	}
 
@@ -138,28 +138,28 @@ func (policy *storageVersionUpgradePolicy) triggerOneCollection(ctx context.Cont
 	log := mlog.With(mlog.FieldCollectionID(collectionID))
 	collection, err := policy.handler.GetCollection(ctx, collectionID)
 	if err != nil {
-		log.Warn(ctx, "fail to apply storageVersionUpgradePolicy, unable to get collection from handler",
+		mlog.Warn(ctx, "fail to apply storageVersionUpgradePolicy, unable to get collection from handler",
 			mlog.Err(err))
 		return nil, err
 	}
 	if collection == nil {
-		log.Warn(ctx, "fail to apply storageVersionUpgradePolicy, collection not exist")
+		mlog.Warn(ctx, "fail to apply storageVersionUpgradePolicy, collection not exist")
 		return nil, nil
 	}
 	if collection.IsExternal() {
-		log.Info("skip storage version compaction for external collection")
+		log.Info(ctx, "skip storage version compaction for external collection")
 		return nil, nil
 	}
 
 	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
 	if err != nil {
-		log.Warn(ctx, "failed to apply storageVersionUpgradePolicy, get collection ttl failed")
+		mlog.Warn(ctx, "failed to apply storageVersionUpgradePolicy, get collection ttl failed")
 		return nil, err
 	}
 
 	newTriggerID, err := policy.allocator.AllocID(ctx)
 	if err != nil {
-		log.Warn(ctx, "fail to apply storageVersionUpgradePolicy, unable to allocate triggerID", mlog.Err(err))
+		mlog.Warn(ctx, "fail to apply storageVersionUpgradePolicy, unable to allocate triggerID", mlog.Err(err))
 		return nil, err
 	}
 
@@ -171,7 +171,7 @@ func (policy *storageVersionUpgradePolicy) triggerOneCollection(ctx context.Cont
 	if targetVersion < storage.StorageV3 {
 		for _, field := range collection.Schema.GetFields() {
 			if field.GetDataType() == schemapb.DataType_Text {
-				log.Warn(ctx, "storage version upgrade policy skipped: collection has TEXT field but configured target storage version is lower than V3, refusing to downgrade",
+				mlog.Warn(ctx, "storage version upgrade policy skipped: collection has TEXT field but configured target storage version is lower than V3, refusing to downgrade",
 					mlog.Int64("targetVersion", targetVersion),
 					mlog.Int64("requiredVersion", storage.StorageV3))
 				return nil, nil

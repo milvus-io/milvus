@@ -259,9 +259,9 @@ func (m *bufferManager) UseGrowingSourceFlush(channel string) bool {
 func (m *bufferManager) CheckReleaseManualFlushNeed(ctx context.Context, channel string, segmentIDs []int64) (bool, error) {
 	buf, loaded := m.buffers.Get(channel)
 	if !loaded {
-		log.Ctx(ctx).Warn("write buffer not found when checking release manual flush",
-			zap.String("channel", channel),
-			zap.Int64s("segmentIDs", segmentIDs))
+		mlog.Warn(ctx, "write buffer not found when checking release manual flush",
+			mlog.String("channel", channel),
+			mlog.Int64s("segmentIDs", segmentIDs))
 		return true, merr.WrapErrChannelNotFound(channel)
 	}
 	checker, ok := buf.(interface {
@@ -276,10 +276,10 @@ func (m *bufferManager) CheckReleaseManualFlushNeed(ctx context.Context, channel
 func (m *bufferManager) GetGrowingFlushProgress(ctx context.Context, channel string, segmentIDs []int64, fenceTs uint64) ([]GrowingFlushSegmentProgress, error) {
 	buf, loaded := m.buffers.Get(channel)
 	if !loaded {
-		log.Ctx(ctx).Warn("write buffer not found when get growing flush progress",
-			zap.String("channel", channel),
-			zap.Int64s("segmentIDs", segmentIDs),
-			zap.Uint64("fenceTs", fenceTs))
+		mlog.Warn(ctx, "write buffer not found when get growing flush progress",
+			mlog.String("channel", channel),
+			mlog.Int64s("segmentIDs", segmentIDs),
+			mlog.Uint64("fenceTs", fenceTs))
 		return nil, merr.WrapErrChannelNotFound(channel)
 	}
 	return buf.GetGrowingFlushProgress(ctx, segmentIDs, fenceTs)

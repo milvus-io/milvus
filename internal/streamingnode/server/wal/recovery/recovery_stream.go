@@ -101,21 +101,21 @@ func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
 		// non-atomic etcd persistence or Kafka offset compaction replaying CreateSegment
 		// for dropped collections/partitions.
 		if _, ok := vchannels[segment.meta.Vchannel]; !ok {
-			r.Logger().Warn("getSnapshot: skipping orphaned segment assignment with non-active vchannel",
-				zap.Int64("segmentID", segmentID),
-				zap.String("vchannel", segment.meta.Vchannel),
-				zap.Int64("collectionID", segment.meta.CollectionId),
-				zap.String("state", segment.meta.State.String()),
+			r.Logger().Warn(context.TODO(), "getSnapshot: skipping orphaned segment assignment with non-active vchannel",
+				mlog.Int64("segmentID", segmentID),
+				mlog.String("vchannel", segment.meta.Vchannel),
+				mlog.Int64("collectionID", segment.meta.CollectionId),
+				mlog.String("state", segment.meta.State.String()),
 			)
 			continue
 		}
 		if _, ok := activePartitions[segment.meta.PartitionId]; !ok {
-			r.Logger().Warn("getSnapshot: skipping orphaned segment assignment with dropped partition",
-				zap.Int64("segmentID", segmentID),
-				zap.String("vchannel", segment.meta.Vchannel),
-				zap.Int64("collectionID", segment.meta.CollectionId),
-				zap.Int64("partitionID", segment.meta.PartitionId),
-				zap.String("state", segment.meta.State.String()),
+			r.Logger().Warn(context.TODO(), "getSnapshot: skipping orphaned segment assignment with dropped partition",
+				mlog.Int64("segmentID", segmentID),
+				mlog.String("vchannel", segment.meta.Vchannel),
+				mlog.Int64("collectionID", segment.meta.CollectionId),
+				mlog.Int64("partitionID", segment.meta.PartitionId),
+				mlog.String("state", segment.meta.State.String()),
 			)
 			continue
 		}

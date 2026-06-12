@@ -268,9 +268,9 @@ type writeBufferBase struct {
 	closed                      bool
 
 	// pre build logger
-	logger                   *log.MLogger
-	cpRatedLogger            *log.MLogger
-	growingSourceRatedLogger *log.MLogger
+	logger                   *mlog.Logger
+	cpRatedLogger            *mlog.Logger
+	growingSourceRatedLogger *mlog.Logger
 }
 
 func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr syncmgr.SyncManager, option *writeBufferOption) (*writeBufferBase, error) {
@@ -320,10 +320,10 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		growingSourceRetryInterval: growingSourceRetryInterval,
 	}
 
-	wb.logger = mlog.With(zap.Int64("collectionID", wb.collectionID),
-		zap.String("channel", wb.channelName))
-	wb.cpRatedLogger = wb.logger.WithRateGroup(fmt.Sprintf("writebuffer_cp_%s", wb.channelName), 1, 60)
-	wb.growingSourceRatedLogger = wb.logger.WithRateGroup(fmt.Sprintf("writebuffer_growing_source_%s", wb.channelName), 1, 60)
+	wb.logger = mlog.With(mlog.Int64("collectionID", wb.collectionID),
+		mlog.String("channel", wb.channelName))
+	wb.cpRatedLogger = wb.logger
+	wb.growingSourceRatedLogger = wb.logger
 
 	return wb, nil
 }
@@ -646,10 +646,10 @@ func (wb *writeBufferBase) warnGrowingSourceFallback(segmentID int64, targetOffs
 	if !wb.useGrowingSourceFlush {
 		return
 	}
-	wb.growingSourceRatedLogger.RatedWarn(1, "growing-source source is unavailable, fallback to WriteBuffer",
-		zap.Int64("segmentID", segmentID),
-		zap.Int64("targetOffset", targetOffset),
-		zap.Any("endPosition", endPos),
+	wb.growingSourceRatedLogger.RatedWarn(context.TODO(), rate.Limit(1), "growing-source source is unavailable, fallback to WriteBuffer",
+		mlog.Int64("segmentID", segmentID),
+		mlog.Int64("targetOffset", targetOffset),
+		mlog.Any("endPosition", endPos),
 	)
 }
 
@@ -731,7 +731,7 @@ func (wb *writeBufferBase) retryGrowingSourceProgress() {
 
 	var futures []*conc.Future[struct{}]
 	if len(segmentIDs) > 0 {
-		wb.logger.Info("retry growing-source source sync", zap.Int64s("segmentIDs", segmentIDs))
+		wb.logger.Info(context.TODO(), "retry growing-source source sync", mlog.Int64s("segmentIDs", segmentIDs))
 		futures = wb.syncSegments(context.Background(), segmentIDs)
 	}
 	wb.mut.Unlock()
@@ -826,9 +826,9 @@ func (wb *writeBufferBase) sealSegments(ctx context.Context, segmentIDs []int64)
 		_, ok := wb.metaCache.GetSegmentByID(segmentID)
 		if !ok {
 			if !wb.useGrowingSourceFlush {
-				log.Warn("cannot find segment when sealSegments",
-					zap.Int64("segmentID", segmentID),
-					zap.String("channel", wb.channelName))
+				mlog.Warn(ctx, "cannot find segment when sealSegments",
+					mlog.Int64("segmentID", segmentID),
+					mlog.String("channel", wb.channelName))
 				return merr.WrapErrSegmentNotFound(segmentID)
 			}
 			mlog.Info(ctx, "segment not found in WriteBuffer metaCache, skipping seal",
@@ -878,10 +878,10 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 				continue
 			} else if errors.Is(err, errGrowingSourceUnavailable) && wb.hasGrowingSourceProgress(segmentID) {
 				wb.rollbackGrowingSourceSyncCandidate(segmentID)
-				log.Warn("growing source unavailable when building sync task, retry later",
-					zap.Int64("segmentID", segmentID),
-					zap.String("channel", wb.channelName),
-					zap.Error(err))
+				mlog.Warn(ctx, "growing source unavailable when building sync task, retry later",
+					mlog.Int64("segmentID", segmentID),
+					mlog.String("channel", wb.channelName),
+					mlog.Err(err))
 				continue
 			} else {
 				mlog.Fatal(ctx, "failed to get sync task", mlog.FieldSegmentID(segmentID), mlog.Err(err))
@@ -959,7 +959,7 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 			if growingSourceTask, ok := syncTask.(*syncmgr.GrowingSourceSyncTask); ok {
 				growingSourceTask.ReleaseSource()
 			}
-			log.Fatal("failed to sync data", zap.Int64("segmentID", segmentID), zap.Error(err))
+			mlog.Fatal(ctx, "failed to sync data", mlog.Int64("segmentID", segmentID), mlog.Err(err))
 		}
 		result = append(result, future)
 	}
@@ -1074,11 +1074,11 @@ func (wb *writeBufferBase) observeGrowingSourceSyncFailureLocked(segmentID int64
 		return
 	}
 
-	wb.growingSourceRatedLogger.RatedWarn(1, "growing-source source sync keeps failing",
-		zap.Int64("segmentID", segmentID),
-		zap.Int64("failureCount", progress.failureCount),
-		zap.Int64("targetOffset", progress.targetOffset),
-		zap.String("lastFailure", progress.lastFailure),
+	wb.growingSourceRatedLogger.RatedWarn(context.TODO(), rate.Limit(1), "growing-source source sync keeps failing",
+		mlog.Int64("segmentID", segmentID),
+		mlog.Int64("failureCount", progress.failureCount),
+		mlog.Int64("targetOffset", progress.targetOffset),
+		mlog.String("lastFailure", progress.lastFailure),
 	)
 }
 
@@ -1400,10 +1400,10 @@ func (wb *writeBufferBase) getGrowingSourceSyncTask(ctx context.Context, segment
 				source.Release()
 				source = nil
 			}
-			wb.logger.Warn("growing source unavailable during committed flush ack retry; retrying SaveBinlogPaths without re-flush",
-				zap.Int64("segmentID", progress.segmentID),
-				zap.Int64("targetOffset", targetOffset),
-				zap.Int("state", int(state)))
+			wb.logger.Warn(ctx, "growing source unavailable during committed flush ack retry; retrying SaveBinlogPaths without re-flush",
+				mlog.Int64("segmentID", progress.segmentID),
+				mlog.Int64("targetOffset", targetOffset),
+				mlog.Int("state", int(state)))
 		}
 	}
 
@@ -1490,10 +1490,10 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 		syncTask, err := wb.getSyncTask(ctx, id)
 		if err != nil {
 			if wb.hasGrowingSourceProgress(id) {
-				log.Warn("skip growing source sync while dropping write buffer",
-					zap.Int64("segmentID", id),
-					zap.String("channel", wb.channelName),
-					zap.Error(err))
+				mlog.Warn(ctx, "skip growing source sync while dropping write buffer",
+					mlog.Int64("segmentID", id),
+					mlog.String("channel", wb.channelName),
+					mlog.Err(err))
 				delete(wb.growingSourceProgress, id)
 				// flushSourceMode lives on metacache.SegmentInfo and is
 				// reclaimed when the segment is removed from metacache by
@@ -1527,7 +1527,7 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 			if growingSourceTask, ok := syncTask.(*syncmgr.GrowingSourceSyncTask); ok {
 				growingSourceTask.ReleaseSource()
 			}
-			log.Fatal("failed to sync segment", zap.Int64("segmentID", id), zap.Error(err))
+			mlog.Fatal(ctx, "failed to sync segment", mlog.Int64("segmentID", id), mlog.Err(err))
 		}
 		futures = append(futures, f)
 	}

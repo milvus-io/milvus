@@ -157,17 +157,17 @@ func (hc *handlerClientImpl) PrepareReleaseManualFlush(ctx context.Context, coll
 	defer hc.lifetime.Done()
 
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
-	logger := log.With(
-		zap.String("pchannel", pchannel),
-		zap.String("vchannel", vchannel),
-		zap.Int64("collectionID", collectionID),
-		zap.Int64s("releaseSegmentIDs", releaseSegmentIDs),
-		zap.String("handler", "prepare release manual flush"),
+	logger := mlog.With(
+		mlog.String("pchannel", pchannel),
+		mlog.String("vchannel", vchannel),
+		mlog.Int64("collectionID", collectionID),
+		mlog.Int64s("releaseSegmentIDs", releaseSegmentIDs),
+		mlog.String("handler", "prepare release manual flush"),
 	)
 	result, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		if assign.Channel.AccessMode != types.AccessModeRW {
-			logger.Info("skip release manual flush prepare because channel is not RW",
-				zap.String("accessMode", assign.Channel.AccessMode.String()))
+			logger.Info(ctx, "skip release manual flush prepare because channel is not RW",
+				mlog.String("accessMode", assign.Channel.AccessMode.String()))
 			return false, nil
 		}
 
@@ -175,8 +175,8 @@ func (hc *handlerClientImpl) PrepareReleaseManualFlush(ctx context.Context, coll
 		if err != nil {
 			if errors.Is(err, registry.ErrNoStreamingNodeDeployed) ||
 				status.AsStreamingError(err).IsWrongStreamingNode() {
-				logger.Info("skip release manual flush prepare because channel is not owned by local streaming node",
-					zap.Error(err))
+				logger.Info(ctx, "skip release manual flush prepare because channel is not owned by local streaming node",
+					mlog.Err(err))
 				return false, nil
 			}
 			return false, err
@@ -346,7 +346,7 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 			// them immediately so callers get a typed error within RTT instead of
 			// retrying until their context deadline.
 			if status.AsStreamingError(err).IsUnrecoverable() {
-				logger.Warn("create handler failed with unrecoverable error, stop retrying", zap.Error(err))
+				logger.Warn(ctx, "create handler failed with unrecoverable error, stop retrying", mlog.Err(err))
 				return nil, err
 			}
 

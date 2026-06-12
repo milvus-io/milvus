@@ -474,7 +474,7 @@ func (c *importChecker) checkUncommittedJob(job ImportJob) {
 		return
 	}
 	if err := c.commitImportFn(c.ctx, job); err != nil {
-		log.Warn("auto-commit broadcast failed, will retry on next tick", zap.Error(err))
+		log.Warn(c.ctx, "auto-commit broadcast failed, will retry on next tick", mlog.Err(err))
 	}
 }
 

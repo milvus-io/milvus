@@ -83,7 +83,7 @@ func (l *AccessLogger) Update(enable bool) error {
 	// close logger
 	if !enable {
 		if l.enable.Load() != enable {
-			log.Info("start close access log")
+			mlog.Info(context.TODO(), "start close access log")
 			if write, ok := l.writer.(*RotateWriter); ok {
 				write.Close()
 				l.writer = nil
@@ -101,11 +101,11 @@ func (l *AccessLogger) Update(enable bool) error {
 	}
 
 	// update access log params
-	log.Info("start update access log params")
+	mlog.Info(context.TODO(), "start update access log params")
 	params := paramtable.Get()
 	err := l.init(params)
 	if err != nil {
-		log.Warn("enable access log failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "enable access log failed", mlog.Err(err))
 		return err
 	}
 
@@ -141,7 +141,7 @@ func InitAccessLogger(params *paramtable.ComponentParam) {
 		params.WatchKeyPrefix("proxy.accessLog", configEvent.NewHandler("update accesslog", func(event *configEvent.Event) {
 			enable := params.ProxyCfg.AccessLog.Enable.GetAsBool()
 			if err := logger.Update(enable); err != nil {
-				log.Warn("update access log failed", zap.Error(err))
+				mlog.Warn(context.TODO(), "update access log failed", mlog.Err(err))
 			}
 		}))
 
