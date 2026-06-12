@@ -1875,7 +1875,7 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                     output_fields=output_fields,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 1100,
-                                 "err_msg": "error: comparisons between VarChar and Int64 are not supported"})
+                                 "err_msg": "comparisons between VarChar and Int64 are not supported"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_using_all_types_of_default_value(self):

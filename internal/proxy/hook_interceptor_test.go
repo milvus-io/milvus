@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type mockHook struct {
@@ -131,8 +132,8 @@ func TestHookInterceptor(t *testing.T) {
 
 func TestUpdateProxyFunctionCallMetric(t *testing.T) {
 	assert.NotPanics(t, func() {
-		updateProxyFunctionCallMetric("/milvus.proto.milvus.MilvusService/Flush")
-		updateProxyFunctionCallMetric("Flush")
-		updateProxyFunctionCallMetric("")
+		updateProxyFunctionCallMetric("/milvus.proto.milvus.MilvusService/Flush", errors.New("mock hook error"))
+		updateProxyFunctionCallMetric("Flush", merr.WrapErrParameterInvalidMsg("mock input error"))
+		updateProxyFunctionCallMetric("", nil)
 	})
 }

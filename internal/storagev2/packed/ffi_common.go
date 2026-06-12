@@ -20,6 +20,7 @@ import (
 
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -81,7 +82,7 @@ func ExtfsPrefixForCollection(collectionID int64) string {
 // StorageConfig are mapped to corresponding key-value pairs in Properties.
 func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extraKVs map[string]string) (*C.LoonProperties, error) {
 	if storageConfig == nil {
-		return nil, fmt.Errorf("storageConfig is required")
+		return nil, merr.WrapErrStorageMsg("storageConfig is required")
 	}
 
 	// Prepare key-value pairs from StorageConfig
@@ -236,7 +237,7 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 
 	err := HandleLoonFFIResult(result)
 	if err != nil {
-		return nil, err
+		return nil, merr.WrapErrStorage(err, "loon properties_create failed")
 	}
 	return properties, nil
 }
@@ -268,7 +269,7 @@ func injectExternalSpecProperties(properties *C.LoonProperties, collectionID int
 	externalSource, externalSpec string,
 ) error {
 	if properties == nil {
-		return fmt.Errorf("injectExternalSpecProperties: properties is nil")
+		return merr.WrapErrStorageMsg("injectExternalSpecProperties: properties is nil")
 	}
 	if externalSource == "" {
 		return nil
@@ -282,7 +283,10 @@ func injectExternalSpecProperties(properties *C.LoonProperties, collectionID int
 	}
 	result := C.loon_properties_inject_external_spec(
 		properties, C.int64_t(collectionID), cSource, cSpec)
-	return HandleLoonFFIResult(result)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return merr.WrapErrStorage(err, "loon inject_external_spec failed")
+	}
+	return nil
 }
 
 func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
@@ -294,7 +298,7 @@ func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 			errStr = C.GoString(errMsg)
 		}
 
-		return errors.Wrapf(ErrLoonTransient, "FFI operation failed: %s", errStr)
+		return merr.Wrapf(ErrLoonTransient, "FFI operation failed: %s", errStr)
 	}
 	return nil
 }
@@ -335,14 +339,14 @@ func CompareManifestPath(a, b string) (int, error) {
 	bBase, bVer, bErr := UnmarshalManifestPath(b)
 
 	if aErr != nil {
-		return 0, fmt.Errorf("failed to parse manifest path %q: %w", a, aErr)
+		return 0, merr.WrapErrStorage(aErr, "failed to parse manifest path %q", a)
 	}
 	if bErr != nil {
-		return 0, fmt.Errorf("failed to parse manifest path %q: %w", b, bErr)
+		return 0, merr.WrapErrStorage(bErr, "failed to parse manifest path %q", b)
 	}
 
 	if aBase != bBase {
-		return 0, fmt.Errorf("manifest paths have different base paths: %q vs %q", aBase, bBase)
+		return 0, merr.WrapErrServiceInternalMsg("manifest paths have different base paths: %q vs %q", aBase, bBase)
 	}
 
 	switch {
@@ -375,7 +379,7 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return 0, fmt.Errorf("failed to make properties: %w", err)
+		return 0, merr.Wrap(err, "failed to make properties")
 	}
 	defer C.loon_properties_free(cProperties)
 
@@ -386,7 +390,7 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 	var cTransactionHandle C.LoonTransactionHandle
 	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return 0, fmt.Errorf("failed to begin transaction: %w", err)
+		return 0, merr.WrapErrStorage(err, "failed to begin transaction")
 	}
 	defer C.loon_transaction_destroy(cTransactionHandle)
 
@@ -406,7 +410,7 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 		C.free(unsafe.Pointer(cPath))
 
 		if err := HandleLoonFFIResult(result); err != nil {
-			return 0, fmt.Errorf("failed to add LOB file %s: %w", lobFile.Path, err)
+			return 0, merr.WrapErrStorage(err, "failed to add LOB file %s", lobFile.Path)
 		}
 	}
 
@@ -414,7 +418,7 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 	var committedVersion C.int64_t
 	result = C.loon_transaction_commit(cTransactionHandle, &committedVersion)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return 0, fmt.Errorf("failed to commit transaction: %w", err)
+		return 0, merr.WrapErrStorage(err, "failed to commit transaction")
 	}
 
 	return int64(committedVersion), nil
@@ -425,12 +429,12 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConfig) ([]LobFileInfo, error) {
 	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal manifest path: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to unmarshal manifest path")
 	}
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to make properties: %w", err)
+		return nil, merr.Wrap(err, "failed to make properties")
 	}
 	defer C.loon_properties_free(cProperties)
 
@@ -441,7 +445,7 @@ func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConf
 	var cTransactionHandle C.LoonTransactionHandle
 	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to begin transaction")
 	}
 	defer C.loon_transaction_destroy(cTransactionHandle)
 
@@ -449,7 +453,7 @@ func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConf
 	var cManifest *C.LoonManifest
 	result = C.loon_transaction_get_manifest(cTransactionHandle, &cManifest)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, fmt.Errorf("failed to get manifest: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to get manifest")
 	}
 	defer C.loon_manifest_destroy(cManifest)
 

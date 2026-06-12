@@ -1,12 +1,12 @@
 package shards
 
 import (
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -176,7 +176,7 @@ func (m *shardManagerImpl) AlterCollection(msg message.MutableAlterCollectionMes
 			// in downstream GetSchema paths.
 			logger.Error("schema change indicated by UpdateMask but schema body is nil",
 				zap.Int64("collectionID", collectionID))
-			return nil, errors.New("schema change message has nil schema body")
+			return nil, status.NewInvalidArgument("schema change message has nil schema body")
 		}
 		collectionInfo := m.collections[collectionID]
 		collectionInfo.Schema = &streamingpb.CollectionSchemaOfVChannel{

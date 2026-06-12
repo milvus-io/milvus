@@ -3,7 +3,6 @@ package rootcoord
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
@@ -36,10 +35,10 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	// check if the field schema is illegal.
 	fieldSchema := &schemapb.FieldSchema{}
 	if err = proto.Unmarshal(req.Schema, fieldSchema); err != nil {
-		return errors.Wrap(err, "failed to unmarshal field schema")
+		return merr.Wrap(err, "failed to unmarshal field schema")
 	}
 	if err := checkFieldSchema([]*schemapb.FieldSchema{fieldSchema}); err != nil {
-		return errors.Wrap(err, "failed to check field schema")
+		return merr.Wrap(err, "failed to check field schema")
 	}
 	if fieldSchema.GetDataType() == schemapb.DataType_Timestamptz {
 		timezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, coll.Properties)
@@ -47,7 +46,7 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 			timezone = common.DefaultTimezone
 		}
 		if err := timestamptz.CheckAndRewriteTimestampTzDefaultValueForFieldSchema(fieldSchema, timezone); err != nil {
-			return merr.WrapErrParameterInvalidMsg("invalid default value of field, name: %s, err: %w", fieldSchema.Name, err)
+			return merr.WrapErrParameterInvalidErr(err, "invalid default value of field, name: %s", fieldSchema.Name)
 		}
 	}
 

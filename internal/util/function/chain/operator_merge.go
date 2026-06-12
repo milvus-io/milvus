@@ -192,19 +192,19 @@ func (op *MergeOp) ExecuteMulti(ctx *types.FuncContext, inputs []*DataFrame) (*D
 	numChunks := inputs[0].NumChunks()
 	for i, df := range inputs {
 		if df.NumChunks() != numChunks {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: input[%d] has %d chunks, expected %d", i, df.NumChunks(), numChunks))
+			return nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] has %d chunks, expected %d", i, df.NumChunks(), numChunks)
 		}
 	}
 
 	// Validate scoreNormFuncs count matches inputs count (when present)
 	if len(op.scoreNormFuncs) > 0 && len(op.scoreNormFuncs) != len(inputs) {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: scoreNormFuncs count %d != inputs count %d", len(op.scoreNormFuncs), len(inputs)))
+		return nil, merr.WrapErrServiceInternalMsg("merge_op: scoreNormFuncs count %d != inputs count %d", len(op.scoreNormFuncs), len(inputs))
 	}
 
 	// Validate weights for weighted strategy
 	if op.strategy == MergeStrategyWeighted {
 		if len(op.weights) != len(inputs) {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: weights count %d != inputs count %d", len(op.weights), len(inputs)))
+			return nil, merr.WrapErrServiceInternalMsg("merge_op: weights count %d != inputs count %d", len(op.weights), len(inputs))
 		}
 	}
 
@@ -221,7 +221,7 @@ func (op *MergeOp) ExecuteMulti(ctx *types.FuncContext, inputs []*DataFrame) (*D
 	case MergeStrategyAvg:
 		return op.mergeScoreCombine(ctx, inputs, avgMergeFunc)
 	default:
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: unsupported strategy %s", op.strategy))
+		return nil, merr.WrapErrServiceInternalMsg("merge_op: unsupported strategy %s", op.strategy)
 	}
 }
 
@@ -324,7 +324,7 @@ func (op *MergeOp) collectRRFScores(inputs []*DataFrame, chunkIdx int) (map[any]
 	for inputIdx, df := range inputs {
 		idCol := df.Column(types.IDFieldName)
 		if idCol == nil {
-			return nil, nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: input[%d] missing %s column", inputIdx, types.IDFieldName))
+			return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] missing %s column", inputIdx, types.IDFieldName)
 		}
 
 		idChunk := idCol.Chunk(chunkIdx)
@@ -363,13 +363,13 @@ func (op *MergeOp) collectWeightedScores(inputs []*DataFrame, chunkIdx int) (map
 		idCol := df.Column(types.IDFieldName)
 		scoreCol := df.Column(types.ScoreFieldName)
 		if idCol == nil || scoreCol == nil {
-			return nil, nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: input[%d] missing ID or score column", inputIdx))
+			return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] missing ID or score column", inputIdx)
 		}
 
 		idChunk := idCol.Chunk(chunkIdx)
 		scoreChunk, ok := scoreCol.Chunk(chunkIdx).(*array.Float32)
 		if !ok {
-			return nil, nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: input[%d] score column chunk %d is not Float32", inputIdx, chunkIdx))
+			return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] score column chunk %d is not Float32", inputIdx, chunkIdx)
 		}
 
 		weight := float32(op.weights[inputIdx])
@@ -449,13 +449,13 @@ func (op *MergeOp) collectCombinedScores(inputs []*DataFrame, chunkIdx int, merg
 		idCol := df.Column(types.IDFieldName)
 		scoreCol := df.Column(types.ScoreFieldName)
 		if idCol == nil || scoreCol == nil {
-			return nil, nil, nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: input[%d] missing ID or score column", inputIdx))
+			return nil, nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] missing ID or score column", inputIdx)
 		}
 
 		idChunk := idCol.Chunk(chunkIdx)
 		scoreChunk, ok := scoreCol.Chunk(chunkIdx).(*array.Float32)
 		if !ok {
-			return nil, nil, nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: input[%d] score column chunk %d is not Float32", inputIdx, chunkIdx))
+			return nil, nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] score column chunk %d is not Float32", inputIdx, chunkIdx)
 		}
 
 		normFunc := op.scoreNormFunc(inputIdx)
@@ -727,7 +727,7 @@ func (op *MergeOp) buildResultArrays(ctx *types.FuncContext, ids []any, scores [
 	case string:
 		return op.buildStringResults(ctx, ids, scores)
 	default:
-		return nil, nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: unsupported ID type %T", ids[0]))
+		return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: unsupported ID type %T", ids[0])
 	}
 }
 
@@ -740,7 +740,7 @@ func (op *MergeOp) buildInt64Results(ctx *types.FuncContext, ids []any, scores [
 	for i, id := range ids {
 		v, ok := id.(int64)
 		if !ok {
-			return nil, nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: expected int64 ID at index %d, got %T", i, id))
+			return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: expected int64 ID at index %d, got %T", i, id)
 		}
 		idBuilder.Append(v)
 		scoreBuilder.Append(scores[i])
@@ -758,7 +758,7 @@ func (op *MergeOp) buildStringResults(ctx *types.FuncContext, ids []any, scores 
 	for i, id := range ids {
 		v, ok := id.(string)
 		if !ok {
-			return nil, nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: expected string ID at index %d, got %T", i, id))
+			return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: expected string ID at index %d, got %T", i, id)
 		}
 		idBuilder.Append(v)
 		scoreBuilder.Append(scores[i])
@@ -817,7 +817,7 @@ func (op *MergeOp) buildFieldArray(ctx *types.FuncContext, colName string, locs 
 				return buildEmptyArray(ctx.Pool(), col.DataType())
 			}
 		}
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: cannot determine type for column %s", colName))
+		return nil, merr.WrapErrServiceInternalMsg("merge_op: cannot determine type for column %s", colName)
 	}
 
 	// Find the data type from first input that has this column
@@ -830,7 +830,7 @@ func (op *MergeOp) buildFieldArray(ctx *types.FuncContext, colName string, locs 
 	}
 
 	if dataType == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("merge_op: column %s not found in any input", colName))
+		return nil, merr.WrapErrServiceInternalMsg("merge_op: column %s not found in any input", colName)
 	}
 
 	return buildArrayFromLocations(ctx.Pool(), colName, locs, inputs, dataType, chunkIdx)
@@ -872,7 +872,7 @@ func buildEmptyArray(pool memory.Allocator, dt arrow.DataType) (arrow.Array, err
 		defer b.Release()
 		return b.NewArray(), nil
 	default:
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported type: %s", dt.Name()))
+		return nil, merr.WrapErrServiceInternalMsg("unsupported type: %s", dt.Name())
 	}
 }
 
@@ -896,7 +896,7 @@ func buildArrayFromLocations(pool memory.Allocator, colName string, locs []idLoc
 	case arrow.STRING:
 		return buildTypedArrayFromLocations[string](pool, colName, locs, inputs, array.NewStringBuilder(pool), chunkIdx)
 	default:
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported type: %s", dt.Name()))
+		return nil, merr.WrapErrServiceInternalMsg("unsupported type: %s", dt.Name())
 	}
 }
 

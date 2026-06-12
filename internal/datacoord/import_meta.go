@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
@@ -345,7 +344,7 @@ func (m *importMeta) HandleCommitVchannel(ctx context.Context, jobID int64, vcha
 
 	job := m.jobs[jobID]
 	if job == nil {
-		return merr.WrapErrImportFailed(fmt.Sprintf("job %d not found", jobID))
+		return merr.WrapErrImportSysFailedMsg("job %d not found", jobID)
 	}
 	// Idempotency: if vchannel already committed, skip.
 	for _, c := range job.GetCommittedVchannels() {

@@ -1201,7 +1201,7 @@ func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.Sear
 
 	pb := &commonpb.PlaceholderGroup{}
 	if err := proto.Unmarshal(req.GetPlaceholderGroup(), pb); err != nil {
-		return 0, merr.WrapErrServiceInternal("failed to unmarshal BM25 IDF placeholder group", err.Error())
+		return 0, merr.WrapErrParameterInvalidMsg("failed to unmarshal BM25 IDF placeholder group: %v", err)
 	}
 
 	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
@@ -1210,7 +1210,7 @@ func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.Sear
 
 	holder := pb.Placeholders[0]
 	if holder.Type != commonpb.PlaceholderType_VarChar {
-		return 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("please provide varchar/text for BM25 Function based search, got %s", holder.Type.String()))
+		return 0, merr.WrapErrParameterInvalidMsg("please provide varchar/text for BM25 Function based search, got %s", holder.Type.String())
 	}
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
@@ -1218,7 +1218,7 @@ func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.Sear
 	schemaVersion := sd.collection.Schema().GetVersion()
 	ok, err := function.RunWithRunner(ctx, sd.collectionID, schemaVersion, req.GetFieldId(), func(functionType schemapb.FunctionType, functionRunner function.FunctionRunner) error {
 		if functionType != schemapb.FunctionType_BM25 {
-			return fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
+			return merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
 		}
 
 		datas := []any{texts}
@@ -1242,13 +1242,13 @@ func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.Sear
 			return err
 		}
 		if len(output) == 0 {
-			return errors.New("BM25 embedding failed: runner returned empty output")
+			return merr.WrapErrFunctionFailedMsg("BM25 embedding failed: runner returned empty output")
 		}
 
 		var ok bool
 		tfArray, ok = output[0].(*schemapb.SparseFloatArray)
 		if !ok {
-			return errors.New("functionRunner return unknown data")
+			return merr.WrapErrFunctionFailedMsg("functionRunner return unknown data")
 		}
 		return nil
 	})
@@ -1256,7 +1256,9 @@ func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.Sear
 		return 0, err
 	}
 	if !ok {
-		return 0, fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
+		// internal invariant: runners are populated with the schema, never by
+		// the request — classified system, keeps cross-replica failover
+		return 0, merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
 	}
 
 	idfSparseVector, avgdl, err := idfOracle.BuildIDF(req.GetFieldId(), tfArray)
@@ -1284,7 +1286,7 @@ func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.Sear
 func (sd *shardDelegator) parseMinHash(ctx context.Context, req *internalpb.SearchRequest) error {
 	pb := &commonpb.PlaceholderGroup{}
 	if err := proto.Unmarshal(req.GetPlaceholderGroup(), pb); err != nil {
-		return merr.WrapErrServiceInternal("failed to unmarshal MinHash placeholder group", err.Error())
+		return merr.WrapErrParameterInvalidMsg("failed to unmarshal MinHash placeholder group: %v", err)
 	}
 
 	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
@@ -1293,7 +1295,7 @@ func (sd *shardDelegator) parseMinHash(ctx context.Context, req *internalpb.Sear
 
 	holder := pb.Placeholders[0]
 	if holder.Type != commonpb.PlaceholderType_VarChar {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("please provide varchar/text for MinHash Function based search, got %s", holder.Type.String()))
+		return merr.WrapErrParameterInvalidMsg("please provide varchar/text for MinHash Function based search, got %s", holder.Type.String())
 	}
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
@@ -1301,7 +1303,7 @@ func (sd *shardDelegator) parseMinHash(ctx context.Context, req *internalpb.Sear
 	schemaVersion := sd.collection.Schema().GetVersion()
 	ok, err := function.RunWithRunner(ctx, sd.collectionID, schemaVersion, req.GetFieldId(), func(functionType schemapb.FunctionType, functionRunner function.FunctionRunner) error {
 		if functionType != schemapb.FunctionType_MinHash {
-			return fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
+			return merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
 		}
 
 		output, err := functionRunner.BatchRun(texts)
@@ -1309,13 +1311,13 @@ func (sd *shardDelegator) parseMinHash(ctx context.Context, req *internalpb.Sear
 			return err
 		}
 		if len(output) == 0 {
-			return errors.New("MinHash embedding failed: runner returned empty output")
+			return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: runner returned empty output")
 		}
 
 		var ok bool
 		fieldData, ok = output[0].(*schemapb.FieldData)
 		if !ok {
-			return errors.New("MinHash embedding failed: MinHash functionRunner return unknown data")
+			return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: MinHash functionRunner return unknown data")
 		}
 		return nil
 	})
@@ -1323,17 +1325,17 @@ func (sd *shardDelegator) parseMinHash(ctx context.Context, req *internalpb.Sear
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
+		return merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
 	}
 
 	vectorField := fieldData.GetVectors()
 	if vectorField == nil {
-		return errors.New("MinHash embedding failed: output is not a vector field")
+		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: output is not a vector field")
 	}
 
 	binaryVector := vectorField.GetBinaryVector()
 	if binaryVector == nil {
-		return errors.New("MinHash embedding failed: output is not a binary vector")
+		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: output is not a binary vector")
 	}
 
 	req.PlaceholderGroup, err = funcutil.FieldDataToPlaceholderGroupBytes(fieldData)
@@ -1357,7 +1359,7 @@ func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHigh
 	result := []*querypb.HighlightResult{}
 	for _, task := range req.GetTasks() {
 		if len(task.GetTexts()) != int(task.GetSearchTextNum()+task.GetCorpusTextNum())+len(task.GetQueries()) {
-			return nil, errors.Errorf("package highlight texts error, num of texts not equal the expected num %d:%d", len(task.GetTexts()), int(task.GetSearchTextNum()+task.GetCorpusTextNum())+len(task.GetQueries()))
+			return nil, merr.WrapErrServiceInternalMsg("package highlight texts error, num of texts not equal the expected num %d:%d", len(task.GetTexts()), int(task.GetSearchTextNum()+task.GetCorpusTextNum())+len(task.GetQueries()))
 		}
 		topks := req.GetTopks()
 		var results [][]*milvuspb.AnalyzerToken

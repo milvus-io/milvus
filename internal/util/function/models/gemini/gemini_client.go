@@ -17,10 +17,10 @@
 package gemini
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type GeminiClient struct {
@@ -29,7 +29,7 @@ type GeminiClient struct {
 
 func NewGeminiClient(apiKey string) (*GeminiClient, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("missing credentials config or configure the %s environment variable in the Milvus service", models.GeminiAKEnvStr)
+		return nil, merr.WrapErrParameterInvalidMsg("missing credentials config or configure the %s environment variable in the Milvus service", models.GeminiAKEnvStr)
 	}
 	return &GeminiClient{
 		apiKey: apiKey,

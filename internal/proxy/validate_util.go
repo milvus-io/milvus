@@ -560,7 +560,7 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 				return err
 			}
 		default:
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
+			return merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.Type.String())
 		}
 
 	case *schemapb.FieldData_Vectors:
@@ -572,7 +572,7 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 		if field.Type == schemapb.DataType_ArrayOfVector {
 			vectorArray := field.GetVectors().GetVectorArray()
 			if vectorArray == nil {
-				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("array of vector data is nil, field: %s", field.GetFieldName()))
+				return merr.WrapErrParameterInvalidMsg("array of vector data is nil, field: %s", field.GetFieldName())
 			}
 			expanded, err := fillVectorArrayNullValueImpl(vectorArray.GetData(), field.GetValidData(), vectorArray.GetDim(), vectorArray.GetElementType())
 			if err != nil {
@@ -581,7 +581,7 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 			vectorArray.Data = expanded
 		}
 	default:
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
+		return merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.Type.String())
 	}
 
 	return nil
@@ -748,7 +748,7 @@ func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.Field
 			}
 
 		default:
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
+			return merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.Type.String())
 		}
 
 	case *schemapb.FieldData_Vectors:
@@ -756,7 +756,7 @@ func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.Field
 		return merr.WrapErrParameterInvalidMsg("vector type not support default value")
 
 	default:
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
+		return merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.Type.String())
 	}
 
 	if !typeutil.IsVectorType(field.Type) {
@@ -958,7 +958,7 @@ func (v *validateUtil) checkGeometryFieldData(field *schemapb.FieldData, fieldSc
 		wkbArray[index], err = common.ConvertWKTToWKB(wktdata)
 		if err != nil {
 			log.Warn("insert invalid Geometry data!! Transform to wkb failed, has errors", zap.Error(err))
-			return merr.WrapErrIoFailedReason(err.Error())
+			return merr.WrapErrParameterInvalidMsg("invalid Geometry data, transform to wkb failed: %s", err.Error())
 		}
 	}
 	// replace the field data with wkb data array

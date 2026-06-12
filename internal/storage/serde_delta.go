@@ -21,14 +21,12 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 	"io"
 	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
-	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -416,7 +414,7 @@ func newDeltalogMultiFieldWriter(eventWriter *MultiFieldDeltalogStreamWriter, ba
 				pb.Append(pk)
 			}
 		default:
-			return nil, fmt.Errorf("unexpected pk type %v", v[0].PkType)
+			return nil, merr.WrapErrServiceInternalMsg("unexpected pk type %v", v[0].PkType)
 		}
 
 		for _, vv := range v {
@@ -441,7 +439,7 @@ func newDeltalogMultiFieldReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteL
 	return NewDeserializeReader(reader, func(r Record, v []*DeleteLog) error {
 		rec, ok := r.(*simpleArrowRecord)
 		if !ok {
-			return errors.New("can not cast to simple arrow record")
+			return merr.WrapErrServiceInternalMsg("can not cast to simple arrow record")
 		}
 		fields := rec.r.Schema().Fields()
 		switch fields[0].Type.ID() {
@@ -462,7 +460,7 @@ func newDeltalogMultiFieldReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteL
 				v[j].Pk = NewVarCharPrimaryKey(arr.Value(j))
 			}
 		default:
-			return fmt.Errorf("unexpected delta log pkType %v", fields[0].Type.Name())
+			return merr.WrapErrServiceInternalMsg("unexpected delta log pkType %v", fields[0].Type.Name())
 		}
 
 		arr := r.Column(1).(*array.Int64)
@@ -561,7 +559,7 @@ func (w *LegacyDeltalogWriter) Write(rec Record) error {
 			pk := NewVarCharPrimaryKey(rec.Column(0).(*array.String).Value(i))
 			return NewDeleteLog(pk, ts), nil
 		default:
-			return nil, fmt.Errorf("unexpected pk type %v", w.pkType)
+			return nil, merr.WrapErrServiceInternalMsg("unexpected pk type %v", w.pkType)
 		}
 	}
 
@@ -642,7 +640,7 @@ func (r *deleteLogToRecordReader) Next() (Record, error) {
 		}
 		pkArray = builder.NewArray()
 	default:
-		return nil, fmt.Errorf("unsupported pk type: %v", r.pkType)
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported pk type: %v", r.pkType)
 	}
 
 	tsBuilder := array.NewInt64Builder(allocator)

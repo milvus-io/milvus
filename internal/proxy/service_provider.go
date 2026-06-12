@@ -58,7 +58,7 @@ func NewInterceptor[Req Request, Resp Response](proxy *Proxy, method string) (*I
 		}
 		return interface{}(interceptor).(*InterceptorImpl[Req, Resp]), nil
 	default:
-		return nil, fmt.Errorf("method %s not supported", method)
+		return nil, merr.WrapErrParameterInvalidMsg("method %s not supported", method)
 	}
 }
 
@@ -290,7 +290,7 @@ func (node *RemoteProxyServiceProvider) DescribeCollection(ctx context.Context,
 			zap.Uint64("EndTS", dct.EndTs()))
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-			metrics.FailLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+			failMetricLabel(err), request.GetDbName(), request.GetCollectionName()).Inc()
 
 		return nil, err
 	}

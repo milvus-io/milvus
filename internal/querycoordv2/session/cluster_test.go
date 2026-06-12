@@ -238,7 +238,7 @@ func (suite *ClusterTestSuite) TestLoadSegments() {
 		Infos: []*querypb.SegmentLoadInfo{{}},
 	})
 	suite.Error(err)
-	suite.IsType(WrapErrNodeNotFound(3), err)
+	suite.IsType(merr.WrapErrNodeNotFound(3), err)
 }
 
 func (suite *ClusterTestSuite) TestWatchDmChannels() {

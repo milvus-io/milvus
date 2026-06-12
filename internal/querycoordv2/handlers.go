@@ -18,11 +18,9 @@ package querycoordv2
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
@@ -166,7 +164,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 		if err != nil {
 			msg := "failed to wait all balance task finished"
 			log.Warn(msg, zap.Error(err))
-			return errors.Wrap(err, msg)
+			return merr.Wrapf(err, "%s", msg)
 		}
 	}
 
@@ -246,7 +244,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 		if err != nil {
 			msg := "failed to wait all balance task finished"
 			log.Warn(msg, zap.Error(err))
-			return errors.Wrap(err, msg)
+			return merr.Wrapf(err, "%s", msg)
 		}
 	}
 
@@ -322,7 +320,7 @@ func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRe
 		}
 		return string(bs), nil
 	}
-	return "", fmt.Errorf("invalid param value in=[%s], it should be qc or qn", in)
+	return "", merr.WrapErrParameterInvalidMsg("invalid param value in=[%s], it should be qc or qn", in)
 }
 
 // TODO(dragondriver): add more detail metrics

@@ -22,7 +22,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -108,7 +107,7 @@ func NewReplicaManager(idAllocator func() (int64, error), catalog metastore.Quer
 func (m *ReplicaManager) Recover(ctx context.Context, collections []int64) error {
 	replicas, err := m.catalog.GetReplicas(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to recover replicas, err=%w", err)
+		return merr.Wrap(err, "failed to recover replicas")
 	}
 
 	collectionSet := typeutil.NewUniqueSet(collections...)
@@ -245,10 +244,10 @@ func (m *ReplicaManager) SpawnWithReplicaConfig(ctx context.Context, params Spaw
 		)
 	}
 	if err := m.put(ctx, params.CollectionID, replicas...); err != nil {
-		return nil, errors.Wrap(err, "failed to put replicas")
+		return nil, merr.Wrap(err, "failed to put replicas")
 	}
 	if err := m.removeRedundantReplicas(ctx, params); err != nil {
-		return nil, errors.Wrap(err, "failed to remove redundant replicas")
+		return nil, merr.Wrap(err, "failed to remove redundant replicas")
 	}
 	return replicas, nil
 }
@@ -683,7 +682,7 @@ func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectio
 	defer m.collLock.Unlock(collectionID)
 
 	if _, ok := m.coll2Replicas.Get(collectionID); !ok {
-		return errors.Errorf("collection %d not loaded", collectionID)
+		return merr.WrapErrCollectionNotLoaded(collectionID)
 	}
 
 	// create a helper to do the recover.
@@ -760,7 +759,7 @@ func (m *ReplicaManager) validateResourceGroups(rgs map[string]typeutil.UniqueSe
 	for _, rg := range rgs {
 		for id := range rg {
 			if node.Contain(id) {
-				return errors.New("node in resource group is not mutual exclusive")
+				return merr.WrapErrServiceInternalMsg("node in resource group is not mutual exclusive")
 			}
 			node.Insert(id)
 		}
@@ -774,14 +773,14 @@ func (m *ReplicaManager) getCollectionAssignmentHelper(collectionID typeutil.Uni
 	// check if the collection is exist.
 	replicas, ok := m.coll2Replicas.Get(collectionID)
 	if !ok {
-		return nil, errors.Errorf("collection %d not loaded", collectionID)
+		return nil, merr.WrapErrCollectionNotLoaded(collectionID)
 	}
 
 	rgToReplicas := make(map[string][]*Replica)
 	for _, replica := range replicas {
 		rgName := replica.GetResourceGroup()
 		if _, ok := rgs[rgName]; !ok {
-			return nil, errors.Errorf("lost resource group info, collectionID: %d, replicaID: %d, resourceGroup: %s", collectionID, replica.GetID(), rgName)
+			return nil, merr.WrapErrServiceInternalMsg("lost resource group info, collectionID: %d, replicaID: %d, resourceGroup: %s", collectionID, replica.GetID(), rgName)
 		}
 		rgToReplicas[rgName] = append(rgToReplicas[rgName], replica)
 	}
@@ -876,7 +875,7 @@ func (m *ReplicaManager) RecoverSQNodesInCollection(ctx context.Context, collect
 
 	replicas, ok := m.coll2Replicas.Get(collectionID)
 	if !ok {
-		return errors.Errorf("collection %d not loaded", collectionID)
+		return merr.WrapErrCollectionNotLoaded(collectionID)
 	}
 
 	// Build helpers based on whether we can use resource group isolation.

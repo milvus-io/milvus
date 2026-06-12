@@ -84,7 +84,7 @@ func (suite *StatsInterceptorSuite) TestUnaryRequestStatsInterceptor() {
 			},
 			expectLabels: [][]string{
 				{paramtable.GetStringNodeID(), "CreateCollection", metrics.TotalLabel, dbName, collection},
-				{paramtable.GetStringNodeID(), "CreateCollection", metrics.FailLabel, dbName, collection},
+				{paramtable.GetStringNodeID(), "CreateCollection", metrics.FailSystemLabel, dbName, collection},
 			},
 		},
 		{
@@ -120,7 +120,8 @@ func (suite *StatsInterceptorSuite) TestUnaryRequestStatsInterceptor() {
 			},
 			expectLabels: [][]string{
 				{paramtable.GetStringNodeID(), "CreateCollection", metrics.TotalLabel, dbName, collection},
-				{paramtable.GetStringNodeID(), "CreateCollection", metrics.RejectedLabel, dbName, collection},
+				// Unauthenticated is a caller-side rejection -> rejected_user (review §8).
+				{paramtable.GetStringNodeID(), "CreateCollection", metrics.RejectedUserLabel, dbName, collection},
 			},
 		},
 	}

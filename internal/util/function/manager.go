@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/util/bm25"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -476,7 +477,7 @@ func (e *functionRunnerCollectionEntry) ensureVersion(
 	schema *schemapb.CollectionSchema,
 ) ([]*functionRunnerEntry, error) {
 	if schema == nil {
-		return nil, errors.New("collection schema is nil")
+		return nil, merr.WrapErrFunctionFailedMsg("collection schema is nil")
 	}
 
 	schemaVersion := schema.GetVersion()
@@ -579,7 +580,7 @@ func (e *functionRunnerCollectionEntry) ensureVersion(
 			_, outputOK := outputFieldIDsBySignature[signature]
 			if _, functionOK := functionsBySignature[signature]; !functionOK || !outputOK {
 				e.mu.Unlock()
-				return nil, fmt.Errorf("function runner signature %s not found in schema version %d", signature, schemaVersion)
+				return nil, merr.WrapErrFunctionFailedMsg("function runner signature %s not found in schema version %d", signature, schemaVersion)
 			}
 			if e.runners[signature] == nil {
 				e.runners[signature] = newFunctionRunnerEntry(
@@ -675,7 +676,7 @@ func (e *functionRunnerCollectionEntry) Materialize(
 	body *msgpb.InsertRequest,
 ) (bool, error) {
 	if schema == nil {
-		return false, errors.New("collection schema is nil")
+		return false, merr.WrapErrFunctionFailedMsg("collection schema is nil")
 	}
 	changed, ok, err := e.TryMaterialize(schema.GetVersion(), body)
 	if err != nil {
@@ -710,7 +711,7 @@ func (e *functionRunnerCollectionEntry) TryMaterialize(
 	body *msgpb.InsertRequest,
 ) (bool, bool, error) {
 	if body == nil {
-		return false, false, errors.New("insert request is nil")
+		return false, false, merr.WrapErrFunctionFailedMsg("insert request is nil")
 	}
 
 	runnerEntries, outputFieldIDs, ok := e.getVersionRunnerEntries(schemaVersion)
@@ -763,7 +764,7 @@ func (e *functionRunnerCollectionEntry) RunWithAnalyzer(
 	err := runnerEntry.run(ctx, func(runner FunctionRunner) error {
 		analyzer, ok := runner.(Analyzer)
 		if !ok {
-			return errors.New("function runner cannot serve analyzer requests")
+			return merr.WrapErrFunctionFailedMsg("function runner cannot serve analyzer requests")
 		}
 		return run(analyzer)
 	})
@@ -820,14 +821,14 @@ func (m *functionRunnerManager) Materialize(
 	body *msgpb.InsertRequest,
 ) (bool, error) {
 	if schema == nil {
-		return false, errors.New("collection schema is nil")
+		return false, merr.WrapErrFunctionFailedMsg("collection schema is nil")
 	}
 	if !HasEmbeddingFunctions(schema) {
 		return false, nil
 	}
 	entry := m.getEntry(collectionID)
 	if entry == nil {
-		return false, fmt.Errorf("function runners for collection %d are not allocated", collectionID)
+		return false, merr.WrapErrFunctionFailedMsg("function runners for collection %d are not allocated", collectionID)
 	}
 	return entry.Materialize(ctx, schema, body)
 }
@@ -894,10 +895,10 @@ func functionRunnerErrorResult(err error) <-chan error {
 
 func BuildEmbeddingRunner(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
 	if schema == nil {
-		return nil, errors.New("collection schema is nil")
+		return nil, merr.WrapErrFunctionFailedMsg("collection schema is nil")
 	}
 	if fn == nil {
-		return nil, errors.New("function schema is nil")
+		return nil, merr.WrapErrFunctionFailedMsg("function schema is nil")
 	}
 	if !IsEmbeddingFunctionType(fn.GetType()) {
 		return nil, nil
@@ -910,7 +911,7 @@ func BuildEmbeddingRunner(schema *schemapb.CollectionSchema, fn *schemapb.Functi
 
 func BuildEmbeddingRunners(schema *schemapb.CollectionSchema) ([]FunctionRunner, error) {
 	if schema == nil {
-		return nil, errors.New("collection schema is nil")
+		return nil, merr.WrapErrFunctionFailedMsg("collection schema is nil")
 	}
 	if !HasEmbeddingFunctions(schema) {
 		return nil, nil
@@ -933,7 +934,7 @@ func BuildEmbeddingRunners(schema *schemapb.CollectionSchema) ([]FunctionRunner,
 
 func EmbeddingOutputFieldIDs(schema *schemapb.CollectionSchema) ([]int64, error) {
 	if schema == nil {
-		return nil, errors.New("collection schema is nil")
+		return nil, merr.WrapErrFunctionFailedMsg("collection schema is nil")
 	}
 	if !HasEmbeddingFunctions(schema) {
 		return nil, nil
@@ -953,7 +954,7 @@ func EmbeddingOutputFieldIDs(schema *schemapb.CollectionSchema) ([]int64, error)
 
 func EmbeddingFunctionSignature(schema *schemapb.CollectionSchema) (string, error) {
 	if schema == nil {
-		return "", errors.New("collection schema is nil")
+		return "", merr.WrapErrFunctionFailedMsg("collection schema is nil")
 	}
 
 	hasher := sha256.New()
@@ -1005,7 +1006,7 @@ func functionOutputFieldIDs(schema *schemapb.CollectionSchema, fn *schemapb.Func
 		outputFieldIDs := append([]int64(nil), outputIDs...)
 		for _, outputFieldID := range outputFieldIDs {
 			if typeutil.GetField(schema, outputFieldID) == nil {
-				return nil, fmt.Errorf("function %s output field %d not found", fn.GetName(), outputFieldID)
+				return nil, merr.WrapErrFunctionFailedMsg("function %s output field %d not found", fn.GetName(), outputFieldID)
 			}
 		}
 		return outputFieldIDs, nil
@@ -1013,14 +1014,14 @@ func functionOutputFieldIDs(schema *schemapb.CollectionSchema, fn *schemapb.Func
 
 	outputNames := fn.GetOutputFieldNames()
 	if len(outputNames) == 0 {
-		return nil, fmt.Errorf("function %s output fields not found", fn.GetName())
+		return nil, merr.WrapErrFunctionFailedMsg("function %s output fields not found", fn.GetName())
 	}
 
 	outputFieldIDs := make([]int64, 0, len(outputNames))
 	for _, outputName := range outputNames {
 		field := typeutil.GetFieldByName(schema, outputName)
 		if field == nil {
-			return nil, fmt.Errorf("function %s output field %s not found", fn.GetName(), outputName)
+			return nil, merr.WrapErrFunctionFailedMsg("function %s output field %s not found", fn.GetName(), outputName)
 		}
 		outputFieldIDs = append(outputFieldIDs, field.GetFieldID())
 	}
@@ -1032,7 +1033,7 @@ func functionInputFieldIDs(schema *schemapb.CollectionSchema, fn *schemapb.Funct
 		inputFieldIDs := append([]int64(nil), inputIDs...)
 		for _, inputFieldID := range inputFieldIDs {
 			if typeutil.GetField(schema, inputFieldID) == nil {
-				return nil, fmt.Errorf("function %s input field %d not found", fn.GetName(), inputFieldID)
+				return nil, merr.WrapErrFunctionFailedMsg("function %s input field %d not found", fn.GetName(), inputFieldID)
 			}
 		}
 		return inputFieldIDs, nil
@@ -1040,14 +1041,14 @@ func functionInputFieldIDs(schema *schemapb.CollectionSchema, fn *schemapb.Funct
 
 	inputNames := fn.GetInputFieldNames()
 	if len(inputNames) == 0 {
-		return nil, fmt.Errorf("function %s input fields not found", fn.GetName())
+		return nil, merr.WrapErrFunctionFailedMsg("function %s input fields not found", fn.GetName())
 	}
 
 	inputFieldIDs := make([]int64, 0, len(inputNames))
 	for _, inputName := range inputNames {
 		field := typeutil.GetFieldByName(schema, inputName)
 		if field == nil {
-			return nil, fmt.Errorf("function %s input field %s not found", fn.GetName(), inputName)
+			return nil, merr.WrapErrFunctionFailedMsg("function %s input field %s not found", fn.GetName(), inputName)
 		}
 		inputFieldIDs = append(inputFieldIDs, field.GetFieldID())
 	}
@@ -1066,28 +1067,28 @@ func embeddingFunctionSignature(schema *schemapb.CollectionSchema, fn *schemapb.
 	for _, fieldID := range fn.GetInputFieldIds() {
 		field := typeutil.GetField(schema, fieldID)
 		if field == nil {
-			return "", fmt.Errorf("function %s input field %d not found", fn.GetName(), fieldID)
+			return "", merr.WrapErrFunctionFailedMsg("function %s input field %d not found", fn.GetName(), fieldID)
 		}
 		writeFieldSignature(hasher, "input", field)
 	}
 	for _, fieldName := range fn.GetInputFieldNames() {
 		field := typeutil.GetFieldByName(schema, fieldName)
 		if field == nil {
-			return "", fmt.Errorf("function %s input field %s not found", fn.GetName(), fieldName)
+			return "", merr.WrapErrFunctionFailedMsg("function %s input field %s not found", fn.GetName(), fieldName)
 		}
 		writeFieldSignature(hasher, "input_name", field)
 	}
 	for _, fieldID := range fn.GetOutputFieldIds() {
 		field := typeutil.GetField(schema, fieldID)
 		if field == nil {
-			return "", fmt.Errorf("function %s output field %d not found", fn.GetName(), fieldID)
+			return "", merr.WrapErrFunctionFailedMsg("function %s output field %d not found", fn.GetName(), fieldID)
 		}
 		writeFieldSignature(hasher, "output", field)
 	}
 	for _, fieldName := range fn.GetOutputFieldNames() {
 		field := typeutil.GetFieldByName(schema, fieldName)
 		if field == nil {
-			return "", fmt.Errorf("function %s output field %s not found", fn.GetName(), fieldName)
+			return "", merr.WrapErrFunctionFailedMsg("function %s output field %s not found", fn.GetName(), fieldName)
 		}
 		writeFieldSignature(hasher, "output_name", field)
 	}
@@ -1192,14 +1193,14 @@ func RunWithAnalyzer(
 
 func FillFunctionFields(runners []FunctionRunner, body *msgpb.InsertRequest) (bool, error) {
 	if body == nil {
-		return false, errors.New("insert request is nil")
+		return false, merr.WrapErrFunctionFailedMsg("insert request is nil")
 	}
 
 	changed := false
 	for _, runner := range runners {
 		outputFields := runner.GetOutputFields()
 		if len(outputFields) != 1 {
-			return false, fmt.Errorf("function should have exactly one output field, got %d", len(outputFields))
+			return false, merr.WrapErrFunctionFailedMsg("function should have exactly one output field, got %d", len(outputFields))
 		}
 		outputField := outputFields[0]
 		if HasFieldData(body.GetFieldsData(), outputField.GetFieldID()) {
@@ -1239,12 +1240,12 @@ func RunFunction(runner FunctionRunner, body *msgpb.InsertRequest) (*schemapb.Fi
 		return nil, err
 	}
 	if len(output) == 0 {
-		return nil, errors.New("function runner returned empty output")
+		return nil, merr.WrapErrFunctionFailedMsg("function runner returned empty output")
 	}
 
 	outputFields := runner.GetOutputFields()
 	if len(outputFields) != 1 {
-		return nil, fmt.Errorf("function should have exactly one output field, got %d", len(outputFields))
+		return nil, merr.WrapErrFunctionFailedMsg("function should have exactly one output field, got %d", len(outputFields))
 	}
 	outputField := outputFields[0]
 
@@ -1252,20 +1253,20 @@ func RunFunction(runner FunctionRunner, body *msgpb.InsertRequest) (*schemapb.Fi
 	case schemapb.FunctionType_BM25:
 		sparseArray, ok := output[0].(*schemapb.SparseFloatArray)
 		if !ok {
-			return nil, errors.New("BM25 runner returned non sparse-float-vector output")
+			return nil, merr.WrapErrFunctionFailedMsg("BM25 runner returned non sparse-float-vector output")
 		}
 		return bm25.BuildSparseFieldData(outputField, sparseArray), nil
 	case schemapb.FunctionType_MinHash:
 		fieldData, ok := output[0].(*schemapb.FieldData)
 		if !ok {
-			return nil, errors.New("MinHash runner returned non field-data output")
+			return nil, merr.WrapErrFunctionFailedMsg("MinHash runner returned non field-data output")
 		}
 		fieldData.Type = outputField.GetDataType()
 		fieldData.FieldName = outputField.GetName()
 		fieldData.FieldId = outputField.GetFieldID()
 		return fieldData, nil
 	default:
-		return nil, fmt.Errorf("unsupported embedding function type %s", runner.GetSchema().GetType().String())
+		return nil, merr.WrapErrFunctionFailedMsg("unsupported embedding function type %s", runner.GetSchema().GetType().String())
 	}
 }
 
@@ -1312,11 +1313,11 @@ func getStringFieldData(fieldsData []*schemapb.FieldData, fieldIDs ...int64) ([]
 	for _, fieldID := range fieldIDs {
 		fieldData := GetFieldData(fieldsData, fieldID)
 		if fieldData == nil {
-			return nil, fmt.Errorf("field %d not found", fieldID)
+			return nil, merr.WrapErrFunctionFailedMsg("field %d not found", fieldID)
 		}
 		stringData := fieldData.GetScalars().GetStringData()
 		if stringData == nil {
-			return nil, fmt.Errorf("field %d is not string data", fieldID)
+			return nil, merr.WrapErrFunctionFailedMsg("field %d is not string data", fieldID)
 		}
 		result = append(result, stringData.GetData())
 	}

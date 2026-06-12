@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
@@ -282,7 +281,7 @@ func newReduceByGroupsOperator(
 		for i := 0; i < fieldCount; i++ {
 			indices := outputMap.IndexesAt(i)
 			if len(indices) == 0 {
-				return nil, fmt.Errorf("no indices found for output field '%s'", outputMap.NameAt(i))
+				return nil, merr.WrapErrParameterInvalidMsg("no indices found for output field '%s'", outputMap.NameAt(i))
 			} else if len(indices) == 1 {
 				reOrganizedFieldDatas[i] = reducedFieldDatas[indices[0]]
 				reOrganizedFieldDatas[i].FieldName = outputMap.NameAt(i)
@@ -345,7 +344,7 @@ func newAggRemapOperator(outputMap *agg.AggregationFieldMap) queryutil.Operator 
 		for i := 0; i < fieldCount; i++ {
 			indices := outputMap.IndexesAt(i)
 			if len(indices) == 0 {
-				return nil, fmt.Errorf("no indices found for output field '%s'", outputMap.NameAt(i))
+				return nil, merr.WrapErrParameterInvalidMsg("no indices found for output field '%s'", outputMap.NameAt(i))
 			} else if len(indices) == 1 {
 				remapped[i] = rawFields[indices[0]]
 				remapped[i].FieldName = outputMap.NameAt(i)

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type TextEmbeddingMode int
@@ -211,11 +212,11 @@ func ParseAKAndURL(credentials *credentials.Credentials, params []*commonpb.KeyV
 func ParseAndCheckFieldDim(dimStr string, fieldDim int64, fieldName string) (int64, error) {
 	dim, err := strconv.ParseInt(dimStr, 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("dimension [%s] provided in Function params is not a valid int", dimStr)
+		return 0, merr.WrapErrParameterInvalidMsg("dimension [%s] provided in Function params is not a valid int", dimStr)
 	}
 
 	if dim != 0 && dim != fieldDim {
-		return 0, fmt.Errorf("function output field:[%s]'s dimension [%d] does not match the dimension [%d] provided in Function params", fieldName, fieldDim, dim)
+		return 0, merr.WrapErrParameterInvalidMsg("function output field:[%s]'s dimension [%d] does not match the dimension [%d] provided in Function params", fieldName, fieldDim, dim)
 	}
 	return dim, nil
 }
@@ -267,10 +268,10 @@ func NewBaseURL(endpoint string) (*url.URL, error) {
 		return nil, err
 	}
 	if base.Scheme != "http" && base.Scheme != "https" {
-		return nil, fmt.Errorf("endpoint: [%s] is not a valid http/https link", endpoint)
+		return nil, merr.WrapErrParameterInvalidMsg("endpoint: [%s] is not a valid http/https link", endpoint)
 	}
 	if base.Host == "" {
-		return nil, fmt.Errorf("endpoint: [%s] is not a valid http/https link", endpoint)
+		return nil, merr.WrapErrParameterInvalidMsg("endpoint: [%s] is not a valid http/https link", endpoint)
 	}
 	return base, nil
 }
@@ -303,7 +304,7 @@ func PostRequest[T Response](req any, url string, headers map[string]string, tim
 	var res T
 	err = json.Unmarshal(body, &res)
 	if err != nil {
-		return nil, fmt.Errorf("call service failed, unmarshal response failed, errs:[%v]", err)
+		return nil, merr.Wrap(err, "call service failed, unmarshal response failed")
 	}
 	return &res, err
 }
@@ -311,17 +312,25 @@ func PostRequest[T Response](req any, url string, headers map[string]string, tim
 func send(req *http.Request) ([]byte, error) {
 	resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL is constructed from configured model endpoints, not user input
 	if err != nil {
-		return nil, fmt.Errorf("call service failed, errs:[%v]", err)
+		// transport failure (connection refused / timeout / DNS) is transient
+		return nil, merr.WrapErrServiceUnavailable(err.Error(), "call service failed")
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("call service failed, read response failed, errs:[%v]", err)
+		// interrupted while reading the response body is transient
+		return nil, merr.WrapErrServiceUnavailable(err.Error(), "call service failed, read response failed")
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("call service failed, errs:[%s, %s]", resp.Status, body)
+		msg := fmt.Sprintf("call service failed, errs:[%s, %s]", resp.Status, body)
+		// 429 / 5xx are transient and retryable; other 4xx are caused by the
+		// request/config (bad key, bad input) and are permanent.
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
+			return nil, merr.WrapErrServiceUnavailable(msg)
+		}
+		return nil, merr.WrapErrFunctionFailedMsg("%s", msg)
 	}
 	return body, nil
 }

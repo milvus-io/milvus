@@ -20,7 +20,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type SyncNewCreatedPartitionJob struct {
@@ -92,7 +92,7 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 	if err != nil {
 		msg := "failed to store partitions"
 		log.Warn(msg, zap.Error(err))
-		return errors.Wrap(err, msg)
+		return merr.Wrapf(err, "%s", msg)
 	}
 
 	return WaitUpdatePartition(job.ctx, job.targetObserver, job.req.GetCollectionID(), job.req.GetPartitionID())

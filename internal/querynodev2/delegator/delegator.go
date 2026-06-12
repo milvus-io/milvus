@@ -458,7 +458,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		log.Warn("delegator received search request not belongs to it",
 			zap.Strings("reqChannels", req.GetDmlChannels()),
 		)
-		return nil, fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
+		return nil, merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("request channels %v", req.GetDmlChannels()))
 	}
 
 	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
@@ -591,14 +591,14 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
 	log := sd.getLogger(ctx)
 	if !sd.Serviceable() {
-		return errors.New("delegator is not serviceable")
+		return merr.WrapErrServiceUnavailable("delegator", "not serviceable")
 	}
 
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
 		log.Warn("deletgator received query request not belongs to it",
 			zap.Strings("reqChannels", req.GetDmlChannels()),
 		)
-		return fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
+		return merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("request channels %v", req.GetDmlChannels()))
 	}
 
 	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
@@ -686,7 +686,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		log.Warn("delegator received query request not belongs to it",
 			zap.Strings("reqChannels", req.GetDmlChannels()),
 		)
-		return nil, fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
+		return nil, merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("request channels %v", req.GetDmlChannels()))
 	}
 
 	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
@@ -802,7 +802,7 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 		log.Warn("delegator received GetStatistics request not belongs to it",
 			zap.Strings("reqChannels", req.GetDmlChannels()),
 		)
-		return nil, fmt.Errorf("dml channel not match, delegator channel %s, GetStatistics channels %v", sd.vchannelName, req.GetDmlChannels())
+		return nil, merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("GetStatistics channels %v", req.GetDmlChannels()))
 	}
 
 	// wait tsafe
@@ -952,11 +952,11 @@ func executeSubTasks[T any, R interface {
 				} else {
 					segments = []int64{}
 				}
-				err = fmt.Errorf("segments not loaded in any worker: %v", segments[:min(len(segments), 10)])
+				err = merr.WrapErrServiceInternalMsg("segments not loaded in any worker: %v", segments[:min(len(segments), 10)])
 			} else {
 				result, err = execute(ctx, task.req, task.worker)
 				if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-					err = fmt.Errorf("worker(%d) query failed: %s", task.targetID, result.GetStatus().GetReason())
+					err = merr.Wrapf(merr.Error(result.GetStatus()), "worker(%d) query failed", task.targetID)
 				}
 			}
 
@@ -1408,7 +1408,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 
 	collection := manager.Collection.Get(collectionID)
 	if collection == nil {
-		return nil, fmt.Errorf("collection(%d) not found in manager", collectionID)
+		return nil, merr.WrapErrCollectionNotFound(collectionID, "not in delegator manager")
 	}
 
 	sizePerBlock := paramtable.Get().QueryNodeCfg.DeleteBufferBlockSize.GetAsInt64()
@@ -1547,7 +1547,7 @@ func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnaly
 
 		analyzerNames := req.GetAnalyzerNames()
 		if len(analyzerNames) == 0 {
-			return merr.WrapErrAsInputError(fmt.Errorf("analyzer names must be set for multi analyzer"))
+			return merr.WrapErrParameterMissingMsg("analyzer names must be set for multi analyzer")
 		}
 
 		if len(analyzerNames) == 1 && len(texts) > 1 {
@@ -1563,7 +1563,7 @@ func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnaly
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("analyzer runner for field %d not exist, now only support run analyzer by field if field was bm25/minhash input field", req.GetFieldId())
+		return nil, merr.WrapErrParameterInvalidMsg("analyzer runner for field %d not exist, now only support run analyzer by field if field was bm25/minhash input field", req.GetFieldId())
 	}
 
 	return lo.Map(result, func(tokens []*milvuspb.AnalyzerToken, _ int) *milvuspb.AnalyzerResult {

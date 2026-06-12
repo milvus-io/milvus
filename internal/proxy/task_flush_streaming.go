@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 
 	"go.uber.org/zap"
 
@@ -49,7 +48,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 	for _, collName := range t.CollectionNames {
 		collID, err := globalMetaCache.GetCollectionID(t.ctx, t.DbName, collName)
 		if err != nil {
-			return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+			return err
 		}
 
 		vchannels, err := t.chMgr.getVChannels(collID)
@@ -77,7 +76,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 		}
 		resp, err := t.mixCoord.Flush(ctx, flushReq)
 		if err = merr.CheckRPCCall(resp, err); err != nil {
-			return fmt.Errorf("failed to call flush to data coordinator: %s", err.Error())
+			return merr.Wrap(err, "failed to call flush to data coordinator")
 		}
 
 		// Remove the flushed segments from onFlushSegmentIDs

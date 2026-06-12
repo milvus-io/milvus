@@ -63,7 +63,7 @@ func (o *SelectOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 	for _, colName := range o.inputs {
 		col := input.Column(colName)
 		if col == nil {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("select_op: column %q not found", colName))
+			return nil, merr.WrapErrServiceInternalMsg("select_op: column %q not found", colName)
 		}
 
 		// Copy chunks with retain
@@ -89,7 +89,7 @@ func (o *SelectOp) String() string {
 func NewSelectOpFromRepr(repr *OperatorRepr) (Operator, error) {
 	columnsInterface, ok := repr.Params["columns"]
 	if !ok {
-		return nil, merr.WrapErrParameterInvalidMsg("select_op: columns is required")
+		return nil, merr.WrapErrParameterMissingMsg("select_op: columns is required")
 	}
 	columns, ok := columnsInterface.([]interface{})
 	if !ok {
@@ -100,7 +100,7 @@ func NewSelectOpFromRepr(repr *OperatorRepr) (Operator, error) {
 		return nil, merr.WrapErrParameterInvalidMsg("select_op: columns must be a list")
 	}
 	if len(columns) == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("select_op: columns is required")
+		return nil, merr.WrapErrParameterMissingMsg("select_op: columns is required")
 	}
 	colsStr := make([]string, len(columns))
 	for i, col := range columns {

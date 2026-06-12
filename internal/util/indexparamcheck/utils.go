@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -68,27 +69,27 @@ func CheckStrByValues(params map[string]string, key string, container []string) 
 func ValidateArrayOfVectorMetricType(elementType schemapb.DataType, metricType string) error {
 	if typeutil.IsDenseFloatVectorType(elementType) {
 		if !funcutil.SliceContain(ArrayOfVectorFloatMetrics, metricType) {
-			return fmt.Errorf("array of vector with float element type does not support metric type: %s, supported: %v", metricType, ArrayOfVectorFloatMetrics)
+			return merr.WrapErrParameterInvalidMsg("array of vector with float element type does not support metric type: %s, supported: %v", metricType, ArrayOfVectorFloatMetrics)
 		}
 		return nil
 	}
 	if typeutil.IsBinaryVectorType(elementType) {
 		if !funcutil.SliceContain(ArrayOfVectorBinaryMetrics, metricType) {
-			return fmt.Errorf("array of vector with binary element type does not support metric type: %s, supported: %v", metricType, ArrayOfVectorBinaryMetrics)
+			return merr.WrapErrParameterInvalidMsg("array of vector with binary element type does not support metric type: %s, supported: %v", metricType, ArrayOfVectorBinaryMetrics)
 		}
 		return nil
 	}
 	if typeutil.IsIntVectorType(elementType) {
 		if !funcutil.SliceContain(ArrayOfVectorIntMetrics, metricType) {
-			return fmt.Errorf("array of vector with int element type does not support metric type: %s, supported: %v", metricType, ArrayOfVectorIntMetrics)
+			return merr.WrapErrParameterInvalidMsg("array of vector with int element type does not support metric type: %s, supported: %v", metricType, ArrayOfVectorIntMetrics)
 		}
 		return nil
 	}
-	return fmt.Errorf("array of vector index does not support element type: %s", elementType.String())
+	return merr.WrapErrParameterInvalidMsg("array of vector index does not support element type: %s", elementType.String())
 }
 
 func errOutOfRange(x interface{}, lb interface{}, ub interface{}) error {
-	return fmt.Errorf("%v out of range: [%v, %v]", x, lb, ub)
+	return merr.WrapErrParameterInvalidMsg("%v out of range: [%v, %v]", x, lb, ub)
 }
 
 func setDefaultIfNotExist(params map[string]string, key string, defaultValue string) {

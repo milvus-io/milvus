@@ -20,7 +20,6 @@ package chain
 
 import (
 	"encoding/json"
-	"fmt"
 
 	"github.com/apache/arrow/go/v17/arrow/memory"
 
@@ -135,7 +134,7 @@ func chainJSONToRepr(json *ChainJSON) (*ChainRepr, error) {
 	for i, opJSON := range json.Operators {
 		opRepr, err := operatorJSONToRepr(&opJSON)
 		if err != nil {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("operator[%d]: %v", i, err))
+			return nil, merr.WrapErrServiceInternalMsg("operator[%d]: %v", i, err)
 		}
 		repr.Operators = append(repr.Operators, *opRepr)
 	}
@@ -172,7 +171,7 @@ func funcChainFromRepr(repr *ChainRepr, alloc memory.Allocator) (*FuncChain, err
 	}
 
 	if repr.Stage == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("stage is required")
+		return nil, merr.WrapErrParameterMissingMsg("stage is required")
 	}
 
 	chain := NewFuncChainWithAllocator(alloc)
@@ -184,7 +183,7 @@ func funcChainFromRepr(repr *ChainRepr, alloc memory.Allocator) (*FuncChain, err
 	for i, opRepr := range repr.Operators {
 		op, err := operatorFromRepr(&opRepr)
 		if err != nil {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("operator[%d]: %v", i, err))
+			return nil, merr.WrapErrServiceInternalMsg("operator[%d]: %v", i, err)
 		}
 		chain.Add(op)
 	}
@@ -209,7 +208,7 @@ func operatorFromRepr(repr *OperatorRepr) (Operator, error) {
 // FunctionFromRepr creates a FunctionExpr from a FunctionRepr.
 func FunctionFromRepr(repr *FunctionRepr) (types.FunctionExpr, error) {
 	if repr.Name == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("function name is required")
+		return nil, merr.WrapErrParameterMissingMsg("function name is required")
 	}
 
 	return types.CreateFunction(repr.Name, repr.Params)

@@ -28,7 +28,6 @@ package packed
 import "C"
 
 import (
-	"fmt"
 	"strings"
 	"unsafe"
 
@@ -39,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -164,7 +164,7 @@ func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []st
 
 func SchemaBasedPattern(schema *arrow.Schema, columnGroups []storagecommon.ColumnGroup) (string, error) {
 	if schema == nil {
-		return "", fmt.Errorf("arrow schema is required")
+		return "", merr.WrapErrParameterInvalidMsg("arrow schema is required")
 	}
 	return strings.Join(lo.Map(columnGroups, func(columnGroup storagecommon.ColumnGroup, _ int) string {
 		return strings.Join(lo.Map(columnGroup.Columns, func(index int, _ int) string {
@@ -248,13 +248,13 @@ func (f *ColumnGroups) applyTo(handle C.LoonTransactionHandle) error {
 		slice := unsafe.Slice(f.cColumnGroups.column_group_array, num)
 		for i := range slice {
 			if err := HandleLoonFFIResult(C.loon_transaction_add_column_group(handle, &slice[i])); err != nil {
-				return fmt.Errorf("commit manifest add_column_group: %w", err)
+				return merr.Wrap(err, "commit manifest add_column_group")
 			}
 		}
 		return nil
 	}
 	if err := HandleLoonFFIResult(C.loon_transaction_append_files(handle, f.cColumnGroups)); err != nil {
-		return fmt.Errorf("commit manifest append_files: %w", err)
+		return merr.Wrap(err, "commit manifest append_files")
 	}
 	return nil
 }
@@ -270,7 +270,7 @@ func (f *ColumnGroups) applyTo(handle C.LoonTransactionHandle) error {
 // Close or Write calls fail.
 func (pw *FFIPackedWriter) Close() (WriterOutput, error) {
 	if pw.closed {
-		return nil, fmt.Errorf("FFIPackedWriter already closed")
+		return nil, merr.WrapErrServiceInternalMsg("FFIPackedWriter already closed")
 	}
 	pw.closed = true
 	defer func() {

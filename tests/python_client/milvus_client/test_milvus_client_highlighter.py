@@ -1111,8 +1111,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
                                        num_of_fragments=1)
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
         error = {ct.err_code: 1100,
-                 ct.err_msg: f"failed to create query plan: cannot parse expression: TEXT_MATCH({default_text_field_name}, \"seat\"), "
-                             f"error: field \"{default_text_field_name}\" does not enable match: invalid parameter"}
+                 ct.err_msg: "does not enable match"}
 
         self.search(
             client,

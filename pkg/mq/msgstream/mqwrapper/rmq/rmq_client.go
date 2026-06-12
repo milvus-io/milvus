@@ -20,7 +20,6 @@ import (
 	"context"
 	"strconv"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/log"
@@ -29,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/client"
 	"github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -83,7 +83,7 @@ func (rc *rmqClient) Subscribe(ctx context.Context, options mqwrapper.ConsumerOp
 
 	if options.BufSize == 0 {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
-		err := errors.New("subscription bufSize of rmq should never be zero")
+		err := merr.WrapErrParameterInvalidMsg("subscription bufSize of rmq should never be zero")
 		log.Warn("unexpected subscription consumer options", zap.Error(err))
 		return nil, err
 	}

@@ -24,7 +24,6 @@ package proxy
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -54,8 +53,8 @@ func InitEmptyGlobalCache() {
 	var err error
 	emptyMock := common.NewEmptyMockT()
 	mixcoord := mocks.NewMockMixCoordClient(emptyMock)
-	mixcoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("collection not found"))
-	mixcoord.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("alias not found"))
+	mixcoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.WrapErrParameterInvalidMsg("collection not found"))
+	mixcoord.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.WrapErrParameterInvalidMsg("alias not found"))
 	globalMetaCache, err = NewMetaCache(mixcoord)
 	if err != nil {
 		panic(err)

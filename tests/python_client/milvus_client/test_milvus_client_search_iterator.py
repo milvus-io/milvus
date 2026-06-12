@@ -298,8 +298,7 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         # 3. search
         vectors_to_search = cf.gen_vectors(1, default_dim)
         error = {ct.err_code: 1100,
-                 ct.err_msg: f"failed to create query plan: predicate is not a boolean expression: invalidexpr, "
-                             f"data type: JSON: invalid parameter"}
+                 ct.err_msg: "predicate is not a boolean expression"}
         self.search_iterator(client, collection_name, vectors_to_search,
                              filter=expr,
                              batch_size=20,

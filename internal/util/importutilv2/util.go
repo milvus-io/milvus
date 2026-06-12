@@ -105,5 +105,5 @@ func GetFileType(file *internalpb.ImportFile) (FileType, error) {
 		}
 		return CSV, nil
 	}
-	return Invalid, merr.WrapErrImportFailed(fmt.Sprintf("unexpected file type, files=%v", file.GetPaths()))
+	return Invalid, merr.WrapErrImportFailedMsg("unexpected file type, files=%v", file.GetPaths())
 }

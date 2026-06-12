@@ -19,7 +19,6 @@
 package tasks
 
 import (
-	"fmt"
 	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -46,12 +45,12 @@ func dataFrameFromArrowRecordBatch(rec arrow.Record, chunkSizes []int64) (*chain
 	var totalRows int64
 	for _, size := range chunkSizes {
 		if size < 0 {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("invalid negative Arrow chunk size: %d", size))
+			return nil, merr.WrapErrServiceInternalMsg("invalid negative Arrow chunk size: %d", size)
 		}
 		totalRows += size
 	}
 	if totalRows != rec.NumRows() {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("Arrow record batch row count %d does not match chunk sizes total %d", rec.NumRows(), totalRows))
+		return nil, merr.WrapErrServiceInternalMsg("Arrow record batch row count %d does not match chunk sizes total %d", rec.NumRows(), totalRows)
 	}
 
 	numCols := int(rec.NumCols())
@@ -84,13 +83,13 @@ func dataFrameFromArrowRecordBatch(rec arrow.Record, chunkSizes []int64) (*chain
 		builder.SetFieldNullable(colName, nullable)
 		if fieldID, ok, err := fieldMetadataInt64(field.Metadata, arrowMetadataFieldIDKey); err != nil {
 			releaseChunks()
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("invalid Arrow field metadata %s for column %s: %v", arrowMetadataFieldIDKey, colName, err))
+			return nil, merr.WrapErrServiceInternalMsg("invalid Arrow field metadata %s for column %s: %v", arrowMetadataFieldIDKey, colName, err)
 		} else if ok {
 			builder.SetFieldID(colName, fieldID)
 		}
 		if dataType, ok, err := fieldMetadataInt64(field.Metadata, arrowMetadataDataTypeKey); err != nil {
 			releaseChunks()
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("invalid Arrow field metadata %s for column %s: %v", arrowMetadataDataTypeKey, colName, err))
+			return nil, merr.WrapErrServiceInternalMsg("invalid Arrow field metadata %s for column %s: %v", arrowMetadataDataTypeKey, colName, err)
 		} else if ok {
 			builder.SetFieldType(colName, schemapb.DataType(dataType))
 		}

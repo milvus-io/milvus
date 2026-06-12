@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -43,7 +44,7 @@ var (
 	Cipher                 atomic.Value
 	initCipherOnce         sync.Once
 	cipherReloadMutex      sync.RWMutex
-	ErrCipherPluginMissing = errors.New("cipher plugin is missing")
+	errCipherPluginMissing = errors.New("cipher plugin is missing")
 )
 
 type BackupInterface interface {
@@ -198,7 +199,7 @@ func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) (
 		case common.EncryptionEnabledKey:
 			value := strings.ToLower(property.Value)
 			if value != "true" && value != "false" {
-				return nil, fmt.Errorf("invalid value for %s: %q, must be \"true\" or \"false\"",
+				return nil, merr.WrapErrParameterInvalidMsg("invalid value for %s: %q, must be \"true\" or \"false\"",
 					common.EncryptionEnabledKey, property.Value)
 			}
 			defaultEncrypt = value == "true"
@@ -213,7 +214,7 @@ func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) (
 	cipher := GetCipher()
 	// If cipher plugin is missing but encryption is requested, return error
 	if cipher == nil && defaultEncrypt {
-		return nil, ErrCipherPluginMissing
+		return nil, errCipherPluginMissing
 	}
 
 	// No plugin or not encrypted
@@ -222,7 +223,7 @@ func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) (
 	}
 
 	if defaultRootKey == "" {
-		return nil, fmt.Errorf("encryption enabled but no key provided and no default key configured")
+		return nil, merr.WrapErrParameterInvalidMsg("encryption enabled but no key provided and no default key configured")
 	}
 
 	result := removeCipherProperties(dbProperties)
@@ -377,7 +378,7 @@ func GetCPluginContextByEzID(ezID int64) (*indexcgopb.StoragePluginContext, erro
 	}
 	key := GetCipher().GetUnsafeKey(ezID, 0)
 	if len(key) == 0 {
-		return nil, errors.Newf("cannot get ez key for ezID=%d", ezID)
+		return nil, merr.WrapErrParameterInvalidMsg("cannot get ez key for ezID=%d", ezID)
 	}
 	return &indexcgopb.StoragePluginContext{
 		EncryptionZoneId: ezID,
@@ -388,12 +389,12 @@ func GetCPluginContextByEzID(ezID int64) (*indexcgopb.StoragePluginContext, erro
 
 func BackupEZKFromDBProperties(dbProperties []*commonpb.KeyValuePair) (string, error) {
 	if !IsDBEncrypted(dbProperties) {
-		return "", fmt.Errorf("not an encryption zone")
+		return "", merr.WrapErrParameterInvalidMsg("not an encryption zone")
 	}
 
 	ezID, hasEzID := ParseEzIDFromProperties(dbProperties)
 	if !hasEzID {
-		return "", fmt.Errorf("encryption enabled but no ezID found")
+		return "", merr.WrapErrServiceInternalMsg("encryption enabled but no ezID found")
 	}
 
 	return BackupEZ(ezID)
@@ -433,7 +434,7 @@ func initCipher() error {
 
 	initConfigs := buildCipherInitConfig()
 	if err = cipherVal.Init(initConfigs); err != nil {
-		return fmt.Errorf("fail to init configs for the cipher plugin, error: %s", err.Error())
+		return merr.Wrap(err, "fail to init configs for the cipher plugin")
 	}
 
 	registerCallback()

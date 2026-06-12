@@ -32,6 +32,7 @@ import (
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -50,7 +51,7 @@ type insertNode struct {
 func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.InsertData, msg *InsertMsg, collection *Collection) {
 	insertRecord, err := storage.TransferInsertMsgToInsertRecord(collection.Schema(), msg)
 	if err != nil {
-		err = fmt.Errorf("failed to get primary keys, err = %v", err)
+		err = merr.Wrap(err, "failed to get primary keys")
 		log.Error(err.Error(), zap.Int64("collectionID", iNode.collectionID), zap.String("channel", iNode.channel))
 		panic(err)
 	}
@@ -231,7 +232,7 @@ func (iNode *insertNode) appendBM25Stats(iData *delegator.InsertData, msg *Inser
 	for _, outputFieldID := range outputFieldIDs {
 		outputData := getFieldData(msg.FieldsData, outputFieldID)
 		if outputData == nil {
-			return fmt.Errorf("BM25 output field %d not found in insert message", outputFieldID)
+			return merr.WrapErrFunctionFailedMsg("BM25 output field %d not found in insert message", outputFieldID)
 		}
 		if err := appendBM25StatsFromFieldData(iData.BM25Stats, outputFieldID, outputData); err != nil {
 			return err
@@ -249,7 +250,7 @@ func getBM25OutputFieldIDs(schema *schemapb.CollectionSchema) ([]int64, error) {
 
 		outputField := typeutil.GetFunctionOutputField(schema, fn)
 		if outputField == nil {
-			return nil, fmt.Errorf("function %s output field not found", fn.GetName())
+			return nil, merr.WrapErrFunctionFailedMsg("function %s output field not found", fn.GetName())
 		}
 
 		outputFieldIDs = append(outputFieldIDs, outputField.GetFieldID())
@@ -260,7 +261,7 @@ func getBM25OutputFieldIDs(schema *schemapb.CollectionSchema) ([]int64, error) {
 func appendBM25StatsFromFieldData(stats map[int64]*storage.BM25Stats, outputFieldID int64, fieldData *schemapb.FieldData) error {
 	sparseArray := fieldData.GetVectors().GetSparseFloatVector()
 	if sparseArray == nil {
-		return fmt.Errorf("BM25 output field %d is not sparse float vector data", outputFieldID)
+		return merr.WrapErrFunctionFailedMsg("BM25 output field %d is not sparse float vector data", outputFieldID)
 	}
 	if _, ok := stats[outputFieldID]; !ok {
 		stats[outputFieldID] = storage.NewBM25Stats()

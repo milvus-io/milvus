@@ -23,7 +23,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -629,7 +628,7 @@ func (t *clusteringCompactionTask) processAnalyzing() error {
 		}
 	case indexpb.JobState_JobStateFailed:
 		log.Warn("analyze task fail", zap.Int64("analyzeID", t.GetTaskProto().GetAnalyzeTaskID()))
-		return errors.New(analyzeTask.FailReason)
+		return merr.WrapErrServiceInternalMsg(analyzeTask.FailReason)
 	default:
 	}
 	return nil
