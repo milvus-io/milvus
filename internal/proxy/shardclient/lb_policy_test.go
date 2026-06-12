@@ -681,12 +681,12 @@ func (s *LBPolicySuite) TestExecuteWithRetryNonRetriableErrorReturnsLastError() 
 		Nq:             1,
 		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
 			executed++
-			return errors.Wrapf(merr.ErrServiceInternal, "fail on QueryNode %d", nodeID)
+			return errors.Wrapf(merr.ErrParameterInvalid, "fail on QueryNode %d", nodeID)
 		},
 	})
 
-	s.ErrorIs(err, merr.ErrServiceInternal)
-	s.Equal(2, executed)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.Equal(1, executed)
 }
 
 // TestExecuteWithRetryInputErrorNotRetried verifies that an input error
