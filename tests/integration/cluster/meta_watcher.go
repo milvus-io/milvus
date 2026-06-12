@@ -25,11 +25,10 @@ import (
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
@@ -173,7 +172,7 @@ func listReplicas(cli *clientv3.Client, prefix string) ([]*querypb.Replica, erro
 	for _, kv := range resp.Kvs {
 		replica := &querypb.Replica{}
 		if err := proto.Unmarshal(kv.Value, replica); err != nil {
-			log.Warn("failed to unmarshal replica info", zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to unmarshal replica info", mlog.Err(err))
 			continue
 		}
 		replicas = append(replicas, replica)

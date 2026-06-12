@@ -11,7 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -85,7 +85,7 @@ func TestSecondaryReplicateManager(t *testing.T) {
 				},
 				ReplicateConfig: newReplicateConfiguration("test2", "test1"),
 			},
-			TxnBuffer: utility.NewTxnBuffer(log.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
+			TxnBuffer: utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
 		},
 	})
 	assert.NoError(t, err)
@@ -98,7 +98,7 @@ func TestSecondaryReplicateManager(t *testing.T) {
 
 func TestSalvageCheckpointCaptureOnForcePromote(t *testing.T) {
 	// Setup: cluster starts as secondary with a checkpoint
-	txnBuffer := utility.NewTxnBuffer(log.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
+	txnBuffer := utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
 		ChannelInfo:      types.PChannelInfo{Name: "test1-rootcoord-dml_0", Term: 1},
 		CurrentClusterID: "test1",
@@ -139,7 +139,7 @@ func TestSalvageCheckpointCaptureOnForcePromote(t *testing.T) {
 
 func TestSalvageCheckpointNotCapturedOnNormalPromote(t *testing.T) {
 	// Setup: cluster starts as secondary
-	txnBuffer := utility.NewTxnBuffer(log.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
+	txnBuffer := utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
 		ChannelInfo:      types.PChannelInfo{Name: "test1-rootcoord-dml_0", Term: 1},
 		CurrentClusterID: "test1",
@@ -235,7 +235,7 @@ func TestSalvageCheckpointMultipleForcePromotes(t *testing.T) {
 	// Start as secondary of cluster-a, force promote to primary,
 	// then become secondary of cluster-b, force promote again.
 	// Both salvage checkpoints should accumulate (keyed by source cluster).
-	txnBuffer := utility.NewTxnBuffer(log.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
+	txnBuffer := utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
 		ChannelInfo:      types.PChannelInfo{Name: "test1-rootcoord-dml_0", Term: 1},
 		CurrentClusterID: "test1",
@@ -291,7 +291,7 @@ func TestSalvageCheckpointMultipleForcePromotes(t *testing.T) {
 }
 
 func TestSecondaryReplicateManagerWithTxn(t *testing.T) {
-	txnBuffer := utility.NewTxnBuffer(log.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
+	txnBuffer := utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 	txnMsgs := newReplicateTxnMessage("test1", "test2", 2)
 
 	for _, msg := range txnMsgs[0:3] {

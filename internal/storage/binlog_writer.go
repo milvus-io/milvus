@@ -18,15 +18,15 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 // BinlogType is to distinguish different files saving different data.
@@ -169,10 +169,10 @@ func (writer *baseBinlogWriter) Finish() error {
 		if err != nil {
 			return err
 		}
-		log.Debug("Binlog writer encrypted plain text",
-			zap.String("writer type", writer.binlogType.String()),
-			zap.Int("plain size", eventBuffer.Len()),
-			zap.Int("cipher size", len(encrypted)))
+		mlog.Debug(context.TODO(), "Binlog writer encrypted plain text",
+			mlog.String("writer type", writer.binlogType.String()),
+			mlog.Int("plain size", eventBuffer.Len()),
+			mlog.Int("cipher size", len(encrypted)))
 		if err := binary.Write(writer.buffer, common.Endian, encrypted); err != nil {
 			return err
 		}

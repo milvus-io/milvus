@@ -5,13 +5,12 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -20,7 +19,9 @@ import (
 // asyncAllocSegment allocates a new growing segment asynchronously.
 func (m *partitionManager) asyncAllocSegment(schemaVersion int32, useGrowingSourceFlush bool) {
 	if m.onAllocating != nil {
-		m.Logger().Debug("segment alloc worker is already on allocating")
+		m.Logger().Debug(context.TODO(),
+
+			"segment alloc worker is already on allocating")
 		// manager is already on allocating.
 		return
 	}
@@ -43,7 +44,7 @@ func (m *partitionManager) asyncAllocSegment(schemaVersion int32, useGrowingSour
 
 // segmentAllocWorker is a worker that allocates new growing segments asynchronously.
 type segmentAllocWorker struct {
-	log.Binder
+	mlog.Binder
 	ctx          context.Context
 	collectionID int64
 	partitionID  int64
@@ -72,18 +73,26 @@ func (w *segmentAllocWorker) do() {
 			return
 		}
 		if e := status.AsStreamingError(err); e.IsUnrecoverable() {
-			w.Logger().Warn("allocate new growing segement with unrecoverable error, stop retrying", zap.Error(err))
+			w.Logger().Warn(w.ctx,
+
+				"allocate new growing segement with unrecoverable error, stop retrying", mlog.Err(err))
 			return
 		}
 		nextInterval := backoff.NextBackOff()
-		w.Logger().Info("failed to allocate new growing segment, retrying", zap.Duration("nextInterval", nextInterval), zap.Error(err))
+		w.Logger().Info(w.ctx,
+
+			"failed to allocate new growing segment, retrying", mlog.Duration("nextInterval", nextInterval), mlog.Err(err))
 		select {
 		case <-w.ctx.Done():
-			w.Logger().Info("segment allocation canceled", zap.Error(w.ctx.Err()))
+			w.Logger().Info(w.ctx,
+
+				"segment allocation canceled", mlog.Err(w.ctx.Err()))
 			return
 		case <-w.wal.Available():
 			// wal is unavailable, stop the worker.
-			w.Logger().Warn("wal is unavailable, stop alloc new segment")
+			w.Logger().Warn(w.ctx,
+
+				"wal is unavailable, stop alloc new segment")
 			return
 		case <-time.After(backoff.NextBackOff()):
 		}
@@ -122,10 +131,14 @@ func (w *segmentAllocWorker) doOnce() error {
 
 	result, err := w.wal.Append(w.ctx, msg)
 	if err != nil {
-		w.Logger().Warn("failed to append create segment message", log.FieldMessage(msg), zap.Error(err))
+		w.Logger().Warn(w.ctx,
+
+			"failed to append create segment message", mlog.FieldMessage(msg), mlog.Err(err))
 		return err
 	}
-	w.Logger().Info("append create segment message", log.FieldMessage(msg), zap.String("messageID", result.MessageID.String()), zap.Uint64("timetick", result.TimeTick))
+	w.Logger().Info(w.ctx,
+
+		"append create segment message", mlog.FieldMessage(msg), mlog.String("messageID", result.MessageID.String()), mlog.Uint64("timetick", result.TimeTick))
 	return nil
 }
 
@@ -140,7 +153,9 @@ func (w *segmentAllocWorker) initSegmentConfig() error {
 	// Allocate new segment id.
 	segmentID, err := resource.Resource().IDAllocator().Allocate(w.ctx)
 	if err != nil {
-		w.Logger().Warn("failed to allocate segment id", zap.Error(err))
+		w.Logger().Warn(w.ctx,
+
+			"failed to allocate segment id", mlog.Err(err))
 		return err
 	}
 	w.segmentID = segmentID

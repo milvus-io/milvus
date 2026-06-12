@@ -7,12 +7,11 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -205,7 +204,7 @@ func isChannelAvailableInReplication(channelName string, config *replicateutil.C
 // ChannelManager is the `wal` of channel assignment and unassignment.
 // Every operation applied to the streaming node should be recorded in ChannelManager first.
 type ChannelManager struct {
-	log.Binder
+	mlog.Binder
 
 	cond             *syncutil.ContextCond
 	channels         map[ChannelID]*PChannelMeta
@@ -306,13 +305,17 @@ func (cm *ChannelManager) AddPChannels(ctx context.Context, newChannels []string
 			c := newPChannelMetaFromProto(m, cm.replicateConfig)
 			delete(cm.channels, c.ChannelID())
 		}
-		cm.Logger().Error("failed to save new pchannels", zap.Error(err))
+		cm.Logger().Error(ctx,
+
+			"failed to save new pchannels", mlog.Err(err))
 		return err
 	}
 
-	cm.Logger().Info("dynamically added new pchannels",
-		zap.Int("count", len(newMetas)),
-		zap.Strings("channels", newChannels))
+	cm.Logger().Info(ctx,
+
+		"dynamically added new pchannels",
+		mlog.Int("count", len(newMetas)),
+		mlog.Strings("channels", newChannels))
 	return nil
 }
 
@@ -341,7 +344,9 @@ func (cm *ChannelManager) MarkStreamingHasEnabled(ctx context.Context) error {
 	}
 
 	if err := resource.Resource().StreamingCatalog().SaveVersion(ctx, cm.streamingVersion); err != nil {
-		cm.Logger().Error("failed to save streaming version", zap.Error(err))
+		cm.Logger().Error(ctx,
+
+			"failed to save streaming version", mlog.Err(err))
 		return err
 	}
 
@@ -370,7 +375,9 @@ func (cm *ChannelManager) MarkStreamingVersion(ctx context.Context, version int6
 	}
 	cm.streamingVersion.Version = version
 	if err := resource.Resource().StreamingCatalog().SaveVersion(ctx, cm.streamingVersion); err != nil {
-		cm.Logger().Error("failed to save streaming version", zap.Error(err))
+		cm.Logger().Error(ctx,
+
+			"failed to save streaming version", mlog.Err(err))
 		return err
 	}
 	return nil
@@ -536,7 +543,9 @@ func (cm *ChannelManager) updatePChannelMeta(ctx context.Context, pChannelMetas 
 	}
 
 	if err := resource.Resource().StreamingCatalog().SavePChannels(ctx, pChannelMetas); err != nil {
-		cm.Logger().Error("failed to save pchannels", zap.Error(err))
+		cm.Logger().Error(ctx,
+
+			"failed to save pchannels", mlog.Err(err))
 		return err
 	}
 
@@ -623,7 +632,9 @@ func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, resu
 			ReplicateConfiguration: config.GetReplicateConfiguration(),
 			ForcePromoted:          true,
 		}
-		cm.Logger().Info("Applying force promote to replicate configuration",
+		cm.Logger().Info(ctx,
+
+			"Applying force promote to replicate configuration",
 			replicateutil.ConfigLogField(config.GetReplicateConfiguration()),
 		)
 	} else {
@@ -635,11 +646,15 @@ func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, resu
 	}
 
 	if err := resource.Resource().StreamingCatalog().SaveReplicateConfiguration(ctx, configMeta, newIncomingCDCTasks); err != nil {
-		cm.Logger().Error("failed to save replicate configuration", zap.Error(err))
+		cm.Logger().Error(ctx,
+
+			"failed to save replicate configuration", mlog.Err(err))
 		return err
 	}
 
-	cm.Logger().Info("Saved replicate configuration", replicateutil.ConfigLogField(config.GetReplicateConfiguration()))
+	cm.Logger().Info(ctx,
+
+		"Saved replicate configuration", replicateutil.ConfigLogField(config.GetReplicateConfiguration()))
 
 	cm.replicateConfig = config
 	// Recompute availableInReplication for all channels after config update

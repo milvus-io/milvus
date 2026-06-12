@@ -17,13 +17,12 @@
 package resource
 
 import (
+	"context"
 	"runtime"
 	"sync"
 	"unsafe"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 // PinnedResourceManager is a registry that attaches cleanup functions to objects by pointer.
@@ -69,14 +68,14 @@ var MsgPins = NewPinnedResourceManager("msg-pins")
 func (r *PinnedResourceManager) Pin(obj any, cleanup func()) {
 	key := ptrOf(obj)
 	if key == 0 {
-		log.Warn("PinnedResourceManager.Pin: nil obj, ignored", zap.String("registry", r.name))
+		mlog.Warn(context.TODO(), "PinnedResourceManager.Pin: nil obj, ignored", mlog.String("registry", r.name))
 		return
 	}
 	r.mu.Lock()
 	if _, existed := r.entries[key]; existed {
 		r.mu.Unlock()
-		log.Warn("PinnedResourceManager: double-Pin detected — new cleanup ignored",
-			zap.String("registry", r.name))
+		mlog.Warn(context.TODO(), "PinnedResourceManager: double-Pin detected — new cleanup ignored",
+			mlog.String("registry", r.name))
 		return
 	}
 	r.entries[key] = cleanup
@@ -85,8 +84,8 @@ func (r *PinnedResourceManager) Pin(obj any, cleanup func()) {
 	// Safety net: the closure captures only r (the manager), not obj.
 	// The parameter o is provided by the runtime when the finalizer fires.
 	runtime.SetFinalizer(obj, func(o any) {
-		log.Warn("PinnedResourceManager: obj GC'd without Release — triggering cleanup",
-			zap.String("registry", r.name))
+		mlog.Warn(context.TODO(), "PinnedResourceManager: obj GC'd without Release — triggering cleanup",
+			mlog.String("registry", r.name))
 		r.Release(o)
 	})
 }

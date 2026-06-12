@@ -1,12 +1,11 @@
 package broadcaster
 
 import (
+	"context"
 	"sort"
 	"time"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
@@ -19,7 +18,7 @@ type tombstoneItem struct {
 
 // tombstoneScheduler is a scheduler for the tombstone.
 type tombstoneScheduler struct {
-	log.Binder
+	mlog.Binder
 
 	notifier   *syncutil.AsyncTaskNotifier[struct{}]
 	pending    chan uint64
@@ -28,7 +27,7 @@ type tombstoneScheduler struct {
 }
 
 // newTombstoneScheduler creates a new tombstone scheduler.
-func newTombstoneScheduler(logger *log.MLogger) *tombstoneScheduler {
+func newTombstoneScheduler(logger *mlog.Logger) *tombstoneScheduler {
 	ts := &tombstoneScheduler{
 		notifier: syncutil.NewAsyncTaskNotifier[struct{}](),
 		pending:  make(chan uint64),
@@ -72,9 +71,13 @@ func (s *tombstoneScheduler) Close() {
 func (s *tombstoneScheduler) background() {
 	defer func() {
 		s.notifier.Finish(struct{}{})
-		s.Logger().Info("tombstone scheduler background exit")
+		s.Logger().Info(context.TODO(),
+
+			"tombstone scheduler background exit")
 	}()
-	s.Logger().Info("tombstone scheduler background start")
+	s.Logger().Info(context.TODO(),
+
+		"tombstone scheduler background start")
 
 	tombstoneGCInterval := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneCheckInternal.GetAsDurationByParse()
 	ticker := time.NewTicker(tombstoneGCInterval)
@@ -105,10 +108,12 @@ func (s *tombstoneScheduler) triggerGCTombstone() {
 	if len(s.tombstones) > maxTombstoneCount {
 		expiredOffset = len(s.tombstones) - maxTombstoneCount
 	}
-	s.Logger().Info("triggerGCTombstone",
-		zap.Int("tombstone count", len(s.tombstones)),
-		zap.Int("expired offset", expiredOffset),
-		zap.Time("expired time", expiredTime))
+	s.Logger().Info(context.TODO(),
+
+		"triggerGCTombstone",
+		mlog.Int("tombstone count", len(s.tombstones)),
+		mlog.Int("expired offset", expiredOffset),
+		mlog.Time("expired time", expiredTime))
 	for idx, tombstone := range s.tombstones {
 		// drop tombstone until the expired time or until the expired offset.
 		if idx >= expiredOffset && tombstone.createTime.After(expiredTime) {
@@ -116,7 +121,9 @@ func (s *tombstoneScheduler) triggerGCTombstone() {
 			return
 		}
 		if err := s.bm.DropTombstone(s.notifier.Context(), tombstone.broadcastID); err != nil {
-			s.Logger().Error("failed to drop tombstone", zap.Error(err))
+			s.Logger().Error(context.TODO(),
+
+				"failed to drop tombstone", mlog.Err(err))
 			s.tombstones = s.tombstones[idx:]
 			return
 		}

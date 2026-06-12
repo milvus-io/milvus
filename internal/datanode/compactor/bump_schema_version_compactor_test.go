@@ -29,7 +29,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -43,7 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -341,10 +340,10 @@ func (s *BumpSchemaVersionCompactionTaskSuite) finishBumpSchemaVersionSegment() 
 		},
 	}
 
-	log.Info("created segment with MultiSegmentWriter",
-		zap.Int64("segmentID", actualSegID),
-		zap.Int("numRows", int(segment.GetNumOfRows())),
-		zap.Int("insertLogsCount", len(segment.GetInsertLogs())))
+	mlog.Info(context.TODO(), "created segment with MultiSegmentWriter",
+		mlog.FieldSegmentID(actualSegID),
+		mlog.Int("numRows", int(segment.GetNumOfRows())),
+		mlog.Int("insertLogsCount", len(segment.GetInsertLogs())))
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) initSegBufferForSchemaBump(segID int64) {

@@ -22,12 +22,12 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -84,7 +84,7 @@ func (m *TimeTickSender) Start() {
 		defer m.wg.Done()
 		m.work(ctx)
 	}()
-	log.Info("timeTick sender started")
+	mlog.Info(context.TODO(), "timeTick sender started")
 }
 
 func (m *TimeTickSender) Stop() {
@@ -100,7 +100,7 @@ func (m *TimeTickSender) work(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("TimeTickSender context done")
+			mlog.Info(ctx, "TimeTickSender context done")
 			return
 		case <-ticker.C:
 			m.sendReport(ctx)
@@ -132,7 +132,7 @@ func (m *TimeTickSender) GetLatestTimestamp(channel string) typeutil.Timestamp {
 	defer m.mu.RUnlock()
 	chStats, ok := m.statsCache[channel]
 	if !ok {
-		log.Warn("channel not found in TimeTickSender", zap.String("channel", channel))
+		mlog.Warn(context.TODO(), "channel not found in TimeTickSender", mlog.String("channel", channel))
 		return 0
 	}
 	return chStats.lastTs
@@ -182,17 +182,17 @@ func (m *TimeTickSender) cleanStatesCache(lastSentTss map[string]uint64) {
 			}
 		}
 	}
-	log.RatedDebug(30, "TimeTickSender stats", zap.Any("lastSentTss", lastSentTss), zap.Int("sizeBeforeClean", sizeBeforeClean), zap.Int("sizeAfterClean", len(m.statsCache)))
+	mlog.RatedDebug(context.TODO(), rate.Limit(30), "TimeTickSender stats", mlog.Any("lastSentTss", lastSentTss), mlog.Int("sizeBeforeClean", sizeBeforeClean), mlog.Int("sizeAfterClean", len(m.statsCache)))
 }
 
 func (m *TimeTickSender) sendReport(ctx context.Context) error {
 	toSendMsgs, sendLastTss := m.assembleDatanodeTtMsg()
-	log.RatedDebug(30, "TimeTickSender send datanode timetick message", zap.Any("toSendMsgs", toSendMsgs), zap.Any("sendLastTss", sendLastTss))
+	mlog.RatedDebug(ctx, rate.Limit(30), "TimeTickSender send datanode timetick message", mlog.Any("toSendMsgs", toSendMsgs), mlog.Any("sendLastTss", sendLastTss))
 	err := retry.Do(ctx, func() error {
 		return m.broker.ReportTimeTick(ctx, toSendMsgs)
 	}, m.options...)
 	if err != nil {
-		log.Error("ReportDataNodeTtMsgs fail after retry", zap.Error(err))
+		mlog.Error(ctx, "ReportDataNodeTtMsgs fail after retry", mlog.Err(err))
 		return err
 	}
 	m.cleanStatesCache(sendLastTss)

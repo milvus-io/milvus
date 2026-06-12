@@ -8,12 +8,11 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -411,17 +410,17 @@ func TestUpsertAutoID(t *testing.T) {
 	vecColumn := hp.GenColumnData(nb, entity.FieldTypeFloatVector, *hp.TNewDataOption())
 	upsertRes, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(insertRes.IDs, vecColumn))
 	common.CheckErr(t, err, true)
-	log.Debug("upsertRes", zap.Any("len", upsertRes.IDs.(*column.ColumnInt64).Data()))
+	mlog.Debug(context.TODO(), "upsertRes", mlog.Any("len", upsertRes.IDs.(*column.ColumnInt64).Data()))
 
 	// insertRes pks were deleted
 	expr := fmt.Sprintf("%s <= %d", common.DefaultInt64FieldName, insertRes.IDs.(*column.ColumnInt64).Data()[nb-1])
-	log.Debug("expr", zap.String("expr", expr))
+	mlog.Debug(context.TODO(), "expr", mlog.String("expr", expr))
 	resSet, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithOutputFields(common.DefaultFloatVecFieldName).WithFilter(expr))
 	common.CheckErr(t, err, true)
 	require.EqualValues(t, 0, resSet.ResultCount)
 
 	exprUpsert := fmt.Sprintf("%s <= %d", common.DefaultInt64FieldName, upsertRes.IDs.(*column.ColumnInt64).Data()[nb-1])
-	log.Debug("expr", zap.String("expr", expr))
+	mlog.Debug(context.TODO(), "expr", mlog.String("expr", expr))
 	resSet1, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithOutputFields(common.DefaultFloatVecFieldName).WithFilter(exprUpsert))
 	common.CheckErr(t, err, true)
 	common.EqualColumn(t, vecColumn, resSet1.GetColumn(common.DefaultFloatVecFieldName))
@@ -484,17 +483,17 @@ func TestUpsertAutoIDRows(t *testing.T) {
 	}
 	upsertRes, err := mc.Upsert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rows...))
 	common.CheckErr(t, err, true)
-	log.Debug("upsertRes", zap.Any("len", upsertRes.IDs.(*column.ColumnInt64).Data()))
+	mlog.Debug(context.TODO(), "upsertRes", mlog.Any("len", upsertRes.IDs.(*column.ColumnInt64).Data()))
 
 	// insertRes pks were deleted
 	expr := fmt.Sprintf("%s <= %d", common.DefaultInt64FieldName, insertRes.IDs.(*column.ColumnInt64).Data()[nb-1])
-	log.Debug("expr", zap.String("expr", expr))
+	mlog.Debug(context.TODO(), "expr", mlog.String("expr", expr))
 	resSet, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithOutputFields(common.DefaultFloatVecFieldName).WithFilter(expr))
 	common.CheckErr(t, err, true)
 	require.EqualValues(t, 0, resSet.ResultCount)
 
 	exprUpsert := fmt.Sprintf("%s <= %d", common.DefaultInt64FieldName, upsertRes.IDs.(*column.ColumnInt64).Data()[nb-1])
-	log.Debug("expr", zap.String("expr", expr))
+	mlog.Debug(context.TODO(), "expr", mlog.String("expr", expr))
 	resSet1, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithOutputFields(common.DefaultFloatVecFieldName).WithFilter(exprUpsert))
 	common.CheckErr(t, err, true)
 	common.EqualColumn(t, vecColumn, resSet1.GetColumn(common.DefaultFloatVecFieldName))

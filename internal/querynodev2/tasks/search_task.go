@@ -11,7 +11,6 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -19,8 +18,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -217,7 +216,7 @@ func (t *SearchTask) Execute() error {
 				},
 			}
 		}
-		log.Ctx(t.ctx).Debug("filter-only search completed", zap.Int("segments", len(segmentIDs)))
+		mlog.Debug(t.ctx, "filter-only search completed", mlog.Int("segments", len(segmentIDs)))
 		return nil
 	}
 
@@ -273,7 +272,7 @@ func (t *SearchTask) Execute() error {
 		t.originTopks,
 	)
 	if err != nil {
-		log.Ctx(t.ctx).Warn("failed to prepare search results for export", zap.Error(err))
+		mlog.Warn(t.ctx, "failed to prepare search results for export", mlog.Err(err))
 		return err
 	}
 

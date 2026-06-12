@@ -3,10 +3,9 @@ package flusherimpl
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
@@ -52,9 +51,9 @@ func (ds *dataSyncServiceWrapper) HandleMessage(ctx context.Context, msg message
 
 		// filter out the message less than vchannel level checkpoint.
 		if nextTsMsg.EndTs < ds.channelCheckpointTimeTick {
-			ds.handler.Logger.Debug("skip the message less than vchannel checkpoint",
-				zap.Uint64("timestamp", nextTsMsg.EndTs),
-				zap.Uint64("checkpoint", ds.channelCheckpointTimeTick),
+			ds.handler.Logger.Debug(ctx, "skip the message less than vchannel checkpoint",
+				mlog.Uint64("timestamp", nextTsMsg.EndTs),
+				mlog.Uint64("checkpoint", ds.channelCheckpointTimeTick),
 			)
 			ds.handler.PendingMsgPack.UnsafeAdvance()
 			continue

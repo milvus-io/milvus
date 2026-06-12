@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
@@ -28,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -71,11 +70,11 @@ func NewReleaseCollectionJob(ctx context.Context,
 
 func (job *ReleaseCollectionJob) Execute() error {
 	collectionID := job.result.Message.Header().GetCollectionId()
-	log := log.Ctx(job.ctx).With(zap.Int64("collectionID", collectionID))
+	log := mlog.With(mlog.FieldCollectionID(collectionID))
 	replicas := job.meta.GetByCollection(job.ctx, collectionID)
 
 	if !job.meta.Exist(job.ctx, collectionID) && len(replicas) == 0 {
-		log.Info("release collection end, the collection has not been loaded into QueryNode")
+		log.Info(context.TODO(), "release collection end, the collection has not been loaded into QueryNode")
 		return nil
 	}
 
@@ -83,7 +82,8 @@ func (job *ReleaseCollectionJob) Execute() error {
 		err := job.meta.CollectionManager.RemoveCollection(job.ctx, collectionID)
 		if err != nil {
 			msg := "failed to remove collection"
-			log.Warn(msg, zap.Error(err))
+			log.Warn(context.TODO(),
+				msg, mlog.Err(err))
 			return errors.Wrap(err, msg)
 		}
 
@@ -96,27 +96,28 @@ func (job *ReleaseCollectionJob) Execute() error {
 				CollectionID: collectionID,
 			},
 			proxyutil.SetMsgType(commonpb.MsgType_ReleaseCollection)); err != nil {
-			log.Warn("failed to invalidate collection meta cache", zap.Error(err))
+			log.Warn(context.TODO(), "failed to invalidate collection meta cache", mlog.Err(err))
 		}
 
 		// try best clean shard leader cache
 		if err := job.proxyManager.InvalidateShardLeaderCache(job.ctx, &proxypb.InvalidateShardLeaderCacheRequest{
 			CollectionIDs: []int64{collectionID},
 		}); err != nil {
-			log.Warn("failed to invalidate shard leader cache", zap.Error(err))
+			log.Warn(context.TODO(), "failed to invalidate shard leader cache", mlog.Err(err))
 		}
 	}
 
 	if err := WaitCollectionReleased(job.ctx, job.dist, job.checkerController, collectionID); err != nil {
-		log.Warn("failed to wait collection released", zap.Error(err))
+		log.Warn(context.TODO(), "failed to wait collection released", mlog.Err(err))
 		return errors.Wrap(err, "failed to wait collection released")
 	}
 
 	if err := job.meta.ReplicaManager.RemoveCollection(job.ctx, collectionID); err != nil {
 		msg := "failed to remove replicas"
-		log.Warn(msg, zap.Error(err))
+		log.Warn(context.TODO(),
+			msg, mlog.Err(err))
 		return errors.Wrap(err, msg)
 	}
-	log.Info("release collection job done", zap.Int64("collectionID", collectionID))
+	log.Info(context.TODO(), "release collection job done", mlog.FieldCollectionID(collectionID))
 	return nil
 }

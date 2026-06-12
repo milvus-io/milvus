@@ -6,11 +6,10 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -26,7 +25,7 @@ func NewResumableConsumer(factory factory, opts *ConsumerOptions) ResumableConsu
 		cancel:         cancel,
 		stopResumingCh: make(chan struct{}),
 		resumingExitCh: make(chan struct{}),
-		logger:         log.With(zap.String("pchannel", opts.PChannel), zap.Any("initialDeliverPolicy", opts.DeliverPolicy)),
+		logger:         mlog.With(mlog.FieldPChannel(opts.PChannel), mlog.Any("initialDeliverPolicy", opts.DeliverPolicy)),
 		opts:           opts,
 		mh: &timeTickOrderMessageHandler{
 			inner:                  opts.MessageHandler,
@@ -46,7 +45,7 @@ func NewResumableConsumer(factory factory, opts *ConsumerOptions) ResumableConsu
 type resumableConsumerImpl struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
-	logger         *log.MLogger
+	logger         *mlog.Logger
 	stopResumingCh chan struct{}
 	resumingExitCh chan struct{}
 
@@ -65,7 +64,7 @@ func (rc *resumableConsumerImpl) resumeLoop() {
 		// close the message handler.
 		rc.mh.Close()
 		rc.metrics.IntoUnavailable()
-		rc.logger.Info("resumable consumer is closed")
+		rc.logger.Info(rc.ctx, "resumable consumer is closed")
 		close(rc.resumingExitCh)
 	}()
 
@@ -139,7 +138,7 @@ func (rc *resumableConsumerImpl) resumeLoop() {
 }
 
 func (rc *resumableConsumerImpl) createNewConsumer(opts *handler.ConsumerOptions) (consumer.Consumer, error) {
-	logger := rc.logger.With(zap.Any("deliverPolicy", opts.DeliverPolicy))
+	logger := rc.logger.With(mlog.Any("deliverPolicy", opts.DeliverPolicy))
 
 	backoff := backoff.NewExponentialBackOff()
 	backoff.InitialInterval = 100 * time.Millisecond
@@ -157,12 +156,12 @@ func (rc *resumableConsumerImpl) createNewConsumer(opts *handler.ConsumerOptions
 		}
 		if err != nil {
 			nextBackoff := backoff.NextBackOff()
-			logger.Warn("create consumer failed, retry...", zap.Error(err), zap.Duration("nextRetryInterval", nextBackoff))
+			logger.Warn(rc.ctx, "create consumer failed, retry...", mlog.Err(err), mlog.Duration("nextRetryInterval", nextBackoff))
 			time.Sleep(nextBackoff)
 			continue
 		}
 
-		logger.Info("resume on new consumer at new start message id")
+		logger.Info(rc.ctx, "resume on new consumer at new start message id")
 		return newConsumerWithMetrics(rc.opts.PChannel, consumer), nil
 	}
 }
@@ -172,7 +171,7 @@ func (rc *resumableConsumerImpl) waitUntilUnavailable(consumer handler.Consumer)
 	defer func() {
 		consumer.Close()
 		if consumer.Error() != nil {
-			rc.logger.Warn("consumer is closed with error", zap.Error(consumer.Error()))
+			rc.logger.Warn(rc.ctx, "consumer is closed with error", mlog.Err(consumer.Error()))
 		}
 	}()
 
@@ -182,10 +181,10 @@ func (rc *resumableConsumerImpl) waitUntilUnavailable(consumer handler.Consumer)
 	case <-rc.ctx.Done():
 		return rc.ctx.Err()
 	case <-consumer.Done():
-		rc.logger.Warn("consumer is done or encounter error, try to resume...",
-			zap.Error(consumer.Error()),
-			zap.Any("lastConfirmedMessageID", rc.mh.lastConfirmedMessageID),
-			zap.Uint64("lastTimeTick", rc.mh.lastTimeTick),
+		rc.logger.Warn(rc.ctx, "consumer is done or encounter error, try to resume...",
+			mlog.Err(consumer.Error()),
+			mlog.Any("lastConfirmedMessageID", rc.mh.lastConfirmedMessageID),
+			mlog.Uint64("lastTimeTick", rc.mh.lastTimeTick),
 		)
 		return nil
 	}
@@ -205,7 +204,7 @@ func (rc *resumableConsumerImpl) gracefulClose() error {
 // Close the scanner, release the underlying resources.
 func (rc *resumableConsumerImpl) Close() {
 	if err := rc.gracefulClose(); err != nil {
-		rc.logger.Warn("graceful close a consumer fail, force close is applied")
+		rc.logger.Warn(rc.ctx, "graceful close a consumer fail, force close is applied")
 	}
 
 	// cancel is always need to be called, even graceful close is success.

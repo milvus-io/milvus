@@ -5,13 +5,12 @@ import (
 	"math"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
@@ -19,7 +18,7 @@ import (
 // newPartitionSegmentManager creates a new partition segment assign manager.
 func newPartitionSegmentManager(
 	ctx context.Context,
-	logger *log.MLogger,
+	logger *mlog.Logger,
 	wal *syncutil.Future[wal.WAL],
 	pchannel types.PChannelInfo,
 	vchannel string,
@@ -48,13 +47,13 @@ func newPartitionSegmentManager(
 		fencedAssignTimeTick: fencedAssignTimeTick,
 		metrics:              metrics,
 	}
-	m.SetLogger(logger.With(zap.String("vchannel", vchannel), zap.Int64("collectionID", collectionID), zap.Int64("partitionID", paritionID)))
+	m.SetLogger(logger.With(mlog.FieldVChannel(vchannel), mlog.FieldCollectionID(collectionID), mlog.FieldPartitionID(paritionID)))
 	return m
 }
 
 // partitionManager is a assign manager of determined partition on determined vchannel.
 type partitionManager struct {
-	log.Binder
+	mlog.Binder
 
 	ctx                  context.Context
 	txnManager           TxnManager // the txn manager is used to manage the transaction of the segment.

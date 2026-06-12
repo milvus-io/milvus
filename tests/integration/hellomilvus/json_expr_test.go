@@ -23,14 +23,13 @@ import (
 	"strconv"
 	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -96,15 +95,15 @@ func (s *HelloMilvusSuite) TestJsonEnableDynamicSchema() {
 	})
 	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.String("reason", createCollectionStatus.GetReason()))
 	}
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	describeCollectionResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 	s.NoError(err)
@@ -179,15 +178,15 @@ func (s *HelloMilvusSuite) TestJSON_InsertWithoutDynamicData() {
 	})
 	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.String("reason", createCollectionStatus.GetReason()))
 	}
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	describeCollectionResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 	s.NoError(err)
@@ -206,7 +205,7 @@ func (s *HelloMilvusSuite) TestJSON_InsertWithoutDynamicData() {
 		}
 	}
 	s.doSearch(collectionName, []string{common.MetaFieldName}, expr, dim, checkFunc)
-	log.Info("GT expression run successfully")
+	mlog.Info(context.TODO(), "GT expression run successfully")
 }
 
 func (s *HelloMilvusSuite) TestJSON_DynamicSchemaWithJSON() {
@@ -275,15 +274,15 @@ func (s *HelloMilvusSuite) TestJSON_DynamicSchemaWithJSON() {
 	})
 	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.String("reason", createCollectionStatus.GetReason()))
 	}
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	describeCollectionResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 	s.NoError(err)
@@ -308,7 +307,7 @@ func (s *HelloMilvusSuite) TestJSON_DynamicSchemaWithJSON() {
 		s.Equal(5, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{integration.JSONField}, expr, dim, checkFunc)
-	log.Info("LT expression run successfully")
+	mlog.Info(context.TODO(), "LT expression run successfully")
 
 	expr = `jsonField["A"] <= 5`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -318,7 +317,7 @@ func (s *HelloMilvusSuite) TestJSON_DynamicSchemaWithJSON() {
 		s.Equal(3, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{integration.JSONField}, expr, dim, checkFunc)
-	log.Info("LE expression run successfully")
+	mlog.Info(context.TODO(), "LE expression run successfully")
 
 	expr = `jsonField["A"] == 5`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -328,7 +327,7 @@ func (s *HelloMilvusSuite) TestJSON_DynamicSchemaWithJSON() {
 		s.Equal(1, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{integration.JSONField}, expr, dim, checkFunc)
-	log.Info("EQ expression run successfully")
+	mlog.Info(context.TODO(), "EQ expression run successfully")
 
 	expr = `jsonField["C"][0] in [90, 91, 95, 97]`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -338,7 +337,7 @@ func (s *HelloMilvusSuite) TestJSON_DynamicSchemaWithJSON() {
 		s.Equal(4, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{integration.JSONField}, expr, dim, checkFunc)
-	log.Info("IN expression run successfully")
+	mlog.Info(context.TODO(), "IN expression run successfully")
 
 	expr = `jsonField["C"][0] not in [90, 91, 95, 97]`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -348,7 +347,7 @@ func (s *HelloMilvusSuite) TestJSON_DynamicSchemaWithJSON() {
 		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{integration.JSONField}, expr, dim, checkFunc)
-	log.Info("NIN expression run successfully")
+	mlog.Info(context.TODO(), "NIN expression run successfully")
 
 	expr = `jsonField["E"]["G"] > 100`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -358,7 +357,7 @@ func (s *HelloMilvusSuite) TestJSON_DynamicSchemaWithJSON() {
 		s.Equal(9, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{integration.JSONField}, expr, dim, checkFunc)
-	log.Info("nested path expression run successfully")
+	mlog.Info(context.TODO(), "nested path expression run successfully")
 }
 
 func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int) {
@@ -372,7 +371,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(5, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{"A"}, expr, dim, checkFunc)
-	log.Info("GT expression run successfully")
+	mlog.Info(context.TODO(), "GT expression run successfully")
 
 	expr = `$meta["A"] < 10`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -382,7 +381,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(5, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{"B"}, expr, dim, checkFunc)
-	log.Info("LT expression run successfully")
+	mlog.Info(context.TODO(), "LT expression run successfully")
 
 	expr = `$meta["A"] <= 5`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -392,7 +391,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(3, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{"C"}, expr, dim, checkFunc)
-	log.Info("LE expression run successfully")
+	mlog.Info(context.TODO(), "LE expression run successfully")
 
 	expr = `A >= 95`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -402,7 +401,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(3, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("GE expression run successfully")
+	mlog.Info(context.TODO(), "GE expression run successfully")
 
 	expr = `$meta["A"] == 5`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -412,7 +411,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(1, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("EQ expression run successfully")
+	mlog.Info(context.TODO(), "EQ expression run successfully")
 
 	expr = `A != 95`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -422,7 +421,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("NE expression run successfully")
+	mlog.Info(context.TODO(), "NE expression run successfully")
 
 	expr = `not (A != 95)`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -432,7 +431,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(1, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("NOT NE expression run successfully")
+	mlog.Info(context.TODO(), "NOT NE expression run successfully")
 
 	expr = `A > 90 && B < 5`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -442,7 +441,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(2, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("NE expression run successfully")
+	mlog.Info(context.TODO(), "NE expression run successfully")
 
 	expr = `A > 95 || 5 > B`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -452,7 +451,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(4, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("NE expression run successfully")
+	mlog.Info(context.TODO(), "NE expression run successfully")
 
 	expr = `not (A == 95)`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -462,7 +461,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("NOT expression run successfully")
+	mlog.Info(context.TODO(), "NOT expression run successfully")
 
 	expr = `A in [90, 91, 95, 97]`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -472,7 +471,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(3, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("IN expression run successfully")
+	mlog.Info(context.TODO(), "IN expression run successfully")
 
 	expr = `A not in [90, 91, 95, 97]`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -482,7 +481,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("NIN expression run successfully")
+	mlog.Info(context.TODO(), "NIN expression run successfully")
 
 	expr = `C[0] in [90, 91, 95, 97]`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -492,7 +491,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(4, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("IN expression run successfully")
+	mlog.Info(context.TODO(), "IN expression run successfully")
 
 	expr = `C[0] not in [90, 91, 95, 97]`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -502,7 +501,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("NIN expression run successfully")
+	mlog.Info(context.TODO(), "NIN expression run successfully")
 
 	expr = `0 <= A < 5`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -512,7 +511,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(2, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("BinaryRange expression run successfully")
+	mlog.Info(context.TODO(), "BinaryRange expression run successfully")
 
 	expr = `100 > A >= 90`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -522,7 +521,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(5, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("BinaryRange expression run successfully")
+	mlog.Info(context.TODO(), "BinaryRange expression run successfully")
 
 	expr = `1+5 <= A < 5+10`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -532,7 +531,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(4, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("BinaryRange expression run successfully")
+	mlog.Info(context.TODO(), "BinaryRange expression run successfully")
 
 	expr = `A + 5 == 10`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -542,7 +541,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(1, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("Arithmetic expression run successfully")
+	mlog.Info(context.TODO(), "Arithmetic expression run successfully")
 
 	expr = `exists A`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -552,7 +551,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("EXISTS expression run successfully")
+	mlog.Info(context.TODO(), "EXISTS expression run successfully")
 
 	expr = `exists AAA`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -561,7 +560,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		}
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("EXISTS expression run successfully")
+	mlog.Info(context.TODO(), "EXISTS expression run successfully")
 
 	expr = `not exists A`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -571,7 +570,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("NOT EXISTS expression run successfully")
+	mlog.Info(context.TODO(), "NOT EXISTS expression run successfully")
 
 	expr = `E["G"] > 100`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -581,7 +580,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(9, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("nested path expression run successfully")
+	mlog.Info(context.TODO(), "nested path expression run successfully")
 
 	expr = `D like "name-%"`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -591,7 +590,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("like expression run successfully")
+	mlog.Info(context.TODO(), "like expression run successfully")
 
 	expr = `D like "name-11"`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -601,7 +600,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(1, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("like expression run successfully")
+	mlog.Info(context.TODO(), "like expression run successfully")
 
 	expr = `A like "10"`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -610,7 +609,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		}
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("like expression run successfully")
+	mlog.Info(context.TODO(), "like expression run successfully")
 
 	expr = `str1 like 'abc\\"def-%'`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -620,7 +619,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("like expression run successfully")
+	mlog.Info(context.TODO(), "like expression run successfully")
 
 	expr = `str1 like 'abc"def-%'`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -629,7 +628,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		}
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("like expression run successfully")
+	mlog.Info(context.TODO(), "like expression run successfully")
 
 	expr = `str2 like 'abc\\"def-%'`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -638,7 +637,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		}
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("like expression run successfully")
+	mlog.Info(context.TODO(), "like expression run successfully")
 
 	expr = `str2 like 'abc"def-%'`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -648,7 +647,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("like expression run successfully")
+	mlog.Info(context.TODO(), "like expression run successfully")
 
 	expr = `D like "%name-%"`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -658,7 +657,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("like expression run successfully")
+	mlog.Info(context.TODO(), "like expression run successfully")
 
 	expr = `D like "na%me"`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -668,7 +667,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(0, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("like expression run successfully")
+	mlog.Info(context.TODO(), "like expression run successfully")
 
 	expr = `A in []`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -677,7 +676,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		}
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("term empty expression run successfully")
+	mlog.Info(context.TODO(), "term empty expression run successfully")
 
 	expr = `A not in []`
 	checkFunc = func(result *milvuspb.SearchResults) {
@@ -687,7 +686,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
-	log.Info("term empty expression run successfully")
+	mlog.Info(context.TODO(), "term empty expression run successfully")
 
 	// invalid expr
 	expr = `E[F] > 100`
@@ -745,7 +744,7 @@ func (s *HelloMilvusSuite) insertFlushIndexLoad(ctx context.Context, dbName, col
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
-		log.Info("ShowSegments result", zap.String("segment", segment.String()))
+		mlog.Info(ctx, "ShowSegments result", mlog.String("segment", segment.String()))
 	}
 
 	// create index
@@ -775,7 +774,7 @@ func (s *HelloMilvusSuite) insertFlushIndexLoad(ctx context.Context, dbName, col
 	s.NoError(err)
 
 	if err = merr.Error(createIndexStatus); err != nil {
-		log.Warn("createIndexStatus failed", zap.Error(err))
+		mlog.Warn(ctx, "createIndexStatus failed", mlog.Err(err))
 	}
 	s.NoError(err)
 
@@ -788,7 +787,7 @@ func (s *HelloMilvusSuite) insertFlushIndexLoad(ctx context.Context, dbName, col
 	s.Require().NoError(err)
 
 	if err = merr.Error(loadStatus); err != nil {
-		log.Warn("loadStatus failed", zap.Error(err))
+		mlog.Warn(ctx, "loadStatus failed", mlog.Err(err))
 	}
 	s.Require().NoError(err)
 
@@ -818,15 +817,15 @@ func (s *HelloMilvusSuite) doSearch(collectionName string, outputField []string,
 	searchResult, err := s.Cluster.MilvusClient.Search(context.Background(), searchReq)
 
 	if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
+		mlog.Warn(context.TODO(), "searchResult fail reason", mlog.String("reason", searchResult.GetStatus().GetReason()))
 	}
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
 
-	log.Info("TestHelloMilvus succeed", zap.Any("result", searchResult.Results),
-		zap.Any("result num", len(searchResult.Results.FieldsData)))
+	mlog.Info(context.TODO(), "TestHelloMilvus succeed", mlog.Any("result", searchResult.Results),
+		mlog.Any("result num", len(searchResult.Results.FieldsData)))
 	for _, data := range searchResult.Results.FieldsData {
-		log.Info("output field", zap.Any("outputfield", data.String()))
+		mlog.Info(context.TODO(), "output field", mlog.Any("outputfield", data.String()))
 	}
 	checkFunc(searchResult)
 }
@@ -895,7 +894,7 @@ func (s *HelloMilvusSuite) doSearchWithInvalidExpr(collectionName string, output
 	searchResult, err := s.Cluster.MilvusClient.Search(context.Background(), searchReq)
 
 	if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
+		mlog.Warn(context.TODO(), "searchResult fail reason", mlog.String("reason", searchResult.GetStatus().GetReason()))
 	}
 	s.NoError(err)
 	s.NotEqual(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
@@ -961,15 +960,15 @@ func (s *HelloMilvusSuite) TestJsonWithEscapeString() {
 	})
 	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.String("reason", createCollectionStatus.GetReason()))
 	}
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	describeCollectionResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 	s.NoError(err)
@@ -1080,15 +1079,15 @@ func (s *HelloMilvusSuite) TestJsonContains() {
 	})
 	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.String("reason", createCollectionStatus.GetReason()))
 	}
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	describeCollectionResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 	s.NoError(err)

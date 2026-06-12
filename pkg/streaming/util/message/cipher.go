@@ -1,15 +1,15 @@
 package message
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 // cipher is a global variable that is used to encrypt and decrypt messages.
@@ -73,21 +73,21 @@ func getDecryptorWithRetry(ezID, collectionID int64, safeKey []byte) (hook.Decry
 
 		// If it's NOT a KMS key invalid error, fail immediately (non-retriable)
 		if !isKmsKeyInvalidError(err) {
-			log.Error("failed to get decryptor with non-retriable error",
-				zap.Int64("ezID", ezID),
-				zap.Int64("collectionID", collectionID),
-				zap.Int("attempt", attempt),
-				zap.Error(err))
+			mlog.Error(context.TODO(), "failed to get decryptor with non-retriable error",
+				mlog.Int64("ezID", ezID),
+				mlog.FieldCollectionID(collectionID),
+				mlog.Int("attempt", attempt),
+				mlog.Err(err))
 			return nil, err
 		}
 
 		// KMS key invalid error - log and retry
-		log.Warn("KMS key invalid, will retry",
-			zap.Int64("ezID", ezID),
-			zap.Int64("collectionID", collectionID),
-			zap.Int("attempt", attempt),
-			zap.Duration("backoff", backoff),
-			zap.Error(err))
+		mlog.Warn(context.TODO(), "KMS key invalid, will retry",
+			mlog.Int64("ezID", ezID),
+			mlog.FieldCollectionID(collectionID),
+			mlog.Int("attempt", attempt),
+			mlog.Duration("backoff", backoff),
+			mlog.Err(err))
 
 		time.Sleep(backoff)
 

@@ -12,15 +12,15 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -58,11 +58,11 @@ func removePath(rmqPath string) {
 	rocksdbPath := rmqPath
 	err := os.RemoveAll(rocksdbPath)
 	if err != nil {
-		log.Error("Failed to call os.removeAll.", zap.String("path", rocksdbPath))
+		mlog.Error(context.TODO(), "Failed to call os.removeAll.", mlog.String("path", rocksdbPath))
 	}
 	metaPath := rmqPath + "_meta_kv"
 	err = os.RemoveAll(metaPath)
 	if err != nil {
-		log.Error("Failed to call os.removeAll.", zap.String("path", metaPath))
+		mlog.Error(context.TODO(), "Failed to call os.removeAll.", mlog.String("path", metaPath))
 	}
 }

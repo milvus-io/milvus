@@ -1,14 +1,15 @@
 package picker
 
 import (
+	"context"
+
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/balancer/base"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/attributes"
 	bbalancer "github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 const (
@@ -36,7 +37,7 @@ func (b *serverIDPickerBuilder) Build(info bbalancer.PickerBuildInfo) balancer.P
 	for sc, scInfo := range info.ReadySCs {
 		serverID := attributes.GetServerID(scInfo.Address.BalancerAttributes)
 		if serverID == nil {
-			log.Warn("no server id found in subConn", zap.String("address", scInfo.Address.Addr))
+			mlog.Warn(context.TODO(), "no server id found in subConn", mlog.String("address", scInfo.Address.Addr))
 			continue
 		}
 
@@ -52,7 +53,7 @@ func (b *serverIDPickerBuilder) Build(info bbalancer.PickerBuildInfo) balancer.P
 	for sc, scInfo := range info.UnReadySCs {
 		serverID := attributes.GetServerID(scInfo.Address.BalancerAttributes)
 		if serverID == nil {
-			log.Warn("no server id found in subConn", zap.String("address", scInfo.Address.Addr))
+			mlog.Warn(context.TODO(), "no server id found in subConn", mlog.String("address", scInfo.Address.Addr))
 			continue
 		}
 		info := subConnInfo{
@@ -64,7 +65,7 @@ func (b *serverIDPickerBuilder) Build(info bbalancer.PickerBuildInfo) balancer.P
 	}
 
 	if len(readyList) == 0 {
-		log.Warn("no subConn available after serverID filtering")
+		mlog.Warn(context.TODO(), "no subConn available after serverID filtering")
 		return base.NewErrPicker(balancer.ErrNoSubConnAvailable)
 	}
 	p := &serverIDPicker{

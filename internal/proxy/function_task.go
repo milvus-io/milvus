@@ -20,14 +20,13 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -103,10 +102,10 @@ func (t *addCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	}
 	coll, err := getCollectionInfo(ctx, t.GetDbName(), t.GetCollectionName())
 	if err != nil {
-		log.Ctx(t.ctx).Error("AddCollectionTask, get collection info failed",
-			zap.String("dbName", t.GetDbName()),
-			zap.String("collectionName", t.GetCollectionName()),
-			zap.Error(err))
+		mlog.Error(t.ctx, "AddCollectionTask, get collection info failed",
+			mlog.FieldDbName(t.GetDbName()),
+			mlog.FieldCollectionName(t.GetCollectionName()),
+			mlog.Err(err))
 		return err
 	}
 	newColl := proto.Clone(coll.schema.CollectionSchema).(*schemapb.CollectionSchema)
@@ -192,10 +191,10 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	}
 	coll, err := getCollectionInfo(ctx, t.GetDbName(), t.GetCollectionName())
 	if err != nil {
-		log.Ctx(t.ctx).Error("AddCollectionTask, get collection info failed",
-			zap.String("dbName", t.GetDbName()),
-			zap.String("collectionName", t.GetCollectionName()),
-			zap.Error(err))
+		mlog.Error(t.ctx, "AddCollectionTask, get collection info failed",
+			mlog.FieldDbName(t.GetDbName()),
+			mlog.FieldCollectionName(t.GetCollectionName()),
+			mlog.Err(err))
 		return err
 	}
 	if err := rejectExternalCollectionFunctionMutation(coll.schema.CollectionSchema); err != nil {
@@ -294,10 +293,10 @@ func (t *dropCollectionFunctionTask) Name() string {
 func (t *dropCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	coll, err := getCollectionInfo(ctx, t.GetDbName(), t.GetCollectionName())
 	if err != nil {
-		log.Ctx(t.ctx).Error("DropFunctionTask, get collection info failed",
-			zap.String("dbName", t.GetDbName()),
-			zap.String("collectionName", t.GetCollectionName()),
-			zap.Error(err))
+		mlog.Error(t.ctx, "DropFunctionTask, get collection info failed",
+			mlog.FieldDbName(t.GetDbName()),
+			mlog.FieldCollectionName(t.GetCollectionName()),
+			mlog.Err(err))
 		return err
 	}
 	if err := rejectExternalCollectionFunctionMutation(coll.schema.CollectionSchema); err != nil {

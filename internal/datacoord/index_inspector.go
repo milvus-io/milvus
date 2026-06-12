@@ -21,15 +21,13 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -85,9 +83,8 @@ func (i *indexInspector) Stop() {
 }
 
 func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
-	log := log.Ctx(ctx)
-	log.Info("start create index for segment loop...",
-		zap.Int64("TaskCheckInterval", Params.DataCoordCfg.TaskCheckInterval.GetAsInt64()))
+	mlog.Info(ctx, "start create index for segment loop...",
+		mlog.Int64("TaskCheckInterval", Params.DataCoordCfg.TaskCheckInterval.GetAsInt64()))
 	defer i.wg.Done()
 
 	ticker := time.NewTicker(Params.DataCoordCfg.TaskCheckInterval.GetAsDuration(time.Second))
@@ -95,37 +92,37 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Warn("DataCoord context done, exit...")
+			mlog.Warn(ctx, "DataCoord context done, exit...")
 			return
 		case <-ticker.C:
 			segments := i.getUnIndexTaskSegments(ctx)
 			for _, segment := range segments {
 				if err := i.createIndexesForSegment(ctx, segment); err != nil {
-					log.Warn("create index for segment fail, wait for retry", zap.Int64("segmentID", segment.ID))
+					mlog.Warn(ctx, "create index for segment fail, wait for retry", mlog.FieldSegmentID(segment.ID))
 					continue
 				}
 			}
 		case collectionID := <-i.notifyIndexChan:
-			log.Info("receive create index notify", zap.Int64("collectionID", collectionID))
+			mlog.Info(ctx, "receive create index notify", mlog.FieldCollectionID(collectionID))
 			isExternal := i.isExternalCollection(collectionID)
 			segments := i.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
 				return isFlush(info) && (!enableSortCompaction() || info.GetIsSorted() || info.GetIsSortedByNamespace() || isExternal)
 			}))
 			for _, segment := range segments {
 				if err := i.createIndexesForSegment(ctx, segment); err != nil {
-					log.Warn("create index for segment fail, wait for retry", zap.Int64("segmentID", segment.ID))
+					mlog.Warn(ctx, "create index for segment fail, wait for retry", mlog.FieldSegmentID(segment.ID))
 					continue
 				}
 			}
 		case segID := <-getBuildIndexChSingleton():
-			log.Info("receive new flushed segment", zap.Int64("segmentID", segID))
+			mlog.Info(ctx, "receive new flushed segment", mlog.FieldSegmentID(segID))
 			segment := i.meta.GetSegment(ctx, segID)
 			if segment == nil {
-				log.Warn("segment is not exist, no need to build index", zap.Int64("segmentID", segID))
+				mlog.Warn(ctx, "segment is not exist, no need to build index", mlog.FieldSegmentID(segID))
 				continue
 			}
 			if err := i.createIndexesForSegment(ctx, segment); err != nil {
-				log.Warn("create index for segment fail, wait for retry", zap.Int64("segmentID", segment.ID))
+				mlog.Warn(ctx, "create index for segment fail, wait for retry", mlog.FieldSegmentID(segment.ID))
 				continue
 			}
 		}
@@ -146,11 +143,11 @@ func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentI
 
 func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *SegmentInfo) error {
 	if enableSortCompaction() && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() && !i.isExternalCollection(segment.CollectionID) {
-		log.Ctx(ctx).Debug("segment is not sorted by pk, skip create indexes", zap.Int64("segmentID", segment.GetID()))
+		mlog.Debug(ctx, "segment is not sorted by pk, skip create indexes", mlog.FieldSegmentID(segment.GetID()))
 		return nil
 	}
 	if segment.GetLevel() == datapb.SegmentLevel_L0 {
-		log.Ctx(ctx).Debug("segment is level zero, skip create indexes", zap.Int64("segmentID", segment.GetID()))
+		mlog.Debug(ctx, "segment is level zero, skip create indexes", mlog.FieldSegmentID(segment.GetID()))
 		return nil
 	}
 
@@ -169,8 +166,8 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 			continue
 		}
 		if err := i.createIndexForSegment(ctx, segment, index.IndexID); err != nil {
-			log.Ctx(ctx).Warn("create index for segment fail", zap.Int64("segmentID", segment.ID),
-				zap.Int64("indexID", index.IndexID))
+			mlog.Warn(ctx, "create index for segment fail", mlog.FieldSegmentID(segment.ID),
+				mlog.FieldIndexID(index.IndexID))
 			return err
 		}
 	}
@@ -200,7 +197,7 @@ func (i *indexInspector) canCreateIndexForSegment(ctx context.Context, segment *
 	if !i.isFunctionOutputField(segment.CollectionID, index.FieldID) || hasField {
 		return true
 	}
-	log.Ctx(ctx).Debug("function output field has no binlog, skip create index", zap.Int64("segmentID", segment.ID), zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID))
+	mlog.Debug(ctx, "function output field has no binlog, skip create index", mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID))
 	return false
 }
 
@@ -220,7 +217,7 @@ func (i *indexInspector) isFunctionOutputField(collectionID, fieldID int64) bool
 }
 
 func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *SegmentInfo, indexID UniqueID) error {
-	log.Info("create index for segment", zap.Int64("segmentID", segment.ID), zap.Int64("indexID", indexID))
+	mlog.Info(ctx, "create index for segment", mlog.FieldSegmentID(segment.ID), mlog.FieldIndexID(indexID))
 	buildID, err := i.allocator.AllocID(context.Background())
 	if err != nil {
 		return err
@@ -243,7 +240,7 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 	}
 	newIndexType := GetIndexType(indexParams)
 	if newIndexType != "" && newIndexType != indexType {
-		log.Info("override index type", zap.String("indexType", indexType), zap.String("newIndexType", newIndexType))
+		mlog.Info(ctx, "override index type", mlog.String("indexType", indexType), mlog.String("newIndexType", newIndexType))
 		indexType = newIndexType
 	}
 
@@ -268,13 +265,13 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 		i.handler,
 		i.storageCli,
 		i.indexEngineVersionManager))
-	log.Info("indexInspector create index for segment success",
-		zap.Int64("segmentID", segment.ID),
-		zap.Int64("indexID", indexID),
-		zap.Int64("fieldID", fieldID),
-		zap.Int64("segment size", segment.getSegmentSize()),
-		zap.Int64("field size", fieldSize),
-		zap.Int64("task slot", taskSlot))
+	mlog.Info(ctx, "indexInspector create index for segment success",
+		mlog.FieldSegmentID(segment.ID),
+		mlog.FieldIndexID(indexID),
+		mlog.FieldFieldID(fieldID),
+		mlog.Int64("segment size", segment.getSegmentSize()),
+		mlog.Int64("field size", fieldSize),
+		mlog.Int64("task slot", taskSlot))
 	return nil
 }
 

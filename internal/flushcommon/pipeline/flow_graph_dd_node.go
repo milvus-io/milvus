@@ -23,15 +23,15 @@ import (
 	"sync/atomic"
 
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
@@ -86,7 +86,7 @@ func (ddn *ddNode) IsValidInMsg(in []Msg) bool {
 	}
 	_, ok := in[0].(*MsgStreamMsg)
 	if !ok {
-		log.Warn("type assertion failed for MsgStreamMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
+		mlog.Warn(ddn.ctx, "type assertion failed for MsgStreamMsg", mlog.String("name", reflect.TypeOf(in[0]).Name()))
 		return false
 	}
 	return true
@@ -94,10 +94,9 @@ func (ddn *ddNode) IsValidInMsg(in []Msg) bool {
 
 // Operate handles input messages, implementing flowgrpah.Node
 func (ddn *ddNode) Operate(in []Msg) []Msg {
-	log := log.Ctx(ddn.ctx)
 	msMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
-		log.Warn("type assertion failed for MsgStreamMsg", zap.String("channel", ddn.vChannelName), zap.String("name", reflect.TypeOf(in[0]).Name()))
+		mlog.Warn(ddn.ctx, "type assertion failed for MsgStreamMsg", mlog.String("channel", ddn.vChannelName), mlog.String("name", reflect.TypeOf(in[0]).Name()))
 		return []Msg{}
 	}
 
@@ -113,12 +112,12 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			EndPositions:   msMsg.EndPositions(),
 			dropCollection: false,
 		}
-		log.Warn("MsgStream closed", zap.Any("ddNode node", ddn.Name()), zap.String("channel", ddn.vChannelName), zap.Int64("collection", ddn.collectionID))
+		mlog.Warn(ddn.ctx, "MsgStream closed", mlog.Any("ddNode node", ddn.Name()), mlog.String("channel", ddn.vChannelName), mlog.Int64("collection", ddn.collectionID))
 		return []Msg{&fgMsg}
 	}
 
 	if load := ddn.dropMode.Load(); load != nil && load.(bool) {
-		log.RatedInfo(1.0, "ddNode in dropMode", zap.String("channel", ddn.vChannelName))
+		mlog.RatedInfo(ddn.ctx, rate.Limit(1.0), "ddNode in dropMode", mlog.String("channel", ddn.vChannelName))
 		return []Msg{}
 	}
 
@@ -149,7 +148,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		switch msg.Type() {
 		case commonpb.MsgType_DropCollection:
 			if msg.(*msgstream.DropCollectionMsg).GetCollectionID() == ddn.collectionID {
-				log.Info("Receiving DropCollection msg", zap.String("channel", ddn.vChannelName))
+				mlog.Info(ddn.ctx, "Receiving DropCollection msg", mlog.String("channel", ddn.vChannelName))
 				ddn.dropMode.Store(true)
 				fgMsg.dropCollection = true
 			}
@@ -157,25 +156,25 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		case commonpb.MsgType_DropPartition:
 			dpMsg := msg.(*msgstream.DropPartitionMsg)
 			if dpMsg.GetCollectionID() == ddn.collectionID {
-				log.Info("drop partition msg received", zap.String("channel", ddn.vChannelName), zap.Int64("partitionID", dpMsg.GetPartitionID()))
+				mlog.Info(ddn.ctx, "drop partition msg received", mlog.String("channel", ddn.vChannelName), mlog.FieldPartitionID(dpMsg.GetPartitionID()))
 				fgMsg.dropPartitions = append(fgMsg.dropPartitions, dpMsg.PartitionID)
 			}
 
 		case commonpb.MsgType_Insert:
 			imsg := msg.(*msgstream.InsertMsg)
 			if imsg.CollectionID != ddn.collectionID {
-				log.Warn("filter invalid insert message, collection mis-match",
-					zap.Int64("Get collID", imsg.CollectionID),
-					zap.String("channel", ddn.vChannelName),
-					zap.Int64("Expected collID", ddn.collectionID))
+				mlog.Warn(ddn.ctx, "filter invalid insert message, collection mis-match",
+					mlog.Int64("Get collID", imsg.CollectionID),
+					mlog.String("channel", ddn.vChannelName),
+					mlog.Int64("Expected collID", ddn.collectionID))
 				continue
 			}
 
 			if ddn.tryToFilterSegmentInsertMessages(imsg) {
-				log.Debug("filter insert messages",
-					zap.Int64("filter segmentID", imsg.GetSegmentID()),
-					zap.String("channel", ddn.vChannelName),
-					zap.Uint64("message timestamp", msg.EndTs()),
+				mlog.Debug(ddn.ctx, "filter insert messages",
+					mlog.Int64("filter segmentID", imsg.GetSegmentID()),
+					mlog.String("channel", ddn.vChannelName),
+					mlog.Uint64("message timestamp", msg.EndTs()),
 				)
 				continue
 			}
@@ -194,30 +193,30 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				WithLabelValues(paramtable.GetStringNodeID(), metrics.InsertLabel).
 				Add(float64(imsg.GetNumRows()))
 
-			log.Debug("DDNode receive insert messages",
-				zap.Int64("segmentID", imsg.GetSegmentID()),
-				zap.String("channel", ddn.vChannelName),
-				zap.Int("numRows", len(imsg.GetRowIDs())),
-				zap.Uint64("startPosTs", msMsg.StartPositions()[0].GetTimestamp()),
-				zap.Uint64("endPosTs", msMsg.EndPositions()[0].GetTimestamp()))
+			mlog.Debug(ddn.ctx, "DDNode receive insert messages",
+				mlog.FieldSegmentID(imsg.GetSegmentID()),
+				mlog.String("channel", ddn.vChannelName),
+				mlog.Int("numRows", len(imsg.GetRowIDs())),
+				mlog.Uint64("startPosTs", msMsg.StartPositions()[0].GetTimestamp()),
+				mlog.Uint64("endPosTs", msMsg.EndPositions()[0].GetTimestamp()))
 			fgMsg.InsertMessages = append(fgMsg.InsertMessages, imsg)
 
 		case commonpb.MsgType_Delete:
 			dmsg := msg.(*msgstream.DeleteMsg)
 
 			if dmsg.CollectionID != ddn.collectionID {
-				log.Warn("filter invalid DeleteMsg, collection mis-match",
-					zap.Int64("Get collID", dmsg.CollectionID),
-					zap.String("channel", ddn.vChannelName),
-					zap.Int64("Expected collID", ddn.collectionID))
+				mlog.Warn(ddn.ctx, "filter invalid DeleteMsg, collection mis-match",
+					mlog.Int64("Get collID", dmsg.CollectionID),
+					mlog.String("channel", ddn.vChannelName),
+					mlog.Int64("Expected collID", ddn.collectionID))
 				continue
 			}
 
-			log.Debug("DDNode receive delete messages",
-				zap.String("channel", ddn.vChannelName),
-				zap.Int64("numRows", dmsg.NumRows),
-				zap.Uint64("startPosTs", msMsg.StartPositions()[0].GetTimestamp()),
-				zap.Uint64("endPosTs", msMsg.EndPositions()[0].GetTimestamp()),
+			mlog.Debug(ddn.ctx, "DDNode receive delete messages",
+				mlog.String("channel", ddn.vChannelName),
+				mlog.Int64("numRows", dmsg.NumRows),
+				mlog.Uint64("startPosTs", msMsg.StartPositions()[0].GetTimestamp()),
+				mlog.Uint64("endPosTs", msMsg.EndPositions()[0].GetTimestamp()),
 			)
 			util.GetRateCollector().Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(dmsg.DeleteRequest)))
 
@@ -235,103 +234,103 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			fgMsg.DeleteMessages = append(fgMsg.DeleteMessages, dmsg)
 		case commonpb.MsgType_CreateSegment:
 			createSegment := msg.(*adaptor.CreateSegmentMessageBody)
-			logger := log.With(
-				zap.String("vchannel", ddn.Name()),
-				zap.Int32("msgType", int32(msg.Type())),
-				zap.Uint64("timetick", createSegment.CreateSegmentMessage.TimeTick()),
+			logger := mlog.With(
+				mlog.FieldVChannel(ddn.Name()),
+				mlog.Int32("msgType", int32(msg.Type())),
+				mlog.Uint64("timetick", createSegment.CreateSegmentMessage.TimeTick()),
 			)
-			logger.Info("receive create segment message")
+			logger.Info(ddn.ctx, "receive create segment message")
 			if err := ddn.msgHandler.HandleCreateSegment(ddn.ctx, createSegment.CreateSegmentMessage); err != nil {
-				logger.Warn("handle create segment message failed", zap.Error(err))
+				logger.Warn(ddn.ctx, "handle create segment message failed", mlog.Err(err))
 			} else {
-				logger.Info("handle create segment message success")
+				logger.Info(ddn.ctx, "handle create segment message success")
 			}
 		case commonpb.MsgType_FlushSegment:
 			flushMsg := msg.(*adaptor.FlushMessageBody)
-			logger := log.With(
-				zap.String("vchannel", ddn.Name()),
-				zap.Int32("msgType", int32(msg.Type())),
-				zap.Uint64("timetick", flushMsg.FlushMessage.TimeTick()),
+			logger := mlog.With(
+				mlog.FieldVChannel(ddn.Name()),
+				mlog.Int32("msgType", int32(msg.Type())),
+				mlog.Uint64("timetick", flushMsg.FlushMessage.TimeTick()),
 			)
-			logger.Info("receive flush message")
+			logger.Info(ddn.ctx, "receive flush message")
 			if err := ddn.msgHandler.HandleFlush(flushMsg.FlushMessage); err != nil {
-				logger.Warn("handle flush message failed", zap.Error(err))
+				logger.Warn(ddn.ctx, "handle flush message failed", mlog.Err(err))
 			} else {
-				logger.Info("handle flush message success")
+				logger.Info(ddn.ctx, "handle flush message success")
 			}
 		case commonpb.MsgType_ManualFlush:
 			manualFlushMsg := msg.(*adaptor.ManualFlushMessageBody)
-			logger := log.With(
-				zap.String("vchannel", ddn.Name()),
-				zap.Int32("msgType", int32(msg.Type())),
-				zap.Uint64("timetick", manualFlushMsg.ManualFlushMessage.TimeTick()),
-				zap.Uint64("flushTs", manualFlushMsg.ManualFlushMessage.Header().FlushTs),
-				zap.Int64s("segmentIDs", manualFlushMsg.ManualFlushMessage.Header().SegmentIds),
+			logger := mlog.With(
+				mlog.FieldVChannel(ddn.Name()),
+				mlog.Int32("msgType", int32(msg.Type())),
+				mlog.Uint64("timetick", manualFlushMsg.ManualFlushMessage.TimeTick()),
+				mlog.Uint64("flushTs", manualFlushMsg.ManualFlushMessage.Header().FlushTs),
+				mlog.Int64s("segmentIDs", manualFlushMsg.ManualFlushMessage.Header().SegmentIds),
 			)
-			logger.Info("receive manual flush message")
+			logger.Info(ddn.ctx, "receive manual flush message")
 			if err := ddn.msgHandler.HandleManualFlush(manualFlushMsg.ManualFlushMessage); err != nil {
-				logger.Warn("handle manual flush message failed", zap.Error(err))
+				logger.Warn(ddn.ctx, "handle manual flush message failed", mlog.Err(err))
 			} else {
-				logger.Info("handle manual flush message success")
+				logger.Info(ddn.ctx, "handle manual flush message success")
 			}
 		case commonpb.MsgType_FlushAll:
 			flushAllMsg := msg.(*adaptor.FlushAllMessageBody)
-			log.Info("receive flush all message",
-				zap.String("vchannel", ddn.Name()),
-				zap.Int32("msgType", int32(msg.Type())),
-				zap.Uint64("timetick", flushAllMsg.FlushAllMessage.TimeTick()),
+			mlog.Info(ddn.ctx, "receive flush all message",
+				mlog.FieldVChannel(ddn.Name()),
+				mlog.Int32("msgType", int32(msg.Type())),
+				mlog.Uint64("timetick", flushAllMsg.FlushAllMessage.TimeTick()),
 			)
 			ddn.msgHandler.HandleFlushAll(ddn.vChannelName, flushAllMsg.FlushAllMessage)
 		case commonpb.MsgType_AddCollectionField:
 			schemaMsg := msg.(*adaptor.SchemaChangeMessageBody)
-			logger := log.With(
-				zap.String("vchannel", ddn.Name()),
-				zap.Int32("msgType", int32(msg.Type())),
-				zap.Uint64("timetick", schemaMsg.SchemaChangeMessage.TimeTick()),
-				zap.Int64s("segmentIDs", schemaMsg.SchemaChangeMessage.Header().FlushedSegmentIds),
+			logger := mlog.With(
+				mlog.FieldVChannel(ddn.Name()),
+				mlog.Int32("msgType", int32(msg.Type())),
+				mlog.Uint64("timetick", schemaMsg.SchemaChangeMessage.TimeTick()),
+				mlog.Int64s("segmentIDs", schemaMsg.SchemaChangeMessage.Header().FlushedSegmentIds),
 			)
-			logger.Info("receive schema change message")
+			logger.Info(ddn.ctx, "receive schema change message")
 			ddn.msgHandler.HandleSchemaChange(ddn.ctx, schemaMsg.SchemaChangeMessage)
 		case commonpb.MsgType_AlterCollection:
 			alterCollectionMsg := msg.(*adaptor.AlterCollectionMessageBody)
-			logger := log.With(
-				zap.String("vchannel", ddn.Name()),
-				zap.Int32("msgType", int32(msg.Type())),
-				zap.Uint64("timetick", alterCollectionMsg.AlterCollectionMessage.TimeTick()),
+			logger := mlog.With(
+				mlog.FieldVChannel(ddn.Name()),
+				mlog.Int32("msgType", int32(msg.Type())),
+				mlog.Uint64("timetick", alterCollectionMsg.AlterCollectionMessage.TimeTick()),
 			)
-			logger.Info("receive put collection message")
+			logger.Info(ddn.ctx, "receive put collection message")
 			if err := ddn.msgHandler.HandleAlterCollection(ddn.ctx, alterCollectionMsg.AlterCollectionMessage); err != nil {
-				logger.Warn("handle put collection message failed", zap.Error(err))
+				logger.Warn(ddn.ctx, "handle put collection message failed", mlog.Err(err))
 			} else {
-				logger.Info("handle put collection message success")
+				logger.Info(ddn.ctx, "handle put collection message success")
 			}
 		case commonpb.MsgType_TruncateCollection:
 			truncateCollectionMsg := msg.(*adaptor.TruncateCollectionMessageBody)
-			logger := log.With(
-				zap.String("vchannel", ddn.Name()),
-				zap.Int32("msgType", int32(msg.Type())),
-				zap.Uint64("timetick", truncateCollectionMsg.TruncateCollectionMessage.TimeTick()),
-				zap.Int64s("segmentIDs", truncateCollectionMsg.TruncateCollectionMessage.Header().SegmentIds),
+			logger := mlog.With(
+				mlog.FieldVChannel(ddn.Name()),
+				mlog.Int32("msgType", int32(msg.Type())),
+				mlog.Uint64("timetick", truncateCollectionMsg.TruncateCollectionMessage.TimeTick()),
+				mlog.Int64s("segmentIDs", truncateCollectionMsg.TruncateCollectionMessage.Header().SegmentIds),
 			)
-			logger.Info("receive truncate collection message")
+			logger.Info(ddn.ctx, "receive truncate collection message")
 			if err := ddn.msgHandler.HandleTruncateCollection(truncateCollectionMsg.TruncateCollectionMessage); err != nil {
-				logger.Warn("handle truncate collection message failed", zap.Error(err))
+				logger.Warn(ddn.ctx, "handle truncate collection message failed", mlog.Err(err))
 			} else {
-				logger.Info("handle truncate collection message success")
+				logger.Info(ddn.ctx, "handle truncate collection message success")
 			}
 		case commonpb.MsgType_AlterWAL:
 			alterWALMsg := msg.(*adaptor.AlterWALMessageBody)
-			logger := log.With(
-				zap.String("pchannel", alterWALMsg.AlterWALMessage.VChannel()), // pchannel that received the alter wal message
-				zap.String("vchannel", ddn.vChannelName),                       // vchannel of the current flow graph pipeline
-				zap.Stringer("targetWalName", alterWALMsg.AlterWALMessage.Header().TargetWalName),
-				zap.Uint64("timetick", alterWALMsg.AlterWALMessage.TimeTick()),
+			logger := mlog.With(
+				mlog.FieldPChannel(alterWALMsg.AlterWALMessage.VChannel()), // pchannel that received the alter wal message
+				mlog.FieldVChannel(ddn.vChannelName),                       // vchannel of the current flow graph pipeline
+				mlog.Stringer("targetWalName", alterWALMsg.AlterWALMessage.Header().TargetWalName),
+				mlog.Uint64("timetick", alterWALMsg.AlterWALMessage.TimeTick()),
 			)
-			logger.Info("receive alter wal message")
+			logger.Info(ddn.ctx, "receive alter wal message")
 			if err := ddn.msgHandler.HandleAlterWAL(ddn.ctx, alterWALMsg.AlterWALMessage, ddn.vChannelName); err != nil {
-				logger.Warn("handle alter wal message failed", zap.Error(err))
+				logger.Warn(ddn.ctx, "handle alter wal message failed", mlog.Err(err))
 			} else {
-				logger.Info("handle alter wal message success")
+				logger.Info(ddn.ctx, "handle alter wal message success")
 			}
 			fgMsg.isAlterWal = true
 			fgMsg.alterWalTimeTick = alterWALMsg.AlterWALMessage.TimeTick()
@@ -386,7 +385,7 @@ func (ddn *ddNode) isDropped(segID typeutil.UniqueID) bool {
 }
 
 func (ddn *ddNode) Close() {
-	log.Info("Flowgraph DD Node closing")
+	mlog.Info(ddn.ctx, "Flowgraph DD Node closing")
 }
 
 func newDDNode(ctx context.Context, collID typeutil.UniqueID, vChannelName string, droppedSegmentIDs []typeutil.UniqueID,
@@ -416,10 +415,10 @@ func newDDNode(ctx context.Context, collID typeutil.UniqueID, vChannelName strin
 	for _, s := range growingSegments {
 		dd.growingSegInfo[s.GetID()] = s
 	}
-	log.Info("ddNode add sealed and growing segments",
-		zap.Int64("collectionID", collID),
-		zap.Int("No. sealed segments", len(sealedSegments)),
-		zap.Int("No. growing segments", len(growingSegments)),
+	mlog.Info(ctx, "ddNode add sealed and growing segments",
+		mlog.FieldCollectionID(collID),
+		mlog.Int("No. sealed segments", len(sealedSegments)),
+		mlog.Int("No. growing segments", len(growingSegments)),
 	)
 
 	return dd

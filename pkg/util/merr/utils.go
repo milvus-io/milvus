@@ -22,11 +22,10 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -351,7 +350,7 @@ func WrapErrAsInputErrorWhen(err error, targets ...milvusError) error {
 	if merr, ok := err.(milvusError); ok {
 		for _, target := range targets {
 			if target.errCode == merr.errCode {
-				log.Info("mark error as input error", zap.Error(err))
+				mlog.Info(context.TODO(), "mark error as input error", mlog.Err(err))
 				WithErrorType(InputError)(&merr)
 				return merr
 			}

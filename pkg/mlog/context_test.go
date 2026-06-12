@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -105,6 +106,18 @@ func TestWithFieldsDoesNotMutateParent(t *testing.T) {
 	// Parent should still only have one field
 	parentFields := FieldsFromContext(parentCtx)
 	assert.Len(t, parentFields, 1)
+}
+
+func TestContextFieldHelpers(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithReqID(ctx, 100)
+	ctx = WithModule(ctx, "proxy")
+
+	fields := FieldsFromContext(ctx)
+	require.Len(t, fields, 2)
+	fm := fieldsToMap(fields)
+	assert.Equal(t, zap.Int64("req_id", 100), fm["req_id"])
+	assert.Equal(t, zap.String(keyModule, "proxy"), fm[keyModule])
 }
 
 // Tests for propagatedStringField/propagatedInt64Field

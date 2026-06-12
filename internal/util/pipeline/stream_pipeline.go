@@ -23,11 +23,11 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -61,11 +61,11 @@ func (p *streamPipeline) work() {
 	for {
 		select {
 		case <-p.closeCh:
-			log.Ctx(context.TODO()).Debug("stream pipeline input closed")
+			mlog.Debug(context.TODO(), "stream pipeline input closed")
 			return
 		case msg, ok := <-p.input:
 			if !ok {
-				log.Ctx(context.TODO()).Debug("stream pipeline input closed")
+				mlog.Debug(context.TODO(), "stream pipeline input closed")
 				return
 			}
 
@@ -78,7 +78,7 @@ func (p *streamPipeline) work() {
 			if p.emptyTimeTickSlowdowner.Filter(msg) {
 				continue
 			}
-			log.Ctx(context.TODO()).RatedDebug(10, "stream pipeline fetch msg", zap.Int("sum", len(msg.Msgs)))
+			mlog.RatedDebug(context.TODO(), rate.Limit(10), "stream pipeline fetch msg", mlog.Int("sum", len(msg.Msgs)))
 			p.pipeline.inputChannel <- msg
 			p.pipeline.process()
 		}
@@ -96,10 +96,9 @@ func (p *streamPipeline) Status() string {
 }
 
 func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.MsgPosition) error {
-	log := log.Ctx(ctx)
 	var err error
 	if position == nil {
-		log.Error("seek stream to nil position")
+		mlog.Error(ctx, "seek stream to nil position")
 		return ErrNilPosition
 	}
 
@@ -110,19 +109,19 @@ func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.M
 		SubPos:   common.SubscriptionPositionUnknown,
 	})
 	if err != nil {
-		log.Error("dispatcher register failed after retried", zap.String("channel", position.ChannelName), zap.Error(err))
+		mlog.Error(ctx, "dispatcher register failed after retried", mlog.String("channel", position.ChannelName), mlog.Err(err))
 		p.dispatcher.Deregister(p.vChannel)
 		return WrapErrRegDispather(err)
 	}
 
 	ts, _ := tsoutil.ParseTS(position.GetTimestamp())
-	log.Info("stream pipeline seeks from position with msgDispatcher",
-		zap.String("pchannel", position.ChannelName),
-		zap.String("vchannel", p.vChannel),
-		zap.Time("checkpointTs", ts),
-		zap.Stringer("walName", position.WALName),
-		zap.Duration("tsLag", time.Since(ts)),
-		zap.Duration("elapse", time.Since(start)),
+	mlog.Info(ctx, "stream pipeline seeks from position with msgDispatcher",
+		mlog.FieldPChannel(position.ChannelName),
+		mlog.FieldVChannel(p.vChannel),
+		mlog.Time("checkpointTs", ts),
+		mlog.Stringer("walName", position.WALName),
+		mlog.Duration("tsLag", time.Since(ts)),
+		mlog.Duration("elapse", time.Since(start)),
 	)
 	return nil
 }

@@ -25,14 +25,13 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -82,17 +81,17 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	})
 	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.String("reason", createCollectionStatus.GetReason()))
 	}
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
 		CollectionNames: []string{collectionName},
 	})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	clusteringColumn := integration.NewInt64SameFieldData("clustering", rowNum, 100)
@@ -125,7 +124,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
-		log.Info("ShowSegments result", zap.String("segment", segment.String()))
+		mlog.Info(context.TODO(), "ShowSegments result", mlog.String("segment", segment.String()))
 	}
 
 	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
@@ -145,7 +144,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 		ExtraParams:    integration.ConstructIndexParam(dim, indexType, metricType),
 	})
 	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createIndexStatus fail reason", mlog.String("reason", createIndexStatus.GetReason()))
 	}
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
@@ -159,7 +158,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	})
 	s.NoError(err)
 	if loadStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
+		mlog.Warn(context.TODO(), "loadStatus fail reason", mlog.String("reason", loadStatus.GetReason()))
 	}
 	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	s.WaitForLoad(ctx, collectionName)
@@ -170,7 +169,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	}
 	compactResp, err := c.MilvusClient.ManualCompaction(ctx, compactReq)
 	s.NoError(err)
-	log.Info("compact", zap.Any("compactResp", compactResp))
+	mlog.Info(context.TODO(), "compact", mlog.Any("compactResp", compactResp))
 
 	compacted := func() bool {
 		resp, err := c.MilvusClient.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
@@ -202,7 +201,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	// 30000*(128*4+8+8) = 15.1MB/1MB = 15+1
 	// The check is done every 100 lines written, so the size of each segment may be up to 99 lines larger.
 	// s.Contains([]int{15, 16}, len(flushedSegmentsResp.GetSegments()))
-	log.Info("get flushed segments done", zap.Int64s("segments", flushedSegmentsResp.GetSegments()))
+	mlog.Info(context.TODO(), "get flushed segments done", mlog.Int64s("segments", flushedSegmentsResp.GetSegments()))
 	totalRows := int64(0)
 	segsInfoResp, err := c.MixCoordClient.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
 		SegmentIDs: flushedSegmentsResp.GetSegments(),
@@ -216,7 +215,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 
 	s.Equal(int64(rowNum), totalRows)
 
-	log.Info("compact done")
+	mlog.Info(context.TODO(), "compact done")
 
 	// search
 	expr := "clustering > 0"
@@ -270,7 +269,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	}()
 
 	checkWaitGroup.Wait()
-	log.Info("TestClusteringCompaction succeed")
+	mlog.Info(context.TODO(), "TestClusteringCompaction succeed")
 }
 
 func ConstructScalarClusteringSchema(collection string, dim int, autoID bool, fields ...*schemapb.FieldSchema) *schemapb.CollectionSchema {

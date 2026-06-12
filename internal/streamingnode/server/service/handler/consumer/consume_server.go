@@ -1,17 +1,17 @@
 package consumer
 
 import (
+	"context"
 	"io"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -81,7 +81,9 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 	}); err != nil {
 		// release the scanner to avoid resource leak.
 		if err := scanner.Close(); err != nil {
-			resource.Resource().Logger().Warn("close scanner failed at create consume server", zap.Error(err))
+			resource.Resource().Logger().Warn(context.TODO(),
+
+				"close scanner failed at create consume server", mlog.Err(err))
 		}
 		return nil, err
 	}
@@ -91,9 +93,9 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 		scanner:       scanner,
 		consumeServer: consumeServer,
 		logger: resource.Resource().Logger().With(
-			log.FieldComponent("consumer-server"),
-			zap.String("channel", l.Channel().Name),
-			zap.Int64("term", l.Channel().Term)), // Add trace info for all log.
+			mlog.FieldComponent("consumer-server"),
+			mlog.String("channel", l.Channel().Name),
+			mlog.Int64("term", l.Channel().Term)), // Add trace info for all log.
 		closeCh: make(chan struct{}),
 		metrics: metrics,
 	}, nil
@@ -104,7 +106,7 @@ type ConsumeServer struct {
 	consumerID    int64
 	scanner       wal.Scanner
 	consumeServer *consumeGrpcServerHelper
-	logger        *log.MLogger
+	logger        *mlog.Logger
 	closeCh       chan struct{}
 	metrics       *consumerMetrics
 }
@@ -130,13 +132,13 @@ func (c *ConsumeServer) Execute() error {
 func (c *ConsumeServer) sendLoop() (err error) {
 	defer func() {
 		if err := c.scanner.Close(); err != nil {
-			c.logger.Warn("close scanner failed", zap.Error(err))
+			c.logger.Warn(context.TODO(), "close scanner failed", mlog.Err(err))
 		}
 		if err != nil {
-			c.logger.Warn("send arm of stream closed by unexpected error", zap.Error(err))
+			c.logger.Warn(context.TODO(), "send arm of stream closed by unexpected error", mlog.Err(err))
 			return
 		}
-		c.logger.Info("send arm of stream closed")
+		c.logger.Info(context.TODO(), "send arm of stream closed")
 	}()
 	// Read ahead buffer is implemented by scanner.
 	// Do not add buffer here.
@@ -169,9 +171,9 @@ func (c *ConsumeServer) sendLoop() (err error) {
 				}
 			}
 		case <-c.closeCh:
-			c.logger.Info("close channel notified")
+			c.logger.Info(context.TODO(), "close channel notified")
 			if err := c.consumeServer.SendClosed(); err != nil {
-				c.logger.Warn("send close failed", zap.Error(err))
+				c.logger.Warn(context.TODO(), "send close failed", mlog.Err(err))
 				return status.NewInner("close send server failed: %s", err.Error())
 			}
 			return nil
@@ -202,10 +204,10 @@ func (c *ConsumeServer) recvLoop() (err error) {
 	defer func() {
 		close(c.closeCh)
 		if err != nil {
-			c.logger.Warn("recv arm of stream closed by unexpected error", zap.Error(err))
+			c.logger.Warn(context.TODO(), "recv arm of stream closed by unexpected error", mlog.Err(err))
 			return
 		}
-		c.logger.Info("recv arm of stream closed")
+		c.logger.Info(context.TODO(), "recv arm of stream closed")
 	}()
 
 	for {
@@ -218,11 +220,11 @@ func (c *ConsumeServer) recvLoop() (err error) {
 		}
 		switch req := req.Request.(type) {
 		case *streamingpb.ConsumeRequest_Close:
-			c.logger.Info("close request received")
+			c.logger.Info(context.TODO(), "close request received")
 			// we will receive io.EOF soon, just do nothing here.
 		default:
 			// skip unknown message here, to keep the forward compatibility.
-			c.logger.Warn("unknown request type", zap.Any("request", req))
+			c.logger.Warn(context.TODO(), "unknown request type", mlog.Any("request", req))
 		}
 	}
 }

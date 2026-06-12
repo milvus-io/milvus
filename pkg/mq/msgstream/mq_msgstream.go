@@ -26,14 +26,13 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -97,7 +96,7 @@ func NewMqMsgStream(initCtx context.Context,
 		closeRWMutex: &sync.RWMutex{},
 		closed:       0,
 	}
-	log.Ctx(initCtx).Info("Msg Stream initialized")
+	mlog.Info(initCtx, "Msg Stream initialized")
 
 	return stream, nil
 }
@@ -106,7 +105,7 @@ func NewMqMsgStream(initCtx context.Context,
 func (ms *mqMsgStream) AsProducer(ctx context.Context, channels []string) {
 	for _, channel := range channels {
 		if len(channel) == 0 {
-			log.Ctx(ctx).Error("MsgStream asProducer's channel is an empty string")
+			mlog.Error(ctx, "MsgStream asProducer's channel is an empty string")
 			break
 		}
 
@@ -187,7 +186,7 @@ func (ms *mqMsgStream) AsConsumer(ctx context.Context, channels []string, subNam
 
 			panic(fmt.Sprintf("%s, errors = %s", errMsg, err.Error()))
 		}
-		log.Ctx(ms.ctx).Info("Successfully create consumer", zap.String("channel", channel), zap.String("subname", subName))
+		mlog.Info(ms.ctx, "Successfully create consumer", mlog.String("channel", channel), mlog.String("subname", subName))
 	}
 	return nil
 }
@@ -197,9 +196,9 @@ func (ms *mqMsgStream) SetRepackFunc(repackFunc RepackFunc) {
 }
 
 func (ms *mqMsgStream) Close() {
-	log := log.Ctx(ms.ctx).With(zap.Strings("producers", ms.producerChannels),
-		zap.Strings("consumers", ms.consumerChannels))
-	log.Info("start to close mq msg stream")
+	log := mlog.With(mlog.Strings("producers", ms.producerChannels),
+		mlog.Strings("consumers", ms.consumerChannels))
+	log.Info(ms.ctx, "start to close mq msg stream")
 	ms.streamCancel()
 	ms.closeRWMutex.Lock()
 	defer ms.closeRWMutex.Unlock()
@@ -219,7 +218,7 @@ func (ms *mqMsgStream) Close() {
 
 	ms.client.Close()
 	close(ms.receiveBuf)
-	log.Info("mq msg stream closed")
+	log.Info(ms.ctx, "mq msg stream closed")
 }
 
 func (ms *mqMsgStream) ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32 {
@@ -249,7 +248,7 @@ func (ms *mqMsgStream) GetProduceChannels() []string {
 
 func (ms *mqMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
 	if msgPack == nil || len(msgPack.Msgs) <= 0 {
-		log.Ctx(ms.ctx).Debug("Warning: Receive empty msgPack")
+		mlog.Debug(ms.ctx, "Warning: Receive empty msgPack")
 		return nil
 	}
 	if len(ms.producers) <= 0 {
@@ -395,11 +394,11 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 			}
 			consumer.Ack(msg)
 			if msg.Payload() == nil {
-				log.Ctx(ms.ctx).Warn("MqMsgStream get msg whose payload is nil")
+				mlog.Warn(ms.ctx, "MqMsgStream get msg whose payload is nil")
 				continue
 			}
 			if message.CheckIfMessageFromStreaming(msg.Properties()) {
-				log.Ctx(ms.ctx).Warn("MqMsgStream can not consume the message from streaming service")
+				mlog.Warn(ms.ctx, "MqMsgStream can not consume the message from streaming service")
 				continue
 			}
 
@@ -410,7 +409,7 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 			if err != nil {
 				packMsg, err = UnmarshalMsg(msg, ms.unmarshal)
 				if err != nil {
-					log.Ctx(ms.ctx).Warn("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
+					mlog.Warn(ms.ctx, "Failed to getTsMsgFromConsumerMsg", mlog.Err(err))
 					continue
 				}
 			}
@@ -468,21 +467,20 @@ func (ms *mqMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, in
 				// try to use latest message ID first
 				messageID, err = consumer.GetLatestMsgID()
 				if err != nil {
-					log.Ctx(ctx).Warn("Ignoring bad message id", zap.Error(err))
+					mlog.Warn(ctx, "Ignoring bad message id", mlog.Err(err))
 					continue
 				}
 			} else {
 				return err
 			}
 		}
-
-		log.Ctx(ctx).Info("MsgStream seek begin", zap.String("channel", mp.ChannelName), zap.Any("MessageID", mp.MsgID), zap.Bool("includeCurrentMsg", includeCurrentMsg))
+		mlog.Info(ctx, "MsgStream seek begin", mlog.String("channel", mp.ChannelName), mlog.Any("MessageID", mp.MsgID), mlog.Bool("includeCurrentMsg", includeCurrentMsg))
 		err = consumer.Seek(messageID, includeCurrentMsg)
 		if err != nil {
-			log.Ctx(ctx).Warn("Failed to seek", zap.String("channel", mp.ChannelName), zap.Error(err))
+			mlog.Warn(ctx, "Failed to seek", mlog.String("channel", mp.ChannelName), mlog.Err(err))
 			return err
 		}
-		log.Ctx(ctx).Info("MsgStream seek finished", zap.String("channel", mp.ChannelName))
+		mlog.Info(ctx, "MsgStream seek finished", mlog.String("channel", mp.ChannelName))
 	}
 	return nil
 }
@@ -637,7 +635,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 
 	// block here until addConsumer
 	if _, ok := <-ms.syncConsumer; !ok {
-		log.Ctx(ms.ctx).Warn("consumer closed!")
+		mlog.Warn(ms.ctx, "consumer closed!")
 		return
 	}
 
@@ -736,7 +734,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			uniqueMsgs := make([]ConsumeMsg, 0, len(timeTickBuf))
 			for _, msg := range timeTickBuf {
 				if isDMLMsg(msg) && idset.Contain(msg.GetID()) {
-					log.Ctx(ms.ctx).Warn("mqTtMsgStream, found duplicated msg", zap.Int64("msgID", msg.GetID()))
+					mlog.Warn(ms.ctx, "mqTtMsgStream, found duplicated msg", mlog.Int64("msgID", msg.GetID()))
 					continue
 				}
 				idset.Insert(msg.GetID())
@@ -766,7 +764,6 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 
 // Save all msgs into chanMsgBuf[] till receive one ttMsg
 func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqwrapper.Consumer) {
-	log := log.Ctx(ms.ctx)
 	defer ms.chanWaitGroup.Done()
 	msgTick := time.NewTimer(3 * time.Second)
 	defer msgTick.Stop()
@@ -778,21 +775,21 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqwrapper.Consumer) {
 		case <-ms.chanStopChan[consumer]:
 			return
 		case <-msgTick.C:
-			log.Info("stop consumer, because no msg received in 3s", zap.Strings("channel", ms.consumerChannels))
+			mlog.Info(ms.ctx, "stop consumer, because no msg received in 3s", mlog.Strings("channel", ms.consumerChannels))
 			return
 		case msg, ok := <-consumer.Chan():
 			if !ok {
-				log.Debug("consumer closed!")
+				mlog.Debug(ms.ctx, "consumer closed!")
 				return
 			}
 			consumer.Ack(msg)
 
 			if msg.Payload() == nil {
-				log.Warn("MqTtMsgStream get msg whose payload is nil")
+				mlog.Warn(ms.ctx, "MqTtMsgStream get msg whose payload is nil")
 				continue
 			}
 			if message.CheckIfMessageFromStreaming(msg.Properties()) {
-				log.Warn("MqTtMsgStream can not consume the message from streaming service")
+				mlog.Warn(ms.ctx, "MqTtMsgStream can not consume the message from streaming service")
 				continue
 			}
 
@@ -803,7 +800,7 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqwrapper.Consumer) {
 			if err != nil {
 				packMsg, err = UnmarshalMsg(msg, ms.unmarshal)
 				if err != nil {
-					log.Warn("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
+					mlog.Warn(ms.ctx, "Failed to getTsMsgFromConsumerMsg", mlog.Err(err))
 					continue
 				}
 			}
@@ -853,7 +850,7 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 	var consumer mqwrapper.Consumer
 	var mp *MsgPosition
 	var err error
-	log := log.Ctx(ctx)
+
 	fn := func() (bool, error) {
 		var ok bool
 		consumer, ok = ms.consumers[mp.ChannelName]
@@ -871,7 +868,7 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 				// try to use latest message ID first
 				seekMsgID, err = consumer.GetLatestMsgID()
 				if err != nil {
-					log.Warn("Ignoring bad message id", zap.Error(err))
+					mlog.Warn(ctx, "Ignoring bad message id", mlog.Err(err))
 					return false, nil
 				}
 			} else {
@@ -879,17 +876,17 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 			}
 		}
 
-		log.Info("MsgStream begin to seek start msg: ", zap.String("channel", mp.ChannelName), zap.Any("MessageID", mp.MsgID))
+		mlog.Info(ctx, "MsgStream begin to seek start msg: ", mlog.String("channel", mp.ChannelName), mlog.Any("MessageID", mp.MsgID))
 		err = consumer.Seek(seekMsgID, true)
 		if err != nil {
-			log.Warn("Failed to seek", zap.String("channel", mp.ChannelName), zap.Error(err))
+			mlog.Warn(ctx, "Failed to seek", mlog.String("channel", mp.ChannelName), mlog.Err(err))
 			// stop retry if consumer topic not exist
 			if errors.Is(err, merr.ErrMqTopicNotFound) {
 				return false, err
 			}
 			return true, err
 		}
-		log.Info("MsgStream seek finished", zap.String("channel", mp.ChannelName))
+		mlog.Info(ctx, "MsgStream seek finished", mlog.String("channel", mp.ChannelName))
 
 		return false, nil
 	}
@@ -924,7 +921,7 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-loopTick.C:
-				log.Info("seek loop tick", zap.Int("loopMsgCnt", loopMsgCnt), zap.String("channel", mp.ChannelName))
+				mlog.Info(ctx, "seek loop tick", mlog.Int("loopMsgCnt", loopMsgCnt), mlog.String("channel", mp.ChannelName))
 			case msg, ok := <-consumer.Chan():
 				if !ok {
 					return errors.New("consumer closed")
@@ -939,7 +936,7 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 				if err != nil {
 					packMsg, err = UnmarshalMsg(msg, ms.unmarshal)
 					if err != nil {
-						log.Warn("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
+						mlog.Warn(ctx, "Failed to getTsMsgFromConsumerMsg", mlog.Err(err))
 						continue
 					}
 				}
@@ -947,10 +944,10 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 				if packMsg.GetType() == commonpb.MsgType_TimeTick && packMsg.GetTimestamp() >= mp.Timestamp {
 					runLoop = false
 					if time.Since(loopStarTime) > 30*time.Second {
-						log.Info("seek loop finished long time",
-							zap.Int("loopMsgCnt", loopMsgCnt),
-							zap.String("channel", mp.ChannelName),
-							zap.Duration("cost", time.Since(loopStarTime)))
+						mlog.Info(ctx, "seek loop finished long time",
+							mlog.Int("loopMsgCnt", loopMsgCnt),
+							mlog.String("channel", mp.ChannelName),
+							mlog.Duration("cost", time.Since(loopStarTime)))
 					}
 				} else if packMsg.GetTimestamp() > mp.Timestamp {
 					ctx, _ := ExtractCtx(packMsg, msg.Properties())
@@ -962,12 +959,12 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 					})
 					ms.chanMsgBuf[consumer] = append(ms.chanMsgBuf[consumer], packMsg)
 				} else {
-					log.Info("skip msg",
-						// zap.Int64("source", tsMsg.SourceID()), // TODO SOURCE ID ?
-						zap.String("type", packMsg.GetType().String()),
-						zap.Int("size", packMsg.GetSize()),
-						zap.Uint64("msgTs", packMsg.GetTimestamp()),
-						zap.Uint64("posTs", mp.GetTimestamp()),
+					mlog.Info(ctx, "skip msg",
+						// mlog.Int64("source", tsMsg.SourceID()), // TODO SOURCE ID ?
+						mlog.String("type", packMsg.GetType().String()),
+						mlog.Int("size", packMsg.GetSize()),
+						mlog.Uint64("msgTs", packMsg.GetTimestamp()),
+						mlog.Uint64("posTs", mp.GetTimestamp()),
 					)
 				}
 			}

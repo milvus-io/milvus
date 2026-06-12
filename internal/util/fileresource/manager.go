@@ -28,12 +28,11 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -54,7 +53,7 @@ func InitManager(storage storage.ChunkManager, mode Mode) {
 
 func Sync(version uint64, resourceList []*internalpb.FileResourceInfo) error {
 	if GlobalFileManager == nil {
-		log.Error("sync file resource to file manager not init")
+		mlog.Error(context.TODO(), "sync file resource to file manager not init")
 		return nil
 	}
 
@@ -142,7 +141,7 @@ func (m *SyncManager) Sync(version uint64, resourceList []*internalpb.FileResour
 		// remove old file if exist
 		err := os.RemoveAll(localResourcePath)
 		if err != nil {
-			log.Warn("remove invalid local resource failed", zap.String("path", localResourcePath), zap.Error(err))
+			mlog.Warn(context.TODO(), "remove invalid local resource failed", mlog.String("path", localResourcePath), mlog.Err(err))
 		}
 
 		err = os.MkdirAll(localResourcePath, os.ModePerm)
@@ -153,7 +152,7 @@ func (m *SyncManager) Sync(version uint64, resourceList []*internalpb.FileResour
 		if err := func() error {
 			reader, err := m.downloader.Reader(ctx, resource.GetPath())
 			if err != nil {
-				log.Info("download resource failed", zap.String("path", resource.GetPath()), zap.Error(err))
+				mlog.Info(context.TODO(), "download resource failed", mlog.String("path", resource.GetPath()), mlog.Err(err))
 				return err
 			}
 			defer reader.Close()
@@ -166,10 +165,10 @@ func (m *SyncManager) Sync(version uint64, resourceList []*internalpb.FileResour
 			defer file.Close()
 
 			if _, err = io.Copy(file, reader); err != nil {
-				log.Info("download resource failed", zap.String("path", resource.GetPath()), zap.Error(err))
+				mlog.Info(context.TODO(), "download resource failed", mlog.String("path", resource.GetPath()), mlog.Err(err))
 				return err
 			}
-			log.Info("sync file to local", zap.String("name", fileName), zap.Int64("id", resource.GetId()))
+			mlog.Info(context.TODO(), "sync file to local", mlog.String("name", fileName), mlog.Int64("id", resource.GetId()))
 			return nil
 		}(); err != nil {
 			return err
@@ -191,7 +190,7 @@ func (m *SyncManager) Sync(version uint64, resourceList []*internalpb.FileResour
 	for _, resourceID := range removes {
 		err := os.RemoveAll(path.Join(m.localPath, fmt.Sprint(resourceID)))
 		if err != nil {
-			log.Warn("remove local resource failed", zap.Int64("id", resourceID), zap.Error(err))
+			mlog.Warn(context.TODO(), "remove local resource failed", mlog.Int64("id", resourceID), mlog.Err(err))
 		}
 	}
 	m.resourceMap = newResourceMap
@@ -255,7 +254,7 @@ func (m *RefManager) Download(ctx context.Context, downloader storage.ChunkManag
 
 			reader, err := downloader.Reader(ctx, resource.GetPath())
 			if err != nil {
-				log.Info("download resource failed", zap.String("path", resource.GetPath()), zap.Error(err))
+				mlog.Info(ctx, "download resource failed", mlog.String("path", resource.GetPath()), mlog.Err(err))
 				return nil, err
 			}
 			defer reader.Close()

@@ -1,17 +1,17 @@
 package testcases
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -510,11 +510,11 @@ func TestDeleteComplexExpr(t *testing.T) {
 		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
-		log.Debug("TestDeleteComplexExpr", zap.Any("expr", exprLimit.expr))
+		mlog.Debug(context.TODO(), "TestDeleteComplexExpr", mlog.Any("expr", exprLimit.expr))
 
 		resDe, err := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithExpr(exprLimit.expr))
 		common.CheckErr(t, err, true)
-		log.Debug("delete count", zap.Bool("equal", int64(exprLimit.count) == resDe.DeleteCount))
+		mlog.Debug(context.TODO(), "delete count", mlog.Bool("equal", int64(exprLimit.count) == resDe.DeleteCount))
 		// require.Equal(t, int64(exprLimit.count), resDe.DeleteCount)
 
 		resQuery, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprLimit.expr).WithConsistencyLevel(entity.ClStrong))
@@ -575,11 +575,11 @@ func TestDeleteComplexExprJson(t *testing.T) {
 		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
-		log.Debug("TestDeleteComplexExpr", zap.Any("expr", exprLimit.expr))
+		mlog.Debug(context.TODO(), "TestDeleteComplexExpr", mlog.Any("expr", exprLimit.expr))
 
 		resDe, err := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithExpr(exprLimit.expr))
 		common.CheckErr(t, err, true)
-		log.Debug("delete count", zap.Bool("equal", int64(exprLimit.count) == resDe.DeleteCount))
+		mlog.Debug(context.TODO(), "delete count", mlog.Bool("equal", int64(exprLimit.count) == resDe.DeleteCount))
 		// require.Equal(t, int64(exprLimit.count), resDe.DeleteCount)
 
 		resQuery, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprLimit.expr).WithConsistencyLevel(entity.ClStrong))

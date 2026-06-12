@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -24,13 +25,12 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -287,7 +287,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			if !allMissing {
 				return errors.Newf("segment must not be heterogeneous, all blocks must contain all fields or none, abnormal field %d(%s)", field.GetFieldID(), field.GetName())
 			}
-			log.Info("Skip field nullable missing field, could be schema change", zap.Int64("fieldId", field.GetFieldID()), zap.String("fieldName", field.GetName()))
+			mlog.Info(context.TODO(), "Skip field nullable missing field, could be schema change", mlog.Int64("fieldId", field.GetFieldID()), mlog.String("fieldName", field.GetName()))
 			return nil
 		}
 
@@ -506,7 +506,7 @@ func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
 		return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
 	}
 
-	return
+	return collectionID, partitionID, segmentID, data, err
 }
 
 func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int, insertData *InsertData) (

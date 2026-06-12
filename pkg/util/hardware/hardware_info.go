@@ -12,6 +12,7 @@
 package hardware
 
 import (
+	"context"
 	"flag"
 	syslog "log"
 	"runtime"
@@ -23,9 +24,9 @@ import (
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
 	"go.uber.org/automaxprocs/maxprocs"
-	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -61,14 +62,14 @@ func GetCPUNum() int {
 func GetCPUUsage() float64 {
 	percents, err := cpu.Percent(0, false)
 	if err != nil {
-		log.Warn("failed to get cpu usage",
-			zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to get cpu usage",
+			mlog.Err(err))
 		return 0
 	}
 
 	if len(percents) != 1 {
-		log.Warn("something wrong in cpu.Percent, len(percents) must be equal to 1",
-			zap.Int("len(percents)", len(percents)))
+		mlog.Warn(context.TODO(), "something wrong in cpu.Percent, len(percents) must be equal to 1",
+			mlog.Int("len(percents)", len(percents)))
 		return 0
 	}
 
@@ -80,8 +81,8 @@ func GetMemoryCount() uint64 {
 	// get host memory by `gopsutil`
 	stats, err := mem.VirtualMemory()
 	if err != nil {
-		log.Warn("failed to get memory count",
-			zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to get memory count",
+			mlog.Err(err))
 		return 0
 	}
 
@@ -93,9 +94,9 @@ func GetMemoryCount() uint64 {
 	}
 
 	if err != nil || limit > stats.Total {
-		log.RatedWarn(3600, "failed to get container memory limit",
-			zap.Uint64("containerLimit", limit),
-			zap.Error(err))
+		mlog.RatedWarn(context.TODO(), rate.Limit(3600), "failed to get container memory limit",
+			mlog.Uint64("containerLimit", limit),
+			mlog.Err(err))
 	}
 	return stats.Total
 }

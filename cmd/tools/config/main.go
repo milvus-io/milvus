@@ -1,12 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 const (
@@ -19,7 +18,7 @@ func main() {
 	args := os.Args
 
 	if len(args) < 2 {
-		log.Error("len of args should large than 2")
+		mlog.Error(context.TODO(), "len of args should large than 2")
 		os.Exit(-1)
 	}
 	switch args[1] {
@@ -27,7 +26,7 @@ func main() {
 		f, err := os.Create("configs.csv")
 		defer f.Close()
 		if err != nil {
-			log.Error("create file failed", zap.Error(err))
+			mlog.Error(context.TODO(), "create file failed", mlog.Err(err))
 			os.Exit(-2)
 		}
 		WriteCsv(f)
@@ -35,7 +34,7 @@ func main() {
 		f, err := os.Create("milvus.yaml")
 		defer f.Close()
 		if err != nil {
-			log.Error("create file failed", zap.Error(err))
+			mlog.Error(context.TODO(), "create file failed", mlog.Err(err))
 			os.Exit(-2)
 		}
 		WriteYaml(f)
@@ -48,6 +47,6 @@ func main() {
 		}
 		ShowYaml(f)
 	default:
-		log.Error(fmt.Sprintf("unknown argument %s", args[1]))
+		mlog.Error(context.TODO(), fmt.Sprintf("unknown argument %s", args[1]))
 	}
 }

@@ -6,13 +6,12 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -37,7 +36,7 @@ func (dc *dataCoordBroker) AssignSegmentID(ctx context.Context, reqs ...*datapb.
 	resp, err := dc.client.AssignSegmentID(ctx, req)
 
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		log.Warn("failed to call datacoord AssignSegmentID", zap.Error(err))
+		mlog.Warn(ctx, "failed to call datacoord AssignSegmentID", mlog.Err(err))
 		return nil, err
 	}
 
@@ -47,8 +46,6 @@ func (dc *dataCoordBroker) AssignSegmentID(ctx context.Context, reqs ...*datapb.
 }
 
 func (dc *dataCoordBroker) ReportTimeTick(ctx context.Context, msgs []*msgpb.DataNodeTtMsg) error {
-	log := log.Ctx(ctx)
-
 	req := &datapb.ReportDataNodeTtMsgsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_DataNodeTt),
@@ -59,7 +56,7 @@ func (dc *dataCoordBroker) ReportTimeTick(ctx context.Context, msgs []*msgpb.Dat
 
 	resp, err := dc.client.ReportDataNodeTtMsgs(ctx, req)
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		log.Warn("failed to report datanodeTtMsgs", zap.Error(err))
+		mlog.Warn(ctx, "failed to report datanodeTtMsgs", mlog.Err(err))
 		return err
 	}
 	return nil
@@ -79,13 +76,13 @@ func (dc *dataCoordBroker) GetSegmentInfo(ctx context.Context, ids []int64) ([]*
 			IncludeUnHealthy: true,
 		})
 		if err := merr.CheckRPCCall(infoResp, err); err != nil {
-			log.Warn("Fail to get SegmentInfo by ids from datacoord", zap.Int64s("segments", ids), zap.Error(err))
+			mlog.Warn(ctx, "Fail to get SegmentInfo by ids from datacoord", mlog.Int64s("segments", ids), mlog.Err(err))
 			return nil, err
 		}
 
 		err = binlog.DecompressMultiBinLogs(infoResp.GetInfos())
 		if err != nil {
-			log.Warn("Fail to DecompressMultiBinLogs", zap.Int64s("segments", ids), zap.Error(err))
+			mlog.Warn(ctx, "Fail to DecompressMultiBinLogs", mlog.Int64s("segments", ids), mlog.Err(err))
 			return nil, err
 		}
 		return infoResp, nil
@@ -99,7 +96,7 @@ func (dc *dataCoordBroker) GetSegmentInfo(ctx context.Context, ids []int64) ([]*
 
 		resp, err := getSegmentInfo(ids[startIdx:endIdx])
 		if err != nil {
-			log.Warn("Fail to get SegmentInfo", zap.Int("total segment num", len(ids)), zap.Int("returned num", startIdx))
+			mlog.Warn(ctx, "Fail to get SegmentInfo", mlog.Int("total segment num", len(ids)), mlog.Int("returned num", startIdx))
 			return nil, err
 		}
 		ret = append(ret, resp.GetInfos()...)
@@ -125,19 +122,17 @@ func (dc *dataCoordBroker) UpdateChannelCheckpoint(ctx context.Context, channelC
 		channelTimes := lo.Map(channelCPs, func(pos *msgpb.MsgPosition, _ int) time.Time {
 			return tsoutil.PhysicalTime(pos.GetTimestamp())
 		})
-		log.Warn("failed to update channel checkpoint", zap.Strings("channelNames", channels),
-			zap.Times("channelCheckpointTimes", channelTimes), zap.Error(err))
+		mlog.Warn(ctx, "failed to update channel checkpoint", mlog.Strings("channelNames", channels),
+			mlog.Times("channelCheckpointTimes", channelTimes), mlog.Err(err))
 		return err
 	}
 	return nil
 }
 
 func (dc *dataCoordBroker) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error {
-	log := log.Ctx(ctx)
-
 	resp, err := dc.client.SaveBinlogPaths(ctx, req)
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		log.Warn("failed to SaveBinlogPaths", zap.Error(err))
+		mlog.Warn(ctx, "failed to SaveBinlogPaths", mlog.Err(err))
 		return err
 	}
 
@@ -145,11 +140,9 @@ func (dc *dataCoordBroker) SaveBinlogPaths(ctx context.Context, req *datapb.Save
 }
 
 func (dc *dataCoordBroker) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
-	log := log.Ctx(ctx)
-
 	resp, err := dc.client.DropVirtualChannel(ctx, req)
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		log.Warn("failed to DropVirtualChannel", zap.Error(err))
+		mlog.Warn(ctx, "failed to DropVirtualChannel", mlog.Err(err))
 		return resp, err
 	}
 
@@ -159,7 +152,7 @@ func (dc *dataCoordBroker) DropVirtualChannel(ctx context.Context, req *datapb.D
 func (dc *dataCoordBroker) ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
 	resp, err := dc.client.ImportV2(ctx, in)
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		log.Ctx(ctx).Warn("failed to ImportV2", zap.Error(err))
+		mlog.Warn(ctx, "failed to ImportV2", mlog.Err(err))
 		return resp, err
 	}
 

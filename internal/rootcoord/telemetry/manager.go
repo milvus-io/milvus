@@ -29,12 +29,11 @@ import (
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -196,16 +195,16 @@ func (m *TelemetryManager) cleanupInactiveClients(ctx context.Context) {
 		if inactiveDuration > m.config.InactiveClientThreshold {
 			m.clientMetrics.Delete(clientID)
 			cleaned++
-			log.Ctx(ctx).Debug("cleanupInactiveClients: removed inactive client",
-				zap.String("client_id", clientID),
-				zap.Duration("inactive_duration", inactiveDuration),
-				zap.Duration("threshold", m.config.InactiveClientThreshold))
+			mlog.Debug(ctx, "cleanupInactiveClients: removed inactive client",
+				mlog.String("client_id", clientID),
+				mlog.Duration("inactive_duration", inactiveDuration),
+				mlog.Duration("threshold", m.config.InactiveClientThreshold))
 		}
 		return true
 	})
 	if cleaned > 0 {
-		log.Ctx(ctx).Debug("cleanupInactiveClients: normal cleanup completed",
-			zap.Int("cleaned_count", cleaned))
+		mlog.Debug(ctx, "cleanupInactiveClients: normal cleanup completed",
+			mlog.Int("cleaned_count", cleaned))
 	}
 
 	// Second pass: enforce LRU eviction if still over limit
@@ -249,28 +248,28 @@ func (m *TelemetryManager) evictLRUIfNeeded(ctx context.Context) {
 	// Evict oldest clients until we're under the limit
 	toEvict := len(entries) - m.config.MaxClientsInMemory
 	if toEvict > 0 {
-		log.Ctx(ctx).Warn("telemetry client count exceeds limit, LRU eviction required",
-			zap.Int("current_count", len(entries)),
-			zap.Int("max_allowed", m.config.MaxClientsInMemory),
-			zap.Int("to_evict", toEvict))
+		mlog.Warn(ctx, "telemetry client count exceeds limit, LRU eviction required",
+			mlog.Int("current_count", len(entries)),
+			mlog.Int("max_allowed", m.config.MaxClientsInMemory),
+			mlog.Int("to_evict", toEvict))
 
 		for i := 0; i < toEvict && i < len(entries); i++ {
 			m.clientMetrics.Delete(entries[i].clientID)
-			log.Ctx(ctx).Debug("cleanupInactiveClients: LRU evicted client",
-				zap.String("client_id", entries[i].clientID),
-				zap.Time("last_heartbeat", entries[i].lastHeartbeat))
+			mlog.Debug(ctx, "cleanupInactiveClients: LRU evicted client",
+				mlog.String("client_id", entries[i].clientID),
+				mlog.Time("last_heartbeat", entries[i].lastHeartbeat))
 		}
 
-		log.Ctx(ctx).Info("cleanupInactiveClients: LRU eviction completed",
-			zap.Int("evicted_count", toEvict),
-			zap.Int("max_allowed", m.config.MaxClientsInMemory))
+		mlog.Info(ctx, "cleanupInactiveClients: LRU eviction completed",
+			mlog.Int("evicted_count", toEvict),
+			mlog.Int("max_allowed", m.config.MaxClientsInMemory))
 	}
 }
 
 // cleanupExpiredCommands removes expired commands from etcd
 func (m *TelemetryManager) cleanupExpiredCommands(ctx context.Context) {
 	if m.commandStore == nil {
-		log.Ctx(ctx).Debug("cleanupExpiredCommands: command store not initialized")
+		mlog.Debug(ctx, "cleanupExpiredCommands: command store not initialized")
 		return
 	}
 
@@ -438,11 +437,11 @@ func (m *TelemetryManager) processCommandReplies(cache *ClientMetricsCache, repl
 		cache.CommandReplies = append(cache.CommandReplies, stored)
 
 		if !reply.Success {
-			log.Warn("processCommandReplies: command execution failed",
-				zap.String("client_id", cache.ClientID),
-				zap.String("command_id", reply.CommandId),
-				zap.String("command_type", cmdType),
-				zap.String("error", reply.ErrorMessage))
+			mlog.Warn(context.TODO(), "processCommandReplies: command execution failed",
+				mlog.String("client_id", cache.ClientID),
+				mlog.String("command_id", reply.CommandId),
+				mlog.String("command_type", cmdType),
+				mlog.String("error", reply.ErrorMessage))
 		}
 
 		if reply.CommandId != "" {
@@ -534,16 +533,16 @@ func (m *TelemetryManager) getCommandsForClientWithID(clientID string, req *milv
 	// Fetch commands from CommandStore (handles caching internally)
 	commands, err := m.commandStore.ListCommands(ctx)
 	if err != nil {
-		log.Ctx(ctx).Warn("getCommandsForClientWithID: failed to fetch commands from CommandStore",
-			zap.Error(err))
+		mlog.Warn(ctx, "getCommandsForClientWithID: failed to fetch commands from CommandStore",
+			mlog.Err(err))
 		return nil
 	}
 
 	// Fetch configs from CommandStore (handles caching internally)
 	configs, _, err := m.commandStore.ListConfigs(ctx)
 	if err != nil {
-		log.Ctx(ctx).Warn("getCommandsForClientWithID: failed to fetch configs from CommandStore",
-			zap.Error(err))
+		mlog.Warn(ctx, "getCommandsForClientWithID: failed to fetch configs from CommandStore",
+			mlog.Err(err))
 		return nil
 	}
 
@@ -780,23 +779,23 @@ func (m *TelemetryManager) PushCommand(ctx context.Context, req *milvuspb.PushCl
 		// Non-retriable: service not ready
 		err := merr.WrapErrServiceNotReady("telemetry", 0, "command_store_not_initialized",
 			"command store not initialized")
-		log.Ctx(ctx).Warn("PushCommand: command store not initialized",
-			zap.Error(err))
+		mlog.Warn(ctx, "PushCommand: command store not initialized",
+			mlog.Err(err))
 		return nil, err
 	}
 	cmdID, err := m.commandStore.PushCommand(ctx, req)
 	if err != nil {
 		// Errors from commandStore are already wrapped with merr
-		log.Ctx(ctx).Warn("PushCommand: failed to push command",
-			zap.Error(err),
-			zap.String("command_type", req.CommandType),
-			zap.Bool("persistent", req.Persistent))
+		mlog.Warn(ctx, "PushCommand: failed to push command",
+			mlog.Err(err),
+			mlog.String("command_type", req.CommandType),
+			mlog.Bool("persistent", req.Persistent))
 		return nil, err
 	}
-	log.Ctx(ctx).Debug("PushCommand: command pushed successfully",
-		zap.String("command_id", cmdID),
-		zap.String("command_type", req.CommandType),
-		zap.Bool("persistent", req.Persistent))
+	mlog.Debug(ctx, "PushCommand: command pushed successfully",
+		mlog.String("command_id", cmdID),
+		mlog.String("command_type", req.CommandType),
+		mlog.Bool("persistent", req.Persistent))
 	return &milvuspb.PushClientCommandResponse{
 		Status:    &commonpb.Status{},
 		CommandId: cmdID,
@@ -809,20 +808,20 @@ func (m *TelemetryManager) DeleteCommand(ctx context.Context, req *milvuspb.Dele
 		// Non-retriable: service not ready
 		err := merr.WrapErrServiceNotReady("telemetry", 0, "command_store_not_initialized",
 			"command store not initialized")
-		log.Ctx(ctx).Warn("DeleteCommand: command store not initialized",
-			zap.Error(err))
+		mlog.Warn(ctx, "DeleteCommand: command store not initialized",
+			mlog.Err(err))
 		return nil, err
 	}
 	err := m.commandStore.DeleteCommand(ctx, req.CommandId)
 	if err != nil {
 		// Errors from commandStore are already wrapped with merr
-		log.Ctx(ctx).Warn("DeleteCommand: failed to delete command",
-			zap.Error(err),
-			zap.String("command_id", req.CommandId))
+		mlog.Warn(ctx, "DeleteCommand: failed to delete command",
+			mlog.Err(err),
+			mlog.String("command_id", req.CommandId))
 		return nil, err
 	}
-	log.Ctx(ctx).Debug("DeleteCommand: command deleted successfully",
-		zap.String("command_id", req.CommandId))
+	mlog.Debug(ctx, "DeleteCommand: command deleted successfully",
+		mlog.String("command_id", req.CommandId))
 	return &milvuspb.DeleteClientCommandResponse{
 		Status: &commonpb.Status{},
 	}, nil
@@ -885,7 +884,7 @@ func (m *TelemetryManager) ListAllCommands(ctx context.Context) ([]*CommandInfo,
 	// Use ListCommandsWithInfo to get all commands including TTLSeconds
 	cmdInfos, err := m.commandStore.ListCommandsWithInfo(ctx)
 	if err != nil {
-		log.Ctx(ctx).Warn("ListAllCommands: failed to list commands", zap.Error(err))
+		mlog.Warn(ctx, "ListAllCommands: failed to list commands", mlog.Err(err))
 		return nil, err
 	}
 

@@ -25,13 +25,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -94,7 +93,7 @@ func (s *CoordSwitchSuite) loadCollection(collectionName string, dim int) {
 		s.NoError(err)
 		s.True(merr.Ok(insertResult.GetStatus()))
 	}
-	log.Info("=========================Data insertion finished=========================")
+	mlog.Info(context.TODO(), "=========================Data insertion finished=========================")
 
 	// flush
 	flushResp, err := c.MilvusClient.Flush(context.TODO(), &milvuspb.FlushRequest{
@@ -113,7 +112,7 @@ func (s *CoordSwitchSuite) loadCollection(collectionName string, dim int) {
 	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
-	log.Info("=========================Data flush finished=========================")
+	mlog.Info(context.TODO(), "=========================Data flush finished=========================")
 
 	// create index
 	createIndexStatus, err := c.MilvusClient.CreateIndex(context.TODO(), &milvuspb.CreateIndexRequest{
@@ -126,7 +125,7 @@ func (s *CoordSwitchSuite) loadCollection(collectionName string, dim int) {
 	err = merr.Error(createIndexStatus)
 	s.NoError(err)
 	s.WaitForIndexBuilt(context.TODO(), collectionName, integration.FloatVecField)
-	log.Info("=========================Index created=========================")
+	mlog.Info(context.TODO(), "=========================Index created=========================")
 
 	// load
 	loadStatus, err := c.MilvusClient.LoadCollection(context.TODO(), &milvuspb.LoadCollectionRequest{
@@ -137,7 +136,7 @@ func (s *CoordSwitchSuite) loadCollection(collectionName string, dim int) {
 	err = merr.Error(loadStatus)
 	s.NoError(err)
 	s.WaitForLoad(context.TODO(), collectionName)
-	log.Info("=========================Collection loaded=========================")
+	mlog.Info(context.TODO(), "=========================Collection loaded=========================")
 }
 
 func (s *CoordSwitchSuite) checkCollections() bool {
@@ -163,7 +162,8 @@ func (s *CoordSwitchSuite) checkCollections() bool {
 			loaded++
 		}
 	}
-	log.Info(fmt.Sprintf("loading status: %d/%d", loaded, len(resp.GetCollectionNames())))
+	mlog.Info(context.TODO(),
+		fmt.Sprintf("loading status: %d/%d", loaded, len(resp.GetCollectionNames())))
 	return notLoaded == 0
 }
 
@@ -217,8 +217,9 @@ func (s *CoordSwitchSuite) setupData() {
 		goRoutineNum = numCollections
 	}
 	collectionBatchSize := numCollections / goRoutineNum
-	log.Info(fmt.Sprintf("=========================test with Dim=%d, rowsPerCollection=%d, numCollections=%d, goRoutineNum=%d==================", Dim, rowsPerCollection, numCollections, goRoutineNum))
-	log.Info("=========================Start to inject data=========================")
+	mlog.Info(context.TODO(),
+		fmt.Sprintf("=========================test with Dim=%d, rowsPerCollection=%d, numCollections=%d, goRoutineNum=%d==================", Dim, rowsPerCollection, numCollections, goRoutineNum))
+	mlog.Info(context.TODO(), "=========================Start to inject data=========================")
 	prefix := "TestCoordSwitch" + funcutil.GenRandomStr()
 	searchName := prefix + "_0"
 	wg := sync.WaitGroup{}
@@ -227,23 +228,24 @@ func (s *CoordSwitchSuite) setupData() {
 		go s.insertBatchCollections(prefix, collectionBatchSize, idx*collectionBatchSize, Dim, &wg)
 	}
 	wg.Wait()
-	log.Info("=========================Data injection finished=========================")
+	mlog.Info(context.TODO(), "=========================Data injection finished=========================")
 	s.Require().True(s.checkCollections())
-	log.Info(fmt.Sprintf("=========================start to search %s=========================", searchName))
+	mlog.Info(context.TODO(),
+		fmt.Sprintf("=========================start to search %s=========================", searchName))
 	s.search(searchName, Dim)
-	log.Info("=========================Search finished=========================")
+	mlog.Info(context.TODO(), "=========================Search finished=========================")
 }
 
 func (s *CoordSwitchSuite) switchCoord() float64 {
 	c := s.Cluster
 	start := time.Now()
-	log.Info("=========================Stopping Coordinators========================")
+	mlog.Info(context.TODO(), "=========================Stopping Coordinators========================")
 	c.DefaultMixCoord().Stop()
-	log.Info("=========================Coordinators stopped=========================", zap.Duration("elapsed", time.Since(start)))
+	mlog.Info(context.TODO(), "=========================Coordinators stopped=========================", mlog.Duration("elapsed", time.Since(start)))
 	start = time.Now()
 
 	c.AddMixCoord()
-	log.Info("=========================RootCoord restarted=========================")
+	mlog.Info(context.TODO(), "=========================RootCoord restarted=========================")
 
 	for i := 0; i < 1000; i++ {
 		time.Sleep(time.Second)
@@ -253,9 +255,10 @@ func (s *CoordSwitchSuite) switchCoord() float64 {
 	}
 	elapsed := time.Since(start).Seconds()
 
-	log.Info(fmt.Sprintf("=========================CheckCollections Done in %f seconds=========================", elapsed))
+	mlog.Info(context.TODO(),
+		fmt.Sprintf("=========================CheckCollections Done in %f seconds=========================", elapsed))
 	s.search(searchName, Dim)
-	log.Info("=========================Search finished after reboot=========================")
+	mlog.Info(context.TODO(), "=========================Search finished after reboot=========================")
 	return elapsed
 }
 
@@ -273,7 +276,8 @@ func (s *CoordSwitchSuite) TestCoordSwitch() {
 			maxTime = t
 		}
 	}
-	log.Info(fmt.Sprintf("=========================Coordinators init time avg=%fs(%fs/%d), min=%fs, max=%fs=========================", totalElapsed/float64(rounds), totalElapsed, rounds, minTime, maxTime))
+	mlog.Info(context.TODO(),
+		fmt.Sprintf("=========================Coordinators init time avg=%fs(%fs/%d), min=%fs, max=%fs=========================", totalElapsed/float64(rounds), totalElapsed, rounds, minTime, maxTime))
 	s.True(totalElapsed < float64(maxAllowedInitTimeInSeconds*rounds))
 }
 

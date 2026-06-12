@@ -1,9 +1,9 @@
 package adaptor
 
 import (
-	"go.uber.org/zap"
+	"context"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -105,7 +105,7 @@ func (m *MsgPackAdaptorHandler) Close() {
 // NewBaseMsgPackAdaptorHandler create a new base message pack adaptor handler.
 func NewBaseMsgPackAdaptorHandler() *BaseMsgPackAdaptorHandler {
 	return &BaseMsgPackAdaptorHandler{
-		Logger:         log.With(),
+		Logger:         mlog.With(),
 		Pendings:       make([]message.ImmutableMessage, 0),
 		PendingMsgPack: typeutil.NewMultipartQueue[*msgstream.ConsumeMsgPack](),
 	}
@@ -113,7 +113,7 @@ func NewBaseMsgPackAdaptorHandler() *BaseMsgPackAdaptorHandler {
 
 // BaseMsgPackAdaptorHandler is the handler for message pack.
 type BaseMsgPackAdaptorHandler struct {
-	Logger         *log.MLogger
+	Logger         *mlog.Logger
 	Pendings       []message.ImmutableMessage                          // pendings hold the vOld message which has same time tick.
 	PendingMsgPack *typeutil.MultipartQueue[*msgstream.ConsumeMsgPack] // pendingMsgPack hold unsent msgPack.
 }
@@ -129,11 +129,11 @@ func (m *BaseMsgPackAdaptorHandler) GenerateMsgPack(msg message.ImmutableMessage
 				m.addMsgPackIntoPending(m.Pendings...)
 				m.Pendings = nil
 			} else if msg.TimeTick() < m.Pendings[0].TimeTick() {
-				m.Logger.Warn("message time tick is less than pendings",
-					zap.String("messageID", msg.MessageID().String()),
-					zap.String("pendingMessageID", m.Pendings[0].MessageID().String()),
-					zap.Uint64("timeTick", msg.TimeTick()),
-					zap.Uint64("pendingTimeTick", m.Pendings[0].TimeTick()))
+				m.Logger.Warn(context.TODO(), "message time tick is less than pendings",
+					mlog.String("messageID", msg.MessageID().String()),
+					mlog.String("pendingMessageID", m.Pendings[0].MessageID().String()),
+					mlog.Uint64("timeTick", msg.TimeTick()),
+					mlog.Uint64("pendingTimeTick", m.Pendings[0].TimeTick()))
 				return
 			}
 		}
@@ -169,7 +169,7 @@ func (m *BaseMsgPackAdaptorHandler) addMsgPackIntoPending(msgs ...message.Immuta
 	}
 	newPack, err := NewMsgPackFromMessage(dedupMessages...)
 	if err != nil {
-		m.Logger.Warn("failed to convert message to msgpack", zap.Error(err))
+		m.Logger.Warn(context.TODO(), "failed to convert message to msgpack", mlog.Err(err))
 	}
 	if newPack != nil {
 		m.PendingMsgPack.AddOne(msgstream.BuildConsumeMsgPack(newPack))

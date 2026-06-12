@@ -22,12 +22,11 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -75,13 +74,13 @@ func NewChannelCheckpointUpdaterWithCallback(broker broker.Broker, updateDoneCal
 }
 
 func (ccu *ChannelCheckpointUpdater) Start() {
-	log.Info("channel checkpoint updater start")
+	mlog.Info(context.TODO(), "channel checkpoint updater start")
 	ticker := time.NewTicker(paramtable.Get().DataNodeCfg.ChannelCheckpointUpdateTickInSeconds.GetAsDuration(time.Second))
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ccu.closeCh:
-			log.Info("channel checkpoint updater exit")
+			mlog.Info(context.TODO(), "channel checkpoint updater exit")
 			return
 		case <-ccu.notifyChan:
 			var tasks []*channelCPUpdateTask
@@ -134,7 +133,7 @@ func (ccu *ChannelCheckpointUpdater) updateCheckpoints(tasks []*channelCPUpdateT
 				})
 				err := ccu.broker.UpdateChannelCheckpoint(ctx, channelCPs)
 				if err != nil {
-					log.Warn("update channel checkpoint failed", zap.Error(err))
+					mlog.Warn(context.TODO(), "update channel checkpoint failed", mlog.Err(err))
 					return
 				}
 				for _, task := range tasks {
@@ -172,7 +171,7 @@ func (ccu *ChannelCheckpointUpdater) execute() {
 func (ccu *ChannelCheckpointUpdater) AddTask(channelPos *msgpb.MsgPosition, flush bool, callback func()) {
 	// Note: Only earliest msgId of woodpecker can be empty bytes
 	if channelPos == nil || (channelPos.GetMsgID() == nil && channelPos.GetWALName() != commonpb.WALName_WoodPecker) || channelPos.GetChannelName() == "" {
-		log.Warn("illegal checkpoint", zap.Any("pos", channelPos))
+		mlog.Warn(context.TODO(), "illegal checkpoint", mlog.Any("pos", channelPos))
 		return
 	}
 	if flush {

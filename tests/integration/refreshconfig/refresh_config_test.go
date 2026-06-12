@@ -23,13 +23,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
@@ -48,22 +47,22 @@ func (s *RefreshConfigSuite) TestRefreshPasswordLength() {
 		Username: "test",
 		Password: "1234",
 	})
-	log.Debug("first create result", zap.Any("state", resp))
+	mlog.Debug(context.TODO(), "first create result", mlog.Any("state", resp))
 	s.Require().NoError(err)
 	s.Equal(commonpb.ErrorCode_IllegalArgument, resp.GetErrorCode())
 
 	params := paramtable.Get()
 	key := fmt.Sprintf("%s/config/proxy/minpasswordlength", params.EtcdCfg.RootPath.GetValue())
-	log.Debug("etcd key", zap.String("key", key), zap.Any("endpoints", c.EtcdCli.Endpoints()))
+	mlog.Debug(context.TODO(), "etcd key", mlog.String("key", key), mlog.Any("endpoints", c.EtcdCli.Endpoints()))
 	r, e := c.EtcdCli.Put(ctx, key, "3")
-	log.Debug("etcd put result", zap.Any("resp", r), zap.Error(e))
+	mlog.Debug(context.TODO(), "etcd put result", mlog.Any("resp", r), mlog.Err(e))
 
 	s.Eventually(func() bool {
 		resp, err = c.MilvusClient.CreateCredential(ctx, &milvuspb.CreateCredentialRequest{
 			Username: "test",
 			Password: "1234",
 		})
-		log.Debug("second create result", zap.Any("state", resp))
+		mlog.Debug(context.TODO(), "second create result", mlog.Any("state", resp))
 		return commonpb.ErrorCode_Success == resp.GetErrorCode()
 	}, time.Second*20, time.Millisecond*500)
 }
@@ -96,7 +95,7 @@ func (s *RefreshConfigSuite) TestRefreshDefaultIndexName() {
 	})
 	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.String("reason", createCollectionStatus.GetReason()))
 	}
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 

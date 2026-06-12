@@ -34,7 +34,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/proto"
@@ -58,8 +57,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -251,15 +250,15 @@ func (s *proxyTestServer) startGrpc(ctx context.Context, p *paramtable.GrpcServe
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
 
-	log.Debug("Proxy server about to listen on localhost:0")
+	mlog.Debug(ctx, "Proxy server about to listen on localhost:0")
 	lis, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
-		log.Warn("Proxy server failed to listen on", zap.Error(err))
+		mlog.Warn(ctx, "Proxy server failed to listen on", mlog.Err(err))
 		s.ch <- err
 		return
 	}
 	s.lisAddr = lis.Addr().String()
-	log.Debug("Proxy server listening on", zap.String("addr", s.lisAddr))
+	mlog.Debug(ctx, "Proxy server listening on", mlog.String("addr", s.lisAddr))
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -280,16 +279,16 @@ func (s *proxyTestServer) startGrpc(ctx context.Context, p *paramtable.GrpcServe
 	proxypb.RegisterProxyServer(s.grpcServer, s)
 	milvuspb.RegisterMilvusServiceServer(s.grpcServer, s)
 
-	log.Debug("create Proxy grpc server",
-		zap.Any("enforcement policy", kaep),
-		zap.Any("server parameters", kasp))
+	mlog.Debug(ctx, "create Proxy grpc server",
+		mlog.Any("enforcement policy", kaep),
+		mlog.Any("server parameters", kasp))
 
-	log.Debug("waiting for Proxy grpc server to be ready")
+	mlog.Debug(ctx, "waiting for Proxy grpc server to be ready")
 	go funcutil.CheckGrpcReady(ctx, s.ch)
 
-	log.Debug("Proxy grpc server has been ready, serve grpc requests on listen")
+	mlog.Debug(ctx, "Proxy grpc server has been ready, serve grpc requests on listen")
 	if err := s.grpcServer.Serve(lis); err != nil {
-		log.Warn("failed to serve on Proxy's listener", zap.Error(err))
+		mlog.Warn(ctx, "failed to serve on Proxy's listener", mlog.Err(err))
 		s.ch <- err
 	}
 }
@@ -942,19 +941,19 @@ func TestProxy(t *testing.T) {
 	factory := dependency.NewDefaultFactory(false)
 	alias := "TestProxy"
 
-	log.Info("Initialize parameter table of Proxy")
+	mlog.Info(context.TODO(), "Initialize parameter table of Proxy")
 
 	mix := runMixCoord(ctx, localMsg)
-	log.Info("running MixCoord ...")
+	mlog.Info(context.TODO(), "running MixCoord ...")
 
 	dn := runDataNode(ctx, localMsg, alias)
-	log.Info("running DataNode ...")
+	mlog.Info(context.TODO(), "running DataNode ...")
 
 	sn := runStreamingNode(ctx, localMsg, alias)
-	log.Info("running StreamingNode ...")
+	mlog.Info(context.TODO(), "running StreamingNode ...")
 
 	qn := runQueryNode(ctx, localMsg, alias)
-	log.Info("running QueryNode ...")
+	mlog.Info(context.TODO(), "running QueryNode ...")
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -996,14 +995,14 @@ func TestProxy(t *testing.T) {
 	err = componentutil.WaitForComponentHealthy(ctx, rootCoordClient, typeutil.MixCoordRole, attempts, sleepDuration)
 	assert.NoError(t, err)
 	proxy.SetMixCoordClient(rootCoordClient)
-	log.Info("Proxy set mix coordinator client")
+	mlog.Info(context.TODO(), "Proxy set mix coordinator client")
 
 	mockShardMgr := shardclient.NewMockShardClientManager(t)
 	mockShardMgr.EXPECT().SetClientCreatorFunc(mock.Anything).Return().Maybe()
 	proxy.shardMgr = mockShardMgr
 
 	proxy.SetQueryNodeCreator(shardclient.DefaultQueryNodeClientCreator)
-	log.Info("Proxy set query coordinator client")
+	mlog.Info(context.TODO(), "Proxy set query coordinator client")
 
 	proxy.UpdateStateCode(commonpb.StateCode_Initializing)
 	err = proxy.Init()
@@ -1016,34 +1015,34 @@ func TestProxy(t *testing.T) {
 	// register proxy
 	err = proxy.Register()
 	assert.NoError(t, err)
-	log.Info("Register proxy done")
+	mlog.Info(context.TODO(), "Register proxy done")
 	defer func() {
 		a := []any{mix, qn, dn, sn, proxy}
 		fmt.Println(len(a))
 		// HINT: the order of stopping service refers to the `roles.go` file
-		log.Info("start to stop the services")
+		mlog.Info(context.TODO(), "start to stop the services")
 		{
 			err := sn.Stop()
 			assert.NoError(t, err)
-			log.Info("stop StreamingNode")
+			mlog.Info(context.TODO(), "stop StreamingNode")
 		}
 
 		{
 			err := mix.Stop()
 			assert.NoError(t, err)
-			log.Info("stop MixCoord")
+			mlog.Info(context.TODO(), "stop MixCoord")
 		}
 
 		{
 			err := dn.Stop()
 			assert.NoError(t, err)
-			log.Info("stop DataNode")
+			mlog.Info(context.TODO(), "stop DataNode")
 		}
 
 		{
 			err := proxy.Stop()
 			assert.NoError(t, err)
-			log.Info("stop Proxy")
+			mlog.Info(context.TODO(), "stop Proxy")
 		}
 		cancel()
 	}()
@@ -1546,7 +1545,7 @@ func TestProxy(t *testing.T) {
 		// it can only be seen by streamingnode right away, so we need to check the flush state at streamingnode but not here.
 		// use timetick for GetFlushState in-future but not segment list.
 		time.Sleep(5 * time.Second)
-		log.Info("flush collection", zap.Int64s("segments to be flushed", segmentIDs))
+		mlog.Info(context.TODO(), "flush collection", mlog.Int64s("segments to be flushed", segmentIDs))
 
 		// waiting for flush operation to be done
 		counter := 0
@@ -1561,7 +1560,7 @@ func TestProxy(t *testing.T) {
 		}
 	})
 	if !flushed {
-		log.Warn("flush operation was not sure to be done")
+		mlog.Warn(context.TODO(), "flush operation was not sure to be done")
 	}
 
 	t.Run("get statistics after flush", func(t *testing.T) {
@@ -3770,7 +3769,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	testServer.gracefulStop()
-	log.Info("case done")
+	mlog.Info(context.TODO(), "case done")
 }
 
 func testProxyRole(ctx context.Context, t *testing.T, proxy *Proxy) {

@@ -17,10 +17,11 @@
 package shardclient
 
 import (
+	"context"
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -71,11 +72,11 @@ func (b *ChannelBlacklist) cleanupLoop() {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	log.Info("Start blacklist cleanup loop")
+	mlog.Info(context.TODO(), "Start blacklist cleanup loop")
 	for {
 		select {
 		case <-b.closeCh:
-			log.Info("Blacklist cleanup loop exit")
+			mlog.Info(context.TODO(), "Blacklist cleanup loop exit")
 			return
 		case <-ticker.C:
 			b.cleanup()

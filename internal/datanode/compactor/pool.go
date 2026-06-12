@@ -20,10 +20,8 @@ import (
 	"context"
 	"sync"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -42,20 +40,20 @@ func initExecPool() {
 
 	watchKey := pt.DataNodeCfg.MaxCompactionConcurrency.Key
 	pt.Watch(watchKey, config.NewHandler(watchKey, resizeExecPool))
-	log.Info("init compaction execution pool done", zap.Int("size", initPoolSize))
+	mlog.Info(context.TODO(), "init compaction execution pool done", mlog.Int("size", initPoolSize))
 }
 
 func resizeExecPool(evt *config.Event) {
 	if evt.HasUpdated {
 		newSize := paramtable.Get().DataNodeCfg.MaxCompactionConcurrency.GetAsInt()
-		log := log.Ctx(context.Background()).With(zap.Int("newSize", newSize))
+		log := mlog.With(mlog.Int("newSize", newSize))
 
 		err := GetExecPool().Resize(newSize)
 		if err != nil {
-			log.Warn("failed to resize pool", zap.Error(err))
+			log.Warn(context.TODO(), "failed to resize pool", mlog.Err(err))
 			return
 		}
-		log.Info("pool resize successfully")
+		log.Info(context.TODO(), "pool resize successfully")
 	}
 }
 

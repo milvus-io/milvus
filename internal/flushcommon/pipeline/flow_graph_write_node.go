@@ -6,7 +6,6 @@ import (
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -17,7 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -146,7 +145,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 	schemaVersion := currentSchema.GetVersion()
 	functionOutputFieldIDs, err := wNode.getEmbeddingOutputFieldIDs(currentSchema)
 	if err != nil {
-		log.Error("failed to get embedding output fields", zap.Error(err))
+		mlog.Error(context.TODO(), "failed to get embedding output fields", mlog.Err(err))
 		panic(err)
 	}
 
@@ -157,13 +156,13 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 				continue
 			}
 			if err := wNode.fillEmbeddingData(currentSchema, msg); err != nil {
-				log.Error("failed to fill embedding data", zap.Error(err))
+				mlog.Error(context.TODO(), "failed to fill embedding data", mlog.Err(err))
 				panic(err)
 			}
 		}
 		preparedInsertData, err := writebuffer.PrepareInsert(currentSchema, wNode.pkField, fgMsg.InsertMessages)
 		if err != nil {
-			log.Error("failed to prepare data", zap.Error(err))
+			mlog.Error(context.TODO(), "failed to prepare data", mlog.Err(err))
 			panic(err)
 		}
 		insertData = preparedInsertData
@@ -172,7 +171,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 
 	err = wNode.wbManager.BufferData(wNode.channelName, fgMsg.InsertData, fgMsg.DeleteMessages, start, end, schemaVersion)
 	if err != nil {
-		log.Error("failed to buffer data", zap.Error(err))
+		mlog.Error(context.TODO(), "failed to buffer data", mlog.Err(err))
 		panic(err)
 	}
 
@@ -181,7 +180,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 		func(id int64, _ int) (*commonpb.SegmentStats, bool) {
 			segInfo, ok := wNode.metacache.GetSegmentByID(id)
 			if !ok {
-				log.Warn("segment not found for stats", zap.Int64("segment", id))
+				mlog.Warn(context.TODO(), "segment not found for stats", mlog.Int64("segment", id))
 				return nil, false
 			}
 			return &commonpb.SegmentStats{

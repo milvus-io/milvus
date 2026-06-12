@@ -1,18 +1,18 @@
 package testcases
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	clientv2 "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -40,7 +40,7 @@ func TestLoadCollection(t *testing.T) {
 	common.CheckErr(t, err, true)
 
 	t.Log("https://github.com/milvus-io/milvus/issues/34149")
-	log.Debug("collection", zap.Bool("loaded", coll.Loaded))
+	mlog.Debug(context.TODO(), "collection", mlog.Bool("loaded", coll.Loaded))
 
 	res, err := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithOutputFields(common.QueryCountFieldName))
 	common.CheckErr(t, err, true)
@@ -135,7 +135,7 @@ func TestLoadCollectionMultiPartitions(t *testing.T) {
 
 	// query from parName -> error
 	_, err = mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithOutputFields(common.QueryCountFieldName).WithPartitions(parName))
-	log.Debug("error", zap.Error(err))
+	mlog.Debug(context.TODO(), "error", mlog.Err(err))
 	common.CheckErr(t, err, false, "partition not loaded")
 
 	// query count(*) from default partition

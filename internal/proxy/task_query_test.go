@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -35,7 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -1648,7 +1647,7 @@ func getFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 			FieldId: fieldID,
 		}
 	default:
-		log.Warn("not supported field type", zap.String("fieldType", fieldType.String()))
+		mlog.Warn(context.TODO(), "not supported field type", mlog.String("fieldType", fieldType.String()))
 	}
 
 	return fieldData

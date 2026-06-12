@@ -5,12 +5,11 @@ import (
 	"fmt"
 
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -20,7 +19,7 @@ import (
 func (ut *upsertTask) Execute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-Execute")
 	defer sp.End()
-	log := log.Ctx(ctx).With(zap.String("collectionName", ut.req.CollectionName))
+	log := mlog.With(mlog.FieldCollectionName(ut.req.CollectionName))
 
 	var ez *message.CipherConfig
 	if hookutil.IsClusterEncryptionEnabled() {
@@ -29,19 +28,19 @@ func (ut *upsertTask) Execute(ctx context.Context) error {
 
 	insertMsgs, err := ut.packInsertMessage(ctx, ez)
 	if err != nil {
-		log.Warn("pack insert message failed", zap.Error(err))
+		log.Warn(ctx, "pack insert message failed", mlog.Err(err))
 		return err
 	}
 	deleteMsgs, err := ut.packDeleteMessage(ctx, ez)
 	if err != nil {
-		log.Warn("pack delete message failed", zap.Error(err))
+		log.Warn(ctx, "pack delete message failed", mlog.Err(err))
 		return err
 	}
 
 	messages := append(insertMsgs, deleteMsgs...)
 	resp := streaming.WAL().AppendMessages(ctx, messages...)
 	if err := resp.UnwrapFirstError(); err != nil {
-		log.Warn("append messages to wal failed", zap.Error(err))
+		log.Warn(ctx, "append messages to wal failed", mlog.Err(err))
 		if status.AsStreamingError(err).IsSchemaVersionMismatch() {
 			return merr.ErrCollectionSchemaMismatch
 		}
@@ -62,27 +61,27 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 		return nil, err
 	}
 	ut.upsertMsg.InsertMsg.CollectionID = collID
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", collID))
+	log := mlog.With(
+		mlog.FieldCollectionID(collID))
 	getCacheDur := tr.RecordSpan()
 
 	getMsgStreamDur := tr.RecordSpan()
 	channelNames, err := ut.chMgr.getVChannels(collID)
 	if err != nil {
-		log.Warn("get vChannels failed when insertExecute",
-			zap.Error(err))
+		log.Warn(ctx, "get vChannels failed when insertExecute",
+			mlog.Err(err))
 		ut.result.Status = merr.Status(err)
 		return nil, err
 	}
 
-	log.Debug("send insert request to virtual channels when insertExecute",
-		zap.String("collection", ut.req.GetCollectionName()),
-		zap.String("partition", ut.req.GetPartitionName()),
-		zap.Int64("collection_id", collID),
-		zap.Strings("virtual_channels", channelNames),
-		zap.Int64("task_id", ut.ID()),
-		zap.Duration("get cache duration", getCacheDur),
-		zap.Duration("get msgStream duration", getMsgStreamDur))
+	log.Debug(ctx, "send insert request to virtual channels when insertExecute",
+		mlog.String("collection", ut.req.GetCollectionName()),
+		mlog.String("partition", ut.req.GetPartitionName()),
+		mlog.FieldCollectionID(collID),
+		mlog.Strings("virtual_channels", channelNames),
+		mlog.FieldTaskID(ut.ID()),
+		mlog.Duration("get cache duration", getCacheDur),
+		mlog.Duration("get msgStream duration", getMsgStreamDur))
 
 	// start to repack insert data
 	var msgs []message.MutableMessage
@@ -92,7 +91,7 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schemaVersion)
 	}
 	if err != nil {
-		log.Warn("assign segmentID and repack insert data failed", zap.Error(err))
+		log.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
 		ut.result.Status = merr.Status(err)
 		return nil, err
 	}
@@ -106,12 +105,12 @@ func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherC
 		// if primary keys are not set by queryPreExecute, use oldIDs to delete all given records
 		ut.upsertMsg.DeleteMsg.PrimaryKeys = ut.oldIDs
 	}
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", collID))
+	log := mlog.With(
+		mlog.FieldCollectionID(collID))
 	// hash primary keys to channels
 	vChannels, err := ut.chMgr.getVChannels(collID)
 	if err != nil {
-		log.Warn("get vChannels failed when deleteExecute", zap.Error(err))
+		log.Warn(ctx, "get vChannels failed when deleteExecute", mlog.Err(err))
 		ut.result.Status = merr.Status(err)
 		return nil, err
 	}
@@ -147,12 +146,12 @@ func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherC
 		}
 	}
 
-	log.Debug("Proxy Upsert deleteExecute done",
-		zap.Int64("collection_id", collID),
-		zap.Strings("virtual_channels", vChannels),
-		zap.Int64("taskID", ut.ID()),
-		zap.Int64("numRows", numRows),
-		zap.Duration("prepare duration", tr.ElapseSpan()))
+	log.Debug(ctx, "Proxy Upsert deleteExecute done",
+		mlog.FieldCollectionID(collID),
+		mlog.Strings("virtual_channels", vChannels),
+		mlog.FieldTaskID(ut.ID()),
+		mlog.Int64("numRows", numRows),
+		mlog.Duration("prepare duration", tr.ElapseSpan()))
 
 	return msgs, nil
 }

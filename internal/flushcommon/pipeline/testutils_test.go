@@ -23,7 +23,6 @@ import (
 	"math"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -35,7 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -466,8 +465,8 @@ func GenRowData() (rawData []byte) {
 		panic(err)
 	}
 	rawData = append(rawData, bfloat64.Bytes()...)
-	log.Ctx(context.TODO()).Debug("Rawdata length:", zap.Int("Length of rawData", len(rawData)))
-	return
+	mlog.Debug(context.TODO(), "Rawdata length:", mlog.Int("Length of rawData", len(rawData)))
+	return rawData
 }
 
 func GenColumnData() (fieldsData []*schemapb.FieldData) {
@@ -653,7 +652,7 @@ func GenColumnData() (fieldsData []*schemapb.FieldData) {
 	}
 	fieldsData = append(fieldsData, varCharFieldData)
 
-	return
+	return fieldsData
 }
 
 func (df *DataFactory) GenMsgStreamInsertMsg(idx int, chanName string) *msgstream.InsertMsg {
@@ -720,7 +719,7 @@ func (df *DataFactory) GetMsgStreamTsInsertMsgs(n int, chanName string, ts typeu
 		var tsMsg msgstream.TsMsg = msg
 		inMsgs = append(inMsgs, tsMsg)
 	}
-	return
+	return inMsgs
 }
 
 func (df *DataFactory) GetMsgStreamInsertMsgs(n int) (msgs []*msgstream.InsertMsg) {
@@ -728,7 +727,7 @@ func (df *DataFactory) GetMsgStreamInsertMsgs(n int) (msgs []*msgstream.InsertMs
 		msg := df.GenMsgStreamInsertMsg(i, "")
 		msgs = append(msgs, msg)
 	}
-	return
+	return msgs
 }
 
 func (df *DataFactory) GenMsgStreamDeleteMsg(pks []storage.PrimaryKey, chanName string) *msgstream.DeleteMsg {

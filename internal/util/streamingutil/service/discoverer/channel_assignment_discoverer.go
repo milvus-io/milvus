@@ -3,11 +3,10 @@ package discoverer
 import (
 	"context"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc/resolver"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/attributes"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -76,7 +75,7 @@ func (s *VersionedState) ChannelAssignmentInfo() map[int64]types.StreamingNodeAs
 	for _, v := range s.State.Addresses {
 		assignment := attributes.GetChannelAssignmentInfoFromAttributes(v.BalancerAttributes)
 		if assignment == nil {
-			log.Error("no assignment found in resolver state, skip it", zap.String("address", v.Addr))
+			mlog.Error(context.TODO(), "no assignment found in resolver state, skip it", mlog.String("address", v.Addr))
 			continue
 		}
 		assignments[assignment.NodeInfo.ServerID] = *assignment

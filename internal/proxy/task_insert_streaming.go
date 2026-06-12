@@ -5,14 +5,13 @@ import (
 	"fmt"
 
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -34,9 +33,8 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 	collectionName := it.insertMsg.CollectionName
 	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.insertMsg.GetDbName(), collectionName)
-	log := log.Ctx(ctx)
 	if err != nil {
-		log.Warn("fail to get collection id", zap.Error(err))
+		mlog.Warn(ctx, "fail to get collection id", mlog.Err(err))
 		return err
 	}
 	it.insertMsg.CollectionID = collID
@@ -44,18 +42,18 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	getCacheDur := tr.RecordSpan()
 	channelNames, err := it.chMgr.getVChannels(collID)
 	if err != nil {
-		log.Warn("get vChannels failed", zap.Int64("collectionID", collID), zap.Error(err))
+		mlog.Warn(ctx, "get vChannels failed", mlog.FieldCollectionID(collID), mlog.Err(err))
 		it.result.Status = merr.Status(err)
 		return err
 	}
 
-	log.Debug("send insert request to virtual channels",
-		zap.String("partition", it.insertMsg.GetPartitionName()),
-		zap.Int64("collectionID", collID),
-		zap.Strings("virtual_channels", channelNames),
-		zap.Int64("task_id", it.ID()),
-		zap.Bool("is_parition_key", it.partitionKeys != nil),
-		zap.Duration("get cache duration", getCacheDur))
+	mlog.Debug(ctx, "send insert request to virtual channels",
+		mlog.String("partition", it.insertMsg.GetPartitionName()),
+		mlog.FieldCollectionID(collID),
+		mlog.Strings("virtual_channels", channelNames),
+		mlog.FieldTaskID(it.ID()),
+		mlog.Bool("is_parition_key", it.partitionKeys != nil),
+		mlog.Duration("get cache duration", getCacheDur))
 
 	var ez *message.CipherConfig
 	if hookutil.IsClusterEncryptionEnabled() {
@@ -70,13 +68,13 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schemaVersion)
 	}
 	if err != nil {
-		log.Warn("assign segmentID and repack insert data failed", zap.Error(err))
+		mlog.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
 		it.result.Status = merr.Status(err)
 		return err
 	}
 	resp := streaming.WAL().AppendMessages(ctx, msgs...)
 	if err := resp.UnwrapFirstError(); err != nil {
-		log.Warn("append messages to wal failed", zap.Error(err))
+		mlog.Warn(ctx, "append messages to wal failed", mlog.Err(err))
 		if status.AsStreamingError(err).IsSchemaVersionMismatch() {
 			it.result.Status = merr.Status(merr.ErrCollectionSchemaMismatch)
 		} else {
@@ -152,9 +150,9 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 	channel2RowOffsets := assignChannelsByPK(result.IDs, channelNames, insertMsg)
 	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, insertMsg.GetDbName(), insertMsg.CollectionName)
 	if err != nil {
-		log.Ctx(ctx).Warn("get default partition names failed in partition key mode",
-			zap.String("collectionName", insertMsg.CollectionName),
-			zap.Error(err))
+		mlog.Warn(ctx, "get default partition names failed in partition key mode",
+			mlog.FieldCollectionName(insertMsg.CollectionName),
+			mlog.Err(err))
 		return nil, err
 	}
 
@@ -163,10 +161,10 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 	for _, partitionName := range partitionNames {
 		partitionID, err := globalMetaCache.GetPartitionID(ctx, insertMsg.GetDbName(), insertMsg.CollectionName, partitionName)
 		if err != nil {
-			log.Ctx(ctx).Warn("get partition id failed",
-				zap.String("collectionName", insertMsg.CollectionName),
-				zap.String("partitionName", partitionName),
-				zap.Error(err))
+			mlog.Warn(ctx, "get partition id failed",
+				mlog.FieldCollectionName(insertMsg.CollectionName),
+				mlog.FieldPartitionName(partitionName),
+				mlog.Err(err))
 			return nil, err
 		}
 		partitionIDs[partitionName] = partitionID
@@ -174,9 +172,9 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 
 	hashValues, err := typeutil.HashKey2Partitions(partitionKeys, partitionNames)
 	if err != nil {
-		log.Ctx(ctx).Warn("has partition keys to partitions failed",
-			zap.String("collectionName", insertMsg.CollectionName),
-			zap.Error(err))
+		mlog.Warn(ctx, "has partition keys to partitions failed",
+			mlog.FieldCollectionName(insertMsg.CollectionName),
+			mlog.Err(err))
 		return nil, err
 	}
 	for channel, rowOffsets := range channel2RowOffsets {

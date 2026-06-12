@@ -12,6 +12,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -23,10 +24,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 
 	rocksdbkv "github.com/milvus-io/milvus/pkg/v3/kv/rocksdb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -501,10 +501,10 @@ func TestRocksmq_Throughout(t *testing.T) {
 	}
 	pt1 := time.Now().UnixNano() / int64(time.Millisecond)
 	pDuration := pt1 - pt0
-	log.Info("Rocksmq_Throughout",
-		zap.Int("Total produce item number", entityNum),
-		zap.Int64("Total cost (ms)", pDuration),
-		zap.Int64("Total throughout (s)", int64(entityNum)*1000/pDuration))
+	mlog.Info(context.TODO(), "Rocksmq_Throughout",
+		mlog.Int("Total produce item number", entityNum),
+		mlog.Int64("Total cost (ms)", pDuration),
+		mlog.Int64("Total throughout (s)", int64(entityNum)*1000/pDuration))
 
 	groupName := "test_throughout_group"
 	_ = rmq.DestroyConsumerGroup(channelName, groupName)
@@ -521,10 +521,10 @@ func TestRocksmq_Throughout(t *testing.T) {
 	}
 	ct1 := time.Now().UnixNano() / int64(time.Millisecond)
 	cDuration := ct1 - ct0
-	log.Info("Rocksmq_Throughout",
-		zap.Int("Total produce item number", entityNum),
-		zap.Int64("Total cost (ms)", cDuration),
-		zap.Int64("Total throughout (s)", int64(entityNum)*1000/cDuration))
+	mlog.Info(context.TODO(), "Rocksmq_Throughout",
+		mlog.Int("Total produce item number", entityNum),
+		mlog.Int64("Total cost (ms)", cDuration),
+		mlog.Int64("Total throughout (s)", int64(entityNum)*1000/cDuration))
 }
 
 func TestRocksmq_MultiChan(t *testing.T) {

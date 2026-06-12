@@ -19,13 +19,12 @@ package ratelimit
 import (
 	"context"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/tests/integration"
@@ -59,11 +58,11 @@ func (s *DBPropertiesSuite) TestFlush() {
 	err = merr.CheckRPCCall(createCollectionStatus, err)
 	s.NoError(err)
 
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	err = merr.CheckRPCCall(showCollectionsResp.GetStatus(), err)
 	s.NoError(err)
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	var fVecColumn *schemapb.FieldData
 	if vecType == schemapb.DataType_SparseFloatVector {
@@ -104,5 +103,5 @@ func (s *DBPropertiesSuite) TestFlush() {
 	err = merr.CheckRPCCall(status, err)
 	s.NoError(err)
 
-	log.Info("TestFlush succeed")
+	mlog.Info(context.TODO(), "TestFlush succeed")
 }

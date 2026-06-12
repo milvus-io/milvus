@@ -27,13 +27,12 @@ import (
 
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -85,9 +84,9 @@ func (s *CommitTimestampSuite) setCommitTimestamp(
 			continue
 		}
 
-		log.Info("setCommitTimestamp: modifying segment",
-			zap.Int64("segmentID", seg.GetID()),
-			zap.Uint64("commitTs", commitTs))
+		mlog.Info(context.TODO(), "setCommitTimestamp: modifying segment",
+			mlog.FieldSegmentID(seg.GetID()),
+			mlog.Uint64("commitTs", commitTs))
 
 		seg.CommitTimestamp = commitTs
 
@@ -529,7 +528,7 @@ func (s *CommitTimestampSuite) TestCompaction_NormalizesCommitTs() {
 			continue
 		}
 		if stateResp.GetState() == commonpb.CompactionState_Completed {
-			log.Info("compaction completed", zap.Int64("compactionID", compactionID))
+			mlog.Info(context.TODO(), "compaction completed", mlog.Int64("compactionID", compactionID))
 			compactionCompleted = true
 			break
 		}

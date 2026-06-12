@@ -24,13 +24,12 @@ import (
 	"sync"
 
 	"github.com/hamba/avro/v2"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
@@ -538,9 +537,9 @@ func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (stri
 		manifestPaths = append(manifestPaths, manifestPath)
 	}
 
-	log.Info("Successfully wrote segment manifest files",
-		zap.Int("numSegments", len(snapshot.Segments)),
-		zap.String("manifestDir", manifestDir))
+	mlog.Info(ctx, "Successfully wrote segment manifest files",
+		mlog.Int("numSegments", len(snapshot.Segments)),
+		mlog.String("manifestDir", manifestDir))
 
 	// Step 2: Collect StorageV2 manifest paths from segments
 	// StorageV2 segments have an additional manifest file for Lance/Arrow format
@@ -560,8 +559,8 @@ func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (stri
 		return "", fmt.Errorf("failed to write metadata file: %w", err)
 	}
 
-	log.Info("Successfully wrote metadata file",
-		zap.String("metadataPath", metadataPath))
+	mlog.Info(ctx, "Successfully wrote metadata file",
+		mlog.String("metadataPath", metadataPath))
 
 	return metadataPath, nil
 }
@@ -680,20 +679,20 @@ func (w *SnapshotWriter) Drop(ctx context.Context, metadataFilePath string) erro
 		if err := w.chunkManager.MultiRemove(ctx, manifestList); err != nil {
 			return fmt.Errorf("failed to remove manifest files: %w", err)
 		}
-		log.Info("Successfully removed manifest files",
-			zap.Int("count", len(manifestList)),
-			zap.Int64("snapshotID", snapshotID))
+		mlog.Info(ctx, "Successfully removed manifest files",
+			mlog.Int("count", len(manifestList)),
+			mlog.Int64("snapshotID", snapshotID))
 	}
 
 	// Step 3: Remove the metadata file (entry point)
 	if err := w.chunkManager.Remove(ctx, metadataFilePath); err != nil {
 		return fmt.Errorf("failed to remove metadata file: %w", err)
 	}
-	log.Info("Successfully removed metadata file",
-		zap.String("metadataFilePath", metadataFilePath))
+	mlog.Info(ctx, "Successfully removed metadata file",
+		mlog.String("metadataFilePath", metadataFilePath))
 
-	log.Info("Successfully dropped snapshot",
-		zap.Int64("snapshotID", snapshotID))
+	mlog.Info(ctx, "Successfully dropped snapshot",
+		mlog.Int64("snapshotID", snapshotID))
 	return nil
 }
 
@@ -999,9 +998,9 @@ func (r *SnapshotReader) ListSnapshots(ctx context.Context, collectionID int64) 
 		metadata, err := r.readMetadataFile(ctx, file)
 		if err != nil {
 			// Log warning but continue - don't fail entire list for one bad file
-			log.Warn("Failed to parse metadata file, skipping",
-				zap.String("file", file),
-				zap.Error(err))
+			mlog.Warn(ctx, "Failed to parse metadata file, skipping",
+				mlog.String("file", file),
+				mlog.Err(err))
 			continue
 		}
 

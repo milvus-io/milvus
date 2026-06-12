@@ -21,11 +21,9 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/datacoord/session"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
@@ -73,7 +71,7 @@ func (s *globalTaskScheduler) Enqueue(task Task) {
 		task.SetTaskTime(taskcommon.TimeStart, time.Now())
 		s.runningTasks.Insert(task.GetTaskID(), task)
 	}
-	log.Ctx(s.ctx).Info("task enqueued", WrapTaskLog(task)...)
+	mlog.Info(s.ctx, "task enqueued", WrapTaskLog(task)...)
 }
 
 func (s *globalTaskScheduler) AbortAndRemoveTask(taskID int64) {
@@ -165,7 +163,7 @@ func (s *globalTaskScheduler) schedule() {
 		return
 	}
 	nodeSlots := s.cluster.QuerySlot()
-	log.Ctx(s.ctx).Info("scheduling pending tasks...", zap.Int("num", pendingNum), zap.Any("nodeSlots", nodeSlots))
+	mlog.Info(s.ctx, "scheduling pending tasks...", mlog.Int("num", pendingNum), mlog.Any("nodeSlots", nodeSlots))
 
 	futures := make([]*conc.Future[struct{}], 0)
 	for {
@@ -182,7 +180,7 @@ func (s *globalTaskScheduler) schedule() {
 		future := s.execPool.Submit(func() (struct{}, error) {
 			s.mu.RLock(task.GetTaskID())
 			defer s.mu.RUnlock(task.GetTaskID())
-			log.Ctx(s.ctx).Info("processing task...", WrapTaskLog(task)...)
+			mlog.Info(s.ctx, "processing task...", WrapTaskLog(task)...)
 			if task.GetTaskState() == taskcommon.Init {
 				task.CreateTaskOnWorker(nodeID, s.cluster)
 				switch task.GetTaskState() {
@@ -204,7 +202,7 @@ func (s *globalTaskScheduler) check() {
 	if s.runningTasks.Len() <= 0 {
 		return
 	}
-	log.Ctx(s.ctx).Info("check running tasks", zap.Int("num", s.runningTasks.Len()))
+	mlog.Info(s.ctx, "check running tasks", mlog.Int("num", s.runningTasks.Len()))
 
 	tasks := s.runningTasks.Values()
 	futures := make([]*conc.Future[struct{}], 0, len(tasks))
@@ -255,8 +253,8 @@ func (s *globalTaskScheduler) updateTaskTimeMetrics() {
 
 		queueingTime := time.Since(task.GetTaskTime(taskcommon.TimeQueue))
 		if queueingTime > paramtable.Get().DataCoordCfg.TaskSlowThreshold.GetAsDuration(time.Second) {
-			log.Ctx(s.ctx).Warn("task queueing time is too long", zap.Int64("taskID", taskID),
-				zap.Int64("queueing time(ms)", queueingTime.Milliseconds()))
+			mlog.Warn(s.ctx, "task queueing time is too long", mlog.FieldTaskID(taskID),
+				mlog.Int64("queueing time(ms)", queueingTime.Milliseconds()))
 		}
 
 		maxQueueingTime, ok := maxTaskQueueingTime[taskType]
@@ -276,8 +274,8 @@ func (s *globalTaskScheduler) updateTaskTimeMetrics() {
 
 		runningTime := time.Since(task.GetTaskTime(taskcommon.TimeStart))
 		if runningTime > paramtable.Get().DataCoordCfg.TaskSlowThreshold.GetAsDuration(time.Second) {
-			log.Ctx(s.ctx).Warn("task running time is too long", zap.Int64("taskID", task.GetTaskID()),
-				zap.Int64("running time(ms)", runningTime.Milliseconds()))
+			mlog.Warn(s.ctx, "task running time is too long", mlog.FieldTaskID(task.GetTaskID()),
+				mlog.Int64("running time(ms)", runningTime.Milliseconds()))
 		}
 
 		maxRunningTime, ok := maxTaskRunningTime[taskType]

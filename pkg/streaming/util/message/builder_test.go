@@ -1,15 +1,15 @@
 package message_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
@@ -22,7 +22,7 @@ func TestMutableBuilder(t *testing.T) {
 		MustBuildMutable()
 	assert.True(t, b.IsPersisted())
 	assert.Equal(t, b.VChannel(), "")
-	log.Info("test", zap.Object("msg", b))
+	mlog.Info(context.TODO(), "test", mlog.Object("msg", b))
 
 	b = message.NewTimeTickMessageBuilderV1().
 		WithHeader(&message.TimeTickMessageHeader{}).
@@ -32,7 +32,7 @@ func TestMutableBuilder(t *testing.T) {
 		MustBuildMutable()
 	assert.False(t, b.IsPersisted())
 	assert.Equal(t, b.VChannel(), "v1")
-	log.Info("test", zap.Object("msg", b))
+	mlog.Info(context.TODO(), "test", mlog.Object("msg", b))
 
 	assert.Panics(t, func() {
 		message.NewCreateCollectionMessageBuilderV1().WithNotPersisted()
@@ -64,7 +64,7 @@ func TestImmutableTxnBuilder(t *testing.T) {
 		WithVChannel("v1").
 		MustBuildMutable()
 	mutableMsg := msg.WithTimeTick(2).WithTxnContext(txnCtx).WithLastConfirmed(msgID)
-	log.Info("test", zap.Object("msg", mutableMsg))
+	mlog.Info(context.TODO(), "test", mlog.Object("msg", mutableMsg))
 	immutableMsg := mutableMsg.IntoImmutableMessage(msgID)
 	b.Add(immutableMsg)
 
@@ -81,7 +81,7 @@ func TestImmutableTxnBuilder(t *testing.T) {
 		VChannel:               "v1",
 	}
 	immutableCommit := commit.WithTimeTick(3).WithTxnContext(txnCtx).WithLastConfirmed(msgID).WithReplicateHeader(&rh).IntoImmutableMessage(msgID)
-	log.Info("test", zap.Object("msg", immutableCommit))
+	mlog.Info(context.TODO(), "test", mlog.Object("msg", immutableCommit))
 
 	assert.NotZero(t, b.EstimateSize())
 	beginMsg, msgs := b.Messages()
@@ -94,7 +94,7 @@ func TestImmutableTxnBuilder(t *testing.T) {
 	assert.Equal(t, "v1", immutableTxnMsg.ReplicateHeader().VChannel)
 	assert.Equal(t, msgID, immutableTxnMsg.ReplicateHeader().MessageID)
 	assert.Equal(t, msgID, immutableTxnMsg.ReplicateHeader().LastConfirmedMessageID)
-	log.Info("test", zap.Object("msg", immutableTxnMsg))
+	mlog.Info(context.TODO(), "test", mlog.Object("msg", immutableTxnMsg))
 }
 
 func TestReplicateBuilder(t *testing.T) {

@@ -26,10 +26,11 @@ package analyzecgowrapper
 import "C"
 
 import (
+	"context"
 	"fmt"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -43,12 +44,13 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	defer C.free(unsafe.Pointer(status.error_msg))
 
 	logMsg := fmt.Sprintf("%s, C Runtime Exception: %s\n", extraInfo, errorMsg)
-	log.Warn(logMsg)
+	mlog.Warn(context.TODO(),
+		logMsg)
 	if errorCode == 2003 {
 		return merr.WrapErrSegcoreUnsupported(int32(errorCode), logMsg)
 	}
 	if errorCode == 2033 {
-		log.Info("fake finished the task")
+		mlog.Info(context.TODO(), "fake finished the task")
 		return merr.ErrSegcorePretendFinished
 	}
 	return merr.WrapErrSegcore(int32(errorCode), logMsg)

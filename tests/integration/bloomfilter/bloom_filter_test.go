@@ -25,13 +25,12 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -73,11 +72,11 @@ func (s *BloomFilterTestSuit) initCollection(collectionName string, replica int,
 	s.NoError(err)
 	s.True(merr.Ok(createCollectionStatus))
 
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := s.Cluster.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.Status))
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	for i := 0; i < segmentNum; i++ {
 		// change bf type in real time
@@ -111,8 +110,8 @@ func (s *BloomFilterTestSuit) initCollection(collectionName string, replica int,
 			}
 
 			pks := insertResult.GetIDs().GetIntId().GetData()[:segmentDeleteNum]
-			log.Info("========================delete expr==================",
-				zap.Int("length of pk", len(pks)),
+			mlog.Info(context.TODO(), "========================delete expr==================",
+				mlog.Int("length of pk", len(pks)),
 			)
 
 			expr := fmt.Sprintf("%s in [%s]", integration.Int64Field, strings.Join(lo.Map(pks, func(pk int64, _ int) string { return strconv.FormatInt(pk, 10) }), ","))
@@ -166,7 +165,7 @@ func (s *BloomFilterTestSuit) initCollection(collectionName string, replica int,
 	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	s.True(merr.Ok(loadStatus))
 	s.WaitForLoad(ctx, collectionName)
-	log.Info("initCollection Done")
+	mlog.Info(context.TODO(), "initCollection Done")
 }
 
 func (s *BloomFilterTestSuit) TestLoadAndQuery() {
@@ -181,7 +180,7 @@ func (s *BloomFilterTestSuit) TestLoadAndQuery() {
 		OutputFields:   []string{"count(*)"},
 	})
 	if !merr.Ok(queryResult.GetStatus()) {
-		log.Warn("searchResult fail reason", zap.String("reason", queryResult.GetStatus().GetReason()))
+		mlog.Warn(context.TODO(), "searchResult fail reason", mlog.String("reason", queryResult.GetStatus().GetReason()))
 	}
 	s.NoError(err)
 	s.True(merr.Ok(queryResult.GetStatus()))

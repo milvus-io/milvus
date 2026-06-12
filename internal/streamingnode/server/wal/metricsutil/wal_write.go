@@ -1,14 +1,15 @@
 package metricsutil
 
 import (
+	"context"
 	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -50,7 +51,7 @@ func NewWriteMetrics(pchannel types.PChannelInfo, walName message.WALName) *Writ
 }
 
 type WriteMetrics struct {
-	log.Binder
+	mlog.Binder
 
 	walName                      string
 	pchannel                     types.PChannelInfo
@@ -95,17 +96,21 @@ func (m *WriteMetrics) done(appendMetrics *AppendMetrics) {
 		}
 	}
 	if appendMetrics.err != nil {
-		m.Logger().Warn("append message into wal failed", appendMetrics.IntoLogFields()...)
+		m.Logger().Warn(context.TODO(),
+
+			"append message into wal failed", appendMetrics.IntoLogFields()...)
 		return
 	}
 	if appendMetrics.appendDuration >= m.slowLogThreshold {
 		// log slow append catch
-		m.Logger().Warn("append message into wal too slow", appendMetrics.IntoLogFields()...)
+		m.Logger().Warn(context.TODO(),
+
+			"append message into wal too slow", appendMetrics.IntoLogFields()...)
 		return
 	}
 	logLV := appendMetrics.msg.MessageType().LogLevel()
-	if m.Logger().Level().Enabled(logLV) {
-		m.Logger().Log(logLV, "append message into wal", appendMetrics.IntoLogFields()...)
+	if m.Logger().LevelEnabled(logLV) {
+		m.Logger().Log(context.TODO(), logLV, "append message into wal", appendMetrics.IntoLogFields()...)
 	}
 }
 

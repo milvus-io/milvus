@@ -25,7 +25,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -34,7 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -142,15 +141,15 @@ func (s *StatsTaskCheckerSuite) run() {
 	})
 	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.String("reason", createCollectionStatus.GetReason()))
 	}
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	// batch insert to generate some segments
 	for i := 0; i < s.batchCnt; i++ {
@@ -243,7 +242,7 @@ func (s *StatsTaskCheckerSuite) run() {
 		s.NoError(err)
 		s.NotEmpty(segments)
 		for _, segment := range segments {
-			log.Info("ShowSegments result", zap.String("segment", segment.String()))
+			mlog.Info(context.TODO(), "ShowSegments result", mlog.String("segment", segment.String()))
 		}
 	}
 
@@ -255,7 +254,7 @@ func (s *StatsTaskCheckerSuite) run() {
 		ExtraParams:    integration.ConstructIndexParam(s.dim, s.indexType, s.metricType),
 	})
 	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createIndexStatus fail reason", mlog.String("reason", createIndexStatus.GetReason()))
 	}
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
@@ -269,7 +268,7 @@ func (s *StatsTaskCheckerSuite) run() {
 	})
 	s.NoError(err)
 	if loadStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
+		mlog.Warn(context.TODO(), "loadStatus fail reason", mlog.String("reason", loadStatus.GetReason()))
 	}
 	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	s.WaitForLoad(ctx, collectionName)
@@ -304,7 +303,7 @@ func (s *StatsTaskCheckerSuite) run() {
 		OutputFields:   []string{"count(*)"},
 	})
 	if queryResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("searchResult fail reason", zap.String("reason", queryResult.GetStatus().GetReason()))
+		mlog.Warn(context.TODO(), "searchResult fail reason", mlog.String("reason", queryResult.GetStatus().GetReason()))
 	}
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, queryResult.GetStatus().GetErrorCode())
@@ -321,7 +320,7 @@ func (s *StatsTaskCheckerSuite) run() {
 	err = merr.CheckRPCCall(status, err)
 	s.NoError(err)
 
-	log.Info("TestStatsTask succeed")
+	mlog.Info(context.TODO(), "TestStatsTask succeed")
 }
 
 func (s *StatsTaskCheckerSuite) checkBinlogIsSorted(ctx context.Context, binlogPath string, lastValue interface{}) interface{} {

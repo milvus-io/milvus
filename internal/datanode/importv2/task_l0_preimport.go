@@ -24,13 +24,12 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -126,11 +125,11 @@ func (t *L0PreImportTask) Clone() Task {
 
 func (t *L0PreImportTask) Execute() []*conc.Future[any] {
 	bufferSize := int(t.GetBufferSize())
-	log.Info("start to preimport l0", WrapLogFields(t,
-		zap.Int("bufferSize", bufferSize),
-		zap.Int64("taskSlot", t.GetSlots()),
-		zap.Any("files", t.req.GetImportFiles()),
-		zap.Any("schema", t.GetSchema()),
+	mlog.Info(t.ctx, "start to preimport l0", WrapLogFields(t,
+		mlog.Int("bufferSize", bufferSize),
+		mlog.Int64("taskSlot", t.GetSlots()),
+		mlog.Any("files", t.req.GetImportFiles()),
+		mlog.Any("schema", t.GetSchema()),
 	)...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 	files := lo.Map(t.GetFileStats(),
@@ -145,33 +144,33 @@ func (t *L0PreImportTask) Execute() []*conc.Future[any] {
 				if len(t.GetFileStats()) == 1 {
 					reason = fmt.Sprintf("error: %v, file: %s", err, t.GetFileStats()[0].GetImportFile().String())
 				}
-				log.Warn("l0 import task execute failed", WrapLogFields(t, zap.String("err", reason))...)
+				mlog.Warn(t.ctx, "l0 import task execute failed", WrapLogFields(t, mlog.String("err", reason))...)
 				t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			}
 		}()
 		pkField, err := typeutil.GetPrimaryFieldSchema(t.GetSchema())
 		if err != nil {
-			return
+			return err
 		}
 
 		// Parse ts parameters from options
 		tsStart, tsEnd, err := importutilv2.ParseTimeRange(t.req.GetOptions())
 		if err != nil {
-			return
+			return err
 		}
 
 		reader, err := binlog.NewL0Reader(t.ctx, t.cm, t.req.GetStorageConfig(), pkField, file, bufferSize, tsStart, tsEnd)
 		if err != nil {
-			return
+			return err
 		}
 		start := time.Now()
 		err = t.readL0Stat(reader, i)
 		if err != nil {
-			return
+			return err
 		}
-		log.Info("l0 preimport done", WrapLogFields(t,
-			zap.Strings("l0 prefix", file.GetPaths()),
-			zap.Duration("dur", time.Since(start)))...)
+		mlog.Info(t.ctx, "l0 preimport done", WrapLogFields(t,
+			mlog.Strings("l0 prefix", file.GetPaths()),
+			mlog.Duration("dur", time.Since(start)))...)
 		return nil
 	}
 
@@ -209,7 +208,7 @@ func (t *L0PreImportTask) readL0Stat(reader binlog.L0Reader, fileIdx int) error 
 		size := int(data.Size())
 		totalRows += rows
 		totalSize += size
-		log.Info("reading l0 stat...", WrapLogFields(t, zap.Int("readRows", rows), zap.Int("readSize", size))...)
+		mlog.Info(t.ctx, "reading l0 stat...", WrapLogFields(t, mlog.Int("readRows", rows), mlog.Int("readSize", size))...)
 	}
 
 	stat := &datapb.ImportFileStats{

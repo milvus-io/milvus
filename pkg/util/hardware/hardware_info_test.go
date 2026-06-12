@@ -12,34 +12,34 @@
 package hardware
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 func Test_GetCPUCoreCount(t *testing.T) {
-	log.Info("TestGetCPUCoreCount",
-		zap.Int("physical CPUCoreCount", GetCPUNum()))
+	mlog.Info(context.TODO(), "TestGetCPUCoreCount",
+		mlog.Int("physical CPUCoreCount", GetCPUNum()))
 }
 
 func Test_GetCPUUsage(t *testing.T) {
-	log.Info("TestGetCPUUsage",
-		zap.Float64("CPUUsage", GetCPUUsage()))
+	mlog.Info(context.TODO(), "TestGetCPUUsage",
+		mlog.Float64("CPUUsage", GetCPUUsage()))
 }
 
 func Test_GetMemoryCount(t *testing.T) {
-	log.Info("TestGetMemoryCount",
-		zap.Uint64("MemoryCount", GetMemoryCount()))
+	mlog.Info(context.TODO(), "TestGetMemoryCount",
+		mlog.Uint64("MemoryCount", GetMemoryCount()))
 
 	assert.NotZero(t, GetMemoryCount())
 }
 
 func Test_GetUsedMemoryCount(t *testing.T) {
-	log.Info("TestGetUsedMemoryCount",
-		zap.Uint64("UsedMemoryCount", GetUsedMemoryCount()))
+	mlog.Info(context.TODO(), "TestGetUsedMemoryCount",
+		mlog.Uint64("UsedMemoryCount", GetUsedMemoryCount()))
 }
 
 func TestGetDiskUsage(t *testing.T) {
@@ -61,7 +61,7 @@ func TestGetIOWait(t *testing.T) {
 }
 
 func Test_GetMemoryUsageRatio(t *testing.T) {
-	log.Info("TestGetMemoryUsageRatio",
-		zap.Float64("Memory usage ratio", GetMemoryUseRatio()))
+	mlog.Info(context.TODO(), "TestGetMemoryUsageRatio",
+		mlog.Float64("Memory usage ratio", GetMemoryUseRatio()))
 	assert.True(t, GetMemoryUseRatio() > 0)
 }

@@ -1,15 +1,15 @@
 package utility
 
 import (
-	"go.uber.org/zap"
+	"context"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 // NewTxnBuffer creates a new txn buffer.
-func NewTxnBuffer(logger *log.MLogger, metrics *metricsutil.ScannerMetrics) *TxnBuffer {
+func NewTxnBuffer(logger *mlog.Logger, metrics *metricsutil.ScannerMetrics) *TxnBuffer {
 	return &TxnBuffer{
 		logger:   logger,
 		builders: make(map[message.TxnID]*message.ImmutableTxnMessageBuilder),
@@ -19,7 +19,7 @@ func NewTxnBuffer(logger *log.MLogger, metrics *metricsutil.ScannerMetrics) *Txn
 
 // TxnBuffer is a buffer for txn messages.
 type TxnBuffer struct {
-	logger   *log.MLogger
+	logger   *mlog.Logger
 	builders map[message.TxnID]*message.ImmutableTxnMessageBuilder
 	metrics  *metricsutil.ScannerMetrics
 	bytes    int
@@ -77,20 +77,18 @@ func (b *TxnBuffer) HandleImmutableMessages(msgs []message.ImmutableMessage, ts 
 func (b *TxnBuffer) handleBeginTxn(msg message.ImmutableMessage) {
 	beginMsg, err := message.AsImmutableBeginTxnMessageV2(msg)
 	if err != nil {
-		b.logger.DPanic(
-			"failed to convert message to begin txn message, it's a critical error",
-			zap.Int64("txnID", int64(beginMsg.TxnContext().TxnID)),
-			zap.Any("messageID", beginMsg.MessageID()),
-			zap.Error(err))
+		b.logger.DPanic(context.TODO(), "failed to convert message to begin txn message, it's a critical error",
+			mlog.Int64("txnID", int64(beginMsg.TxnContext().TxnID)),
+			mlog.Any("messageID", beginMsg.MessageID()),
+			mlog.Err(err))
 		return
 	}
 	if _, ok := b.builders[beginMsg.TxnContext().TxnID]; ok {
 		// Because the wal on secondary node may replicate the same txn message, so we need to reset the txn from buffer to avoid
 		// the txn body repeated.
-		b.logger.Warn(
-			"txn id already exist, rollback the txn from buffer",
-			zap.Int64("txnID", int64(beginMsg.TxnContext().TxnID)),
-			zap.Any("messageID", beginMsg.MessageID()),
+		b.logger.Warn(context.TODO(), "txn id already exist, rollback the txn from buffer",
+			mlog.Int64("txnID", int64(beginMsg.TxnContext().TxnID)),
+			mlog.Any("messageID", beginMsg.MessageID()),
 		)
 		b.rollbackTxn(beginMsg.TxnContext().TxnID)
 	}
@@ -102,19 +100,17 @@ func (b *TxnBuffer) handleBeginTxn(msg message.ImmutableMessage) {
 func (b *TxnBuffer) handleCommitTxn(msg message.ImmutableMessage) message.ImmutableMessage {
 	commitMsg, err := message.AsImmutableCommitTxnMessageV2(msg)
 	if err != nil {
-		b.logger.DPanic(
-			"failed to convert message to commit txn message, it's a critical error",
-			zap.Int64("txnID", int64(commitMsg.TxnContext().TxnID)),
-			zap.Any("messageID", commitMsg.MessageID()),
-			zap.Error(err))
+		b.logger.DPanic(context.TODO(), "failed to convert message to commit txn message, it's a critical error",
+			mlog.Int64("txnID", int64(commitMsg.TxnContext().TxnID)),
+			mlog.Any("messageID", commitMsg.MessageID()),
+			mlog.Err(err))
 		return nil
 	}
 	builder, ok := b.builders[commitMsg.TxnContext().TxnID]
 	if !ok {
-		b.logger.Warn(
-			"txn id not exist, it may be a repeated committed message, so ignore it",
-			zap.Int64("txnID", int64(commitMsg.TxnContext().TxnID)),
-			zap.Any("messageID", commitMsg.MessageID()),
+		b.logger.Warn(context.TODO(), "txn id not exist, it may be a repeated committed message, so ignore it",
+			mlog.Int64("txnID", int64(commitMsg.TxnContext().TxnID)),
+			mlog.Any("messageID", commitMsg.MessageID()),
 		)
 		return nil
 	}
@@ -125,17 +121,15 @@ func (b *TxnBuffer) handleCommitTxn(msg message.ImmutableMessage) message.Immuta
 	delete(b.builders, commitMsg.TxnContext().TxnID)
 	if err != nil {
 		b.metrics.ObserveErrorTxn()
-		b.logger.Warn(
-			"failed to build txn message, it's a critical error, some data is lost",
-			zap.Int64("txnID", int64(commitMsg.TxnContext().TxnID)),
-			zap.Any("messageID", commitMsg.MessageID()),
-			zap.Error(err))
+		b.logger.Warn(context.TODO(), "failed to build txn message, it's a critical error, some data is lost",
+			mlog.Int64("txnID", int64(commitMsg.TxnContext().TxnID)),
+			mlog.Any("messageID", commitMsg.MessageID()),
+			mlog.Err(err))
 		return nil
 	}
-	b.logger.Debug(
-		"the txn is committed",
-		zap.Int64("txnID", int64(commitMsg.TxnContext().TxnID)),
-		zap.Any("messageID", commitMsg.MessageID()),
+	b.logger.Debug(context.TODO(), "the txn is committed",
+		mlog.Int64("txnID", int64(commitMsg.TxnContext().TxnID)),
+		mlog.Any("messageID", commitMsg.MessageID()),
 	)
 	b.metrics.ObserveTxn(message.TxnStateCommitted)
 	return txnMsg
@@ -145,17 +139,15 @@ func (b *TxnBuffer) handleCommitTxn(msg message.ImmutableMessage) message.Immuta
 func (b *TxnBuffer) handleRollbackTxn(msg message.ImmutableMessage) {
 	rollbackMsg, err := message.AsImmutableRollbackTxnMessageV2(msg)
 	if err != nil {
-		b.logger.DPanic(
-			"failed to convert message to rollback txn message, it's a critical error",
-			zap.Int64("txnID", int64(rollbackMsg.TxnContext().TxnID)),
-			zap.Any("messageID", rollbackMsg.MessageID()),
-			zap.Error(err))
+		b.logger.DPanic(context.TODO(), "failed to convert message to rollback txn message, it's a critical error",
+			mlog.Int64("txnID", int64(rollbackMsg.TxnContext().TxnID)),
+			mlog.Any("messageID", rollbackMsg.MessageID()),
+			mlog.Err(err))
 		return
 	}
-	b.logger.Debug(
-		"the txn is rollback, so drop the txn from buffer",
-		zap.Int64("txnID", int64(rollbackMsg.TxnContext().TxnID)),
-		zap.Any("messageID", rollbackMsg.MessageID()),
+	b.logger.Debug(context.TODO(), "the txn is rollback, so drop the txn from buffer",
+		mlog.Int64("txnID", int64(rollbackMsg.TxnContext().TxnID)),
+		mlog.Any("messageID", rollbackMsg.MessageID()),
 	)
 	b.rollbackTxn(rollbackMsg.TxnContext().TxnID)
 }
@@ -173,10 +165,9 @@ func (b *TxnBuffer) rollbackTxn(txnID message.TxnID) {
 func (b *TxnBuffer) handleTxnBodyMessage(msg message.ImmutableMessage) {
 	builder, ok := b.builders[msg.TxnContext().TxnID]
 	if !ok {
-		b.logger.Warn(
-			"txn id not exist, so ignore the body message",
-			zap.Int64("txnID", int64(msg.TxnContext().TxnID)),
-			zap.Any("messageID", msg.MessageID()),
+		b.logger.Warn(context.TODO(), "txn id not exist, so ignore the body message",
+			mlog.Int64("txnID", int64(msg.TxnContext().TxnID)),
+			mlog.Any("messageID", msg.MessageID()),
 		)
 		return
 	}
@@ -191,12 +182,11 @@ func (b *TxnBuffer) clearExpiredTxn(ts uint64) {
 			delete(b.builders, txnID)
 			b.bytes -= builder.EstimateSize()
 			b.metrics.ObserveExpiredTxn()
-			if b.logger.Level().Enabled(zap.DebugLevel) {
-				b.logger.Debug(
-					"the txn is expired, so drop the txn from buffer",
-					zap.Int64("txnID", int64(txnID)),
-					zap.Uint64("expiredTimeTick", builder.ExpiredTimeTick()),
-					zap.Uint64("currentTimeTick", ts),
+			if b.logger.LevelEnabled(mlog.DebugLevel) {
+				b.logger.Debug(context.TODO(), "the txn is expired, so drop the txn from buffer",
+					mlog.Int64("txnID", int64(txnID)),
+					mlog.Uint64("expiredTimeTick", builder.ExpiredTimeTick()),
+					mlog.Uint64("currentTimeTick", ts),
 				)
 			}
 		}
@@ -217,7 +207,7 @@ func (b *TxnBuffer) rollbackAllUncommittedTxn() {
 		b.rollbackTxn(txnID)
 	}
 
-	b.logger.Info("Rolled back all uncommitted transactions in TxnBuffer due to force promote",
-		zap.Int64s("txnIDs", txnIDs),
-		zap.Int("count", len(txnIDs)))
+	b.logger.Info(context.TODO(), "Rolled back all uncommitted transactions in TxnBuffer due to force promote",
+		mlog.Int64s("txnIDs", txnIDs),
+		mlog.Int("count", len(txnIDs)))
 }

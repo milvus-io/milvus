@@ -30,6 +30,7 @@ package metrics
 import "C"
 
 import (
+	"context"
 	"sort"
 	"strings"
 	"sync"
@@ -39,12 +40,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
-	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 // metricSorter is a sortable slice of *dto.Metric.
@@ -149,8 +149,8 @@ func (r *CRegistry) Gather() (res []*dto.MetricFamily, err error) {
 
 	out, err := parser.TextToMetricFamilies(strings.NewReader(metricsStr))
 	if err != nil {
-		log.Error("fail to parse knowhere prometheus metrics", zap.Error(err))
-		return
+		mlog.Error(context.TODO(), "fail to parse knowhere prometheus metrics", mlog.Err(err))
+		return res, err
 	}
 
 	cMetricsStr = C.GetCoreMetrics()
@@ -159,8 +159,8 @@ func (r *CRegistry) Gather() (res []*dto.MetricFamily, err error) {
 
 	out1, err := parser.TextToMetricFamilies(strings.NewReader(metricsStr))
 	if err != nil {
-		log.Error("fail to parse storage prometheus metrics", zap.Error(err))
-		return
+		mlog.Error(context.TODO(), "fail to parse storage prometheus metrics", mlog.Err(err))
+		return res, err
 	}
 
 	maps.Copy(out, out1)
@@ -172,7 +172,7 @@ func (r *CRegistry) Gather() (res []*dto.MetricFamily, err error) {
 	}
 
 	res = NormalizeMetricFamilies(out)
-	return
+	return res, err
 }
 
 // gatherJemallocMetrics collects comprehensive jemalloc stats and returns them as metric families.
@@ -183,8 +183,8 @@ func gatherJemallocMetrics() map[string]*dto.MetricFamily {
 	if time.Since(jemallocMetricsCache.timestamp) < jemallocMetricsCacheTTL && jemallocMetricsCache.metrics != nil {
 		cached := jemallocMetricsCache.metrics
 		jemallocMetricsCache.RUnlock()
-		log.Debug("using cached jemalloc metrics",
-			zap.Duration("age", time.Since(jemallocMetricsCache.timestamp)))
+		mlog.Debug(context.TODO(), "using cached jemalloc metrics",
+			mlog.Duration("age", time.Since(jemallocMetricsCache.timestamp)))
 		return cached
 	}
 	jemallocMetricsCache.RUnlock()
@@ -195,7 +195,7 @@ func gatherJemallocMetrics() map[string]*dto.MetricFamily {
 
 	cStats := C.GetJemallocStats()
 	if !bool(cStats.success) {
-		log.Debug("jemalloc stats not available (may be running on macOS or jemalloc is disabled)")
+		mlog.Debug(context.TODO(), "jemalloc stats not available (may be running on macOS or jemalloc is disabled)")
 		return result
 	}
 
@@ -245,8 +245,8 @@ func gatherJemallocMetrics() map[string]*dto.MetricFamily {
 	jemallocMetricsCache.timestamp = time.Now()
 	jemallocMetricsCache.Unlock()
 
-	log.Debug("refreshed jemalloc metrics cache",
-		zap.Int("num_metrics", len(result)))
+	mlog.Debug(context.TODO(), "refreshed jemalloc metrics cache",
+		mlog.Int("num_metrics", len(result)))
 
 	return result
 }
