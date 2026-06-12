@@ -2303,7 +2303,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.DQLBackpressureEnabled = ParamItem{
 		Key:          "proxy.dqlBackpressure.enabled",
-		Version:      "2.6.17",
+		Version:      "2.6.19",
 		DefaultValue: "true",
 		Doc:          "Whether Proxy adaptively controls DQL task dispatch concurrency according to downstream queue-full errors.",
 		Export:       true,
@@ -2312,7 +2312,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.DQLBackpressureSlowdownMinConcurrency = ParamItem{
 		Key:          "proxy.dqlBackpressure.slowdownMinConcurrency",
-		Version:      "2.6.17",
+		Version:      "2.6.19",
 		DefaultValue: "4",
 		Doc:          "The minimum DQL task dispatch concurrency kept during Proxy DQL backpressure slowdown.",
 		Export:       true,
@@ -2321,7 +2321,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.DQLBackpressureSlowdownRatio = ParamItem{
 		Key:          "proxy.dqlBackpressure.slowdownRatio",
-		Version:      "2.6.17",
+		Version:      "2.6.19",
 		DefaultValue: "0.5",
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
@@ -2337,7 +2337,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.DQLBackpressureSlowdownInterval = ParamItem{
 		Key:          "proxy.dqlBackpressure.slowdownInterval",
-		Version:      "2.6.17",
+		Version:      "2.6.19",
 		DefaultValue: "1s",
 		Doc:          "The minimum interval for Proxy DQL dispatch concurrency to slowdown again after downstream queue-full errors.",
 		Export:       true,
@@ -2346,7 +2346,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.DQLBackpressureRecoverInterval = ParamItem{
 		Key:          "proxy.dqlBackpressure.recoverInterval",
-		Version:      "2.6.17",
+		Version:      "2.6.19",
 		DefaultValue: "1s",
 		Doc:          "The minimum interval for Proxy DQL dispatch concurrency to recover after successful DQL task execution.",
 		Export:       true,
@@ -2355,7 +2355,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.DQLBackpressureRecoverStep = ParamItem{
 		Key:          "proxy.dqlBackpressure.recoverStep",
-		Version:      "2.6.17",
+		Version:      "2.6.19",
 		DefaultValue: "4",
 		Formatter: func(v string) string {
 			step := getAsInt(v)
@@ -2371,7 +2371,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.DQLBackpressureRecoverQuietPeriod = ParamItem{
 		Key:          "proxy.dqlBackpressure.recoverQuietPeriod",
-		Version:      "2.6.17",
+		Version:      "2.6.19",
 		DefaultValue: "5s",
 		Doc:          "The quiet period after a Proxy DQL backpressure slowdown before recover is allowed.",
 		Export:       true,
