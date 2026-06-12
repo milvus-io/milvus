@@ -1746,6 +1746,9 @@ func (mt *MetaTable) CheckIfUpdateCredential(ctx context.Context, credInfo *inte
 	if hasEncryptedPassword != hasSha256Password {
 		return merr.WrapErrParameterInvalidMsg("credential password update must include both encrypted and sha256 password")
 	}
+	if !hasEncryptedPassword && !hasSha256Password && credInfo.Description == nil {
+		return merr.WrapErrParameterInvalidMsg("credential update must change password or description")
+	}
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()
 

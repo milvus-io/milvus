@@ -1933,6 +1933,8 @@ func TestRBAC_Credential(t *testing.T) {
 
 		// Return valid keys if count==0
 		// return error if count!=0
+		credentialValue, err := json.Marshal(&internalpb.CredentialInfo{EncryptedPassword: crypto.Base64Encode("passwd")})
+		require.NoError(t, err)
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Call.Return(
 			func(ctx context.Context, key string) []string {
 				cmu.RLock()
@@ -1942,6 +1944,7 @@ func TestRBAC_Credential(t *testing.T) {
 						fmt.Sprintf("%s/%s", CredentialPrefix, "user1"),
 						fmt.Sprintf("%s/%s", CredentialPrefix, "user2"),
 						fmt.Sprintf("%s/%s", CredentialPrefix, "user3"),
+						fmt.Sprintf("%s/%s/%s", CredentialPrefix, UserSubPrefix, "ghost"),
 						"random",
 					}
 				}
@@ -1950,13 +1953,13 @@ func TestRBAC_Credential(t *testing.T) {
 			func(ctx context.Context, key string) []string {
 				cmu.RLock()
 				defer cmu.RUnlock()
-				passwd, _ := json.Marshal(&model.Credential{EncryptedPassword: crypto.Base64Encode("passwd")})
 				if count == 0 {
 					return []string{
-						string(passwd),
-						string(passwd),
-						string(passwd),
-						string(passwd),
+						string(credentialValue),
+						string(credentialValue),
+						string(credentialValue),
+						string(credentialValue),
+						string(credentialValue),
 					}
 				}
 				return nil
@@ -3439,10 +3442,11 @@ func TestRBAC_Restore(t *testing.T) {
 	assert.NoError(t, err)
 
 	// check user
-	users, err := c.ListCredentialsWithPasswd(ctx)
+	credentials, err := c.(*Catalog).listCredentials(ctx)
 	assert.NoError(t, err)
-	assert.Len(t, users, 1)
-	assert.Equal(t, users["user1"], "passwd")
+	assert.Len(t, credentials, 1)
+	assert.Equal(t, "user1", credentials[0].Username)
+	assert.Equal(t, "passwd", credentials[0].EncryptedPassword)
 	// check role
 	roles, err := c.ListRole(ctx, util.DefaultTenant, nil, false)
 	assert.NoError(t, err)
@@ -3510,9 +3514,9 @@ func TestRBAC_Restore(t *testing.T) {
 	assert.NoError(t, err)
 
 	// check user
-	users, err = c.ListCredentialsWithPasswd(ctx)
+	credentials, err = c.(*Catalog).listCredentials(ctx)
 	assert.NoError(t, err)
-	assert.Len(t, users, 2)
+	assert.Len(t, credentials, 2)
 	// check role
 	roles, err = c.ListRole(ctx, util.DefaultTenant, nil, false)
 	assert.NoError(t, err)

@@ -1130,37 +1130,13 @@ func (kc *Catalog) ListAliases(ctx context.Context, dbID int64, ts typeutil.Time
 }
 
 func (kc *Catalog) ListCredentials(ctx context.Context) ([]string, error) {
-	users, err := kc.ListCredentialsWithPasswd(ctx)
+	credentials, err := kc.listCredentials(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return lo.Keys(users), nil
-}
-
-func (kc *Catalog) ListCredentialsWithPasswd(ctx context.Context) (map[string]string, error) {
-	keys, values, err := kc.Txn.LoadWithPrefix(ctx, CredentialPrefix+"/")
-	if err != nil {
-		log.Ctx(ctx).Error("list all credential usernames fail", zap.String("prefix", CredentialPrefix), zap.Error(err))
-		return nil, err
-	}
-
-	users := make(map[string]string)
-	for i := range keys {
-		username := typeutil.After(keys[i], UserSubPrefix+"/")
-		if len(username) == 0 {
-			log.Ctx(ctx).Warn("no username extract from path:", zap.String("path", keys[i]))
-			continue
-		}
-		credential := &internalpb.CredentialInfo{}
-		err := json.Unmarshal([]byte(values[i]), credential)
-		if err != nil {
-			log.Ctx(ctx).Error("credential unmarshal fail", zap.String("key", keys[i]), zap.Error(err))
-			return nil, err
-		}
-		users[username] = credential.EncryptedPassword
-	}
-
-	return users, nil
+	return lo.Map(credentials, func(credential *model.Credential, _ int) string {
+		return credential.Username
+	}), nil
 }
 
 func (kc *Catalog) listCredentials(ctx context.Context) ([]*model.Credential, error) {

@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1206,44 +1205,6 @@ func TestCore_Rbac(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	}
-}
-
-func TestValidateCredentialDescription(t *testing.T) {
-	paramtable.Init()
-
-	description := strings.Repeat("x", Params.ProxyCfg.MaxUserDescriptionLength.GetAsInt()+1)
-	err := validateCredentialDescription(&internalpb.CredentialInfo{
-		Username:    "desc_user",
-		Description: &description,
-	})
-
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "invalid user description")
-}
-
-func TestCoreCredentialDescriptionValidationStatus(t *testing.T) {
-	paramtable.Init()
-
-	ctx := context.Background()
-	c := newTestCore(withHealthyCode())
-
-	description := strings.Repeat("x", Params.ProxyCfg.MaxUserDescriptionLength.GetAsInt()+1)
-
-	createResp, err := c.CreateCredential(ctx, &internalpb.CredentialInfo{
-		Username:    "desc_user",
-		Description: &description,
-	})
-	require.NoError(t, err)
-	assert.NotEqual(t, commonpb.ErrorCode_Success, createResp.GetErrorCode())
-	assert.Contains(t, createResp.GetReason(), "invalid user description")
-
-	updateResp, err := c.UpdateCredential(ctx, &internalpb.CredentialInfo{
-		Username:    "desc_user",
-		Description: &description,
-	})
-	require.NoError(t, err)
-	assert.NotEqual(t, commonpb.ErrorCode_Success, updateResp.GetErrorCode())
-	assert.Contains(t, updateResp.GetReason(), "invalid user description")
 }
 
 func TestCore_sendMinDdlTsAsTt(t *testing.T) {

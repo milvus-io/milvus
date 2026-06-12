@@ -22,9 +22,9 @@ func MarshalCredentialModel(cred *Credential) *internalpb.CredentialInfo {
 		EncryptedPassword: cred.EncryptedPassword,
 		IsSuper:           cred.IsSuper,
 		Sha256Password:    cred.Sha256Password,
+		Description:       &cred.Description,
 		TimeTick:          cred.TimeTick,
 	}
-	credentialInfo.Description = &cred.Description
 	return credentialInfo
 }
 

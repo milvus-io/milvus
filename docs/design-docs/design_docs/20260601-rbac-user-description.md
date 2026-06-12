@@ -125,9 +125,10 @@ both `include_role_info=true` and `include_role_info=false` return the field.
 password and timetick. `Sha256Password` remains cache-only and is not persisted
 by the RootCoord merge path.
 
-Proxy and RootCoord both enforce the description length before writing to WAL, so
-an oversized description is rejected before it can increase the etcd credential
-value.
+Proxy enforces the description length before the request reaches RootCoord, so an
+oversized description is rejected before it can increase the etcd credential
+value. RootCoord keeps the existing credential validation shape and does not
+duplicate proxy-side username, password, or description length checks.
 
 HTTP v2 user create and update requests pass the optional description through to
 the same gRPC credential APIs. HTTP v2 user describe preserves the existing role

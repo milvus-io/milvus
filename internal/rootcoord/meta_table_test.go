@@ -231,6 +231,19 @@ func TestRbacCredentialRejectsInconsistentPasswordUpdate(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "must include both encrypted and sha256 password")
+
+	description := "description-only update"
+	err = mt.CheckIfUpdateCredential(context.TODO(), &internalpb.CredentialInfo{
+		Username:    username,
+		Description: &description,
+	})
+	require.NoError(t, err)
+
+	err = mt.CheckIfUpdateCredential(context.TODO(), &internalpb.CredentialInfo{
+		Username: username,
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "credential update must change password or description")
 }
 
 func TestRbacCreateRole(t *testing.T) {

@@ -2179,7 +2179,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.MaxUserDescriptionLength = ParamItem{
 		Key:          "proxy.maxUserDescriptionLength",
 		DefaultValue: "1024",
-		Version:      "2.7.0",
+		Version:      "2.6.19",
 		PanicIfEmpty: true,
 	}
 	p.MaxUserDescriptionLength.Init(base.mgr)
