@@ -19,7 +19,7 @@ package datacoord
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 

@@ -21,7 +21,7 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )

@@ -3,7 +3,8 @@ package server
 import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
+	kvmetastore "github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
+	"github.com/milvus-io/milvus/internal/metastore/milvuscompat"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/service"
 	"github.com/milvus-io/milvus/internal/types"
@@ -45,9 +46,12 @@ func (b *ServerBuilder) WithSession(session sessionutil.SessionInterface) *Serve
 }
 
 func (s *ServerBuilder) Build() *Server {
+	compatCatalog := milvuscompat.Wrap(milvuscompat.Catalogs{
+		StreamingCoord: kvmetastore.NewCatalog(s.metaKV),
+	})
 	resource.Init(
 		resource.OptETCD(s.etcdClient),
-		resource.OptStreamingCatalog(streamingcoord.NewCataLog(s.metaKV)),
+		resource.OptStreamingCatalog(milvuscompat.New(compatCatalog).StreamingCoord),
 		resource.OptMixCoordClient(s.mixCoordClient),
 		resource.OptSession(s.session),
 	)

@@ -9,7 +9,7 @@ import (
 	"github.com/milvus-io/milvus/cmd/tools/migration/legacy"
 	"github.com/milvus-io/milvus/cmd/tools/migration/legacy/legacypb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
-	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/metastore/model"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 )

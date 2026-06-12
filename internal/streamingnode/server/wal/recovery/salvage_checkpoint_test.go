@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
+	mock_metastore "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -213,7 +213,7 @@ func TestIsDirtyWithSalvageCheckpoint(t *testing.T) {
 }
 
 func TestPersistDirtySnapshotWithSalvageCheckpoint(t *testing.T) {
-	snCatalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	snCatalog := mock_metastore.NewMockStreamingNodeCatalog(t)
 	snCatalog.EXPECT().SaveSalvageCheckpoint(mock.Anything, "test-pchannel", mock.Anything).Return(nil)
 	snCatalog.EXPECT().SaveConsumeCheckpoint(mock.Anything, "test-pchannel", mock.Anything).Return(nil)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog))

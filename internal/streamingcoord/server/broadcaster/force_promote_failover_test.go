@@ -13,8 +13,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	mock_metastore "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
-	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
@@ -188,7 +188,7 @@ type forcePromoteTestEnv struct {
 	t           *testing.T
 	broadcaster Broadcaster
 	walCtrl     *walController
-	catalog     *mock_metastore.MockStreamingCoordCataLog
+	catalog     *mock_metastore.MockStreamingCoordCatalog
 	tombstoned  *typeutil.ConcurrentSet[uint64]
 
 	// catalogRecordsMu protects catalogRecords.
@@ -239,7 +239,7 @@ func setupForcePromoteTest(
 	recoveryTasks []*streamingpb.BroadcastTask,
 	walBehaviors []appendBehavior,
 ) *forcePromoteTestEnv {
-	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	catalog := mock_metastore.NewMockStreamingCoordCatalog(t)
 	catalog.EXPECT().ListBroadcastTask(mock.Anything).
 		Return(recoveryTasks, nil).Times(1)
 

@@ -41,7 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvmetastore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
-	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/metastore/milvuscompat"
 	"github.com/milvus-io/milvus/internal/rootcoord/telemetry"
 	"github.com/milvus-io/milvus/internal/rootcoord/tombstone"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -58,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -396,13 +397,15 @@ func (c *Core) initMetaTable(initCtx context.Context) error {
 			metaKV := c.metaKVCreator()
 			kvmetastore.StartLegacySnapshotGC(c.ctx, metaKV)
 			kvmetastore.StartLegacyTombstoneGC(c.ctx, metaKV)
-			catalog = kvmetastore.NewCatalog(metaKV)
+			compatCatalog := milvuscompat.Wrap(milvuscompat.Catalogs{RootCoord: kvmetastore.NewCatalog(metaKV)})
+			catalog = milvuscompat.New(compatCatalog).RootCoord
 		case util.MetaStoreTypeTiKV:
 			log.Ctx(initCtx).Info("Using tikv as meta storage.")
 			metaKV := c.metaKVCreator()
 			kvmetastore.StartLegacySnapshotGC(c.ctx, metaKV)
 			kvmetastore.StartLegacyTombstoneGC(c.ctx, metaKV)
-			catalog = kvmetastore.NewCatalog(metaKV)
+			compatCatalog := milvuscompat.Wrap(milvuscompat.Catalogs{RootCoord: kvmetastore.NewCatalog(metaKV)})
+			catalog = milvuscompat.New(compatCatalog).RootCoord
 		default:
 			return retry.Unrecoverable(merr.WrapErrServiceInternalMsg("not supported meta store: %s", Params.MetaStoreCfg.MetaStoreType.GetValue()))
 		}

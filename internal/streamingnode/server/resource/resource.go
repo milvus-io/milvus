@@ -49,7 +49,7 @@ func OptMixCoordClient(mixCoordClient *syncutil.Future[types.MixCoordClient]) op
 }
 
 // OptStreamingNodeCatalog provides the streaming node catalog to the resource.
-func OptStreamingNodeCatalog(catalog metastore.StreamingNodeCataLog) optResourceInit {
+func OptStreamingNodeCatalog(catalog metastore.StreamingNodeCatalog) optResourceInit {
 	return func(r *resourceImpl) {
 		r.streamingNodeCatalog = catalog
 	}
@@ -107,7 +107,7 @@ type resourceImpl struct {
 	etcdClient           *clientv3.Client
 	chunkManager         storage.ChunkManager
 	mixCoordClient       *syncutil.Future[types.MixCoordClient]
-	streamingNodeCatalog metastore.StreamingNodeCataLog
+	streamingNodeCatalog metastore.StreamingNodeCatalog
 	segmentStatsManager  *stats.StatsManager
 	timeTickInspector    tinspector.TimeTickSyncInspector
 	vchannelTempStorage  *vchantempstore.VChannelTempStorage
@@ -152,8 +152,8 @@ func (r *resourceImpl) MixCoordClient() *syncutil.Future[types.MixCoordClient] {
 	return r.mixCoordClient
 }
 
-// StreamingNodeCataLog returns the streaming node catalog.
-func (r *resourceImpl) StreamingNodeCatalog() metastore.StreamingNodeCataLog {
+// StreamingNodeCatalog returns the streaming node catalog.
+func (r *resourceImpl) StreamingNodeCatalog() metastore.StreamingNodeCatalog {
 	return r.streamingNodeCatalog
 }
 

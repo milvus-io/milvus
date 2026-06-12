@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
+	mock_metastore "github.com/milvus-io/milvus/internal/metastore/mocks"
 )
 
 func TestInit(t *testing.T) {
@@ -18,7 +18,7 @@ func TestInit(t *testing.T) {
 	})
 	assert.Panics(t, func() {
 		Init(OptStreamingCatalog(
-			mock_metastore.NewMockStreamingCoordCataLog(t),
+			mock_metastore.NewMockStreamingCoordCatalog(t),
 		))
 	})
 }

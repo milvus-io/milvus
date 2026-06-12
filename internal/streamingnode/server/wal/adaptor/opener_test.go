@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
+	mock_metastore "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/mock_recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher/flusherimpl"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -43,7 +43,7 @@ func TestOpenerAdaptorFailure(t *testing.T) {
 		return nil, errExpected
 	})
 
-	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	catalog := mock_metastore.NewMockStreamingNodeCatalog(t)
 	catalog.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(
 		&streamingpb.WALCheckpoint{MessageId: &commonpb.MessageID{
 			Id:      "0",
@@ -106,7 +106,7 @@ func TestHandleAlterWALFlushingStagePassesRateLimitComponent(t *testing.T) {
 		Term:       1,
 		AccessMode: types.AccessModeRW,
 	}
-	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	catalog := mock_metastore.NewMockStreamingNodeCatalog(t)
 	catalog.EXPECT().
 		SaveConsumeCheckpoint(mock.Anything, channel.Name, mock.MatchedBy(func(checkpoint *streamingpb.WALCheckpoint) bool {
 			return checkpoint.GetAlterWalState().GetStage() == streamingpb.AlterWALStage_ADVANCE_CHECKPOINT

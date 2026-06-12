@@ -20,7 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// NewCataLog creates a new streaming-node catalog instance.
+// NewCatalog creates a new streaming-node catalog instance.
 // It's used to persist the recovery info for a streaming node and wal.
 // The catalog is shown as following:
 // streamingnode-meta
@@ -47,7 +47,7 @@ import (
 //	        ├── 456398247934
 //	        ├── 456398247935
 //	        └── 456398247938
-func NewCataLog(metaKV kv.MetaKv) metastore.StreamingNodeCataLog {
+func NewCatalog(metaKV kv.MetaKv) metastore.StreamingNodeCatalog {
 	return &catalog{
 		metaKV: metaKV,
 	}

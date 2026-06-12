@@ -27,7 +27,7 @@ const (
 	legacyVersionKeyForTest         = canonicalVersionKeyForTest + "/"
 )
 
-func newTestCatalog(t *testing.T) (metastore.StreamingCoordCataLog, map[string]string, *mock_kv.MockMetaKv) {
+func newTestCatalog(t *testing.T) (metastore.StreamingCoordCatalog, map[string]string, *mock_kv.MockMetaKv) {
 	kv := mock_kv.NewMockMetaKv(t)
 	kvStorage := make(map[string]string)
 	kv.EXPECT().Load(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, key string) (string, error) {
@@ -85,7 +85,7 @@ func newTestCatalog(t *testing.T) (metastore.StreamingCoordCataLog, map[string]s
 		delete(kvStorage, key)
 		return nil
 	}).Maybe()
-	return NewCataLog(kv), kvStorage, kv
+	return NewCatalog(kv), kvStorage, kv
 }
 
 func TestCatalogMetaKeys(t *testing.T) {

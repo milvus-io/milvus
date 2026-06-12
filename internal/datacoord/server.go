@@ -42,7 +42,8 @@ import (
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
-	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	kvmetastore "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/metastore/milvuscompat"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -629,8 +630,10 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	}
 	reloadEtcdFn := func() error {
 		var err error
-		catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
-		s.meta, err = newMeta(s.ctx, catalog, chunkManager, s.broker)
+		compatCatalog := milvuscompat.Wrap(milvuscompat.Catalogs{
+			DataCoord: kvmetastore.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath),
+		})
+		s.meta, err = newMeta(s.ctx, milvuscompat.New(compatCatalog).DataCoord, chunkManager, s.broker)
 		if err != nil {
 			return err
 		}

@@ -26,8 +26,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"

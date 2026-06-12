@@ -17,8 +17,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	mock_metastore "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
-	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
@@ -57,7 +57,7 @@ func TestBroadcaster(t *testing.T) {
 		return nil
 	})
 
-	meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+	meta := mock_metastore.NewMockStreamingCoordCatalog(t)
 	meta.EXPECT().ListBroadcastTask(mock.Anything).
 		RunAndReturn(func(ctx context.Context) ([]*streamingpb.BroadcastTask, error) {
 			return []*streamingpb.BroadcastTask{
@@ -425,7 +425,7 @@ func TestWithSecondaryClusterResourceKey(t *testing.T) {
 		}).Maybe()
 		balance.Register(mb)
 
-		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+		meta := mock_metastore.NewMockStreamingCoordCatalog(t)
 		meta.EXPECT().ListBroadcastTask(mock.Anything).Return([]*streamingpb.BroadcastTask{}, nil).Times(1)
 		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		rc := idalloc.NewMockRootCoordClient(t)
@@ -461,7 +461,7 @@ func TestWithSecondaryClusterResourceKey(t *testing.T) {
 		}).Maybe()
 		balance.Register(mb)
 
-		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+		meta := mock_metastore.NewMockStreamingCoordCatalog(t)
 		meta.EXPECT().ListBroadcastTask(mock.Anything).Return([]*streamingpb.BroadcastTask{}, nil).Times(1)
 		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		rc := idalloc.NewMockRootCoordClient(t)
@@ -497,7 +497,7 @@ func TestWithSecondaryClusterResourceKey(t *testing.T) {
 		}).Maybe()
 		balance.Register(mb)
 
-		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+		meta := mock_metastore.NewMockStreamingCoordCatalog(t)
 		meta.EXPECT().ListBroadcastTask(mock.Anything).Return([]*streamingpb.BroadcastTask{}, nil).Times(1)
 		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		rc := idalloc.NewMockRootCoordClient(t)
@@ -695,7 +695,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		paramtable.Init()
 		registry.ResetRegistration()
 
-		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+		meta := mock_metastore.NewMockStreamingCoordCatalog(t)
 		rc := idalloc.NewMockRootCoordClient(t)
 		f := syncutil.NewFuture[internaltypes.MixCoordClient]()
 		f.Set(rc)
@@ -721,7 +721,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 				return nil
 			})
 
-		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+		meta := mock_metastore.NewMockStreamingCoordCatalog(t)
 		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		rc := idalloc.NewMockRootCoordClient(t)
 		f := syncutil.NewFuture[internaltypes.MixCoordClient]()
@@ -781,7 +781,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 			return nil
 		})
 
-		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+		meta := mock_metastore.NewMockStreamingCoordCatalog(t)
 		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		rc := idalloc.NewMockRootCoordClient(t)
 		f := syncutil.NewFuture[internaltypes.MixCoordClient]()
@@ -841,7 +841,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 			return nil
 		})
 
-		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+		meta := mock_metastore.NewMockStreamingCoordCatalog(t)
 		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		rc := idalloc.NewMockRootCoordClient(t)
 		f := syncutil.NewFuture[internaltypes.MixCoordClient]()
@@ -905,7 +905,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 			return nil
 		})
 
-		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+		meta := mock_metastore.NewMockStreamingCoordCatalog(t)
 		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		rc := idalloc.NewMockRootCoordClient(t)
 		f := syncutil.NewFuture[internaltypes.MixCoordClient]()
@@ -961,7 +961,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		paramtable.Init()
 		registry.ResetRegistration()
 
-		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+		meta := mock_metastore.NewMockStreamingCoordCatalog(t)
 		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		rc := idalloc.NewMockRootCoordClient(t)
 		f := syncutil.NewFuture[internaltypes.MixCoordClient]()
@@ -1035,7 +1035,7 @@ func TestDoForcePromoteFixIncompleteBroadcasts(t *testing.T) {
 				return nil
 			})
 
-		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+		meta := mock_metastore.NewMockStreamingCoordCatalog(t)
 		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		rc := idalloc.NewMockRootCoordClient(t)
 		f := syncutil.NewFuture[internaltypes.MixCoordClient]()

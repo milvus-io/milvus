@@ -37,7 +37,8 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	kvmetastore "github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/metastore/milvuscompat"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
@@ -379,7 +380,8 @@ func (s *Server) initMeta() error {
 	record := timerecord.NewTimeRecorder("querycoord")
 
 	log.Info("init meta")
-	s.store = querycoord.NewCatalog(s.kv)
+	compatCatalog := milvuscompat.Wrap(milvuscompat.Catalogs{QueryCoord: kvmetastore.NewCatalog(s.kv)})
+	s.store = milvuscompat.New(compatCatalog).QueryCoord
 	s.meta = meta.NewMeta(s.idAllocator, s.store, s.nodeMgr)
 
 	s.broker = meta.NewCoordinatorBroker(

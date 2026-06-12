@@ -13,8 +13,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	mock_metastore "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
@@ -42,7 +42,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestInitRecoveryInfoFromMeta(t *testing.T) {
-	snCatalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	snCatalog := mock_metastore.NewMockStreamingNodeCatalog(t)
 	snCatalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return([]*streamingpb.SegmentAssignmentMeta{}, nil)
 	snCatalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).Return([]*streamingpb.VChannelMeta{}, nil)
 
@@ -65,7 +65,7 @@ func TestInitRecoveryInfoFromMeta(t *testing.T) {
 
 func TestInitRecoveryInfoFromCoord(t *testing.T) {
 	var initialedVChannels map[string]*streamingpb.VChannelMeta
-	snCatalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	snCatalog := mock_metastore.NewMockStreamingNodeCatalog(t)
 	snCatalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, channel string) ([]*streamingpb.SegmentAssignmentMeta, error) {
 		return []*streamingpb.SegmentAssignmentMeta{}, nil
 	})

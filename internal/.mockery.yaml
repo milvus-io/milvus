@@ -88,9 +88,14 @@ packages:
       Manager:
   github.com/milvus-io/milvus/internal/metastore:
     interfaces:
-      ReplicationCatalog:
-      StreamingCoordCataLog:
-      StreamingNodeCataLog:
+      StreamingCoordCatalog:
+        config:
+          dir: "internal/metastore/mocks"
+          outpkg: "mocks"
+      StreamingNodeCatalog:
+        config:
+          dir: "internal/metastore/mocks"
+          outpkg: "mocks"
   github.com/milvus-io/milvus/internal/util/segcore:
     interfaces:
       CSegment:

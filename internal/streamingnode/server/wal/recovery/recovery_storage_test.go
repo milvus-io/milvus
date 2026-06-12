@@ -14,8 +14,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	mock_metastore "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
@@ -44,7 +44,7 @@ func TestRecoveryStorage(t *testing.T) {
 		RecoveryMagic: 0,
 	}
 
-	snCatalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	snCatalog := mock_metastore.NewMockStreamingNodeCatalog(t)
 	snCatalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, channel string) ([]*streamingpb.SegmentAssignmentMeta, error) {
 		return lo.MapToSlice(segmentMetas, func(_ int64, v *streamingpb.SegmentAssignmentMeta) *streamingpb.SegmentAssignmentMeta {
 			return proto.Clone(v).(*streamingpb.SegmentAssignmentMeta)
