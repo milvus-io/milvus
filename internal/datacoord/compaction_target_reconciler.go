@@ -9,7 +9,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 // compactionTargetReconciler converges segments toward declared compaction
@@ -58,7 +57,7 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 
 	candidateSegments := reconciler.selectCompactionTargetCandidates(ctx, targets)
 	segmentsByLabel := groupCompactionTargetSegmentsByLabel(candidateSegments)
-	segmentsInScope := make(map[int64][]*SegmentInfo, len(targets))
+	segmentsInScope := make(map[int64]map[CompactionGroupLabel][]*SegmentInfo, len(targets))
 	for _, label := range sortedCompactionTargetLabels(segmentsByLabel) {
 		groupSegments := segmentsByLabel[label]
 		for _, target := range targets {
@@ -67,7 +66,10 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 			if len(scopedSegments) == 0 {
 				continue
 			}
-			segmentsInScope[record.GetTargetID()] = append(segmentsInScope[record.GetTargetID()], scopedSegments...)
+			if _, ok := segmentsInScope[record.GetTargetID()]; !ok {
+				segmentsInScope[record.GetTargetID()] = make(map[CompactionGroupLabel][]*SegmentInfo)
+			}
+			segmentsInScope[record.GetTargetID()][label] = append(segmentsInScope[record.GetTargetID()][label], scopedSegments...)
 			for _, segment := range scopedSegments {
 				if !target.Match(segment) || !isNormalManualCompactionCandidate(reconciler.meta, segment) {
 					continue
@@ -82,7 +84,7 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 		if !target.Satisfied(segmentsInScope[record.GetTargetID()]) {
 			continue
 		}
-		if err := targetMeta.UpdateCompactionTargetState(ctx, record.GetTargetID(), datapb.TargetState_TARGET_STATE_INACTIVE, tsoutil.GetCurrentTime()); err != nil {
+		if err := targetMeta.UpdateCompactionTargetState(ctx, record.GetTargetID(), datapb.TargetState_TARGET_STATE_INACTIVE); err != nil {
 			return events, err
 		}
 		log.Ctx(ctx).Info("compaction target satisfied",
@@ -93,8 +95,11 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	return events, nil
 }
 
-func (reconciler *compactionTargetReconciler) selectCompactionTargetCandidates(ctx context.Context, targets []compactionTarget) []*SegmentInfo {
+func (reconciler *compactionTargetReconciler) selectCompactionTargetCandidates(ctx context.Context, targets []*compactionTarget) []*SegmentInfo {
 	return reconciler.meta.SelectSegments(ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
+		if !isSegmentHealthy(segment) {
+			return false
+		}
 		for _, target := range targets {
 			if target.ScopeIn(segment) {
 				return true

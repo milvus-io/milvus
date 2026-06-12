@@ -949,7 +949,7 @@ func TestDataCoordCompactionTargetConfig(t *testing.T) {
 
 	field, ok := reflect.TypeOf(dataCoordConfig{}).FieldByName("EnableTargetBasedCompaction")
 	assert.True(t, ok)
-	assert.Equal(t, "true", field.Tag.Get("refreshable"))
+	assert.Equal(t, "false", field.Tag.Get("refreshable"))
 }
 
 func TestForbiddenItem(t *testing.T) {

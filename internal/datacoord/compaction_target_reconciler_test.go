@@ -7,6 +7,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -35,7 +36,7 @@ func TestCompactionTargetReconcilerTriggersEligibleRewriteSegments(t *testing.T)
 
 	require.NoError(t, err)
 	views := events[TriggerTypeTarget]
-	require.Len(t, views, 2)
+	require.Len(t, views, 3)
 	require.Equal(t, int64(100), views[0].GetTriggerID())
 	require.Equal(t, int64(10), views[0].GetGroupLabel().PartitionID)
 	require.Equal(t, "ch-1", views[0].GetGroupLabel().Channel)
@@ -43,7 +44,11 @@ func TestCompactionTargetReconcilerTriggersEligibleRewriteSegments(t *testing.T)
 	require.Equal(t, int64(100), views[1].GetTriggerID())
 	require.Equal(t, int64(10), views[1].GetGroupLabel().PartitionID)
 	require.Equal(t, "ch-1", views[1].GetGroupLabel().Channel)
-	require.Equal(t, []int64{4}, segmentIDsFromViews(views[1].GetSegmentsView()))
+	require.Equal(t, []int64{3}, segmentIDsFromViews(views[1].GetSegmentsView()))
+	require.Equal(t, int64(100), views[2].GetTriggerID())
+	require.Equal(t, int64(10), views[2].GetGroupLabel().PartitionID)
+	require.Equal(t, "ch-1", views[2].GetGroupLabel().Channel)
+	require.Equal(t, []int64{4}, segmentIDsFromViews(views[2].GetSegmentsView()))
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 }
 
@@ -107,7 +112,33 @@ func TestCompactionTargetReconcilerInactivatesRewriteTargetWhenNoMatchRemains(t 
 	targetMeta := newLoadedCompactionTargetMeta(t, ctx, record)
 	meta := newCompactionTargetReconcilerTestMeta(targetMeta,
 		sortedTargetSegment(1, 1, 10, "ch-1", 201, 199, false),
-		sortedTargetSegment(2, 1, 10, "ch-1", 0, 200, false),
+		sortedTargetSegment(2, 1, 10, "ch-1", 0, 201, false),
+	)
+
+	events, err := newCompactionTargetReconciler(meta).Trigger(ctx)
+
+	require.NoError(t, err)
+	require.Empty(t, events[TriggerTypeTarget])
+	require.Equal(t, datapb.TargetState_TARGET_STATE_INACTIVE, targetMeta.GetCompactionTarget(100).GetState())
+}
+
+func TestCompactionTargetReconcilerIgnoresDroppedSegmentsForSatisfaction(t *testing.T) {
+	enableCompactionTargetReconciler(t)
+	ctx := context.Background()
+	record := &datapb.CompactionTarget{
+		TargetID:     100,
+		CollectionID: 1,
+		Intent:       datapb.TargetIntent_INTENT_REWRITE,
+		ExpectedTS:   200,
+		TailLimit:    0,
+		State:        datapb.TargetState_TARGET_STATE_ACTIVE,
+	}
+	targetMeta := newLoadedCompactionTargetMeta(t, ctx, record)
+	droppedSource := sortedTargetSegment(1, 1, 10, "ch-1", 0, 199, false)
+	droppedSource.State = commonpb.SegmentState_Dropped
+	meta := newCompactionTargetReconcilerTestMeta(targetMeta,
+		droppedSource,
+		sortedTargetSegment(2, 1, 10, "ch-1", 201, 199, false, 1),
 	)
 
 	events, err := newCompactionTargetReconciler(meta).Trigger(ctx)
@@ -168,8 +199,8 @@ func newCompactionTargetReconcilerTestMeta(targetMeta *compactionTargetMeta, seg
 	return meta
 }
 
-func sortedTargetSegment(id, collectionID, partitionID int64, channel string, createTS uint64, dataTS uint64, compacting bool) *SegmentInfo {
-	segment := targetSegmentWithDataTS(id, collectionID, partitionID, channel, createTS, dataTS, compacting)
+func sortedTargetSegment(id, collectionID, partitionID int64, channel string, createTS uint64, dataTS uint64, compacting bool, compactionFrom ...int64) *SegmentInfo {
+	segment := targetSegmentWithDataTS(id, collectionID, partitionID, channel, createTS, dataTS, compacting, compactionFrom...)
 	segment.IsSorted = true
 	return segment
 }

@@ -5015,7 +5015,7 @@ type dataCoordConfig struct {
 	// compaction
 	EnableCompaction                       ParamItem `refreshable:"false"`
 	EnableAutoCompaction                   ParamItem `refreshable:"true"`
-	EnableTargetBasedCompaction            ParamItem `refreshable:"true"`
+	EnableTargetBasedCompaction            ParamItem `refreshable:"false"`
 	IndexBasedCompaction                   ParamItem `refreshable:"true"`
 	CompactionTaskPrioritizer              ParamItem `refreshable:"true"`
 	CompactionTaskQueueCapacity            ParamItem `refreshable:"false"`
