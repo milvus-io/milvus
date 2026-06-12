@@ -55,6 +55,8 @@ type Collection struct {
 	UpdateTimestamp      uint64
 	SchemaVersion        int32
 	ShardInfos           map[string]*ShardInfo
+	RoutingVersion       int64          // increases monotonically on every routing change (shard split/merge), 0 for legacy collections.
+	RoutingMode          pb.RoutingMode // how a routing key maps to a shard, RoutingModeHash for legacy collections.
 	FileResourceIds      []int64
 	ExternalSource       string
 	ExternalSpec         string
@@ -64,6 +66,12 @@ type ShardInfo struct {
 	PChannelName         string // the pchannel name of the shard, it is the same with the physical channel name.
 	VChannelName         string // the vchannel name of the shard, it is the same with the virtual channel name.
 	LastTruncateTimeTick uint64 // the last truncate time tick of the shard, if the shard is not truncated, the value is 0.
+	// The routing key range [RoutingKeyLower, RoutingKeyUpper) owned by the shard.
+	// Keys are byte-comparable, nil means unbounded. Only meaningful when the
+	// collection's RoutingMode is RoutingModeRange.
+	RoutingKeyLower []byte
+	RoutingKeyUpper []byte
+	State           pb.ShardState // the lifecycle state during shard split, ShardNormal by default.
 }
 
 func (c *Collection) Available() bool {
@@ -97,6 +105,8 @@ func (c *Collection) ShallowClone() *Collection {
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           c.ShardInfos,
+		RoutingVersion:       c.RoutingVersion,
+		RoutingMode:          c.RoutingMode,
 		FileResourceIds:      c.FileResourceIds,
 		ExternalSource:       c.ExternalSource,
 		ExternalSpec:         c.ExternalSpec,
@@ -110,6 +120,9 @@ func (c *Collection) Clone() *Collection {
 			VChannelName:         channelName,
 			PChannelName:         shardInfo.PChannelName,
 			LastTruncateTimeTick: shardInfo.LastTruncateTimeTick,
+			RoutingKeyLower:      slices.Clone(shardInfo.RoutingKeyLower),
+			RoutingKeyUpper:      slices.Clone(shardInfo.RoutingKeyUpper),
+			State:                shardInfo.State,
 		}
 	}
 	return &Collection{
@@ -138,6 +151,8 @@ func (c *Collection) Clone() *Collection {
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           shardInfos,
+		RoutingVersion:       c.RoutingVersion,
+		RoutingMode:          c.RoutingMode,
 		FileResourceIds:      slices.Clone(c.FileResourceIds),
 		ExternalSource:       c.ExternalSource,
 		ExternalSpec:         c.ExternalSpec,
@@ -262,6 +277,9 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 				VChannelName:         channelName,
 				PChannelName:         coll.PhysicalChannelNames[idx],
 				LastTruncateTimeTick: coll.ShardInfos[idx].LastTruncateTimeTick,
+				RoutingKeyLower:      coll.ShardInfos[idx].RoutingKeyLower,
+				RoutingKeyUpper:      coll.ShardInfos[idx].RoutingKeyUpper,
+				State:                coll.ShardInfos[idx].State,
 			}
 		}
 	}
@@ -289,6 +307,8 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		UpdateTimestamp:      coll.UpdateTimestamp,
 		SchemaVersion:        coll.Schema.Version,
 		ShardInfos:           shardInfos,
+		RoutingVersion:       coll.RoutingVersion,
+		RoutingMode:          coll.RoutingMode,
 		FileResourceIds:      coll.Schema.GetFileResourceIds(),
 		ExternalSource:       coll.Schema.ExternalSource,
 		ExternalSpec:         coll.Schema.ExternalSpec,
@@ -364,6 +384,9 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		if shard, ok := coll.ShardInfos[channelName]; ok {
 			shardInfos[idx] = &pb.CollectionShardInfo{
 				LastTruncateTimeTick: shard.LastTruncateTimeTick,
+				RoutingKeyLower:      shard.RoutingKeyLower,
+				RoutingKeyUpper:      shard.RoutingKeyUpper,
+				State:                shard.State,
 			}
 		} else {
 			shardInfos[idx] = &pb.CollectionShardInfo{
@@ -385,6 +408,8 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		Properties:           coll.Properties,
 		UpdateTimestamp:      coll.UpdateTimestamp,
 		ShardInfos:           shardInfos,
+		RoutingVersion:       coll.RoutingVersion,
+		RoutingMode:          coll.RoutingMode,
 	}
 
 	if c.withPartitions {

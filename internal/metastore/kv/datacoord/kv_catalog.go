@@ -950,6 +950,42 @@ func (kc *Catalog) DropCompactionTask(ctx context.Context, task *datapb.Compacti
 	return kc.MetaKv.Remove(ctx, key)
 }
 
+func (kc *Catalog) ListSplitShardTask(ctx context.Context) ([]*datapb.SplitShardTask, error) {
+	tasks := make([]*datapb.SplitShardTask, 0)
+
+	applyFn := func(key []byte, value []byte) error {
+		info := &datapb.SplitShardTask{}
+		if err := proto.Unmarshal(value, info); err != nil {
+			return err
+		}
+		tasks = append(tasks, info)
+		return nil
+	}
+
+	if err := kc.MetaKv.WalkWithPrefix(ctx, SplitShardTaskPrefix+"/", kc.paginationSize, applyFn); err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func (kc *Catalog) SaveSplitShardTask(ctx context.Context, task *datapb.SplitShardTask) error {
+	if task == nil {
+		return nil
+	}
+	cloned := proto.Clone(task).(*datapb.SplitShardTask)
+	k, v, err := buildSplitShardTaskKV(cloned)
+	if err != nil {
+		return err
+	}
+	kvs := map[string]string{k: v}
+	return kc.SaveByBatch(ctx, kvs)
+}
+
+func (kc *Catalog) DropSplitShardTask(ctx context.Context, task *datapb.SplitShardTask) error {
+	key := buildSplitShardTaskPath(task)
+	return kc.MetaKv.Remove(ctx, key)
+}
+
 func (kc *Catalog) ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error) {
 	tasks := make([]*indexpb.AnalyzeTask, 0)
 

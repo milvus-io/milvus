@@ -250,6 +250,18 @@ func TestGetCollectionIDFromVChannel(t *testing.T) {
 	assert.Equal(t, int64(-1), collectionID)
 }
 
+func TestGetShardIndexFromVChannel(t *testing.T) {
+	assert.Equal(t, 0, GetShardIndexFromVChannel("by-dev-rootcoord-dml_3_449684528748778322v0"))
+	assert.Equal(t, 2, GetShardIndexFromVChannel("by-dev-rootcoord-dml_0_100v2"))
+	assert.Equal(t, 12, GetShardIndexFromVChannel("by-dev-rootcoord-dml_0_100v12"))
+	// no shard index suffix
+	assert.Equal(t, -1, GetShardIndexFromVChannel("by-dev-rootcoord-dml_0"))
+	// missing collection id
+	assert.Equal(t, -1, GetShardIndexFromVChannel("by-dev-rootcoord-dml_3_v0"))
+	// trailing garbage after the shard index
+	assert.Equal(t, -1, GetShardIndexFromVChannel("by-dev-rootcoord-dml_0_100v1x"))
+}
+
 func TestCheckCtxValid(t *testing.T) {
 	bgCtx := context.Background()
 	timeout := 20 * time.Millisecond

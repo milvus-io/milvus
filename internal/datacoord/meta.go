@@ -1013,6 +1013,26 @@ func UpdateStorageVersionOperator(segmentID int64, version int64) UpdateOperator
 	}
 }
 
+// UpdateInsertChannelOperator relabels a segment to another vchannel.
+// It is used by shard split redistribution: the segment keeps its ID and
+// data, only the shard ownership changes.
+func UpdateInsertChannelOperator(segmentID int64, channel string) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Ctx(context.TODO()).Warn("meta update: update insert channel failed - segment not found",
+				zap.Int64("segmentID", segmentID),
+				zap.String("channel", channel))
+			return false
+		}
+		if segment.GetInsertChannel() == channel {
+			return false
+		}
+		segment.InsertChannel = channel
+		return true
+	}
+}
+
 // Set status of segment
 // and record dropped time when change segment status to dropped
 func UpdateStatusOperator(segmentID int64, status commonpb.SegmentState) UpdateOperator {
