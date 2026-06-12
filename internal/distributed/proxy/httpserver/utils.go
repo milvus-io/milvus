@@ -408,11 +408,12 @@ func printStructArrayFieldsV2(structFields []*schemapb.StructArrayFieldSchema) [
 			subs = append(subs, detail)
 		}
 		entry := gin.H{
-			HTTPReturnFieldName:   sf.GetName(),
-			HTTPReturnFieldID:     sf.GetFieldID(),
-			HTTPReturnDescription: sf.GetDescription(),
-			HTTPReturnFieldType:   schemapb.DataType_ArrayOfStruct.String(),
-			"fields":              subs,
+			HTTPReturnFieldName:     sf.GetName(),
+			HTTPReturnFieldID:       sf.GetFieldID(),
+			HTTPReturnDescription:   sf.GetDescription(),
+			HTTPReturnFieldNullable: sf.GetNullable(),
+			HTTPReturnFieldType:     schemapb.DataType_ArrayOfStruct.String(),
+			"fields":                subs,
 		}
 		if len(sf.GetTypeParams()) > 0 {
 			entry[Params] = sf.GetTypeParams()
