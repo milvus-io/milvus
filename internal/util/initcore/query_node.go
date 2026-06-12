@@ -246,6 +246,6 @@ func SyncEnableGrowingSourceFlush(ctx context.Context, params *paramtable.Compon
 	C.SegcoreSetStorageV3Enabled(C.bool(storageV3Enabled))
 	C.SegcoreSetEnableGrowingSourceFlush(C.bool(v))
 	if v {
-		log.Ctx(ctx).Info("enableGrowingSourceFlush=true: growing segments retain raw field chunks for StorageV3 growing-source flush")
+		mlog.Info(ctx, "enableGrowingSourceFlush=true: growing segments retain raw field chunks for StorageV3 growing-source flush")
 	}
 }
