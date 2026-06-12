@@ -183,6 +183,32 @@ TEST(ParallelDegreeSplitStrategy, ContinuousExceedingAvgSize) {
     EXPECT_EQ(blocks[1], (RowGroupBlock{5, 4}));
 }
 
+TEST(FieldDataLoadBatchSplitTargetBytes, UsesBatchTargetByDefault) {
+    auto& budget =
+        milvus::storage::TransientMemoryBudget::GetFieldDataLoadBudget();
+    auto old_capacity = budget.CapacityBytes();
+    auto cleanup = folly::makeGuard(
+        [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
+
+    budget.SetCapacityBytes(kDefaultFieldDataLoadBatchTargetBytes * 4);
+
+    EXPECT_EQ(FieldDataLoadBatchSplitTargetBytes(),
+              kDefaultFieldDataLoadBatchTargetBytes);
+}
+
+TEST(FieldDataLoadBatchSplitTargetBytes, CapsTargetByConfiguredBudget) {
+    constexpr int64_t MB = 1 << 20;
+    auto& budget =
+        milvus::storage::TransientMemoryBudget::GetFieldDataLoadBudget();
+    auto old_capacity = budget.CapacityBytes();
+    auto cleanup = folly::makeGuard(
+        [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
+
+    budget.SetCapacityBytes(8 * MB);
+
+    EXPECT_EQ(FieldDataLoadBatchSplitTargetBytes(), 8 * MB);
+}
+
 // ---- LoadCellBatchAsync tests ----
 
 namespace {

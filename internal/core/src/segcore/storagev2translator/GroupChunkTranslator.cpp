@@ -366,14 +366,14 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
             return load_group_chunk(
                 tables, static_cast<milvus::cachinglayer::cid_t>(cid));
         };
-    auto load_futures =
-        milvus::segcore::LoadCellBatchAsync(ctx,
-                                            std::move(cell_specs),
-                                            std::move(factory),
-                                            channel,
-                                            FieldDataLoadBatchTargetBytes(),
-                                            load_priority_,
-                                            std::move(finalize_cell));
+    auto load_futures = milvus::segcore::LoadCellBatchAsync(
+        ctx,
+        std::move(cell_specs),
+        std::move(factory),
+        channel,
+        FieldDataLoadBatchSplitTargetBytes(),
+        load_priority_,
+        std::move(finalize_cell));
 
     LOG_INFO(
         "[StorageV2] translator {} submits {} batch tasks for column group {}",

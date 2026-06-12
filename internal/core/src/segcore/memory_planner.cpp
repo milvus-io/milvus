@@ -69,6 +69,19 @@ FieldDataLoadBatchTargetBytes() {
 }
 
 int64_t
+FieldDataLoadBatchSplitTargetBytes() {
+    auto target = FieldDataLoadBatchTargetBytes();
+    auto budget_capacity =
+        milvus::storage::TransientMemoryBudget::GetFieldDataLoadBudget()
+            .CapacityBytes();
+    if (budget_capacity == 0) {
+        return target;
+    }
+    return std::max<int64_t>(
+        1, std::min<int64_t>(target, static_cast<int64_t>(budget_capacity)));
+}
+
+int64_t
 FieldDataReadWindowBytes() {
     return PositiveBytes(FIELD_DATA_READ_WINDOW_BYTES.load(),
                          kDefaultFieldDataReadWindowBytes);

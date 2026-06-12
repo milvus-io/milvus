@@ -317,7 +317,7 @@ ManifestGroupTranslator::get_cells(
         std::move(cell_specs),
         std::move(factory),
         channel,
-        FieldDataLoadBatchTargetBytes(),
+        FieldDataLoadBatchSplitTargetBytes(),
         load_priority_,
         [this](const std::vector<std::shared_ptr<arrow::Table>>& tables,
                int64_t cid) {
