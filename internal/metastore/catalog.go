@@ -237,6 +237,10 @@ type DataCoordCatalog interface {
 	SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
 	DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
 
+	ListSplitShardTask(ctx context.Context) ([]*datapb.SplitShardTask, error)
+	SaveSplitShardTask(ctx context.Context, task *datapb.SplitShardTask) error
+	DropSplitShardTask(ctx context.Context, task *datapb.SplitShardTask) error
+
 	ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error)
 	SaveAnalyzeTask(ctx context.Context, task *indexpb.AnalyzeTask) error
 	DropAnalyzeTask(ctx context.Context, taskID typeutil.UniqueID) error
