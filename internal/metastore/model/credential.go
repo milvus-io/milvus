@@ -16,7 +16,7 @@ func MarshalCredentialModel(cred *Credential) *internalpb.CredentialInfo {
 	if cred == nil {
 		return nil
 	}
-	credentialInfo := &internalpb.CredentialInfo{
+	return &internalpb.CredentialInfo{
 		Tenant:            cred.Tenant,
 		Username:          cred.Username,
 		EncryptedPassword: cred.EncryptedPassword,
@@ -25,7 +25,6 @@ func MarshalCredentialModel(cred *Credential) *internalpb.CredentialInfo {
 		Description:       &cred.Description,
 		TimeTick:          cred.TimeTick,
 	}
-	return credentialInfo
 }
 
 func UnmarshalCredentialModel(cred *internalpb.CredentialInfo) *Credential {
