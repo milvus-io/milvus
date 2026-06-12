@@ -242,7 +242,11 @@ interceptor chain.
 
 1. DataCoord decides to split shard0 (per-shard data size, tenant count,
    or a single oversized namespace), checks the gates (feature switch,
-   concurrency limit, pchannel headroom), and creates the target shard
+   concurrency limit, pchannel headroom, and one active task per
+   vchannel — a shard is skipped while an unfinished task references it
+   as the source or as a target, otherwise the trigger would re-fire on
+   the same over-threshold shard every tick during the long
+   redistribution window), and creates the target shard
    metadata in state `Creating`. Shards holding a single namespace are
    excluded from the trigger: they satisfy the size thresholds but cannot
    be split further (the split point must fall on a namespace boundary),
@@ -254,7 +258,18 @@ interceptor chain.
    StreamingNodes own them — a node cannot open a WAL for another node),
    registering the vchannel in a `Creating`, non-writable state and
    carrying the collection schema, partition list and key range — modeled
-   on how `CreateCollection` registers vchannels today. The append
+   on how `CreateCollection` registers vchannels today. Every consumer
+   that special-cases `CreateCollection` as the vchannel-genesis message
+   needs a `CreateVChannel` handler; there are three: the shard manager
+   (registers the collection for DML and segment assignment), the
+   RecoveryStorage (its `vchannel not found` consistency check exempts
+   only `CreateCollection`/`DropCollection` and needs the same exemption,
+   plus an observe handler seeding the vchannel meta), and the flusher
+   (the `CreateCollection` hook spawns the data sync service). The
+   message body keeps the same shape as `CreateCollection`'s (schema
+   extracted through the same parsing path), so the three handlers share
+   the existing parser instead of growing a second schema-carrying
+   format. The append
    results immediately yield the children's consume start positions
    (the `LastConfirmedMessageID` of each append), which DataCoord
    persists in the split task meta. `Creating` vchannels reject DML and
@@ -579,10 +594,12 @@ The view of one segment `S` across the phases:
 | Key | Default | Description |
 |-----|---------|-------------|
 | `dataCoord.shardSplit.enable` | `false` | Master switch, refreshable. Gates the trigger (automatic and manual); disabling stops new tasks but never interrupts a task already past the fence. |
-| `dataCoord.shardSplit.maxSizeThreshold` | 2TB | Per-shard size that triggers a split. |
-| `dataCoord.shardSplit.maxRowsThreshold` | 500M | Per-shard row count that triggers a split. |
-| `dataCoord.shardSplit.namespaceCountLimit` | 100K | Per-shard namespace count that triggers a split. |
+| `dataCoord.shardSplit.checkInterval` | 3600s | Interval at which the trigger inspects the per-shard statistics. |
+| `dataCoord.shardSplit.maxShardSize` | 2048 (GB) | Per-shard data size that triggers a split. |
+| `dataCoord.shardSplit.maxShardRows` | 500M | Per-shard row count that triggers a split. |
+| `dataCoord.shardSplit.maxNamespaceCount` | 100K | Per-shard namespace count that triggers a split. |
 | `dataCoord.shardSplit.maxConcurrentTasks` | 1 | Cluster-wide concurrent split tasks. |
+| `dataCoord.shardSplit.relabelBatchSize` | 256 | Segments relabeled to the target shards per redistribution round. |
 
 Even with the switch on, split stays disabled on clusters with replication
 enabled, and on WAL backends that cannot host additional topics. The
@@ -605,6 +622,16 @@ by the namespace hard limit instead.
   accepted DML); there are no external side effects.
 - **After the fence**: forward-only. Every step is idempotent and resumed
   from the persisted task state; routing versions never go backwards.
+  One crash window needs a recovery path of its own: if the coordinator
+  crashes after the `SplitShard` append succeeded but before `T_switch`
+  is persisted in the task meta, the retried append hits `SHARD_FENCED`
+  and `T_switch` is unrecoverable from the coordinator side. The
+  RecoveryStorage already observes the `SplitShard` message into the
+  source vchannel's meta (the `VChannelMeta` comment reserves storing
+  "the vchannel operation result, such as shard-splitting"): persist
+  `T_switch` and the target vchannels there and expose a small query
+  path, so the coordinator recovers `T_switch` from the StreamingNode
+  instead of requiring manual intervention.
 - **BM25/index rebuild failure**: the new shards stay un-adopted (the
   window simply extends), the rebuild is retried.
 
@@ -615,7 +642,7 @@ by the namespace hard limit instead.
 | Common | `SplitShard` / `CreateVChannel` / `Activate` message types (codegen; `SplitShard` is `ExclusiveRequired`); `SHARD_FENCED` / `ROUTING_STALE` error codes (unrecoverable, `SHARD_FENCED` carries the expected routing version); `etcdpb` shard routing fields; range routing table derived from collection meta |
 | DataCoord | Split task FSM driving the sequence via streaming-client appends (`CreateVChannel` → `ManualFlush` + `SplitShard` → `Activate`, start positions persisted in task meta, Broadcaster `ExclusiveCollectionName` key held across create→fence→activate), trigger and split-point selection, batched relabel (segments + L0), multi-round redistribution, source-shard freeze, adoption gate |
 | StreamingCoord | vchannel allocation for existing collections (per-collection increasing shard index, distinct pchannels), pchannel headroom and expansion |
-| StreamingNode | Target-vchannel `Creating`/`Active` lifecycle (DML rejected until activation; `streaming.proto` already reserves a splitting vchannel state), vchannel fence on the lock interceptor, persisted fence state, rejection codes, `Activate` handling with `BarrierTimeTick = T_switch` plus a TimeTick lower-bound assertion |
+| StreamingNode | Target-vchannel `Creating`/`Active` lifecycle (DML rejected until activation; the `VCHANNEL_STATE_SPLITTED = 3` reservation in `streaming.proto` covers only the fenced **source** vchannel — the targets need a new state, e.g. `VCHANNEL_STATE_CREATING = 4`, with `Activate` transitioning it to `VCHANNEL_STATE_NORMAL`, persisted through the same RecoveryStorage observe path so the non-writable state survives restarts), vchannel fence on the lock interceptor, persisted fence state, rejection codes, `Activate` handling with `BarrierTimeTick = T_switch` plus a TimeTick lower-bound assertion |
 | Proxy | Range routing lookup, reject-and-refetch loop, routing-version header, cache invalidation on adoption |
 | QueryNode | In-place child delegator spawn, fronting fan-out + reduce, delete/TimeTick forwarding, `min(tsafe)` serving timestamp, idempotent re-spawn on recovery, in-place handoff |
 | QueryCoord | Splitting flag (balance freeze), one-shot adoption, in-place delegator conversion, source-shard release |
