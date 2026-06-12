@@ -19,11 +19,18 @@
 package function
 
 import (
+	"sync/atomic"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/analyzer/interfaces"
+	"github.com/milvus-io/milvus/pkg/v2/config"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestBM25FunctionRunnerSuite(t *testing.T) {
@@ -85,4 +92,98 @@ func (s *BM25FunctionRunnerSuite) TestBM25() {
 	// run after close
 	_, err = runner.BatchRun([]string{"test string", "test string 2"})
 	s.Error(err)
+}
+
+func (s *BM25FunctionRunnerSuite) TestBatchAnalyze() {
+	runner, err := NewFunctionRunner(s.schema, &schemapb.FunctionSchema{
+		Name:           "test",
+		Type:           schemapb.FunctionType_BM25,
+		InputFieldIds:  []int64{101},
+		OutputFieldIds: []int64{102},
+	})
+	s.NoError(err)
+
+	analyzer, ok := runner.(Analyzer)
+	s.True(ok)
+
+	result, err := analyzer.BatchAnalyze(true, false, []string{"test string", "test string 2"})
+	s.NoError(err)
+
+	s.Equal(2, len(result))
+	s.Equal(2, len(result[0]))
+	s.Equal(3, len(result[1]))
+}
+
+type singleTokenStream struct {
+	token   string
+	advance bool
+}
+
+func (s *singleTokenStream) Advance() bool {
+	if s.advance {
+		return false
+	}
+	s.advance = true
+	return true
+}
+
+func (s *singleTokenStream) Token() string {
+	return s.token
+}
+
+func (s *singleTokenStream) DetailedToken() *milvuspb.AnalyzerToken {
+	return &milvuspb.AnalyzerToken{Token: s.token}
+}
+
+func (s *singleTokenStream) Destroy() {}
+
+func (s *BM25FunctionRunnerSuite) newCloneCountingAnalyzer(cloneCount *atomic.Int32) *interfaces.MockAnalyzer {
+	tokenizer := interfaces.NewMockAnalyzer(s.T())
+	tokenizer.EXPECT().Clone().RunAndReturn(func() (interfaces.Analyzer, error) {
+		cloneCount.Add(1)
+		return tokenizer, nil
+	})
+	tokenizer.EXPECT().NewTokenStream(mock.Anything).RunAndReturn(func(text string) interfaces.TokenStream {
+		return &singleTokenStream{token: text}
+	})
+	tokenizer.EXPECT().Destroy().Return()
+	return tokenizer
+}
+
+func (s *BM25FunctionRunnerSuite) TestAnalyzerRunnerConcurrencyConfigDynamic() {
+	cfg := &paramtable.Get().FunctionCfg.AnalyzerRunnerConcurrency
+	old := cfg.SwapTempValue("2")
+	defer cfg.SwapTempValue(old)
+
+	var cloneCount atomic.Int32
+	tokenizer := s.newCloneCountingAnalyzer(&cloneCount)
+	runner := &BM25FunctionRunner{tokenizer: tokenizer}
+	input := []string{"a", "b", "c", "d", "e", "f"}
+
+	_, err := runner.BatchRun(input)
+	s.Require().NoError(err)
+	s.Equal(int32(2), cloneCount.Load())
+
+	cfg.SwapTempValue("3")
+
+	_, err = runner.BatchRun(input)
+	s.Require().NoError(err)
+	s.Equal(int32(5), cloneCount.Load())
+}
+
+func (s *BM25FunctionRunnerSuite) TestResizeAnalyzerPool() {
+	cfg := &paramtable.Get().FunctionCfg.AnalyzerConcurrencyPerCPUCore
+	old := cfg.SwapTempValue("1")
+	defer func() {
+		cfg.SwapTempValue(old)
+		ResizeAnalyzerPool(&config.Event{HasUpdated: true})
+	}()
+
+	pool := getOrCreateAnalyzerPool()
+	ResizeAnalyzerPool(&config.Event{HasUpdated: true})
+	s.Equal(hardware.GetCPUNum(), pool.Cap())
+
+	cfg.SwapTempValue("2")
+	ResizeAnalyzerPool(&config.Event{HasUpdated: true})
+	s.Equal(hardware.GetCPUNum()*2, pool.Cap())
 }

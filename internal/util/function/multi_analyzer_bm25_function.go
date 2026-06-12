@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -44,7 +45,6 @@ type MultiAnalyzerBM25FunctionRunner struct {
 	schema      *schemapb.FunctionSchema
 	outputField *schemapb.FieldSchema
 	inputFields []*schemapb.FieldSchema
-	concurrency int
 }
 
 func getMultiAnalyzerParams(field *schemapb.FieldSchema) (string, bool) {
@@ -62,7 +62,6 @@ func NewMultiAnalyzerBM25FunctionRunner(coll *schemapb.CollectionSchema, schema 
 		inputFields: []*schemapb.FieldSchema{inputField},
 		outputField: outputField,
 		analyzers:   make(map[string]analyzer.Analyzer),
-		concurrency: 8,
 	}
 
 	var m map[string]json.RawMessage
@@ -212,12 +211,13 @@ func (v *MultiAnalyzerBM25FunctionRunner) BatchRun(inputs ...any) ([]any, error)
 	rowNum := len(text)
 	embedData := make([]map[uint32]float32, rowNum)
 	wg := sync.WaitGroup{}
+	concurrency := getAnalyzerRunnerConcurrency()
 
-	errCh := make(chan error, v.concurrency)
-	for i, j := 0, 0; i < v.concurrency && j < rowNum; i++ {
+	errCh := make(chan error, concurrency)
+	for i, j := 0, 0; i < concurrency && j < rowNum; i++ {
 		start := j
-		end := start + rowNum/v.concurrency
-		if i < rowNum%v.concurrency {
+		end := start + rowNum/concurrency
+		if i < rowNum%concurrency {
 			end += 1
 		}
 		wg.Add(1)
@@ -308,33 +308,26 @@ func (v *MultiAnalyzerBM25FunctionRunner) BatchAnalyze(withDetail bool, withHash
 
 	rowNum := len(text)
 	result := make([][]*milvuspb.AnalyzerToken, rowNum)
-	wg := sync.WaitGroup{}
+	pool := getOrCreateAnalyzerPool()
+	futures := make([]*conc.Future[struct{}], 0)
+	concurrency := getAnalyzerRunnerConcurrency()
 
-	errCh := make(chan error, v.concurrency)
-	for i, j := 0, 0; i < v.concurrency && j < rowNum; i++ {
+	for i, j := 0, 0; i < concurrency && j < rowNum; i++ {
 		start := j
-		end := start + rowNum/v.concurrency
-		if i < rowNum%v.concurrency {
+		end := start + rowNum/concurrency
+		if i < rowNum%concurrency {
 			end += 1
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			err := v.analyze(text[start:end], analyzer[start:end], result[start:end], withDetail, withHash)
-			if err != nil {
-				errCh <- err
-				return
-			}
-		}()
+		future := pool.Submit(func() (struct{}, error) {
+			return struct{}{}, v.analyze(text[start:end], analyzer[start:end], result[start:end], withDetail, withHash)
+		})
+		futures = append(futures, future)
 		j = end
 	}
 
-	wg.Wait()
-	close(errCh)
-	for err := range errCh {
-		if err != nil {
-			return nil, err
-		}
+	err := conc.AwaitAll(futures...)
+	if err != nil {
+		return nil, err
 	}
 	return result, nil
 }
