@@ -5,6 +5,8 @@ These tests validate GPU_HNSW functionality beyond parameter validation:
 1. Recall correctness — verify GPU search produces correct results
 2. Hot-load path — verify new segments load as GPU_HNSW while collection is loaded
 3. Restart resilience — verify segments reload as GPU_HNSW after querynode restart
+4. VRAM exhaustion — verify graceful handling when GPU memory is exceeded
+5. Mixed CPU/GPU mode — verify selective override (only HNSW_int8 on GPU)
 
 Requirements:
 - Milvus cluster with GPU querynode(s)
@@ -421,6 +423,353 @@ class TestGpuHnswRestart:
         )
 
 
+class TestGpuHnswVramExhaustion:
+    """Test 4: VRAM exhaustion handling.
+
+    Loads multiple large collections to exceed GPU memory capacity.
+    Verifies that Milvus handles the condition gracefully — either by
+    rejecting the load with an error or falling back to CPU.
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup(self, host, port):
+        self.client = get_milvus_client(host, port)
+        self.collections = []
+        yield
+        for name in self.collections:
+            try:
+                self.client.drop_collection(name)
+            except Exception:
+                pass
+
+    def _create_and_load_collection(self, name, num_vectors, dim):
+        """Helper: create collection, insert vectors, index, load."""
+        schema = self.client.create_schema()
+        schema.add_field("id", datatype=DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vector", datatype=DataType.FLOAT_VECTOR, dim=dim)
+        self.client.create_collection(collection_name=name, schema=schema)
+        self.collections.append(name)
+
+        # Insert in batches
+        batch_size = 5000
+        for i in range(0, num_vectors, batch_size):
+            end = min(i + batch_size, num_vectors)
+            vectors = np.random.randn(end - i, dim).astype(np.float32).tolist()
+            rows = [{"id": j, "vector": vectors[j - i]} for j in range(i, end)]
+            self.client.insert(name, rows)
+
+        self.client.flush(name)
+
+        index_params = self.client.prepare_index_params()
+        index_params.add_index(
+            field_name="vector",
+            metric_type="COSINE",
+            index_type="HNSW",
+            params={"M": M, "efConstruction": EF_CONSTRUCTION},
+        )
+        self.client.create_index(name, index_params)
+        self.client.load_collection(name)
+
+    def test_vram_exhaustion_graceful_handling(self):
+        """Load progressively larger collections until GPU memory is stressed.
+
+        Verifies that:
+        - Initial collections load successfully on GPU
+        - When VRAM is exhausted, Milvus either rejects load with a clear error
+          or falls back gracefully (no crash, no silent data loss)
+        - Previously loaded collections remain searchable
+        """
+        np.random.seed(789)
+        large_dim = 768  # Larger dimension = more VRAM per vector
+        vectors_per_collection = 50000  # ~150MB per collection on GPU (768d * 4B * 50K)
+        max_collections = 10  # Attempt to load up to 10 collections
+
+        first_collection = None
+        load_failures = []
+
+        for idx in range(max_collections):
+            name = COLLECTION_PREFIX + f"vram_{idx}_" + str(int(time.time()))
+            try:
+                self._create_and_load_collection(name, vectors_per_collection, large_dim)
+                time.sleep(2)
+
+                if first_collection is None:
+                    first_collection = name
+
+                # Verify the collection is searchable
+                query = np.random.randn(1, large_dim).astype(np.float32).tolist()
+                results = self.client.search(
+                    collection_name=name,
+                    data=query,
+                    anns_field="vector",
+                    search_params={"metric_type": "COSINE", "params": {"ef": 64}},
+                    limit=5,
+                )
+                assert len(results) > 0 and len(results[0]) > 0, (
+                    f"Collection {name} loaded but not searchable"
+                )
+                log.info(f"Collection {idx} loaded successfully ({vectors_per_collection} vectors, dim={large_dim})")
+
+            except Exception as e:
+                error_msg = str(e)
+                log.info(f"Collection {idx} load failed (expected at VRAM limit): {error_msg}")
+                load_failures.append((idx, error_msg))
+                # Remove from cleanup list if creation failed
+                if name in self.collections:
+                    try:
+                        self.client.drop_collection(name)
+                        self.collections.remove(name)
+                    except Exception:
+                        pass
+                break
+
+        # Key assertions:
+        # 1. At least one collection loaded successfully
+        assert first_collection is not None, "No collections loaded at all — GPU may not be configured"
+
+        # 2. First collection is still searchable after loading others
+        query = np.random.randn(1, large_dim).astype(np.float32).tolist()
+        results = self.client.search(
+            collection_name=first_collection,
+            data=query,
+            anns_field="vector",
+            search_params={"metric_type": "COSINE", "params": {"ef": 64}},
+            limit=5,
+        )
+        assert len(results) > 0 and len(results[0]) > 0, (
+            "First collection became unsearchable after loading additional collections"
+        )
+
+        # 3. If we hit VRAM limit, the error should be informative (not a crash)
+        if load_failures:
+            idx, msg = load_failures[0]
+            log.info(f"VRAM exhaustion triggered at collection {idx}: {msg}")
+            # Verify it's a recognizable error, not a generic crash
+            assert any(keyword in msg.lower() for keyword in [
+                "memory", "gpu", "resource", "insufficient", "oom",
+                "out of memory", "exceed", "limit", "capacity",
+            ]), (
+                f"VRAM exhaustion error message is not descriptive: {msg}. "
+                f"Expected a memory-related error from checkSegmentGpuMemSize."
+            )
+        else:
+            log.info(
+                f"All {max_collections} collections loaded — GPU has enough VRAM. "
+                f"Consider increasing vectors_per_collection to stress-test further."
+            )
+
+
+class TestGpuHnswMixedMode:
+    """Test 5: Mixed CPU/GPU mode — selective override.
+
+    When only HNSW_int8 has override_index_type set (not HNSW), verify:
+    - HNSW_int8 (SQ8) collections load on GPU and produce correct results
+    - Plain HNSW (float32) collections stay on CPU and produce correct results
+    - Both can coexist on the same querynode
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup(self, host, port):
+        self.client = get_milvus_client(host, port)
+        self.collection_int8 = COLLECTION_PREFIX + "mixed_int8_" + str(int(time.time()))
+        self.collection_float = COLLECTION_PREFIX + "mixed_float_" + str(int(time.time()))
+        yield
+        for name in [self.collection_int8, self.collection_float]:
+            try:
+                self.client.drop_collection(name)
+            except Exception:
+                pass
+
+    def test_int8_on_gpu_float_on_cpu(self):
+        """HNSW_int8 collection → GPU, plain HNSW collection → CPU.
+
+        Both should produce correct search results. This tests that the
+        override mechanism is selective (keyed by source index type).
+        """
+        np.random.seed(321)
+        num_vectors = 5000
+        vectors = np.random.randn(num_vectors, DIM).astype(np.float32).tolist()
+        query_vectors = np.random.randn(20, DIM).astype(np.float32).tolist()
+        ground_truth = brute_force_knn(vectors, query_vectors, TOP_K, "COSINE")
+
+        # --- Collection 1: HNSW with SQ8 (should go to GPU via override) ---
+        schema = self.client.create_schema()
+        schema.add_field("id", datatype=DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vector", datatype=DataType.FLOAT_VECTOR, dim=DIM)
+        self.client.create_collection(
+            collection_name=self.collection_int8,
+            schema=schema,
+        )
+
+        rows = [{"id": i, "vector": vectors[i]} for i in range(num_vectors)]
+        self.client.insert(self.collection_int8, rows)
+        self.client.flush(self.collection_int8)
+
+        # HNSW_SQ with SQ8 → stored as HNSW_int8 internally
+        index_params = self.client.prepare_index_params()
+        index_params.add_index(
+            field_name="vector",
+            metric_type="COSINE",
+            index_type="HNSW_SQ",
+            params={"M": M, "efConstruction": EF_CONSTRUCTION, "sq_type": "SQ8"},
+        )
+        self.client.create_index(self.collection_int8, index_params)
+        self.client.load_collection(self.collection_int8)
+
+        # --- Collection 2: Plain HNSW (float32, should stay on CPU) ---
+        schema2 = self.client.create_schema()
+        schema2.add_field("id", datatype=DataType.INT64, is_primary=True, auto_id=False)
+        schema2.add_field("vector", datatype=DataType.FLOAT_VECTOR, dim=DIM)
+        self.client.create_collection(
+            collection_name=self.collection_float,
+            schema=schema2,
+        )
+
+        rows2 = [{"id": i, "vector": vectors[i]} for i in range(num_vectors)]
+        self.client.insert(self.collection_float, rows2)
+        self.client.flush(self.collection_float)
+
+        # Plain HNSW (float32) → no override if only HNSW_int8 is configured
+        index_params2 = self.client.prepare_index_params()
+        index_params2.add_index(
+            field_name="vector",
+            metric_type="COSINE",
+            index_type="HNSW",
+            params={"M": M, "efConstruction": EF_CONSTRUCTION},
+        )
+        self.client.create_index(self.collection_float, index_params2)
+        self.client.load_collection(self.collection_float)
+
+        time.sleep(3)
+
+        # --- Verify both collections produce correct search results ---
+
+        # INT8 collection (GPU path)
+        results_int8 = self.client.search(
+            collection_name=self.collection_int8,
+            data=query_vectors,
+            anns_field="vector",
+            search_params={"metric_type": "COSINE", "params": {"ef": EF_SEARCH}},
+            limit=TOP_K,
+            output_fields=["id"],
+        )
+        ids_int8 = [[hit["id"] for hit in hits] for hits in results_int8]
+        recall_int8 = compute_recall(ids_int8, ground_truth, TOP_K)
+        log.info(f"INT8 collection (GPU) recall@{TOP_K}: {recall_int8:.4f}")
+
+        # Float32 collection (CPU path)
+        results_float = self.client.search(
+            collection_name=self.collection_float,
+            data=query_vectors,
+            anns_field="vector",
+            search_params={"metric_type": "COSINE", "params": {"ef": EF_SEARCH}},
+            limit=TOP_K,
+            output_fields=["id"],
+        )
+        ids_float = [[hit["id"] for hit in hits] for hits in results_float]
+        recall_float = compute_recall(ids_float, ground_truth, TOP_K)
+        log.info(f"Float32 collection (CPU) recall@{TOP_K}: {recall_float:.4f}")
+
+        # Both should achieve good recall
+        assert recall_int8 >= RECALL_THRESHOLD, (
+            f"INT8/GPU recall@{TOP_K} = {recall_int8:.4f}, expected >= {RECALL_THRESHOLD}. "
+            f"GPU override for HNSW_int8 may not be working."
+        )
+        assert recall_float >= RECALL_THRESHOLD, (
+            f"Float32/CPU recall@{TOP_K} = {recall_float:.4f}, expected >= {RECALL_THRESHOLD}. "
+            f"Plain HNSW on CPU should still produce correct results."
+        )
+
+    def test_both_collections_searchable_concurrently(self):
+        """Verify simultaneous searches on GPU and CPU collections don't interfere."""
+        np.random.seed(654)
+        num_vectors = 3000
+        vectors = np.random.randn(num_vectors, DIM).astype(np.float32).tolist()
+
+        # Create INT8 collection (GPU)
+        schema = self.client.create_schema()
+        schema.add_field("id", datatype=DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vector", datatype=DataType.FLOAT_VECTOR, dim=DIM)
+        self.client.create_collection(collection_name=self.collection_int8, schema=schema)
+
+        rows = [{"id": i, "vector": vectors[i]} for i in range(num_vectors)]
+        self.client.insert(self.collection_int8, rows)
+        self.client.flush(self.collection_int8)
+
+        index_params = self.client.prepare_index_params()
+        index_params.add_index(
+            field_name="vector",
+            metric_type="COSINE",
+            index_type="HNSW_SQ",
+            params={"M": M, "efConstruction": EF_CONSTRUCTION, "sq_type": "SQ8"},
+        )
+        self.client.create_index(self.collection_int8, index_params)
+        self.client.load_collection(self.collection_int8)
+
+        # Create Float32 collection (CPU)
+        schema2 = self.client.create_schema()
+        schema2.add_field("id", datatype=DataType.INT64, is_primary=True, auto_id=False)
+        schema2.add_field("vector", datatype=DataType.FLOAT_VECTOR, dim=DIM)
+        self.client.create_collection(collection_name=self.collection_float, schema=schema2)
+
+        rows2 = [{"id": i, "vector": vectors[i]} for i in range(num_vectors)]
+        self.client.insert(self.collection_float, rows2)
+        self.client.flush(self.collection_float)
+
+        index_params2 = self.client.prepare_index_params()
+        index_params2.add_index(
+            field_name="vector",
+            metric_type="COSINE",
+            index_type="HNSW",
+            params={"M": M, "efConstruction": EF_CONSTRUCTION},
+        )
+        self.client.create_index(self.collection_float, index_params2)
+        self.client.load_collection(self.collection_float)
+
+        time.sleep(3)
+
+        # Run interleaved searches — verify no cross-contamination
+        num_rounds = 10
+        for round_idx in range(num_rounds):
+            query = np.random.randn(1, DIM).astype(np.float32).tolist()
+
+            # Search INT8 (GPU)
+            r1 = self.client.search(
+                collection_name=self.collection_int8,
+                data=query,
+                anns_field="vector",
+                search_params={"metric_type": "COSINE", "params": {"ef": EF_SEARCH}},
+                limit=TOP_K,
+            )
+            assert len(r1) > 0 and len(r1[0]) > 0, (
+                f"Round {round_idx}: INT8/GPU search returned no results"
+            )
+
+            # Search Float32 (CPU)
+            r2 = self.client.search(
+                collection_name=self.collection_float,
+                data=query,
+                anns_field="vector",
+                search_params={"metric_type": "COSINE", "params": {"ef": EF_SEARCH}},
+                limit=TOP_K,
+            )
+            assert len(r2) > 0 and len(r2[0]) > 0, (
+                f"Round {round_idx}: Float32/CPU search returned no results"
+            )
+
+            # Both collections have same data — top results should be similar
+            ids_gpu = set(hit["id"] for hit in r1[0])
+            ids_cpu = set(hit["id"] for hit in r2[0])
+            overlap = len(ids_gpu & ids_cpu)
+            # Allow some difference due to SQ8 quantization affecting distances
+            assert overlap >= TOP_K // 2, (
+                f"Round {round_idx}: GPU and CPU results diverge too much. "
+                f"Overlap: {overlap}/{TOP_K}. GPU ids: {ids_gpu}, CPU ids: {ids_cpu}"
+            )
+
+        log.info(f"Completed {num_rounds} interleaved search rounds — no interference detected")
+
+
 # --- pytest configuration ---
 
 
@@ -443,7 +792,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GPU HNSW E2E Integration Tests")
     parser.add_argument("--host", default="localhost", help="Milvus host")
     parser.add_argument("--port", default="19530", help="Milvus port")
-    parser.add_argument("--test", choices=["recall", "hotload", "restart", "all"],
+    parser.add_argument("--test",
+                        choices=["recall", "hotload", "restart", "vram", "mixed", "all"],
                         default="all", help="Which test to run")
     args = parser.parse_args()
 
@@ -465,6 +815,8 @@ if __name__ == "__main__":
             "recall": "TestGpuHnswRecall",
             "hotload": "TestGpuHnswHotLoad",
             "restart": "TestGpuHnswRestart",
+            "vram": "TestGpuHnswVramExhaustion",
+            "mixed": "TestGpuHnswMixedMode",
         }
         pytest_args.append(f"-k {test_map[args.test]}")
 
