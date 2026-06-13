@@ -1171,6 +1171,7 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 		IndexFileSize:             indexInfo.GetIndexSize(),
 		NumRows:                   indexInfo.GetNumRows(),
 		CurrentScalarIndexVersion: indexInfo.GetCurrentScalarIndexVersion(),
+		IndexStorePathVersion:     indexInfo.GetIndexStorePathVersion(),
 	}
 
 	// 2.
