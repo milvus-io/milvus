@@ -5736,7 +5736,7 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 		err := qt.initAdvancedSearchRequest(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "range search is not supported for vector array (embedding-list) fields in hybrid search")
+		assert.Contains(t, err.Error(), "range search is not supported for vector array fields")
 	})
 
 	t.Run("hybrid with ArrayOfVector iterator should fail", func(t *testing.T) {
@@ -5744,7 +5744,7 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 		err := qt.initAdvancedSearchRequest(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "search iterator is not supported for vector array (embedding-list) fields in hybrid search")
+		assert.Contains(t, err.Error(), "search iterator is not supported for vector array fields")
 	})
 
 	t.Run("hybrid with ArrayOfVector group by should fail", func(t *testing.T) {
@@ -5752,7 +5752,7 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 		err := qt.initAdvancedSearchRequest(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "group by search is not supported for vector array (embedding-list) fields in hybrid search")
+		assert.Contains(t, err.Error(), "group by search is not supported for vector array fields")
 	})
 
 	t.Run("hybrid with element-level ArrayOfVector plain topK should succeed", func(t *testing.T) {
@@ -5768,9 +5768,9 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 			groupByField string
 			errMsg       string
 		}{
-			{name: "range", rangeRadius: "0.2", errMsg: "range search is not supported for vector array (element-level) fields in hybrid search"},
-			{name: "iterator", withIterator: true, errMsg: "search iterator is not supported for vector array (element-level) fields in hybrid search"},
-			{name: "group by", groupByField: "pk", errMsg: "group by search is not supported for vector array (element-level) fields in hybrid search"},
+			{name: "range", rangeRadius: "0.2", errMsg: "range search is not supported for vector array fields"},
+			{name: "iterator", withIterator: true, errMsg: "search iterator is not supported for vector array fields"},
+			{name: "group by", groupByField: "pk", errMsg: "group by search is not supported for vector array fields"},
 		}
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
