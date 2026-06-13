@@ -1,7 +1,6 @@
 #include "segcore/storagev1translator/SealedIndexTranslator.h"
 
 #include <filesystem>
-#include <limits>
 #include <utility>
 
 #include "common/EasyAssert.h"
@@ -87,7 +86,7 @@ SealedIndexTranslator::SealedIndexTranslator(
             static_cast<int64_t>(
                 milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
                     .CapacityBytes()),
-            std::numeric_limits<int64_t>::max()};
+            int64_t{0}};
         meta_.loading_overhead = milvus::cachinglayer::LoadingOverheadConfig{
             upper_bound, milvus::segcore::kLoadTransientOverheadGroup};
     }
