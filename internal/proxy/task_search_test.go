@@ -3700,7 +3700,7 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			assert.Nil(t, searchInfo)
 			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 			fmt.Println(err.Error())
-			assert.Contains(t, err.Error(), "range search is not supported for vector array (embedding list) fields")
+			assert.Contains(t, err.Error(), "range search is not supported for vector array fields")
 		})
 
 		t.Run("vector array with group by", func(t *testing.T) {
@@ -3717,7 +3717,7 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			assert.Error(t, err)
 			assert.Nil(t, searchInfo)
 			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-			assert.Contains(t, err.Error(), "group by search is not supported for vector array (embedding list) fields")
+			assert.Contains(t, err.Error(), "group by search is not supported for vector array fields")
 			assert.Contains(t, err.Error(), "embeddings_list")
 		})
 
@@ -3735,7 +3735,7 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			assert.Error(t, err)
 			assert.Nil(t, searchInfo)
 			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-			assert.Contains(t, err.Error(), "search iterator is not supported for vector array (embedding list) fields")
+			assert.Contains(t, err.Error(), "search iterator is not supported for vector array fields")
 			assert.Contains(t, err.Error(), "embeddings_list")
 		})
 
@@ -3763,7 +3763,7 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			assert.Error(t, err)
 			assert.Nil(t, searchInfo)
 			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-			assert.Contains(t, err.Error(), "search iterator is not supported for vector array (embedding list) fields")
+			assert.Contains(t, err.Error(), "search iterator is not supported for vector array fields")
 			assert.Contains(t, err.Error(), "embeddings_list")
 		})
 
@@ -3832,7 +3832,7 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			assert.Error(t, err)
 			assert.Nil(t, searchInfo)
 			// Should fail on range search first
-			assert.Contains(t, err.Error(), "range search is not supported for vector array (embedding list) fields")
+			assert.Contains(t, err.Error(), "range search is not supported for vector array fields")
 		})
 
 		t.Run("no anns field specified", func(t *testing.T) {
@@ -3881,7 +3881,7 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			assert.Error(t, err)
 			assert.Nil(t, searchInfo)
 			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-			assert.Contains(t, err.Error(), "group by search is not supported for vector array (embedding list) fields")
+			assert.Contains(t, err.Error(), "group by search is not supported for vector array fields")
 		})
 	})
 

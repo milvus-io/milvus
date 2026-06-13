@@ -338,15 +338,15 @@ func validateVectorArraySearchInfo(searchParamsPair []*commonpb.KeyValuePair, sc
 
 	if strings.Contains(searchParamStr, radiusKey) {
 		return merr.WrapErrParameterInvalid("", "",
-			"range search is not supported for vector array (embedding list) fields, fieldName:"+annsField.GetName())
+			"range search is not supported for vector array fields, fieldName:"+annsField.GetName())
 	}
 	if groupByFieldId > 0 {
 		return merr.WrapErrParameterInvalid("", "",
-			"group by search is not supported for vector array (embedding list) fields, fieldName:"+annsField.GetName())
+			"group by search is not supported for vector array fields, fieldName:"+annsField.GetName())
 	}
 	if isIterator {
 		return merr.WrapErrParameterInvalid("", "",
-			"search iterator is not supported for vector array (embedding list) fields, fieldName:"+annsField.GetName())
+			"search iterator is not supported for vector array fields, fieldName:"+annsField.GetName())
 	}
 	return nil
 }
