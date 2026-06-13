@@ -264,7 +264,7 @@ func TestRbacAlterRoleDescriptionErrors(t *testing.T) {
 			RoleName:    "",
 			Description: "description",
 		})
-		assert.ErrorIs(t, err, errEmptyRoleName)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
 	t.Run("check list role error", func(t *testing.T) {
@@ -296,7 +296,7 @@ func TestRbacAlterRoleDescriptionErrors(t *testing.T) {
 			Name:        "",
 			Description: "description",
 		})
-		assert.ErrorIs(t, err, errEmptyRoleName)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
 	t.Run("alter list role error", func(t *testing.T) {

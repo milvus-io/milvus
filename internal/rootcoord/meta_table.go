@@ -1883,7 +1883,7 @@ func (mt *MetaTable) CreateRole(ctx context.Context, tenant string, entity *milv
 
 func (mt *MetaTable) CheckIfAlterRole(ctx context.Context, in *milvuspb.AlterRoleRequest) error {
 	if funcutil.IsEmptyString(in.GetRoleName()) {
-		return errEmptyRoleName
+		return merr.WrapErrParameterInvalidMsg("role name is empty")
 	}
 	if util.IsBuiltinRole(in.GetRoleName()) || lo.Contains(util.DefaultRoles, in.GetRoleName()) {
 		return merr.WrapErrPrivilegeNotPermitted("the role[%s] is a builtin role, which can't be altered", in.GetRoleName())
@@ -1905,7 +1905,7 @@ func (mt *MetaTable) CheckIfAlterRole(ctx context.Context, in *milvuspb.AlterRol
 
 func (mt *MetaTable) AlterRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
 	if funcutil.IsEmptyString(entity.GetName()) {
-		return errEmptyRoleName
+		return merr.WrapErrParameterInvalidMsg("role name is empty")
 	}
 	if util.IsBuiltinRole(entity.GetName()) || lo.Contains(util.DefaultRoles, entity.GetName()) {
 		return merr.WrapErrPrivilegeNotPermitted("the role[%s] is a builtin role, which can't be altered", entity.GetName())

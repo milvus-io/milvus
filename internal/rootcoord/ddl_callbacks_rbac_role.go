@@ -19,6 +19,8 @@ package rootcoord
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
@@ -59,7 +61,7 @@ func (c *Core) broadcastAlterRole(ctx context.Context, in *milvuspb.AlterRoleReq
 	defer broadcaster.Close()
 
 	if err := c.meta.CheckIfAlterRole(ctx, in); err != nil {
-		return errors.Wrap(err, "failed to check if alter role")
+		return merr.Wrap(err, "failed to check if alter role")
 	}
 
 	msg := message.NewAlterRoleMessageBuilderV2().
