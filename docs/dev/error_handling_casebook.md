@@ -261,7 +261,8 @@ misclassification.
 **segcore pass-through codes collapse on the wire.** C++ codes 2004–2043 are
 deliberately projected to 2000 (`ErrSegcore`) on the wire, with the original
 code preserved in `Reason` as `segcoreCode=`; only named sentinels
-(2001/2002/Folly family/2099) keep distinct wire codes. Don't "improve" a call
+(2001/2002/2037–2040/2099) keep distinct wire codes — note 2037 and 2040 are
+also retriable, a flag the 2000 collapse would drop. Don't "improve" a call
 site by hand-picking a 20xx number — go through `merr.SegcoreError(code, msg)`
 and let the table decide retriability and projection. Guard tests:
 `pkg/util/merr/segcore_test.go` (`wire_code_projection`,
