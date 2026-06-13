@@ -131,16 +131,17 @@ existing sentinel (check before inventing: both `ErrSegcore` and
 | 700–799 | index | 2100–2199 | import |
 | 800–899 | database | 2200–2299 | query / requery plan |
 | 901–999 | node | 2300–2399 | compaction |
-| 1000–1099 | io / storage / serialization / data integrity | 2400–2499 | function pipeline |
+| 1000–1099 | io / storage / serialization / data integrity | 2400–2499 | function pipeline (`ErrFunctionFailed` 2400) — but `ErrDataNodeSlotExhausted` is 2401, so check occupants before assuming |
 | 1100–1199 | request parameter | 2500–2599 | KMS |
 | 1200–1299 | metrics | 2600–2699 | snapshot |
 | | | 3000+ | misc (`ErrOperationNotSupported` 3000, `ErrOldSessionExists` 3001) |
 
 `65535` (`(1<<16)-1`) is `errUnexpected` — the wire fallback for errors that
 carry no merr code. It is reserved; never originate it deliberately. The
-2000–2099 segcore range is owned by the cgo conversion table
-(`merr.SegcoreError` in `pkg/util/merr/segcore.go`): don't hand-pick numbers
-in it (casebook Pattern 7).
+2000–2099 segcore range is owned by the cgo conversion table: go through
+`merr.SegcoreError` (`pkg/util/merr/utils.go`), which consults the
+code/retriability table in `pkg/util/merr/segcore.go` — don't hand-pick
+numbers in the range (casebook Pattern 7).
 
 #### `milvusError.Is` matches by code — two consequences
 

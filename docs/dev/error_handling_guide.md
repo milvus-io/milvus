@@ -177,20 +177,28 @@ would have healed it, and a dashboard blames users for Milvus bugs.
 - **Don't mark a shared sentinel InputError globally** to fix one callsite —
   every internal `retry.Do` loop waiting on that error stops retrying. Use
   boundary marking instead. Pre-flight scan before adding
-  `WithErrorType(InputError)` to a sentinel (or stamping at a new boundary):
+  `WithErrorType(InputError)` to a sentinel (or stamping at a new boundary).
+  The retrier is usually a **caller in a different file** than the producer,
+  so a same-file overlap check is not enough — trace one level up the call
+  graph:
 
   ```bash
-  # files that originate the code AND files that retry on errors —
-  # any overlap is a retry loop your marking would abort:
-  grep -rln "WrapErrXxx" internal/ pkg/ | sort > /tmp/producers
-  grep -rln "retry\.Do" internal/ pkg/ | sort > /tmp/retriers
-  comm -12 /tmp/producers /tmp/retriers   # inspect every hit
+  # 1. every site that originates the code (substitute the real wrapper symbol):
+  grep -rn "WrapErrServiceUnavailable" internal/ pkg/ --include='*.go'
+  # 2. for each producing function from step 1, find its callers…
+  grep -rn "CheckAllQnReady" internal/ --include='*.go'
+  # 3. …and check whether any caller invokes it inside a retry.Do body:
+  grep -rn -A8 "retry\.Do" internal/rootcoord/create_collection_task.go | grep CheckAllQnReady
   ```
 
-  A real save: `CheckAllQnReady` polls a "file resource not synced" error
-  inside `retry.Do` during CreateCollection — that error must ride a
-  retriable system code (`ErrServiceUnavailable`), never an
-  InputError-marked one. See casebook Pattern 5.
+  A real save (the example the commands above trace):
+  `WrapErrServiceUnavailableMsg("file resource not synced, …")` originates in
+  `internal/coordinator/file_resource_observer.go` (`CheckAllQnReady`); the
+  `retry.Do` polling it during CreateCollection lives one call up, in
+  `internal/rootcoord/create_collection_task.go` — a same-file scan finds
+  nothing. That error must ride a retriable system code
+  (`ErrServiceUnavailable`), never an InputError-marked one. See casebook
+  Pattern 5.
 - **Don't classify in a helper** what only the boundary can know. The same
   not-found is the user's fault when the name came from a request, and a
   system fault when it came from internal state — stamp at the chokepoint
