@@ -5607,7 +5607,7 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 		err := task.initSearchRequest(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "range search is not supported for multi-search-multi")
+		assert.Contains(t, err.Error(), "range search is not supported for vector array fields")
 	})
 
 	t.Run("emblist iterator should fail", func(t *testing.T) {
