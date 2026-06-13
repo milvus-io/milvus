@@ -5615,7 +5615,7 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 		err := task.initSearchRequest(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "search iterator is not supported for multi-search-multi")
+		assert.Contains(t, err.Error(), "search iterator is not supported for vector array fields")
 	})
 
 	t.Run("emblist group by should fail", func(t *testing.T) {
@@ -5623,7 +5623,7 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 		err := task.initSearchRequest(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "group by is not supported for multi-search-multi")
+		assert.Contains(t, err.Error(), "group by search is not supported for vector array fields")
 	})
 
 	t.Run("regular vector advanced controls should succeed", func(t *testing.T) {
