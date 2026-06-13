@@ -30,6 +30,12 @@ func TestRegisterMessageIDUnmarshaler(t *testing.T) {
 	assert.Nil(t, id)
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, message.ErrInvalidMessageID)
+	assert.Contains(t, err.Error(), "101")
+
+	id, err = message.UnmarshalMessageID(nil)
+	assert.Nil(t, id)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, message.ErrInvalidMessageID)
 
 	assert.Panics(t, func() {
 		message.MustUnmarshalMessageID(&commonpb.MessageID{WALName: commonpb.WALName(101), Id: "123"})
