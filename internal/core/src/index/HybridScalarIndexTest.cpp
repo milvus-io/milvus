@@ -45,6 +45,8 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
+#include "segcore/memory_planner.h"
+#include "segcore/storagev1translator/SealedIndexTranslator.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
@@ -746,6 +748,52 @@ TYPED_TEST_P(HybridIndexTestInverted,
     EXPECT_FALSE(request.has_raw_data);
 }
 
+TYPED_TEST_P(HybridIndexTestInverted,
+             ScalarIndexLoadingOverheadDoesNotCapFileDimension) {
+    std::map<std::string, std::string> index_params{
+        {"index_type", milvus::index::HYBRID_INDEX_TYPE},
+        {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
+    milvus::segcore::LoadIndexInfo load_info{};
+    load_info.collection_id = 1;
+    load_info.partition_id = 2;
+    load_info.segment_id = 3;
+    load_info.field_id = 101;
+    load_info.field_type = this->type_;
+    load_info.element_type = DataType::NONE;
+    load_info.enable_mmap = false;
+    load_info.index_id = this->index_build_id_;
+    load_info.index_build_id = this->index_build_id_;
+    load_info.index_version = this->index_version_;
+    load_info.index_params = index_params;
+    load_info.index_files = this->index_files_;
+    load_info.index_engine_version = this->index_version_;
+    load_info.index_size = 1024;
+    load_info.num_rows = this->nb_;
+    load_info.dim = 0;
+
+    index::CreateIndexInfo index_info{};
+    index_info.index_type = milvus::index::HYBRID_INDEX_TYPE;
+    index_info.field_type = this->type_;
+    index_info.index_engine_version = this->index_version_;
+
+    storage::FileManagerContext ctx(
+        this->field_meta_, this->index_meta_, this->chunk_manager_, this->fs_);
+    ctx.set_for_loading_index(true);
+
+    Config config = index_params;
+    milvus::segcore::storagev1translator::SealedIndexTranslator translator(
+        index_info,
+        &load_info,
+        milvus::tracer::TraceContext{},
+        ctx,
+        std::move(config));
+
+    ASSERT_TRUE(translator.meta()->loading_overhead.has_value());
+    EXPECT_EQ(translator.meta()->loading_overhead->group,
+              milvus::segcore::kLoadTransientOverheadGroup);
+    EXPECT_EQ(translator.meta()->loading_overhead->upper_bound.file_bytes, 0);
+}
+
 template <typename T>
 class HybridIndexTestNullable : public HybridIndexTestV1<T> {
  public:
@@ -941,7 +989,8 @@ REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestV4,
                             TestRangeCompareFuncTest);
 
 REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestInverted,
-                            ResourceEstimateUsesInternalInvertedIndexType);
+                            ResourceEstimateUsesInternalInvertedIndexType,
+                            ScalarIndexLoadingOverheadDoesNotCapFileDimension);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_HighCardinality,
                                HybridIndexTestV2,
