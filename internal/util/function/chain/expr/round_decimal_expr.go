@@ -19,7 +19,6 @@
 package expr
 
 import (
-	"fmt"
 	"math"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -65,7 +64,7 @@ func (e *RoundDecimalExpr) OutputDataTypes() []arrow.DataType {
 
 func (e *RoundDecimalExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunked) ([]*arrow.Chunked, error) {
 	if len(inputs) != 1 {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("round_decimal: expected 1 input column, got %d", len(inputs)))
+		return nil, merr.WrapErrServiceInternalMsg("round_decimal: expected 1 input column, got %d", len(inputs))
 	}
 
 	scoreCol := inputs[0]
@@ -78,7 +77,7 @@ func (e *RoundDecimalExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunk
 			for i := 0; i < chunkIdx; i++ {
 				newChunks[i].Release()
 			}
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("round_decimal: input chunk %d must be Float32, got %T", chunkIdx, scoreCol.Chunk(chunkIdx)))
+			return nil, merr.WrapErrServiceInternalMsg("round_decimal: input chunk %d must be Float32, got %T", chunkIdx, scoreCol.Chunk(chunkIdx))
 		}
 
 		builder := array.NewFloat32Builder(ctx.Pool())

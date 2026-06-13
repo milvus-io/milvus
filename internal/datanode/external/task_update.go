@@ -164,22 +164,22 @@ func (t *RefreshExternalCollectionTask) PreExecute(ctx context.Context) error {
 		zap.Int64("collectionID", t.req.GetCollectionID()))
 
 	if t.req == nil {
-		return fmt.Errorf("request is nil")
+		return merr.WrapErrParameterInvalidMsg("request is nil")
 	}
 	if t.req.GetSchema() == nil {
-		return fmt.Errorf("schema is nil in request")
+		return merr.WrapErrParameterInvalidMsg("schema is nil in request")
 	}
 	if t.req.GetStorageConfig() == nil {
-		return fmt.Errorf("storage config is nil in request")
+		return merr.WrapErrParameterInvalidMsg("storage config is nil in request")
 	}
 	if t.req.GetExternalSource() == "" {
-		return fmt.Errorf("external source is empty in request")
+		return merr.WrapErrParameterInvalidMsg("external source is empty in request")
 	}
 
 	// Parse and cache external spec for reuse during Execute
 	spec, err := externalspec.ParseExternalSpec(t.req.GetExternalSpec())
 	if err != nil {
-		return fmt.Errorf("failed to parse external spec: %w", err)
+		return merr.Wrap(err, "failed to parse external spec")
 	}
 	t.parsedSpec = spec
 	t.columns = packed.GetColumnNamesFromSchema(t.req.GetSchema())
@@ -198,7 +198,7 @@ func (t *RefreshExternalCollectionTask) Execute(ctx context.Context) error {
 
 	// Initialize pre-allocated segment IDs from request
 	if t.req.GetPreAllocatedSegmentIds() == nil {
-		return fmt.Errorf("pre-allocated segment IDs not provided in request")
+		return merr.WrapErrParameterInvalidMsg("pre-allocated segment IDs not provided in request")
 	}
 
 	t.preallocatedIDRange = t.req.GetPreAllocatedSegmentIds()
@@ -212,13 +212,13 @@ func (t *RefreshExternalCollectionTask) Execute(ctx context.Context) error {
 	// Fetch fragments from external source
 	newFragments, err := t.fetchFragmentsFromExternalSource(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to fetch fragments: %w", err)
+		return merr.Wrap(err, "failed to fetch fragments")
 	}
 
 	// Build current segment -> fragments mapping
 	currentSegmentFragments, err := t.buildCurrentSegmentFragments()
 	if err != nil {
-		return fmt.Errorf("failed to build current segment fragments: %w", err)
+		return merr.Wrap(err, "failed to build current segment fragments")
 	}
 
 	// Compare and organize segments
@@ -235,7 +235,7 @@ func (t *RefreshExternalCollectionTask) Execute(ctx context.Context) error {
 func (t *RefreshExternalCollectionTask) fetchFragmentsFromExternalSource(ctx context.Context) ([]packed.Fragment, error) {
 	manifestPath := t.req.GetExploreManifestPath()
 	if manifestPath == "" {
-		return nil, fmt.Errorf("explore manifest path is required but not provided")
+		return nil, merr.WrapErrParameterMissingMsg("explore manifest path is required but not provided")
 	}
 
 	log.Ctx(ctx).Info("reading file list from explore manifest",
@@ -329,7 +329,7 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 		var err error
 		outputColumns, err = functionOutputColumnNames(t.req.GetSchema())
 		if err != nil {
-			return nil, fmt.Errorf("resolve function output columns: %w", err)
+			return nil, merr.Wrap(err, "resolve function output columns")
 		}
 	}
 
@@ -455,7 +455,7 @@ func (t *RefreshExternalCollectionTask) segmentHasFunctionOutputColumns(seg *dat
 	}
 	hasColumns, err := packed.ManifestHasColumns(seg.GetManifestPath(), t.req.GetStorageConfig(), outputColumns)
 	if err != nil {
-		return false, fmt.Errorf("check function output columns for segment %d: %w", seg.GetID(), err)
+		return false, merr.Wrapf(err, "check function output columns for segment %d", seg.GetID())
 	}
 	return hasColumns, nil
 }
@@ -557,7 +557,7 @@ func (t *RefreshExternalCollectionTask) patchSegmentForMissingColumns(
 		t.req.GetStorageConfig(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to append manifest columns for segment %d: %w", seg.GetID(), err)
+		return nil, merr.Wrapf(err, "failed to append manifest columns for segment %d", seg.GetID())
 	}
 
 	sampleRows := paramtable.Get().QueryNodeCfg.ExternalCollectionSampleRows.GetAsInt()
@@ -574,7 +574,7 @@ func (t *RefreshExternalCollectionTask) patchSegmentForMissingColumns(
 		t.req.GetStorageConfig(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to sample external field sizes for segment %d: %w", seg.GetID(), err)
+		return nil, merr.Wrapf(err, "failed to sample external field sizes for segment %d", seg.GetID())
 	}
 	externalAvgBytes := sumFieldSizes(fieldSizes, schema)
 	if externalAvgBytes <= 0 {
@@ -690,7 +690,7 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 		}
 		// Each segment needs 2 IDs: one for segment, one for fake binlog logID
 		if t.nextAllocID+1 >= t.preallocatedIDRange.End {
-			return nil, fmt.Errorf("insufficient pre-allocated IDs: need 2 more but only have %d IDs in range [%d, %d)",
+			return nil, merr.WrapErrParameterInvalidMsg("insufficient pre-allocated IDs: need 2 more but only have %d IDs in range [%d, %d)",
 				t.preallocatedIDRange.End-t.nextAllocID,
 				t.preallocatedIDRange.Begin,
 				t.preallocatedIDRange.End)
@@ -739,7 +739,7 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 				manifestPath, err = t.createManifestForSegment(ctx, work.segmentID, work.fragments)
 			}
 			if err != nil {
-				return "", fmt.Errorf("failed to create manifest for segment %d: %w", work.segmentID, err)
+				return "", merr.Wrapf(err, "failed to create manifest for segment %d", work.segmentID)
 			}
 			return manifestPath, nil
 		})
@@ -834,7 +834,7 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			log.Warn("external field size sample produced non-positive total",
 				zap.String("manifestPath", manifestPath),
 				zap.Int64("total", total))
-			recordErr(fmt.Errorf("sampled field sizes sum to %d (schema may have no external_field mappings, or sampled rows are empty)", total))
+			recordErr(merr.WrapErrParameterInvalidMsg("sampled field sizes sum to %d (schema may have no external_field mappings, or sampled rows are empty)", total))
 			return 0, false
 		}
 		return total, true
@@ -882,9 +882,9 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			if strings.Contains(rootCause, "not found in schema") {
 				hint = "; check external_field mappings in collection schema against actual parquet columns"
 			}
-			return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf(
+			return nil, merr.WrapErrParameterInvalidMsg(
 				"external field size sampling failed for all %d segment(s): %s%s",
-				len(manifestPaths), rootCause, hint))
+				len(manifestPaths), rootCause, hint)
 		}
 		// Fill any zero slots (sampling failed mid-loop) with the first
 		// successful average so every segment gets a non-zero MemorySize.
@@ -1032,7 +1032,7 @@ func estimateFunctionOutputBytesPerRow(schema *schemapb.CollectionSchema) (int64
 			Fields: []*schemapb.FieldSchema{field},
 		})
 		if err != nil {
-			return 0, fmt.Errorf("estimate function output field %s: %w", field.GetName(), err)
+			return 0, merr.Wrapf(err, "estimate function output field %s", field.GetName())
 		}
 		total += int64(size)
 	}

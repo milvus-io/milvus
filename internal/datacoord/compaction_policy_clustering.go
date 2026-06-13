@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -241,7 +242,7 @@ func calculateClusteringCompactionConfig(coll *collectionInfo, view CompactionVi
 
 func estimateRowsBySegmentSize(segments []*SegmentView, expectedSegmentSize int64) (int64, error) {
 	if expectedSegmentSize <= 0 {
-		return 0, fmt.Errorf("invalid expected segment size %d", expectedSegmentSize)
+		return 0, merr.WrapErrServiceInternalMsg("invalid expected segment size %d", expectedSegmentSize)
 	}
 
 	var totalSize float64
@@ -258,17 +259,17 @@ func estimateRowsBySegmentSize(segments []*SegmentView, expectedSegmentSize int6
 	}
 
 	if totalRows == 0 || totalSize == 0 {
-		return 0, fmt.Errorf("segment view does not contain size info to estimate row count")
+		return 0, merr.WrapErrServiceInternalMsg("segment view does not contain size info to estimate row count")
 	}
 
 	rowSize := totalSize / float64(totalRows)
 	if rowSize <= 0 {
-		return 0, fmt.Errorf("invalid row size calculated from segment view")
+		return 0, merr.WrapErrServiceInternalMsg("invalid row size calculated from segment view")
 	}
 
 	rows := float64(expectedSegmentSize) / rowSize
 	if rows <= 0 {
-		return 0, fmt.Errorf("estimated max row count is not positive")
+		return 0, merr.WrapErrServiceInternalMsg("estimated max row count is not positive")
 	}
 
 	return int64(rows), nil

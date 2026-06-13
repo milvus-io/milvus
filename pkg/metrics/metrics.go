@@ -34,6 +34,22 @@ const (
 	RetryLabel    = "retry"
 	RejectedLabel = "rejected"
 
+	// Fine-grained hard-failure labels (composite status values, not a new
+	// dimension label, to keep Prometheus cardinality additive rather than
+	// multiplicative). They split the coarse "fail"/"rejected" into the
+	// responsible party so monitoring/alerting can tell a user-input error
+	// (the caller must fix the request) apart from an internal system error
+	// (operators must intervene). MIGRATION: old queries on status="fail" must
+	// move to status=~"fail_.*" (fail_input/fail_system), and old queries on
+	// status="rejected" must move to status=~"rejected_.*" (rejected_user for
+	// caller-side auth/privilege/bad-arg rejections, rejected_system otherwise).
+	// Dashboards still matching the bare "fail"/"rejected" values return nothing
+	// after this split.
+	FailInputLabel      = "fail_input"
+	FailSystemLabel     = "fail_system"
+	RejectedSystemLabel = "rejected_system"
+	RejectedUserLabel   = "rejected_user"
+
 	HybridSearchLabel = "hybrid_search"
 
 	InsertLabel      = "insert"

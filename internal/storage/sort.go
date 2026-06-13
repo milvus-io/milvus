@@ -114,7 +114,7 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 				}
 				comparators = append(comparators, f)
 			default:
-				return 0, nil, merr.WrapErrParameterInvalidMsg("unsupported type for sorting key")
+				return 0, nil, merr.WrapErrStorageMsg("unsupported type for sorting key")
 			}
 		}
 
@@ -281,7 +281,7 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 				return 0
 			})
 		default:
-			return 0, merr.WrapErrParameterInvalidMsg("unsupported type for sorting key")
+			return 0, merr.WrapErrStorageMsg("unsupported type for sorting key")
 		}
 	}
 

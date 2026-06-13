@@ -141,8 +141,9 @@ func NewInner(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_INNER, format, args...)
 }
 
-// NewInvaildArgument creates a new StreamingError with code STREAMING_CODE_INVAILD_ARGUMENT.
-func NewInvaildArgument(format string, args ...interface{}) *StreamingError {
+// NewInvalidArgument creates a new StreamingError with code STREAMING_CODE_INVAILD_ARGUMENT.
+// (The proto enum still carries the historical typo INVAILD; only the Go factory uses the correct spelling.)
+func NewInvalidArgument(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_INVAILD_ARGUMENT, format, args...)
 }
 

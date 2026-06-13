@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 )
 
@@ -36,7 +37,11 @@ const (
 	ContextReturnCode    = "code"
 	ContextReturnMessage = "message"
 	ContextRequest       = "request"
-	ContextToken         = "token"
+	// ContextErrorType carries the merr classification (input_error/system_error)
+	// set by the REST handler when it holds the error object; must match the key
+	// written in internal/distributed/proxy/httpserver.
+	ContextErrorType = "error_type"
+	ContextToken     = "token"
 )
 
 type RestfulInfo struct {
@@ -159,7 +164,20 @@ func (i *RestfulInfo) ErrorMsg() string {
 }
 
 func (i *RestfulInfo) ErrorType() string {
-	return Unknown
+	if et, ok := i.ctx.Get(ContextErrorType); ok {
+		if s, ok := et.(string); ok {
+			return s
+		}
+	}
+	// Aborts that never reached the proxy call (request binding / local
+	// validation) only stored the wire code; recover the sentinel's baked
+	// classification from it. Success rows report "" like the gRPC access log.
+	if code, ok := i.ctx.Get(ContextReturnCode); ok {
+		if c, ok := code.(int32); ok && c != 0 {
+			return merr.ErrorTypeOfCode(c).String()
+		}
+	}
+	return ""
 }
 
 func (i *RestfulInfo) SdkVersion() string {

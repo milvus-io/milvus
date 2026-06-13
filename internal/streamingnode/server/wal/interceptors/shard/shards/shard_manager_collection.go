@@ -1,15 +1,22 @@
 package shards
 
 import (
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 )
+
+type CollectionSchemaInfo struct {
+	VChannel string
+	Schema   *schemapb.CollectionSchema
+}
 
 // CheckIfCollectionCanBeCreated checks if a collection can be created.
 // It returns false if the collection cannot be created.
@@ -169,7 +176,7 @@ func (m *shardManagerImpl) AlterCollection(msg message.MutableAlterCollectionMes
 			// in downstream GetSchema paths.
 			logger.Error("schema change indicated by UpdateMask but schema body is nil",
 				zap.Int64("collectionID", collectionID))
-			return nil, errors.New("schema change message has nil schema body")
+			return nil, status.NewInvalidArgument("schema change message has nil schema body")
 		}
 		collectionInfo := m.collections[collectionID]
 		collectionInfo.Schema = &streamingpb.CollectionSchemaOfVChannel{
@@ -221,4 +228,40 @@ func (m *shardManagerImpl) checkIfCollectionSchemaVersionMatch(header *message.I
 	}
 
 	return collectionSchemaVersion, nil
+}
+
+func (m *shardManagerImpl) GetCollectionSchema(collectionID int64, schemaVersion int32) (*schemapb.CollectionSchema, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	collectionInfo, ok := m.collections[collectionID]
+	if !ok {
+		return nil, ErrCollectionNotFound
+	}
+	if collectionInfo.Schema == nil || collectionInfo.Schema.GetSchema() == nil {
+		return nil, ErrCollectionSchemaNotFound
+	}
+	collectionSchemaVersion := collectionInfo.SchemaVersion()
+	if schemaVersion != 0 && collectionSchemaVersion != schemaVersion {
+		return nil, ErrCollectionSchemaVersionNotMatch
+	}
+
+	return proto.Clone(collectionInfo.Schema.GetSchema()).(*schemapb.CollectionSchema), nil
+}
+
+func (m *shardManagerImpl) GetAllCollectionSchemaInfos() map[int64]CollectionSchemaInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	infos := make(map[int64]CollectionSchemaInfo)
+	for collectionID, collectionInfo := range m.collections {
+		if collectionInfo.Schema == nil || collectionInfo.Schema.GetSchema() == nil {
+			continue
+		}
+		infos[collectionID] = CollectionSchemaInfo{
+			VChannel: collectionInfo.VChannel,
+			Schema:   proto.Clone(collectionInfo.Schema.GetSchema()).(*schemapb.CollectionSchema),
+		}
+	}
+	return infos
 }

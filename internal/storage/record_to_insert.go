@@ -15,11 +15,10 @@
 package storage
 
 import (
-	"fmt"
-
 	"github.com/apache/arrow/go/v17/arrow"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -54,13 +53,13 @@ func RecordToInsertData(
 		col, ok := recordColumn(rec, fieldID)
 		if !ok {
 			if requiredFields != nil && requiredFields.Contain(fieldID) {
-				return nil, fmt.Errorf("required field %s (ID=%d) not found in record",
+				return nil, merr.WrapErrParameterInvalidMsg("required field %s (ID=%d) not found in record",
 					field.GetName(), fieldID)
 			}
 			continue
 		}
 		if col.Len() != numRows {
-			return nil, fmt.Errorf("field %s (ID=%d) row count mismatch: %d != %d",
+			return nil, merr.WrapErrParameterInvalidMsg("field %s (ID=%d) row count mismatch: %d != %d",
 				field.GetName(), fieldID, col.Len(), numRows)
 		}
 		dt := field.GetDataType()
@@ -77,24 +76,24 @@ func RecordToInsertData(
 
 		fd, ok := insertData.Data[fieldID]
 		if !ok {
-			return nil, fmt.Errorf("field %s (ID=%d) not initialized in InsertData",
+			return nil, merr.WrapErrServiceInternalMsg("field %s (ID=%d) not initialized in InsertData",
 				field.GetName(), fieldID)
 		}
 
 		entry, ok := serdeMap[dt]
 		if !ok {
-			return nil, fmt.Errorf("unsupported data type %s for field %s", dt, field.GetName())
+			return nil, merr.WrapErrParameterInvalidMsg("unsupported data type %s for field %s", dt, field.GetName())
 		}
 
 		for i := 0; i < numRows; i++ {
 			val, err := entry.deserialize(col, i, elementType, dim, true /* shouldCopy */)
 			if err != nil {
-				return nil, fmt.Errorf("deserialize field %s row %d: %w",
-					field.GetName(), i, err)
+				return nil, merr.Wrapf(err, "deserialize field %s row %d",
+					field.GetName(), i)
 			}
 			if err := fd.AppendRow(val); err != nil {
-				return nil, fmt.Errorf("append field %s row %d: %w",
-					field.GetName(), i, err)
+				return nil, merr.Wrapf(err, "append field %s row %d",
+					field.GetName(), i)
 			}
 		}
 	}
@@ -106,7 +105,7 @@ func RecordToInsertData(
 			rowNum = fd.RowNum()
 		}
 		if !ok || rowNum != numRows {
-			return nil, fmt.Errorf("required field ID=%d has %d rows, expected %d",
+			return nil, merr.WrapErrParameterInvalidMsg("required field ID=%d has %d rows, expected %d",
 				fieldID, rowNum, numRows)
 		}
 	}

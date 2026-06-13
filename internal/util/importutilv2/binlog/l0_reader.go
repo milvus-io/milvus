@@ -175,7 +175,7 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 			tempData, errv2 := readInternal(path, v2opts)
 			if errv2 != nil {
 				// return both the error from v1 and v2
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read deltalogs from v1 and v2: %v, %v", errv1, errv2))
+				return nil, merr.WrapErrImportSysFailedMsg("failed to read deltalogs from v1 and v2: %v, %v", errv1, errv2)
 			}
 			// Merge v2 results into deleteData
 			for i := int64(0); i < tempData.RowCount; i++ {

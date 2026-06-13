@@ -72,10 +72,23 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 				}
 				return err
 			}
-			if c.isRetryErr != nil && !c.isRetryErr(err) {
-				log.Warn("retry func failed, not be retryable",
+
+			// Caller-explicit RetryErr predicate takes precedence over the
+			// default InputError abort: when caller passes RetryErr they have
+			// decided which errors are retriable, framework must not override.
+			if c.isRetryErr != nil {
+				if !c.isRetryErr(err) {
+					log.Warn("retry func failed, not be retryable",
+						zap.Uint("retried", i),
+						zap.Uint("attempt", c.attempts),
+						zap.String("caller", getCaller(2)),
+					)
+					return err
+				}
+			} else if merr.GetErrorType(err) == merr.InputError {
+				log.Warn("retry func failed, input error is non-retriable",
 					zap.Uint("retried", i),
-					zap.Uint("attempt", c.attempts),
+					zap.Error(err),
 					zap.String("caller", getCaller(2)),
 				)
 				return err
@@ -165,6 +178,23 @@ func Handle(ctx context.Context, fn func() (bool, error), opts ...Option) error 
 				return err
 			}
 
+			// shouldRetry=true is the caller's explicit affirmative. Honor
+			// it. The optional RetryErr predicate is still consulted as a
+			// second gate, but unlike retry.Do the InputError default abort
+			// is intentionally not applied here: in retry.Handle the caller
+			// signals abort via shouldRetry=false, not via the error type,
+			// otherwise client-side cache-eviction patterns like
+			// retryIfSchemaError become unreachable for errors classified
+			// server-side as InputError (e.g. ErrCollectionSchemaMismatch).
+			if c.isRetryErr != nil && !c.isRetryErr(err) {
+				log.Warn("retry func failed, not be retryable",
+					zap.Uint("retried", i),
+					zap.Uint("attempt", c.attempts),
+					zap.String("caller", getCaller(2)),
+				)
+				return err
+			}
+
 			deadline, ok := ctx.Deadline()
 			if ok && time.Until(deadline) < c.sleep {
 				isContextErr := errors.IsAny(err, context.Canceled, context.DeadlineExceeded)
@@ -210,7 +240,11 @@ func Handle(ctx context.Context, fn func() (bool, error), opts ...Option) error 
 	return lastErr
 }
 
-// errUnrecoverable is error instance for unrecoverable.
+// errUnrecoverable is a private identity sentinel used only as a marker by
+// Unrecoverable/IsRecoverable. It must NOT be a typed merr error: milvusError.Is
+// compares by error code, so giving it a real code (e.g. ParameterInvalid) makes
+// every error of that code spuriously match errUnrecoverable and corrupts the
+// retriable/InputError classification of whatever was wrapped.
 var errUnrecoverable = errors.New("unrecoverable error")
 
 // Unrecoverable method wrap an error to unrecoverableError. This will make retry

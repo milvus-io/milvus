@@ -40,6 +40,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -138,11 +139,11 @@ func (t *timestampOracle) ResetUserTimestamp(tso uint64) error {
 
 	// do not update
 	if typeutil.SubTimeByWallClock(next, prev.physical) <= 3*updateTimestampGuard {
-		return errors.New("the specified ts too small than now")
+		return merr.WrapErrParameterInvalidMsg("the specified ts too small than now")
 	}
 
 	if typeutil.SubTimeByWallClock(next, prev.physical) >= t.maxResetTSGap() {
-		return errors.New("the specified ts too large than now")
+		return merr.WrapErrParameterInvalidMsg("the specified ts too large than now")
 	}
 
 	save := next.Add(t.saveInterval)

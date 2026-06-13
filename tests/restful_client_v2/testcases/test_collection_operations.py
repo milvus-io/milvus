@@ -451,7 +451,7 @@ class TestCreateCollection(TestBase):
         }
         logging.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
-        assert rsp["code"] == 65535
+        assert rsp["code"] == 1100
         rsp = client.collection_list()
 
         all_collections = rsp["data"]
@@ -1791,6 +1791,131 @@ class TestCollectionAddField(TestBase):
         rsp = vector_client.vector_search(search_payload)
         assert rsp["code"] == 0
         assert len(rsp["data"]) > 0
+
+    @pytest.mark.parametrize(
+        "schema_variant,field_params",
+        [
+            (
+                "array_with_struct_element",
+                {
+                    "fieldName": "dynamic_struct",
+                    "dataType": "Array",
+                    "elementDataType": "Struct",
+                    "nullable": True,
+                    "elementTypeParams": {"max_capacity": 16},
+                    "fields": [
+                        {"fieldName": "sub_int", "dataType": "Array", "elementDataType": "Int32"},
+                        {
+                            "fieldName": "sub_vec",
+                            "dataType": "ArrayOfVector",
+                            "elementDataType": "FloatVector",
+                            "elementTypeParams": {"dim": 8},
+                        },
+                    ],
+                },
+            ),
+            (
+                "array_of_struct",
+                {
+                    "fieldName": "dynamic_struct",
+                    "dataType": "ArrayOfStruct",
+                    "nullable": True,
+                    "typeParams": {"max_capacity": 16},
+                    "fields": [
+                        {"fieldName": "sub_int", "dataType": "Array", "elementDataType": "Int32"},
+                        {
+                            "fieldName": "sub_vec",
+                            "dataType": "ArrayOfVector",
+                            "elementDataType": "FloatVector",
+                            "elementTypeParams": {"dim": 8},
+                        },
+                    ],
+                },
+            ),
+        ],
+    )
+    def test_add_struct_array_field(self, schema_variant, field_params):
+        """
+        target: test REST v2 add StructArray field
+        method: create collection, add StructArray field, insert and query rows with the new field
+        expected: StructArray field is added and usable through REST v2
+        """
+        name = gen_collection_name()
+        dim = DEFAULT_STRUCT_ARRAY_DIM
+        field_name = field_params["fieldName"]
+        client = self.collection_client
+        vector_client = self.vector_client
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                ]
+            },
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_index", "metricType": "L2"}],
+        }
+        rsp = client.collection_create(payload)
+        assert rsp["code"] == 0, rsp
+        client.wait_load_completed(collection_name=name, timeout=60)
+
+        rsp = vector_client.vector_insert(
+            {
+                "collectionName": name,
+                "data": [{"book_id": 0, "book_intro": gen_vector(dim=dim)}],
+            }
+        )
+        assert rsp["code"] == 0, rsp
+
+        rsp = client.add_struct_field(name, field_params)
+        logger.info(f"add struct array field response ({schema_variant}): {rsp}")
+        assert rsp["code"] == 0, rsp
+
+        rsp = client.collection_describe(name)
+        assert rsp["code"] == 0, rsp
+        struct_fields = {field["name"]: field for field in rsp["data"].get("structFields", [])}
+        assert field_name in struct_fields, rsp
+        struct_field = struct_fields[field_name]
+        assert struct_field["type"] == "ArrayOfStruct"
+
+        sub_fields = {field["name"]: field for field in struct_field.get("fields", [])}
+        assert sorted(sub_fields) == ["sub_int", "sub_vec"]
+        assert sub_fields["sub_int"]["type"] == "Array"
+        assert sub_fields["sub_int"]["elementType"] == "Int32"
+        assert sub_fields["sub_vec"]["type"] == "ArrayOfVector"
+        assert sub_fields["sub_vec"]["elementType"] == "FloatVector"
+        for sub_field in sub_fields.values():
+            sub_params = {param["key"]: param["value"] for param in sub_field.get("params", [])}
+            assert str(sub_params["max_capacity"]) == str(DEFAULT_STRUCT_ARRAY_SUB_CAPACITY)
+
+        new_row = {
+            "book_id": 1,
+            "book_intro": gen_vector(dim=dim),
+            field_name: [
+                {"sub_int": 11, "sub_vec": _rand_struct_array_vector(dim)},
+                {"sub_int": 12, "sub_vec": _rand_struct_array_vector(dim)},
+            ],
+        }
+        rsp = vector_client.vector_insert({"collectionName": name, "data": [new_row]})
+        assert rsp["code"] == 0, rsp
+
+        rsp = vector_client.vector_query(
+            {
+                "collectionName": name,
+                "filter": "book_id == 1",
+                "outputFields": ["book_id", field_name],
+                "limit": 1,
+            }
+        )
+        assert rsp["code"] == 0, rsp
+        assert len(rsp["data"]) == 1
+        got = rsp["data"][0]
+        assert got["book_id"] == 1
+        assert len(got[field_name]) == len(new_row[field_name])
+        for actual, expected in zip(got[field_name], new_row[field_name]):
+            assert int(actual["sub_int"]) == expected["sub_int"]
+            np.testing.assert_allclose(actual["sub_vec"], expected["sub_vec"], rtol=1e-5, atol=1e-5)
 
 
 @pytest.mark.L1

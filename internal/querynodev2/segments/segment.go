@@ -424,7 +424,7 @@ func NewSegment(ctx context.Context,
 	case SegmentTypeGrowing:
 		locker = state.NewLoadStateLock(state.LoadStateDataLoaded)
 	default:
-		return nil, fmt.Errorf("illegal segment type %d when create segment %d", segmentType, loadInfo.GetSegmentID())
+		return nil, merr.WrapErrServiceInternalMsg("illegal segment type %d when create segment %d", segmentType, loadInfo.GetSegmentID())
 	}
 
 	logger := log.With(
@@ -875,7 +875,7 @@ func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *segcore.Retr
 
 func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error {
 	if s.Type() != SegmentTypeGrowing {
-		return fmt.Errorf("unexpected segmentType when segmentInsert, segmentType = %s", s.segmentType.String())
+		return merr.WrapErrServiceInternalMsg("unexpected segmentType when segmentInsert, segmentType = %s", s.segmentType.String())
 	}
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
@@ -1171,6 +1171,7 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 		IndexFileSize:             indexInfo.GetIndexSize(),
 		NumRows:                   indexInfo.GetNumRows(),
 		CurrentScalarIndexVersion: indexInfo.GetCurrentScalarIndexVersion(),
+		IndexStorePathVersion:     indexInfo.GetIndexStorePathVersion(),
 	}
 
 	// 2.
@@ -1247,8 +1248,7 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 				return err
 			}
 			if s.Type() != SegmentTypeSealed {
-				errMsg := fmt.Sprintln("updateSegmentIndex failed, illegal segment type ", s.segmentType, "segmentID = ", s.ID())
-				return errors.New(errMsg)
+				return merr.WrapErrServiceInternalMsg("updateSegmentIndex failed, illegal segment type %s, segmentID = %d", s.segmentType, s.ID())
 			}
 			appendLoadIndexInfoSpan := tr.RecordSpan()
 
@@ -1648,12 +1648,12 @@ func (s *LocalSegment) GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo
 func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int64, config *FlushConfig) (*FlushResult, error) {
 	// currently only growing segments support FlushData
 	if s.Type() != SegmentTypeGrowing {
-		return nil, errors.Errorf("FlushData is only supported for growing segments, got %s", s.Type().String())
+		return nil, merr.WrapErrServiceInternalMsg("FlushData is only supported for growing segments, got %s", s.Type().String())
 	}
 
 	// validate offsets
 	if startOffset < 0 || endOffset < startOffset {
-		return nil, errors.Errorf("invalid offsets: start=%d, end=%d", startOffset, endOffset)
+		return nil, merr.WrapErrServiceInternalMsg("invalid offsets: start=%d, end=%d", startOffset, endOffset)
 	}
 
 	// no data to flush
@@ -1706,7 +1706,7 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 	numBM25Fields := len(config.BM25FieldIDs)
 	if numBM25Fields > 0 {
 		if len(config.BM25StatsLogIDs) != numBM25Fields {
-			return nil, errors.Errorf("BM25 stats log IDs count mismatch, fields=%d logIDs=%d", numBM25Fields, len(config.BM25StatsLogIDs))
+			return nil, merr.WrapErrServiceInternalMsg("BM25 stats log IDs count mismatch, fields=%d logIDs=%d", numBM25Fields, len(config.BM25StatsLogIDs))
 		}
 		cBM25FieldIDs := (*C.int64_t)(C.malloc(C.size_t(numBM25Fields) * C.size_t(unsafe.Sizeof(C.int64_t(0)))))
 		defer C.free(unsafe.Pointer(cBM25FieldIDs))

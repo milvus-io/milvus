@@ -132,7 +132,7 @@ func CreateInsertData(schema *schemapb.CollectionSchema, rows int, nullPercent .
 					validData[i] = true
 				}
 			} else {
-				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support the number of nullPercent(%d)", nullPercent))
+				return nil, merr.WrapErrParameterInvalidMsg("not support the number of nullPercent(%d)", nullPercent)
 			}
 			validDataMap[f.FieldID] = validData
 		}
@@ -935,7 +935,7 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 			})
 			fixedSizeBuilder, ok := listBuilder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
 			if !ok {
-				return nil, fmt.Errorf("unexpected list value builder for VectorArray field %s: %T", field.GetName(), listBuilder.ValueBuilder())
+				return nil, merr.WrapErrParameterInvalidMsg("unexpected list value builder for VectorArray field %s: %T", field.GetName(), listBuilder.ValueBuilder())
 			}
 
 			vectorArrayData.Dim = dim
@@ -944,10 +944,10 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 
 			appendBinarySlice := func(data []byte, stride int) error {
 				if stride == 0 {
-					return fmt.Errorf("zero stride for VectorArray field %s", field.GetName())
+					return merr.WrapErrParameterInvalidMsg("zero stride for VectorArray field %s", field.GetName())
 				}
 				if len(data)%stride != 0 {
-					return fmt.Errorf("vector array data length %d is not divisible by stride %d for field %s", len(data), stride, field.GetName())
+					return merr.WrapErrParameterInvalidMsg("vector array data length %d is not divisible by stride %d for field %s", len(data), stride, field.GetName())
 				}
 				for offset := 0; offset < len(data); offset += stride {
 					fixedSizeBuilder.Append(data[offset : offset+stride])
@@ -967,14 +967,14 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 				case schemapb.DataType_FloatVector:
 					floatArray := vectorField.GetFloatVector()
 					if floatArray == nil {
-						return nil, fmt.Errorf("expected FloatVector data for field %s", field.GetName())
+						return nil, merr.WrapErrParameterInvalidMsg("expected FloatVector data for field %s", field.GetName())
 					}
 					data := floatArray.GetData()
 					if len(data) == 0 {
 						continue
 					}
 					if len(data)%int(dim) != 0 {
-						return nil, fmt.Errorf("float vector data length %d is not divisible by dim %d for field %s", len(data), dim, field.GetName())
+						return nil, merr.WrapErrParameterInvalidMsg("float vector data length %d is not divisible by dim %d for field %s", len(data), dim, field.GetName())
 					}
 					for offset := 0; offset < len(data); offset += int(dim) {
 						vectorBytes := make([]byte, bytesPerVector)
@@ -1017,7 +1017,7 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 						return nil, err
 					}
 				default:
-					return nil, fmt.Errorf("unsupported element type in VectorArray: %s", elementType.String())
+					return nil, merr.WrapErrParameterInvalidMsg("unsupported element type in VectorArray: %s", elementType.String())
 				}
 			}
 

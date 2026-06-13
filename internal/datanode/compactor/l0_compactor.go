@@ -18,10 +18,10 @@ package compactor
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -135,7 +136,9 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 	})
 	if len(targetSegments) == 0 {
 		log.Warn("compact wrong, not target sealed segments")
-		return nil, errors.New("illegal compaction plan with empty target segments")
+		// The plan is produced by datacoord, so a malformed plan is an internal
+		// protocol violation, not user input.
+		return nil, merr.WrapErrServiceInternalMsg("illegal compaction plan with empty target segments")
 	}
 	err = binlog.DecompressCompactionBinlogsWithRootPath(t.compactionParams.StorageConfig.GetRootPath(), l0Segments)
 	if err != nil {
@@ -416,7 +419,7 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, l0MemSize int64, 
 	ratio := paramtable.Get().DataNodeCfg.L0BatchMemoryRatio.GetAsFloat()
 	memLimit := float64(hardware.GetFreeMemoryCount()) * ratio
 	if float64(l0MemSize) > memLimit {
-		return nil, errors.Newf("L0 compaction failed, not enough memory, request memory size: %v, memory limit: %v", l0MemSize, memLimit)
+		return nil, merr.Wrap(merr.ErrServiceMemoryLimitExceeded, fmt.Sprintf("L0 compaction failed, not enough memory, request memory size: %v, memory limit: %v", l0MemSize, memLimit))
 	}
 
 	log.Info("L0 compaction process start")

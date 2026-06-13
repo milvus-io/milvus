@@ -572,7 +572,7 @@ func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData
 
 	if err := sm.catalog.SaveSnapshot(ctx, snapshot.SnapshotInfo); err != nil {
 		log.Error("failed to save pending snapshot to catalog", zap.Error(err))
-		return fmt.Errorf("failed to save pending snapshot to catalog: %w", err)
+		return merr.Wrap(err, "failed to save pending snapshot to catalog")
 	}
 	log.Info("saved pending snapshot to catalog")
 
@@ -582,7 +582,7 @@ func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData
 		// S3 write failed, leave PENDING record for GC to clean up
 		log.Error("failed to save snapshot to S3, pending record left for GC cleanup",
 			zap.Error(err))
-		return fmt.Errorf("failed to save snapshot to S3: %w", err)
+		return merr.Wrap(err, "failed to save snapshot to S3")
 	}
 	snapshot.SnapshotInfo.S3Location = metadataFilePath
 	log.Info("saved snapshot data to S3", zap.String("s3Location", metadataFilePath))
@@ -598,7 +598,7 @@ func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData
 		// GC will eventually cleanup via the PENDING marker.
 		log.Error("failed to update snapshot to committed state, pending record left for GC cleanup",
 			zap.Error(err))
-		return fmt.Errorf("failed to update snapshot to committed state: %w", err)
+		return merr.Wrap(err, "failed to update snapshot to committed state")
 	}
 
 	// Catalog committed — safe to insert into in-memory cache and register protection.
@@ -809,8 +809,7 @@ func (sm *snapshotMeta) DropSnapshotsByCollection(ctx context.Context, collectio
 	}
 
 	if len(errs) > 0 {
-		return dropped, fmt.Errorf("failed to drop %d/%d snapshots for collection %d: %w",
-			len(errs), len(snapshotNames), collectionID, merr.Combine(errs...))
+		return dropped, merr.WrapErrServiceInternalErr(merr.Combine(errs...), "failed to drop %d/%d snapshots for collection %d", len(errs), len(snapshotNames), collectionID)
 	}
 
 	return dropped, nil
@@ -1006,7 +1005,7 @@ func (sm *snapshotMeta) GetPendingSnapshots(ctx context.Context, pendingTimeout 
 	// Get all snapshots from catalog (etcd)
 	snapshots, err := sm.catalog.ListSnapshots(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list snapshots from catalog: %w", err)
+		return nil, merr.Wrap(err, "failed to list snapshots from catalog")
 	}
 
 	now := time.Now().UnixMilli()
@@ -1057,7 +1056,7 @@ func (sm *snapshotMeta) CleanupPendingSnapshot(ctx context.Context, snapshot *da
 func (sm *snapshotMeta) GetDeletingSnapshots(ctx context.Context) ([]*datapb.SnapshotInfo, error) {
 	snapshots, err := sm.catalog.ListSnapshots(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list snapshots from catalog: %w", err)
+		return nil, merr.Wrap(err, "failed to list snapshots from catalog")
 	}
 
 	deletingSnapshots := make([]*datapb.SnapshotInfo, 0)
@@ -1774,7 +1773,7 @@ func (sm *snapshotMeta) generatePinID(snapshot *datapb.SnapshotInfo) (int64, err
 	for i := 0; i < 3; i++ {
 		var b [8]byte
 		if _, err := cryptorand.Read(b[:]); err != nil {
-			return 0, fmt.Errorf("failed to generate random pin ID: %w", err)
+			return 0, merr.WrapErrServiceInternalErr(err, "failed to generate random pin ID")
 		}
 		id := int64(binary.BigEndian.Uint64(b[:]) >> 1)
 		if id == 0 {
@@ -1784,5 +1783,5 @@ func (sm *snapshotMeta) generatePinID(snapshot *datapb.SnapshotInfo) (int64, err
 			return id, nil
 		}
 	}
-	return 0, fmt.Errorf("failed to generate unique pin ID after 3 attempts")
+	return 0, merr.WrapErrServiceInternalMsg("failed to generate unique pin ID after 3 attempts")
 }

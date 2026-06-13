@@ -95,6 +95,7 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 
 	"/v2/vectordb/collections/fields/alter_properties": "AlterCollectionField",
 	"/v2/vectordb/collections/fields/add":              "AddCollectionField",
+	"/v2/vectordb/collections/struct_fields/add":       "AddCollectionStructField",
 
 	"/v2/vectordb/databases/create":           "CreateDatabase",
 	"/v2/vectordb/databases/drop":             "DropDatabase",
@@ -207,6 +208,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 
 	// /collections/fields/add
 	router.POST(CollectionFieldCategory+AddAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionFieldReqWithSchema{} }, wrapperTraceLog(h.addCollectionField))))
+	router.POST(CollectionStructFieldCategory+AddAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionFieldReqWithSchema{} }, wrapperTraceLog(h.addCollectionStructField))))
 
 	router.POST(DataBaseCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.createDatabase))))
 	router.POST(DataBaseCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqRequiredName{} }, wrapperTraceLog(h.dropDatabase))))
@@ -408,6 +410,35 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			dbName,
 			collectionName,
 		).Inc()
+
+		// Mirror the fail_input/fail_system metric split into the logs so a
+		// failed REST request can be filtered by error_type. System failures are
+		// logged at Warn (actionable); input failures at Info (expected user
+		// mistakes — keeping them at Warn would spam the logs).
+		if label == metrics.FailSystemLabel || label == metrics.FailInputLabel {
+			var status *commonpb.Status
+			switch r := resp.(type) {
+			case interface{ GetStatus() *commonpb.Status }:
+				status = r.GetStatus()
+			case *commonpb.Status:
+				status = r
+			}
+			errType := merr.SystemError
+			if label == metrics.FailInputLabel {
+				errType = merr.InputError
+			}
+			logger := log.Ctx(ctx).With(
+				zap.String("method", methodTag),
+				zap.String("error_type", errType.String()),
+				zap.Int32("code", status.GetCode()),
+				zap.String("reason", status.GetReason()),
+			)
+			if errType == merr.InputError {
+				logger.Info("restful request returned an input error")
+			} else {
+				logger.Warn("restful request returned a system error")
+			}
+		}
 	}
 }
 
@@ -541,6 +572,9 @@ func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, ch
 	}
 
 	if err != nil {
+		// Expose the exact classification (incl. boundary InputError marks) to
+		// the REST access log; key must match accesslog/info.ContextErrorType.
+		ginCtx.Set("error_type", merr.GetErrorType(err).String())
 		log.Ctx(ctx).Warn("high level restful api, grpc call failed", zap.Error(err))
 		if !ignoreErr {
 			HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
@@ -1023,7 +1057,7 @@ func (h *HandlersV2) waitForFlush(ctx context.Context, dbName string, collection
 	segmentIDs := flushResp.GetCollSegIDs()[collectionName].GetData()
 	flushTs, ok := flushResp.GetCollFlushTs()[collectionName]
 	if !ok {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("failed to get flush timestamp for collection %s", collectionName))
+		return merr.WrapErrServiceInternalMsg("failed to get flush timestamp for collection %s", collectionName)
 	}
 
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -1077,6 +1111,12 @@ func (h *HandlersV2) alterCollectionFieldProperties(ctx context.Context, c *gin.
 func (h *HandlersV2) addCollectionField(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*CollectionFieldReqWithSchema)
 
+	if httpReq.Schema.IsStructArrayField() {
+		err := merr.WrapErrParameterInvalidMsg("StructArray field must be added through /v2/vectordb/collections/struct_fields/add")
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+
 	schemaProto, err := httpReq.Schema.GetProto(ctx)
 	if err != nil {
 		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
@@ -1097,6 +1137,32 @@ func (h *HandlersV2) addCollectionField(ctx context.Context, c *gin.Context, any
 	c.Set(ContextRequest, req)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AddCollectionField", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.AddCollectionField(reqCtx, req.(*milvuspb.AddCollectionFieldRequest))
+	})
+
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) addCollectionStructField(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CollectionFieldReqWithSchema)
+
+	schemaProto, err := httpReq.Schema.GetStructArrayProto(ctx)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+
+	req := &milvuspb.AddCollectionStructFieldRequest{
+		DbName:                 dbName,
+		CollectionName:         httpReq.CollectionName,
+		StructArrayFieldSchema: schemaProto,
+	}
+
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AddCollectionStructField", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.AddCollectionStructField(reqCtx, req.(*milvuspb.AddCollectionStructFieldRequest))
 	})
 
 	if err == nil {
@@ -1487,7 +1553,7 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 					fieldName = field.Name
 					vectorField = field
 				} else {
-					return nil, errors.New("search without annsField, but already found multiple vector fields: [" + fieldName + ", " + field.Name + ",,,]")
+					return nil, merr.WrapErrParameterInvalidMsg("search without annsField, but already found multiple vector fields: [%s, %s,,,]", fieldName, field.Name)
 				}
 			}
 		}
@@ -1513,7 +1579,7 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 		}
 	}
 	if vectorField == nil {
-		return nil, errors.New("cannot find a vector field named: " + fieldName)
+		return nil, merr.WrapErrFieldNotFound(fieldName, "cannot find a vector field")
 	}
 	dim := int64(0)
 	if !typeutil.IsSparseFloatVectorType(vectorField.DataType) {

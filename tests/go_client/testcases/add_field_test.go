@@ -76,6 +76,60 @@ func TestAddCollectionField(t *testing.T) {
 	}
 }
 
+func TestAddCollectionStructField(t *testing.T) {
+	t.Parallel()
+
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{
+		Address:  hp.GetAddr(),
+		Username: hp.GetUser(),
+		Password: hp.GetPassword(),
+	})
+
+	collName := common.GenRandomString("addstructfield", 6)
+	err := mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collName, common.DefaultDim))
+	common.CheckErr(t, err, true)
+
+	structSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("tag").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64)).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim))
+	structField := entity.NewField().
+		WithName("clips").
+		WithDataType(entity.FieldTypeArray).
+		WithElementType(entity.FieldTypeStruct).
+		WithMaxCapacity(16).
+		WithNullable(true).
+		WithStructSchema(structSchema)
+
+	err = mc.AddCollectionStructField(ctx, client.NewAddCollectionStructFieldOption(collName, structField))
+	common.CheckErr(t, err, true)
+
+	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	common.CheckErr(t, err, true)
+
+	var added *entity.Field
+	for _, field := range coll.Schema.Fields {
+		if field.Name == "clips" {
+			added = field
+			break
+		}
+	}
+	require.NotNil(t, added)
+	require.Equal(t, entity.FieldTypeArray, added.DataType)
+	require.Equal(t, entity.FieldTypeStruct, added.ElementType)
+	require.True(t, added.Nullable)
+	require.Equal(t, "16", added.TypeParams[entity.TypeParamMaxCapacity])
+	require.NotNil(t, added.StructSchema)
+	require.Len(t, added.StructSchema.Fields, 2)
+	require.Equal(t, "tag", added.StructSchema.Fields[0].Name)
+	require.Equal(t, entity.FieldTypeVarChar, added.StructSchema.Fields[0].DataType)
+	require.Equal(t, "embedding", added.StructSchema.Fields[1].Name)
+	require.Equal(t, entity.FieldTypeFloatVector, added.StructSchema.Fields[1].DataType)
+	dim, err := added.StructSchema.Fields[1].GetDim()
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, common.DefaultDim, dim)
+}
+
 // parameterized test for add field invalid cases
 func TestAddCollectionFieldInvalid(t *testing.T) {
 	t.Parallel()

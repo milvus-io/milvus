@@ -33,8 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
-var ErrSlowDown = merr.WrapErrServiceRateLimit(0, "reach the limit of request, please slowdown and retry later")
-
 // getDefaultBurst returns the default burst size from configuration.
 func getDefaultBurst() int {
 	return int(paramtable.Get().StreamingCfg.WALRateLimitDefaultBurst.GetAsSize())
@@ -68,7 +66,7 @@ func (arl *produceRateLimiter) RequestReservation(ctx context.Context, msgs ...m
 	}
 	r := arl.limiter.ReserveN(time.Now(), msgSize)
 	if !r.OK() {
-		return nil, ErrSlowDown
+		return nil, merr.WrapErrServiceRateLimit(0, "reach the limit of request, please slowdown and retry later")
 	}
 	return r, nil
 }

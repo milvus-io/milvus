@@ -99,9 +99,9 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 	headerMap := make(map[string]bool)
 	for _, name := range header {
 		if structName, ok := structArraySubFields[name]; ok {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf(
+			return nil, merr.WrapErrImportFailedMsg(
 				"struct field '%s' must be provided as a struct array; flat sub-field '%s' is not supported",
-				structName, name))
+				structName, name)
 		}
 		headerMap[name] = true
 	}
@@ -179,14 +179,14 @@ func (r *rowParser) reconstructArrayForStructArray(structName string, subFieldsM
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.UseNumber()
 	if err := dec.Decode(&decoded); err != nil {
-		return nil, false, merr.WrapErrImportFailed(fmt.Sprintf("invalid StructArray format in CSV, failed to parse JSON: %v", err))
+		return nil, false, merr.WrapErrImportFailedMsg("invalid StructArray format in CSV, failed to parse JSON: %v", err)
 	}
 	if decoded == nil {
 		return nil, true, nil
 	}
 	structs, ok := decoded.([]any)
 	if !ok {
-		return nil, false, merr.WrapErrImportFailed(fmt.Sprintf("invalid StructArray format in CSV, expect array but got type %T", decoded))
+		return nil, false, merr.WrapErrImportFailedMsg("invalid StructArray format in CSV, expect array but got type %T", decoded)
 	}
 
 	expectedFieldCount := len(subFieldsMap)
@@ -194,7 +194,7 @@ func (r *rowParser) reconstructArrayForStructArray(structName string, subFieldsM
 	for i, elem := range structs {
 		dict, ok := elem.(map[string]any)
 		if !ok {
-			return nil, false, merr.WrapErrImportFailed(fmt.Sprintf("invalid element in StructArray, expect map[string]any but got type %T", elem))
+			return nil, false, merr.WrapErrImportFailedMsg("invalid element in StructArray, expect map[string]any but got type %T", elem)
 		}
 		if len(dict) != expectedFieldCount {
 			return nil, false, merr.WrapErrImportFailed(
@@ -247,7 +247,7 @@ func (r *rowParser) Parse(strArr []string) (Row, error) {
 		if subFieldsMap, ok := r.structArrays[csvFieldName]; ok {
 			structField, ok := r.name2StructField[csvFieldName]
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("struct field %s is not found in schema", csvFieldName))
+				return nil, merr.WrapErrImportFailedMsg("struct field %s is not found in schema", csvFieldName)
 			}
 			if value == r.nullkey {
 				if err := appendNullStruct(structField, csvFieldName); err != nil {
@@ -268,7 +268,7 @@ func (r *rowParser) Parse(strArr []string) (Row, error) {
 			for subKey, subValues := range flatStructs {
 				field, ok := r.name2Field[subKey]
 				if !ok {
-					return nil, merr.WrapErrImportFailed(fmt.Sprintf("sub field %s of struct field %s is not found in schema", subKey, csvFieldName))
+					return nil, merr.WrapErrImportFailedMsg("sub field %s of struct field %s is not found in schema", subKey, csvFieldName)
 				}
 				// TODO: how to get max capacity from a StructFieldSchema?
 				data, err := r.parseStructEntity(field, subValues)
@@ -317,7 +317,7 @@ func (r *rowParser) Parse(strArr []string) (Row, error) {
 		}
 		_, subField := r.structArraySubFields[fieldName]
 		if _, ok := row[fieldID]; !ok && !subField {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("value of field '%s' is missed", fieldName))
+			return nil, merr.WrapErrImportFailedMsg("value of field '%s' is missed", fieldName)
 		}
 	}
 
@@ -353,7 +353,7 @@ func (r *rowParser) combineDynamicRow(dynamicValues map[string]string, row Row) 
 		// put the all dynamic fields into newDynamicValues
 		for k, v := range mp {
 			if _, ok = dynamicValues[k]; ok {
-				return merr.WrapErrImportFailed(fmt.Sprintf("duplicated key in dynamic field, key=%s", k))
+				return merr.WrapErrImportFailedMsg("duplicated key in dynamic field, key=%s", k)
 			}
 			newDynamicValues[k] = v
 		}
@@ -627,7 +627,7 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 			}
 			num, err := strconv.ParseInt(value.String(), 10, 32)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse int32: %w", err)
+				return nil, merr.Wrap(err, "failed to parse int32")
 			}
 			values[i] = int32(num)
 		}
@@ -648,7 +648,7 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 			}
 			num, err := strconv.ParseInt(value.String(), 10, 64)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse int64: %w", err)
+				return nil, merr.Wrap(err, "failed to parse int64")
 			}
 			values[i] = num
 		}
@@ -668,12 +668,12 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 			}
 			num, err := strconv.ParseFloat(value.String(), 32)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse float32: %w", err)
+				return nil, merr.Wrap(err, "failed to parse float32")
 			}
 			values[i] = float32(num)
 		}
 		if err := typeutil.VerifyFloats32(values); err != nil {
-			return nil, fmt.Errorf("float32 verification failed: %w", err)
+			return nil, merr.Wrap(err, "float32 verification failed")
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_FloatData{
@@ -691,12 +691,12 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 			}
 			num, err := strconv.ParseFloat(value.String(), 64)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse float64: %w", err)
+				return nil, merr.Wrap(err, "failed to parse float64")
 			}
 			values[i] = num
 		}
 		if err := typeutil.VerifyFloats64(values); err != nil {
-			return nil, fmt.Errorf("float64 verification failed: %w", err)
+			return nil, merr.Wrap(err, "float64 verification failed")
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_DoubleData{
@@ -714,7 +714,7 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 			}
 			num, err := strconv.ParseInt(value.String(), 10, 64)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse timesamptz: %w", err)
+				return nil, merr.Wrap(err, "failed to parse timesamptz")
 			}
 			values[i] = num
 		}
@@ -778,7 +778,7 @@ func (r *rowParser) arrayOfVectorToFieldData(vectors []any, field *schemapb.Fiel
 				}
 				num, err := strconv.ParseFloat(value.String(), 32)
 				if err != nil {
-					return nil, fmt.Errorf("failed to parse float: %w", err)
+					return nil, merr.Wrap(err, "failed to parse float")
 				}
 				vector[i] = float32(num)
 			}
@@ -800,9 +800,9 @@ func (r *rowParser) arrayOfVectorToFieldData(vectors []any, field *schemapb.Fiel
 
 	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_BinaryVector,
 		schemapb.DataType_Int8Vector, schemapb.DataType_SparseFloatVector:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("not implemented element type for CSV: %s", elementType.String()))
+		return nil, merr.WrapErrImportFailedMsg("not implemented element type for CSV: %s", elementType.String())
 	default:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported element type: %s", elementType.String()))
+		return nil, merr.WrapErrImportFailedMsg("unsupported element type: %s", elementType.String())
 	}
 }
 

@@ -19,7 +19,6 @@ package rootcoord
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -105,7 +104,7 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		fieldSchemas = append(fieldSchemas, fieldSchema)
 	}
 	if err := checkFieldSchema(fieldSchemas); err != nil {
-		return errors.Wrap(err, "failed to check field schema")
+		return merr.Wrap(err, "failed to check field schema")
 	}
 	newFieldNames := make(map[string]struct{}, len(fieldSchemas))
 	for _, fieldSchema := range fieldSchemas {
@@ -268,7 +267,7 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId:
 		schema, properties, droppedFieldIds, err = buildSchemaForDropField(coll, "", id.FieldId)
 	default:
-		return merr.WrapErrParameterInvalidMsg("drop request must specify field_name, field_id, or function_name")
+		return merr.WrapErrParameterMissingMsg("drop request must specify field_name, field_id, or function_name")
 	}
 	if err != nil {
 		return err

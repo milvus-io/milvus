@@ -11,12 +11,8 @@
 
 package metricsinfo
 
-import "github.com/cockroachdb/errors"
-
 const (
 	// MsgUnimplementedMetric represents that user requests an unimplemented metric type
 	MsgUnimplementedMetric           = "metric request type is not implemented"
 	msgInvalidSystemInfosMetricCache = "system infos metric is invalid"
 )
-
-var errInvalidSystemInfosMetricCache = errors.New(msgInvalidSystemInfosMetricCache)

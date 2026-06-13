@@ -272,8 +272,7 @@ func (m *Manager) AddSource(source Source) error {
 	sourceName := source.GetSourceName()
 	_, ok := m.sources.Get(sourceName)
 	if ok {
-		err := errors.New("duplicate source supplied")
-		return err
+		return ErrSourceDuplicate
 	}
 
 	source.SetManager(m)
@@ -281,8 +280,7 @@ func (m *Manager) AddSource(source Source) error {
 
 	err := m.pullSourceConfigs(sourceName)
 	if err != nil {
-		err = fmt.Errorf("failed to load %s cause: %x", sourceName, err)
-		return err
+		return errors.Wrapf(err, "failed to load source %s", sourceName)
 	}
 
 	source.SetEventHandler(m)
@@ -341,7 +339,7 @@ func (m *Manager) UpdateSourceOptions(opts ...Option) {
 func (m *Manager) pullSourceConfigs(source string) error {
 	configSource, ok := m.sources.Get(source)
 	if !ok {
-		return errors.New("invalid source or source not added")
+		return ErrSourceInvalid
 	}
 
 	configs, err := configSource.GetConfigurations()
@@ -551,14 +549,14 @@ func (m *Manager) ProcessImmutableConfigs() error {
 	}
 
 	if len(saveErrors) > 0 {
-		return fmt.Errorf("failed to save %d immutable configs to etcd", len(saveErrors))
+		return errors.Wrapf(ErrImmutableConfigSaveFailed, "%d config(s) failed", len(saveErrors))
 	}
 	return nil
 }
 
 func (m *Manager) SaveConfigToEtcd(etcdSource *EtcdSource, key, value string) error {
 	if etcdSource == nil || etcdSource.etcdCli == nil {
-		return errors.New("etcd client is not available")
+		return ErrEtcdClientUnavailable
 	}
 	etcdKey := fmt.Sprintf("%s/config/%s", etcdSource.keyPrefix, key)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -568,7 +566,7 @@ func (m *Manager) SaveConfigToEtcd(etcdSource *EtcdSource, key, value string) er
 		Then(clientv3.OpPut(etcdKey, value)).
 		Commit()
 	if err != nil {
-		return fmt.Errorf("failed to put config to etcd: %w", err)
+		return errors.Wrap(err, "failed to put config to etcd")
 	}
 	if !resp.Succeeded {
 		log.Info("config already exists in etcd, skip writing",
@@ -591,11 +589,11 @@ func (m *Manager) UpdateConfigInEtcd(etcdSource *EtcdSource, key, value string) 
 // Both updates (put) and deletes are executed in a single etcd transaction.
 func (m *Manager) AlterConfigsInEtcd(etcdSource *EtcdSource, updates map[string]string, deletes []string) error {
 	if etcdSource == nil || etcdSource.etcdCli == nil {
-		return errors.New("etcd client is not available")
+		return ErrEtcdClientUnavailable
 	}
 
 	if len(updates) == 0 && len(deletes) == 0 {
-		return errors.New("no configs to alter")
+		return ErrNoConfigsToAlter
 	}
 
 	// Build transaction operations
@@ -618,7 +616,7 @@ func (m *Manager) AlterConfigsInEtcd(etcdSource *EtcdSource, updates map[string]
 		Then(ops...).
 		Commit()
 	if err != nil {
-		return fmt.Errorf("failed to atomically alter configs in etcd: %w", err)
+		return errors.Wrap(err, "failed to atomically alter configs in etcd")
 	}
 
 	// Proactively refresh local EtcdSource so the write is immediately visible in this process,

@@ -121,5 +121,5 @@ func TestListInsertLogs_ParseFieldIDError(t *testing.T) {
 	_, err := listInsertLogs(ctx, cm, "prefix/", 3)
 
 	assert.Error(t, err)
-	assert.True(t, errors.Is(err, merr.ErrImportFailed), "parse error must be wrapped as an import failure")
+	assert.True(t, errors.Is(err, merr.ErrImportSysFailed), "parse-field-id IO error must be wrapped as a server-side import failure")
 }

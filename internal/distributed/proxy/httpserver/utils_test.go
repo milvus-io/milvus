@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -36,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -3005,7 +3007,8 @@ func TestBuildQueryResps(t *testing.T) {
 	}
 
 	_, err := buildQueryResp(int64(0), outputFields, newFieldData([]*schemapb.FieldData{}, 1000), generateIDs(schemapb.DataType_Int64, 3), DefaultScores, true, nil)
-	assert.Equal(t, "the type(1000) of field(wrong-field-type) is not supported, use other sdk please", err.Error())
+	assert.Contains(t, err.Error(), "the type(1000) of field(wrong-field-type) is not supported, use other sdk please")
+	assert.True(t, errors.Is(err, merr.ErrParameterInvalid))
 
 	res, err := buildQueryResp(int64(0), outputFields, []*schemapb.FieldData{}, generateIDs(schemapb.DataType_Int64, 3), DefaultScores, true, nil)
 	assert.Equal(t, 3, len(res))
@@ -4006,11 +4009,13 @@ func TestIsEmbeddingListData(t *testing.T) {
 
 func TestPrintStructArrayFieldsV2(t *testing.T) {
 	schema := buildStructArrayTestSchema()
+	schema.GetStructArrayFields()[0].Nullable = true
 	printed := printStructArrayFieldsV2(schema.GetStructArrayFields())
 	require.Len(t, printed, 1)
 	entry := printed[0]
 	assert.Equal(t, "my_struct", entry[HTTPReturnFieldName])
 	assert.Equal(t, schemapb.DataType_ArrayOfStruct.String(), entry[HTTPReturnFieldType])
+	assert.Equal(t, true, entry[HTTPReturnFieldNullable])
 	subs, ok := entry["fields"].([]gin.H)
 	require.True(t, ok)
 	require.Len(t, subs, 2)
@@ -4508,6 +4513,7 @@ func TestStructArrayFieldSchemaGetProtoTypeParams(t *testing.T) {
 	proto, err := (&StructArrayFieldSchema{
 		FieldName:   "my_struct",
 		Description: "with params",
+		Nullable:    true,
 		TypeParams: map[string]interface{}{
 			common.MaxCapacityKey: 8,
 		},
@@ -4518,9 +4524,14 @@ func TestStructArrayFieldSchemaGetProtoTypeParams(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "my_struct", proto.GetName())
 	assert.Equal(t, "with params", proto.GetDescription())
+	assert.True(t, proto.GetNullable())
 	require.Len(t, proto.GetTypeParams(), 1)
 	assert.Equal(t, common.MaxCapacityKey, proto.GetTypeParams()[0].GetKey())
 	assert.Equal(t, "8", proto.GetTypeParams()[0].GetValue())
+	subParams := proto.GetFields()[0].GetTypeParams()
+	require.Len(t, subParams, 1)
+	assert.Equal(t, common.MaxCapacityKey, subParams[0].GetKey())
+	assert.Equal(t, "8", subParams[0].GetValue())
 
 	_, err = (&StructArrayFieldSchema{
 		FieldName: "bad_params",
@@ -4532,6 +4543,59 @@ func TestStructArrayFieldSchemaGetProtoTypeParams(t *testing.T) {
 		},
 	}).GetProto(context.Background())
 	assert.Error(t, err)
+}
+
+func TestFieldSchemaStructArrayHelpers(t *testing.T) {
+	var nilField *FieldSchema
+	assert.False(t, nilField.IsStructArrayField())
+	assert.False(t, (&FieldSchema{DataType: "Int64"}).IsStructArrayField())
+	assert.True(t, (&FieldSchema{DataType: "Array", ElementDataType: "Struct"}).IsStructArrayField())
+	assert.True(t, (&FieldSchema{DataType: "ArrayOfStruct"}).IsStructArrayField())
+
+	proto, err := (&FieldSchema{
+		FieldName:       "clips",
+		Description:     "clip metadata",
+		DataType:        "Array",
+		ElementDataType: "Struct",
+		Nullable:        true,
+		ElementTypeParams: map[string]interface{}{
+			common.MaxCapacityKey: 16,
+		},
+		TypeParams: map[string]interface{}{
+			common.MaxCapacityKey: 32,
+		},
+		Fields: []FieldSchema{
+			{
+				FieldName:       "tag",
+				DataType:        "Array",
+				ElementDataType: "VarChar",
+				ElementTypeParams: map[string]interface{}{
+					common.MaxLengthKey: 64,
+				},
+			},
+			{
+				FieldName:       "scores",
+				DataType:        "Array",
+				ElementDataType: "Int64",
+				ElementTypeParams: map[string]interface{}{
+					common.MaxCapacityKey: 7,
+				},
+			},
+		},
+	}).GetStructArrayProto(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "clips", proto.GetName())
+	assert.Equal(t, "clip metadata", proto.GetDescription())
+	assert.True(t, proto.GetNullable())
+	assert.Equal(t, "32", kvPairsToMap(proto.GetTypeParams())[common.MaxCapacityKey])
+
+	require.Len(t, proto.GetFields(), 2)
+	tagParams := kvPairsToMap(proto.GetFields()[0].GetTypeParams())
+	assert.Equal(t, "64", tagParams[common.MaxLengthKey])
+	assert.Equal(t, "32", tagParams[common.MaxCapacityKey])
+
+	scoreParams := kvPairsToMap(proto.GetFields()[1].GetTypeParams())
+	assert.Equal(t, "7", scoreParams[common.MaxCapacityKey])
 }
 
 func TestPrintStructArrayFieldsV2QualifiedSubFields(t *testing.T) {

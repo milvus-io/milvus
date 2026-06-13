@@ -17,7 +17,6 @@
 package conc
 
 import (
-	"fmt"
 	"strconv"
 	"sync"
 	"time"
@@ -71,7 +70,7 @@ func (pool *Pool[T]) Submit(method func() (T, error)) *Future[T] {
 		defer close(future.ch)
 		defer func() {
 			if x := recover(); x != nil {
-				future.err = fmt.Errorf("panicked with error: %v", x)
+				future.err = merr.WrapErrServiceInternalMsg("panicked with error: %v", x)
 				panic(x) // throw panic out
 			}
 		}()

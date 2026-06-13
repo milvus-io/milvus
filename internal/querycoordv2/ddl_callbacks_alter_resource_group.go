@@ -32,11 +32,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
-func (s *Server) broadcastCreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) error {
+func (s *Server) broadcastCreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (ignored bool, err error) {
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
 	if err != nil {
 		if !shouldApplyLocallyOnNonPrimary(err, message.MessageTypeAlterResourceGroup) {
-			return err
+			return false, err
 		}
 	}
 	if broadcaster != nil {
@@ -48,8 +48,8 @@ func (s *Server) broadcastCreateResourceGroup(ctx context.Context, req *milvuspb
 		// Use default config if not set, compatible with old client.
 		cfg = meta.NewResourceGroupConfig(0, 0)
 	}
-	if err := s.meta.CheckIfResourceGroupAddable(ctx, req.GetResourceGroup(), cfg); err != nil {
-		return err
+	if ignored, err := s.meta.CheckIfResourceGroupAddable(ctx, req.GetResourceGroup(), cfg); err != nil || ignored {
+		return ignored, err
 	}
 
 	msg := message.NewAlterResourceGroupMessageBuilderV2().
@@ -60,10 +60,10 @@ func (s *Server) broadcastCreateResourceGroup(ctx context.Context, req *milvuspb
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
 	if broadcaster == nil {
-		return registry.CallMessageAckCallback(ctx, msg, nil)
+		return false, registry.CallMessageAckCallback(ctx, msg, nil)
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
-	return err
+	return false, err
 }
 
 func (s *Server) broadcastUpdateResourceGroups(ctx context.Context, req *querypb.UpdateResourceGroupsRequest) error {

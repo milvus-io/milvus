@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // S3 snapshot storage path constants.
@@ -136,7 +137,7 @@ func getManifestSchemaByVersion(version int) (avro.Schema, error) {
 	case 3:
 		return getManifestSchemaV3()
 	default:
-		return nil, fmt.Errorf("unsupported manifest schema version: %d", version)
+		return nil, merr.WrapErrServiceInternalMsg("unsupported manifest schema version: %d", version)
 	}
 }
 
@@ -508,22 +509,22 @@ func GetSegmentManifestPath(manifestDir string, segmentID int64) string {
 func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (string, error) {
 	// Validate input parameters
 	if snapshot == nil {
-		return "", fmt.Errorf("snapshot cannot be nil")
+		return "", merr.WrapErrServiceInternalMsg("snapshot cannot be nil")
 	}
 	if snapshot.SnapshotInfo == nil {
-		return "", fmt.Errorf("snapshot info cannot be nil")
+		return "", merr.WrapErrServiceInternalMsg("snapshot info cannot be nil")
 	}
 	collectionID := snapshot.SnapshotInfo.GetCollectionId()
 	if collectionID <= 0 {
-		return "", fmt.Errorf("invalid collection ID: %d", collectionID)
+		return "", merr.WrapErrServiceInternalMsg("invalid collection ID: %d", collectionID)
 	}
 	if snapshot.Collection == nil {
-		return "", fmt.Errorf("collection description cannot be nil")
+		return "", merr.WrapErrServiceInternalMsg("collection description cannot be nil")
 	}
 
 	snapshotID := snapshot.SnapshotInfo.GetId()
 	if snapshotID <= 0 {
-		return "", fmt.Errorf("invalid snapshot ID: %d", snapshotID)
+		return "", merr.WrapErrServiceInternalMsg("invalid snapshot ID: %d", snapshotID)
 	}
 	manifestDir, metadataPath := GetSnapshotPaths(w.chunkManager.RootPath(), collectionID, snapshotID)
 
@@ -533,7 +534,7 @@ func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (stri
 	for _, segment := range snapshot.Segments {
 		manifestPath := GetSegmentManifestPath(manifestDir, segment.GetSegmentId())
 		if err := w.writeSegmentManifest(ctx, manifestPath, segment); err != nil {
-			return "", fmt.Errorf("failed to write manifest for segment %d: %w", segment.GetSegmentId(), err)
+			return "", merr.Wrapf(err, "failed to write manifest for segment %d", segment.GetSegmentId())
 		}
 		manifestPaths = append(manifestPaths, manifestPath)
 	}
@@ -557,7 +558,7 @@ func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (stri
 	// Step 3: Write metadata file with all manifest paths
 	// This file is the entry point for reading the snapshot
 	if err := w.writeMetadataFile(ctx, metadataPath, snapshot, manifestPaths, storagev2Manifests); err != nil {
-		return "", fmt.Errorf("failed to write metadata file: %w", err)
+		return "", merr.Wrap(err, "failed to write metadata file")
 	}
 
 	log.Info("Successfully wrote metadata file",
@@ -584,12 +585,12 @@ func (w *SnapshotWriter) writeSegmentManifest(ctx context.Context, manifestPath 
 	// Serialize to Avro binary format (single record per file)
 	avroSchema, err := getManifestSchema()
 	if err != nil {
-		return fmt.Errorf("failed to get manifest schema: %w", err)
+		return merr.WrapErrServiceInternalErr(err, "failed to get manifest schema")
 	}
 
 	binaryData, err := avro.Marshal(avroSchema, entry)
 	if err != nil {
-		return fmt.Errorf("failed to serialize entry to avro: %w", err)
+		return merr.WrapErrServiceInternalErr(err, "failed to serialize entry to avro")
 	}
 
 	// Write to object storage
@@ -634,7 +635,7 @@ func (w *SnapshotWriter) writeMetadataFile(ctx context.Context, metadataPath str
 	}
 	jsonData, err := opts.Marshal(metadata)
 	if err != nil {
-		return fmt.Errorf("failed to marshal metadata to JSON: %w", err)
+		return merr.WrapErrServiceInternalErr(err, "failed to marshal metadata to JSON")
 	}
 
 	// Write to object storage
@@ -663,13 +664,13 @@ func (w *SnapshotWriter) writeMetadataFile(ctx context.Context, metadataPath str
 func (w *SnapshotWriter) Drop(ctx context.Context, metadataFilePath string) error {
 	// Validate input parameter
 	if metadataFilePath == "" {
-		return fmt.Errorf("metadata file path cannot be empty")
+		return merr.WrapErrServiceInternalMsg("metadata file path cannot be empty")
 	}
 
 	// Step 1: Read metadata file to discover manifest file paths
 	metadata, err := w.readMetadataFile(ctx, metadataFilePath)
 	if err != nil {
-		return fmt.Errorf("failed to read metadata file: %w", err)
+		return merr.Wrap(err, "failed to read metadata file")
 	}
 
 	snapshotID := metadata.GetSnapshotInfo().GetId()
@@ -678,7 +679,7 @@ func (w *SnapshotWriter) Drop(ctx context.Context, metadataFilePath string) erro
 	manifestList := metadata.GetManifestList()
 	if len(manifestList) > 0 {
 		if err := w.chunkManager.MultiRemove(ctx, manifestList); err != nil {
-			return fmt.Errorf("failed to remove manifest files: %w", err)
+			return merr.Wrap(err, "failed to remove manifest files")
 		}
 		log.Info("Successfully removed manifest files",
 			zap.Int("count", len(manifestList)),
@@ -687,7 +688,7 @@ func (w *SnapshotWriter) Drop(ctx context.Context, metadataFilePath string) erro
 
 	// Step 3: Remove the metadata file (entry point)
 	if err := w.chunkManager.Remove(ctx, metadataFilePath); err != nil {
-		return fmt.Errorf("failed to remove metadata file: %w", err)
+		return merr.Wrap(err, "failed to remove metadata file")
 	}
 	log.Info("Successfully removed metadata file",
 		zap.String("metadataFilePath", metadataFilePath))
@@ -703,7 +704,7 @@ func (w *SnapshotWriter) readMetadataFile(ctx context.Context, filePath string) 
 	// Read raw JSON content from object storage
 	data, err := w.chunkManager.Read(ctx, filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read metadata file: %w", err)
+		return nil, merr.Wrap(err, "failed to read metadata file")
 	}
 
 	// Use protojson for deserialization to correctly handle protobuf oneof fields
@@ -712,7 +713,7 @@ func (w *SnapshotWriter) readMetadataFile(ctx context.Context, filePath string) 
 		DiscardUnknown: true,
 	}
 	if err := opts.Unmarshal(data, metadata); err != nil {
-		return nil, fmt.Errorf("failed to parse metadata JSON: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to parse metadata JSON")
 	}
 
 	return metadata, nil
@@ -775,13 +776,13 @@ func NewSnapshotReader(cm storage.ChunkManager) *SnapshotReader {
 func (r *SnapshotReader) ReadSnapshot(ctx context.Context, metadataFilePath string, includeSegments bool) (*SnapshotData, error) {
 	// Validate input
 	if metadataFilePath == "" {
-		return nil, fmt.Errorf("metadata file path cannot be empty")
+		return nil, merr.WrapErrServiceInternalMsg("metadata file path cannot be empty")
 	}
 
 	// Step 1: Read metadata file (always required)
 	metadata, err := r.readMetadataFile(ctx, metadataFilePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read metadata file: %w", err)
+		return nil, merr.Wrap(err, "failed to read metadata file")
 	}
 
 	// Step 2: Optionally read segment details from manifest files
@@ -791,7 +792,7 @@ func (r *SnapshotReader) ReadSnapshot(ctx context.Context, metadataFilePath stri
 		for _, manifestPath := range metadata.GetManifestList() {
 			segments, err := r.readManifestFile(ctx, manifestPath, int(metadata.GetFormatVersion()))
 			if err != nil {
-				return nil, fmt.Errorf("failed to read manifest file %s: %w", manifestPath, err)
+				return nil, merr.Wrapf(err, "failed to read manifest file %s", manifestPath)
 			}
 			allSegments = append(allSegments, segments...)
 		}
@@ -830,7 +831,7 @@ func (r *SnapshotReader) readMetadataFile(ctx context.Context, filePath string) 
 	// Read raw JSON content from object storage
 	data, err := r.chunkManager.Read(ctx, filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read metadata file: %w", err)
+		return nil, merr.Wrap(err, "failed to read metadata file")
 	}
 
 	// Use protojson for deserialization to correctly handle protobuf oneof fields
@@ -839,12 +840,12 @@ func (r *SnapshotReader) readMetadataFile(ctx context.Context, filePath string) 
 		DiscardUnknown: true,
 	}
 	if err := opts.Unmarshal(data, metadata); err != nil {
-		return nil, fmt.Errorf("failed to parse metadata JSON: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to parse metadata JSON")
 	}
 
 	// Validate format version compatibility
 	if err := validateFormatVersion(int(metadata.GetFormatVersion())); err != nil {
-		return nil, fmt.Errorf("incompatible snapshot format: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "incompatible snapshot format")
 	}
 
 	return metadata, nil
@@ -865,7 +866,7 @@ func validateFormatVersion(version int) error {
 
 	// Check if version is too new for current code
 	if version > SnapshotFormatVersion {
-		return fmt.Errorf("snapshot format version %d is too new, current supported version: %d (please upgrade Milvus)",
+		return merr.WrapErrServiceInternalMsg("snapshot format version %d is too new, current supported version: %d (please upgrade Milvus)",
 			version, SnapshotFormatVersion)
 	}
 
@@ -888,20 +889,20 @@ func (r *SnapshotReader) readManifestFile(ctx context.Context, filePath string, 
 	// Read raw Avro content from object storage
 	data, err := r.chunkManager.Read(ctx, filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read manifest file: %w", err)
+		return nil, merr.Wrap(err, "failed to read manifest file")
 	}
 
 	// Get Avro schema for the specified format version
 	avroSchema, err := getManifestSchemaByVersion(formatVersion)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get manifest schema for version %d: %w", formatVersion, err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to get manifest schema for version %d", formatVersion)
 	}
 
 	// Deserialize Avro binary data to single ManifestEntry record
 	var record ManifestEntry
 	err = avro.Unmarshal(avroSchema, data, &record)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse avro data: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to parse avro data")
 	}
 
 	// Convert ManifestEntry record to protobuf SegmentDescription
@@ -974,7 +975,7 @@ func (r *SnapshotReader) readManifestFile(ctx context.Context, filePath string, 
 func (r *SnapshotReader) ListSnapshots(ctx context.Context, collectionID int64) ([]*datapb.SnapshotInfo, error) {
 	// Validate input parameters
 	if collectionID <= 0 {
-		return nil, fmt.Errorf("invalid collection ID: %d", collectionID)
+		return nil, merr.WrapErrServiceInternalMsg("invalid collection ID: %d", collectionID)
 	}
 
 	// Construct metadata directory path
@@ -984,7 +985,7 @@ func (r *SnapshotReader) ListSnapshots(ctx context.Context, collectionID int64) 
 	// List all files in the metadata directory
 	files, _, err := storage.ListAllChunkWithPrefix(ctx, r.chunkManager, metadataDir, false)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list metadata files: %w", err)
+		return nil, merr.Wrap(storage.ToMilvusIoError(metadataDir, err), "failed to list metadata files")
 	}
 
 	// Read each metadata file and extract SnapshotInfo

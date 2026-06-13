@@ -1052,7 +1052,7 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 			}
 			if typeutil.IsVectorType(field.GetDataType()) {
 				log.Warn("vector index cannot be dropped on loaded collection", zap.String("indexName", req.IndexName), zap.Int64("collectionID", req.GetCollectionID()), zap.Int64("fieldID", index.FieldID))
-				return merr.Status(merr.WrapErrParameterInvalidMsg(fmt.Sprintf("vector index cannot be dropped on loaded collection: %d", req.GetCollectionID()))), nil
+				return merr.Status(merr.WrapErrParameterInvalidMsg("vector index cannot be dropped on loaded collection: %d", req.GetCollectionID())), nil
 			}
 		}
 	}

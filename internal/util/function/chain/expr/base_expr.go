@@ -19,8 +19,6 @@
 package expr
 
 import (
-	"fmt"
-
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 
@@ -192,6 +190,6 @@ func GetNumericValue(arr arrow.Array, idx int) (float64, error) {
 	case *array.Float64:
 		return a.Value(idx), nil
 	default:
-		return 0, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported input column type %T, expected numeric type", arr))
+		return 0, merr.WrapErrServiceInternalMsg("unsupported input column type %T, expected numeric type", arr)
 	}
 }

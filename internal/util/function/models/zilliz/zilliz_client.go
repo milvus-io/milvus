@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"fmt"
 	"strconv"
 	"sync"
 	"time"
@@ -36,6 +35,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/modelservicepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type clientConfig struct {
@@ -71,14 +71,14 @@ type clientManager struct {
 func loadConfig(config map[string]string) (*clientConfig, error) {
 	endpoint := config["endpoint"]
 	if endpoint == "" {
-		return nil, fmt.Errorf("zilliz client config error, lost endpoint config")
+		return nil, merr.WrapErrParameterInvalidMsg("zilliz client config error, lost endpoint config")
 	}
 	enableTLSStr := config["enableTLS"]
 	enableTLS := false
 	if enableTLSStr != "" {
 		var err error
 		if enableTLS, err = strconv.ParseBool(enableTLSStr); err != nil {
-			return nil, fmt.Errorf("zilliz client config err: enableTLS:%s is not bool, err:%w", enableTLSStr, err)
+			return nil, merr.Wrapf(err, "zilliz client config err: enableTLS:%s is not bool", enableTLSStr)
 		}
 	}
 	if enableTLS {
@@ -192,7 +192,8 @@ func NewZilliClient(modelDeploymentID string, clusterID string, dbName string, i
 	}
 	conn, err := mgr.GetConn(clientConf)
 	if err != nil {
-		return nil, fmt.Errorf("connect model serving failed, err:%w", err)
+		// failing to connect to the model serving backend is transient
+		return nil, merr.WrapErrServiceUnavailable(err.Error(), "connect model serving failed")
 	}
 	return &ZillizClient{
 		modelDeploymentID: modelDeploymentID,
@@ -280,7 +281,7 @@ func (c *ZillizClient) Highlight(ctx context.Context, query string, texts []stri
 		}
 
 		if len(sentences) != len(retScores) {
-			return nil, nil, fmt.Errorf("sentences length %d does not match scores length %d", len(sentences), len(retScores))
+			return nil, nil, merr.WrapErrFunctionFailedMsg("sentences length %d does not match scores length %d", len(sentences), len(retScores))
 		}
 		highlights = append(highlights, sentences)
 		scores = append(scores, retScores)

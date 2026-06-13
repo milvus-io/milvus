@@ -107,8 +107,9 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_MaxJobsExceededReturnsE
 	err := server.validateImportRequest(ctx, files, options)
 
 	s.Error(err)
-	// ValidateMaxImportJobExceed returns WrapErrImportFailed, not ErrServiceQuotaExceeded
-	s.True(errors.Is(err, merr.ErrImportFailed))
+	// Job-count backpressure is a server-side condition -> ErrImportSysFailed
+	// (must not be bucketed as fail_input).
+	s.True(errors.Is(err, merr.ErrImportSysFailed))
 	s.Contains(err.Error(), "The number of jobs has reached the limit")
 }
 
@@ -185,7 +186,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterRetur
 	err := server.validateImportRequest(ctx, files, options)
 
 	s.Error(err)
-	s.True(errors.Is(err, merr.ErrImportFailed))
+	s.True(errors.Is(err, merr.ErrOperationNotSupported))
 	s.Contains(err.Error(), "replicating cluster")
 }
 
@@ -230,7 +231,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterEnabl
 		{Key: "timeout", Value: "300s"},
 	})
 	s.Error(err)
-	s.True(errors.Is(err, merr.ErrImportFailed))
+	s.True(errors.Is(err, merr.ErrOperationNotSupported))
 	s.Contains(err.Error(), "auto_commit=true")
 
 	err = server.validateImportRequest(ctx, files, []*commonpb.KeyValuePair{
@@ -1159,7 +1160,8 @@ func testBroadcastRequiresVchannels(t *testing.T, broadcastFn func(*Server, cont
 
 	err := broadcastFn(server, ctx, job)
 	assert.Error(t, err)
-	assert.True(t, errors.Is(err, merr.ErrImportFailed))
+	// Missing vchannels is internal broadcast state -> ErrImportSysFailed.
+	assert.True(t, errors.Is(err, merr.ErrImportSysFailed))
 	assert.Contains(t, err.Error(), "job 7 has no vchannels")
 }
 

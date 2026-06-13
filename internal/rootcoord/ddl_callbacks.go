@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -123,7 +124,7 @@ func (c *DDLCallback) ExpireCaches(ctx context.Context, expirations any) error {
 func (c *DDLCallback) expireCache(ctx context.Context, cacheExpiration *message.CacheExpiration) error {
 	ts, err := c.tsoAllocator.GenerateTSO(1)
 	if err != nil {
-		return errors.Wrap(err, "failed to generate timestamp")
+		return merr.Wrap(err, "failed to generate timestamp")
 	}
 	switch cacheExpiration.Cache.(type) {
 	case *messagespb.CacheExpiration_LegacyProxyCollectionMetaCache:
@@ -144,7 +145,7 @@ func (c *DDLCallback) expireCache(ctx context.Context, cacheExpiration *message.
 func startBroadcastWithRBACLock(ctx context.Context) (broadcaster.BroadcastAPI, error) {
 	api, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusivePrivilegeResourceKey())
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to start broadcast with rbac lock")
+		return nil, merr.Wrap(err, "failed to start broadcast with rbac lock")
 	}
 	return api, nil
 }
@@ -153,7 +154,7 @@ func startBroadcastWithRBACLock(ctx context.Context) (broadcaster.BroadcastAPI, 
 func startBroadcastWithDatabaseLock(ctx context.Context, dbName string) (broadcaster.BroadcastAPI, error) {
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveDBNameResourceKey(dbName))
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to start broadcast with database lock")
+		return nil, merr.Wrap(err, "failed to start broadcast with database lock")
 	}
 	return broadcaster, nil
 }
@@ -167,7 +168,7 @@ func (*Core) startBroadcastWithCollectionLock(ctx context.Context, dbName string
 		message.NewExclusiveCollectionNameResourceKey(dbName, collectionName),
 	)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to start broadcast with collection lock")
+		return nil, merr.Wrap(err, "failed to start broadcast with collection lock")
 	}
 	return broadcaster, nil
 }
@@ -189,7 +190,7 @@ func waitUntilSchemaDropReady(ctx context.Context) error {
 func (c *Core) startBroadcastWithAliasOrCollectionLock(ctx context.Context, dbName string, collectionNameOrAlias string) (broadcaster.BroadcastAPI, error) {
 	coll, err := c.meta.GetCollectionByName(ctx, dbName, collectionNameOrAlias, typeutil.MaxTimestamp, true)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to get collection by name")
+		return nil, merr.Wrap(err, "failed to get collection by name")
 	}
 	return c.startBroadcastWithCollectionLock(ctx, dbName, coll.Name)
 }

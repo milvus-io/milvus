@@ -23,7 +23,6 @@ package packed
 import "C"
 
 import (
-	"fmt"
 	"math"
 	"unsafe"
 
@@ -31,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -91,7 +91,7 @@ func addDeltaLogsToManifest(
 
 	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse manifest path: %w", err)
+		return "", merr.WrapErrStorage(err, "failed to parse manifest path")
 	}
 
 	log.Debug("AddDeltaLogsToManifest",
@@ -101,7 +101,7 @@ func addDeltaLogsToManifest(
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to create properties: %w", err)
+		return "", merr.Wrap(err, "failed to create properties")
 	}
 	defer C.loon_properties_free(cProperties)
 
@@ -112,7 +112,7 @@ func addDeltaLogsToManifest(
 	var transactionHandle C.LoonTransactionHandle
 	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), resolveID /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return "", fmt.Errorf("failed to begin transaction: %w", err)
+		return "", merr.WrapErrStorage(err, "failed to begin transaction")
 	}
 	defer C.loon_transaction_destroy(transactionHandle)
 
@@ -124,7 +124,7 @@ func addDeltaLogsToManifest(
 		C.free(unsafe.Pointer(cPath))
 
 		if err := HandleLoonFFIResult(result); err != nil {
-			return "", fmt.Errorf("failed to add delta log %s: %w", deltaLog.Path, err)
+			return "", merr.WrapErrStorage(err, "failed to add delta log %s", deltaLog.Path)
 		}
 
 		log.Debug("Added delta log to transaction",
@@ -136,7 +136,7 @@ func addDeltaLogsToManifest(
 	var commitVersion C.int64_t
 	result = C.loon_transaction_commit(transactionHandle, &commitVersion)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return "", fmt.Errorf("failed to commit transaction: %w", err)
+		return "", merr.WrapErrStorage(err, "failed to commit transaction")
 	}
 
 	newManifestPath := MarshalManifestPath(basePath, int64(commitVersion))
@@ -154,12 +154,12 @@ func GetDeltaLogPathsFromManifest(
 ) ([]string, error) {
 	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse manifest path: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to parse manifest path")
 	}
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create properties: %w", err)
+		return nil, merr.Wrap(err, "failed to create properties")
 	}
 	defer C.loon_properties_free(cProperties)
 
@@ -169,14 +169,14 @@ func GetDeltaLogPathsFromManifest(
 	var cTransactionHandle C.LoonTransactionHandle
 	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to begin transaction")
 	}
 	defer C.loon_transaction_destroy(cTransactionHandle)
 
 	var cManifest *C.LoonManifest
 	result = C.loon_transaction_get_manifest(cTransactionHandle, &cManifest)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, fmt.Errorf("failed to get manifest: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to get manifest")
 	}
 	defer C.loon_manifest_destroy(cManifest)
 
@@ -221,7 +221,7 @@ func AddStatsToManifest(
 
 	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse manifest path: %w", err)
+		return "", merr.WrapErrStorage(err, "failed to parse manifest path")
 	}
 
 	log.Debug("AddStatsToManifest",
@@ -231,7 +231,7 @@ func AddStatsToManifest(
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to create properties: %w", err)
+		return "", merr.Wrap(err, "failed to create properties")
 	}
 	defer C.loon_properties_free(cProperties)
 
@@ -241,14 +241,14 @@ func AddStatsToManifest(
 	var transactionHandle C.LoonTransactionHandle
 	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.LOON_TRANSACTION_RESOLVE_OVERWRITE /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return "", fmt.Errorf("failed to begin transaction: %w", err)
+		return "", merr.WrapErrStorage(err, "failed to begin transaction")
 	}
 	defer C.loon_transaction_destroy(transactionHandle)
 
 	// The C++ loon library converts absolute paths to relative at commit time
 	for _, stat := range stats {
 		if err := UpdateTransactionStat(transactionHandle, stat.Key, stat.Files, stat.Metadata); err != nil {
-			return "", fmt.Errorf("failed to update stat %s: %w", stat.Key, err)
+			return "", merr.WrapErrStorage(err, "failed to update stat %s", stat.Key)
 		}
 		log.Debug("Added stat to transaction",
 			zap.String("key", stat.Key),
@@ -258,7 +258,7 @@ func AddStatsToManifest(
 	var commitVersion C.int64_t
 	result = C.loon_transaction_commit(transactionHandle, &commitVersion)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return "", fmt.Errorf("failed to commit transaction: %w", err)
+		return "", merr.WrapErrStorage(err, "failed to commit transaction")
 	}
 
 	newManifestPath := MarshalManifestPath(basePath, int64(commitVersion))

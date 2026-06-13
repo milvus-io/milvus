@@ -583,7 +583,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			if _, exists := newBuildIDs[srcBuildID]; !exists {
 				newID, err := t.alloc.AllocID(ctx)
 				if err != nil {
-					return merr.WrapErrServiceInternal(fmt.Sprintf("failed to allocate new buildID for source buildID %d", srcBuildID), err.Error())
+					return merr.Wrapf(err, "failed to allocate new buildID for source buildID %d", srcBuildID)
 				}
 				newBuildIDs[srcBuildID] = newID
 			}

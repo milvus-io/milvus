@@ -18,7 +18,6 @@ package queryutil
 
 import (
 	"context"
-	"fmt"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
@@ -26,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -123,7 +123,7 @@ func (op *ReduceByPKOperator) mergeByPK(results []*internalpb.RetrieveResults, h
 			seenPKs[pk] = struct{}{}
 			selectedRows = append(selectedRows, rowRef{resultIdx: sel, rowIdx: cursors[sel]})
 		} else {
-			return nil, fmt.Errorf("duplicate PK %v found across shards, possible data integrity issue", pk)
+			return nil, merr.WrapErrDataIntegrityMsg("duplicate PK %v found across shards", pk)
 		}
 		cursors[sel]++
 	}
@@ -294,7 +294,7 @@ func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*tim
 		}
 
 		if op.maxOutputSize > 0 && retSize > op.maxOutputSize {
-			return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", op.maxOutputSize)
+			return nil, merr.WrapErrParameterInvalidMsg("query results exceed the maxOutputSize Limit %d", op.maxOutputSize)
 		}
 
 		// Early termination when limit reached

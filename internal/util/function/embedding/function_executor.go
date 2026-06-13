@@ -20,11 +20,9 @@ package embedding
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -72,7 +70,7 @@ func createFunction(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSc
 	case schemapb.FunctionType_MinHash:
 		return nil, nil
 	default:
-		return nil, fmt.Errorf("unknown functionRunner type %s", schema.GetType().String())
+		return nil, merr.WrapErrParameterInvalidMsg("unknown functionRunner type %s", schema.GetType().String())
 	}
 }
 
@@ -96,7 +94,7 @@ func validateFunction(schema *schemapb.CollectionSchema, fSchema *schemapb.Funct
 	}
 
 	if err := f.Check(context.Background()); err != nil {
-		return fmt.Errorf("check function [%s:%s] failed, the err is: %v", fSchema.Name, fSchema.GetType().String(), err)
+		return merr.Wrapf(err, "check function [%s:%s] failed", fSchema.Name, fSchema.GetType().String())
 	}
 	return nil
 }
@@ -119,7 +117,7 @@ func ValidateFunctions(schema *schemapb.CollectionSchema, needValidateFunctionNa
 		}
 	}
 
-	return fmt.Errorf("function [%s] not found in schema", needValidateFunctionName)
+	return merr.WrapErrParameterInvalidMsg("function [%s] not found in schema", needValidateFunctionName)
 }
 
 func NewFunctionExecutor(schema *schemapb.CollectionSchema, functions []*schemapb.FunctionSchema, extraInfo *models.ModelExtraInfo) (*FunctionExecutor, error) {
@@ -151,7 +149,7 @@ func (executor *FunctionExecutor) processSingleFunction(ctx context.Context, run
 		}
 	}
 	if len(inputs) != len(runner.GetSchema().InputFieldIds) {
-		return nil, errors.New("input field not found")
+		return nil, merr.WrapErrParameterInvalidMsg("input field not found")
 	}
 
 	tr := timerecord.NewTimeRecorder("function ProcessInsert")
@@ -169,7 +167,7 @@ func (executor *FunctionExecutor) ProcessInsert(ctx context.Context, msg *msgstr
 	numRows := msg.NumRows
 	for _, runner := range executor.runners {
 		if numRows > uint64(runner.MaxBatch()) {
-			return fmt.Errorf("numRows [%d] > function [%s]'s max batch [%d]", numRows, runner.GetSchema().Name, runner.MaxBatch())
+			return merr.WrapErrParameterInvalidMsg("numRows [%d] > function [%s]'s max batch [%d]", numRows, runner.GetSchema().Name, runner.MaxBatch())
 		}
 	}
 
@@ -198,7 +196,7 @@ func (executor *FunctionExecutor) ProcessInsert(ctx context.Context, msg *msgstr
 		errs = append(errs, err)
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("%v", errs)
+		return merr.WrapErrFunctionFailedMsg("function execution failed: %v", errs)
 	}
 
 	for output := range outputs {
@@ -230,10 +228,10 @@ func (executor *FunctionExecutor) processSingleSearch(ctx context.Context, runne
 func (executor *FunctionExecutor) prcessSearch(ctx context.Context, req *internalpb.SearchRequest) error {
 	runner, exist := executor.runners[req.FieldId]
 	if !exist {
-		return fmt.Errorf("can not found function in field %d", req.FieldId)
+		return merr.WrapErrParameterInvalidMsg("can not found function in field %d", req.FieldId)
 	}
 	if req.Nq > int64(runner.MaxBatch()) {
-		return fmt.Errorf("nq [%d] > function [%s]'s max batch [%d]", req.Nq, runner.GetSchema().Name, runner.MaxBatch())
+		return merr.WrapErrParameterInvalidMsg("nq [%d] > function [%s]'s max batch [%d]", req.Nq, runner.GetSchema().Name, runner.MaxBatch())
 	}
 	if newHolder, err := executor.processSingleSearch(ctx, runner, req.GetPlaceholderGroup()); err != nil {
 		return err
@@ -250,7 +248,7 @@ func (executor *FunctionExecutor) prcessAdvanceSearch(ctx context.Context, req *
 	for idx, sub := range req.GetSubReqs() {
 		if runner, exist := executor.runners[sub.FieldId]; exist {
 			if sub.Nq > int64(runner.MaxBatch()) {
-				return fmt.Errorf("nq [%d] > function [%s]'s max batch [%d]", sub.Nq, runner.GetSchema().Name, runner.MaxBatch())
+				return merr.WrapErrParameterInvalidMsg("nq [%d] > function [%s]'s max batch [%d]", sub.Nq, runner.GetSchema().Name, runner.MaxBatch())
 			}
 			wg.Add(1)
 			go func(runner Runner, idx int64, placeholderGroup []byte) {
@@ -290,7 +288,7 @@ func (executor *FunctionExecutor) processSingleBulkInsert(ctx context.Context, r
 	for idx, id := range runner.GetSchema().InputFieldIds {
 		field, exist := data.Data[id]
 		if !exist {
-			return nil, fmt.Errorf("can not find input field: [%s]", runner.GetSchema().GetInputFieldNames()[idx])
+			return nil, merr.WrapErrParameterInvalidMsg("can not find input field: [%s]", runner.GetSchema().GetInputFieldNames()[idx])
 		}
 		inputs = append(inputs, field)
 	}

@@ -1359,7 +1359,12 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithSchema(schema).
 		WithSyncPack(pack).
 		WithStorageConfig(packed.CreateStorageConfig()).
-		WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second))
+		// The flush write path must keep retrying: aborting surfaces the error
+		// to SyncTask.HandleError, whose default callback panics the datanode.
+		// retry.Do short-circuits InputError-typed errors unless an explicit
+		// RetryErr predicate is supplied, so AttemptAlways alone is not enough.
+		WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second),
+			retry.RetryErr(func(error) bool { return true }))
 	return task, nil
 }
 
@@ -1422,7 +1427,10 @@ func (wb *writeBufferBase) getGrowingSourceSyncTask(ctx context.Context, segment
 			WithMetaWriter(wb.metaWriter).
 			WithSchema(wb.metaCache.GetSchema(schemaTimestamp)).
 			WithAllocator(wb.allocator).
-			WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second))
+			// Same as above: keep the critical write path retrying despite the
+			// retry.Do InputError short-circuit.
+			WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second),
+				retry.RetryErr(func(error) bool { return true }))
 		if source != nil {
 			task.WithSource(source)
 		}
@@ -1547,6 +1555,11 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 // prepareInsert transfers InsertMsg into organized InsertData grouped by segmentID
 // also returns primary key field data
 func PrepareInsert(collSchema *schemapb.CollectionSchema, pkField *schemapb.FieldSchema, insertMsgs []*msgstream.InsertMsg) ([]*InsertData, error) {
+	bm25OutputFieldIDs, err := getBM25OutputFieldIDs(collSchema)
+	if err != nil {
+		return nil, err
+	}
+
 	groups := lo.GroupBy(insertMsgs, func(msg *msgstream.InsertMsg) int64 { return msg.SegmentID })
 	segmentPartition := lo.SliceToMap(insertMsgs, func(msg *msgstream.InsertMsg) (int64, int64) { return msg.GetSegmentID(), msg.GetPartitionID() })
 
@@ -1570,6 +1583,15 @@ func PrepareInsert(collSchema *schemapb.CollectionSchema, pkField *schemapb.Fiel
 			if err != nil {
 				log.Warn("failed to transfer insert msg to insert data", zap.Error(err))
 				return nil, err
+			}
+
+			if len(bm25OutputFieldIDs) > 0 {
+				if inData.bm25Stats == nil {
+					inData.bm25Stats = make(map[int64]*storage.BM25Stats)
+				}
+				if err := appendBM25StatsFromInsertData(inData.bm25Stats, bm25OutputFieldIDs, data); err != nil {
+					return nil, err
+				}
 			}
 
 			pkFieldData, err := storage.GetPkFromInsertData(collSchema, data)
@@ -1618,4 +1640,41 @@ func PrepareInsert(collSchema *schemapb.CollectionSchema, pkField *schemapb.Fiel
 	}
 
 	return result, nil
+}
+
+func getBM25OutputFieldIDs(schema *schemapb.CollectionSchema) ([]int64, error) {
+	outputFieldIDs := make([]int64, 0)
+	for _, fn := range schema.GetFunctions() {
+		if fn.GetType() != schemapb.FunctionType_BM25 {
+			continue
+		}
+
+		outputField := typeutil.GetFunctionOutputField(schema, fn)
+		if outputField == nil {
+			return nil, merr.WrapErrFunctionFailedMsg("function %s output field not found", fn.GetName())
+		}
+
+		outputFieldIDs = append(outputFieldIDs, outputField.GetFieldID())
+	}
+	return outputFieldIDs, nil
+}
+
+func appendBM25StatsFromInsertData(stats map[int64]*storage.BM25Stats, outputFieldIDs []int64, data *storage.InsertData) error {
+	for _, outputFieldID := range outputFieldIDs {
+		outputData, ok := data.Data[outputFieldID]
+		if !ok {
+			return merr.WrapErrFunctionFailedMsg("BM25 output field %d not found in insert data", outputFieldID)
+		}
+
+		sparseData, ok := outputData.(*storage.SparseFloatVectorFieldData)
+		if !ok {
+			return merr.WrapErrFunctionFailedMsg("BM25 output field %d is not sparse vector data", outputFieldID)
+		}
+
+		if _, ok := stats[outputFieldID]; !ok {
+			stats[outputFieldID] = storage.NewBM25Stats()
+		}
+		stats[outputFieldID].AppendBytes(sparseData.GetContents()...)
+	}
+	return nil
 }

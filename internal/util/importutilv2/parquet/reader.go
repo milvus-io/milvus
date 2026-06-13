@@ -18,7 +18,6 @@ package parquet
 
 import (
 	"context"
-	"fmt"
 	"io"
 
 	"github.com/apache/arrow/go/v17/arrow/memory"
@@ -73,7 +72,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	}))
 	if err != nil {
 		retryableReader.Close()
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet reader failed, err=%v", err))
+		return nil, merr.WrapErrImportSysFailedMsg("new parquet reader failed, err=%v", err)
 	}
 	log.Info("parquet file info", zap.Int("row group num", r.NumRowGroups()),
 		zap.Int64("num rows", r.NumRows()))
@@ -90,7 +89,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	fileReader, err := pqarrow.NewFileReader(r, readProps, memory.DefaultAllocator)
 	if err != nil {
 		r.Close()
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet file reader failed, err=%v", err))
+		return nil, merr.WrapErrImportSysFailedMsg("new parquet file reader failed, err=%v", err)
 	}
 
 	crs, err := CreateFieldReaders(ctx, fileReader, schema)

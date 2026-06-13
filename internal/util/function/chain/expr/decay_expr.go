@@ -19,7 +19,6 @@
 package expr
 
 import (
-	"fmt"
 	"math"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -215,7 +214,7 @@ func (d *DecayExpr) OutputDataTypes() []arrow.DataType {
 // returns: decay factor column (Float32, values in [0, 1])
 func (d *DecayExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunked) ([]*arrow.Chunked, error) {
 	if len(inputs) != 1 {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("decay: expected 1 input column, got %d", len(inputs)))
+		return nil, merr.WrapErrServiceInternalMsg("decay: expected 1 input column, got %d", len(inputs))
 	}
 
 	inputCol := inputs[0]
@@ -262,7 +261,7 @@ func (d *DecayExpr) processChunk(ctx *types.FuncContext, inputChunk arrow.Array)
 
 		distance, err := GetNumericValue(inputChunk, i)
 		if err != nil {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("decay: %v", err))
+			return nil, merr.WrapErrServiceInternalMsg("decay: %v", err)
 		}
 
 		decayScore := d.decayFunc(d.origin, d.scale, d.decay, d.offset, distance)

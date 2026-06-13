@@ -274,7 +274,7 @@ func (kv *etcdKV) MultiLoad(ctx context.Context, keys []string) ([]string, error
 	}
 	if len(invalid) != 0 {
 		log.Ctx(ctx).Warn("MultiLoad: there are invalid keys", zap.Strings("keys", invalid))
-		err = fmt.Errorf("there are invalid keys: %s", invalid)
+		err = merr.WrapErrIoKeyNotFound(fmt.Sprintf("%v", invalid))
 		return result, err
 	}
 	CheckElapseAndWarn(ctx, start, "Slow etcd operation multi load", zap.Any("keys", keys))
@@ -309,7 +309,7 @@ func (kv *etcdKV) MultiLoadBytes(ctx context.Context, keys []string) ([][]byte, 
 	}
 	if len(invalid) != 0 {
 		log.Ctx(ctx).Warn("MultiLoad: there are invalid keys", zap.Strings("keys", invalid))
-		err = fmt.Errorf("there are invalid keys: %s", invalid)
+		err = merr.WrapErrIoKeyNotFound(fmt.Sprintf("%v", invalid))
 		return result, err
 	}
 	CheckElapseAndWarn(ctx, start, "Slow etcd operation multi load", zap.Strings("keys", keys))
@@ -721,7 +721,10 @@ func (kv *etcdKV) getEtcdMeta(ctx context.Context, key string, opts ...clientv3.
 	} else {
 		metrics.MetaOpCounter.WithLabelValues(metrics.MetaGetLabel, metrics.FailLabel).Inc()
 	}
-	return resp, err
+	// translate the raw etcd/grpc transport error into a typed merr at this
+	// boundary so callers never receive an untyped error (key-not-found is
+	// classified by the callers via resp.Count).
+	return resp, merr.WrapErrIoFailed(key, err)
 }
 
 func (kv *etcdKV) putEtcdMeta(ctx context.Context, key, val string, opts ...clientv3.OpOption) (*clientv3.PutResponse, error) {
@@ -740,7 +743,7 @@ func (kv *etcdKV) putEtcdMeta(ctx context.Context, key, val string, opts ...clie
 		metrics.MetaOpCounter.WithLabelValues(metrics.MetaPutLabel, metrics.FailLabel).Inc()
 	}
 
-	return resp, err
+	return resp, merr.WrapErrIoFailed(key, err)
 }
 
 func (kv *etcdKV) removeEtcdMeta(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.DeleteResponse, error) {
@@ -759,7 +762,7 @@ func (kv *etcdKV) removeEtcdMeta(ctx context.Context, key string, opts ...client
 		metrics.MetaOpCounter.WithLabelValues(metrics.MetaRemoveLabel, metrics.FailLabel).Inc()
 	}
 
-	return resp, err
+	return resp, merr.WrapErrIoFailed(key, err)
 }
 
 func (kv *etcdKV) getTxnWithCmp(ctx context.Context, cmp ...clientv3.Cmp) clientv3.Txn {
@@ -799,5 +802,8 @@ func (kv *etcdKV) executeTxn(txn clientv3.Txn, ops ...clientv3.Op) (*clientv3.Tx
 		metrics.MetaOpCounter.WithLabelValues(metrics.MetaTxnLabel, metrics.FailLabel).Inc()
 	}
 
+	if err != nil {
+		err = merr.WrapErrIoFailedReason("execute etcd txn failed", err.Error())
+	}
 	return resp, err
 }

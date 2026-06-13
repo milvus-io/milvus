@@ -104,7 +104,7 @@ func (s *ImportServicesSuite) TestImportV2_AllocatorNilReturnsError() {
 
 	s.NoError(err)
 	s.NotNil(resp)
-	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrServiceUnavailable))
 	s.Contains(resp.GetStatus().GetReason(), "allocator not initialized")
 }
 
@@ -114,7 +114,7 @@ func (s *ImportServicesSuite) TestImportV2_AllocatorFailsReturnsError() {
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
 	mockAllocator := allocator.NewMockAllocator(s.T())
-	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(0), int64(0), errors.New("allocation failed"))
+	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(0), int64(0), merr.WrapErrServiceUnavailable("allocation failed"))
 	server.allocator = mockAllocator
 
 	req := &internalpb.ImportRequestInternal{
@@ -127,7 +127,7 @@ func (s *ImportServicesSuite) TestImportV2_AllocatorFailsReturnsError() {
 
 	s.NoError(err)
 	s.NotNil(resp)
-	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrServiceUnavailable))
 	s.Contains(resp.GetStatus().GetReason(), "failed to allocate job ID")
 }
 
@@ -164,7 +164,7 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 	// Mock StartBroadcastWithResourceKeys to fail
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
-			return nil, errors.New("broadcast failed")
+			return nil, merr.WrapErrServiceUnavailable("broadcast failed")
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
@@ -199,8 +199,8 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 
 	s.NoError(err)
 	s.NotNil(resp)
-	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
-	s.Contains(resp.GetStatus().GetReason(), "failed to broadcast import")
+	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrServiceUnavailable))
+	s.Contains(resp.GetStatus().GetReason(), "broadcast")
 }
 
 func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
@@ -395,7 +395,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_AllocatorFailsReturnsEr
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
 	mockAllocator := allocator.NewMockAllocator(s.T())
-	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(0), int64(0), errors.New("allocation failed"))
+	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(0), int64(0), merr.WrapErrServiceUnavailable("allocation failed"))
 	server.allocator = mockAllocator
 
 	req := &internalpb.ImportRequestInternal{
@@ -412,7 +412,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_AllocatorFailsReturnsEr
 
 	s.NoError(err)
 	s.NotNil(resp)
-	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrServiceUnavailable))
 	s.Contains(resp.GetStatus().GetReason(), "alloc id failed")
 }
 
@@ -493,7 +493,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_AddJobFailsReturnsError
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(errors.New("save job failed"))
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(merr.WrapErrServiceUnavailable("save job failed"))
 
 	importMeta, err := NewImportMeta(context.TODO(), catalog, nil, nil)
 	s.NoError(err)
@@ -528,7 +528,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_AddJobFailsReturnsError
 
 	s.NoError(err)
 	s.NotNil(resp)
-	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrServiceUnavailable))
 	s.Contains(resp.GetStatus().GetReason(), "add import job failed")
 }
 

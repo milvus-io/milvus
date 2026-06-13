@@ -30,7 +30,13 @@ import (
 
 var _ streamingpb.StreamingCoordAssignmentServiceServer = (*assignmentServiceImpl)(nil)
 
-var errReplicateConfigurationSame = errors.New("same replicate configuration")
+var (
+	errReplicateConfigurationSame = errors.New("same replicate configuration")
+	// errAssignmentDone is returned from a WatchChannelAssignments callback to
+	// signal "target configuration reached, stop watching". The outer call site
+	// identifies it via errors.Is and treats it as success.
+	errAssignmentDone = errors.New("done")
+)
 
 // NewAssignmentService returns a new assignment service.
 func NewAssignmentService() streamingpb.StreamingCoordAssignmentServiceServer {
@@ -125,14 +131,13 @@ func (s *assignmentServiceImpl) waitUntilPrimaryChangeOrConfigurationSame(ctx co
 	if err != nil {
 		return err
 	}
-	errDone := errors.New("done")
 	err = b.WatchChannelAssignments(ctx, func(param balancer.WatchChannelAssignmentsCallbackParam) error {
 		if proto.Equal(config, param.ReplicateConfiguration) {
-			return errDone
+			return errAssignmentDone
 		}
 		return nil
 	})
-	if errors.Is(err, errDone) {
+	if errors.Is(err, errAssignmentDone) {
 		return nil
 	}
 	return err
@@ -191,19 +196,19 @@ func validateForcePromoteConfiguration(config *commonpb.ReplicateConfiguration, 
 	// Use config helper to validate the configuration structure
 	helper, err := replicateutil.NewConfigHelper(currentClusterID, config)
 	if err != nil {
-		return status.NewInvaildArgument("invalid replicate configuration for force promote: %v", err)
+		return status.NewInvalidArgument("invalid replicate configuration for force promote: %v", err)
 	}
 
 	// Check that configuration contains exactly one cluster (the current cluster)
 	if len(config.Clusters) != 1 {
-		return status.NewInvaildArgument(
+		return status.NewInvalidArgument(
 			"force promote requires configuration with exactly one cluster (current cluster only), got %d clusters",
 			len(config.Clusters))
 	}
 
 	// Check that the single cluster is the current cluster
 	if config.Clusters[0].ClusterId != currentClusterID {
-		return status.NewInvaildArgument(
+		return status.NewInvalidArgument(
 			"force promote requires configuration with only current cluster %s, got cluster %s",
 			currentClusterID,
 			config.Clusters[0].ClusterId)
@@ -211,14 +216,14 @@ func validateForcePromoteConfiguration(config *commonpb.ReplicateConfiguration, 
 
 	// Check that there is NO topology (no replication)
 	if len(config.CrossClusterTopology) > 0 {
-		return status.NewInvaildArgument(
+		return status.NewInvalidArgument(
 			"force promote requires configuration with no topology (single primary cluster), got %d topology edges",
 			len(config.CrossClusterTopology))
 	}
 
 	// Verify the cluster role is primary (should be true for single cluster with no topology)
 	if helper.GetCurrentCluster().Role() != replicateutil.RolePrimary {
-		return status.NewInvaildArgument("force promote configuration must result in current cluster being primary")
+		return status.NewInvalidArgument("force promote configuration must result in current cluster being primary")
 	}
 
 	return nil
@@ -235,7 +240,7 @@ func (s *assignmentServiceImpl) handleForcePromote(ctx context.Context, config *
 	broadcaster, err := broadcast.StartBroadcastWithSecondaryClusterResourceKey(ctx)
 	if err != nil {
 		if errors.Is(err, broadcast.ErrNotSecondary) {
-			return nil, status.NewInvaildArgument("force promote can only be used on secondary clusters, current cluster is primary")
+			return nil, status.NewInvalidArgument("force promote can only be used on secondary clusters, current cluster is primary")
 		}
 		return nil, err
 	}
@@ -305,7 +310,7 @@ func (s *assignmentServiceImpl) buildForcePromoteConfiguration(ctx context.Conte
 
 	// Force promote requires current config to exist (secondary must have been configured)
 	if currentConfig == nil {
-		return nil, nil, status.NewInvaildArgument("force promote requires existing replicate configuration; current cluster has no configuration")
+		return nil, nil, status.NewInvalidArgument("force promote requires existing replicate configuration; current cluster has no configuration")
 	}
 
 	// Get the current cluster from existing config directly (don't construct a new one)
@@ -317,7 +322,7 @@ func (s *assignmentServiceImpl) buildForcePromoteConfiguration(ctx context.Conte
 		}
 	}
 	if currentCluster == nil {
-		return nil, nil, status.NewInvaildArgument("force promote requires current cluster in existing configuration; cluster %s not found in config", currentClusterID)
+		return nil, nil, status.NewInvalidArgument("force promote requires current cluster in existing configuration; cluster %s not found in config", currentClusterID)
 	}
 
 	// Get pchannels from PChannelView for validation

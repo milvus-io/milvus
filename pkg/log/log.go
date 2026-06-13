@@ -30,7 +30,6 @@
 package log
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -115,12 +114,15 @@ func InitTestLogger(t zaptest.TestingT, cfg *Config, opts ...zap.Option) (*zap.L
 	return InitLoggerWithWriteSyncer(cfg, writer, opts...)
 }
 
+// errLogFileIsDir is returned when the configured log file path points to a directory.
+var errLogFileIsDir = errors.New("can't use directory as log file name")
+
 // InitLoggerWithWriteSyncer initializes a zap logger with specified  write syncer.
 func InitLoggerWithWriteSyncer(cfg *Config, output zapcore.WriteSyncer, opts ...zap.Option) (*zap.Logger, *ZapProperties, error) {
 	level := zap.NewAtomicLevel()
 	err := level.UnmarshalText([]byte(cfg.Level))
 	if err != nil {
-		return nil, nil, fmt.Errorf("initLoggerWithWriteSyncer UnmarshalText cfg.Level err:%w", err)
+		return nil, nil, errors.Wrapf(err, "initLoggerWithWriteSyncer UnmarshalText cfg.Level err")
 	}
 	var core zapcore.Core
 	if cfg.AsyncWriteEnable {
@@ -144,7 +146,7 @@ func initFileLog(cfg *FileLogConfig) (*lumberjack.Logger, error) {
 	logPath := strings.Join([]string{cfg.RootPath, cfg.Filename}, string(filepath.Separator))
 	if st, err := os.Stat(logPath); err == nil {
 		if st.IsDir() {
-			return nil, errors.New("can't use directory as log file name")
+			return nil, errLogFileIsDir
 		}
 	}
 	if cfg.MaxSize == 0 {

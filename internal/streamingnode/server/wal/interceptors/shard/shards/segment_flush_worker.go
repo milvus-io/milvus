@@ -98,7 +98,7 @@ func (w *segmentFlushWorker) waitForTxnManagerRecoverDone() error {
 		w.Logger().Info("flush segment canceled", zap.Error(w.ctx.Err()))
 		return w.ctx.Err()
 	case <-w.wal.Available():
-		return errors.New("wal is unavailable")
+		return status.NewOnShutdownError("wal is unavailable")
 	}
 }
 

@@ -45,6 +45,8 @@
 #include "knowhere/index/index_factory.h"
 #include "knowhere/version.h"
 #include "pb/common.pb.h"
+#include "pb/cgo_msg.pb.h"
+#include "pb/index_coord.pb.h"
 #include "pb/plan.pb.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
@@ -53,6 +55,7 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "segcore/collection_c.h"
+#include "segcore/load_index_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/segment_c.h"
 #include "test_utils/DataGen.h"
@@ -145,6 +148,43 @@ TEST(CApiTest, LoadIndexSearch) {
         knowhere::GenDataSet(num_query, DIM, raw_data.data() + BIAS * DIM);
 
     auto result = indexing.Search(query_dataset, conf, nullptr);
+}
+
+TEST(LoadIndexCTest, FinishLoadIndexInfoPreservesIndexStorePathVersion) {
+    milvus::proto::cgo::LoadIndexInfo proto;
+    proto.set_collectionid(100);
+    proto.set_partitionid(20);
+    proto.set_segmentid(30);
+    auto* field = proto.mutable_field();
+    field->set_fieldid(100);
+    field->set_name("vec");
+    field->set_data_type(milvus::proto::schema::DataType::FloatVector);
+    auto* dim_param = field->add_type_params();
+    dim_param->set_key("dim");
+    dim_param->set_value("128");
+    proto.set_indexid(50);
+    proto.set_index_buildid(60);
+    proto.set_index_version(1);
+    proto.set_index_engine_version(1);
+    proto.set_index_file_size(1024);
+    proto.set_num_rows(1000);
+    proto.set_index_store_path_version(
+        milvus::proto::index::IndexStorePathVersion::
+            INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED);
+
+    std::string serialized;
+    ASSERT_TRUE(proto.SerializeToString(&serialized));
+
+    milvus::segcore::LoadIndexInfo load_index_info;
+    auto status =
+        FinishLoadIndexInfo(static_cast<CLoadIndexInfo>(&load_index_info),
+                            reinterpret_cast<const uint8_t*>(serialized.data()),
+                            serialized.size());
+
+    ASSERT_EQ(status.error_code, milvus::Success);
+    EXPECT_EQ(load_index_info.index_store_path_version,
+              milvus::proto::index::IndexStorePathVersion::
+                  INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED);
 }
 
 template <class TraitType>
