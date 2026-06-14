@@ -171,6 +171,22 @@ func TestDumpMessages_EmptyStartMessageIdBytes(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestDumpMessages_InvalidStartMessageIdBytes(t *testing.T) {
+	node := &Proxy{}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	stream := &mockDumpMessagesServer{ctx: context.Background()}
+	err := node.DumpMessages(&milvuspb.DumpMessagesRequest{
+		Pchannel: "test-channel",
+		StartMessageId: &commonpb.MessageID{
+			WALName: commonpb.WALName_Pulsar,
+			Id:      "not-a-valid-base64-msgid!!!",
+		},
+	}, stream)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Empty(t, stream.getSent())
+}
+
 func TestDumpMessages_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
