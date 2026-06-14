@@ -11,6 +11,7 @@
 
 #include <algorithm>
 
+#include "knowhere/comp/index_param.h"
 #include "query/CachedSearchIterator.h"
 #include "query/SearchBruteForce.h"
 
@@ -27,6 +28,21 @@ CachedSearchIterator::CachedSearchIterator(
                   "Query dataset is nullptr, cannot initialize iterator");
     }
     nq_ = query_ds->GetRows();
+    // For an embedding-list (MAX_SIM) query the dataset is a flat run of
+    // vectors grouped into emb_lists by EMB_LIST_OFFSET; the iterator's unit of
+    // work is the query emb_list, not the individual vector. knowhere's emblist
+    // AnnIterator returns one iterator per query emb_list, so nq is the emb_list
+    // count -- the offset array's index at which it reaches the vector count.
+    const auto* el_offsets =
+        query_ds->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
+    if (el_offsets != nullptr) {
+        const auto num_vectors = static_cast<size_t>(query_ds->GetRows());
+        size_t num_emb_lists = 0;
+        while (el_offsets[num_emb_lists] < num_vectors) {
+            ++num_emb_lists;
+        }
+        nq_ = num_emb_lists;
+    }
     Init(search_info);
 
     auto search_json = index.PrepareSearchParams(search_info);
