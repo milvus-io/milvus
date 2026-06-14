@@ -81,7 +81,7 @@ func getDiskPQDims(diskPQCodeBudgetGBRatio float64, dim int64, dataType schemapb
 	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 		return int(float32(dim) * (float32(diskPQCodeBudgetGBRatio) * 2)), nil
 	case schemapb.DataType_SparseFloatVector:
-		return 0, errors.New("could not estimate DiskPQDims of SparseFloatVector")
+		return 0, merr.WrapErrServiceInternalMsg("could not estimate DiskPQDims of SparseFloatVector")
 	default:
 		return 0, nil
 	}
@@ -212,7 +212,7 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 
 	indexType, ok := indexParams[common.IndexTypeKey]
 	if !ok {
-		return errors.New("type param indexType not exist")
+		return merr.WrapErrServiceInternalMsg("type param indexType not exist")
 	}
 
 	if indexType == "AISAQ" {
@@ -293,11 +293,11 @@ func FillAiSAQIndexParams(params *paramtable.ComponentParam, indexParams map[str
 		var ok bool
 		maxDegree, ok = indexParams[MaxDegreeKey]
 		if !ok {
-			return errors.New("index param max_degree not exist")
+			return merr.WrapErrServiceInternalMsg("index param max_degree not exist")
 		}
 		searchListSize, ok = indexParams[SearchListSizeKey]
 		if !ok {
-			return errors.New("index param search_list_size not exist")
+			return merr.WrapErrServiceInternalMsg("index param search_list_size not exist")
 		}
 		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
 		if err != nil {
@@ -307,7 +307,7 @@ func FillAiSAQIndexParams(params *paramtable.ComponentParam, indexParams map[str
 		searchCacheBudgetGBRatio = fmt.Sprintf("%f", extraParams.SearchCacheBudgetGBRatio)
 		pqCacheSize, ok = indexParams[PQCacheSizeKey]
 		if !ok {
-			return errors.New("index param pq_cache_size not exist")
+			return merr.WrapErrServiceInternalMsg("index param pq_cache_size not exist")
 		}
 	} else {
 		var ok bool
@@ -359,7 +359,7 @@ func FillAiSAQIndexParams(params *paramtable.ComponentParam, indexParams map[str
 
 	pqCacheSizeInt, err := strconv.Atoi(pqCacheSize)
 	if err != nil {
-		return errors.New("Error converting pqCacheSize string to int")
+		return merr.WrapErrServiceInternalMsg("Error converting pqCacheSize string to int")
 	}
 	pqCacheSizeBytes = strconv.Itoa(pqCacheSizeInt * 1024 * 1024)
 	indexParams[MaxDegreeKey] = maxDegree
@@ -418,7 +418,7 @@ func UpdateDiskIndexBuildParams(params *paramtable.ComponentParam, indexParams [
 		if indexType == "DISKANN" || indexType == "AISAQ" {
 			paramVal, err := strconv.ParseFloat(existedVal, 64)
 			if err != nil {
-				return indexParams, errors.New("index param search_cache_budget_gb_ratio not exist in existedVal")
+				return indexParams, merr.WrapErrServiceInternalMsg("index param search_cache_budget_gb_ratio not exist in existedVal")
 			}
 			searchCacheBudgetGBRatio = fmt.Sprintf("%f", paramVal)
 		}
@@ -487,7 +487,7 @@ func SetDiskIndexBuildParams(indexParams map[string]string, fieldDataSize int64,
 	indexParams[BuildDramBudgetKey] = fmt.Sprintf("%f", float32(hardware.GetFreeMemoryCount())/(1<<30))
 	indexType, ok := indexParams[common.IndexTypeKey]
 	if !ok {
-		return errors.New("type param indexType not exist")
+		return merr.WrapErrServiceInternalMsg("type param indexType not exist")
 	}
 
 	if indexType == "AISAQ" || indexType == "DISKANN" {
@@ -503,7 +503,7 @@ func SetDiskIndexBuildParams(indexParams map[string]string, fieldDataSize int64,
 		}
 		dimStr, ok := indexParams[common.DimKey]
 		if !ok {
-			return errors.New("type param dim not exist")
+			return merr.WrapErrServiceInternalMsg("type param dim not exist")
 		}
 		dim, err := strconv.ParseInt(dimStr, 10, 64)
 		if err != nil {
@@ -541,7 +541,7 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 
 	indexType, ok := indexParams[common.IndexTypeKey]
 	if !ok {
-		return errors.New("type param indexType not exist")
+		return merr.WrapErrServiceInternalMsg("type param indexType not exist")
 	}
 	var searchCacheBudgetGBRatio float64
 	var loadNumThreadRatio float64
