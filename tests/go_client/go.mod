@@ -3,7 +3,7 @@ module github.com/milvus-io/milvus/tests/go_client
 go 1.25.8
 
 require (
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.18
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.19-0.20260612103015-fd141a092113
 	github.com/milvus-io/milvus/client/v2 v2.0.0-20241125024034-0b9edb62a92d
 	github.com/milvus-io/milvus/pkg/v2 v2.6.7-0.20251202033909-b71a123d25ad
 	github.com/peterstace/simplefeatures v0.54.0

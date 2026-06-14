@@ -18,14 +18,20 @@ package rootcoord
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -70,6 +76,7 @@ func TestDDLCallbacksRBACCredential(t *testing.T) {
 	status, err = core.UpdateCredential(context.Background(), &internalpb.CredentialInfo{
 		Username:          testUserName,
 		EncryptedPassword: "1234567",
+		Sha256Password:    "1234567-sha256",
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
 	getCredentialResp, err = core.GetCredential(context.Background(), &rootcoordpb.GetCredentialRequest{
@@ -87,4 +94,82 @@ func TestDDLCallbacksRBACCredential(t *testing.T) {
 		Username: testUserName,
 	})
 	require.Error(t, merr.CheckRPCCall(getCredentialResp.Status, err))
+}
+
+func TestAlterUserV2AckCallbackSkipsCredentialCacheForDescriptionOnlyUpdate(t *testing.T) {
+	description := "description only"
+	var updateCacheCalls atomic.Int32
+
+	meta := newMockMetaTable()
+	meta.AlterCredentialFunc = func(ctx context.Context, msg message.BroadcastResultAlterUserMessageV2) error {
+		return nil
+	}
+
+	core := newTestCore(withMeta(meta))
+	core.proxyClientManager = proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
+	proxy := newMockProxy()
+	proxy.UpdateCredentialCacheFunc = func(ctx context.Context, request *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error) {
+		updateCacheCalls.Add(1)
+		return merr.Success(), nil
+	}
+	core.proxyClientManager.GetProxyClients().Insert(TestProxyID, proxy)
+
+	err := (&DDLCallback{Core: core}).alterUserV2AckCallback(context.Background(), buildAlterUserMessage(&internalpb.CredentialInfo{
+		Username:    "desc_user",
+		Description: &description,
+	}, 1))
+
+	require.NoError(t, err)
+	assert.Zero(t, updateCacheCalls.Load())
+}
+
+func TestAlterUserV2AckCallbackUpdatesCredentialCacheForPasswordUpdate(t *testing.T) {
+	var updateCacheCalls atomic.Int32
+
+	meta := newMockMetaTable()
+	meta.AlterCredentialFunc = func(ctx context.Context, msg message.BroadcastResultAlterUserMessageV2) error {
+		return nil
+	}
+
+	core := newTestCore(withMeta(meta))
+	core.proxyClientManager = proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
+	proxy := newMockProxy()
+	proxy.UpdateCredentialCacheFunc = func(ctx context.Context, request *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error) {
+		updateCacheCalls.Add(1)
+		assert.Equal(t, "desc_user", request.GetUsername())
+		assert.Equal(t, "sha256", request.GetPassword())
+		return merr.Success(), nil
+	}
+	core.proxyClientManager.GetProxyClients().Insert(TestProxyID, proxy)
+
+	err := (&DDLCallback{Core: core}).alterUserV2AckCallback(context.Background(), buildAlterUserMessage(&internalpb.CredentialInfo{
+		Username:       "desc_user",
+		Sha256Password: "sha256",
+	}, 1))
+
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), updateCacheCalls.Load())
+}
+
+func TestAlterUserV2AckCallbackReturnsCredentialCacheError(t *testing.T) {
+	meta := newMockMetaTable()
+	meta.AlterCredentialFunc = func(ctx context.Context, msg message.BroadcastResultAlterUserMessageV2) error {
+		return nil
+	}
+
+	core := newTestCore(withMeta(meta))
+	core.proxyClientManager = proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
+	proxy := newMockProxy()
+	proxy.UpdateCredentialCacheFunc = func(ctx context.Context, request *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error) {
+		return nil, errors.New("cache update failed")
+	}
+	core.proxyClientManager.GetProxyClients().Insert(TestProxyID, proxy)
+
+	err := (&DDLCallback{Core: core}).alterUserV2AckCallback(context.Background(), buildAlterUserMessage(&internalpb.CredentialInfo{
+		Username:       "desc_user",
+		Sha256Password: "sha256",
+	}, 1))
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "failed to update cred cache")
 }
