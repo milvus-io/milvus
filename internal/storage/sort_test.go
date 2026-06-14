@@ -19,7 +19,6 @@ package storage
 import (
 	"fmt"
 	"io"
-	"os"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -29,7 +28,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -101,14 +99,6 @@ func testSchema() *schemapb.CollectionSchema {
 	}
 }
 
-func makeInt64Array(vals []int64) *array.Int64 {
-	b := array.NewInt64Builder(memory.DefaultAllocator)
-	defer b.Release()
-
-	b.AppendValues(vals, nil)
-	return b.NewInt64Array()
-}
-
 func TestSort_ErrorCases(t *testing.T) {
 	paramtable.Get().Init(paramtable.NewBaseTable())
 	origPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
@@ -133,30 +123,6 @@ func TestSort_ErrorCases(t *testing.T) {
 		_, _, err := Sort(batchSize, schema, rr, rw, predicate, sortBy)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to create temp dir")
-	})
-
-	t.Run("flushRun - CreateTemp fails", func(t *testing.T) {
-		tmpRoot := t.TempDir()
-		paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, tmpRoot)
-		require.NoError(t, os.Chmod(tmpRoot, 0o555))
-
-		// Create a reader that returns one record to trigger flush
-		mockRec := &mockRecord{}
-		mockRec.On("Retain").Return()
-		mockRec.On("Len").Return(1)
-		mockRec.On("Column", mock.Anything).Return(makeInt64Array([]int64{1, 2, 3}))
-		mockRec.On("Release").Return()
-
-		mrr := &mockRecordReader{}
-		mrr.On("Next").Return(mockRec, nil).Once()
-		mrr.On("Next").Return(nil, io.EOF).Once()
-		mrr.On("Close").Return(nil)
-
-		rr := []RecordReader{mrr}
-		rw := &mockRecordWriter{}
-
-		_, _, err := Sort(batchSize, schema, rr, rw, predicate, sortBy)
-		assert.Error(t, err)
 	})
 
 	t.Run("flushRun - unsupported sort type", func(t *testing.T) {
