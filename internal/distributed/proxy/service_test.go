@@ -892,7 +892,7 @@ func Test_NewServer_HTTPServer_TimeoutDefaults(t *testing.T) {
 	assert.Equal(t, time.Duration(0), server.httpServer.ReadTimeout)
 	assert.Equal(t, time.Duration(0), server.httpServer.WriteTimeout)
 	assert.Equal(t, 300*time.Second, server.httpServer.IdleTimeout)
-	assert.Equal(t, 1<<20, server.httpServer.MaxHeaderBytes)
+	assert.Equal(t, 16<<20, server.httpServer.MaxHeaderBytes)
 }
 
 func Test_NewServer_HTTPServer_TimeoutConfigOverrides(t *testing.T) {

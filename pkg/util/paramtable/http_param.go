@@ -128,9 +128,9 @@ func (p *httpConfig) init(base *BaseTable) {
 
 	p.MaxHeaderBytes = ParamItem{
 		Key:          "proxy.http.maxHeaderBytes",
-		DefaultValue: "1048576",
+		DefaultValue: "16777216",
 		Version:      "2.6.0",
-		Doc:          "Maximum number of bytes the HTTP server reads from request headers",
+		Doc:          "Maximum number of bytes the HTTP server reads from request headers. Defaults to 16MiB to match grpc-go's max header list size, since in shared-port mode this server also serves external gRPC over HTTP/2",
 		Export:       true,
 	}
 	p.MaxHeaderBytes.Init(base.mgr)

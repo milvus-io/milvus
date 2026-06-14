@@ -36,7 +36,7 @@ func TestHTTPConfig_Init(t *testing.T) {
 	assert.Equal(t, time.Duration(0), cfg.ReadTimeout.GetAsDurationByParse())
 	assert.Equal(t, time.Duration(0), cfg.WriteTimeout.GetAsDurationByParse())
 	assert.Equal(t, 300*time.Second, cfg.IdleTimeout.GetAsDurationByParse())
-	assert.Equal(t, 1048576, cfg.MaxHeaderBytes.GetAsInt())
+	assert.Equal(t, 16777216, cfg.MaxHeaderBytes.GetAsInt())
 	assert.Equal(t, cfg.EnableWebUI.GetAsBool(), true)
 }
 
