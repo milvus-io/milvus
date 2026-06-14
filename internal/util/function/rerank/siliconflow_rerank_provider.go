@@ -84,10 +84,7 @@ func newSiliconflowProvider(params []*commonpb.KeyValuePair, conf map[string]str
 		return nil, merr.WrapErrParameterMissingMsg("siliconflow rerank model name is required")
 	}
 
-	timeoutMs, err := models.ResolveTimeoutMs(params)
-	if err != nil {
-		return nil, err
-	}
+	timeoutMs := models.ResolveTimeoutMs(params)
 
 	provider := siliconflowProvider{
 		baseProvider:      baseProvider{batchSize: maxBatch},

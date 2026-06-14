@@ -204,10 +204,7 @@ func NewVertexAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 		client = c
 	}
 
-	timeoutMs, err := models.ResolveTimeoutMs(functionSchema.Params)
-	if err != nil {
-		return nil, err
-	}
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
 
 	provider := VertexAIEmbeddingProvider{
 		fieldDim:      fieldDim,

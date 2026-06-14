@@ -93,10 +93,7 @@ func NewGeminiEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		url = fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:batchEmbedContents", modelName)
 	}
 
-	timeoutMs, err := models.ResolveTimeoutMs(functionSchema.Params)
-	if err != nil {
-		return nil, err
-	}
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
 
 	provider := GeminiEmbeddingProvider{
 		client:        c,

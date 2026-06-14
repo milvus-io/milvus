@@ -90,10 +90,7 @@ func NewAliDashScopeEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functio
 		maxBatch = 6
 	}
 
-	timeoutMs, err := models.ResolveTimeoutMs(functionSchema.Params)
-	if err != nil {
-		return nil, err
-	}
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
 
 	provider := AliEmbeddingProvider{
 		client:        c,

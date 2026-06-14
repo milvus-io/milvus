@@ -17,13 +17,12 @@
 package paramtable
 
 import (
-	"strconv"
 	"strings"
 )
 
 type functionConfig struct {
 	BatchFactor                   ParamItem  `refreshable:"true"`
-	ModelRequestTimeoutMs         ParamItem  `refreshable:"true"`
+	ModelRequestTimeout           ParamItem  `refreshable:"true"`
 	TextEmbeddingProviders        ParamGroup `refreshable:"true"`
 	RerankModelProviders          ParamGroup `refreshable:"true"`
 	LocalResourcePath             ParamItem  `refreshable:"true"`
@@ -41,24 +40,14 @@ func (p *functionConfig) init(base *BaseTable) {
 	}
 	p.BatchFactor.Init(base.mgr)
 
-	p.ModelRequestTimeoutMs = ParamItem{
-		Key:          "function.model.timeout_ms",
+	p.ModelRequestTimeout = ParamItem{
+		Key:          "function.model.requestTimeout",
 		Version:      "2.6.12",
-		DefaultValue: "30000",
-		Formatter: func(v string) string {
-			if v == "" {
-				return "30000"
-			}
-			timeoutMs, err := strconv.ParseInt(v, 10, 64)
-			if err != nil || timeoutMs <= 0 {
-				return "30000"
-			}
-			return v
-		},
-		Export: true,
-		Doc:    "Global timeout in milliseconds for external model requests. Function param timeout_ms overrides it.",
+		DefaultValue: "30s",
+		Export:       true,
+		Doc:          "Global timeout for external model requests, e.g. 30s. Function param timeout_ms overrides it.",
 	}
-	p.ModelRequestTimeoutMs.Init(base.mgr)
+	p.ModelRequestTimeout.Init(base.mgr)
 
 	p.TextEmbeddingProviders = ParamGroup{
 		KeyPrefix: "function.textEmbedding.providers.",

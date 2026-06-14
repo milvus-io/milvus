@@ -74,10 +74,7 @@ func newVoyageaiProvider(params []*commonpb.KeyValuePair, conf map[string]string
 	if modelName == "" {
 		return nil, merr.WrapErrParameterMissingMsg("voyageai rerank model name is required")
 	}
-	timeoutMs, err := models.ResolveTimeoutMs(params)
-	if err != nil {
-		return nil, err
-	}
+	timeoutMs := models.ResolveTimeoutMs(params)
 
 	provider := voyageaiProvider{
 		baseProvider:   baseProvider{batchSize: maxBatch},

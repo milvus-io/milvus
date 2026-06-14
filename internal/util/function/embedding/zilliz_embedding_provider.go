@@ -58,10 +58,7 @@ func NewZillizEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		}
 	}
 
-	timeoutMs, err := models.ResolveTimeoutMs(functionSchema.Params)
-	if err != nil {
-		return nil, err
-	}
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
 
 	c, err := zilliz.NewZilliClient(modelDeploymentID, extraInfo.ClusterID, extraInfo.DBName, params, timeoutMs)
 	if err != nil {

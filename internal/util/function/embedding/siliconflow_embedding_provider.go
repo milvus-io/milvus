@@ -77,10 +77,7 @@ func NewSiliconflowEmbeddingProvider(fieldSchema *schemapb.FieldSchema, function
 		url = "https://api.siliconflow.cn/v1/embeddings"
 	}
 
-	timeoutMs, err := models.ResolveTimeoutMs(functionSchema.Params)
-	if err != nil {
-		return nil, err
-	}
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
 
 	provider := SiliconflowEmbeddingProvider{
 		client:        c,

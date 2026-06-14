@@ -64,10 +64,7 @@ func newAliProvider(params []*commonpb.KeyValuePair, conf map[string]string, cre
 	if modelName == "" {
 		return nil, merr.WrapErrParameterMissingMsg("ali rerank model name is required")
 	}
-	timeoutMs, err := models.ResolveTimeoutMs(params)
-	if err != nil {
-		return nil, err
-	}
+	timeoutMs := models.ResolveTimeoutMs(params)
 
 	provider := aliProvider{
 		baseProvider: baseProvider{batchSize: maxBatch},

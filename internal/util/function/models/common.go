@@ -31,9 +31,12 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -223,30 +226,35 @@ func ParseAndCheckFieldDim(dimStr string, fieldDim int64, fieldName string) (int
 	return dim, nil
 }
 
-func ParseTimeoutMs(params []*commonpb.KeyValuePair, defaultTimeoutMs int64) (int64, error) {
+// ParseTimeoutMs resolves the request timeout in milliseconds from the function
+// params, falling back to defaultTimeoutMs (and to 30000 when that is also
+// non-positive). An invalid timeout_ms override is logged and ignored rather
+// than failing, so a misconfigured param never breaks provider construction.
+func ParseTimeoutMs(params []*commonpb.KeyValuePair, defaultTimeoutMs int64) int64 {
+	if defaultTimeoutMs <= 0 {
+		defaultTimeoutMs = 30000
+	}
 	for _, param := range params {
 		if strings.ToLower(param.Key) != TimeoutMsParamKey {
 			continue
 		}
 
 		timeoutMs, err := strconv.ParseInt(param.Value, 10, 64)
-		if err != nil {
-			return 0, fmt.Errorf("[%s param's value: %s] is not a valid number", TimeoutMsParamKey, param.Value)
+		if err != nil || timeoutMs <= 0 {
+			log.Warn("invalid function timeout_ms param, falling back to default",
+				zap.String("value", param.Value),
+				zap.Int64("defaultMs", defaultTimeoutMs))
+			return defaultTimeoutMs
 		}
-		if timeoutMs <= 0 {
-			return 0, fmt.Errorf("[%s param's value: %s] must be greater than 0", TimeoutMsParamKey, param.Value)
-		}
-		return timeoutMs, nil
+		return timeoutMs
 	}
 
-	if defaultTimeoutMs <= 0 {
-		return 30000, nil
-	}
-	return defaultTimeoutMs, nil
+	return defaultTimeoutMs
 }
 
-func ResolveTimeoutMs(params []*commonpb.KeyValuePair) (int64, error) {
-	return ParseTimeoutMs(params, paramtable.Get().FunctionCfg.ModelRequestTimeoutMs.GetAsInt64())
+func ResolveTimeoutMs(params []*commonpb.KeyValuePair) int64 {
+	defaultTimeout := paramtable.Get().FunctionCfg.ModelRequestTimeout.GetAsDurationByParse()
+	return ParseTimeoutMs(params, defaultTimeout.Milliseconds())
 }
 
 func GetEmbdType(dtype schemapb.DataType) EmbeddingType {

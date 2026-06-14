@@ -18,6 +18,7 @@ package paramtable
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -95,5 +96,5 @@ func TestFunctionConfig(t *testing.T) {
 	defer cfg.AnalyzerRunnerConcurrency.SwapTempValue(old)
 	assert.Equal(t, 1, cfg.GetAnalyzerRunnerConcurrency())
 
-	assert.Equal(t, 30000, cfg.ModelRequestTimeoutMs.GetAsInt())
+	assert.Equal(t, 30*time.Second, cfg.ModelRequestTimeout.GetAsDurationByParse())
 }

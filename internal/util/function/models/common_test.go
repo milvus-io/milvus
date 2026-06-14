@@ -69,32 +69,22 @@ func (s *CommonSuite) TestParseAKAndURL() {
 }
 
 func (s *CommonSuite) TestParseTimeoutMs() {
-	timeoutMs, err := ParseTimeoutMs([]*commonpb.KeyValuePair{}, 45)
-	s.NoError(err)
-	s.Equal(int64(45), timeoutMs)
+	s.Equal(int64(45), ParseTimeoutMs([]*commonpb.KeyValuePair{}, 45))
 
-	timeoutMs, err = ParseTimeoutMs([]*commonpb.KeyValuePair{{Key: TimeoutMsParamKey, Value: "90"}}, 45)
-	s.NoError(err)
-	s.Equal(int64(90), timeoutMs)
+	s.Equal(int64(90), ParseTimeoutMs([]*commonpb.KeyValuePair{{Key: TimeoutMsParamKey, Value: "90"}}, 45))
 
-	_, err = ParseTimeoutMs([]*commonpb.KeyValuePair{{Key: TimeoutMsParamKey, Value: "invalid"}}, 45)
-	s.ErrorContains(err, "is not a valid number")
+	// an invalid override falls back to the default instead of failing
+	s.Equal(int64(45), ParseTimeoutMs([]*commonpb.KeyValuePair{{Key: TimeoutMsParamKey, Value: "invalid"}}, 45))
 
-	_, err = ParseTimeoutMs([]*commonpb.KeyValuePair{{Key: TimeoutMsParamKey, Value: "0"}}, 45)
-	s.ErrorContains(err, "must be greater than 0")
+	// non-positive overrides fall back to the default
+	s.Equal(int64(45), ParseTimeoutMs([]*commonpb.KeyValuePair{{Key: TimeoutMsParamKey, Value: "0"}}, 45))
+	s.Equal(int64(45), ParseTimeoutMs([]*commonpb.KeyValuePair{{Key: TimeoutMsParamKey, Value: "-1"}}, 45))
 
-	timeoutMs, err = ParseTimeoutMs([]*commonpb.KeyValuePair{}, 0)
-	s.NoError(err)
-	s.Equal(int64(30000), timeoutMs)
+	// a non-positive default falls back to 30000
+	s.Equal(int64(30000), ParseTimeoutMs([]*commonpb.KeyValuePair{}, 0))
 
 	// param key match is case-insensitive
-	timeoutMs, err = ParseTimeoutMs([]*commonpb.KeyValuePair{{Key: "Timeout_MS", Value: "120"}}, 45)
-	s.NoError(err)
-	s.Equal(int64(120), timeoutMs)
-
-	// negative override is rejected
-	_, err = ParseTimeoutMs([]*commonpb.KeyValuePair{{Key: TimeoutMsParamKey, Value: "-1"}}, 45)
-	s.ErrorContains(err, "must be greater than 0")
+	s.Equal(int64(120), ParseTimeoutMs([]*commonpb.KeyValuePair{{Key: "Timeout_MS", Value: "120"}}, 45))
 }
 
 func (s *CommonSuite) TestResolveTimeoutMs() {
@@ -102,14 +92,10 @@ func (s *CommonSuite) TestResolveTimeoutMs() {
 	params := paramtable.Get()
 
 	// falls back to the global function model timeout when no param is set
-	params.Save(params.FunctionCfg.ModelRequestTimeoutMs.Key, "12345")
-	defer params.Reset(params.FunctionCfg.ModelRequestTimeoutMs.Key)
-	timeoutMs, err := ResolveTimeoutMs([]*commonpb.KeyValuePair{})
-	s.NoError(err)
-	s.Equal(int64(12345), timeoutMs)
+	params.Save(params.FunctionCfg.ModelRequestTimeout.Key, "12s")
+	defer params.Reset(params.FunctionCfg.ModelRequestTimeout.Key)
+	s.Equal(int64(12000), ResolveTimeoutMs([]*commonpb.KeyValuePair{}))
 
 	// per-function param overrides the global default
-	timeoutMs, err = ResolveTimeoutMs([]*commonpb.KeyValuePair{{Key: TimeoutMsParamKey, Value: "777"}})
-	s.NoError(err)
-	s.Equal(int64(777), timeoutMs)
+	s.Equal(int64(777), ResolveTimeoutMs([]*commonpb.KeyValuePair{{Key: TimeoutMsParamKey, Value: "777"}}))
 }

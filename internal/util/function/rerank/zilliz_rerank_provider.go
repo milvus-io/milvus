@@ -53,10 +53,7 @@ func newZillizProvider(params []*commonpb.KeyValuePair, conf map[string]string, 
 		}
 	}
 
-	timeoutMs, err := models.ResolveTimeoutMs(params)
-	if err != nil {
-		return nil, err
-	}
+	timeoutMs := models.ResolveTimeoutMs(params)
 
 	c, err := zilliz.NewZilliClient(modelDeploymentID, extraInfo.ClusterID, extraInfo.DBName, conf, timeoutMs)
 	if err != nil {

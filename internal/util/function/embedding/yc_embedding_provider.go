@@ -90,10 +90,7 @@ func NewYCEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *s
 		url = defaultYCTextEmbeddingURL
 	}
 
-	timeoutMs, err := models.ResolveTimeoutMs(functionSchema.Params)
-	if err != nil {
-		return nil, err
-	}
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
 
 	provider := YCEmbeddingProvider{
 		fieldDim:  fieldDim,

@@ -77,10 +77,7 @@ func newTeiProvider(params []*commonpb.KeyValuePair, conf map[string]string, cre
 		return nil, err
 	}
 
-	timeoutMs, err := models.ResolveTimeoutMs(params)
-	if err != nil {
-		return nil, err
-	}
+	timeoutMs := models.ResolveTimeoutMs(params)
 
 	provider := teiProvider{
 		baseProvider: baseProvider{batchSize: maxBatch},
