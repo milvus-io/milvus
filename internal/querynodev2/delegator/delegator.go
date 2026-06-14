@@ -23,6 +23,7 @@ import (
 	"path"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -478,8 +479,11 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	defer sd.distribution.Unpin(version)
 
 	if req.GetReq().GetIsAdvanced() {
-		futures := make([]*conc.Future[*internalpb.SearchResults], len(req.GetReq().GetSubReqs()))
+		group, groupCtx := errgroup.WithContext(ctx)
+		results := make([]*internalpb.SearchResults, len(req.GetReq().GetSubReqs()))
 		for index, subReq := range req.GetReq().GetSubReqs() {
+			index := index
+			subReq := subReq
 			newRequest := &internalpb.SearchRequest{
 				Base:                    req.GetReq().GetBase(),
 				ReqID:                   req.GetReq().GetReqID(),
@@ -509,7 +513,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				AnalyzerName:            subReq.GetAnalyzerName(),
 				PkFilter:                common.PkFilterNoPkFilter, // hybrid search sub-requests rarely have PK predicates, skip unmarshal
 			}
-			future := conc.Go(func() (*internalpb.SearchResults, error) {
+			group.Go(func() error {
 				searchReq := &querypb.SearchRequest{
 					Req:             newRequest,
 					DmlChannels:     req.GetDmlChannels(),
@@ -521,34 +525,32 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 					searchReq.GetReq().MvccTimestamp = tSafe
 				}
 				searchReq.Req.CollectionTtlTimestamps = req.GetReq().GetCollectionTtlTimestamps()
-				results, err := sd.search(ctx, searchReq, sealed, growing, sealedRowCount)
+				searchResults, err := sd.search(groupCtx, searchReq, sealed, growing, sealedRowCount)
 				if err != nil {
-					return nil, err
+					return err
 				}
-
-				return segments.ReduceSearchOnQueryNode(ctx,
-					results,
+				result, err := segments.ReduceSearchOnQueryNode(groupCtx,
+					searchResults,
 					reduce.NewReduceSearchResultInfo(searchReq.GetReq().GetNq(),
 						searchReq.GetReq().GetTopk()).WithMetricType(searchReq.GetReq().GetMetricType()).
 						WithGroupByField(searchReq.GetReq().GetGroupByFieldId()).
 						WithGroupSize(searchReq.GetReq().GetGroupSize()))
+				if err != nil {
+					return err
+				}
+				if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+					log.Debug("delegator hybrid search failed",
+						zap.String("reason", result.GetStatus().GetReason()))
+					return merr.Error(result.GetStatus())
+				}
+				results[index] = result
+				return nil
 			})
-			futures[index] = future
 		}
 
-		err = conc.AwaitAll(futures...)
+		err = group.Wait()
 		if err != nil {
 			return nil, err
-		}
-		results := make([]*internalpb.SearchResults, len(futures))
-		for i, future := range futures {
-			result := future.Value()
-			if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				log.Debug("delegator hybrid search failed",
-					zap.String("reason", result.GetStatus().GetReason()))
-				return nil, merr.Error(result.GetStatus())
-			}
-			results[i] = result
 		}
 		return results, nil
 	}
@@ -900,6 +902,7 @@ func executeSubTasks[T any, R interface {
 
 	wg, ctx := errgroup.WithContext(ctx)
 	type channelResult struct {
+		index    int
 		nodeID   int64
 		segments []int64
 		result   R
@@ -907,7 +910,8 @@ func executeSubTasks[T any, R interface {
 	}
 	// Buffered channel to collect results from all goroutines
 	resultCh := make(chan channelResult, len(tasks))
-	for _, task := range tasks {
+	for index, task := range tasks {
+		index := index
 		task := task // capture loop variable
 		wg.Go(func() error {
 			var result R
@@ -923,7 +927,7 @@ func executeSubTasks[T any, R interface {
 			} else {
 				result, err = execute(ctx, task.req, task.worker)
 				if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-					err = fmt.Errorf("worker(%d) query failed: %s", task.targetID, result.GetStatus().GetReason())
+					err = errors.Wrapf(merr.Error(result.GetStatus()), "worker(%d) query failed", task.targetID)
 				}
 			}
 
@@ -940,6 +944,7 @@ func executeSubTasks[T any, R interface {
 			}
 
 			taskResult := channelResult{
+				index:  index,
 				nodeID: task.targetID,
 				result: result,
 				err:    err,
@@ -963,8 +968,7 @@ func executeSubTasks[T any, R interface {
 	close(resultCh)
 
 	successSegmentList := typeutil.NewSet[int64]()
-	failureSegmentList := make([]int64, 0)
-	var errors []error
+	failureResults := make([]channelResult, 0)
 
 	// Collect results
 	results := make([]R, 0, len(tasks))
@@ -973,18 +977,26 @@ func executeSubTasks[T any, R interface {
 			successSegmentList.Insert(item.segments...)
 			results = append(results, item.result)
 		} else {
-			failureSegmentList = append(failureSegmentList, item.segments...)
-			errors = append(errors, item.err)
+			failureResults = append(failureResults, item)
 		}
 	}
 
-	if len(errors) == 0 {
+	if len(failureResults) == 0 {
 		return results, nil
+	}
+	slices.SortFunc(failureResults, func(left, right channelResult) int {
+		return left.index - right.index
+	})
+	failureSegmentList := make([]int64, 0)
+	taskErrors := make([]error, 0, len(failureResults))
+	for _, item := range failureResults {
+		failureSegmentList = append(failureSegmentList, item.segments...)
+		taskErrors = append(taskErrors, item.err)
 	}
 
 	// Use evaluator to determine if partial results should be returned
 	if evaluator != nil {
-		shouldReturnPartial, accessedDataRatio := evaluator(taskType, successSegmentList, failureSegmentList, errors)
+		shouldReturnPartial, accessedDataRatio := evaluator(taskType, successSegmentList, failureSegmentList, taskErrors)
 		if shouldReturnPartial {
 			log.Info("partial result executed successfully",
 				zap.String("taskType", taskType),
@@ -995,7 +1007,22 @@ func executeSubTasks[T any, R interface {
 		}
 	}
 
-	return nil, merr.Combine(errors...)
+	return nil, wrapSubTaskErrors(taskErrors)
+}
+
+func wrapSubTaskErrors(errs []error) error {
+	if len(errs) == 0 {
+		return nil
+	}
+	if len(errs) == 1 {
+		return errs[0]
+	}
+
+	messages := make([]string, 0, len(errs)-1)
+	for _, err := range errs[1:] {
+		messages = append(messages, err.Error())
+	}
+	return errors.Wrapf(errs[0], "other worker errors: %s", strings.Join(messages, "; "))
 }
 
 // speedupGuranteeTS returns the guarantee timestamp for strong consistency search.
