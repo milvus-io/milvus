@@ -18,7 +18,6 @@ package storage
 
 import (
 	"container/heap"
-	"fmt"
 	"io"
 	"os"
 	"sort"
@@ -60,7 +59,7 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
 	tmpDir, err := os.MkdirTemp(rootPath, "milvus-sort-*")
 	if err != nil {
-		return 0, nil, fmt.Errorf("failed to create temp dir: %w", err)
+		return 0, nil, merr.WrapErrStorageMsg("failed to create temp dir")
 	}
 	// remove entire tmpDir at the end
 	defer os.RemoveAll(tmpDir)
@@ -110,7 +109,7 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 					}
 					comparators = append(comparators, f)
 				default:
-					return merr.WrapErrParameterInvalidMsg("unsupported type for sorting key")
+					return merr.WrapErrStorageMsg("unsupported type for sorting key")
 				}
 			}
 		}
@@ -142,7 +141,7 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 		writeRecordToFile := func(rec Record) error {
 			sar, ok := rec.(*simpleArrowRecord)
 			if !ok {
-				return fmt.Errorf("unexpected Record type")
+				return merr.WrapErrStorageMsg("unexpected Record type")
 			}
 			arrowRec := sar.r
 			if ipcWriter == nil {
@@ -469,7 +468,7 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 				return 0
 			})
 		default:
-			return 0, merr.WrapErrParameterInvalidMsg("unsupported type for sorting key")
+			return 0, merr.WrapErrStorageMsg("unsupported type for sorting key")
 		}
 	}
 

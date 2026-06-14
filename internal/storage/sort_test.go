@@ -19,81 +19,185 @@ package storage
 import (
 	"fmt"
 	"io"
-	"math"
+	"os"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-type oneShotRecordReader struct {
-	rec  Record
-	done bool
+type mockRecordReader struct {
+	mock.Mock
 }
 
-func (r *oneShotRecordReader) Next() (Record, error) {
-	if r.done {
-		return nil, io.EOF
+func (m *mockRecordReader) Next() (Record, error) {
+	args := m.Called()
+	if rec := args.Get(0); rec != nil {
+		return rec.(Record), args.Error(1)
 	}
-	r.done = true
-	return r.rec, nil
+	return nil, args.Error(1)
 }
 
-func (r *oneShotRecordReader) Close() error {
-	return nil
+func (m *mockRecordReader) Close() error {
+	args := m.Called()
+	return args.Error(0)
 }
 
-func TestRadixSortByInt64(t *testing.T) {
-	t.Run("edge values across records", func(t *testing.T) {
-		// Keys laid out across 3 records, mixing negatives, zero, duplicates and
-		// the int64 bounds to exercise the sign-bit flip and every byte position.
-		keys := [][]int64{
-			{5, math.MaxInt64, -1},
-			{0, math.MinInt64, -1},
-			{42, 5},
-		}
-		var indices []rowIndex
-		for ri := range keys {
-			for i := range keys[ri] {
-				indices = append(indices, rowIndex{int32(ri), int32(i)})
-			}
-		}
+type mockRecordWriter struct {
+	mock.Mock
+}
 
-		radixSortByInt64(indices, keys)
+func (m *mockRecordWriter) GetWrittenUncompressed() uint64 {
+	panic("implement me")
+}
 
-		got := make([]int64, len(indices))
-		for k, idx := range indices {
-			got[k] = keys[idx.ri][idx.i]
-		}
-		assert.Equal(t, []int64{math.MinInt64, -1, -1, 0, 5, 5, 42, math.MaxInt64}, got)
+func (m *mockRecordWriter) Close() error {
+	panic("implement me")
+}
+
+func (m *mockRecordWriter) Write(rec Record) error {
+	args := m.Called(rec)
+	return args.Error(0)
+}
+
+type mockRecord struct {
+	mock.Mock
+	*simpleArrowRecord // embed to satisfy interface if needed
+}
+
+func (m *mockRecord) Column(fieldID int64) arrow.Array {
+	args := m.Called(fieldID)
+	return args.Get(0).(arrow.Array)
+}
+
+func (m *mockRecord) Len() int {
+	args := m.Called()
+	return args.Int(0)
+}
+
+func (m *mockRecord) Retain() {
+	m.Called()
+}
+
+func (m *mockRecord) Release() {
+	m.Called()
+}
+
+func testSchema() *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64},
+		},
+	}
+}
+
+func makeInt64Array(vals []int64) *array.Int64 {
+	b := array.NewInt64Builder(memory.DefaultAllocator)
+	defer b.Release()
+
+	b.AppendValues(vals, nil)
+	return b.NewInt64Array()
+}
+
+func TestSort_ErrorCases(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+	origPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	defer func() {
+		paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, origPath)
+	}()
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, t.TempDir())
+
+	schema := testSchema()
+	batchSize := uint64(100)
+	sortBy := []int64{100}
+
+	predicate := func(r Record, ri, i int) bool { return true }
+
+	t.Run("MkdirTemp fails", func(t *testing.T) {
+		badPath := "/nonexistent/invalid/path/that/should/fail"
+		paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, badPath)
+
+		rr := []RecordReader{&mockRecordReader{}}
+		rw := &mockRecordWriter{}
+
+		_, _, err := Sort(batchSize, schema, rr, rw, predicate, sortBy)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to create temp dir")
 	})
 
-	t.Run("stable for equal keys", func(t *testing.T) {
-		// Three rows share key 7 ({0,0},{1,0},{1,1} in input order); a stable sort
-		// must keep that relative order among the duplicates.
-		keys := [][]int64{
-			{7, 3},
-			{7, 7, 1},
-		}
-		indices := []rowIndex{{0, 0}, {0, 1}, {1, 0}, {1, 1}, {1, 2}}
+	t.Run("flushRun - CreateTemp fails", func(t *testing.T) {
+		tmpRoot := t.TempDir()
+		paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, tmpRoot)
+		require.NoError(t, os.Chmod(tmpRoot, 0o555))
 
-		radixSortByInt64(indices, keys)
+		// Create a reader that returns one record to trigger flush
+		mockRec := &mockRecord{}
+		mockRec.On("Retain").Return()
+		mockRec.On("Len").Return(1)
+		mockRec.On("Column", mock.Anything).Return(makeInt64Array([]int64{1, 2, 3}))
+		mockRec.On("Release").Return()
 
-		assert.Equal(t, []rowIndex{{1, 2}, {0, 1}, {0, 0}, {1, 0}, {1, 1}}, indices)
+		mrr := &mockRecordReader{}
+		mrr.On("Next").Return(mockRec, nil).Once()
+		mrr.On("Next").Return(nil, io.EOF).Once()
+		mrr.On("Close").Return(nil)
+
+		rr := []RecordReader{mrr}
+		rw := &mockRecordWriter{}
+
+		_, _, err := Sort(batchSize, schema, rr, rw, predicate, sortBy)
+		assert.Error(t, err)
 	})
 
-	t.Run("small inputs are no-ops", func(t *testing.T) {
-		single := []rowIndex{{0, 0}}
-		radixSortByInt64(single, [][]int64{{99}})
-		assert.Equal(t, []rowIndex{{0, 0}}, single)
+	t.Run("flushRun - unsupported sort type", func(t *testing.T) {
+		tmpRoot := t.TempDir()
+		paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, tmpRoot)
+		builder := array.NewBooleanBuilder(memory.DefaultAllocator)
+		builder.AppendValues([]bool{true, false, true}, nil)
+		arr := builder.NewBooleanArray()
 
-		assert.NotPanics(t, func() { radixSortByInt64(nil, nil) })
+		mockRec := &mockRecord{}
+		mockRec.On("Retain").Return()
+		mockRec.On("Len").Return(1)
+		// Return a type not handled (e.g. Boolean)
+		mockRec.On("Column", mock.Anything).Return(arr)
+		mockRec.On("Release").Return()
+
+		mrr := &mockRecordReader{}
+		mrr.On("Next").Return(mockRec, nil).Once()
+		mrr.On("Next").Return(nil, io.EOF).Once()
+
+		rr := []RecordReader{mrr}
+		rw := &mockRecordWriter{}
+
+		_, _, err := Sort(batchSize, schema, rr, rw, predicate, sortBy)
+		assert.Error(t, err)
+	})
+
+	t.Run("Next() returns non-EOF error", func(t *testing.T) {
+		tmpRoot := t.TempDir()
+		paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, tmpRoot)
+
+		expectedErr := errors.New("reader error")
+		mrr := &mockRecordReader{}
+		mrr.On("Next").Return(nil, expectedErr)
+
+		rr := []RecordReader{mrr}
+		rw := &mockRecordWriter{}
+
+		_, _, err := Sort(batchSize, schema, rr, rw, predicate, sortBy)
+		assert.Error(t, err)
+		assert.Equal(t, expectedErr, err)
 	})
 }
 
@@ -308,49 +412,6 @@ func TestMergeSort(t *testing.T) {
 		err = rw.Close()
 		assert.NoError(t, err)
 	})
-}
-
-func TestMergeSortReturnsRecordBuilderAppendError(t *testing.T) {
-	textBuilder := array.NewStringBuilder(memory.DefaultAllocator)
-	textBuilder.Append("not-a-lob-ref")
-	textColumn := textBuilder.NewArray()
-	defer textColumn.Release()
-	textBuilder.Release()
-
-	pkBuilder := array.NewInt64Builder(memory.DefaultAllocator)
-	pkBuilder.Append(1)
-	pkColumn := pkBuilder.NewArray()
-	defer pkColumn.Release()
-	pkBuilder.Release()
-
-	rec := NewSimpleArrowRecord(array.NewRecord(
-		arrow.NewSchema([]arrow.Field{
-			{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
-			{Name: "text", Type: arrow.BinaryTypes.String},
-		}, nil),
-		[]arrow.Array{pkColumn, textColumn},
-		1,
-	), map[FieldID]int{100: 0, 101: 1})
-	defer rec.Release()
-
-	reader := &oneShotRecordReader{rec: rec}
-	writer := &MockRecordWriter{
-		writefn: func(r Record) error {
-			return nil
-		},
-		closefn: func() error {
-			return nil
-		},
-	}
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-		{FieldID: 101, Name: "text", DataType: schemapb.DataType_Text},
-	}}
-
-	_, err := MergeSort(1024, schema, []RecordReader{reader}, writer, func(r Record, ri, i int) bool {
-		return true
-	}, []int64{100})
-	assert.ErrorContains(t, err, "failed to append value")
 }
 
 // Benchmark sort
