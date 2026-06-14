@@ -1486,6 +1486,13 @@ func ValidateUsername(username string) error {
 	return nil
 }
 
+func ValidateUserDescription(description string) error {
+	if len(description) > Params.ProxyCfg.MaxUserDescriptionLength.GetAsInt() {
+		return merr.WrapErrParameterInvalidMsg("invalid user description with length %d, the length of user description must be less than or equal to %s", len(description), Params.ProxyCfg.MaxUserDescriptionLength.GetValue())
+	}
+	return nil
+}
+
 func ValidatePassword(password string) error {
 	if len(password) < Params.ProxyCfg.MinPasswordLength.GetAsInt() || len(password) > Params.ProxyCfg.MaxPasswordLength.GetAsInt() {
 		return merr.WrapErrParameterInvalidRange(Params.ProxyCfg.MinPasswordLength.GetAsInt(),

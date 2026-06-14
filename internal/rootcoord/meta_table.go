@@ -1741,6 +1741,14 @@ func (mt *MetaTable) CheckIfUpdateCredential(ctx context.Context, credInfo *inte
 	if funcutil.IsEmptyString(credInfo.GetUsername()) {
 		return merr.WrapErrParameterInvalidMsg("username is empty")
 	}
+	hasEncryptedPassword := credInfo.GetEncryptedPassword() != ""
+	hasSha256Password := credInfo.GetSha256Password() != ""
+	if hasEncryptedPassword != hasSha256Password {
+		return merr.WrapErrParameterInvalidMsg("credential password update must include both encrypted and sha256 password")
+	}
+	if !hasEncryptedPassword && !hasSha256Password && credInfo.Description == nil {
+		return merr.WrapErrParameterInvalidMsg("credential update must change password or description")
+	}
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()
 
@@ -1774,9 +1782,20 @@ func (mt *MetaTable) AlterCredential(ctx context.Context, result message.Broadca
 		)
 		return nil
 	}
+	encryptedPassword := body.CredentialInfo.EncryptedPassword
+	description := body.CredentialInfo.GetDescription()
+	if existsCredential != nil {
+		if encryptedPassword == "" {
+			encryptedPassword = existsCredential.EncryptedPassword
+		}
+		if body.CredentialInfo.Description == nil {
+			description = existsCredential.Description
+		}
+	}
 	credential := &model.Credential{
 		Username:          body.CredentialInfo.Username,
-		EncryptedPassword: body.CredentialInfo.EncryptedPassword,
+		EncryptedPassword: encryptedPassword,
+		Description:       description,
 		TimeTick:          result.GetControlChannelResult().TimeTick,
 	}
 	return mt.catalog.AlterCredential(ctx, credential)

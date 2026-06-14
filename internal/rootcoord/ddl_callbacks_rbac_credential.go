@@ -88,8 +88,10 @@ func (c *DDLCallback) alterUserV2AckCallback(ctx context.Context, result message
 		return merr.Wrap(err, "failed to alter credential")
 	}
 	// update proxy's local cache
-	if err := c.UpdateCredCache(ctx, result.Message.MustBody().CredentialInfo); err != nil {
-		return merr.Wrap(err, "failed to update cred cache")
+	if result.Message.MustBody().CredentialInfo.GetSha256Password() != "" {
+		if err := c.UpdateCredCache(ctx, result.Message.MustBody().CredentialInfo); err != nil {
+			return merr.Wrap(err, "failed to update cred cache")
+		}
 	}
 	return nil
 }
