@@ -24,10 +24,12 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_pipeline"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -46,7 +48,7 @@ type StreamPipelineSuite struct {
 func (suite *StreamPipelineSuite) SetupTest() {
 	paramtable.Init()
 	suite.channel = "test-channel"
-	suite.inChannel = make(chan *msgstream.MsgPack, 1)
+	suite.inChannel = make(chan *msgstream.MsgPack, 4)
 	suite.outChannel = make(chan msgstream.Timestamp)
 	suite.msgDispatcher = msgdispatcher.NewMockClient(suite.T())
 	suite.msgDispatcher.EXPECT().Register(mock.Anything, mock.Anything).Return(suite.inChannel, nil)
@@ -81,6 +83,103 @@ func (suite *StreamPipelineSuite) TestBasic() {
 	}
 }
 
+func (suite *StreamPipelineSuite) TestDMLMsgPackBatcherMergesBufferedDMLPacks() {
+	suite.pipeline = NewPipelineWithStream(
+		suite.msgDispatcher,
+		0,
+		false,
+		suite.channel,
+		nil,
+		staticMVCCGetter{},
+		WithMsgPackBatcher(NewDMLMsgPackBatcher(8)),
+	)
+
+	received := make(chan *msgstream.MsgPack, 1)
+	suite.pipeline.Add(&captureMsgPackNode{
+		BaseNode:   NewBaseNode("capture-msg-pack", 8),
+		outChannel: received,
+	})
+
+	err := suite.pipeline.ConsumeMsgStream(context2.Background(), &msgpb.MsgPosition{})
+	suite.NoError(err)
+
+	suite.inChannel <- &msgstream.MsgPack{
+		BeginTs: 100,
+		EndTs:   110,
+		Msgs: []msgstream.TsMsg{
+			newInsertTsMsg(101),
+		},
+		StartPositions: []*msgpb.MsgPosition{{Timestamp: 100}},
+		EndPositions:   []*msgpb.MsgPosition{{Timestamp: 110}},
+	}
+	suite.inChannel <- &msgstream.MsgPack{
+		BeginTs: 111,
+		EndTs:   120,
+		Msgs: []msgstream.TsMsg{
+			newDeleteTsMsg(115),
+		},
+		StartPositions: []*msgpb.MsgPosition{{Timestamp: 111}},
+		EndPositions:   []*msgpb.MsgPosition{{Timestamp: 120}},
+	}
+
+	suite.pipeline.Start()
+	defer suite.pipeline.Close()
+
+	merged := <-received
+	suite.Equal(uint64(100), merged.BeginTs)
+	suite.Equal(uint64(120), merged.EndTs)
+	suite.Len(merged.Msgs, 2)
+	suite.Equal(uint64(101), merged.Msgs[0].EndTs())
+	suite.Equal(uint64(115), merged.Msgs[1].EndTs())
+	suite.Equal(uint64(100), merged.StartPositions[0].GetTimestamp())
+	suite.Equal(uint64(120), merged.EndPositions[0].GetTimestamp())
+	suite.Empty(received)
+}
+
 func TestStreamPipeline(t *testing.T) {
 	suite.Run(t, new(StreamPipelineSuite))
+}
+
+type staticMVCCGetter struct{}
+
+func (staticMVCCGetter) GetLatestRequiredMVCCTimeTick() uint64 {
+	return 0
+}
+
+type captureMsgPackNode struct {
+	*BaseNode
+	outChannel chan *msgstream.MsgPack
+}
+
+func (node *captureMsgPackNode) Operate(in Msg) Msg {
+	node.outChannel <- in.(*msgstream.MsgPack)
+	return nil
+}
+
+func newInsertTsMsg(ts uint64) *msgstream.InsertMsg {
+	msg := &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{},
+		InsertRequest: &msgpb.InsertRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_Insert),
+				commonpbutil.WithTimeStamp(ts),
+			),
+		},
+	}
+	msg.SetTs(ts)
+	return msg
+}
+
+func newDeleteTsMsg(ts uint64) *msgstream.DeleteMsg {
+	msg := &msgstream.DeleteMsg{
+		BaseMsg: msgstream.BaseMsg{},
+		DeleteRequest: &msgpb.DeleteRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_Delete),
+				commonpbutil.WithTimeStamp(ts),
+			),
+		},
+	}
+	msg.SetTs(ts)
+	return msg
 }
