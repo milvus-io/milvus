@@ -24,6 +24,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -83,6 +84,27 @@ type routingKeyEncoder interface {
 // names (a namespace collection maps one namespace to one partition). The
 // production resolver is backed by the datacoord broker's ShowPartitions.
 type namespaceResolver func(ctx context.Context, collectionID int64) (map[int64]string, error)
+
+// brokerNamespaceResolver builds a namespaceResolver from the datacoord
+// broker: it zips the partition ids and names that ShowPartitions returns.
+func brokerNamespaceResolver(b broker.Broker) namespaceResolver {
+	return func(ctx context.Context, collectionID int64) (map[int64]string, error) {
+		resp, err := b.ShowPartitions(ctx, collectionID)
+		if err != nil {
+			return nil, err
+		}
+		ids, names := resp.GetPartitionIDs(), resp.GetPartitionNames()
+		if len(ids) != len(names) {
+			return nil, errors.Errorf("ShowPartitions returned %d ids but %d names for collection %d",
+				len(ids), len(names), collectionID)
+		}
+		out := make(map[int64]string, len(ids))
+		for i, id := range ids {
+			out[id] = names[i]
+		}
+		return out, nil
+	}
+}
 
 // routingKeyRange is a half-open byte range [lower, upper). A nil bound is
 // unbounded, so the full key space is routingKeyRange{nil, nil}.

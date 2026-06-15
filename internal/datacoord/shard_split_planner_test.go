@@ -21,7 +21,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -164,6 +167,26 @@ func TestRangeSplitPlannerWrongTargetCount(t *testing.T) {
 	planner := newRangeSplitPlanner(m, testNamespaceEncoder{}, resolver.resolve)
 
 	_, err := planner.PlanTargets(context.Background(), m.GetCollection(1), "v0", []string{"v1"})
+	assert.Error(t, err)
+}
+
+func TestBrokerNamespaceResolver(t *testing.T) {
+	b := broker.NewMockBroker(t)
+	b.EXPECT().ShowPartitions(mock.Anything, int64(1)).Return(&milvuspb.ShowPartitionsResponse{
+		PartitionIDs:   []int64{10, 11},
+		PartitionNames: []string{"a", "b"},
+	}, nil).Once()
+	resolve := brokerNamespaceResolver(b)
+	names, err := resolve(context.Background(), 1)
+	assert.NoError(t, err)
+	assert.Equal(t, map[int64]string{10: "a", 11: "b"}, names)
+
+	// a mismatched ids/names length is reported instead of mis-zipping.
+	b.EXPECT().ShowPartitions(mock.Anything, int64(2)).Return(&milvuspb.ShowPartitionsResponse{
+		PartitionIDs:   []int64{10, 11},
+		PartitionNames: []string{"a"},
+	}, nil).Once()
+	_, err = resolve(context.Background(), 2)
 	assert.Error(t, err)
 }
 
