@@ -5683,10 +5683,15 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 	}
 
 	var roleName string
+	var description string
 	if req.Entity != nil {
 		roleName = req.Entity.Name
+		description = req.Entity.GetDescription()
 	}
 	if err := ValidateRoleName(roleName); err != nil {
+		return merr.Status(err), nil
+	}
+	if err := ValidateRoleDescription(description); err != nil {
 		return merr.Status(err), nil
 	}
 	if req.Base == nil {
@@ -5697,6 +5702,39 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 	result, err := node.mixCoord.CreateRole(ctx, req)
 	if err != nil {
 		log.Warn("fail to create role", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	return result, nil
+}
+
+func (node *Proxy) AlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterRole")
+	defer sp.End()
+
+	log := log.Ctx(ctx)
+
+	log.Info("AlterRole", zap.Stringer("req", req))
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	if err := ValidateRoleName(req.GetRoleName()); err != nil {
+		return merr.Status(err), nil
+	}
+	if err := ValidateRoleDescription(req.GetDescription()); err != nil {
+		return merr.Status(err), nil
+	}
+	if IsDefaultRole(req.GetRoleName()) {
+		err := merr.WrapErrPrivilegeNotPermitted("the role[%s] is a default role, which can't be altered", req.GetRoleName())
+		return merr.Status(err), nil
+	}
+	if req.Base == nil {
+		req.Base = &commonpb.MsgBase{}
+	}
+	req.Base.MsgType = commonpb.MsgType_AlterRole
+
+	result, err := node.mixCoord.AlterRole(ctx, req)
+	if err != nil {
+		log.Warn("fail to alter role", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	return result, nil
@@ -6124,8 +6162,14 @@ func (node *Proxy) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMet
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	if req.RBACMeta == nil {
+	meta := req.GetRBACMeta()
+	if meta == nil {
 		return merr.Success(), nil
+	}
+	for _, role := range meta.GetRoles() {
+		if err := ValidateRoleDescription(role.GetDescription()); err != nil {
+			return merr.Status(err), nil
+		}
 	}
 
 	result, err := node.mixCoord.RestoreRBAC(ctx, req)

@@ -67,6 +67,7 @@ const (
 	RootCoord_ListCredUsers_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/ListCredUsers"
 	RootCoord_GetCredential_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/GetCredential"
 	RootCoord_CreateRole_FullMethodName                    = "/milvus.proto.rootcoord.RootCoord/CreateRole"
+	RootCoord_AlterRole_FullMethodName                     = "/milvus.proto.rootcoord.RootCoord/AlterRole"
 	RootCoord_DropRole_FullMethodName                      = "/milvus.proto.rootcoord.RootCoord/DropRole"
 	RootCoord_OperateUserRole_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/OperateUserRole"
 	RootCoord_SelectRole_FullMethodName                    = "/milvus.proto.rootcoord.RootCoord/SelectRole"
@@ -221,6 +222,7 @@ type RootCoordClient interface {
 	GetCredential(ctx context.Context, in *GetCredentialRequest, opts ...grpc.CallOption) (*GetCredentialResponse, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+29+--+Support+Role-Based+Access+Control
 	CreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	AlterRole(ctx context.Context, in *milvuspb.AlterRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	DropRole(ctx context.Context, in *milvuspb.DropRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	SelectRole(ctx context.Context, in *milvuspb.SelectRoleRequest, opts ...grpc.CallOption) (*milvuspb.SelectRoleResponse, error)
@@ -659,6 +661,15 @@ func (c *rootCoordClient) CreateRole(ctx context.Context, in *milvuspb.CreateRol
 	return out, nil
 }
 
+func (c *rootCoordClient) AlterRole(ctx context.Context, in *milvuspb.AlterRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_AlterRole_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *rootCoordClient) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, RootCoord_DropRole_FullMethodName, in, out, opts...)
@@ -1051,6 +1062,7 @@ type RootCoordServer interface {
 	GetCredential(context.Context, *GetCredentialRequest) (*GetCredentialResponse, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+29+--+Support+Role-Based+Access+Control
 	CreateRole(context.Context, *milvuspb.CreateRoleRequest) (*commonpb.Status, error)
+	AlterRole(context.Context, *milvuspb.AlterRoleRequest) (*commonpb.Status, error)
 	DropRole(context.Context, *milvuspb.DropRoleRequest) (*commonpb.Status, error)
 	OperateUserRole(context.Context, *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error)
 	SelectRole(context.Context, *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error)
@@ -1220,6 +1232,9 @@ func (UnimplementedRootCoordServer) GetCredential(context.Context, *GetCredentia
 }
 func (UnimplementedRootCoordServer) CreateRole(context.Context, *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateRole not implemented")
+}
+func (UnimplementedRootCoordServer) AlterRole(context.Context, *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AlterRole not implemented")
 }
 func (UnimplementedRootCoordServer) DropRole(context.Context, *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DropRole not implemented")
@@ -2115,6 +2130,24 @@ func _RootCoord_CreateRole_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RootCoord_AlterRole_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.AlterRoleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).AlterRole(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_AlterRole_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).AlterRole(ctx, req.(*milvuspb.AlterRoleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RootCoord_DropRole_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(milvuspb.DropRoleRequest)
 	if err := dec(in); err != nil {
@@ -2837,6 +2870,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateRole",
 			Handler:    _RootCoord_CreateRole_Handler,
+		},
+		{
+			MethodName: "AlterRole",
+			Handler:    _RootCoord_AlterRole_Handler,
 		},
 		{
 			MethodName: "DropRole",

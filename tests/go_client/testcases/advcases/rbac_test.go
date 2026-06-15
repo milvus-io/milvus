@@ -5,6 +5,7 @@ package advcases
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -452,6 +453,51 @@ func TestDropRoleBindPrivilege(t *testing.T) {
 
 	err = mc.DropRole(ctx, client.NewDropRoleOption(roleName))
 	common.CheckErr(t, err, true)
+}
+
+func TestRoleDescription(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
+	setupTest(t, ctx, mc)
+
+	// create role with description -> read back
+	roleName := common.GenRandomString("role", 6)
+	err := mc.CreateRole(ctx, client.NewCreateRoleOption(roleName).WithDescription("e2e role description"))
+	common.CheckErr(t, err, true)
+	role, err := mc.DescribeRole(ctx, client.NewDescribeRoleOption(roleName))
+	common.CheckErr(t, err, true)
+	require.Equal(t, "e2e role description", role.Description)
+
+	// alter description -> read back
+	err = mc.AlterRole(ctx, client.NewAlterRoleOption(roleName).WithDescription("updated description"))
+	common.CheckErr(t, err, true)
+	role, err = mc.DescribeRole(ctx, client.NewDescribeRoleOption(roleName))
+	common.CheckErr(t, err, true)
+	require.Equal(t, "updated description", role.Description)
+
+	// alter with empty description clears it
+	err = mc.AlterRole(ctx, client.NewAlterRoleOption(roleName))
+	common.CheckErr(t, err, true)
+	role, err = mc.DescribeRole(ctx, client.NewDescribeRoleOption(roleName))
+	common.CheckErr(t, err, true)
+	require.Empty(t, role.Description)
+
+	// description over limit is rejected on both create and alter
+	overLimit := strings.Repeat("a", 1025)
+	err = mc.CreateRole(ctx, client.NewCreateRoleOption(common.GenRandomString("role", 6)).WithDescription(overLimit))
+	common.CheckErr(t, err, false, "the length of role description must be not greater than limit")
+	err = mc.AlterRole(ctx, client.NewAlterRoleOption(roleName).WithDescription(overLimit))
+	common.CheckErr(t, err, false, "the length of role description must be not greater than limit")
+
+	// alter a not existed role
+	err = mc.AlterRole(ctx, client.NewAlterRoleOption(common.GenRandomString("role", 6)).WithDescription("desc"))
+	common.CheckErr(t, err, false, "role not exists")
+
+	// alter builtin roles is not permitted
+	for _, builtinRole := range []string{common.AdminRole, common.PublicRole} {
+		err = mc.AlterRole(ctx, client.NewAlterRoleOption(builtinRole).WithDescription("desc"))
+		common.CheckErr(t, err, false, "can't be altered")
+	}
 }
 
 func TestDescribeRole(t *testing.T) {

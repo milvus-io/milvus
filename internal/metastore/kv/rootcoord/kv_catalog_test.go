@@ -2062,6 +2062,140 @@ func TestRBAC_Role(t *testing.T) {
 		})
 		assert.NoError(t, err)
 	})
+	t.Run("test AlterRole load error", func(t *testing.T) {
+		var (
+			kvmock   = mocks.NewTxnKV(t)
+			c        = NewCatalog(kvmock)
+			roleName = "role_load_error"
+			loadErr  = errors.New("mock load role error")
+		)
+
+		kvmock.EXPECT().Load(mock.Anything, RolePrefix+"/"+roleName).Return("", loadErr).Once()
+
+		err := c.AlterRole(ctx, tenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "description",
+		})
+		assert.ErrorIs(t, err, loadErr)
+		kvmock.AssertNotCalled(t, "Save", mock.Anything, mock.Anything, mock.Anything)
+	})
+	t.Run("test AlterRole malformed stored role value", func(t *testing.T) {
+		var (
+			kvmock     = mocks.NewTxnKV(t)
+			c          = NewCatalog(kvmock)
+			roleName   = "role_malformed_alter"
+			newDesc    = "new description"
+			expectedKV string
+		)
+
+		expectedKV, err := model.MarshalRoleModel(&model.Role{
+			Name:        roleName,
+			Description: newDesc,
+		})
+		require.NoError(t, err)
+
+		kvmock.EXPECT().Load(mock.Anything, RolePrefix+"/"+roleName).Return("not-json", nil).Once()
+		kvmock.EXPECT().Save(mock.Anything, RolePrefix+"/"+roleName, expectedKV).Return(nil).Once()
+
+		err = c.AlterRole(ctx, tenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: newDesc,
+		})
+		require.NoError(t, err)
+	})
+	t.Run("test ListRole malformed exact role value", func(t *testing.T) {
+		var (
+			kvmock   = mocks.NewTxnKV(t)
+			c        = NewCatalog(kvmock)
+			roleName = "role_malformed_exact"
+		)
+
+		kvmock.EXPECT().Load(mock.Anything, RolePrefix+"/"+roleName).Return("{", nil).Once()
+
+		roles, err := c.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: roleName}, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Equal(t, roleName, roles[0].GetRole().GetName())
+		assert.Empty(t, roles[0].GetRole().GetDescription())
+	})
+	t.Run("test ListRole empty exact role name", func(t *testing.T) {
+		var (
+			kvmock = mocks.NewTxnKV(t)
+			c      = NewCatalog(kvmock)
+		)
+
+		roles, err := c.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: ""}, false)
+		require.Error(t, err)
+		assert.Empty(t, roles)
+		assert.Contains(t, err.Error(), "role name in the role entity is empty")
+	})
+	t.Run("test role description persistence", func(t *testing.T) {
+		etcdCli, err := etcd.GetEtcdClient(
+			Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+			Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+			Params.EtcdCfg.Endpoints.GetAsStrings(),
+			Params.EtcdCfg.EtcdTLSCert.GetValue(),
+			Params.EtcdCfg.EtcdTLSKey.GetValue(),
+			Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+			Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		require.NoError(t, err)
+		rootPath := "/test/rbac/role-description/" + funcutil.RandomString(8)
+		metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+		defer metaKV.RemoveWithPrefix(context.TODO(), "")
+		defer metaKV.Close()
+		c := NewCatalog(metaKV)
+
+		roleName := "role_desc"
+		require.NoError(t, c.CreateRole(ctx, tenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "初始角色描述",
+		}))
+		roles, err := c.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: roleName}, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Equal(t, "初始角色描述", roles[0].GetRole().GetDescription())
+
+		require.NoError(t, c.AlterRole(ctx, tenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "updated role description",
+		}))
+		roles, err = c.ListRole(ctx, tenant, nil, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Equal(t, roleName, roles[0].GetRole().GetName())
+		assert.Equal(t, "updated role description", roles[0].GetRole().GetDescription())
+
+		require.NoError(t, metaKV.Save(ctx, RolePrefix+"/legacy_role", ""))
+		roles, err = c.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: "legacy_role"}, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Empty(t, roles[0].GetRole().GetDescription())
+
+		roles, err = c.ListRole(ctx, tenant, nil, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 2)
+		roleDescriptions := lo.SliceToMap(roles, func(role *milvuspb.RoleResult) (string, string) {
+			return role.GetRole().GetName(), role.GetRole().GetDescription()
+		})
+		assert.Equal(t, "updated role description", roleDescriptions[roleName])
+		assert.Empty(t, roleDescriptions["legacy_role"])
+
+		require.NoError(t, metaKV.Save(ctx, RolePrefix+"/malformed_role", "{"))
+		roles, err = c.ListRole(ctx, tenant, nil, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 3)
+		roleDescriptions = lo.SliceToMap(roles, func(role *milvuspb.RoleResult) (string, string) {
+			return role.GetRole().GetName(), role.GetRole().GetDescription()
+		})
+		assert.Equal(t, "updated role description", roleDescriptions[roleName])
+		assert.Empty(t, roleDescriptions["legacy_role"])
+		assert.Empty(t, roleDescriptions["malformed_role"])
+
+		roles, err = c.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: "malformed_role"}, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Empty(t, roles[0].GetRole().GetDescription())
+	})
 	t.Run("test DropRole", func(t *testing.T) {
 		var (
 			kvmock = mocks.NewTxnKV(t)
