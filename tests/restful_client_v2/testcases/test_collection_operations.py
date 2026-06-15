@@ -428,8 +428,8 @@ class TestCreateCollection(TestBase):
     def test_create_collections_multi_float_vector_with_one_index(self, dim, metric_type):
         """
         target: test create collection
-        method: create a collection with a simple schema
-        expected: create collection success
+        method: create a collection with multiple vector fields and only one index
+        expected: create reports the missing vector index and the collection stays unloaded
         """
         name = gen_collection_name()
         dim = 128
@@ -452,6 +452,7 @@ class TestCreateCollection(TestBase):
         logging.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
         assert rsp["code"] == 1100
+        assert "there is no vector index on field: [image_intro]" in rsp["message"]
         rsp = client.collection_list()
 
         all_collections = rsp["data"]
@@ -2157,7 +2158,7 @@ class TestCollectionMaintenance(TestBase):
     def test_collection_compact(self):
         """
         target: test collection compact
-        method: create collection, insert data, flush multiple times, then compact
+        method: create collection with a clustering key, insert data, flush multiple times, then compact
         expected: compact successfully
         """
         # Create collection
@@ -2169,6 +2170,12 @@ class TestCollectionMaintenance(TestBase):
             "schema": {
                 "fields": [
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {
+                        "fieldName": "word_count",
+                        "dataType": "Int64",
+                        "isClusteringKey": True,
+                        "elementTypeParams": {},
+                    },
                     {"fieldName": "my_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": 128}},
                 ]
             },
@@ -2176,13 +2183,20 @@ class TestCollectionMaintenance(TestBase):
         client.collection_create(payload)
 
         # Insert and flush multiple times
-        for i in range(3):
+        batch_count = 4
+        rows_per_batch = 100
+        for batch in range(batch_count):
             # Insert data
-            vectors = [gen_vector(dim=128) for _ in range(10)]
+            vectors = [gen_vector(dim=128) for _ in range(rows_per_batch)]
             insert_data = {
                 "collectionName": name,
                 "data": [
-                    {"book_id": i * 10 + j, "my_vector": vector} for i, vector in enumerate(vectors) for j in range(10)
+                    {
+                        "book_id": batch * rows_per_batch + i,
+                        "word_count": batch,
+                        "my_vector": vector,
+                    }
+                    for i, vector in enumerate(vectors)
                 ],
             }
             response = vector_client.vector_insert(insert_data)
@@ -2192,11 +2206,13 @@ class TestCollectionMaintenance(TestBase):
             c = Collection(name)
             c.flush()
         # Compact collection
-        response = client.compact(name)
+        response = client.compact(name, is_clustering=True)
         assert response["code"] == 0
+        compaction_id = response.get("data", {}).get("compactionID")
+        assert isinstance(compaction_id, int) and compaction_id > 0, response
 
         # Get compaction state
-        response = client.get_compaction_state(name)
+        response = client.get_compaction_state(compaction_id)
         assert response["code"] == 0
         assert "state" in response["data"]
         assert "compactionID" in response["data"]
