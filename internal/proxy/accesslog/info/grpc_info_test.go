@@ -26,6 +26,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -309,6 +310,50 @@ func (s *GrpcAccessInfoSuite) TestClientRequestTime() {
 	})
 	s.info.ctx = ctx
 	s.NotEqual(Unknown, Get(s.info, "$client_request_time")[0])
+}
+
+func (s *GrpcAccessInfoSuite) TestTraceID() {
+	s.Equal(Unknown, s.info.TraceID())
+
+	// 1. Test with incoming metadata (should be ignored, returns Unknown)
+	md := metadata.MD{ClientRequestIDKey: []string{"test-trace-incoming"}}
+	s.info.ctx = metadata.NewIncomingContext(context.Background(), md)
+	s.Equal(Unknown, s.info.TraceID())
+
+	// 2. Test with outgoing metadata but no client_request_id
+	md = metadata.MD{"some-other-key": []string{"value"}}
+	s.info.ctx = metadata.NewOutgoingContext(context.Background(), md)
+	s.NotPanics(func() {
+		s.Equal(Unknown, s.info.TraceID())
+	})
+
+	// 3. Test with outgoing metadata having an empty client_request_id slice
+	md = metadata.MD{ClientRequestIDKey: []string{}}
+	s.info.ctx = metadata.NewOutgoingContext(context.Background(), md)
+	s.NotPanics(func() {
+		s.Equal(Unknown, s.info.TraceID())
+	})
+
+	// 4. Test with outgoing metadata and client_request_id
+	md = metadata.MD{ClientRequestIDKey: []string{"test-trace-outgoing"}}
+	s.info.ctx = metadata.NewOutgoingContext(context.Background(), md)
+	s.Equal("test-trace-outgoing", s.info.TraceID())
+
+	// 5. Test with valid OpenTelemetry trace ID (no outgoing metadata)
+	validTraceID := trace.TraceID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16})
+	spanCtx := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    validTraceID,
+		SpanID:     trace.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}),
+		TraceFlags: trace.FlagsSampled,
+	})
+	ctxWithTrace := trace.ContextWithSpanContext(context.Background(), spanCtx)
+	s.info.ctx = ctxWithTrace
+	s.Equal(validTraceID.String(), s.info.TraceID())
+
+	// 6. Test with valid OpenTelemetry trace ID + outgoing metadata lacking client_request_id
+	md = metadata.MD{"some-other-key": []string{"value"}}
+	s.info.ctx = metadata.NewOutgoingContext(ctxWithTrace, md)
+	s.Equal(validTraceID.String(), s.info.TraceID())
 }
 
 func (s *GrpcAccessInfoSuite) TestTemplateValueLength() {
