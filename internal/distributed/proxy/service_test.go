@@ -58,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/netutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/uniquegenerator"
 )
@@ -881,6 +882,59 @@ func Test_NewServer_HTTPServer_Enabled(t *testing.T) {
 	}()
 	// if disable works path not registered, so it shall not panic
 	server.registerHTTPServer()
+}
+
+func Test_NewServer_HTTPServer_TimeoutDefaults(t *testing.T) {
+	server := getServer(t)
+	startProxyHTTPServerForTest(t, server)
+
+	assert.Equal(t, 5*time.Second, server.httpServer.ReadHeaderTimeout)
+	assert.Equal(t, time.Duration(0), server.httpServer.ReadTimeout)
+	assert.Equal(t, time.Duration(0), server.httpServer.WriteTimeout)
+	assert.Equal(t, 300*time.Second, server.httpServer.IdleTimeout)
+	assert.Equal(t, 16<<20, server.httpServer.MaxHeaderBytes)
+}
+
+func Test_NewServer_HTTPServer_TimeoutConfigOverrides(t *testing.T) {
+	params := paramtable.Get()
+	params.Save("proxy.http.readHeaderTimeout", "7s")
+	params.Save("proxy.http.readTimeout", "8s")
+	params.Save("proxy.http.writeTimeout", "9s")
+	params.Save("proxy.http.idleTimeout", "10s")
+	params.Save("proxy.http.maxHeaderBytes", "2048")
+	t.Cleanup(func() {
+		params.Reset("proxy.http.readHeaderTimeout")
+		params.Reset("proxy.http.readTimeout")
+		params.Reset("proxy.http.writeTimeout")
+		params.Reset("proxy.http.idleTimeout")
+		params.Reset("proxy.http.maxHeaderBytes")
+	})
+
+	server := getServer(t)
+	startProxyHTTPServerForTest(t, server)
+
+	assert.Equal(t, 7*time.Second, server.httpServer.ReadHeaderTimeout)
+	assert.Equal(t, 8*time.Second, server.httpServer.ReadTimeout)
+	assert.Equal(t, 9*time.Second, server.httpServer.WriteTimeout)
+	assert.Equal(t, 10*time.Second, server.httpServer.IdleTimeout)
+	assert.Equal(t, 2048, server.httpServer.MaxHeaderBytes)
+}
+
+func startProxyHTTPServerForTest(t *testing.T, server *Server) {
+	t.Helper()
+
+	listener, err := netutil.NewListener()
+	assert.NoError(t, err)
+	server.listenerManager = &listenerManager{httpListener: listener}
+
+	errChan := make(chan error, 2)
+	server.wg.Add(1)
+	go server.startHTTPServer(errChan)
+	assert.NoError(t, <-errChan)
+	t.Cleanup(func() {
+		assert.NoError(t, server.httpServer.Close())
+		server.wg.Wait()
+	})
 }
 
 func getServer(t *testing.T) *Server {

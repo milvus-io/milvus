@@ -386,6 +386,11 @@ proxy:
     port:  # high-level restful api
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
     enablePprof: true # Whether to enable pprof middleware on the metrics port
+    readHeaderTimeout: 5s # HTTP server timeout for reading request headers
+    readTimeout: 0s # HTTP server timeout for reading the entire request, including the body. 0 disables this timeout
+    writeTimeout: 0s # HTTP server timeout for handling requests and writing responses. 0 disables this timeout
+    idleTimeout: 300s # HTTP server keep-alive idle timeout
+    maxHeaderBytes: 16777216 # Maximum number of bytes the HTTP server reads from request headers. Defaults to 16MiB to match grpc-go's max header list size, since in shared-port mode this server also serves external gRPC over HTTP/2
     hstsMaxAge: 31536000 # Strict-Transport-Security max-age in seconds
     hstsIncludeSubDomains: false # Include subdomains in Strict-Transport-Security
     enableHSTS: false # Whether to enable setting the Strict-Transport-Security header
