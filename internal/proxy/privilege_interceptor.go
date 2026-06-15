@@ -12,8 +12,10 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
@@ -23,6 +25,8 @@ import (
 
 type PrivilegeFunc func(ctx context.Context, req interface{}) (context.Context, error)
 
+const RBACRoleContextKey = hook.HookContextKeyType("rbac-role")
+
 var (
 	initOnce                sync.Once
 	initPrivilegeGroupsOnce sync.Once
@@ -30,12 +34,20 @@ var (
 
 var roPrivileges, rwPrivileges, adminPrivileges map[string]struct{}
 
+func SetRBACRolesToContext(ctx context.Context, roles []string) context.Context {
+	rolesCopy := append([]string(nil), roles...)
+	return context.WithValue(ctx, RBACRoleContextKey, rolesCopy)
+}
+
 // UnaryServerInterceptor returns a new unary server interceptors that performs per-request privilege access.
 func UnaryServerInterceptor(privilegeFunc PrivilegeFunc) grpc.UnaryServerInterceptor {
 	privilege.InitPrivilegeGroups()
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		newCtx, err := privilegeFunc(ctx, req)
 		if err != nil {
+			hookutil.GetExtension().ReportAction(newCtx, req, &milvuspb.BoolResponse{
+				Status: merr.Status(err),
+			}, err, info.FullMethod, hookutil.ActionAuthorize)
 			return nil, err
 		}
 		return handler(newCtx, req)
@@ -67,6 +79,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		return ctx, err
 	}
 	roleNames = append(roleNames, util.RolePublic)
+	ctx = SetRBACRolesToContext(ctx, roleNames)
 	objectType := privilegeExt.ObjectType.String()
 	objectNameIndex := privilegeExt.ObjectNameIndex
 	objectName := funcutil.GetObjectName(req, objectNameIndex)
