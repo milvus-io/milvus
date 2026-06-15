@@ -79,6 +79,7 @@ DiskFileManagerImpl::DiskFileManagerImpl(
     plugin_context_ = fileManagerContext.plugin_context;
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
     stats_base_path_ = fileManagerContext.stats_base_path;
+    storage_column_mappings_ = fileManagerContext.storage_column_mappings;
 }
 
 DiskFileManagerImpl::~DiskFileManagerImpl() {
@@ -801,12 +802,14 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
         AssertInfo(
             loon_ffi_properties_ != nullptr,
             "loon ffi properties is null when build index with manifest");
-        field_datas = GetFieldDatasFromManifest(manifest_path_str,
-                                                loon_ffi_properties_,
-                                                field_meta_,
-                                                data_type,
-                                                dim,
-                                                element_type);
+        field_datas = GetFieldDatasFromManifest(
+            manifest_path_str,
+            loon_ffi_properties_,
+            field_meta_,
+            data_type,
+            dim,
+            element_type,
+            GetStorageColumnMapping(field_meta_.field_id));
     } else {
         field_datas = GetFieldDatasFromStorageV2(all_remote_files,
                                                  GetFieldDataMeta().field_id,
@@ -1271,12 +1274,14 @@ DiskFileManagerImpl::cache_opt_field_to_disk_v3(const Config& config) {
                                                   field_meta_.segment_id,
                                                   field_id,
                                                   field_schema};
-        auto field_datas = GetFieldDatasFromManifest(manifest_path_str,
-                                                     loon_ffi_properties_,
-                                                     field_meta,
-                                                     field_type,
-                                                     1,  // scalar field
-                                                     element_type);
+        auto field_datas =
+            GetFieldDatasFromManifest(manifest_path_str,
+                                      loon_ffi_properties_,
+                                      field_meta,
+                                      field_type,
+                                      1,  // scalar field
+                                      element_type,
+                                      GetStorageColumnMapping(field_id));
 
         if (WriteOptFieldIvfData(field_type,
                                  field_id,

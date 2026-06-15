@@ -16,11 +16,24 @@ package packed
 
 /*
 #cgo pkg-config: milvus_core milvus-storage
+#include <stdint.h>
 #include <stdlib.h>
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/ffi_exttable_c.h"
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
+
+LoonFFIResult loon_milvus_table_create_manifest_from_segment_manifests(
+    const char* base_path,
+    char** source_manifest_paths,
+    const int64_t* source_row_counts,
+    size_t num_source_manifests,
+    char** target_columns,
+    size_t num_target_columns,
+    const char* external_source,
+    const LoonProperties* properties,
+    int has_external_primary_key,
+    char** out_manifest_path);
 */
 import "C"
 
@@ -35,18 +48,25 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+)
+
+const (
+	milvusTableSourceManifestPathProperty = "milvus_table.source_manifest_path"
+	milvusTableSourceRowCountProperty     = "milvus_table.source_row_count"
 )
 
 // Fragment represents a data fragment from an external data source.
 // A large file (e.g., 10M rows) can be split into multiple fragments.
 type Fragment struct {
-	FragmentID int64  // Unique fragment identifier
-	FilePath   string // File path
-	StartRow   int64  // Start row index within the file (inclusive)
-	EndRow     int64  // End row index within the file (exclusive)
-	RowCount   int64  // Number of rows (EndRow - StartRow)
+	FragmentID int64                 // Unique fragment identifier
+	FilePath   string                // File path
+	StartRow   int64                 // Start row index within the file (inclusive)
+	EndRow     int64                 // End row index within the file (exclusive)
+	RowCount   int64                 // Number of rows (EndRow - StartRow)
+	Deltalogs  []*datapb.FieldBinlog // Source delete logs for milvus-table fragments
 }
 
 type manifestColumnGroup struct {
@@ -183,6 +203,112 @@ func CreateManifestForSegment(
 	return MarshalManifestPath(basePath, int64(committedVersion)), nil
 }
 
+// CreateMilvusTableManifestFromSegmentManifests builds a target external
+// segment manifest by importing source StorageV3 column groups from a Milvus
+// snapshot. Real-PK milvus-table segments also import source segment deltas and
+// bloom-filter stats; virtual-PK segments skip them because DataNode translates
+// source-PK deletes into target virtual-PK deltalogs after manifest creation.
+// The source manifests are carried in Fragment.FilePath.
+func CreateMilvusTableManifestFromSegmentManifests(
+	basePath string,
+	columns []string,
+	fragments []Fragment,
+	storageConfig *indexpb.StorageConfig,
+	extfs ExternalSpecContext,
+) (string, error) {
+	if len(fragments) == 0 {
+		return "", fmt.Errorf("fragments cannot be empty")
+	}
+	if len(fragments) != 1 {
+		return "", fmt.Errorf("milvus-table requires exactly one source fragment per target segment, got %d", len(fragments))
+	}
+	if len(columns) == 0 {
+		return "", fmt.Errorf("columns cannot be empty")
+	}
+	for _, fragment := range fragments {
+		if fragment.RowCount <= 0 {
+			return "", fmt.Errorf("milvus-table source fragment %s has non-positive row count %d", fragment.FilePath, fragment.RowCount)
+		}
+	}
+
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create properties: %w", err)
+	}
+	defer C.loon_properties_free(cProperties)
+	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
+		return "", fmt.Errorf("inject extfs: %w", err)
+	}
+
+	cBasePath := C.CString(basePath)
+	defer C.free(unsafe.Pointer(cBasePath))
+	cExternalSource := C.CString(extfs.Source)
+	defer C.free(unsafe.Pointer(cExternalSource))
+
+	cPaths := make([]*C.char, len(fragments))
+	cRowCounts := make([]C.int64_t, len(fragments))
+	for i, fragment := range fragments {
+		cPaths[i] = C.CString(fragment.FilePath)
+		cRowCounts[i] = C.int64_t(fragment.RowCount)
+	}
+	defer func() {
+		for _, cPath := range cPaths {
+			C.free(unsafe.Pointer(cPath))
+		}
+	}()
+
+	var cPathsPtr **C.char
+	if len(cPaths) > 0 {
+		cPathsPtr = &cPaths[0]
+	}
+	var cRowCountsPtr *C.int64_t
+	if len(cRowCounts) > 0 {
+		cRowCountsPtr = &cRowCounts[0]
+	}
+
+	cColumns := make([]*C.char, len(columns))
+	for i, column := range columns {
+		cColumns[i] = C.CString(column)
+	}
+	defer func() {
+		for _, cColumn := range cColumns {
+			C.free(unsafe.Pointer(cColumn))
+		}
+	}()
+
+	var cColumnsPtr **C.char
+	if len(cColumns) > 0 {
+		cColumnsPtr = &cColumns[0]
+	}
+
+	var outManifestPath *C.char
+	hasExternalPrimaryKey := C.int(0)
+	if extfs.MilvusTablePKMode.usesExternalPrimaryKey() {
+		hasExternalPrimaryKey = C.int(1)
+	}
+	result := C.loon_milvus_table_create_manifest_from_segment_manifests(
+		cBasePath,
+		cPathsPtr,
+		cRowCountsPtr,
+		C.size_t(len(cPaths)),
+		cColumnsPtr,
+		C.size_t(len(cColumns)),
+		cExternalSource,
+		cProperties,
+		hasExternalPrimaryKey,
+		&outManifestPath,
+	)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return "", err
+	}
+	if outManifestPath == nil {
+		return "", fmt.Errorf("loon_milvus_table_create_manifest_from_segment_manifests returned nil manifest path")
+	}
+	manifestPath := C.GoString(outManifestPath)
+	C.loon_free_cstr(outManifestPath)
+	return manifestPath, nil
+}
+
 // createColumnGroups creates a LoonColumnGroups structure from fragments.
 // This is an internal function used by CreateManifestForSegment.
 func createColumnGroups(
@@ -256,6 +382,8 @@ func createColumnGroups(
 	return outColumnGroups, nil
 }
 
+// GetManifestFieldIDs reads numeric field IDs stored as column names in a
+// StorageV3 manifest.
 func GetManifestFieldIDs(manifestPath string, storageConfig *indexpb.StorageConfig) (map[int64]struct{}, error) {
 	manifest, err := GetManifestHandle(manifestPath, storageConfig)
 	if err != nil {
@@ -445,6 +573,10 @@ func readColumnGroupsFromManifest(
 	defer C.loon_manifest_destroy(manifest)
 
 	cgroups := &manifest.column_groups
+	manifestDeltalogs, err := deltaLogsFromManifest(manifest)
+	if err != nil {
+		return nil, fmt.Errorf("read delta logs from manifest %s: %w", manifestPath, err)
+	}
 	if cgroups.column_group_array == nil && cgroups.num_of_column_groups > 0 {
 		return nil, merr.WrapErrServiceInternalMsg("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
 	}
@@ -504,6 +636,24 @@ func readColumnGroupsFromManifest(
 				startRow := int64(file.start_index)
 				endRow := int64(file.end_index)
 
+				sourceManifestPath := columnGroupFileProperty(file, milvusTableSourceManifestPathProperty)
+				if sourceManifestPath != "" {
+					rowCountText := columnGroupFileProperty(file, milvusTableSourceRowCountProperty)
+					rowCount, err := strconv.ParseInt(rowCountText, 10, 64)
+					if err != nil || rowCount <= 0 {
+						return nil, fmt.Errorf("invalid milvus-table source row count %q for %s", rowCountText, sourceManifestPath)
+					}
+					group.Fragments = append(group.Fragments, Fragment{
+						FragmentID: int64(len(group.Fragments)),
+						FilePath:   sourceManifestPath,
+						StartRow:   0,
+						EndRow:     rowCount,
+						RowCount:   rowCount,
+						Deltalogs:  manifestDeltalogs,
+					})
+					continue
+				}
+
 				group.Fragments = append(group.Fragments, Fragment{
 					FragmentID: int64(len(group.Fragments)),
 					FilePath:   filePath,
@@ -518,6 +668,50 @@ func readColumnGroupsFromManifest(
 	}
 
 	return groups, nil
+}
+
+func deltaLogsFromManifest(manifest *C.LoonManifest) ([]*datapb.FieldBinlog, error) {
+	if manifest == nil {
+		return nil, nil
+	}
+	numDeltaLogs := int(manifest.delta_logs.num_delta_logs)
+	if numDeltaLogs == 0 {
+		return nil, nil
+	}
+	if manifest.delta_logs.delta_log_paths == nil || manifest.delta_logs.delta_log_num_entries == nil {
+		return nil, fmt.Errorf("manifest has %d delta logs but missing delta log paths or entry counts", numDeltaLogs)
+	}
+	cPaths := unsafe.Slice(manifest.delta_logs.delta_log_paths, numDeltaLogs)
+	cNumEntries := unsafe.Slice(manifest.delta_logs.delta_log_num_entries, numDeltaLogs)
+	binlogs := make([]*datapb.Binlog, 0, numDeltaLogs)
+	for i, cPath := range cPaths {
+		if cPath == nil {
+			continue
+		}
+		binlogs = append(binlogs, &datapb.Binlog{
+			LogPath:    C.GoString(cPath),
+			EntriesNum: int64(cNumEntries[i]),
+		})
+	}
+	if len(binlogs) == 0 {
+		return nil, nil
+	}
+	return []*datapb.FieldBinlog{{Binlogs: binlogs}}, nil
+}
+
+func columnGroupFileProperty(file *C.LoonColumnGroupFile, key string) string {
+	if file == nil || file.num_properties == 0 || file.property_keys == nil || file.property_values == nil {
+		return ""
+	}
+	keys := unsafe.Slice(file.property_keys, int(file.num_properties))
+	values := unsafe.Slice(file.property_values, int(file.num_properties))
+	for i, cKey := range keys {
+		if cKey == nil || C.GoString(cKey) != key || values[i] == nil {
+			continue
+		}
+		return C.GoString(values[i])
+	}
+	return ""
 }
 
 func AppendSegmentManifestColumns(

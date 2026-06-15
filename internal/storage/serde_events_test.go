@@ -515,6 +515,57 @@ func TestManifestReaderExternalContext(t *testing.T) {
 	require.Equal(t, []string{"text_col", "101"}, reader.neededColumns)
 }
 
+func TestDeltalogReaderExternalContext(t *testing.T) {
+	storageConfig := &indexpb.StorageConfig{RootPath: "root"}
+	externalReader := packed.ExternalReaderContext{
+		CollectionID: 19530,
+		Source:       "s3://bucket/source",
+		Spec:         `{"format":"milvus-table"}`,
+	}
+	sourcePath := "s3://bucket/source/_delta/1"
+
+	var capturedPaths []string
+	var capturedBufferSize int64
+	var capturedStorageConfig *indexpb.StorageConfig
+	var capturedPluginContext *indexcgopb.StoragePluginContext
+	var capturedExternalReader packed.ExternalReaderContext
+	mock := mockey.Mock(packed.NewPackedReaderWithExtfs).To(
+		func(paths []string,
+			arrowSchema *arrow.Schema,
+			bufferSize int64,
+			cfg *indexpb.StorageConfig,
+			pluginContext *indexcgopb.StoragePluginContext,
+			ext packed.ExternalReaderContext,
+		) (*packed.PackedReader, error) {
+			require.NotNil(t, arrowSchema)
+			capturedPaths = append([]string(nil), paths...)
+			capturedBufferSize = bufferSize
+			capturedStorageConfig = cfg
+			capturedPluginContext = pluginContext
+			capturedExternalReader = ext
+			return &packed.PackedReader{}, nil
+		}).Build()
+	defer mock.UnPatch()
+
+	reader, err := NewDeltalogReader(
+		schemapb.DataType_Int64,
+		[]string{sourcePath},
+		WithVersion(StorageV3),
+		WithStorageConfig(storageConfig),
+		WithBufferSize(4096),
+		WithExternalReaderContext(externalReader),
+	)
+	require.NoError(t, err)
+	record, err := reader.Next()
+	require.Nil(t, record)
+	require.ErrorIs(t, err, io.EOF)
+	require.Equal(t, []string{sourcePath}, capturedPaths)
+	require.Equal(t, int64(4096), capturedBufferSize)
+	require.Same(t, storageConfig, capturedStorageConfig)
+	require.Nil(t, capturedPluginContext)
+	require.Equal(t, externalReader, capturedExternalReader)
+}
+
 func TestManifestReaderExternalContextErrors(t *testing.T) {
 	storageConfig := &indexpb.StorageConfig{RootPath: "root"}
 	badSchema := &schemapb.CollectionSchema{

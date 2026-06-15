@@ -73,7 +73,12 @@ func SampleExternalFieldSizes(
 	var cSchema C.CProto
 	var schemaBytes []byte
 	if schema != nil {
-		schemaBytes, err = proto.Marshal(schema)
+		schemaForSample := schema
+		if schemaForSample.GetExternalSpec() == "" && externalSpec != "" {
+			schemaForSample = proto.Clone(schemaForSample).(*schemapb.CollectionSchema)
+			schemaForSample.ExternalSpec = externalSpec
+		}
+		schemaBytes, err = proto.Marshal(schemaForSample)
 		if err != nil {
 			return nil, merr.WrapErrStorage(err, "failed to marshal collection schema")
 		}

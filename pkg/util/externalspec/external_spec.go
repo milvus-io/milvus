@@ -23,39 +23,41 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // File formats supported by external collections. Mirror of LOON_FORMAT_*
 // in the C++ FFI layer — keep the two in sync.
 const (
-	FormatParquet      = "parquet"
-	FormatLanceTable   = "lance-table"
-	FormatVortex       = "vortex"
-	FormatIcebergTable = "iceberg-table"
+	FormatParquet      = specutil.FormatParquet
+	FormatLanceTable   = specutil.FormatLanceTable
+	FormatVortex       = specutil.FormatVortex
+	FormatIcebergTable = specutil.FormatIcebergTable
+	FormatMilvusTable  = specutil.FormatMilvusTable
 )
 
 // ExtfsKey* are the canonical spec.extfs key names. Use these instead of
 // string literals; keep in sync with kAllowedExtfsSpecKeys / kExtfsFields in
 // internal/core/src/storage/loon_ffi/util.cpp.
 const (
-	ExtfsKeyAccessKeyID             = "access_key_id"
-	ExtfsKeyAccessKeyValue          = "access_key_value"
-	ExtfsKeyRoleARN                 = "role_arn"
-	ExtfsKeySessionName             = "session_name"
-	ExtfsKeyExternalID              = "external_id"
-	ExtfsKeyUseIAM                  = "use_iam"
-	ExtfsKeyAnonymous               = "anonymous"
-	ExtfsKeyGCPTargetServiceAccount = "gcp_target_service_account"
-	ExtfsKeyRegion                  = "region"
-	ExtfsKeyCloudProvider           = "cloud_provider"
-	ExtfsKeyBucketName              = "bucket_name"
-	ExtfsKeyIAMEndpoint             = "iam_endpoint"
-	ExtfsKeyStorageType             = "storage_type"
-	ExtfsKeySSLCACert               = "ssl_ca_cert"
-	ExtfsKeyUseSSL                  = "use_ssl"
-	ExtfsKeyUseVirtualHost          = "use_virtual_host"
-	ExtfsKeyLoadFrequency           = "load_frequency"
+	ExtfsKeyAccessKeyID             = specutil.ExtfsKeyAccessKeyID
+	ExtfsKeyAccessKeyValue          = specutil.ExtfsKeyAccessKeyValue
+	ExtfsKeyRoleARN                 = specutil.ExtfsKeyRoleARN
+	ExtfsKeySessionName             = specutil.ExtfsKeySessionName
+	ExtfsKeyExternalID              = specutil.ExtfsKeyExternalID
+	ExtfsKeyUseIAM                  = specutil.ExtfsKeyUseIAM
+	ExtfsKeyAnonymous               = specutil.ExtfsKeyAnonymous
+	ExtfsKeyGCPTargetServiceAccount = specutil.ExtfsKeyGCPTargetServiceAccount
+	ExtfsKeyRegion                  = specutil.ExtfsKeyRegion
+	ExtfsKeyCloudProvider           = specutil.ExtfsKeyCloudProvider
+	ExtfsKeyBucketName              = specutil.ExtfsKeyBucketName
+	ExtfsKeyIAMEndpoint             = specutil.ExtfsKeyIAMEndpoint
+	ExtfsKeyStorageType             = specutil.ExtfsKeyStorageType
+	ExtfsKeySSLCACert               = specutil.ExtfsKeySSLCACert
+	ExtfsKeyUseSSL                  = specutil.ExtfsKeyUseSSL
+	ExtfsKeyUseVirtualHost          = specutil.ExtfsKeyUseVirtualHost
+	ExtfsKeyLoadFrequency           = specutil.ExtfsKeyLoadFrequency
 )
 
 // Scheme* are URL schemes accepted in external_source.
@@ -101,94 +103,8 @@ var validCloudProviders = map[string]bool{
 	CloudProviderMinIO:   true,
 }
 
-// ExternalSpec represents the parsed external collection specification
-type ExternalSpec struct {
-	Format     string            `json:"format"`          // one of Format* constants
-	Columns    []string          `json:"columns"`         // optional: specific columns to load
-	Extfs      map[string]string `json:"extfs,omitempty"` // optional: extfs config overrides (non-sensitive only)
-	SnapshotID *int64            `json:"snapshot_id,omitempty"`
-}
-
-func (s *ExternalSpec) UnmarshalJSON(data []byte) error {
-	type externalSpec ExternalSpec
-	var raw struct {
-		externalSpec
-		SnapshotID json.RawMessage `json:"snapshot_id"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	*s = ExternalSpec(raw.externalSpec)
-	if len(raw.SnapshotID) == 0 || string(raw.SnapshotID) == "null" {
-		return nil
-	}
-	var n int64
-	if err := json.Unmarshal(raw.SnapshotID, &n); err == nil {
-		s.SnapshotID = &n
-		return nil
-	}
-	var str string
-	if err := json.Unmarshal(raw.SnapshotID, &str); err != nil {
-		return err
-	}
-	parsed, err := strconv.ParseInt(str, 10, 64)
-	if err != nil {
-		return err
-	}
-	s.SnapshotID = &parsed
-	return nil
-}
-
-func (s ExternalSpec) MarshalJSON() ([]byte, error) {
-	type externalSpec ExternalSpec
-	var raw struct {
-		externalSpec
-		SnapshotID *string `json:"snapshot_id,omitempty"`
-	}
-	raw.externalSpec = externalSpec(s)
-	if s.SnapshotID != nil {
-		str := strconv.FormatInt(*s.SnapshotID, 10)
-		raw.SnapshotID = &str
-	}
-	return json.Marshal(raw)
-}
-
-// supportedFormats lists the file formats supported for external collections
-var supportedFormats = map[string]bool{
-	FormatParquet:      true,
-	FormatLanceTable:   true,
-	FormatVortex:       true,
-	FormatIcebergTable: true,
-}
-
-// allowedExtfsKeys gates keys permitted in ExternalSpec.extfs. Persisted in
-// etcd as part of CollectionSchema. Keep in sync with C++ kAllowedExtfsSpecKeys.
-var allowedExtfsKeys = map[string]bool{
-	ExtfsKeyUseIAM:                  true,
-	ExtfsKeyUseSSL:                  true,
-	ExtfsKeyUseVirtualHost:          true,
-	ExtfsKeyRegion:                  true,
-	ExtfsKeyCloudProvider:           true,
-	ExtfsKeyIAMEndpoint:             true,
-	ExtfsKeyStorageType:             true,
-	ExtfsKeySSLCACert:               true,
-	ExtfsKeyAccessKeyID:             true,
-	ExtfsKeyAccessKeyValue:          true,
-	ExtfsKeyRoleARN:                 true,
-	ExtfsKeySessionName:             true,
-	ExtfsKeyExternalID:              true,
-	ExtfsKeyLoadFrequency:           true,
-	ExtfsKeyBucketName:              true,
-	ExtfsKeyGCPTargetServiceAccount: true,
-	ExtfsKeyAnonymous:               true,
-}
-
-var booleanExtfsKeys = map[string]bool{
-	ExtfsKeyUseIAM:         true,
-	ExtfsKeyUseSSL:         true,
-	ExtfsKeyUseVirtualHost: true,
-	ExtfsKeyAnonymous:      true,
-}
+// ExternalSpec represents the parsed external collection specification.
+type ExternalSpec = specutil.ExternalSpec
 
 // allowedExternalSourceSchemes lists URL schemes accepted in ExternalSource.
 // This is a defense-in-depth allowlist to prevent unvalidated SSRF / arbitrary
@@ -228,35 +144,11 @@ var secretExtfsKeys = map[string]bool{
 
 // ParseExternalSpec parses the JSON external spec string
 func ParseExternalSpec(specStr string) (*ExternalSpec, error) {
-	if specStr == "" {
-		return &ExternalSpec{Format: FormatParquet}, nil // default
+	spec, err := specutil.ParseExternalSpec(specStr)
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("%s", err.Error())
 	}
-
-	var spec ExternalSpec
-	if err := json.Unmarshal([]byte(specStr), &spec); err != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("invalid external spec JSON: %s", err.Error())
-	}
-
-	if spec.Format == "" {
-		spec.Format = FormatParquet // default format
-	}
-
-	if !supportedFormats[spec.Format] {
-		return nil, merr.WrapErrParameterInvalidMsg("unsupported format %q, supported formats: %s",
-			spec.Format, strings.Join(sortedKeys(supportedFormats), ", "))
-	}
-
-	for key, val := range spec.Extfs {
-		if !allowedExtfsKeys[key] {
-			return nil, merr.WrapErrParameterInvalidMsg("extfs key %q is not allowed; allowed keys: %s",
-				key, strings.Join(sortedKeys(allowedExtfsKeys), ", "))
-		}
-		if booleanExtfsKeys[key] && val != "true" && val != "false" {
-			return nil, merr.WrapErrParameterInvalidMsg("extfs key %q must be \"true\" or \"false\", got %q", key, val)
-		}
-	}
-
-	return &spec, nil
+	return spec, nil
 }
 
 func sortedKeys(m map[string]bool) []string {
@@ -531,7 +423,7 @@ func RedactExternalSpec(specStr string) string {
 	if err := json.Unmarshal([]byte(specStr), &spec); err != nil {
 		return "<invalid spec>"
 	}
-	if err := normalizeSnapshotID(spec); err != nil {
+	if err := normalizeInt64Field(spec, "snapshot_id"); err != nil {
 		return "<invalid spec>"
 	}
 	if err := redactExtfsSecrets(spec); err != nil {
@@ -544,27 +436,27 @@ func RedactExternalSpec(specStr string) string {
 	return string(out)
 }
 
-func normalizeSnapshotID(spec map[string]json.RawMessage) error {
-	snapshotRaw, ok := spec["snapshot_id"]
-	if !ok || len(snapshotRaw) == 0 || string(snapshotRaw) == "null" {
+func normalizeInt64Field(spec map[string]json.RawMessage, field string) error {
+	raw, ok := spec[field]
+	if !ok || len(raw) == 0 || string(raw) == "null" {
 		return nil
 	}
 
 	var n int64
-	if err := json.Unmarshal(snapshotRaw, &n); err == nil {
-		spec["snapshot_id"] = quotedInt64JSON(n)
+	if err := json.Unmarshal(raw, &n); err == nil {
+		spec[field] = quotedInt64JSON(n)
 		return nil
 	}
 
 	var str string
-	if err := json.Unmarshal(snapshotRaw, &str); err != nil {
+	if err := json.Unmarshal(raw, &str); err != nil {
 		return err
 	}
 	parsed, err := strconv.ParseInt(str, 10, 64)
 	if err != nil {
 		return err
 	}
-	spec["snapshot_id"] = quotedInt64JSON(parsed)
+	spec[field] = quotedInt64JSON(parsed)
 	return nil
 }
 
