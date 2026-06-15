@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/rbacutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -131,6 +132,7 @@ type IMetaTable interface {
 	ListCredentialUsernames(ctx context.Context) (*milvuspb.ListCredUsersResponse, error)
 
 	CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error
+	AlterRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error
 	DropRole(ctx context.Context, tenant string, roleName string) error
 	OperateUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error
 	SelectRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error)
@@ -1721,6 +1723,9 @@ func (mt *MetaTable) CheckIfCreateRole(ctx context.Context, in *milvuspb.CreateR
 	if funcutil.IsEmptyString(in.GetEntity().GetName()) {
 		return errEmptyRoleName
 	}
+	if err := validateRoleDescription(in.GetEntity().GetDescription()); err != nil {
+		return err
+	}
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()
 
@@ -1749,6 +1754,47 @@ func (mt *MetaTable) CreateRole(ctx context.Context, tenant string, entity *milv
 	defer mt.permissionLock.Unlock()
 
 	return mt.catalog.CreateRole(ctx, tenant, entity)
+}
+
+func (mt *MetaTable) CheckIfAlterRole(ctx context.Context, in *milvuspb.AlterRoleRequest) error {
+	if funcutil.IsEmptyString(in.GetRoleName()) {
+		return merr.WrapErrParameterInvalidMsg("role name is empty")
+	}
+	if util.IsBuiltinRole(in.GetRoleName()) || lo.Contains(util.DefaultRoles, in.GetRoleName()) {
+		return merr.WrapErrPrivilegeNotPermitted("the role[%s] is a builtin role, which can't be altered", in.GetRoleName())
+	}
+	if err := validateRoleDescription(in.GetDescription()); err != nil {
+		return err
+	}
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
+
+	if _, err := mt.catalog.ListRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: in.GetRoleName()}, false); err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return errRoleNotExists
+		}
+		return err
+	}
+	return nil
+}
+
+func (mt *MetaTable) AlterRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
+	if funcutil.IsEmptyString(entity.GetName()) {
+		return merr.WrapErrParameterInvalidMsg("role name is empty")
+	}
+	if util.IsBuiltinRole(entity.GetName()) || lo.Contains(util.DefaultRoles, entity.GetName()) {
+		return merr.WrapErrPrivilegeNotPermitted("the role[%s] is a builtin role, which can't be altered", entity.GetName())
+	}
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
+	if _, err := mt.catalog.ListRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.GetName()}, false); err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return errRoleNotExists
+		}
+		return err
+	}
+	return mt.catalog.AlterRole(ctx, tenant, entity)
 }
 
 func (mt *MetaTable) CheckIfDropRole(ctx context.Context, in *milvuspb.DropRoleRequest) error {
@@ -1783,6 +1829,10 @@ func (mt *MetaTable) CheckIfDropRole(ctx context.Context, in *milvuspb.DropRoleR
 		return errors.New(errMsg)
 	}
 	return nil
+}
+
+func validateRoleDescription(description string) error {
+	return rbacutil.ValidateRoleDescription(description, Params.ProxyCfg.MaxRoleDescriptionLength.GetAsInt())
 }
 
 // DropRole drop role info
@@ -1949,6 +1999,9 @@ func (mt *MetaTable) CheckIfRBACRestorable(ctx context.Context, req *milvuspb.Re
 	existRoleMap := lo.SliceToMap(existRoles, func(entity *milvuspb.RoleResult) (string, struct{}) { return entity.GetRole().GetName(), struct{}{} })
 	existRoleAfterRestoreMap := lo.SliceToMap(existRoles, func(entity *milvuspb.RoleResult) (string, struct{}) { return entity.GetRole().GetName(), struct{}{} })
 	for _, role := range meta.GetRoles() {
+		if err := validateRoleDescription(role.GetDescription()); err != nil {
+			return err
+		}
 		if _, ok := existRoleMap[role.GetName()]; ok {
 			return errors.Newf("role [%s] already exists", role.GetName())
 		}

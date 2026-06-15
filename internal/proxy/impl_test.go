@@ -47,12 +47,14 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	pulsar2 "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
+	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
@@ -176,6 +178,86 @@ func TestProxy_CheckHealth(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, true, resp.IsHealthy)
 	})
+}
+
+func TestProxyRoleDescriptionValidation(t *testing.T) {
+	paramtable.Init()
+	node := &Proxy{mixCoord: NewMixCoordMock()}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	ctx := context.Background()
+
+	paramtable.Get().Save(Params.ProxyCfg.MaxRoleDescriptionLength.Key, "4")
+	defer paramtable.Get().Reset(Params.ProxyCfg.MaxRoleDescriptionLength.Key)
+
+	status, err := node.CreateRole(ctx, &milvuspb.CreateRoleRequest{
+		Entity: &milvuspb.RoleEntity{
+			Name:        "role_desc",
+			Description: "12345",
+		},
+	})
+	require.NoError(t, err)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	status, err = node.AlterRole(ctx, &milvuspb.AlterRoleRequest{
+		RoleName:    "role_desc",
+		Description: "12345",
+	})
+	require.NoError(t, err)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	status, err = node.AlterRole(ctx, &milvuspb.AlterRoleRequest{
+		RoleName:    util.RoleAdmin,
+		Description: "ok",
+	})
+	require.NoError(t, err)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	status, err = node.RestoreRBAC(ctx, &milvuspb.RestoreRBACMetaRequest{
+		RBACMeta: &milvuspb.RBACMeta{
+			Roles: []*milvuspb.RoleEntity{
+				{
+					Name:        "role_desc",
+					Description: "12345",
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+}
+
+func TestProxyRoleDescriptionForwarding(t *testing.T) {
+	paramtable.Init()
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	node := &Proxy{mixCoord: mixCoord}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	ctx := context.Background()
+
+	mixCoord.EXPECT().CreateRole(mock.Anything, mock.MatchedBy(func(req *milvuspb.CreateRoleRequest) bool {
+		return req.GetBase().GetMsgType() == commonpb.MsgType_CreateRole &&
+			req.GetEntity().GetName() == "role_desc_forward" &&
+			req.GetEntity().GetDescription() == "role description"
+	})).Return(merr.Success(), nil).Once()
+	status, err := node.CreateRole(ctx, &milvuspb.CreateRoleRequest{
+		Entity: &milvuspb.RoleEntity{
+			Name:        "role_desc_forward",
+			Description: "role description",
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, merr.Ok(status))
+
+	mixCoord.EXPECT().AlterRole(mock.Anything, mock.MatchedBy(func(req *milvuspb.AlterRoleRequest) bool {
+		return req.GetBase().GetMsgType() == commonpb.MsgType_AlterRole &&
+			req.GetRoleName() == "role_desc_forward" &&
+			req.GetDescription() == "updated role description"
+	})).Return(merr.Success(), nil).Once()
+	status, err = node.AlterRole(ctx, &milvuspb.AlterRoleRequest{
+		RoleName:    "role_desc_forward",
+		Description: "updated role description",
+	})
+	require.NoError(t, err)
+	require.True(t, merr.Ok(status))
 }
 
 func TestProxyRenameCollection(t *testing.T) {

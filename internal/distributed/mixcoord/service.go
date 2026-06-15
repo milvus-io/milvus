@@ -499,6 +499,10 @@ func (s *Server) CreateRole(ctx context.Context, request *milvuspb.CreateRoleReq
 	return s.mixCoord.CreateRole(ctx, request)
 }
 
+func (s *Server) AlterRole(ctx context.Context, request *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+	return s.mixCoord.AlterRole(ctx, request)
+}
+
 func (s *Server) DropRole(ctx context.Context, request *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
 	return s.mixCoord.DropRole(ctx, request)
 }

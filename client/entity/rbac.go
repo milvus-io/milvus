@@ -22,8 +22,9 @@ type User struct {
 }
 
 type Role struct {
-	RoleName   string
-	Privileges []GrantItem
+	RoleName    string
+	Description string
+	Privileges  []GrantItem
 }
 
 type GrantItem struct {

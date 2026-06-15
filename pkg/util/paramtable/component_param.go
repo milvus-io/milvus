@@ -2023,6 +2023,7 @@ type proxyConfig struct {
 	GinLogSkipPaths                ParamItem `refreshable:"false"`
 	MaxUserNum                     ParamItem `refreshable:"true"`
 	MaxRoleNum                     ParamItem `refreshable:"true"`
+	MaxRoleDescriptionLength       ParamItem `refreshable:"true"`
 	NameValidationAllowedChars     ParamItem `refreshable:"true"`
 	RoleNameValidationAllowedChars ParamItem `refreshable:"true"`
 	MaxTaskNum                     ParamItem `refreshable:"false"`
@@ -2250,6 +2251,16 @@ please adjust in embedded Milvus: false`,
 		PanicIfEmpty: true,
 	}
 	p.MaxRoleNum.Init(base.mgr)
+
+	p.MaxRoleDescriptionLength = ParamItem{
+		Key:          "proxy.maxRoleDescriptionLength",
+		DefaultValue: "1024",
+		Version:      "2.6.19",
+		PanicIfEmpty: true,
+		Doc:          "Maximum role description length in bytes.",
+		Export:       true,
+	}
+	p.MaxRoleDescriptionLength.Init(base.mgr)
 
 	p.NameValidationAllowedChars = ParamItem{
 		Key:          "proxy.nameValidation.allowedChars",

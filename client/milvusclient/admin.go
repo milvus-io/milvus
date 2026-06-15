@@ -141,7 +141,8 @@ func (c *Client) BackupRBAC(ctx context.Context, option BackupRBACOption, callOp
 			}),
 			Roles: lo.Map(rbacMeta.GetRoles(), func(role *milvuspb.RoleEntity, _ int) *entity.Role {
 				return &entity.Role{
-					RoleName: role.GetName(),
+					RoleName:    role.GetName(),
+					Description: role.GetDescription(),
 				}
 			}),
 			RoleGrants: lo.Map(rbacMeta.GetGrants(), func(grant *milvuspb.GrantEntity, _ int) *entity.RoleGrants {
@@ -186,7 +187,7 @@ func (opt *restoreRBACOption) Request() *milvuspb.RestoreRBACMetaRequest {
 				}
 			}),
 			Roles: lo.Map(opt.meta.Roles, func(role *entity.Role, _ int) *milvuspb.RoleEntity {
-				return &milvuspb.RoleEntity{Name: role.RoleName}
+				return &milvuspb.RoleEntity{Name: role.RoleName, Description: role.Description}
 			}),
 			Grants: lo.Map(opt.meta.RoleGrants, func(grant *entity.RoleGrants, _ int) *milvuspb.GrantEntity {
 				return &milvuspb.GrantEntity{
