@@ -1246,6 +1246,12 @@ func validateDropField(schema *schemapb.CollectionSchema, fieldName string) erro
 		return merr.WrapErrParameterInvalidMsg("field not found: %s", fieldName)
 	}
 
+	for _, property := range schema.GetProperties() {
+		if property.GetKey() == common.CollectionTTLFieldKey && property.GetValue() == fieldName {
+			return merr.WrapErrParameterInvalidMsg("cannot drop field %s because it is referenced by collection property %s, drop the property first", fieldName, common.CollectionTTLFieldKey)
+		}
+	}
+
 	// Check: cannot drop system fields
 	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName}, fieldName) {
 		return merr.WrapErrParameterInvalidMsg("cannot drop system field: %s", fieldName)

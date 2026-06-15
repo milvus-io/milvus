@@ -7888,6 +7888,24 @@ func TestValidateDropField(t *testing.T) {
 		assert.Contains(t, err.Error(), "cannot drop dynamic field")
 	})
 
+	t.Run("cannot drop active ttl field", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+				{FieldID: 102, Name: "ttl", DataType: schemapb.DataType_Timestamptz, Nullable: true},
+			},
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.CollectionTTLFieldKey, Value: "ttl"},
+			},
+		}
+
+		err := validateDropField(schema, "ttl")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "referenced by collection property ttl_field")
+	})
+
 	t.Run("field referenced by function - input", func(t *testing.T) {
 		err := validateDropField(baseSchema, "scalar_field")
 		assert.Error(t, err)
