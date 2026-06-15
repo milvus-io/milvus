@@ -2031,6 +2031,7 @@ type proxyConfig struct {
 	SkipPartitionKeyCheck          ParamItem `refreshable:"true"`
 	MaxVarCharLength               ParamItem `refreshable:"false"`
 	MaxTextLength                  ParamItem `refreshable:"false"`
+	MaxArrayCapacity               ParamItem `refreshable:"true"`
 	MaxResultEntries               ParamItem `refreshable:"true"`
 	EnableCachedServiceProvider    ParamItem `refreshable:"true"`
 	ResolveAliasForPrivilege       ParamItem `refreshable:"true"`
@@ -2490,6 +2491,22 @@ please adjust in embedded Milvus: false`,
 		Doc:          "maximum number of characters for a row of the text field",
 	}
 	p.MaxTextLength.Init(base.mgr)
+
+	p.MaxArrayCapacity = ParamItem{
+		Key:          "proxy.maxArrayCapacity",
+		Version:      "2.6.19",
+		DefaultValue: "4096",
+		PanicIfEmpty: true,
+		Doc:          "maximum number of elements in an array field for a single row",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt64(v) <= 0 {
+				return "4096"
+			}
+			return v
+		},
+	}
+	p.MaxArrayCapacity.Init(base.mgr)
 
 	p.MaxResultEntries = ParamItem{
 		Key:          "proxy.maxResultEntries",

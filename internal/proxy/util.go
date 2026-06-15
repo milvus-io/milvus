@@ -72,8 +72,6 @@ const (
 	// enableMultipleVectorFields indicates whether to enable multiple vector fields.
 	enableMultipleVectorFields = true
 
-	defaultMaxArrayCapacity = 4096
-
 	defaultMaxSearchRequest = 1024
 
 	// DefaultArithmeticIndexType name of default index type for scalar field
@@ -480,6 +478,7 @@ func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema)
 }
 
 func validateMaxCapacityPerRow(collectionName string, field *schemapb.FieldSchema) error {
+	maxArrayCapacity := Params.ProxyCfg.MaxArrayCapacity.GetAsInt64()
 	exist := false
 	for _, param := range field.TypeParams {
 		if param.Key != common.MaxCapacityKey {
@@ -490,8 +489,8 @@ func validateMaxCapacityPerRow(collectionName string, field *schemapb.FieldSchem
 		if err != nil {
 			return fmt.Errorf("the value for %s of field %s must be an integer", common.MaxCapacityKey, field.GetName())
 		}
-		if maxCapacityPerRow > defaultMaxArrayCapacity || maxCapacityPerRow <= 0 {
-			return errors.New("the maximum capacity specified for a Array should be in (0, 4096]")
+		if maxCapacityPerRow > maxArrayCapacity || maxCapacityPerRow <= 0 {
+			return fmt.Errorf("the maximum capacity specified for a Array should be in (0, %d]", maxArrayCapacity)
 		}
 		exist = true
 	}

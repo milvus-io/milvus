@@ -1802,8 +1802,9 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			if err != nil {
 				return merr.WrapErrParameterInvalidMsg("the value for %s of field %s must be an integer", common.MaxCapacityKey, fieldName)
 			}
-			if maxCapacityPerRow > defaultMaxArrayCapacity || maxCapacityPerRow <= 0 {
-				return merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", defaultMaxArrayCapacity)
+			maxArrayCapacity := Params.ProxyCfg.MaxArrayCapacity.GetAsInt64()
+			if maxCapacityPerRow > maxArrayCapacity || maxCapacityPerRow <= 0 {
+				return merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", maxArrayCapacity)
 			}
 		}
 	}
