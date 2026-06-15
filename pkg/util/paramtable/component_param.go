@@ -3665,6 +3665,7 @@ type queryNodeConfig struct {
 
 	// Idf Oracle
 	IDFPreload             ParamItem `refreshable:"true"`
+	IDFRemoteFetchOnly     ParamItem `refreshable:"true"`
 	IDFReadBufferSize      ParamItem `refreshable:"true"`
 	BM25StatsBytesPerEntry ParamItem `refreshable:"true"`
 	// partial search
@@ -3701,6 +3702,15 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Doc:          "Whether to parse and merge BM25 stats into current during load before first target. When false, stats are only written to disk and loaded on first SyncDistribution.",
 	}
 	p.IDFPreload.Init(base.mgr)
+
+	p.IDFRemoteFetchOnly = ParamItem{
+		Key:          "queryNode.idfOracle.remoteFetchOnly",
+		Version:      "2.6.15",
+		Export:       true,
+		DefaultValue: "false",
+		Doc:          "Whether sealed BM25 stats should skip local disk cache and be fetched directly from remote storage. When true, preload parses remote stats directly into current and later target updates fetch from remote storage on demand.",
+	}
+	p.IDFRemoteFetchOnly.Init(base.mgr)
 
 	p.IDFReadBufferSize = ParamItem{
 		Key:          "queryNode.idfOracle.readBufferSize",

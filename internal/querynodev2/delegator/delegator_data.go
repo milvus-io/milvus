@@ -425,7 +425,7 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 // idf oracle owns the full lifecycle: download, disk write, register, cleanup.
 func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
 	idfOracle := sd.getIDFOracle()
-	if idfOracle == nil {
+	if idfOracle == nil || len(infos) == 0 {
 		return nil
 	}
 
@@ -630,21 +630,20 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return sd.handleReopenPostLoad(ctx, req)
 	}
 
-	return sd.withPostLoadLimit(ctx, func() error {
-		infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
-			return !sd.distribution.SealedSegmentExistsOnNode(info.GetSegmentID(), targetNodeID)
-		})
+	infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
+		return !sd.distribution.SealedSegmentExistsOnNode(info.GetSegmentID(), targetNodeID)
+	})
 
+	// Load BM25 stats before loadStreamDelete so stats are ready before the segment becomes visible.
+	if err := sd.loadBM25Stats(ctx, infos, req); err != nil {
+		log.Warn("failed to load BM25 stats", zap.Error(err))
+		return err
+	}
+
+	return sd.withPostLoadLimit(ctx, func() error {
 		candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), infos...)
 		if err != nil {
 			log.Warn("failed to load bloom filter set for segment", zap.Error(err))
-			return err
-		}
-
-		// Load BM25 stats BEFORE loadStreamDelete so stats are ready before segment becomes visible
-		err = sd.loadBM25Stats(ctx, infos, req)
-		if err != nil {
-			log.Warn("failed to load BM25 stats", zap.Error(err))
 			return err
 		}
 
