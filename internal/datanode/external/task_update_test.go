@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -1122,6 +1123,95 @@ func (s *RefreshExternalCollectionTaskSuite) TestSegmentHasFunctionOutputColumns
 	s.True(hasColumns)
 }
 
+func (s *RefreshExternalCollectionTaskSuite) TestExternalColumnCoverageHelpers() {
+	s.Empty(targetExternalFields(nil))
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			{FieldID: 2, Name: "internal", DataType: schemapb.DataType_VarChar},
+			{FieldID: 3, Name: "category", DataType: schemapb.DataType_VarChar, ExternalField: "category"},
+		},
+	}
+	s.Equal(map[int64]string{1: "id", 3: "category"}, targetExternalFields(schema))
+
+	seg := &datapb.SegmentInfo{
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 1},
+			{FieldID: 100, ChildFields: []int64{2}},
+			{FieldID: 0},
+		},
+	}
+	coveredFields := coveredFieldsFromChildFields(seg)
+	_, covered := coveredFields[1]
+	s.True(covered)
+	_, covered = coveredFields[2]
+	s.True(covered)
+	_, covered = coveredFields[0]
+	s.False(covered)
+
+	s.False(segmentChildFieldsContainColumns(seg, []string{"bad"}))
+	s.False(segmentChildFieldsContainColumns(seg, []string{"1", "3"}))
+	s.True(segmentChildFieldsContainColumns(seg, []string{"2"}))
+
+	s.Nil(missingExternalColumns(seg, nil))
+	s.Equal([]string{"category"}, missingExternalColumns(seg, schema))
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestPatchSegmentForMissingColumnsErrors() {
+	paramtable.Init()
+
+	ctx := context.Background()
+	schema := &schemapb.CollectionSchema{
+		Version: 4,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "score", DataType: schemapb.DataType_Double, ExternalField: "score"},
+		},
+	}
+	task := NewRefreshExternalCollectionTask(ctx, &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:   s.collectionID,
+		ExternalSpec:   `{"format":"parquet"}`,
+		ExternalSource: "s3://bucket/data/",
+		StorageConfig:  &indexpb.StorageConfig{StorageType: "local"},
+		Schema:         schema,
+	})
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+	seg := &datapb.SegmentInfo{
+		ID:           10,
+		NumOfRows:    100,
+		ManifestPath: `{"base_path":"seg10","ver":1}`,
+	}
+	fragments := []packed.Fragment{{FilePath: "s3://bucket/data/a.parquet", StartRow: 0, EndRow: 100, RowCount: 100}}
+
+	mockAppend := mockey.Mock(packed.AppendSegmentManifestColumns).Return("", fmt.Errorf("append failed")).Build()
+	patched, err := task.patchSegmentForMissingColumns(ctx, seg, fragments, []string{"score"})
+	s.ErrorContains(err, "append failed")
+	s.Nil(patched)
+	mockAppend.UnPatch()
+
+	mockAppend = mockey.Mock(packed.AppendSegmentManifestColumns).Return(`{"base_path":"seg10","ver":2}`, nil).Build()
+	mockSample := mockey.Mock(packed.SampleExternalFieldSizes).Return(nil, fmt.Errorf("sample failed")).Build()
+	patched, err = task.patchSegmentForMissingColumns(ctx, seg, fragments, []string{"score"})
+	s.ErrorContains(err, "sample failed")
+	s.Nil(patched)
+	mockSample.UnPatch()
+
+	mockSample = mockey.Mock(packed.SampleExternalFieldSizes).Return(map[string]int64{"score": 0}, nil).Build()
+	patched, err = task.patchSegmentForMissingColumns(ctx, seg, fragments, []string{"score"})
+	s.ErrorContains(err, "non-positive average size")
+	s.Nil(patched)
+	mockSample.UnPatch()
+
+	zeroRowSegment := proto.Clone(seg).(*datapb.SegmentInfo)
+	zeroRowSegment.NumOfRows = 0
+	mockSample = mockey.Mock(packed.SampleExternalFieldSizes).Return(map[string]int64{"score": 8}, nil).Build()
+	patched, err = task.patchSegmentForMissingColumns(ctx, zeroRowSegment, fragments, []string{"score"})
+	s.ErrorContains(err, "non-positive memory size")
+	s.Nil(patched)
+	mockSample.UnPatch()
+	mockAppend.UnPatch()
+}
+
 func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegmentsFunctionOutputColumnError() {
 	ctx := context.Background()
 	req := &datapb.RefreshExternalCollectionTaskRequest{
@@ -1659,8 +1749,21 @@ func (s *RefreshExternalCollectionTaskSuite) TestFinalizeBM25StatsErrors() {
 	ctx := context.Background()
 	storageConfig := &indexpb.StorageConfig{RootPath: "files", StorageType: "local"}
 	manifestPath := packed.MarshalManifestPath("files/insert_log/1000/2000/3000", 42)
+	basePath := "files/insert_log/1000/2000/3000"
 	stats := storage.NewBM25Stats()
 	stats.Append(map[uint32]float32{1: 2})
+
+	bm25Statslogs, err := appendBM25Stats(ctx, nil, storageConfig, basePath, &packed.ManifestUpdates{}, nil)
+	s.NoError(err)
+	s.Nil(bm25Statslogs)
+
+	bm25Statslogs, err = appendBM25Stats(ctx, map[int64]*storage.BM25Stats{101: stats}, storageConfig, basePath, nil, map[int64]int64{101: 1})
+	s.ErrorContains(err, "manifest updates is nil")
+	s.Nil(bm25Statslogs)
+
+	bm25Statslogs, err = appendBM25Stats(ctx, map[int64]*storage.BM25Stats{101: stats}, storageConfig, basePath, &packed.ManifestUpdates{}, nil)
+	s.ErrorContains(err, "bm25 stats log id not allocated for field 101")
+	s.Nil(bm25Statslogs)
 
 	mockSerialize := mockey.Mock(mockey.GetMethod(stats, "Serialize")).Return(nil, fmt.Errorf("serialize failed")).Build()
 	gotManifest, err := finalizeBM25Stats(ctx, map[int64]*storage.BM25Stats{101: stats}, storageConfig, manifestPath)

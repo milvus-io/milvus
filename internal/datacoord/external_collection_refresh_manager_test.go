@@ -229,6 +229,98 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 	assert.Equal(t, int64(7), mt.segments.GetSegment(20).GetNumOfRows())
 }
 
+func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsNoTasks(t *testing.T) {
+	ctx := context.Background()
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	assert.NoError(t, err)
+
+	mgr := &externalCollectionRefreshManager{
+		refreshMeta: refreshMeta,
+	}
+
+	err = mgr.applyFinishedJobSegments(ctx, &datapb.ExternalCollectionRefreshJob{
+		JobId:        1,
+		CollectionId: 100,
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "has no tasks to apply")
+}
+
+func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsMissingCollection(t *testing.T) {
+	ctx := context.Background()
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	assert.NoError(t, err)
+
+	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+		TaskId:       1001,
+		JobId:        1,
+		CollectionId: 100,
+		State:        indexpb.JobState_JobStateFinished,
+		ResultReady:  true,
+	}))
+
+	mt := &meta{
+		catalog:     catalog,
+		segments:    NewSegmentsInfo(),
+		collections: newTestCollections(101),
+	}
+	mgr := &externalCollectionRefreshManager{
+		mt:          mt,
+		refreshMeta: refreshMeta,
+	}
+
+	err = mgr.applyFinishedJobSegments(ctx, &datapb.ExternalCollectionRefreshJob{
+		JobId:        1,
+		CollectionId: 100,
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "collection 100 not found in meta")
+}
+
+func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsSkipsNilUpdatedSegment(t *testing.T) {
+	ctx := context.Background()
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	assert.NoError(t, err)
+
+	mockTasks := mockey.Mock((*externalCollectionRefreshMeta).GetTasksByJobID).Return([]*datapb.ExternalCollectionRefreshTask{{
+		TaskId:       1001,
+		JobId:        1,
+		CollectionId: 100,
+		State:        indexpb.JobState_JobStateFinished,
+		ResultReady:  true,
+		UpdatedSegments: []*datapb.SegmentInfo{
+			nil,
+			newTestExternalRefreshSegment(10, 100, 7),
+		},
+	}}).Build()
+	defer mockTasks.UnPatch()
+
+	mt := &meta{
+		catalog:     catalog,
+		segments:    NewSegmentsInfo(),
+		collections: newTestCollections(100),
+	}
+	collection := mt.GetCollection(100)
+	assert.NotNil(t, collection)
+	collection.Schema = &schemapb.CollectionSchema{Version: 1}
+
+	mgr := &externalCollectionRefreshManager{
+		mt:          mt,
+		refreshMeta: refreshMeta,
+	}
+
+	err = mgr.applyFinishedJobSegments(ctx, &datapb.ExternalCollectionRefreshJob{
+		JobId:         1,
+		CollectionId:  100,
+		SchemaVersion: 1,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(10).GetState())
+}
+
 func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsNonFinishedTask(t *testing.T) {
 	ctx := context.Background()
 	catalog := &stubCatalog{}
@@ -421,6 +513,56 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsSchemaV
 	})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "schema changed during refresh")
+}
+
+func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsSegmentSchemaMismatch(t *testing.T) {
+	ctx := context.Background()
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	assert.NoError(t, err)
+
+	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+		TaskId:        1001,
+		JobId:         1,
+		CollectionId:  100,
+		State:         indexpb.JobState_JobStateFinished,
+		ResultReady:   true,
+		SchemaVersion: 4,
+		UpdatedSegments: []*datapb.SegmentInfo{{
+			ID:            20,
+			CollectionID:  100,
+			NumOfRows:     7,
+			SchemaVersion: 3,
+		}},
+	}))
+
+	mt := &meta{
+		catalog:     catalog,
+		segments:    NewSegmentsInfo(),
+		collections: newTestCollections(100),
+	}
+	collection := mt.GetCollection(100)
+	assert.NotNil(t, collection)
+	collection.Schema = &schemapb.CollectionSchema{Version: 4}
+
+	updateMock := mockey.Mock((*meta).UpdateSegmentsInfo).To(func(_ *meta, _ context.Context, _ ...UpdateOperator) error {
+		assert.FailNow(t, "schema-mismatched segment must not update segments")
+		return nil
+	}).Build()
+	defer updateMock.UnPatch()
+
+	mgr := &externalCollectionRefreshManager{
+		mt:          mt,
+		refreshMeta: refreshMeta,
+	}
+
+	err = mgr.applyFinishedJobSegments(ctx, &datapb.ExternalCollectionRefreshJob{
+		JobId:         1,
+		CollectionId:  100,
+		SchemaVersion: 4,
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "does not match job schema version")
 }
 
 // ==================== Test Functions ====================

@@ -17,7 +17,6 @@
 package segments
 
 import (
-	"fmt"
 	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -53,7 +52,7 @@ func ValidateExternalMaterializedFields(schema *schemapb.CollectionSchema, loadI
 		if fieldName == "" {
 			fieldName = strconv.FormatInt(missingFields[0].FieldID, 10)
 		}
-		return fmt.Errorf("external field %s is not materialized; run RefreshExternalCollection", fieldName)
+		return merr.WrapErrParameterInvalidMsg("external field %s is not materialized; run RefreshExternalCollection", fieldName)
 	}
 
 	return nil

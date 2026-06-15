@@ -76,10 +76,14 @@ func buildAlterSchemaReq(dbName, collName, inputField, outputField, funcName str
 
 type captureBroadcastAPI struct {
 	msg message.BroadcastMutableMessage
+	err error
 }
 
 func (b *captureBroadcastAPI) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 	b.msg = msg
+	if b.err != nil {
+		return nil, b.err
+	}
 	return &types.BroadcastAppendResult{}, nil
 }
 
@@ -591,12 +595,23 @@ func TestBroadcastAlterCollectionSchemaAddExternalField(t *testing.T) {
 		},
 		Properties: []*commonpb.KeyValuePair{{Key: common.MaxFieldIDKey, Value: "101"}},
 	}
+	structColl := coll.Clone()
+	structColl.StructArrayFields = []*model.StructArrayField{
+		{
+			FieldID: 200,
+			Name:    "profile",
+			Fields: []*model.Field{
+				{FieldID: 201, Name: "age", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+			},
+		},
+	}
 
 	for _, tc := range []struct {
-		name       string
-		collection *model.Collection
-		mutate     func(*milvuspb.AlterCollectionSchemaRequest, *schemapb.FieldSchema)
-		wantErr    string
+		name         string
+		collection   *model.Collection
+		mutate       func(*milvuspb.AlterCollectionSchemaRequest, *schemapb.FieldSchema)
+		broadcastErr error
+		wantErr      string
 	}{
 		{
 			name:       "reject internal collection",
@@ -610,6 +625,30 @@ func TestBroadcastAlterCollectionSchemaAddExternalField(t *testing.T) {
 				req.GetAction().GetAddRequest().DoPhysicalBackfill = true
 			},
 			wantErr: "does not support physical backfill",
+		},
+		{
+			name:       "reject missing field info",
+			collection: coll,
+			mutate: func(req *milvuspb.AlterCollectionSchemaRequest, field *schemapb.FieldSchema) {
+				req.GetAction().GetAddRequest().FieldInfos = nil
+			},
+			wantErr: "requires exactly one field_info",
+		},
+		{
+			name:       "reject nil field info",
+			collection: coll,
+			mutate: func(req *milvuspb.AlterCollectionSchemaRequest, field *schemapb.FieldSchema) {
+				req.GetAction().GetAddRequest().FieldInfos = []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{nil}
+			},
+			wantErr: "fieldInfo is nil",
+		},
+		{
+			name:       "reject nil field schema",
+			collection: coll,
+			mutate: func(req *milvuspb.AlterCollectionSchemaRequest, field *schemapb.FieldSchema) {
+				req.GetAction().GetAddRequest().FieldInfos[0].FieldSchema = nil
+			},
+			wantErr: "fieldSchema is nil",
 		},
 		{
 			name:       "reject missing external mapping",
@@ -636,10 +675,66 @@ func TestBroadcastAlterCollectionSchemaAddExternalField(t *testing.T) {
 			wantErr: "must not be marked as function output",
 		},
 		{
+			name:       "reject system field",
+			collection: coll,
+			mutate: func(req *milvuspb.AlterCollectionSchemaRequest, field *schemapb.FieldSchema) {
+				field.Name = common.RowIDFieldName
+			},
+			wantErr: "not support to add system field",
+		},
+		{
+			name:       "reject primary key field",
+			collection: coll,
+			mutate: func(req *milvuspb.AlterCollectionSchemaRequest, field *schemapb.FieldSchema) {
+				field.IsPrimaryKey = true
+			},
+			wantErr: "not support to add pk field",
+		},
+		{
+			name:       "reject auto id field",
+			collection: coll,
+			mutate: func(req *milvuspb.AlterCollectionSchemaRequest, field *schemapb.FieldSchema) {
+				field.AutoID = true
+			},
+			wantErr: "only primary field can speficy AutoID",
+		},
+		{
+			name:       "reject partition key field",
+			collection: coll,
+			mutate: func(req *milvuspb.AlterCollectionSchemaRequest, field *schemapb.FieldSchema) {
+				field.IsPartitionKey = true
+			},
+			wantErr: "not support to add partition key field",
+		},
+		{
+			name:       "reject clustering key field",
+			collection: coll,
+			mutate: func(req *milvuspb.AlterCollectionSchemaRequest, field *schemapb.FieldSchema) {
+				field.IsClusteringKey = true
+			},
+			wantErr: "not support to add clustering key field",
+		},
+		{
+			name:       "reject invalid field schema",
+			collection: coll,
+			mutate: func(req *milvuspb.AlterCollectionSchemaRequest, field *schemapb.FieldSchema) {
+				field.DataType = schemapb.DataType_ArrayOfStruct
+			},
+			wantErr: "failed to check field schema",
+		},
+		{
 			name:       "reject duplicate field name",
 			collection: coll,
 			mutate: func(req *milvuspb.AlterCollectionSchemaRequest, field *schemapb.FieldSchema) {
 				field.Name = "text"
+			},
+			wantErr: "field already exists",
+		},
+		{
+			name:       "reject duplicate struct subfield name",
+			collection: structColl,
+			mutate: func(req *milvuspb.AlterCollectionSchemaRequest, field *schemapb.FieldSchema) {
+				field.Name = storedRootStructSubFieldName("profile", "age")
 			},
 			wantErr: "field already exists",
 		},
@@ -651,6 +746,20 @@ func TestBroadcastAlterCollectionSchemaAddExternalField(t *testing.T) {
 			},
 			wantErr: "mapped by multiple fields",
 		},
+		{
+			name:       "reject cache expiration lookup failure",
+			collection: coll,
+			mutate: func(req *milvuspb.AlterCollectionSchemaRequest, field *schemapb.FieldSchema) {
+				req.CollectionName = collectionName + "_missing"
+			},
+			wantErr: "collection not found",
+		},
+		{
+			name:         "reject broadcast failure",
+			collection:   coll,
+			broadcastErr: errors.New("broadcast error"),
+			wantErr:      "broadcast error",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			field := baseField()
@@ -659,7 +768,7 @@ func TestBroadcastAlterCollectionSchemaAddExternalField(t *testing.T) {
 				tc.mutate(req, field)
 			}
 
-			err := core.broadcastAlterCollectionSchemaAdd(ctx, &captureBroadcastAPI{}, tc.collection, req)
+			err := core.broadcastAlterCollectionSchemaAdd(ctx, &captureBroadcastAPI{err: tc.broadcastErr}, tc.collection, req)
 			require.Error(t, err)
 			require.ErrorContains(t, err, tc.wantErr)
 		})

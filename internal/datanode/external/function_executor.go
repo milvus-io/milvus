@@ -470,7 +470,7 @@ func appendBM25Stats(
 	for outID, stats := range acc {
 		logID := bm25StatsLogIDs[outID]
 		if logID == 0 {
-			return nil, fmt.Errorf("bm25 stats log id not allocated for field %d", outID)
+			return nil, merr.WrapErrServiceInternalMsg("bm25 stats log id not allocated for field %d", outID)
 		}
 		blob, err := stats.Serialize()
 		if err != nil {

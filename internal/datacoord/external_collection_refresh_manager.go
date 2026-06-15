@@ -311,10 +311,10 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 
 	collection := m.mt.GetCollection(job.GetCollectionId())
 	if collection == nil {
-		return fmt.Errorf("collection %d not found in meta", job.GetCollectionId())
+		return merr.WrapErrServiceInternalMsg("collection %d not found in meta", job.GetCollectionId())
 	}
 	if collection.Schema.GetVersion() != job.GetSchemaVersion() {
-		return fmt.Errorf("external collection schema changed during refresh; rerun refresh")
+		return merr.WrapErrServiceInternalMsg("external collection schema changed during refresh; rerun refresh")
 	}
 
 	keptSet := make(map[int64]struct{})
@@ -352,7 +352,7 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 
 	for _, segment := range updatedSegments {
 		if segment.GetSchemaVersion() != job.GetSchemaVersion() {
-			return fmt.Errorf(
+			return merr.WrapErrServiceInternalMsg(
 				"refresh result segment %d schema version %d does not match job schema version %d",
 				segment.GetID(),
 				segment.GetSchemaVersion(),

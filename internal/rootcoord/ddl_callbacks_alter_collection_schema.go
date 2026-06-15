@@ -274,7 +274,7 @@ func (c *Core) broadcastAlterCollectionSchemaAddField(
 		return merr.WrapErrParameterInvalidMsg("not support to add clustering key field, field name = %s", fieldSchema.GetName())
 	}
 	if err := checkFieldSchema([]*schemapb.FieldSchema{fieldSchema}); err != nil {
-		return errors.Wrap(err, "failed to check field schema")
+		return merr.Wrap(err, "failed to check field schema")
 	}
 
 	fieldNameSet := make(map[string]struct{})
