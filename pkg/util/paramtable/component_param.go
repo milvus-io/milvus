@@ -5173,17 +5173,17 @@ type dataCoordConfig struct {
 	ChannelOperationRPCTimeout   ParamItem `refreshable:"true"`
 
 	// --- SEGMENTS ---
-	SegmentMaxSize                 ParamItem `refreshable:"false"`
-	DiskSegmentMaxSize             ParamItem `refreshable:"true"`
+	SegmentMaxSize     ParamItem `refreshable:"false"`
+	DiskSegmentMaxSize ParamItem `refreshable:"true"`
 
 	// shard split
-	ShardSplitEnable             ParamItem `refreshable:"true"`
-	ShardSplitCheckInterval      ParamItem `refreshable:"true"`
-	ShardSplitMaxShardSize       ParamItem `refreshable:"true"`
-	ShardSplitMaxShardRows       ParamItem `refreshable:"true"`
-	ShardSplitMaxNamespaceCount  ParamItem `refreshable:"true"`
-	ShardSplitMaxConcurrentTasks ParamItem `refreshable:"true"`
-	ShardSplitRelabelBatchSize   ParamItem `refreshable:"true"`
+	ShardSplitEnable               ParamItem `refreshable:"true"`
+	ShardSplitCheckInterval        ParamItem `refreshable:"true"`
+	ShardSplitMaxShardSize         ParamItem `refreshable:"true"`
+	ShardSplitMaxShardRows         ParamItem `refreshable:"true"`
+	ShardSplitMaxNamespaceCount    ParamItem `refreshable:"true"`
+	ShardSplitMaxConcurrentTasks   ParamItem `refreshable:"true"`
+	ShardSplitRelabelBatchSize     ParamItem `refreshable:"true"`
 	SegmentSealProportion          ParamItem `refreshable:"false"`
 	SegmentSealProportionJitter    ParamItem `refreshable:"true"`
 	SegAssignmentExpiration        ParamItem `refreshable:"false"`
@@ -5570,7 +5570,7 @@ disabling it stops new split tasks but never interrupts a task already past the 
 	p.ShardSplitCheckInterval = ParamItem{
 		Key:          "dataCoord.shardSplit.checkInterval",
 		Version:      "2.7.0",
-		DefaultValue: "60",
+		DefaultValue: "3600",
 		Doc:          "The interval in seconds the shard split trigger inspects the per-shard statistics.",
 		Export:       true,
 	}

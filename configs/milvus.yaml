@@ -720,7 +720,7 @@ dataCoord:
     # Master switch of online shard split. It gates the split trigger (automatic and manual);
     # disabling it stops new split tasks but never interrupts a task already past the write fence.
     enable: false
-    checkInterval: 60 # The interval in seconds the shard split trigger inspects the per-shard statistics.
+    checkInterval: 3600 # The interval in seconds the shard split trigger inspects the per-shard statistics.
     maxShardSize: 2048 # The data size of one shard that triggers a split, unit: GB.
     maxShardRows: 500000000 # The row count of one shard that triggers a split.
     maxNamespaceCount: 100000 # The namespace (partition) count of one shard that triggers a split.
