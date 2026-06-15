@@ -425,5 +425,8 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 	log.Ctx(ctx).Info("SetJobInfo for stats task success", zap.Int64("taskID", st.GetTaskID()),
 		zap.Int64("oldSegmentID", st.GetSegmentID()), zap.Int64("targetSegmentID", st.GetTargetSegmentID()),
 		zap.String("subJobType", st.GetSubJobType().String()), zap.String("state", st.GetState().String()))
+	if st.GetSubJobType() == indexpb.StatsSubJob_Sort && st.meta.GetHealthySegment(ctx, st.GetTargetSegmentID()) != nil {
+		notifySegmentIndexBuild(st.GetTargetSegmentID())
+	}
 	return nil
 }
