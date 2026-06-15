@@ -183,6 +183,28 @@ func (info *vchannelRecoveryInfo) ObserveDropCollection(msg message.ImmutableDro
 	info.dirty = true
 }
 
+// ObserveSplitShard is called when a split shard message is observed.
+// The vchannel is fenced by shard split: it never accepts new DML again,
+// and the state must survive restarts so the fence keeps holding after
+// recovery.
+func (info *vchannelRecoveryInfo) ObserveSplitShard(msg message.ImmutableSplitShardMessageV2) {
+	if msg.TimeTick() < info.meta.CheckpointTimeTick {
+		// the txn message will share the same time tick.
+		// (although the flush operation is not a txn message)
+		// so we only filter the time tick is less than the checkpoint time tick.
+		// Consistent state is guaranteed by the recovery storage's mutex.
+		return
+	}
+	if info.meta.State != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
+		// make it idempotent, a dropped or already splitted vchannel never
+		// goes back to normal.
+		return
+	}
+	info.meta.State = streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED
+	info.meta.CheckpointTimeTick = msg.TimeTick()
+	info.dirty = true
+}
+
 // ObserveDropPartition is called when a drop partition message is observed.
 func (info *vchannelRecoveryInfo) ObserveDropPartition(msg message.ImmutableDropPartitionMessageV1) {
 	if msg.TimeTick() < info.meta.CheckpointTimeTick {

@@ -34,6 +34,7 @@ var (
 	ErrSegmentNotFound                 = errors.New("segment not found")
 	ErrSegmentOnGrowing                = errors.New("segment on growing")
 	ErrFencedAssign                    = errors.New("fenced assign")
+	ErrVChannelFenced                  = errors.New("vchannel is fenced by shard split")
 
 	ErrTimeTickTooOld    = errors.New("time tick is too old")
 	ErrWaitForNewSegment = errors.New("wait for new segment")
@@ -182,6 +183,7 @@ func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*Coll
 			VChannel:     vchannelInfo.Vchannel,
 			PartitionIDs: currentPartition,
 			Schema:       latestSchema,
+			State:        vchannelInfo.State,
 		}
 	}
 	return collectionInfoMap
@@ -208,6 +210,10 @@ type CollectionInfo struct {
 	VChannel     string
 	PartitionIDs map[int64]struct{}
 	Schema       *streamingpb.CollectionSchemaOfVChannel
+	// State is the vchannel state of the collection on this pchannel.
+	// VCHANNEL_STATE_SPLITTED means the vchannel is fenced by shard split
+	// and never accepts new DML again.
+	State streamingpb.VChannelState
 }
 
 // SchemaVersion returns the current collection schema version for the write path.
@@ -266,6 +272,7 @@ func newCollectionInfo(vchannel string, partitionIDs []int64) *CollectionInfo {
 		VChannel:     vchannel,
 		PartitionIDs: make(map[int64]struct{}, len(partitionIDs)),
 		Schema:       nil, // Schema will be set when collection is created or altered
+		State:        streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
 	}
 	for _, partitionID := range partitionIDs {
 		info.PartitionIDs[partitionID] = struct{}{}
