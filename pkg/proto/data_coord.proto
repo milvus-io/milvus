@@ -1839,9 +1839,13 @@ message SplitShardTask {
   string source_vchannel               = 3;
   repeated SplitShardTaskTarget targets = 4;
   SplitShardTaskState state            = 5;
-  // switch_time_tick is T_switch: the time tick of the SplitShard message,
-  // persisted right after the fence succeeds. 0 means not fenced yet.
-  uint64 switch_time_tick              = 6;
+  // fenced is set once the SplitShard fence has been appended to the source
+  // vchannel (the append succeeded or returned already-fenced). A fenced task
+  // is forward-only and can no longer be aborted. DataCoord does not record
+  // T_switch: the target vchannels are created with a freshly allocated
+  // barrier (always greater than T_switch), and what is recorded is each
+  // target's consume start position.
+  bool fenced                          = 6;
   uint64 start_time                    = 7; // unix seconds.
   uint64 end_time                      = 8; // unix seconds.
   string fail_reason                   = 9;

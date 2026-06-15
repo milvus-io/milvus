@@ -111,9 +111,10 @@ func (m *shardSplitManager) advancePreparing(task *datapb.SplitShardTask) {
 	logger.Info("split targets planned, advance to fencing", zap.Int("targets", len(targets)))
 }
 
-// advanceFencing executes the write switch: it fences the source vchannel
-// (ManualFlush + SplitShard, T_switch persisted right after), then
-// initializes the target vchannels with BarrierTimeTick = T_switch.
+// advanceFencing executes the write switch: it fences the source vchannel with
+// a single SplitShard message, then creates the target vchannels with a freshly
+// allocated barrier time tick (always greater than T_switch). DataCoord never
+// records T_switch; what it records is each target's consume start position.
 func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 	logger := m.taskLogger(task)
 	collection := m.meta.GetCollection(task.GetCollectionId())
@@ -122,50 +123,53 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 		return
 	}
 
-	if task.GetSwitchTimeTick() == 0 {
+	if !task.GetFenced() {
 		// A single SplitShard message fences the source vchannel: the source
-		// streamingnode auto-flushes the growing segments as of T_switch and
-		// embeds their ids in the message, so no separate flush is appended.
-		result, err := streaming.SplitShard(m.ctx, m.wal, streaming.SplitShardParam{
+		// streamingnode auto-flushes the growing segments and embeds their ids.
+		// The append is idempotent — a retry on an already-fenced vchannel
+		// returns ErrSourceVChannelFenced, which is success: the fence holds and
+		// the barrier below is freshly allocated, so no exact T_switch is needed.
+		_, err := streaming.SplitShard(m.ctx, m.wal, streaming.SplitShardParam{
 			CollectionID:   task.GetCollectionId(),
 			SourceVChannel: task.GetSourceVchannel(),
 			SplitTaskID:    task.GetTaskId(),
 			Targets:        toMessageSplitTargets(task.GetTargets()),
 		})
-		if errors.Is(err, streaming.ErrSourceVChannelFenced) {
-			// fenced by a previous attempt but T_switch was lost before it
-			// was persisted; recovering it from the vchannel meta of the
-			// streamingnode is not wired yet.
-			logger.Warn("source vchannel already fenced but T_switch is unknown, manual intervention required", zap.Error(err))
-			return
-		}
-		if err != nil {
+		if err != nil && !errors.Is(err, streaming.ErrSourceVChannelFenced) {
 			logger.Warn("fence the source vchannel failed", zap.Error(err))
 			return
 		}
-		// persist T_switch before initializing the targets, so a crash here
-		// resumes with the recorded T_switch instead of hitting the fence.
+		// persist the fenced flag before creating the targets, so a crash here
+		// resumes forward-only (abort is refused once the source is fenced).
 		if err := m.updateTask(task, func(task *datapb.SplitShardTask) {
-			task.SwitchTimeTick = result.SwitchTimeTick
+			task.Fenced = true
 		}); err != nil {
-			logger.Warn("persist T_switch failed", zap.Error(err))
+			logger.Warn("persist the fenced flag failed", zap.Error(err))
 			return
 		}
 		task = m.mustGetTask(task.GetTaskId())
-		logger.Info("source vchannel fenced", zap.Uint64("switchTimeTick", result.SwitchTimeTick))
+		logger.Info("source vchannel fenced")
 	}
 
+	// The new vchannels are created strictly after the fence: a freshly
+	// allocated barrier is always greater than T_switch (the TSO is monotonic),
+	// so every message of the new WALs lands after the fence.
+	barrier, err := m.allocator.AllocTimestamp(m.ctx)
+	if err != nil {
+		logger.Warn("allocate the barrier timestamp failed", zap.Error(err))
+		return
+	}
 	startPositions, err := streaming.InitSplitTargetVChannels(m.ctx, m.wal, streaming.InitSplitTargetVChannelsParam{
-		CollectionID:   task.GetCollectionId(),
-		DBID:           collection.DatabaseID,
-		DBName:         collection.DatabaseName,
-		CollectionName: collection.Schema.GetName(),
-		Schema:         collection.Schema,
-		PartitionIDs:   collection.Partitions,
-		SplitTaskID:    task.GetTaskId(),
-		SourceVChannel: task.GetSourceVchannel(),
-		SwitchTimeTick: task.GetSwitchTimeTick(),
-		Targets:        toMessageSplitTargets(task.GetTargets()),
+		CollectionID:    task.GetCollectionId(),
+		DBID:            collection.DatabaseID,
+		DBName:          collection.DatabaseName,
+		CollectionName:  collection.Schema.GetName(),
+		Schema:          collection.Schema,
+		PartitionIDs:    collection.Partitions,
+		SplitTaskID:     task.GetTaskId(),
+		SourceVChannel:  task.GetSourceVchannel(),
+		BarrierTimeTick: barrier,
+		Targets:         toMessageSplitTargets(task.GetTargets()),
 	})
 	if err != nil {
 		logger.Warn("create the target vchannels failed", zap.Error(err))
@@ -178,8 +182,11 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 
 	if err := m.updateTask(task, func(task *datapb.SplitShardTask) {
 		// persist the consume start position of each target so the child
-		// delegators can be spawned from it after a crash.
+		// delegators can be spawned from it; keep the first one on a retry.
 		for _, target := range task.GetTargets() {
+			if target.GetStartPosition() != "" {
+				continue
+			}
 			if pos, ok := startPositions[target.GetVchannel()]; ok {
 				target.StartPosition = pos
 			}
@@ -276,7 +283,7 @@ func (m *shardSplitManager) updateTask(task *datapb.SplitShardTask, mutate func(
 
 // abortTask aborts a split task. Abort is only legal before the write fence.
 func (m *shardSplitManager) abortTask(task *datapb.SplitShardTask, reason string) {
-	if task.GetSwitchTimeTick() > 0 {
+	if task.GetFenced() {
 		m.taskLogger(task).Error("refuse to abort a split task past the write fence", zap.String("reason", reason))
 		return
 	}

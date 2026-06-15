@@ -205,39 +205,46 @@ func TestAdvanceFencing(t *testing.T) {
 			}).Times(2)
 
 		manager, catalog := newSplitExecutorManager(t, m, fencingTask(), wal, nil, &fakeSplitPlanner{})
-		// two persists: T_switch first, then the state transition.
+		// two persists: the fenced flag first, then the state transition.
 		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Times(2)
 
 		manager.advanceTasks()
 		task := manager.mustGetTask(100)
 		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, task.GetState())
-		assert.Equal(t, uint64(2000), task.GetSwitchTimeTick())
-		// every target created with T_switch as the barrier.
-		assert.Equal(t, map[string]uint64{"v1": 2000, "v2": 2000}, initialized)
+		assert.True(t, task.GetFenced())
+		// every target is created with the freshly allocated barrier (1000 from
+		// the mocked allocator), not T_switch.
+		assert.Equal(t, map[string]uint64{"v1": 1000, "v2": 1000}, initialized)
 		// the consume start position of each target is persisted.
 		for _, target := range task.GetTargets() {
 			assert.Equal(t, rmq.NewRmqID(9).Marshal(), target.GetStartPosition())
 		}
 	})
 
-	t.Run("already fenced without recorded T_switch stays", func(t *testing.T) {
+	t.Run("already fenced proceeds to create targets", func(t *testing.T) {
 		m := newSplitTestMeta(true, "v0", map[int64]int64{10: 80, 11: 40})
 		wal := mock_streaming.NewMockWALAccesser(t)
+		// the source was already fenced by a previous attempt: the retry returns
+		// SHARD_FENCED, treated as success, and the task rolls forward.
 		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
 			return msg.MessageType() == message.MessageTypeSplitShard
 		})).Return(nil, status.NewShardFenced("v0")).Once()
+		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
+			return msg.MessageType() == message.MessageTypeCreateVChannel
+		}), mock.Anything).Return(&types.AppendResult{MessageID: rmq.NewRmqID(3), TimeTick: 2100, LastConfirmedMessageID: rmq.NewRmqID(9)}, nil).Times(2)
 
-		manager, _ := newSplitExecutorManager(t, m, fencingTask(), wal, nil, &fakeSplitPlanner{})
+		manager, catalog := newSplitExecutorManager(t, m, fencingTask(), wal, nil, &fakeSplitPlanner{})
+		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Times(2)
 		manager.advanceTasks()
 		task := manager.mustGetTask(100)
-		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskFencing, task.GetState())
-		assert.Zero(t, task.GetSwitchTimeTick())
+		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, task.GetState())
+		assert.True(t, task.GetFenced())
 	})
 
 	t.Run("resume after T_switch persisted only initializes targets", func(t *testing.T) {
 		m := newSplitTestMeta(true, "v0", map[int64]int64{10: 80, 11: 40})
 		task := fencingTask()
-		task.SwitchTimeTick = 2000
+		task.Fenced = true
 		wal := mock_streaming.NewMockWALAccesser(t)
 		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
 			return msg.MessageType() == message.MessageTypeCreateVChannel
@@ -272,7 +279,7 @@ func TestAdvanceFencing(t *testing.T) {
 		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskFencing, manager.mustGetTask(100).GetState())
 	})
 
-	t.Run("create vchannel error keeps T_switch and stays in fencing", func(t *testing.T) {
+	t.Run("create vchannel error keeps the fence and stays in fencing", func(t *testing.T) {
 		m := newSplitTestMeta(true, "v0", map[int64]int64{10: 80})
 		wal := mock_streaming.NewMockWALAccesser(t)
 		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
@@ -285,12 +292,12 @@ func TestAdvanceFencing(t *testing.T) {
 		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Once() // T_switch persist
 		manager.advanceTasks()
 		task := manager.mustGetTask(100)
-		// T_switch is persisted, but target creation failed: stay in fencing and retry.
+		// the fence is persisted, but target creation failed: stay in fencing and retry.
 		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskFencing, task.GetState())
-		assert.Equal(t, uint64(2000), task.GetSwitchTimeTick())
+		assert.True(t, task.GetFenced())
 	})
 
-	t.Run("T_switch persist failure does not record the switch", func(t *testing.T) {
+	t.Run("fenced-flag persist failure does not record the fence", func(t *testing.T) {
 		m := newSplitTestMeta(true, "v0", map[int64]int64{10: 80})
 		wal := mock_streaming.NewMockWALAccesser(t)
 		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
@@ -301,7 +308,7 @@ func TestAdvanceFencing(t *testing.T) {
 		manager.advanceTasks()
 		task := manager.mustGetTask(100)
 		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskFencing, task.GetState())
-		assert.Zero(t, task.GetSwitchTimeTick())
+		assert.False(t, task.GetFenced())
 	})
 
 	t.Run("final persist failure stays in fencing", func(t *testing.T) {
@@ -314,7 +321,7 @@ func TestAdvanceFencing(t *testing.T) {
 			return msg.MessageType() == message.MessageTypeCreateVChannel
 		}), mock.Anything).Return(&types.AppendResult{MessageID: rmq.NewRmqID(3), TimeTick: 2100, LastConfirmedMessageID: rmq.NewRmqID(9)}, nil).Times(2)
 		manager, catalog := newSplitExecutorManager(t, m, fencingTask(), wal, nil, &fakeSplitPlanner{})
-		// T_switch persist succeeds, the final state-transition persist fails.
+		// the fenced-flag persist succeeds, the final state-transition persist fails.
 		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Once()
 		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(errors.New("save failed")).Once()
 		manager.advanceTasks()
@@ -330,7 +337,7 @@ func TestAdvanceRedistributing(t *testing.T) {
 
 	task := fencingTask()
 	task.State = datapb.SplitShardTaskState_SplitShardTaskRedistributing
-	task.SwitchTimeTick = 2000
+	task.Fenced = true
 
 	// three segments on the source vchannel: partitions 10/11/12 spread to
 	// the two targets by parity.
@@ -361,7 +368,7 @@ func TestAdvanceRedistributing(t *testing.T) {
 	taskC.TaskId = 300
 	taskC.SourceVchannel = "v8"
 	taskC.State = datapb.SplitShardTaskState_SplitShardTaskRedistributing
-	taskC.SwitchTimeTick = 2000
+	taskC.Fenced = true
 	mC := newSplitTestMeta(true, "v8", map[int64]int64{10: 10})
 	segmentID := mC.GetSegmentsByChannel("v8")[0].GetID()
 	mC.segments.SetIsCompacting(segmentID, true)
@@ -378,7 +385,7 @@ func TestAdvanceRedistributing(t *testing.T) {
 	task2.TaskId = 200
 	task2.SourceVchannel = "v9"
 	task2.State = datapb.SplitShardTaskState_SplitShardTaskRedistributing
-	task2.SwitchTimeTick = 2000
+	task2.Fenced = true
 	m2 := newSplitTestMeta(true, "v9", map[int64]int64{10: 10})
 	manager2, _ := newSplitExecutorManager(t, m2, task2, nil, nil, &fakeSplitPlanner{assignErr: errors.New("mock assign error")})
 	manager2.advanceTasks()
@@ -389,7 +396,7 @@ func TestAdvanceRedistributingSkipsImportingSegments(t *testing.T) {
 	paramtable.Init()
 	task := fencingTask()
 	task.State = datapb.SplitShardTaskState_SplitShardTaskRedistributing
-	task.SwitchTimeTick = 2000
+	task.Fenced = true
 
 	// one flushed segment and one still importing on the source vchannel.
 	m := newSplitTestMeta(true, "v0", map[int64]int64{10: 10})
@@ -417,7 +424,7 @@ func TestAdvanceRedistributingDrainWaitsForImportJob(t *testing.T) {
 	paramtable.Init()
 	task := fencingTask()
 	task.State = datapb.SplitShardTaskState_SplitShardTaskRedistributing
-	task.SwitchTimeTick = 2000
+	task.Fenced = true
 
 	// no segment remains on the source vchannel.
 	m := newSplitTestMeta(true, "v0", map[int64]int64{})
@@ -443,10 +450,21 @@ func TestAdvanceRedistributingDrainWaitsForImportJob(t *testing.T) {
 func TestAbortTaskRefusedPastFence(t *testing.T) {
 	paramtable.Init()
 	task := fencingTask()
-	task.SwitchTimeTick = 2000
+	task.Fenced = true
 	m := newSplitTestMeta(true, "v0", map[int64]int64{10: 80})
 	manager, _ := newSplitExecutorManager(t, m, task, nil, nil, &fakeSplitPlanner{})
 
 	manager.abortTask(manager.mustGetTask(100), "should be refused")
 	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskFencing, manager.mustGetTask(100).GetState())
+}
+
+func TestAbortTaskPersistFailure(t *testing.T) {
+	paramtable.Init()
+	m := newSplitTestMeta(true, "v0", map[int64]int64{10: 80})
+	manager, catalog := newSplitExecutorManager(t, m, preparingTask(), nil, nil, &fakeSplitPlanner{})
+	catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(errors.New("save failed")).Once()
+
+	manager.abortTask(manager.mustGetTask(100), "reason")
+	// the persist failed, so the task is not marked aborted in the cache.
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskPreparing, manager.mustGetTask(100).GetState())
 }
