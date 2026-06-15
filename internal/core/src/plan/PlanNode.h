@@ -714,12 +714,18 @@ class OrderByNode : public PlanNode {
                 std::vector<expr::FieldAccessTypeExprPtr>&& sorting_keys,
                 std::vector<SortOrder>&& sorting_orders,
                 int64_t limit,
-                std::vector<PlanNodePtr> sources)
+                std::vector<PlanNodePtr> sources,
+                RowTypePtr input_type = nullptr,
+                std::vector<FieldId>&& raw_input_field_ids =
+                    std::vector<FieldId>{},
+                bool use_raw_input = false)
         : PlanNode(id),
           sorting_keys_(std::move(sorting_keys)),
           sorting_orders_(std::move(sorting_orders)),
           limit_(limit),
-          sources_(std::move(sources)) {
+          sources_(std::move(sources)),
+          raw_input_field_ids_(std::move(raw_input_field_ids)),
+          use_raw_input_(use_raw_input) {
         AssertInfo(
             sorting_keys_.size() == sorting_orders_.size(),
             "Number of sorting keys ({}) must match number of sort orders ({})",
@@ -728,10 +734,20 @@ class OrderByNode : public PlanNode {
         AssertInfo(!sorting_keys_.empty(),
                    "OrderByNode requires at least one sorting key");
 
-        // OrderByNode always requires a source node that produces data to sort.
-        AssertInfo(!sources_.empty() && sources_[0]->output_type(),
-                   "OrderByNode requires a source node with valid output type");
-        output_type_ = sources_[0]->output_type();
+        // Raw ORDER BY consumes bitmap input from MvccNode and defines its own
+        // pipeline output layout. Materialized ORDER BY inherits source output.
+        AssertInfo(!sources_.empty(), "OrderByNode requires a source node");
+        if (use_raw_input_) {
+            output_type_ = std::move(input_type);
+            AssertInfo(output_type_ != nullptr && output_type_->column_count() > 0,
+                       "raw ORDER BY requires non-empty input type");
+            AssertInfo(output_type_->column_count() == raw_input_field_ids_.size(),
+                       "raw ORDER BY input type and field id list must match");
+        } else {
+            output_type_ = sources_[0]->output_type();
+            AssertInfo(output_type_ != nullptr && output_type_->column_count() > 0,
+                       "OrderByNode requires source node with non-empty output type");
+        }
     }
 
     RowTypePtr
@@ -783,11 +799,23 @@ class OrderByNode : public PlanNode {
         return limit_;
     }
 
+    const std::vector<FieldId>&
+    RawInputFieldIds() const {
+        return raw_input_field_ids_;
+    }
+
+    bool
+    UseRawInput() const {
+        return use_raw_input_;
+    }
+
  private:
     const std::vector<expr::FieldAccessTypeExprPtr> sorting_keys_;
     const std::vector<SortOrder> sorting_orders_;
     const int64_t limit_;
     const std::vector<PlanNodePtr> sources_;
+    const std::vector<FieldId> raw_input_field_ids_;
+    const bool use_raw_input_;
     RowTypePtr output_type_;
 };
 

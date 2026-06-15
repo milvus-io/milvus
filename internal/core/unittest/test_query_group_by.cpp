@@ -122,7 +122,7 @@ countValidRows(const GeneratedData& data, FieldId field_id) {
     return std::count(valid_data.begin(), valid_data.end(), true);
 }
 
-TEST_P(QueryAggTest, ProtoCountFieldUsesValidityOnlyProjection) {
+TEST_P(QueryAggTest, ProtoCountFieldUsesRawAggregationInput) {
     proto::plan::PlanNode plan_node;
     auto* query = plan_node.mutable_query();
     query->set_limit(num_rows_);
@@ -136,19 +136,12 @@ TEST_P(QueryAggTest, ProtoCountFieldUsesValidityOnlyProjection) {
     auto agg_node = std::dynamic_pointer_cast<plan::AggregationNode>(
         retrieve_plan->plan_node_->plannodes_);
     ASSERT_NE(agg_node, nullptr);
-    ASSERT_EQ(agg_node->sources().size(), 1);
-    auto project_node =
-        std::dynamic_pointer_cast<plan::ProjectNode>(agg_node->sources()[0]);
-    ASSERT_NE(project_node, nullptr);
-    ASSERT_EQ(project_node->FieldsToProject().size(), 1);
-    ASSERT_EQ(project_node->ProjectionModes().size(), 1);
-    EXPECT_EQ(project_node->FieldsToProject()[0], double_id);
-    EXPECT_EQ(project_node->ProjectionModes()[0],
-              plan::ProjectNode::ProjectionMode::ValidityOnly);
-    EXPECT_EQ(project_node->output_type()->column_type(0), DataType::INT8);
+    EXPECT_TRUE(agg_node->UseRawInput());
+    EXPECT_EQ(agg_node->RawInputFieldIds().size(), 1);
+    EXPECT_EQ(agg_node->RawInputFieldIds()[0], double_id);
 }
 
-TEST_P(QueryAggTest, ProtoCountFieldUsesValueProjectionWhenSharedWithSum) {
+TEST_P(QueryAggTest, ProtoCountFieldUsesRawValueWhenSharedWithSum) {
     auto int64_id = field_map_[int64_field];
     for (int order = 0; order < 2; order++) {
         auto count_first = order == 0;
@@ -179,17 +172,56 @@ TEST_P(QueryAggTest, ProtoCountFieldUsesValueProjectionWhenSharedWithSum) {
         auto agg_node = std::dynamic_pointer_cast<plan::AggregationNode>(
             retrieve_plan->plan_node_->plannodes_);
         ASSERT_NE(agg_node, nullptr);
-        ASSERT_EQ(agg_node->sources().size(), 1);
-        auto project_node = std::dynamic_pointer_cast<plan::ProjectNode>(
-            agg_node->sources()[0]);
-        ASSERT_NE(project_node, nullptr);
-        ASSERT_EQ(project_node->FieldsToProject().size(), 1);
-        ASSERT_EQ(project_node->ProjectionModes().size(), 1);
-        EXPECT_EQ(project_node->FieldsToProject()[0], int64_id);
-        EXPECT_EQ(project_node->ProjectionModes()[0],
-                  plan::ProjectNode::ProjectionMode::Value);
-        EXPECT_EQ(project_node->output_type()->column_type(0), DataType::INT64);
+        EXPECT_TRUE(agg_node->UseRawInput());
+        EXPECT_EQ(agg_node->RawInputFieldIds().size(), 1);
+        EXPECT_EQ(agg_node->RawInputFieldIds()[0], int64_id);
+        ASSERT_NE(agg_node->input_type(), nullptr);
+        EXPECT_EQ(agg_node->input_type()->column_type(0), DataType::INT64);
     }
+}
+
+TEST_P(QueryAggTest, ProtoAvgRequiresRawAggregationSupport) {
+    proto::plan::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_limit(num_rows_);
+    auto* aggregate = query->add_aggregates();
+    aggregate->set_op(proto::plan::avg);
+    aggregate->set_field_id(field_map_[double_field].get());
+
+    EXPECT_THROW(
+        {
+            try {
+                query::ProtoParser(schema_).CreateRetrievePlan(plan_node);
+            } catch (const std::exception& e) {
+                std::string msg = e.what();
+                EXPECT_NE(msg.find("raw aggregation does not support avg"),
+                          std::string::npos)
+                    << "Unexpected error: " << msg;
+                throw;
+            }
+        },
+        std::exception);
+}
+
+TEST_P(QueryAggTest, ProtoVectorGroupByRequiresRawAggregationSupport) {
+    proto::plan::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_limit(num_rows_);
+    query->add_group_by_field_ids(field_map_[vector_field].get());
+
+    EXPECT_THROW(
+        {
+            try {
+                query::ProtoParser(schema_).CreateRetrievePlan(plan_node);
+            } catch (const std::exception& e) {
+                std::string msg = e.what();
+                EXPECT_NE(msg.find("raw aggregation does not support group-by"),
+                          std::string::npos)
+                    << "Unexpected error: " << msg;
+                throw;
+            }
+        },
+        std::exception);
 }
 
 TEST_P(QueryAggTest, GroupFixedLengthType) {
@@ -548,9 +580,9 @@ TEST_P(QueryAggTest, CountAggTest) {
 
 TEST_P(QueryAggTest, GlobalCountAggTest) {
     std::vector<milvus::plan::PlanNodePtr> sources;
-    // MvccNode -> ProjectNode (empty fields) -> AggNode
-    // ProjectNode is always created in production (PlanProto.cpp),
-    // so tests should match that code path.
+    // MvccNode -> ProjectNode (empty fields) -> AggNode.
+    // This keeps legacy materialized count(*) coverage; production planning may
+    // choose the raw aggregation path when the aggregate is raw-compatible.
     PlanNodePtr mvcc_node = std::make_shared<milvus::plan::MvccNode>(
         milvus::plan::GetNextPlanNodeId(), sources);
     sources = std::vector<milvus::plan::PlanNodePtr>{mvcc_node};

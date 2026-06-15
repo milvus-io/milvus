@@ -266,8 +266,8 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                         true,
                         &fte_op_ctx);
     } else if (!plan->plan_node_->pipeline_field_ids_.empty()) {
-        // Non-aggregation ORDER BY (single-project or two-project mode):
-        // Pipeline output contains [pk, sort_cols, ..., SegmentOffsetFieldID].
+        // Non-aggregation ORDER BY:
+        // Pipeline output contains [pk, sort_cols, SegmentOffsetFieldID].
         // FillOrderByResult strips the offset column, sets field_id on each
         // DataArray, bulk-fetches deferred fields (if any), populates system
         // fields, and fills PK-based IDs for proxy reduce.
@@ -617,17 +617,6 @@ SegmentInternalInterface::get_real_count() const {
         milvus::plan::GetNextPlanNodeId());
     sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
 
-    // ProjectNode consumes the MVCC bitmap and materializes valid rows.
-    // Without it, AggregationNode would see input->size() == total rows
-    // instead of the actual valid row count after MVCC filtering.
-    plannode = std::make_shared<milvus::plan::ProjectNode>(
-        milvus::plan::GetNextPlanNodeId(),
-        std::vector<FieldId>{},
-        std::vector<std::string>{},
-        std::vector<DataType>{},
-        sources);
-    sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
-
     std::string agg_name = "count";
     std::vector<plan::AggregationNode::Aggregate> aggregates;
     {
@@ -642,7 +631,11 @@ SegmentInternalInterface::get_real_count() const {
         std::vector<expr::FieldAccessTypeExprPtr>{},
         std::vector<std::string>{agg_name},
         std::move(aggregates),
-        sources);
+        sources,
+        std::make_shared<RowType>(std::vector<std::string>{},
+                                  std::vector<DataType>{}),
+        std::vector<FieldId>{},
+        true);
 
     plan->plan_node_->plannodes_ = plannode;
     auto res = Retrieve(nullptr,

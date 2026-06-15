@@ -30,6 +30,8 @@
 namespace milvus {
 namespace exec {
 
+class RawInput;
+
 /// Sort key specification for ORDER BY operations
 struct SortKeyInfo {
     int32_t column_index;  // Index of the column in column_types (0-based)
@@ -125,6 +127,9 @@ class SortBuffer {
     void
     AddRows(const std::vector<ColumnVectorPtr>& columns,
             vector_size_t num_rows);
+
+    void
+    AddRawRows(const RawInput& input);
 
     //=========================================================================
     // Phase 2: Finalization

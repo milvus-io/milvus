@@ -20,6 +20,7 @@
 #include <functional>
 
 #include "common/EasyAssert.h"
+#include "exec/operator/RawInput.h"
 #include "log/Log.h"
 
 namespace milvus {
@@ -98,6 +99,35 @@ SortBuffer::AddRows(const std::vector<ColumnVectorPtr>& columns,
     }
 
     num_input_rows_ += num_rows;
+}
+
+void
+SortBuffer::AddRawRows(const RawInput& input) {
+    AssertInfo(!sorted_, "Cannot add input after NoMoreInput()");
+    AssertInfo(input.column_count() == column_types_.size(),
+               "Raw column count mismatch: expected {}, got {}",
+               column_types_.size(),
+               input.column_count());
+    if (input.selected_count() == 0) {
+        return;
+    }
+
+    std::vector<char*> new_rows(input.selected_count());
+    for (vector_size_t i = 0; i < input.selected_count(); ++i) {
+        new_rows[i] = data_->newRow();
+    }
+
+    for (vector_size_t i = 0; i < input.selected_count(); ++i) {
+        for (size_t col = 0; col < column_types_.size(); ++col) {
+            data_->store(input.child(col),
+                         input,
+                         i,
+                         new_rows[i],
+                         static_cast<int32_t>(col));
+        }
+    }
+
+    num_input_rows_ += input.selected_count();
 }
 
 void

@@ -16,10 +16,16 @@
 
 #include "QueryOrderByNode.h"
 
+#include <memory>
 #include <utility>
+#include <vector>
 
 #include "common/EasyAssert.h"
+#include "exec/QueryContext.h"
+#include "exec/expression/Utils.h"
+#include "exec/operator/RawInput.h"
 #include "log/Log.h"
+#include "segcore/SegmentInterface.h"
 
 namespace milvus {
 namespace exec {
@@ -40,7 +46,18 @@ PhyQueryOrderByNode::PhyQueryOrderByNode(
                operator_id,
                order_by_node->id(),
                "QueryOrderBy"),
-      output_batch_size_(kDefaultOutputBatchSize) {
+      output_batch_size_(kDefaultOutputBatchSize),
+      use_raw_input_(order_by_node->UseRawInput()),
+      raw_input_field_ids_(order_by_node->RawInputFieldIds()) {
+    if (use_raw_input_) {
+        auto exec_context = operator_context_->get_exec_context();
+        auto query_context = exec_context->get_query_context();
+        segment_ = query_context->get_segment();
+        op_context_ = query_context->get_op_context();
+        AssertInfo(segment_, "segment cannot be nullptr for raw ORDER BY");
+        AssertInfo(op_context_, "op context cannot be nullptr for raw ORDER BY");
+    }
+
     // Extract sorting keys and orders from plan node
     const auto& sorting_keys = order_by_node->SortingKeys();
     const auto& sorting_orders = order_by_node->SortingOrders();
@@ -100,6 +117,10 @@ PhyQueryOrderByNode::AddInput(RowVectorPtr& input) {
     if (input == nullptr || input->size() == 0) {
         return;
     }
+    if (use_raw_input_) {
+        AddRawInput(input);
+        return;
+    }
 
     // Extract column vectors from input RowVector
     const auto& children = input->childrens();
@@ -132,6 +153,38 @@ PhyQueryOrderByNode::AddInput(RowVectorPtr& input) {
     LOG_DEBUG("QueryOrderByNode: added {} rows, total={}",
               num_rows,
               sort_buffer_->NumInputRows());
+}
+
+void
+PhyQueryOrderByNode::AddRawInput(RowVectorPtr& input) {
+    auto filter_column = GetColumnVector(input);
+    AssertInfo(filter_column->IsBitmap(),
+               "raw ORDER BY expects bitmap input from upstream");
+    AssertInfo(!raw_input_field_ids_.empty(),
+               "raw ORDER BY requires raw input fields");
+    TargetBitmapView filter_mask(filter_column->GetRawData(),
+                                 filter_column->size());
+    auto chunks = SelectedChunkInput::FromSegment(
+        *segment_, raw_input_field_ids_.front(), filter_mask);
+    for (const auto& chunk : chunks.chunks()) {
+        RawInput raw_input(chunk);
+        std::vector<std::unique_ptr<RawColumnPinHolderBase>> pins;
+        pins.reserve(raw_input_field_ids_.size());
+        for (size_t i = 0; i < raw_input_field_ids_.size(); ++i) {
+            if (raw_input_field_ids_[i] == SegmentOffsetFieldID) {
+                AddSegmentOffsetRawColumn(raw_input, pins, chunk);
+                continue;
+            }
+            AddRawColumn(raw_input,
+                         pins,
+                         *segment_,
+                         op_context_,
+                         raw_input_field_ids_[i],
+                         column_types_[i],
+                         chunk);
+        }
+        sort_buffer_->AddRawRows(raw_input);
+    }
 }
 
 void
