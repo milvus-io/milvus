@@ -456,11 +456,45 @@ sequenceDiagram
 3. Only then do the target shards leave state `Creating`; QueryCoord picks
    them up, issues `WatchDmChannel`, and — because the child delegators
    already exist on that QueryNode with all segments loaded — converts
-   them in place: the segment distribution view switches atomically to the
-   two new channels, segment instances are shared on the node, and the
-   consume positions are kept. At the flip itself no segment data is
-   unloaded or reloaded; segments flushed during the window were already
-   loaded into delegator0's view as they appeared (§6.2, step 5).
+   them in place rather than building fresh ones:
+   - **No re-subscribe / no new pipeline.** `WatchDmChannel` already
+     no-ops when the channel's delegator is present (`services.go`: "channel
+     already subscribed"). The child is registered in the node's delegator
+     map from the moment delegator0 spawns it, so the watch reuses it
+     instead of creating a new delegator and replaying the WAL from a seek
+     position. The convert path must, beyond the bare no-op, adopt
+     QueryCoord's `version`/target version, drop the delegator0-fronting
+     wiring, and keep the consume position.
+   - **No segment reload.** `LoadSegments` filters out segments already
+     present on the node (`segment_loader.go`: "skip loaded/loading
+     segment"), and segment instances are shared by ID in the
+     SegmentManager. The new shard's sealed segments are already loaded —
+     relabel keeps the same segment ID; hash-rewrite IDs were produced and
+     loaded into delegator0's view via the in-window handoff (§6.2, step 5)
+     — so `LoadSegments` degrades to a distribution-view update that
+     attributes the already-loaded instances to the child, not a physical
+     load.
+   - **No premature reads (the gate is `Serviceable`, not map
+     membership).** Registering the child early does *not* expose it to
+     proxy reads: proxies route reads via QueryCoord's `GetShardLeaders`,
+     and QueryCoord learns leaders from each QueryNode's
+     `GetDataDistribution`, which **skips non-serviceable delegators**
+     (`services.go`: `if !delegator.Serviceable() { return }`). During the
+     window the child is naturally non-serviceable — it owns no sealed
+     segment and has no QueryCoord target version yet
+     (`channelQueryView.Serviceable()` requires `loadedRatio == 1.0` and a
+     ready target) — so it is never reported, never returned by
+     `GetShardLeaders`, and never read by a proxy. delegator0's internal
+     fan-out reaches the child through a direct in-process handle, not
+     through this leader path, so fronting still works while the child is
+     externally invisible. The convert in this step injects the QueryCoord
+     target version (`SyncTargetVersion`); the child becomes serviceable,
+     is reported on the next `GetDataDistribution`, and only then does
+     `GetShardLeaders` flip proxy reads onto it.
+
+   At the flip itself no segment data is unloaded or reloaded; segments
+   flushed during the window were already loaded into delegator0's view as
+   they appeared (§6.2, step 5).
 4. QueryCoord releases the source shard (draining in-flight queries
    first), the routing version is bumped, and proxy caches are
    invalidated. The split is complete.
@@ -596,7 +630,15 @@ The view of one segment `S` across the phases:
    balancing and channel moves on the QueryCoord side.
 3. **In-place handoff.** QueryCoord's watch path must recognize an
    existing child delegator on the node and convert it (change owner, keep
-   consume positions, no reload) instead of release-and-rewatch.
+   consume positions, no reload) instead of release-and-rewatch — the
+   `WatchDmChannel` no-op-when-present and `LoadSegments` skip-when-loaded
+   paths already give the no-reload half (§6.3, step 3). The child is
+   registered in the delegator map early (so the watch finds it) but kept
+   **non-serviceable** until the convert: `GetDataDistribution` skips
+   non-serviceable delegators, so QueryCoord never exposes the child via
+   `GetShardLeaders` and no proxy read reaches it before adoption; the
+   convert injects the QueryCoord target version, which flips it
+   serviceable and routes reads onto it.
 4. **Old-vchannel lifecycle.** WAL0 stays replayable for the whole window
    (no truncation); after adoption the vchannel is dropped. Its
    namespace-scoped L0 segments have been relabeled to the target shards
