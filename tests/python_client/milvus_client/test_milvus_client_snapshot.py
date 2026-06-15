@@ -4474,7 +4474,7 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientSnapshotBase):
         self.create_alias(client, col_src, alias_name)
 
         # 2. Restore with target_collection_name = existing alias name must fail
-        error = {ct.err_code: 65535, ct.err_msg: "conflicts with an existing alias"}
+        error = {ct.err_code: 1601, ct.err_msg: "alias and collection name conflict"}
         self.restore_snapshot(
             client,
             snapshot_name,
@@ -4502,9 +4502,16 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientSnapshotBase):
 
 
 @pytest.mark.tags(CaseLabel.RBAC)
+@pytest.mark.xdist_group(name="snapshot_rbac_serial")
 class TestMilvusClientSnapshotRbac(TestMilvusClientSnapshotBase):
     """
     Test RBAC v2 privilege enforcement for snapshot operations.
+
+    Pinned to a single xdist worker via ``xdist_group`` because the
+    teardown does a global ``list_users()`` / ``list_roles()`` and drops
+    everything non-default. Under ``-n>1`` that cross-deletes objects
+    owned by other workers and causes cascading "role not found" /
+    "role has privileges" failures (same root cause as #49699).
     """
 
     user_pre = "snap_user"

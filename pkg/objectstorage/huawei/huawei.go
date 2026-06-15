@@ -36,6 +36,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const (
@@ -186,7 +187,7 @@ func (p *HuaweiCredentialProvider) Retrieve() (minioCred.Value, error) {
 			return p.credentials, nil
 		}
 		log.Warn("HuaweiCloud credential provider: in cooldown after failure, no valid cached credentials available")
-		return minioCred.Value{}, errors.New("STS refresh in cooldown, no valid cached credentials available")
+		return minioCred.Value{}, merr.WrapErrServiceInternalMsg("STS refresh in cooldown, no valid cached credentials available")
 	}
 
 	durationSeconds := int32(2 * 60 * 60) // 2 hours, matching C++ layer's duration
@@ -238,7 +239,7 @@ func (p *HuaweiCredentialProvider) Retrieve() (minioCred.Value, error) {
 		log.Warn("HuaweiCloud credential provider: STS returned nil or incomplete credentials",
 			zap.Int64("sts_success", p.stsSuccessCount.Load()),
 			zap.Int64("sts_failure", p.stsFailureCount.Load()))
-		return minioCred.Value{}, errors.New("incomplete credential returned from Huawei Cloud (missing ak/sk/token)")
+		return minioCred.Value{}, merr.WrapErrServiceInternalMsg("incomplete credential returned from Huawei Cloud (missing ak/sk/token)")
 	}
 
 	expiration, err := time.Parse(time.RFC3339, response.Credential.ExpiresAt)

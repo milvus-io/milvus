@@ -35,6 +35,7 @@
 #include "knowhere/comp/index_param.h"
 #include "pb/common.pb.h"
 #include "pb/index_cgo_msg.pb.h"
+#include "pb/index_coord.pb.h"
 #include "pb/segcore.pb.h"
 #include "segcore/SegmentLoadInfo.h"
 #include "segcore/Types.h"
@@ -239,6 +240,50 @@ TEST_F(SegmentLoadInfoTest, IndexInfo) {
     // Test non-existent field
     auto empty_infos = info.GetFieldIndexInfos(FieldId(999));
     EXPECT_TRUE(empty_infos.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, LoadIndexInfoCopyPreservesIndexStorePathVersion) {
+    LoadIndexInfo original;
+    original.index_store_path_version = proto::index::IndexStorePathVersion::
+        INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED;
+
+    LoadIndexInfo copied(original);
+    EXPECT_EQ(copied.index_store_path_version,
+              proto::index::IndexStorePathVersion::
+                  INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED);
+
+    LoadIndexInfo assigned;
+    assigned = original;
+    EXPECT_EQ(assigned.index_store_path_version,
+              proto::index::IndexStorePathVersion::
+                  INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED);
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ConvertFieldIndexInfoToLoadIndexInfoPreservesIndexStorePathVersion) {
+    auto* index_info = proto_.add_index_infos();
+    index_info->set_fieldid(101);
+    index_info->set_indexid(201);
+    index_info->set_buildid(301);
+    index_info->set_index_version(1);
+    index_info->set_current_index_version(1);
+    index_info->set_index_size(1024);
+    index_info->set_num_rows(1000);
+    index_info->add_index_file_paths("index_v1/1/2/3/301/1/index_data");
+    auto* index_param = index_info->add_index_params();
+    index_param->set_key("index_type");
+    index_param->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+    index_info->set_index_store_path_version(
+        proto::index::IndexStorePathVersion::
+            INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED);
+
+    SegmentLoadInfo info(proto_, schema_);
+    auto load_index_info = info.ConvertFieldIndexInfoToLoadIndexInfo(
+        index_info, proto_.segmentid());
+
+    EXPECT_EQ(load_index_info.index_store_path_version,
+              proto::index::IndexStorePathVersion::
+                  INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED);
 }
 
 TEST_F(SegmentLoadInfoTest, BinlogInfo) {

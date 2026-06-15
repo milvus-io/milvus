@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestSchema(t *testing.T) {
@@ -703,7 +704,8 @@ func TestSchema_invalid(t *testing.T) {
 		}
 		_, err := CreateSchemaHelper(schema)
 		assert.Error(t, err)
-		assert.EqualError(t, err, "duplicated fieldName: field_int8")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "duplicated fieldName: field_int8")
 	})
 	t.Run("Duplicate field id", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
@@ -729,7 +731,8 @@ func TestSchema_invalid(t *testing.T) {
 		}
 		_, err := CreateSchemaHelper(schema)
 		assert.Error(t, err)
-		assert.EqualError(t, err, "duplicated fieldID: 100")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "duplicated fieldID: 100")
 	})
 	t.Run("Duplicated primary key", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
@@ -755,7 +758,8 @@ func TestSchema_invalid(t *testing.T) {
 		}
 		_, err := CreateSchemaHelper(schema)
 		assert.Error(t, err)
-		assert.EqualError(t, err, "primary key is not unique")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "primary key is not unique")
 	})
 	t.Run("field not exist", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
@@ -777,15 +781,18 @@ func TestSchema_invalid(t *testing.T) {
 
 		_, err = helper.GetPrimaryKeyField()
 		assert.Error(t, err)
-		assert.EqualError(t, err, "failed to get primary key field: no primary in schema")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "failed to get primary key field: no primary in schema")
 
 		_, err = helper.GetFieldFromName("none")
 		assert.Error(t, err)
-		assert.EqualError(t, err, "failed to get field schema by name: fieldName(none) not found")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "failed to get field schema by name: fieldName(none) not found")
 
 		_, err = helper.GetFieldFromID(101)
 		assert.Error(t, err)
-		assert.EqualError(t, err, "fieldID(101) not found")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "fieldID(101) not found")
 	})
 	t.Run("vector dim not exist", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{

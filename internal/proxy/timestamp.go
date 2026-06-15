@@ -18,16 +18,14 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"time"
-
-	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
@@ -65,13 +63,13 @@ func (ta *timestampAllocator) alloc(ctx context.Context, count uint32) ([]Timest
 	}()
 
 	if err != nil {
-		return nil, fmt.Errorf("syncTimestamp Failed:%w", err)
+		return nil, merr.Wrap(err, "syncTimestamp Failed")
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return nil, fmt.Errorf("syncTimeStamp Failed:%s", resp.GetStatus().GetReason())
+		return nil, merr.Error(resp.GetStatus())
 	}
 	if resp == nil {
-		return nil, errors.New("empty AllocTimestampResponse")
+		return nil, merr.WrapErrServiceInternalMsg("empty AllocTimestampResponse")
 	}
 	start, cnt := resp.GetTimestamp(), resp.GetCount()
 	ret := make([]Timestamp, cnt)

@@ -3292,7 +3292,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	if enableMultipleVectorFields {
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
-		assert.Equal(t, err.Error(), "multiple anns_fields exist, please specify a anns_field in search_params")
+		assert.Contains(t, err.Error(), "multiple anns_fields exist, please specify a anns_field in search_params")
 	} else {
 		assert.NoError(t, task.PreExecute(ctx))
 	}

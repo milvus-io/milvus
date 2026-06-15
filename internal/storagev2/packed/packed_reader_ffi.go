@@ -25,18 +25,17 @@ package packed
 import "C"
 
 import (
-	"fmt"
 	"io"
 	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // ExternalReaderContext carries per-collection context needed by the FFI
@@ -54,7 +53,7 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 	externalSpec := ext.Spec
 	cLoonManifest, err := GetManifestHandle(manifestPath, storageConfig)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to get manifest")
+		return nil, merr.Wrap(err, "failed to get manifest")
 	}
 	defer C.loon_manifest_destroy(cLoonManifest)
 
@@ -139,7 +138,7 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 
 		status = C.NewPackedFFIReaderWithManifest(cLoonManifest, cSchema, cNeededColumnArray, cNumColumns, &cPackedReader, cStorageConfig, pluginContextPtr, C.int64_t(collectionID), cExternalSource, cExternalSpec)
 	} else {
-		return nil, fmt.Errorf("storageConfig is required")
+		return nil, merr.WrapErrServiceInternalMsg("storageConfig is required")
 	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
@@ -150,14 +149,14 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 	status = C.GetFFIReaderStream(cPackedReader, C.int64_t(8196), (*C.struct_ArrowArrayStream)(unsafe.Pointer(&cStream)))
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		C.CloseFFIReader(cPackedReader)
-		return nil, fmt.Errorf("failed to get reader stream: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to get reader stream")
 	}
 
 	// Import the stream as a RecordReader
 	recordReader, err := cdata.ImportCRecordReader(&cStream, schema)
 	if err != nil {
 		C.CloseFFIReader(cPackedReader)
-		return nil, fmt.Errorf("failed to import record reader: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to import record reader")
 	}
 
 	return &FFIPackedReader{
@@ -178,7 +177,7 @@ func (r *FFIPackedReader) ReadNext() (rec arrow.Record, err error) {
 		if err == io.EOF {
 			return nil, io.EOF
 		}
-		return nil, fmt.Errorf("failed to read next record: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to read next record")
 	}
 
 	return rec, nil

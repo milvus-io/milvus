@@ -178,7 +178,7 @@ func (p *delegatorGrowingSourceProvider) registerRetained(segmentID int64, targe
 	currentOffset := p.currentOffset(segment)
 	if currentOffset < targetOffset {
 		segment.Unpin()
-		return errors.Errorf("growing-source segment %d is behind target offset, current=%d target=%d", segmentID, currentOffset, targetOffset)
+		return merr.WrapErrServiceInternalMsg("growing-source segment %d is behind target offset, current=%d target=%d", segmentID, currentOffset, targetOffset)
 	}
 
 	p.mu.Lock()

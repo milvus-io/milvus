@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -69,7 +70,7 @@ func NewReplicateMessage(clustrID string, im *commonpb.ImmutableMessage) (Replic
 	messageID := MustUnmarshalMessageID(im.GetId())
 	msg := NewImmutableMesasge(messageID, im.GetPayload(), im.GetProperties()).(*immutableMessageImpl)
 	if msg.ReplicateHeader() != nil {
-		return nil, errors.New("message is already a replicate message")
+		return nil, merr.WrapErrParameterInvalidMsg("message is already a replicate message")
 	}
 
 	m := &messageImpl{

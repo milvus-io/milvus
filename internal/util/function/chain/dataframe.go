@@ -19,8 +19,6 @@
 package chain
 
 import (
-	"fmt"
-
 	"github.com/apache/arrow/go/v17/arrow"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -286,11 +284,11 @@ func (b *DataFrameBuilder) addColumn(name string, col *arrow.Chunked) error {
 		if col != nil {
 			col.Release()
 		}
-		return merr.WrapErrServiceInternal(fmt.Sprintf("column %s already exists", name))
+		return merr.WrapErrServiceInternalMsg("column %s already exists", name)
 	}
 
 	if col == nil {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("column %s is nil", name))
+		return merr.WrapErrServiceInternalMsg("column %s is nil", name)
 	}
 
 	b.addColumnUnchecked(name, col)
@@ -327,7 +325,7 @@ func (b *DataFrameBuilder) AddColumns(names []string, cols []*arrow.Chunked) err
 
 	if len(names) != len(cols) {
 		releaseAll()
-		return merr.WrapErrServiceInternal(fmt.Sprintf("names count (%d) != cols count (%d)", len(names), len(cols)))
+		return merr.WrapErrServiceInternalMsg("names count (%d) != cols count (%d)", len(names), len(cols))
 	}
 
 	// Validate all before adding any
@@ -335,16 +333,16 @@ func (b *DataFrameBuilder) AddColumns(names []string, cols []*arrow.Chunked) err
 	for i, name := range names {
 		if _, exists := b.result.nameIndex[name]; exists {
 			releaseAll()
-			return merr.WrapErrServiceInternal(fmt.Sprintf("column %s already exists", name))
+			return merr.WrapErrServiceInternalMsg("column %s already exists", name)
 		}
 		if seen[name] {
 			releaseAll()
-			return merr.WrapErrServiceInternal(fmt.Sprintf("duplicate column name %s in batch", name))
+			return merr.WrapErrServiceInternalMsg("duplicate column name %s in batch", name)
 		}
 		seen[name] = true
 		if cols[i] == nil {
 			releaseAll()
-			return merr.WrapErrServiceInternal(fmt.Sprintf("column %s is nil", name))
+			return merr.WrapErrServiceInternalMsg("column %s is nil", name)
 		}
 	}
 
@@ -364,7 +362,7 @@ func (b *DataFrameBuilder) AddColumnFrom(source *DataFrame, colName string) erro
 
 	col := source.Column(colName)
 	if col == nil {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("column %s not found in source", colName))
+		return merr.WrapErrServiceInternalMsg("column %s not found in source", colName)
 	}
 
 	col.Retain()

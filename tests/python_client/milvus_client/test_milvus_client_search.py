@@ -226,8 +226,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         error = {ct.err_code: 1100,
-                 ct.err_msg: "float vector index does not support metric type: invalid: "
-                             "invalid parameter[expected=valid index params][actual=invalid index params]"}
+                 ct.err_msg: "float vector index does not support metric type"}
         self.create_collection(client, collection_name, default_dim, metric_type="invalid",
                                check_task=CheckTasks.err_res, check_items=error)
 
@@ -321,8 +320,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         for null_expr_op in null_expr_ops:
             null_expr = not_exist_field_name + " " + null_expr_op
             error = {ct.err_code: 1100,
-                    ct.err_msg: f"failed to create query plan: cannot parse expression: "
-                                f"{null_expr}, error: field {not_exist_field_name} not exist: invalid parameter"}
+                    ct.err_msg: f"field {not_exist_field_name} not exist"}
             self.search(client, collection_name, vectors_to_search,
                         filter=null_expr,
                         check_task=CheckTasks.err_res, check_items=error)
@@ -1300,8 +1298,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     filter=expression,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 1100,
-                                 "err_msg": f"cannot parse expression: !{ct.default_bool_field_name}, "
-                                            "error: not op can only be applied on boolean expression"})
+                                 "err_msg": "not op can only be applied on boolean expression"})
         expression = f"{ct.default_int64_field_name} > 0 and {ct.default_bool_field_name}"
         log.debug(f"search with expression: {expression}")
         self.search(client, collection_name,
@@ -1310,8 +1307,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     filter=expression,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 1100,
-                                 "err_msg": f"cannot parse expression: {ct.default_int64_field_name} > 0 and {ct.default_bool_field_name}, "
-                                            "error: 'and' can only be used between boolean expressions"})
+                                 "err_msg": "'and' can only be used between boolean expressions"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_expression_invalid_array_one(self):
@@ -2032,7 +2028,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     filter=expr,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 1100,
-                                 "err_msg": "error: two column comparison with JSON type is not supported"})
+                                 "err_msg": "two column comparison with JSON type is not supported"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_ef_less_than_limit(self):
@@ -3240,7 +3236,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                     search_params=search_params, limit=default_limit)
         not_supported_hints = "not_supported_hints"
         error = {ct.err_code: 0,
-                 ct.err_msg: f"Create Plan by expr failed:  => hints: {not_supported_hints} not supported"}
+                 ct.err_msg: f"hints: {not_supported_hints} not supported"}
         search_params = {'hints': not_supported_hints,
                          'params': cf.get_search_params_params('IVF_FLAT')}
         self.search(client, collection_name, data=[search_vector], filter='id >= 10',

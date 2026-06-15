@@ -162,6 +162,90 @@ func TestRbacCredential(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestRbacCredentialAlterCredentialMergesPartialUpdates(t *testing.T) {
+	mt := generateMetaTable(t)
+
+	ptr := func(s string) *string {
+		return &s
+	}
+
+	username := "user" + funcutil.RandomString(10)
+	err := mt.AlterCredential(context.TODO(), buildAlterUserMessage(&internalpb.CredentialInfo{
+		Username:          username,
+		EncryptedPassword: "old-password",
+		Description:       ptr("initial description"),
+	}, 1))
+	require.NoError(t, err)
+
+	err = mt.AlterCredential(context.TODO(), buildAlterUserMessage(&internalpb.CredentialInfo{
+		Username:          username,
+		EncryptedPassword: "new-password",
+	}, 2))
+	require.NoError(t, err)
+	cred, err := mt.GetCredential(context.TODO(), username)
+	require.NoError(t, err)
+	assert.Equal(t, "new-password", cred.GetEncryptedPassword())
+	assert.Equal(t, "initial description", cred.GetDescription())
+
+	err = mt.AlterCredential(context.TODO(), buildAlterUserMessage(&internalpb.CredentialInfo{
+		Username:    username,
+		Description: ptr("updated description"),
+	}, 3))
+	require.NoError(t, err)
+	cred, err = mt.GetCredential(context.TODO(), username)
+	require.NoError(t, err)
+	assert.Equal(t, "new-password", cred.GetEncryptedPassword())
+	assert.Equal(t, "updated description", cred.GetDescription())
+
+	err = mt.AlterCredential(context.TODO(), buildAlterUserMessage(&internalpb.CredentialInfo{
+		Username:    username,
+		Description: ptr(""),
+	}, 4))
+	require.NoError(t, err)
+	cred, err = mt.GetCredential(context.TODO(), username)
+	require.NoError(t, err)
+	assert.Equal(t, "new-password", cred.GetEncryptedPassword())
+	assert.Equal(t, "", cred.GetDescription())
+}
+
+func TestRbacCredentialRejectsInconsistentPasswordUpdate(t *testing.T) {
+	mt := generateMetaTable(t)
+
+	username := "user" + funcutil.RandomString(10)
+	err := mt.AlterCredential(context.TODO(), buildAlterUserMessage(&internalpb.CredentialInfo{
+		Username:          username,
+		EncryptedPassword: "old-password",
+	}, 1))
+	require.NoError(t, err)
+
+	err = mt.CheckIfUpdateCredential(context.TODO(), &internalpb.CredentialInfo{
+		Username:          username,
+		EncryptedPassword: "new-password",
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "must include both encrypted and sha256 password")
+
+	err = mt.CheckIfUpdateCredential(context.TODO(), &internalpb.CredentialInfo{
+		Username:       username,
+		Sha256Password: "sha256",
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "must include both encrypted and sha256 password")
+
+	description := "description-only update"
+	err = mt.CheckIfUpdateCredential(context.TODO(), &internalpb.CredentialInfo{
+		Username:    username,
+		Description: &description,
+	})
+	require.NoError(t, err)
+
+	err = mt.CheckIfUpdateCredential(context.TODO(), &internalpb.CredentialInfo{
+		Username: username,
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "credential update must change password or description")
+}
+
 func TestRbacCreateRole(t *testing.T) {
 	mt := generateMetaTable(t)
 

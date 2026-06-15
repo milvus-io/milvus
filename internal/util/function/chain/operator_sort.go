@@ -80,12 +80,12 @@ func (o *SortOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, 
 	column := o.Column()
 	sortCol := input.Column(column)
 	if sortCol == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("sort_op: column %q not found", column))
+		return nil, merr.WrapErrServiceInternalMsg("sort_op: column %q not found", column)
 	}
 
 	// Validate sort column type is comparable
 	if !isComparableType(sortCol.DataType()) {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("sort_op: column %s has non-comparable type %s", column, sortCol.DataType().Name()))
+		return nil, merr.WrapErrServiceInternalMsg("sort_op: column %s has non-comparable type %s", column, sortCol.DataType().Name())
 	}
 
 	// Resolve optional tie-break column
@@ -164,7 +164,7 @@ func (o *SortOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, 
 			dataChunk := col.Chunk(chunkIdx)
 			reordered, err := reorderArray(ctx.Pool(), dataChunk, indices)
 			if err != nil {
-				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("sort_op: column %s: %v", colName, err))
+				return nil, merr.WrapErrServiceInternalMsg("sort_op: column %s: %v", colName, err)
 			}
 			collector.Set(colName, chunkIdx, reordered)
 		}
@@ -263,7 +263,7 @@ func reorderArray(pool memory.Allocator, data arrow.Array, indices []int) (arrow
 func NewSortOpFromRepr(repr *OperatorRepr) (Operator, error) {
 	column, ok := repr.Params["column"].(string)
 	if !ok || column == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("sort_op: column is required")
+		return nil, merr.WrapErrParameterMissingMsg("sort_op: column is required")
 	}
 	desc := false
 	if descVal, ok := repr.Params["desc"]; ok {

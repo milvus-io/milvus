@@ -296,8 +296,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"float vector index does not support metric type: {metric_type}: "
-            f"invalid parameter[expected=valid index params][actual=invalid index params",
+            ct.err_msg: "float vector index does not support metric type",
         }
         self.create_collection(
             client,
@@ -1120,7 +1119,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         )
 
         # not support search on null vector with is null or is not null filter
-        error = {ct.err_code: 999, ct.err_msg: "error: IsNull/IsNotNull operations are not supported on vector fields"}
+        error = {ct.err_code: 999, ct.err_msg: "IsNull/IsNotNull operations are not supported on vector fields"}
         self.search(
             client,
             collection_name,

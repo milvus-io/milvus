@@ -1519,7 +1519,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		Params.Save(Params.ProxyCfg.MustUsePartitionKey.Key, "true")
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorIs(t, err, merr.ErrParameterMissing)
 		Params.Reset(Params.ProxyCfg.MustUsePartitionKey.Key)
 
 		task.Schema = []byte{0x1, 0x2, 0x3, 0x4}
@@ -7585,7 +7585,7 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		task := buildTask(req, oldSchema)
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorIs(t, err, merr.ErrParameterMissing)
 	})
 
 	t.Run("PreExecute multiple fieldInfos", func(t *testing.T) {

@@ -1985,7 +1985,7 @@ func (suite *ServiceSuite) TestGetMetric_Failed() {
 	req.Request = "---"
 	resp, err = suite.node.GetMetrics(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.GetStatus().GetErrorCode())
 
 	// node unhealthy
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)

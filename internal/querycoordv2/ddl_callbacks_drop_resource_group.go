@@ -20,8 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
@@ -30,11 +28,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func (s *Server) broadcastDropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) error {
+func (s *Server) broadcastDropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (ignored bool, err error) {
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
 	if err != nil {
 		if !shouldApplyLocallyOnNonPrimary(err, message.MessageTypeDropResourceGroup) {
-			return err
+			return false, err
 		}
 	}
 	if broadcaster != nil {
@@ -44,11 +42,10 @@ func (s *Server) broadcastDropResourceGroup(ctx context.Context, req *milvuspb.D
 	replicas := s.meta.GetByResourceGroup(ctx, req.GetResourceGroup())
 	if len(replicas) > 0 {
 		err := merr.WrapErrParameterInvalid("empty resource group", fmt.Sprintf("resource group %s has collection %d loaded", req.GetResourceGroup(), replicas[0].GetCollectionID()))
-		return errors.Wrap(err,
-			fmt.Sprintf("some replicas still loaded in resource group[%s], release it first", req.GetResourceGroup()))
+		return false, merr.Wrapf(err, "some replicas still loaded in resource group[%s], release it first", req.GetResourceGroup())
 	}
-	if err := s.meta.CheckIfResourceGroupDropable(ctx, req.GetResourceGroup()); err != nil {
-		return err
+	if ignored, err := s.meta.CheckIfResourceGroupDropable(ctx, req.GetResourceGroup()); err != nil || ignored {
+		return ignored, err
 	}
 
 	msg := message.NewDropResourceGroupMessageBuilderV2().
@@ -59,10 +56,10 @@ func (s *Server) broadcastDropResourceGroup(ctx context.Context, req *milvuspb.D
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
 	if broadcaster == nil {
-		return registry.CallMessageAckCallback(ctx, msg, nil)
+		return false, registry.CallMessageAckCallback(ctx, msg, nil)
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
-	return err
+	return false, err
 }
 
 func (c *DDLCallbacks) dropResourceGroupV2AckCallback(ctx context.Context, result message.BroadcastResultDropResourceGroupMessageV2) error {

@@ -3441,7 +3441,7 @@ class TestMilvusClientGeometryNegative(TestMilvusClientV2Base):
 
         error = {
             ct.err_code: 65535,
-            ct.err_msg: "Create retrieve plan by expr failed",
+            ct.err_msg: "not found",
         }  # We expect error for invalid spatial function
         self.query(
             client,

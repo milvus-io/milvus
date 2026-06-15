@@ -3752,7 +3752,7 @@ func TestProxy(t *testing.T) {
 
 		resp, err := proxy.Upsert(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_IllegalArgument, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, 0, len(resp.SuccIndex))
 		assert.Equal(t, rowNum, len(resp.ErrIndex))
 		assert.Equal(t, int64(0), resp.UpsertCnt)

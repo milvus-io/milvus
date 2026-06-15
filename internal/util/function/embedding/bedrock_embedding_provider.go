@@ -21,7 +21,6 @@ package embedding
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"strings"
 
@@ -29,12 +28,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
-	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	milvusCredentials "github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -57,13 +56,13 @@ type BedrockEmbeddingProvider struct {
 
 func createBedRockEmbeddingClient(awsAccessKeyId string, awsSecretAccessKey string, region string) (*bedrockruntime.Client, error) {
 	if awsAccessKeyId == "" {
-		return nil, fmt.Errorf("missing credentials config or configure the %s environment variable in the Milvus service", models.BedrockAccessKeyId)
+		return nil, merr.WrapErrParameterInvalidMsg("missing credentials config or configure the %s environment variable in the Milvus service", models.BedrockAccessKeyId)
 	}
 	if awsSecretAccessKey == "" {
-		return nil, fmt.Errorf("missing credentials config or configure the %s environment variable in the Milvus service", models.BedrockSAKEnvStr)
+		return nil, merr.WrapErrParameterInvalidMsg("missing credentials config or configure the %s environment variable in the Milvus service", models.BedrockSAKEnvStr)
 	}
 	if region == "" {
-		return nil, errors.New("missing AWS Service region. Please pass `region` param")
+		return nil, merr.WrapErrParameterInvalidMsg("missing AWS Service region. Please pass `region` param")
 	}
 
 	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region),
@@ -140,7 +139,7 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 			case "true":
 				normalize = true
 			default:
-				return nil, fmt.Errorf("illegal [%s:%s] param", models.NormalizeParamKey, param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("illegal [%s:%s] param", models.NormalizeParamKey, param.Value)
 			}
 		default:
 		}
@@ -214,7 +213,7 @@ func (provider *BedrockEmbeddingProvider) CallEmbedding(ctx context.Context, tex
 			return nil, err
 		}
 		if len(resp.Embedding) != int(provider.fieldDim) {
-			return nil, fmt.Errorf("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+			return nil, merr.WrapErrFunctionFailedMsg("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 				provider.fieldDim, len(resp.Embedding))
 		}
 		data = append(data, resp.Embedding)

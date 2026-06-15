@@ -29,6 +29,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
@@ -44,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -2879,6 +2881,79 @@ func TestMethodPost(t *testing.T) {
 	}
 }
 
+func TestUserDescriptionV2(t *testing.T) {
+	paramtable.Init()
+
+	description := "用户描述"
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().
+		CreateCredential(mock.Anything, mock.MatchedBy(func(req *milvuspb.CreateCredentialRequest) bool {
+			return req.GetUsername() == util.UserRoot &&
+				req.GetPassword() == crypto.Base64Encode("Milvus") &&
+				req.Description != nil &&
+				req.GetDescription() == description
+		})).
+		Return(commonSuccessStatus, nil).
+		Once()
+	mp.EXPECT().
+		UpdateCredential(mock.Anything, mock.MatchedBy(func(req *milvuspb.UpdateCredentialRequest) bool {
+			return req.GetUsername() == util.UserRoot &&
+				req.GetOldPassword() == "" &&
+				req.GetNewPassword() == "" &&
+				req.Description != nil &&
+				req.GetDescription() == description
+		})).
+		Return(commonSuccessStatus, nil).
+		Once()
+	mp.EXPECT().
+		SelectUser(mock.Anything, mock.Anything).
+		Return(&milvuspb.SelectUserResponse{
+			Status: &StatusSuccess,
+			Results: []*milvuspb.UserResult{
+				{
+					User:        &milvuspb.UserEntity{Name: util.UserRoot},
+					Roles:       []*milvuspb.RoleEntity{{Name: util.RoleAdmin}},
+					Description: description,
+				},
+			},
+		}, nil).
+		Once()
+
+	testEngine := initHTTPServerV2(mp, false)
+	for _, testcase := range []struct {
+		path string
+		body string
+	}{
+		{
+			path: versionalV2(UserCategory, CreateAction),
+			body: `{"userName":"` + util.UserRoot + `","password":"Milvus","description":"` + description + `"}`,
+		},
+		{
+			path: versionalV2(UserCategory, UpdatePasswordAction),
+			body: `{"userName":"` + util.UserRoot + `","description":"` + description + `"}`,
+		},
+		{
+			path: versionalV2(UserCategory, DescribeAction),
+			body: `{"userName":"` + util.UserRoot + `"}`,
+		},
+	} {
+		t.Run(testcase.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader([]byte(testcase.body)))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+
+			resp := map[string]interface{}{}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			assert.Equal(t, float64(0), resp[HTTPReturnCode])
+			if testcase.path == versionalV2(UserCategory, DescribeAction) {
+				assert.Equal(t, description, resp[HTTPReturnDescription])
+				assert.Equal(t, []interface{}{util.RoleAdmin}, resp[HTTPReturnData])
+			}
+		})
+	}
+}
+
 func validateTestCases(t *testing.T, testEngine *gin.Engine, queryTestCases []requestBodyTestCase, allowInt64 bool) {
 	for i, testcase := range queryTestCases {
 		t.Run(testcase.path, func(t *testing.T) {
@@ -3352,13 +3427,13 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
 		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "word_count", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "test"}`),
-		errMsg:      "can only accept json format request, error: cannot find a vector field named: word_count",
+		errMsg:      "cannot find a vector field",
 		errCode:     1801,
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        AdvancedSearchAction,
 		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [{"data": [[0.1, 0.2]], "annsField": "float_vector1", "metricType": "L2", "limit": 3}, {"data": [[0.1, 0.2]], "annsField": "float_vector2", "metricType": "L2", "limit": 3}], "rerank": {"strategy": "rrf", "params": {"k":  1}}}`),
-		errMsg:      "can only accept json format request, error: cannot find a vector field named: float_vector1",
+		errMsg:      "cannot find a vector field",
 		errCode:     1801,
 	})
 	// multiple annsFields

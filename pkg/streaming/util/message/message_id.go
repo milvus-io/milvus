@@ -49,13 +49,25 @@ func MustUnmarshalMessageID(msgID *commonpb.MessageID) MessageID {
 
 // UnmsarshalMessageID unmarshal the message id.
 func UnmarshalMessageID(msgID *commonpb.MessageID) (MessageID, error) {
+	if msgID == nil {
+		return nil, errors.Wrap(ErrInvalidMessageID, "nil message id")
+	}
+	// wal_name is a client-controlled proto enum; proto3 allows any int32 on the
+	// wire. Return errors instead of panicking so a malformed value cannot crash
+	// the process. MustUnmarshalMessageID keeps the panic contract for trusted
+	// internal callers.
 	name := WALName(msgID.WALName)
 	if name == WALNameUnknown {
-		name = MustGetDefaultWALName()
+		// Use the non-panicking lookup: an unregistered default WAL must not
+		// nil-deref on client input.
+		name = GetDefaultWALName()
+		if name == WALNameUnknown {
+			return nil, errors.Wrapf(ErrInvalidMessageID, "default wal name is not registered, wal: %s", msgID.WALName.String())
+		}
 	}
 	unmarshaler, ok := messageIDUnmarshaler.Get(name)
 	if !ok {
-		panic("MessageID Unmarshaler not registered: " + name.String())
+		return nil, errors.Wrapf(ErrInvalidMessageID, "message id unmarshaler not registered for wal: %s", msgID.WALName.String())
 	}
 	return unmarshaler(msgID.Id)
 }

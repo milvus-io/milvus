@@ -2,12 +2,14 @@ package search_agg
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -432,6 +434,57 @@ func TestBuildSearchAggregationContextRejectsJSONField(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "group_by field \"meta['region']\": JSON / dynamic fields are not yet supported with search_aggregation")
 	})
+}
+
+// TestBuildSearchAggregationContextRejectErrorsAreSingleSuffix guards against the
+// doubled "invalid parameter" sentinel suffix. Once err-std made the leaf validators
+// return typed merr errors, an outer context wrapper that re-stamped them via
+// WrapErrParameterInvalidMsg("...: %v", err) appended a second suffix. Context wrappers
+// must use merr.Wrapf so the sentinel suffix (and code) come exactly once, from the
+// inner origin.
+func TestBuildSearchAggregationContextRejectErrorsAreSingleSuffix(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "agg_test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 108, Name: "meta", DataType: schemapb.DataType_JSON},
+		},
+	}
+
+	cases := []struct {
+		name string
+		spec *commonpb.SearchAggregationSpec
+		want string
+	}{
+		{
+			name: "group_by json field", // exercises the group_by context wrapper
+			spec: &commonpb.SearchAggregationSpec{Fields: []string{"meta"}, Size: 3},
+			want: `group_by field "meta": JSON / dynamic fields are not yet supported`,
+		},
+		{
+			name: "metric json field", // exercises the metric context wrapper (originally reported)
+			spec: &commonpb.SearchAggregationSpec{
+				Fields:  []string{"id"},
+				Size:    3,
+				Metrics: map[string]*commonpb.MetricAggSpec{"avg_meta": {Op: "avg", FieldName: "meta"}},
+			},
+			want: `invalid metric "avg_meta": metric field "meta": JSON / dynamic fields are not yet supported`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := BuildSearchAggregationContext(tc.spec, schema, 1)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.want)
+			// The merr sentinel suffix must appear exactly once — not doubled by an
+			// outer wrapper re-stamping the already-typed inner.
+			require.Equal(t, 1, strings.Count(err.Error(), "invalid parameter"),
+				"sentinel suffix doubled: %s", err.Error())
+			// Wrapping must preserve the inner ParameterInvalid classification.
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		})
+	}
 }
 
 func TestBuildSearchAggregationContextRejectsTopHitsSortJSONPath(t *testing.T) {

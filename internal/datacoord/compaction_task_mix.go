@@ -398,7 +398,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		resources, err := t.meta.GetFileResources(context.Background(), taskSchema.GetFileResourceIds()...)
 		if err != nil {
 			log.Warn("get file resources for collection failed", zap.Int64("collectionID", taskProto.GetCollectionID()), zap.Error(err))
-			return nil, errors.Errorf("get file resources for sort compaction failed: %v", err)
+			return nil, merr.Wrap(err, "get file resources for sort compaction failed")
 		}
 		plan.FileResources = resources
 	}
@@ -411,7 +411,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 			return nil, merr.WrapErrSegmentNotFound(segID)
 		}
 		if taskSchemaVersion < segInfo.GetSchemaVersion() {
-			return nil, merr.WrapErrIllegalCompactionPlan(fmt.Sprintf("compaction task schema version %d is older than input segment %d schema version %d", taskSchemaVersion, segInfo.GetID(), segInfo.GetSchemaVersion()))
+			return nil, merr.WrapErrIllegalCompactionPlanMsg("compaction task schema version %d is older than input segment %d schema version %d", taskSchemaVersion, segInfo.GetID(), segInfo.GetSchemaVersion())
 		}
 		plan.SegmentBinlogs = append(plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
 			SegmentID:           segID,

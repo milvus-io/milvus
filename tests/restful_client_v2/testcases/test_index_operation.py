@@ -678,4 +678,4 @@ class TestCreateIndexNegative(TestBase):
             payload["indexParams"][0]["params"]["nlist"] = "16384"
         rsp = self.index_client.index_create(payload)
         assert rsp["code"] == 1100
-        assert "not supported" in rsp["message"]
+        assert "does not support metric type" in rsp["message"]

@@ -77,7 +77,7 @@ func parseAndRemoveElementScope(searchParamStr string) (elementCollapseConfig, b
 	delete(root, elementScopeKey)
 	sanitized, err := json.Marshal(root)
 	if err != nil {
-		return elementCollapseConfig{}, false, "", merr.WrapErrServiceInternal(fmt.Sprintf("failed to rewrite search params without %s: %v", elementScopeKey, err))
+		return elementCollapseConfig{}, false, "", merr.WrapErrServiceInternalMsg("failed to rewrite search params without %s: %v", elementScopeKey, err)
 	}
 	return cfg, true, string(sanitized), nil
 }
@@ -94,7 +94,7 @@ func parseElementScope(scopeRaw json.RawMessage) (elementCollapseConfig, error) 
 	}
 	collapseRaw, ok := scope["collapse"]
 	if !ok {
-		return elementCollapseConfig{}, merr.WrapErrParameterInvalidMsg("%s.collapse is required", elementScopeKey)
+		return elementCollapseConfig{}, merr.WrapErrParameterMissingMsg("%s.collapse is required", elementScopeKey)
 	}
 
 	var collapse map[string]json.RawMessage
@@ -115,7 +115,7 @@ func parseElementScope(scopeRaw json.RawMessage) (elementCollapseConfig, error) 
 	}
 	strategy = strings.TrimSpace(strategy)
 	if strategy == "" {
-		return elementCollapseConfig{}, merr.WrapErrParameterInvalidMsg("%s.collapse.strategy is required", elementScopeKey)
+		return elementCollapseConfig{}, merr.WrapErrParameterMissingMsg("%s.collapse.strategy is required", elementScopeKey)
 	}
 	if !isSupportedElementCollapseStrategy(strategy) {
 		return elementCollapseConfig{}, merr.WrapErrParameterInvalidMsg("unsupported %s.collapse.strategy: %s", elementScopeKey, strategy)
@@ -134,7 +134,7 @@ func parseElementScope(scopeRaw json.RawMessage) (elementCollapseConfig, error) 
 	switch strategy {
 	case elementCollapseTopKSum, elementCollapseTopKAvg:
 		if cfg.TopK <= 0 {
-			return elementCollapseConfig{}, merr.WrapErrParameterInvalidMsg("%s.collapse.topk is required for strategy %s", elementScopeKey, strategy)
+			return elementCollapseConfig{}, merr.WrapErrParameterMissingMsg("%s.collapse.topk is required for strategy %s", elementScopeKey, strategy)
 		}
 	default:
 		if cfg.TopK != 0 {

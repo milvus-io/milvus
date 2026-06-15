@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -6652,4 +6653,17 @@ func TestInjectVirtualPKForExternalCollection(t *testing.T) {
 		// FieldID should be 0 (assigned by RootCoord later)
 		assert.Equal(t, int64(0), schema.Fields[0].FieldID)
 	})
+}
+
+func TestFailMetricLabel(t *testing.T) {
+	// untyped / nil errors must take the conservative system bucket
+	assert.Equal(t, metrics.FailSystemLabel, failMetricLabel(nil))
+	assert.Equal(t, metrics.FailSystemLabel, failMetricLabel(errors.New("plain error")))
+	assert.Equal(t, metrics.FailSystemLabel, failMetricLabel(merr.WrapErrServiceInternalMsg("internal failure")))
+	// input-classified merr errors go to the user bucket, also through wrapping
+	assert.Equal(t, metrics.FailInputLabel, failMetricLabel(merr.WrapErrParameterInvalidMsg("bad parameter")))
+	assert.Equal(t, metrics.FailInputLabel, failMetricLabel(merr.Wrap(merr.WrapErrParameterInvalidMsg("bad parameter"), "context")))
+	// client cancellation is neither party's failure
+	assert.Equal(t, metrics.CancelLabel, failMetricLabel(context.Canceled))
+	assert.Equal(t, metrics.CancelLabel, failMetricLabel(errors.Wrap(context.Canceled, "rpc aborted")))
 }

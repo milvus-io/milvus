@@ -24,7 +24,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
@@ -33,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -312,7 +312,7 @@ func (d *dmlChannels) getMsgStreamByName(chanName string) (*dmlMsgStream, error)
 	dms, ok := d.pool.Get(chanName)
 	if !ok {
 		log.Ctx(d.ctx).Error("invalid channelName", zap.String("chanName", chanName))
-		return nil, errors.Newf("invalid channel name: %s", chanName)
+		return nil, merr.WrapErrParameterInvalidMsg("invalid channel name: %s", chanName)
 	}
 	return dms, nil
 }
@@ -361,7 +361,7 @@ func (d *dmlChannels) broadcastMark(chanNames []string, pack *msgstream.MsgPack)
 			}
 		} else {
 			dms.mutex.RUnlock()
-			return nil, errors.Newf("channel not in use: %s", chanName)
+			return nil, merr.WrapErrServiceInternalMsg("channel not in use: %s", chanName)
 		}
 		dms.mutex.RUnlock()
 	}

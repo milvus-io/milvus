@@ -1,9 +1,6 @@
 package indexparamcheck
 
 import (
-	"fmt"
-
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -40,7 +37,7 @@ func (c *STLSORTChecker) CheckValidDataType(indexType IndexType, field *schemapb
 	if typeutil.IsArrayType(dataType) && typeutil.IsStructSubField(field.GetName()) {
 		elemType := field.GetElementType()
 		if !typeutil.IsArithmetic(elemType) && !typeutil.IsStringType(elemType) && !typeutil.IsTimestamptzType(elemType) {
-			return errors.New(fmt.Sprintf("STL_SORT are only supported on numeric, varchar or timestamptz field, got struct sub-field of %s", field.GetElementType()))
+			return merr.WrapErrParameterInvalidMsg("STL_SORT are only supported on numeric, varchar or timestamptz field, got struct sub-field of %s", field.GetElementType())
 		}
 		return nil
 	}
@@ -48,7 +45,7 @@ func (c *STLSORTChecker) CheckValidDataType(indexType IndexType, field *schemapb
 		return nil
 	}
 	if !typeutil.IsArithmetic(dataType) && !typeutil.IsStringType(dataType) && !typeutil.IsTimestamptzType(dataType) {
-		return errors.New(fmt.Sprintf("STL_SORT are only supported on numeric, varchar or timestamptz field, got %s", field.GetDataType()))
+		return merr.WrapErrParameterInvalidMsg("STL_SORT are only supported on numeric, varchar or timestamptz field, got %s", field.GetDataType())
 	}
 	return nil
 }
