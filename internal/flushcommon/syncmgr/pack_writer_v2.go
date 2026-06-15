@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -77,6 +78,7 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 	bm25Stats map[int64]*datapb.FieldBinlog,
 	manifest string,
 	size int64,
+	segmentStats *datapb.Statistics,
 	err error,
 ) {
 	if inserts, manifest, err = bw.writeInserts(ctx, pack); err != nil {
@@ -98,6 +100,38 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 
 	size = bw.sizeWritten
 
+	// Digest this sync's writes into the growing segment's cumulative
+	// StatisticsCollector, dispatched immediately like RollStats. Skip the
+	// dispatch for an empty sync (nothing written) so there is nothing to
+	// digest — the publish below still runs and returns the segment's prior
+	// cumulative Statistics (or nil for a never-digested segment). V2 returns
+	// the stats / bm25Stats arrays, so statsBlobSize is summed from them here.
+	if len(inserts) > 0 || len(stats) > 0 || len(bm25Stats) > 0 || len(deltas.GetBinlogs()) > 0 {
+		var statsBlobSize int64
+		for _, fb := range stats {
+			for _, l := range fb.GetBinlogs() {
+				statsBlobSize += l.GetMemorySize()
+			}
+		}
+		for _, fb := range bm25Stats {
+			for _, l := range fb.GetBinlogs() {
+				statsBlobSize += l.GetMemorySize()
+			}
+		}
+		bw.metaCache.UpdateSegments(
+			metacache.MergeSegmentAction(metacache.MergeStatistics(inserts, deltas, statsBlobSize, pack.batchRows, pack.tsFrom, pack.tsTo)),
+			metacache.WithSegmentIDs(pack.segmentID),
+		)
+	}
+
+	// Publish the segment's cumulative Statistics. No scaling — the value
+	// reflects exactly the syncs the collector has digested so far.
+	seg, ok := bw.metaCache.GetSegmentByID(pack.segmentID)
+	if !ok {
+		err = merr.WrapErrSegmentNotFound(pack.segmentID)
+		return
+	}
+	segmentStats = seg.Statistics().Publish()
 	return
 }
 

@@ -125,16 +125,25 @@ func (w *MultiSegmentWriter) closeWriter() error {
 		rowNum := writer.GetRowNum()
 		writtenUncompressed := writer.GetWrittenUncompressed()
 
+		sortedInsertLogs := storage.SortFieldBinlogs(fieldBinlogs)
+		statslogsForStats := []*datapb.FieldBinlog{statsLog}
+		bm25LogsForStats := lo.Values(bm25Logs)
 		result := &datapb.CompactionSegment{
 			SegmentID:           w.currentSegmentID,
-			InsertLogs:          storage.SortFieldBinlogs(fieldBinlogs),
-			Field2StatslogPaths: []*datapb.FieldBinlog{statsLog},
+			InsertLogs:          sortedInsertLogs,
+			Field2StatslogPaths: statslogsForStats,
 			NumOfRows:           rowNum,
 			Channel:             w.channel,
-			Bm25Logs:            lo.Values(bm25Logs),
+			Bm25Logs:            bm25LogsForStats,
 			StorageVersion:      w.storageVersion,
 			Manifest:            manifest,
 			ExpirQuantiles:      expirQuantiles,
+			// Stats is the aggregate footprint of this output segment.
+			// The receiver copies it verbatim onto SegmentInfo.Stats and
+			// does not recompute. statsBlobSize is sourced from the
+			// writer's tracked counter (works for V2 array-emitting
+			// writers and V3 manifest-embedded-stats writers alike).
+			Stats: buildCompactionOutputStats(sortedInsertLogs, nil, writer.GetStatsBlobSize()),
 		}
 
 		w.res = append(w.res, result)

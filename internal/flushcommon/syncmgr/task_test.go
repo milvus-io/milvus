@@ -198,7 +198,7 @@ func (s *SyncTaskSuite) createSegment(storageVersion int64) *metacache.SegmentIn
 		segInfo.ManifestPath = packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 	}
 
-	seg := metacache.NewSegmentInfo(segInfo, bfs, nil)
+	seg := metacache.NewSegmentInfo(segInfo, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)
 	seg.GetBloomFilterSet().Roll()
 
@@ -380,7 +380,7 @@ func (s *SyncTaskSuite) TestRunL0Segment() {
 
 	s.Run("pure_delete_l0_flush", func() {
 		bfs := pkoracle.NewBloomFilterSet()
-		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0}, bfs, nil)
+		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0}, bfs, nil, metacache.NewEmptySegmentStats())
 		s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 		s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
@@ -401,7 +401,7 @@ func (s *SyncTaskSuite) TestRunL0Segment() {
 	s.Run("pure_delete_l0_no_flush_storage_v2", func() {
 		// should not affect l0 segment with storage v2
 		bfs := pkoracle.NewBloomFilterSet()
-		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0, StorageVersion: storage.StorageV2}, bfs, nil)
+		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0, StorageVersion: storage.StorageV2}, bfs, nil, metacache.NewEmptySegmentStats())
 		s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 		s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
@@ -437,7 +437,7 @@ func (s *SyncTaskSuite) TestRunError() {
 	})
 
 	s.metacache.ExpectedCalls = nil
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, pkoracle.NewBloomFilterSet(), nil)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, pkoracle.NewBloomFilterSet(), nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})

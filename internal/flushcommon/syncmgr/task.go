@@ -78,6 +78,13 @@ type SyncTask struct {
 
 	manifestPath string
 
+	// stats is the writer-built Statistics for SegmentInfo.Stats: insert /
+	// delta counts and sizes, bloom-filter / BM25 stats_binlog_size,
+	// timestamp_from/to/quantiles. DataCoord persists it directly on
+	// SaveBinlogPathsRequest.Stats; for V2 (or any flush that returns nil
+	// here) the handler falls back to computing from FieldBinlog arrays.
+	stats *datapb.Statistics
+
 	writeRetryOpts []retry.Option
 
 	failureCallback func(err error)
@@ -140,11 +147,11 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		// New sync task means needs to flush data immediately, so do not need to buffer data in writer again.
 		writer := NewBulkPackWriterV2(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
 			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, t.writeRetryOpts...)
-		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, err = writer.Write(ctx, t.pack)
+		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, t.stats, err = writer.Write(ctx, t.pack)
 	case storage.StorageV3:
 		writer := NewBulkPackWriterV3(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
 			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, segmentInfo.ManifestPath(), t.writeRetryOpts...)
-		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, err = writer.Write(ctx, t.pack)
+		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, t.stats, err = writer.Write(ctx, t.pack)
 	default:
 		writer, writerErr := NewBulkPackWriter(t.metacache, t.schema, t.chunkManager, t.allocator, t.writeRetryOpts...)
 		if writerErr != nil {

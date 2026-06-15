@@ -407,6 +407,12 @@ func (t *bumpSchemaVersionCompactionTask) runSchemaVersionBumpOnly() *datapb.Com
 				StorageVersion:      segment.GetStorageVersion(),
 				Manifest:            segment.GetManifest(),
 				ExpirQuantiles:      segment.GetExpirQuantiles(),
+				// Schema-version-bump-only path doesn't rewrite data —
+				// the receiver Clones oldSegment and only updates
+				// SchemaVersion/Binlogs/StorageVersion/ManifestPath, so
+				// the existing oldSegment.Stats is preserved. Leaving
+				// Stats nil here documents that the receiver does not
+				// read it for this path.
 			},
 		},
 		Type: t.plan.GetType(),
@@ -565,6 +571,11 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		ExpirQuantiles:      expirQuantiles,
 		IsSorted:            segment.GetIsSorted(),
 		IsSortedByNamespace: segment.GetIsSortedByNamespace(),
+		// Stats: insert aggregates from the freshly emitted insert logs,
+		// stats footprint from the writer's tracked counter. V3 writers
+		// leave statsLog/bm25StatsLogs nil because stats live in the
+		// manifest — the counter is the only correct source.
+		Stats: buildCompactionOutputStats(sortedInsertLogs, nil, writer.GetStatsBlobSize()),
 	}
 	if totalRows > 0 {
 		// Text stats are built explicitly, matching sort compaction.
@@ -652,6 +663,10 @@ type bumpSchemaVersionWriterResult struct {
 	basePath       string
 	baseVersion    int64
 	v3Stats        []packed.StatEntry
+	// statsBlobSize tracks the cumulative bloom-filter + BM25 blob memory
+	// committed via addV3Stats. Reported to DataCoord on
+	// CompactionSegment.Stats.StatsBinlogSize.
+	statsBlobSize int64
 }
 
 func (t *bumpSchemaVersionCompactionTask) setupWriter(outputFields []*schemapb.FieldSchema, segment *datapb.CompactionSegmentBinlogs, collectionID int64) (*bumpSchemaVersionWriterResult, error) {
@@ -742,6 +757,7 @@ func (t *bumpSchemaVersionCompactionTask) addV3Stats(prefix string, fieldID int6
 			MemorySize: memorySize,
 		}},
 	}))
+	writerResult.statsBlobSize += memorySize
 	return nil
 }
 
@@ -1020,6 +1036,16 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 				Channel:             segment.GetInsertChannel(),
 				StorageVersion:      writerResult.storageVersion,
 				Manifest:            manifestPath,
+				// Partial-writer path merges new inserts with the
+				// input's existing statslogs and deltalogs. statsBlobSize
+				// comes from the freshly committed V3 stats (tracked on
+				// writerResult); insert/delta aggregates come from the
+				// merged arrays.
+				Stats: buildCompactionOutputStats(
+					mergedInsertLogs,
+					segment.GetDeltalogs(),
+					writerResult.statsBlobSize,
+				),
 			},
 		},
 		Type: t.plan.GetType(),

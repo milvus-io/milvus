@@ -1221,27 +1221,27 @@ func (sm *snapshotManager) createRestoreJob(
 			dmlPos.ChannelName = targetChannelName
 		}
 
-		// Pre-register target segment in meta
-		newSegment := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:                  targetSegmentID,
-				CollectionID:        targetCollection,
-				PartitionID:         targetPartitionID,
-				InsertChannel:       targetChannelName,
-				NumOfRows:           segDesc.GetNumOfRows(),
-				State:               commonpb.SegmentState_Importing,
-				MaxRowNum:           Params.DataCoordCfg.SegmentMaxSize.GetAsInt64(),
-				Level:               segDesc.GetSegmentLevel(),
-				CreatedByCompaction: false,
-				LastExpireTime:      math.MaxUint64,
-				StartPosition:       startPos,
-				DmlPosition:         dmlPos,
-				StorageVersion:      segDesc.GetStorageVersion(),
-				IsSorted:            segDesc.GetIsSorted(),
-				CommitTimestamp:     segDesc.GetCommitTimestamp(),
-				IsImporting:         true,
-			},
-		}
+		// Pre-register target segment in meta. NewSegmentInfo eagerly
+		// populates Stats so concurrent RLock readers don't race on a
+		// lazy init.
+		newSegment := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:                  targetSegmentID,
+			CollectionID:        targetCollection,
+			PartitionID:         targetPartitionID,
+			InsertChannel:       targetChannelName,
+			NumOfRows:           segDesc.GetNumOfRows(),
+			State:               commonpb.SegmentState_Importing,
+			MaxRowNum:           Params.DataCoordCfg.SegmentMaxSize.GetAsInt64(),
+			Level:               segDesc.GetSegmentLevel(),
+			CreatedByCompaction: false,
+			LastExpireTime:      math.MaxUint64,
+			StartPosition:       startPos,
+			DmlPosition:         dmlPos,
+			StorageVersion:      segDesc.GetStorageVersion(),
+			IsSorted:            segDesc.GetIsSorted(),
+			CommitTimestamp:     segDesc.GetCommitTimestamp(),
+			IsImporting:         true,
+		})
 		targetSegments[targetSegmentID] = newSegment
 	}
 

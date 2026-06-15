@@ -28,7 +28,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -1781,9 +1780,16 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	couldDo = trigger.ShouldDoSingleCompaction(info2, &compactTime{expireTime: 300})
 	assert.False(t, couldDo)
 
-	// didn't reach single compaction size 10 * 1024 * 1024
+	// Opportunistic quantile-based ratio/size check has 20% bucket
+	// granularity (vs. the legacy per-binlog computation). At
+	// expireTime=600 all five quantiles are 500 < 600, so qualifyingIdx=4;
+	// the under-estimate rule drops one bucket → expiredFraction = 0.8.
+	// approxExpiredSize = 0.8 × InsertBinlogSize comfortably exceeds the
+	// 10 MiB threshold and compaction triggers. (Legacy precise per-
+	// binlog sum would have been 100 × 100 KiB = 10 MiB, exactly at
+	// threshold; the approximate path now sits above it.)
 	couldDo = trigger.ShouldDoSingleCompaction(info2, &compactTime{expireTime: 600})
-	assert.False(t, couldDo)
+	assert.True(t, couldDo)
 
 	// expire time < Timestamp False
 	couldDo = trigger.ShouldDoSingleCompaction(info2, &compactTime{expireTime: 1200})
@@ -2696,11 +2702,11 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 func (s *CompactionTriggerSuite) TestSqueezeSmallSegments() {
 	expectedSize := int64(70000)
 	smallsegments := []*SegmentInfo{
-		{SegmentInfo: &datapb.SegmentInfo{ID: 3}, size: *atomic.NewInt64(69999)},
-		{SegmentInfo: &datapb.SegmentInfo{ID: 1}, size: *atomic.NewInt64(100)},
+		{SegmentInfo: &datapb.SegmentInfo{ID: 3, Stats: &datapb.Statistics{InsertBinlogSize: 69999}}},
+		{SegmentInfo: &datapb.SegmentInfo{ID: 1, Stats: &datapb.Statistics{InsertBinlogSize: 100}}},
 	}
 
-	largeSegment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 2}, size: *atomic.NewInt64(expectedSize)}
+	largeSegment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 2, Stats: &datapb.Statistics{InsertBinlogSize: expectedSize}}}
 	buckets := [][]*SegmentInfo{{largeSegment}}
 	s.Require().Equal(1, len(buckets))
 	s.Require().Equal(1, len(buckets[0]))
@@ -3561,4 +3567,82 @@ func Test_ShouldRebuildSegmentIndex_ForceRebuild_TargetExceedsMax_Converges(t *t
 		segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: segID, CollectionID: collID}}
 		assert.False(t, trigger.ShouldRebuildSegmentIndex(segment))
 	})
+}
+
+// hasTooManyDeletions reads three independent thresholds off Stats. Make
+// sure each one fires on its own, that all-zero stats don't fire, and that
+// nil Stats lazily initializes (no panic, no false positive).
+func TestHasTooManyDeletions(t *testing.T) {
+	saveKeys := map[string]string{
+		Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.Key:  Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetValue(),
+		Params.DataCoordCfg.SingleCompactionRatioThreshold.Key:  Params.DataCoordCfg.SingleCompactionRatioThreshold.GetValue(),
+		Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.Key: Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetValue(),
+	}
+	defer func() {
+		for k, v := range saveKeys {
+			Params.Save(k, v)
+		}
+	}()
+	Params.Save(Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.Key, "10")
+	Params.Save(Params.DataCoordCfg.SingleCompactionRatioThreshold.Key, "0.2")
+	Params.Save(Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.Key, "1024")
+
+	cases := []struct {
+		name    string
+		stats   *datapb.Statistics
+		numRows int64
+		want    bool
+	}{
+		{
+			name:    "no stats no deletions",
+			stats:   nil,
+			numRows: 100,
+			want:    false,
+		},
+		{
+			name:    "all zero stats does not fire",
+			stats:   &datapb.Statistics{},
+			numRows: 100,
+			want:    false,
+		},
+		{
+			name:    "exceeds delta file count",
+			stats:   &datapb.Statistics{DeltaBinlogCount: 11},
+			numRows: 100,
+			want:    true,
+		},
+		{
+			name:    "delta file count at threshold (>, not >=)",
+			stats:   &datapb.Statistics{DeltaBinlogCount: 10},
+			numRows: 100,
+			want:    false,
+		},
+		{
+			name:    "exceeds delete ratio",
+			stats:   &datapb.Statistics{DeleteNumRows: 25},
+			numRows: 100,
+			want:    true,
+		},
+		{
+			name:    "ratio just below threshold",
+			stats:   &datapb.Statistics{DeleteNumRows: 19},
+			numRows: 100,
+			want:    false,
+		},
+		{
+			name:    "exceeds delta size",
+			stats:   &datapb.Statistics{DeltaBinlogSize: 2048},
+			numRows: 100,
+			want:    true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			segment := &SegmentInfo{
+				SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: tc.numRows, Stats: tc.stats},
+			}
+			assert.Equal(t, tc.want, hasTooManyDeletions(segment))
+		})
+	}
 }

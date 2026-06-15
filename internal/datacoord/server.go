@@ -970,23 +970,17 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		}
 	}
 
-	insertFileNum := 0
-	for _, fieldBinlog := range segment.GetBinlogs() {
-		insertFileNum += len(fieldBinlog.GetBinlogs())
-	}
-	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.InsertFileLabel).Observe(float64(insertFileNum))
-
+	// Insert / delta counts come from Statistics. Stats array is iterated
+	// because Statistics doesn't carry a per-segment stat-file count — V3
+	// reports 0, matching the manifest-driven layout.
+	stats := segment.EnsureStats()
+	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.InsertFileLabel).Observe(float64(stats.GetInsertBinlogCount()))
 	statFileNum := 0
 	for _, fieldBinlog := range segment.GetStatslogs() {
 		statFileNum += len(fieldBinlog.GetBinlogs())
 	}
 	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.StatFileLabel).Observe(float64(statFileNum))
-
-	deleteFileNum := 0
-	for _, filedBinlog := range segment.GetDeltalogs() {
-		deleteFileNum += len(filedBinlog.GetBinlogs())
-	}
-	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(deleteFileNum))
+	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(stats.GetDeltaBinlogCount()))
 
 	log.Info("flush segment complete", zap.Int64("id", segmentID))
 	return nil
