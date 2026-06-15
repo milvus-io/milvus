@@ -397,6 +397,42 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.plan.GetType().String()).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
 	metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(durInQueue.Milliseconds()))
 
+	// Build text index inline for each output segment so the segment
+	// arrives at QueryNode with TextStatsLogs populated, avoiding the
+	// CGO_LOAD CreateTextIndex fallback at load time. Mirrors sortCompaction.
+	//
+	// Only sorted outputs get an inline text index. Unsorted mix-compaction
+	// outputs (from mergeSplit) are interim: a later sortcompaction will
+	// re-emit them as sorted and build the text index inline at that step.
+	// Building here would be discarded work, and stats_inspector also skips
+	// unsorted segments in its TextIndexJob filter, so the index would never
+	// be promoted to text_stats_logs in datacoord either.
+	textIndexStart := time.Now()
+	for _, resultSegment := range res {
+		if resultSegment.GetNumOfRows() == 0 {
+			continue
+		}
+		if !resultSegment.GetIsSorted() {
+			continue
+		}
+		textStatsLogs, err := t.createTextIndex(ctx, resultSegment)
+		if err != nil {
+			log.Warn("failed to create text indexes",
+				zap.Int64("targetSegmentID", resultSegment.GetSegmentID()),
+				zap.Error(err))
+			return nil, err
+		}
+		if len(textStatsLogs) == 0 {
+			continue
+		}
+		resultSegment.TextStatsLogs = textStatsLogs
+	}
+	createTextIndexCost := time.Since(textIndexStart)
+	metrics.DataNodeCompactionStageLatency.
+		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.plan.GetType().String(), "create_text_index").
+		Observe(float64(createTextIndexCost.Milliseconds()))
+	log.Info("compact create text index done", zap.Duration("createTextIndexCost", createTextIndexCost))
+
 	planResult := &datapb.CompactionPlanResult{
 		State:    datapb.CompactionTaskState_completed,
 		PlanID:   t.GetPlanID(),
@@ -405,6 +441,29 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		Type:     t.plan.GetType(),
 	}
 	return planResult, nil
+}
+
+// createTextIndex delegates to the shared helper buildTextIndexesForSegment
+// after assembling per-segment inputs. The wrapper exists so the per-segment
+// loop in Compact stays compact and so unit tests can mock the helper.
+func (t *mixCompactionTask) createTextIndex(ctx context.Context,
+	segment *datapb.CompactionSegment,
+) (map[int64]*datapb.TextIndexStats, error) {
+	return buildTextIndexesForSegment(ctx, buildTextIndexArgs{
+		plan:             t.plan,
+		compactionParams: t.compactionParams,
+		collectionID:     t.collectionID,
+		partitionID:      t.partitionID,
+		segmentID:        segment.GetSegmentID(),
+		taskID:           t.GetPlanID(),
+		storageVersion:   segment.GetStorageVersion(),
+		// Pass the output segment's own freshly-written manifest. Under StorageV2
+		// MultiSegmentWriter sets CompactionSegment.Manifest, and BuildTextIndex
+		// consumes it (config[SEGMENT_MANIFEST_KEY] + loon FFI properties), so it
+		// must be forwarded rather than left empty.
+		manifest:      segment.GetManifest(),
+		insertBinlogs: segment.GetInsertLogs(),
+	})
 }
 
 func (t *mixCompactionTask) Complete() {

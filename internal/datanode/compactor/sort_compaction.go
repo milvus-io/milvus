@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"runtime/debug"
-	"sync"
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -28,24 +27,19 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
-	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -396,6 +390,7 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	stepStart = time.Now()
 	textStatsLogs, err := t.createTextIndex(ctx,
 		t.collectionID, t.partitionID, targetSegemntID, t.GetPlanID(),
+		res.GetSegments()[0].GetManifest(),
 		res.GetSegments()[0].GetInsertLogs())
 	if err != nil {
 		log.Warn("failed to create text indexes", zap.Int64("targetSegmentID", targetSegemntID),
@@ -455,115 +450,22 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 	partitionID int64,
 	segmentID int64,
 	taskID int64,
+	manifest string,
 	insertBinlogs []*datapb.FieldBinlog,
 ) (map[int64]*datapb.TextIndexStats, error) {
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", collectionID),
-		zap.Int64("partitionID", partitionID),
-		zap.Int64("segmentID", segmentID),
-	)
-
-	fieldBinlogs := lo.GroupBy(insertBinlogs, func(binlog *datapb.FieldBinlog) int64 {
-		return binlog.GetFieldID()
+	return buildTextIndexesForSegment(ctx, buildTextIndexArgs{
+		plan:             t.plan,
+		compactionParams: t.compactionParams,
+		collectionID:     collectionID,
+		partitionID:      partitionID,
+		segmentID:        segmentID,
+		taskID:           taskID,
+		storageVersion:   t.storageVersion,
+		// Use the OUTPUT segment's own manifest, not the input segment's
+		// (t.manifest). Under StorageV2 the text-index build reads field data
+		// via the manifest, so the index must reflect the sorted OUTPUT
+		// segment's rows/order, not the unsorted input's.
+		manifest:      manifest,
+		insertBinlogs: insertBinlogs,
 	})
-
-	getInsertFiles := func(fieldID int64) ([]string, error) {
-		if t.storageVersion == storage.StorageV2 {
-			return []string{}, nil
-		}
-		binlogs, ok := fieldBinlogs[fieldID]
-		if !ok {
-			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
-		}
-		result := make([]string, 0, len(binlogs))
-		for _, binlog := range binlogs {
-			for _, file := range binlog.GetBinlogs() {
-				result = append(result, metautil.BuildInsertLogPath(t.compactionParams.StorageConfig.GetRootPath(),
-					collectionID, partitionID, segmentID, fieldID, file.GetLogID()))
-			}
-		}
-		return result, nil
-	}
-
-	newStorageConfig, err := util.ParseStorageConfig(t.compactionParams.StorageConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	// Concurrent create text index for all match-enabled fields
-	var (
-		mu            sync.Mutex
-		textIndexLogs = make(map[int64]*datapb.TextIndexStats)
-	)
-
-	eg, egCtx := errgroup.WithContext(ctx)
-
-	for _, field := range t.plan.GetSchema().GetFields() {
-		field := field
-		h := typeutil.CreateFieldSchemaHelper(field)
-		if !h.EnableMatch() {
-			continue
-		}
-		log.Info("field enable match, ready to create text index", zap.Int64("field id", field.GetFieldID()))
-
-		eg.Go(func() error {
-			files, err := getInsertFiles(field.GetFieldID())
-			if err != nil {
-				return err
-			}
-
-			buildIndexParams := &indexcgopb.BuildIndexInfo{
-				BuildID:                   t.GetPlanID(),
-				CollectionID:              collectionID,
-				PartitionID:               partitionID,
-				SegmentID:                 segmentID,
-				IndexVersion:              0, // always zero
-				InsertFiles:               files,
-				FieldSchema:               field,
-				StorageConfig:             newStorageConfig,
-				CurrentScalarIndexVersion: common.ClampScalarIndexVersion(t.plan.GetCurrentScalarIndexVersion()),
-				StorageVersion:            t.storageVersion,
-				Manifest:                  t.manifest,
-			}
-
-			if t.storageVersion == storage.StorageV2 {
-				buildIndexParams.SegmentInsertFiles = util.GetSegmentInsertFiles(
-					insertBinlogs,
-					t.compactionParams.StorageConfig,
-					collectionID,
-					partitionID,
-					segmentID)
-			}
-			uploaded, err := indexcgowrapper.CreateTextIndex(egCtx, buildIndexParams)
-			if err != nil {
-				return err
-			}
-
-			mu.Lock()
-			totalSize := lo.SumBy(lo.Values(uploaded), func(fileSize int64) int64 { return fileSize })
-			textIndexLogs[field.GetFieldID()] = &datapb.TextIndexStats{
-				FieldID:                   field.GetFieldID(),
-				Version:                   0,
-				BuildID:                   taskID,
-				Files:                     lo.Keys(uploaded),
-				LogSize:                   totalSize,
-				MemorySize:                totalSize,
-				CurrentScalarIndexVersion: common.ClampScalarIndexVersion(t.plan.GetCurrentScalarIndexVersion()),
-			}
-			mu.Unlock()
-
-			log.Info("field enable match, create text index done",
-				zap.Int64("segmentID", segmentID),
-				zap.Int64("field id", field.GetFieldID()),
-				zap.Strings("files", lo.Keys(uploaded)),
-			)
-			return nil
-		})
-	}
-
-	if err := eg.Wait(); err != nil {
-		return nil, err
-	}
-
-	return textIndexLogs, nil
 }
