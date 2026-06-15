@@ -265,3 +265,31 @@ func (s *DataSalvageSuite) TestDumpMessagesWithMissingStartMessageId() {
 
 	s.Error(err)
 }
+
+// TestDumpMessagesWithMalformedStartMessageId verifies that DumpMessages
+// returns an error (instead of panicking and crashing the process) when
+// start_message_id is non-empty but cannot be unmarshaled. See issue #50341.
+func (s *DataSalvageSuite) TestDumpMessagesWithMalformedStartMessageId() {
+	ctx := context.Background()
+
+	stream, err := s.Cluster.MilvusClient.DumpMessages(ctx, &milvuspb.DumpMessagesRequest{
+		Pchannel: "test-pchannel",
+		StartMessageId: &commonpb.MessageID{
+			Id:      "not-a-valid-base64-msgid!!!", // non-empty but undecodable
+			WALName: commonpb.WALName_Pulsar,
+		},
+	})
+
+	// The error might come during stream creation or first Recv()
+	if err == nil {
+		_, err = stream.Recv()
+	}
+
+	s.Error(err)
+
+	// The server must stay up: a follow-up RPC should still succeed.
+	_, err = s.Cluster.MilvusClient.GetReplicateInfo(ctx, &milvuspb.GetReplicateInfoRequest{
+		TargetPchannel: "test-pchannel",
+	})
+	s.NoError(err)
+}
