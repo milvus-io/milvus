@@ -36,6 +36,7 @@ const (
 	MessageTypeCommitImport              MessageType = MessageType(messagespb.MessageType_CommitImport)
 	MessageTypeRollbackImport            MessageType = MessageType(messagespb.MessageType_RollbackImport)
 	MessageTypeSplitShard                MessageType = MessageType(messagespb.MessageType_SplitShard)
+	MessageTypeCreateVChannel            MessageType = MessageType(messagespb.MessageType_CreateVChannel)
 	MessageTypeCreateSegment             MessageType = MessageType(messagespb.MessageType_CreateSegment)
 	MessageTypeFlush                     MessageType = MessageType(messagespb.MessageType_Flush)
 	MessageTypeManualFlush               MessageType = MessageType(messagespb.MessageType_ManualFlush)
@@ -121,6 +122,7 @@ type (
 	RollbackImportMessageBody              = messagespb.RollbackImportMessageBody
 	SplitShardMessageHeader                = messagespb.SplitShardMessageHeader
 	SplitShardMessageBody                  = messagespb.SplitShardMessageBody
+	CreateVChannelMessageHeader            = messagespb.CreateVChannelMessageHeader
 	CreateSegmentMessageHeader             = messagespb.CreateSegmentMessageHeader
 	CreateSegmentMessageBody               = messagespb.CreateSegmentMessageBody
 	FlushMessageHeader                     = messagespb.FlushMessageHeader
@@ -708,6 +710,48 @@ var MustAsBroadcastSplitShardMessageV2 = MustAsSpecializedBroadcastMessage[*Spli
 
 // NewSplitShardMessageBuilderV2 creates a new message builder for SplitShardMessageV2
 var NewSplitShardMessageBuilderV2 = newMutableMessageBuilder[*SplitShardMessageHeader, *SplitShardMessageBody]
+
+// Type aliases for CreateVChannelMessageV2
+type (
+	MutableCreateVChannelMessageV2         = specializedMutableMessage[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+	ImmutableCreateVChannelMessageV2       = SpecializedImmutableMessage[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+	BroadcastCreateVChannelMessageV2       = SpecializedBroadcastMessage[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+	BroadcastResultCreateVChannelMessageV2 = BroadcastResult[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+	AckResultCreateVChannelMessageV2       = AckResult[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+)
+
+// MessageTypeWithVersion for CreateVChannelMessageV2
+var MessageTypeCreateVChannelV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeCreateVChannel,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for CreateVChannelMessageV2
+var SpecializedTypeCreateVChannelV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*CreateCollectionRequest)(nil)),
+	HeaderType: reflect.TypeOf((*CreateVChannelMessageHeader)(nil)),
+}
+
+// AsMutableCreateVChannelMessageV2 converts a BasicMessage to MutableCreateVChannelMessageV2
+var AsMutableCreateVChannelMessageV2 = asSpecializedMutableMessage[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+
+// MustAsMutableCreateVChannelMessageV2 converts a BasicMessage to MutableCreateVChannelMessageV2, panics on error
+var MustAsMutableCreateVChannelMessageV2 = mustAsSpecializedMutableMessage[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+
+// AsImmutableCreateVChannelMessageV2 converts an ImmutableMessage to ImmutableCreateVChannelMessageV2
+var AsImmutableCreateVChannelMessageV2 = asSpecializedImmutableMessage[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+
+// MustAsImmutableCreateVChannelMessageV2 converts an ImmutableMessage to ImmutableCreateVChannelMessageV2, panics on error
+var MustAsImmutableCreateVChannelMessageV2 = MustAsSpecializedImmutableMessage[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+
+// AsBroadcastCreateVChannelMessageV2 converts a BasicMessage to BroadcastCreateVChannelMessageV2
+var AsBroadcastCreateVChannelMessageV2 = asSpecializedBroadcastMessage[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+
+// MustAsBroadcastCreateVChannelMessageV2 converts a BasicMessage to BroadcastCreateVChannelMessageV2, panics on error
+var MustAsBroadcastCreateVChannelMessageV2 = MustAsSpecializedBroadcastMessage[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+
+// NewCreateVChannelMessageBuilderV2 creates a new message builder for CreateVChannelMessageV2
+var NewCreateVChannelMessageBuilderV2 = newMutableMessageBuilder[*CreateVChannelMessageHeader, *CreateCollectionRequest]
 
 // Type aliases for CreateSegmentMessageV2
 type (
@@ -2435,6 +2479,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.CreatePartitionMessageHeader{}):           MessageTypeCreatePartition,
 	reflect.TypeOf(&messagespb.CreateSegmentMessageHeader{}):             MessageTypeCreateSegment,
 	reflect.TypeOf(&messagespb.CreateSnapshotMessageHeader{}):            MessageTypeCreateSnapshot,
+	reflect.TypeOf(&messagespb.CreateVChannelMessageHeader{}):            MessageTypeCreateVChannel,
 	reflect.TypeOf(&messagespb.DeleteMessageHeader{}):                    MessageTypeDelete,
 	reflect.TypeOf(&messagespb.DropAliasMessageHeader{}):                 MessageTypeDropAlias,
 	reflect.TypeOf(&messagespb.DropCollectionMessageHeader{}):            MessageTypeDropCollection,
@@ -2508,6 +2553,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeCreatePartitionV1:           SpecializedTypeCreatePartitionV1,
 	MessageTypeCreateSegmentV2:             SpecializedTypeCreateSegmentV2,
 	MessageTypeCreateSnapshotV2:            SpecializedTypeCreateSnapshotV2,
+	MessageTypeCreateVChannelV2:            SpecializedTypeCreateVChannelV2,
 	MessageTypeDeleteV1:                    SpecializedTypeDeleteV1,
 	MessageTypeDropAliasV2:                 SpecializedTypeDropAliasV2,
 	MessageTypeDropCollectionV1:            SpecializedTypeDropCollectionV1,
@@ -2565,6 +2611,7 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeCreatePartitionV1:           MessageTypeCreatePartitionV1,
 	SpecializedTypeCreateSegmentV2:             MessageTypeCreateSegmentV2,
 	SpecializedTypeCreateSnapshotV2:            MessageTypeCreateSnapshotV2,
+	SpecializedTypeCreateVChannelV2:            MessageTypeCreateVChannelV2,
 	SpecializedTypeDeleteV1:                    MessageTypeDeleteV1,
 	SpecializedTypeDropAliasV2:                 MessageTypeDropAliasV2,
 	SpecializedTypeDropCollectionV1:            MessageTypeDropCollectionV1,
