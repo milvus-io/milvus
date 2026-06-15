@@ -542,7 +542,7 @@ queryNode:
       cellTargetSizeBytes: 4194304 # Target average byte size per storage v2 cache cell. Parquet row groups are greedily packed so that rgs_per_cell * avg_row_group_size ≈ this target. Each cell always contains at least one row group and cells never cross file boundaries. Tune larger for bigger batch IO (fewer cells) or smaller to get finer cache granularity. Default 4 MiB.
     deleteDumpBatchSize: 10000 # Batch size for delete snapshot dump in segcore.
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
-  enableDisk: false # enable querynode load disk index, and search on disk index
+  enableDisk: true # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
   cache:
     memoryLimit: 2147483648 # Deprecated: 2 GB, 2 * 1024 *1024 *1024
@@ -1086,6 +1086,18 @@ common:
       dataNode: sync # File resource mode for data node, options: [sync, ref, close]. Default is sync.
   groupBy:
     maxGroups: 100000 # Maximum number of groups allowed in GROUP BY aggregation, enforced both per segment and during cross-segment merge. Exceeding this limit fails the query.
+  AiSAQIndex:
+    MaxDegree: 56
+    SearchListSize: 100
+    PQCodeBudgetGBRatio: 0.125
+    SearchCacheBudgetGBRatio: 0
+    BeamWidthRatio: 4
+    DiskPQCodeBudgetGBRatio: 0.25
+    inlinePQ: -1 # Enable compressed vectors to be stored in-line within the node, the number of in-line vectors is limited by the node size.
+    pqCacheSize: 0 # compressed vectors cache DRAM size in MiB.
+    rearrange: true # Enable vectors rearrangement during build.
+    pqReadPageCacheSize: 0 # compressed vectors read cache DRAM size in bytes per thread.
+    numEntryPoints: 100 # Number of entry points that should be generated to be used as a search start points
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:

@@ -61,3 +61,24 @@ func (ap diskANNParam) Params() map[string]any {
 	result[diskANNSearchListKey] = ap.searchList
 	return result
 }
+
+var _ Index = AISAQIndex{}
+
+type AISAQIndex struct {
+	baseIndex
+}
+
+func (idx AISAQIndex) Params() map[string]string {
+	return map[string]string{
+		MetricTypeKey: string(idx.metricType),
+		IndexTypeKey:  string(AISAQ),
+	}
+}
+
+func NewAISAQIndex(metricType MetricType) Index {
+	return &AISAQIndex{
+		baseIndex: baseIndex{
+			metricType: metricType,
+		},
+	}
+}
