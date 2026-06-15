@@ -426,6 +426,15 @@ ChunkedSegmentSealedImpl::init_storage_v1_pk_index(
                        field_id.get());
             insert_record_.insert_pks(data_type, column.get());
             insert_record_.seal_pks();
+            size_t pk_index_size = insert_record_.pk2offset_->memory_size();
+            stats_.mem_size += pk_index_size;
+            LOG_INFO(
+                "Adding pk to offset index with size {} for segment {} , "
+                "mem_size= "
+                "{}",
+                pk_index_size,
+                id_,
+                stats_.mem_size.load());
         }
     }
 }
@@ -441,6 +450,19 @@ ChunkedSegmentSealedImpl::init_storage_v2_pk_index(
     std::unique_ptr<Translator<storagev2translator::PkIndexCell>> translator =
         std::make_unique<storagev2translator::PkIndexTranslator>(
             id_, column, data_type, is_sorted_by_pk_);
+    size_t pk_index_size = 0;
+    ResourceUsage expected_total_size;
+    for (size_t i = 0; i < translator->num_cells(); ++i) {
+        expected_total_size += translator->estimated_byte_size_of_cell(i).first;
+    }
+    pk_index_size = expected_total_size.memory_bytes;
+    stats_.mem_size += pk_index_size;
+    LOG_INFO(
+        "Adding pk to offset index with size {} for segment {} , mem_size= "
+        "{}",
+        pk_index_size,
+        id_,
+        stats_.mem_size.load());
     *pk_index_slot_.wlock() =
         Manager::GetInstance().CreateCacheSlot(std::move(translator));
 }
@@ -515,9 +537,12 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info, bool is_replace) {
         field_id, metric_type, std::move(info.cache_index));
     set_bit(index_ready_bitset_, field_id, true);
     index_has_raw_data_[field_id] = request.has_raw_data;
-    LOG_INFO("Has load vec index done, fieldID:{}. segmentID:{}, ",
+    LOG_INFO("index_mem_size: {}", info.index_mem_size);
+    stats_.mem_size += info.index_mem_size;
+    LOG_INFO("Has load vec index done, fieldID:{}. segmentID:{}. mem_size:{}, ",
              info.field_id,
-             id_);
+             id_,
+             stats_.mem_size.load());
 }
 
 void
@@ -1112,6 +1137,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         }
 
         if (column_group_id.get() == DEFAULT_SHORT_COLUMN_GROUP_ID) {
+            LOG_INFO("chunked_column_group->memory_size(): {}",
+                     chunked_column_group->memory_size());
             stats_.mem_size += chunked_column_group->memory_size();
         }
     }
@@ -4705,6 +4732,10 @@ ChunkedSegmentSealedImpl::init_storage_v1_timestamp_index(
     insert_record_.init_timestamps_from_owned(std::move(timestamps),
                                               std::move(index));
     stats_.mem_size += sizeof(Timestamp) * num_rows;
+    LOG_INFO("Adding timestamps raw with size {} for segment {} , mem_size= {}",
+             timestamps.size() * sizeof(Timestamp),
+             id_,
+             stats_.mem_size.load());
 }
 
 void
