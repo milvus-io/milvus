@@ -83,11 +83,14 @@ func newInitSplitTargetParam() streaming.InitSplitTargetVChannelsParam {
 		Schema: &schemapb.CollectionSchema{
 			Name: "col",
 		},
-		PartitionIDs:    []int64{10, 11},
-		SplitTaskID:     100,
-		SourceVChannel:  "by-dev-rootcoord-dml_0_1v0",
-		SwitchTimeTick:  2000,
-		TargetVChannels: []string{"by-dev-rootcoord-dml_1_1v1", "by-dev-rootcoord-dml_2_1v2"},
+		PartitionIDs:   []int64{10, 11},
+		SplitTaskID:    100,
+		SourceVChannel: "by-dev-rootcoord-dml_0_1v0",
+		SwitchTimeTick: 2000,
+		Targets: []*message.SplitShardTarget{
+			{Vchannel: "by-dev-rootcoord-dml_1_1v1", KeyRange: &message.KeyRange{Upper: []byte{0x80}}},
+			{Vchannel: "by-dev-rootcoord-dml_2_1v2", KeyRange: &message.KeyRange{Lower: []byte{0x80}}},
+		},
 	}
 }
 
@@ -98,13 +101,14 @@ func TestInitSplitTargetVChannels(t *testing.T) {
 	initialized := make(map[string]uint64, 2)
 	w.EXPECT().RawAppend(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, msg message.MutableMessage, opts ...streaming.AppendOption) (*types.AppendResult, error) {
-			assert.Equal(t, message.MessageTypeCreateCollection, msg.MessageType())
-			createMsg := message.MustAsMutableCreateCollectionMessageV1(msg)
+			assert.Equal(t, message.MessageTypeCreateVChannel, msg.MessageType())
+			createMsg := message.MustAsMutableCreateVChannelMessageV2(msg)
 			header := createMsg.Header()
 			assert.Equal(t, int64(1), header.GetCollectionId())
 			assert.Equal(t, []int64{10, 11}, header.GetPartitionIds())
 			assert.Equal(t, int64(100), header.GetSplitTaskId())
 			assert.Equal(t, "by-dev-rootcoord-dml_0_1v0", header.GetSplitSourceVchannel())
+			assert.NotNil(t, header.GetKeyRange())
 			body, err := createMsg.Body()
 			assert.NoError(t, err)
 			assert.Equal(t, "col", body.GetCollectionSchema().GetName())
@@ -112,16 +116,19 @@ func TestInitSplitTargetVChannels(t *testing.T) {
 			if len(opts) > 0 {
 				initialized[msg.VChannel()] = opts[0].BarrierTimeTick
 			}
-			return &types.AppendResult{MessageID: rmq.NewRmqID(1), TimeTick: 2100}, nil
+			return &types.AppendResult{MessageID: rmq.NewRmqID(1), TimeTick: 2100, LastConfirmedMessageID: rmq.NewRmqID(7)}, nil
 		}).Times(2)
 
-	err := streaming.InitSplitTargetVChannels(context.Background(), w, param)
+	startPositions, err := streaming.InitSplitTargetVChannels(context.Background(), w, param)
 	assert.NoError(t, err)
-	// every target vchannel is initialized with T_switch as the barrier.
+	// every target vchannel is created with T_switch as the barrier.
 	assert.Equal(t, map[string]uint64{
 		"by-dev-rootcoord-dml_1_1v1": 2000,
 		"by-dev-rootcoord-dml_2_1v2": 2000,
 	}, initialized)
+	// the start position of each target is the marshaled LastConfirmedMessageID.
+	assert.Equal(t, rmq.NewRmqID(7).Marshal(), startPositions["by-dev-rootcoord-dml_1_1v1"])
+	assert.Equal(t, rmq.NewRmqID(7).Marshal(), startPositions["by-dev-rootcoord-dml_2_1v2"])
 }
 
 func TestInitSplitTargetVChannelsAppendFailure(t *testing.T) {
@@ -129,10 +136,9 @@ func TestInitSplitTargetVChannelsAppendFailure(t *testing.T) {
 	w.EXPECT().RawAppend(mock.Anything, mock.Anything, mock.Anything).Return(&types.AppendResult{
 		MessageID: rmq.NewRmqID(1),
 		TimeTick:  2100,
-	}, nil).Once()
-	w.EXPECT().RawAppend(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("mock append error")).Once()
+	}, errors.New("mock append error")).Once()
 
-	err := streaming.InitSplitTargetVChannels(context.Background(), w, newInitSplitTargetParam())
+	_, err := streaming.InitSplitTargetVChannels(context.Background(), w, newInitSplitTargetParam())
 	assert.Error(t, err)
 }
 
@@ -161,26 +167,27 @@ func TestInitSplitTargetVChannelsParamValidate(t *testing.T) {
 	assert.Error(t, param.Validate())
 
 	param = newInitSplitTargetParam()
-	param.TargetVChannels = nil
+	param.Targets = nil
 	assert.Error(t, param.Validate())
 
 	param = newInitSplitTargetParam()
-	param.TargetVChannels[0] = ""
+	param.Targets[0].Vchannel = ""
 	assert.Error(t, param.Validate())
 
 	// the target must not duplicate the source.
 	param = newInitSplitTargetParam()
-	param.TargetVChannels[0] = param.SourceVChannel
+	param.Targets[0].Vchannel = param.SourceVChannel
 	assert.Error(t, param.Validate())
 
 	// the targets must not duplicate each other.
 	param = newInitSplitTargetParam()
-	param.TargetVChannels[1] = param.TargetVChannels[0]
+	param.Targets[1].Vchannel = param.Targets[0].Vchannel
 	assert.Error(t, param.Validate())
 
 	// validation failure happens before any append.
 	w := mock_streaming.NewMockWALAccesser(t)
-	assert.Error(t, streaming.InitSplitTargetVChannels(context.Background(), w, param))
+	_, err := streaming.InitSplitTargetVChannels(context.Background(), w, param)
+	assert.Error(t, err)
 }
 
 func TestSplitShardParamValidate(t *testing.T) {
