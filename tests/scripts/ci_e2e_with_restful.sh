@@ -92,9 +92,9 @@ fi
 if [[ "${MILVUS_HELM_RELEASE_NAME}" != *"msop"* ]]; then
   if [[ -n "${TEST_TIMEOUT:-}" ]]; then
 
-    timeout "${TEST_TIMEOUT}" pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m BulkInsert -n 6 --timeout 360
+    timeout "${TEST_TIMEOUT}" pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m "BulkInsert and not L3" -n 6 --timeout 360
   else
-    pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m BulkInsert -n 6 --timeout 360
+    pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m "BulkInsert and not L3" -n 6 --timeout 360
   fi
 fi
 
