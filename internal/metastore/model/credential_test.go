@@ -15,14 +15,17 @@ var (
 		Tenant:            "tenant-1",
 		IsSuper:           true,
 		Sha256Password:    "xxxx",
+		Description:       "description",
 	}
 
+	description  = "description"
 	credentialPb = &internalpb.CredentialInfo{
 		Username:          "user",
 		EncryptedPassword: "password",
 		Tenant:            "tenant-1",
 		IsSuper:           true,
 		Sha256Password:    "xxxx",
+		Description:       &description,
 	}
 )
 

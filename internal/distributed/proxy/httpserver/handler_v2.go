@@ -2394,14 +2394,18 @@ func (h *HandlersV2) describeUser(ctx context.Context, c *gin.Context, anyReq an
 	})
 	if err == nil {
 		roleNames := []string{}
+		description := ""
 		for _, userRole := range resp.(*milvuspb.SelectUserResponse).Results {
 			if userRole.User.Name == userName {
+				description = userRole.GetDescription()
 				for _, role := range userRole.Roles {
 					roleNames = append(roleNames, role.Name)
 				}
 			}
 		}
-		HTTPReturn(c, http.StatusOK, wrapperReturnList(roleNames))
+		result := wrapperReturnList(roleNames)
+		result[HTTPReturnDescription] = description
+		HTTPReturn(c, http.StatusOK, result)
 	}
 	return resp, err
 }
@@ -2409,8 +2413,9 @@ func (h *HandlersV2) describeUser(ctx context.Context, c *gin.Context, anyReq an
 func (h *HandlersV2) createUser(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*PasswordReq)
 	req := &milvuspb.CreateCredentialRequest{
-		Username: httpReq.UserName,
-		Password: crypto.Base64Encode(httpReq.Password),
+		Username:    httpReq.UserName,
+		Password:    crypto.Base64Encode(httpReq.Password),
+		Description: httpReq.Description,
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateCredential", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.CreateCredential(reqCtx, req.(*milvuspb.CreateCredentialRequest))
@@ -2425,8 +2430,11 @@ func (h *HandlersV2) updateUser(ctx context.Context, c *gin.Context, anyReq any,
 	httpReq := anyReq.(*NewPasswordReq)
 	req := &milvuspb.UpdateCredentialRequest{
 		Username:    httpReq.UserName,
-		OldPassword: crypto.Base64Encode(httpReq.Password),
-		NewPassword: crypto.Base64Encode(httpReq.NewPassword),
+		Description: httpReq.Description,
+	}
+	if httpReq.NewPassword != "" {
+		req.OldPassword = crypto.Base64Encode(httpReq.Password)
+		req.NewPassword = crypto.Base64Encode(httpReq.NewPassword)
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/UpdateCredential", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.UpdateCredential(reqCtx, req.(*milvuspb.UpdateCredentialRequest))

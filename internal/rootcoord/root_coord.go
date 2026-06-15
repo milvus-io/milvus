@@ -2015,7 +2015,6 @@ func (c *Core) CreateCredential(ctx context.Context, credInfo *internalpb.Creden
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-
 	if err := c.broadcastAlterUserForCreateCredential(ctx, credInfo); err != nil {
 		ctxLog.Warn("CreateCredential failed", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
@@ -2071,7 +2070,6 @@ func (c *Core) UpdateCredential(ctx context.Context, credInfo *internalpb.Creden
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-
 	if err := c.broadcastAlterUserForUpdateCredential(ctx, credInfo); err != nil {
 		ctxLog.Warn("UpdateCredential append message failed", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()

@@ -485,14 +485,16 @@ type TimestampGetter interface {
 	GetTimestamp() uint64
 }
 type PasswordReq struct {
-	UserName string `json:"userName" binding:"required"`
-	Password string `json:"password" binding:"required"`
+	UserName    string  `json:"userName" binding:"required"`
+	Password    string  `json:"password" binding:"required"`
+	Description *string `json:"description"`
 }
 
 type NewPasswordReq struct {
-	UserName    string `json:"userName" binding:"required"`
-	Password    string `json:"password" binding:"required"`
-	NewPassword string `json:"newPassword" binding:"required"`
+	UserName    string  `json:"userName" binding:"required"`
+	Password    string  `json:"password"`
+	NewPassword string  `json:"newPassword"`
+	Description *string `json:"description"`
 }
 
 type UserRoleReq struct {

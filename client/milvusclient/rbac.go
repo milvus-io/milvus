@@ -53,8 +53,9 @@ func (c *Client) DescribeUser(ctx context.Context, opt DescribeUserOption, callO
 		}
 		result := resp.GetResults()[0]
 		user = &entity.User{
-			UserName: result.GetUser().GetName(),
-			Roles:    lo.Map(result.GetRoles(), func(r *milvuspb.RoleEntity, _ int) string { return r.GetName() }),
+			UserName:    result.GetUser().GetName(),
+			Roles:       lo.Map(result.GetRoles(), func(r *milvuspb.RoleEntity, _ int) string { return r.GetName() }),
+			Description: result.GetDescription(),
 		}
 
 		return nil
