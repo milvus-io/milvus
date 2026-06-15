@@ -242,6 +242,43 @@ INSTANTIATE_TEST_SUITE_P(TestChunkSegmentStorageV2,
                          TestChunkSegmentStorageV2,
                          testing::Bool());
 
+TEST_P(TestChunkSegmentStorageV2,
+       LoadBatchFieldDataMergesDuplicateGroupChildIds) {
+    auto fresh_segment = segcore::CreateSealedSegment(
+        schema_, nullptr, -1, segcore::SegcoreConfig::default_config(), true);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(fresh_segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo segment_load_info;
+    segment_load_info.set_segmentid(100);
+    segment_load_info.set_num_of_rows(chunk_num * test_data_count);
+    segment_load_info.set_storageversion(2);
+    sealed->SetLoadInfo(segment_load_info);
+
+    auto int64_field = fields.at("int64");
+    auto pk_field = fields.at("pk");
+    constexpr int64_t group_id = 0;
+    const auto& group_info = load_info_.field_infos.at(group_id);
+    ASSERT_FALSE(group_info.insert_files.empty());
+
+    auto add_group_binlog = [&](FieldId child_field) {
+        auto* group_binlog = segment_load_info.add_binlog_paths();
+        group_binlog->set_fieldid(group_id);
+        group_binlog->add_child_fields(child_field.get());
+        auto* binlog = group_binlog->add_binlogs();
+        binlog->set_log_path(group_info.insert_files[0]);
+        binlog->set_entries_num(group_info.row_count);
+        binlog->set_memory_size(1);
+    };
+    add_group_binlog(int64_field);
+    add_group_binlog(pk_field);
+
+    sealed->Reopen(nullptr, segment_load_info);
+
+    EXPECT_TRUE(sealed->HasFieldData(int64_field));
+    EXPECT_TRUE(sealed->HasFieldData(pk_field));
+}
+
 TEST_P(TestChunkSegmentStorageV2, TestTermExpr) {
     bool pk_is_string = GetParam();
     // query int64 expr

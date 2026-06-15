@@ -5583,10 +5583,12 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
 
     auto load_info_snapshot = std::atomic_load(&segment_load_info_);
     std::map<FieldId, LoadFieldDataInfo> field_data_to_load;
+    std::map<FieldId, std::vector<int64_t>> child_field_ids_by_group;
     for (auto& [field_ids, field_binlog] : field_binlog_to_load) {
         LoadFieldDataInfo load_field_data_info;
         load_field_data_info.storage_version =
             load_info_snapshot->GetStorageVersion();
+        bool has_child_fields = field_binlog.child_fields_size() > 0;
         auto fields_to_load = field_ids;
         AssertInfo(!fields_to_load.empty(),
                    "load field data with empty field list");
@@ -5657,6 +5659,18 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         // Build FieldBinlogInfo
         FieldBinlogInfo field_binlog_info;
         field_binlog_info.field_id = group_id;
+        if (has_child_fields) {
+            auto& merged_child_field_ids =
+                child_field_ids_by_group[FieldId(group_id)];
+            for (const auto& field_id : fields_to_load) {
+                auto child_field_id = field_id.get();
+                if (std::find(merged_child_field_ids.begin(),
+                              merged_child_field_ids.end(),
+                              child_field_id) == merged_child_field_ids.end()) {
+                    merged_child_field_ids.push_back(child_field_id);
+                }
+            }
+        }
 
         // Calculate total row count and collect binlog paths
         int64_t total_entries = 0;
@@ -5688,6 +5702,19 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         load_field_data_info.field_infos[group_id] = field_binlog_info;
 
         field_data_to_load[FieldId(group_id)] = load_field_data_info;
+    }
+
+    for (const auto& [group_id, child_field_ids] : child_field_ids_by_group) {
+        auto load_iter = field_data_to_load.find(group_id);
+        if (load_iter == field_data_to_load.end()) {
+            continue;
+        }
+        auto field_info_iter =
+            load_iter->second.field_infos.find(group_id.get());
+        if (field_info_iter == load_iter->second.field_infos.end()) {
+            continue;
+        }
+        field_info_iter->second.child_field_ids = child_field_ids;
     }
 
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
