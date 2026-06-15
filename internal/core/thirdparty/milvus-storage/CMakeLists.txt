@@ -36,8 +36,9 @@ set(WITH_VORTEX ON CACHE BOOL "" FORCE )
 # milvus-storage's Rust bridge now depends on crates that require Rust 1.92.
 # The top-level CMake cache may have been initialized by other Rust components
 # that intentionally build with 1.89, so reset Corrosion's cached Rust toolchain
-# before adding milvus-storage.
-set(Rust_TOOLCHAIN "1.92.0-x86_64-unknown-linux-gnu" CACHE STRING "" FORCE)
+# before adding milvus-storage. Use rustup's channel name so Corrosion can
+# append the current host triple on Linux and macOS.
+set(Rust_TOOLCHAIN "1.92" CACHE STRING "" FORCE)
 unset(Rust_COMPILER_CACHED CACHE)
 unset(Rust_CARGO_CACHED CACHE)
 unset(_CORROSION_RUSTC CACHE)
