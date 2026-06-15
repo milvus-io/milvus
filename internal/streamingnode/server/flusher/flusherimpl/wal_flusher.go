@@ -289,6 +289,13 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 			return nil
 		}
 		impl.flusherComponents.WhenCreateCollection(createCollectionMsg)
+	case message.MessageTypeCreateVChannel:
+		createVChannelMsg, err := message.AsImmutableCreateVChannelMessageV2(msg)
+		if err != nil {
+			impl.logger.DPanic("the message type is not CreateVChannelMessage", zap.Error(err))
+			return nil
+		}
+		impl.flusherComponents.WhenCreateVChannel(createVChannelMsg)
 	case message.MessageTypeDropCollection:
 		// defer to remove the data sync service from the components.
 		// TODO: Current drop collection message will be handled by the underlying data sync service.
