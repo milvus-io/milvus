@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func trace() string {
@@ -59,6 +60,58 @@ func CheckErr(t *testing.T, actualErr error, expErrNil bool, expErrorMsg ...stri
 			}
 		}
 	}
+}
+
+// CheckErrCode asserts that actualErr carries the same merr error code as the
+// expected sentinel. Pass nil expErr to assert success.
+//
+// Prefer this over the message-substring form of CheckErr for new assertions:
+// the error code is the stable wire contract, whereas the message text is not
+// and breaks on harmless rewording.
+func CheckErrCode(t *testing.T, actualErr error, expErr error) {
+	if expErr == nil {
+		require.NoError(t, actualErr, trace())
+		return
+	}
+	require.Error(t, actualErr, trace())
+	require.Equalf(t, merr.Code(expErr), merr.Code(actualErr),
+		"error code mismatch: expected %d (%v), got %d; actual error: %v; %s",
+		merr.Code(expErr), expErr, merr.Code(actualErr), actualErr, trace())
+}
+
+// CheckErrTriple asserts the full structured error contract introduced by the
+// merr Sys/Input classification: (code, is_input_error, retriable).
+//
+//   - expErr        the expected merr sentinel, e.g. merr.ErrParameterInvalid;
+//     nil asserts success.
+//   - expInput      whether the client should observe an InputError
+//     (request author's fault, never failed-over, forced non-retriable).
+//   - expRetriable  whether blindly retrying the same request may succeed.
+//     Note: for an InputError the server forces retriable=false, so expInput
+//     true together with expRetriable true is a contradiction.
+//
+// All three are read from the returned error itself via the merr accessors;
+// the wire keys (Status.ExtraInfo["is_input_error"], Status.Retriable) are an
+// implementation detail the client reconstructs in merr.Error.
+func CheckErrTriple(t *testing.T, actualErr error, expErr error, expInput bool, expRetriable bool) {
+	if expErr == nil {
+		require.NoError(t, actualErr, trace())
+		return
+	}
+	require.Error(t, actualErr, trace())
+	require.Equalf(t, merr.Code(expErr), merr.Code(actualErr),
+		"error code mismatch: expected %d (%v), got %d; actual error: %v; %s",
+		merr.Code(expErr), expErr, merr.Code(actualErr), actualErr, trace())
+
+	gotInput := merr.GetErrorType(actualErr) == merr.InputError
+	require.Equalf(t, expInput, gotInput,
+		"is_input_error mismatch: expected %v, got %v; actual error: %v; %s",
+		expInput, gotInput, actualErr, trace())
+
+	gotRetriable := merr.IsRetryableErr(actualErr)
+	require.Equalf(t, expRetriable, gotRetriable,
+		"retriable mismatch: expected %v, got %v; actual error: %v; %s",
+		expRetriable, gotRetriable, actualErr, trace())
 }
 
 func IsTSafeStalledError(err error) bool {
