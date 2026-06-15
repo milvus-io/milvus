@@ -56,6 +56,8 @@ func (m *shardSplitManager) advanceTask(task *datapb.SplitShardTask) {
 		// shard becomes Dropped and the routing version is bumped in the
 		// collection meta, all in one transaction — belongs to the
 		// authoritative routing table milestone. TODO: issue #50463.
+		// On the flip to Done, call m.recordTerminalMetrics(task) to record
+		// the outcome counter and the split duration.
 	}
 }
 
@@ -269,6 +271,7 @@ func (m *shardSplitManager) abortTask(task *datapb.SplitShardTask, reason string
 		m.taskLogger(task).Warn("persist the aborted split task failed", zap.Error(err))
 		return
 	}
+	m.recordTerminalMetrics(m.mustGetTask(task.GetTaskId()))
 	m.taskLogger(task).Info("split task aborted", zap.String("reason", reason))
 }
 
