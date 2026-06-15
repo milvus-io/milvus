@@ -232,11 +232,11 @@ Four principles work around the constraints of §2 simultaneously:
 
 ```mermaid
 flowchart LR
-    IDLE["Normal"] -->|"split triggered"| PREP["Preparing: target shard meta + vchannel names allocated"]
-    PREP -->|"abort (no external side effects)"| IDLE
-    PREP -->|"append SplitShard, SN auto-flush+fence"| FENCE["Fenced @T_switch: old vchannel rejects writes"]
-    FENCE -->|"forward-only: CreateVChannel @Barrier=T_switch, routing commit"| WIN["Window: in-place children + multi-round redistribute"]
-    WIN -->|"all segments processed"| ADOPT["Adopting: new shards visible, watch/load"]
+    IDLE["Normal"] -->|"split triggered"| PREP["Preparing, target shard meta and vchannel names allocated"]
+    PREP -->|"abort, no external side effects"| IDLE
+    PREP -->|"append SplitShard, SN auto-flush and fence"| FENCE["Fenced at T_switch, old vchannel rejects writes"]
+    FENCE -->|"forward-only, CreateVChannel barrier T_switch, routing commit"| WIN["Window, in-place children and multi-round redistribute"]
+    WIN -->|"all segments processed"| ADOPT["Adopting, new shards visible, watch and load"]
     ADOPT -->|"release source shard, bump routing"| DONE["Done"]
 ```
 
