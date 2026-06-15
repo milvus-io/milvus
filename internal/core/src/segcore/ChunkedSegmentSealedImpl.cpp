@@ -5582,7 +5582,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
             .get_prefer_field_data_when_index_has_raw_data();
 
     auto load_info_snapshot = std::atomic_load(&segment_load_info_);
-    std::map<FieldId, LoadFieldDataInfo> field_data_to_load;
+    std::vector<std::pair<FieldId, LoadFieldDataInfo>> field_data_to_load;
     for (auto& [field_ids, field_binlog] : field_binlog_to_load) {
         LoadFieldDataInfo load_field_data_info;
         load_field_data_info.storage_version =
@@ -5671,6 +5671,11 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
             total_entries += binlog.entries_num();
         }
         field_binlog_info.row_count = total_entries;
+        field_binlog_info.child_field_ids.resize(field_ids.size());
+        std::transform(field_ids.begin(),
+                       field_ids.end(),
+                       field_binlog_info.child_field_ids.begin(),
+                       [](FieldId field_id) { return field_id.get(); });
 
         auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
         auto global_use_mmap = is_vector
@@ -5687,7 +5692,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         // Store in map
         load_field_data_info.field_infos[group_id] = field_binlog_info;
 
-        field_data_to_load[FieldId(group_id)] = load_field_data_info;
+        field_data_to_load.emplace_back(group_id, load_field_data_info);
     }
 
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
