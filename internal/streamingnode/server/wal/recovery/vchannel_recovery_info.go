@@ -28,32 +28,45 @@ func newVChannelRecoveryInfoFromVChannelMeta(meta []*streamingpb.VChannelMeta) m
 
 // newVChannelRecoveryInfoFromCreateCollectionMessage creates a new vchannel recovery info from a create collection message.
 func newVChannelRecoveryInfoFromCreateCollectionMessage(msg message.ImmutableCreateCollectionMessageV1) *vchannelRecoveryInfo {
-	partitions := make([]*streamingpb.PartitionInfoOfVChannel, 0, len(msg.Header().PartitionIds))
-	for _, partitionId := range msg.Header().PartitionIds {
+	schema := messageutil.MustGetSchemaFromCreateCollectionMessageBody(msg.MustBody())
+	return newVChannelRecoveryInfo(msg.VChannel(), msg.Header().CollectionId, msg.Header().PartitionIds, schema, msg.TimeTick())
+}
+
+// newVChannelRecoveryInfoFromCreateVChannelMessage creates a new vchannel
+// recovery info from a shard split target vchannel's genesis message. The
+// CreateVChannel body shares the CreateCollection shape, so the same schema
+// parser seeds the vchannel meta.
+func newVChannelRecoveryInfoFromCreateVChannelMessage(msg message.ImmutableCreateVChannelMessageV2) *vchannelRecoveryInfo {
+	schema := messageutil.MustGetSchemaFromCreateCollectionMessageBody(msg.MustBody())
+	return newVChannelRecoveryInfo(msg.VChannel(), msg.Header().CollectionId, msg.Header().PartitionIds, schema, msg.TimeTick())
+}
+
+// newVChannelRecoveryInfo builds the seed recovery info of a vchannel genesis.
+func newVChannelRecoveryInfo(vchannel string, collectionID int64, partitionIDs []int64, schema *schemapb.CollectionSchema, timetick uint64) *vchannelRecoveryInfo {
+	partitions := make([]*streamingpb.PartitionInfoOfVChannel, 0, len(partitionIDs))
+	for _, partitionId := range partitionIDs {
 		partitions = append(partitions, &streamingpb.PartitionInfoOfVChannel{
 			PartitionId: partitionId,
 		})
 	}
-	body := msg.MustBody()
-	schema := messageutil.MustGetSchemaFromCreateCollectionMessageBody(body)
 	return &vchannelRecoveryInfo{
 		meta: &streamingpb.VChannelMeta{
-			Vchannel: msg.VChannel(),
+			Vchannel: vchannel,
 			State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
 			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
-				CollectionId: msg.Header().CollectionId,
+				CollectionId: collectionID,
 				Partitions:   partitions,
 				Schemas: []*streamingpb.CollectionSchemaOfVChannel{
 					{
 						Schema:             schema,
 						State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
-						CheckpointTimeTick: msg.TimeTick(),
+						CheckpointTimeTick: timetick,
 					},
 				},
 			},
-			CheckpointTimeTick: msg.TimeTick(),
+			CheckpointTimeTick: timetick,
 		},
-		// a new incoming create collection request is always dirty until it is persisted.
+		// a new incoming vchannel genesis is always dirty until it is persisted.
 		dirty: true,
 	}
 }
