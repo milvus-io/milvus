@@ -296,26 +296,8 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		return nil, fmt.Errorf("parse iterator v2 info failed: %w", err)
 	}
 
-	// 7. check search for embedding list
-	annsFieldName, _ := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, searchParamsPair)
-	if annsFieldName != "" {
-		annField := typeutil.GetFieldByName(schema, annsFieldName)
-		if annField != nil && annField.GetDataType() == schemapb.DataType_ArrayOfVector {
-			if strings.Contains(searchParamStr, radiusKey) {
-				return nil, merr.WrapErrParameterInvalid("", "",
-					"range search is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
-			}
-
-			if groupByFieldId > 0 {
-				return nil, merr.WrapErrParameterInvalid("", "",
-					"group by search is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
-			}
-
-			if isIterator {
-				return nil, merr.WrapErrParameterInvalid("", "",
-					"search iterator is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
-			}
-		}
+	if err := validateVectorArraySearchInfo(searchParamsPair, schema, searchParamStr, groupByFieldId, isIterator || planSearchIteratorV2Info != nil); err != nil {
+		return nil, err
 	}
 
 	return &SearchInfo{
@@ -337,6 +319,36 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		isIterator:   isIterator,
 		collectionID: collectionId,
 	}, nil
+}
+
+func validateVectorArraySearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, searchParamStr string, groupByFieldId int64, isIterator bool) error {
+	if schema == nil {
+		return nil
+	}
+
+	annsFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, searchParamsPair)
+	if err != nil || annsFieldName == "" {
+		return nil
+	}
+
+	annsField := typeutil.GetFieldByName(schema, annsFieldName)
+	if annsField == nil || annsField.GetDataType() != schemapb.DataType_ArrayOfVector {
+		return nil
+	}
+
+	if strings.Contains(searchParamStr, radiusKey) {
+		return merr.WrapErrParameterInvalid("", "",
+			"range search is not supported for vector array fields, fieldName:"+annsField.GetName())
+	}
+	if groupByFieldId > 0 {
+		return merr.WrapErrParameterInvalid("", "",
+			"group by search is not supported for vector array fields, fieldName:"+annsField.GetName())
+	}
+	if isIterator {
+		return merr.WrapErrParameterInvalid("", "",
+			"search iterator is not supported for vector array fields, fieldName:"+annsField.GetName())
+	}
+	return nil
 }
 
 func getOutputFieldIDs(schema *schemaInfo, outputFields []string) (outputFieldIDs []UniqueID, err error) {

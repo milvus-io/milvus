@@ -52,10 +52,16 @@ type RerankBase struct {
 	searchParams *searchParams
 }
 
-func newRerankBase(coll *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema, rerankerName string, isSupportGroup bool) (*RerankBase, error) {
+func newRerankBase(coll *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema, rerankerName string, isSupportGroup bool, pkTypeOverride ...schemapb.DataType) (*RerankBase, error) {
 	pkType, err := getPKType(coll)
 	if err != nil {
 		return nil, err
+	}
+	if len(pkTypeOverride) > 0 && pkTypeOverride[0] != schemapb.DataType_None {
+		if pkTypeOverride[0] != schemapb.DataType_Int64 && pkTypeOverride[0] != schemapb.DataType_VarChar {
+			return nil, fmt.Errorf("unsupported pk type override: %s", pkTypeOverride[0].String())
+		}
+		pkType = pkTypeOverride[0]
 	}
 
 	base := RerankBase{

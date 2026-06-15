@@ -41,8 +41,8 @@ type WeightedFunction[T PKType] struct {
 	needNorm bool
 }
 
-func newWeightedFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema) (Reranker, error) {
-	base, err := newRerankBase(collSchema, funcSchema, WeightedName, true)
+func newWeightedFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema, pkTypeOverride ...schemapb.DataType) (Reranker, error) {
+	base, err := newRerankBase(collSchema, funcSchema, WeightedName, true, pkTypeOverride...)
 	if err != nil {
 		return nil, err
 	}

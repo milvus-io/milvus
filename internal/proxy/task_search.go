@@ -110,6 +110,9 @@ type searchTask struct {
 	userRequestedPkFieldExplicitly bool
 
 	storageCost segcore.StorageCost
+
+	hybridSubSearchInfos []hybridSubSearchInfo
+	hybridElementLevel   bool
 }
 
 func (t *searchTask) CanSkipAllocTimestamp() bool {
@@ -442,6 +445,8 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 
 	t.SubReqs = make([]*internalpb.SubSearchRequest, len(t.request.GetSubReqs()))
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
+	t.hybridSubSearchInfos = make([]hybridSubSearchInfo, len(t.request.GetSubReqs()))
+	t.hybridElementLevel = false
 	queryFieldIDs := []int64{}
 	for index, subReq := range t.request.GetSubReqs() {
 		plan, queryInfo, offset, subIsIterator, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
@@ -449,23 +454,50 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			return err
 		}
 
-		// Hybrid search supports plain top-K on ArrayOfVector fields. Advanced
-		// element-level features are intentionally not enabled in this 2.6 path.
+		placeholderType := getPlaceholderType(subReq.GetPlaceholderGroup())
+		subSearchInfo := classifyHybridSubSearch(t.schema.CollectionSchema, queryInfo.GetQueryFieldId(), placeholderType)
 		annsField := typeutil.GetField(t.schema.CollectionSchema, queryInfo.GetQueryFieldId())
+		collapseConfig, elementScopeProvided, sanitizedSearchParams, err := parseAndRemoveElementScope(queryInfo.GetSearchParams())
+		if err != nil {
+			return err
+		}
+		if elementScopeProvided {
+			if subSearchInfo.Kind != hybridSubSearchStructElement {
+				return merr.WrapErrParameterInvalidMsg("%s is only supported for element-level search on struct array vector sub-fields", elementScopeKey)
+			}
+			if err := validateElementCollapseMetricType(collapseConfig, resolveElementCollapseMetricType(queryInfo.GetMetricType(), annsField)); err != nil {
+				return err
+			}
+			queryInfo.SearchParams = sanitizedSearchParams
+			subSearchInfo.ElementScopeProvided = true
+			subSearchInfo.Collapse = collapseConfig
+		}
+
+		// Hybrid search only supports plain top-K on ArrayOfVector fields. Both
+		// element-level and embedding-list searches reject advanced controls here.
 		if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
-			if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
-				return merr.WrapErrParameterInvalid("", "",
-					"range search is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
-			}
-			if t.rankParams.GetGroupByFieldId() > 0 {
-				return merr.WrapErrParameterInvalid("", "",
-					"group by search is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
-			}
-			if subIsIterator {
-				return merr.WrapErrParameterInvalid("", "",
-					"search iterator is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
+			isStructElementSubSearch := subSearchInfo.Kind == hybridSubSearchStructElement
+			isStructEmbListSubSearch := subSearchInfo.Kind == hybridSubSearchStructEmbList
+			if isStructElementSubSearch || isStructEmbListSubSearch {
+				searchKind := "element-level"
+				if isStructEmbListSubSearch {
+					searchKind = "embedding-list"
+				}
+				if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
+					return merr.WrapErrParameterInvalid("", "",
+						"range search is not supported for vector array ("+searchKind+") fields in hybrid search, fieldName:"+annsField.GetName())
+				}
+				if t.rankParams.GetGroupByFieldId() > 0 {
+					return merr.WrapErrParameterInvalid("", "",
+						"group by search is not supported for vector array ("+searchKind+") fields in hybrid search, fieldName:"+annsField.GetName())
+				}
+				if subIsIterator {
+					return merr.WrapErrParameterInvalid("", "",
+						"search iterator is not supported for vector array ("+searchKind+") fields in hybrid search, fieldName:"+annsField.GetName())
+				}
 			}
 		}
+		t.hybridSubSearchInfos[index] = subSearchInfo
 
 		ignoreGrowing := t.IgnoreGrowing
 		if !ignoreGrowing {
@@ -551,6 +583,21 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			zap.Stringer("plan", plan)) // may be very large if large term passed.
 	}
 
+	t.hybridElementLevel = inferElementLevelHybrid(t.hybridSubSearchInfos)
+	for index, info := range t.hybridSubSearchInfos {
+		if t.hybridElementLevel && info.ElementScopeProvided {
+			return merr.WrapErrParameterInvalidMsg("%s is not allowed for same-struct element-level hybrid search", elementScopeKey)
+		}
+		if !t.hybridElementLevel && info.Kind == hybridSubSearchStructElement && !info.ElementScopeProvided {
+			t.hybridSubSearchInfos[index].Collapse = defaultElementCollapseConfig()
+		}
+	}
+	if t.hybridElementLevel {
+		if err := t.useElementLevelHybridFunctionScore(); err != nil {
+			return err
+		}
+	}
+
 	if embedding.HasNonBM25Functions(t.schema.Functions, queryFieldIDs) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AdvancedSearch-call-function-udf")
 		defer sp.End()
@@ -572,6 +619,24 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		t.PartitionIDs = t.partitionIDsSet.Collect()
 	}
 
+	return nil
+}
+
+func (t *searchTask) useElementLevelHybridFunctionScore() error {
+	extraInfo := &models.ModelExtraInfo{
+		ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
+		DBName:    t.request.GetDbName(),
+	}
+
+	var err error
+	if t.request.FunctionScore != nil {
+		t.functionScore, err = rerank.NewFunctionScoreWithPKType(t.schema.CollectionSchema, t.request.FunctionScore, extraInfo, schemapb.DataType_VarChar)
+	} else {
+		t.functionScore, err = rerank.NewFunctionScoreWithlegacyAndPKType(t.schema.CollectionSchema, t.request.GetSearchParams(), schemapb.DataType_VarChar)
+	}
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -755,10 +820,46 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.SearchLabel, strconv.FormatInt(t.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(t.request.GetPlaceholderGroup(), int(t.request.GetNq()))))
 	}
 	// Convert placeholder group vector type if needed (e.g., fp32 -> fp16/bf16)
+	placeholderType := getPlaceholderType(t.request.GetPlaceholderGroup())
 	t.PlaceholderGroup, err = t.convertPlaceholderIfNeeded(t.request.GetPlaceholderGroup(), t.FieldId)
 	if err != nil {
 		return err
 	}
+
+	annsField := typeutil.GetField(t.schema.CollectionSchema, t.FieldId)
+	if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
+		isEmbList := isEmbeddingListPlaceholderType(placeholderType)
+		if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
+			if isEmbList {
+				return merr.WrapErrParameterInvalid("", "",
+					"range search is not supported for multi-search-multi on embedding list fields")
+			}
+			return merr.WrapErrParameterInvalid("", "",
+				"range search is not supported for vector array fields, fieldName:"+annsField.GetName())
+		}
+		if t.isIterator {
+			if isEmbList {
+				return merr.WrapErrParameterInvalid("", "",
+					"search iterator is not supported for multi-search-multi on embedding list fields")
+			}
+			return merr.WrapErrParameterInvalid("", "",
+				"search iterator is not supported for vector array fields, fieldName:"+annsField.GetName())
+		}
+
+		var groupByFieldIDs []int64
+		if queryInfo.GetGroupByFieldId() > 0 {
+			groupByFieldIDs = []int64{queryInfo.GetGroupByFieldId()}
+		}
+		if len(groupByFieldIDs) > 0 {
+			if isEmbList {
+				return merr.WrapErrParameterInvalid("", "",
+					"group by is not supported for multi-search-multi on embedding list fields")
+			}
+			return merr.WrapErrParameterInvalid("", "",
+				"group by search is not supported for vector array fields, fieldName:"+annsField.GetName())
+		}
+	}
+
 	t.Topk = queryInfo.GetTopk()
 	t.MetricType = queryInfo.GetMetricType()
 	t.queryInfos = append(t.queryInfos, queryInfo)

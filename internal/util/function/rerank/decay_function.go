@@ -58,8 +58,8 @@ type DecayFunction[T PKType, R int32 | int64 | float32 | float64] struct {
 	reScorer     decayReScorer
 }
 
-func newDecayFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema) (Reranker, error) {
-	base, err := newRerankBase(collSchema, funcSchema, DecayFunctionName, true)
+func newDecayFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema, pkTypeOverride ...schemapb.DataType) (Reranker, error) {
+	base, err := newRerankBase(collSchema, funcSchema, DecayFunctionName, true, pkTypeOverride...)
 	if err != nil {
 		return nil, err
 	}
