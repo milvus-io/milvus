@@ -10,26 +10,576 @@
 | Related Branch | [rls-feature](https://github.com/milvus-io/milvus/pull/48448) |
 
 ## 1. Summary
-Row-Level Security (RLS) provides fine-grained row-level access control for Milvus collections. After RLS is enabled on a collection, Milvus automatically limits which rows a user can `query`, `search`, `hybrid_search`, `delete`, `insert`, or `upsert` based on the current user, user roles, user tags, and administrator-defined row policies.
-RLS moves multi-tenant isolation, user-owned data isolation, and department-scoped data isolation from application code into the database layer. This avoids data leaks caused by application paths that forget to add tenant or ownership filters.
+Row-Level Security (RLS) provides fine-grained row-level access control for Milvus collections. After RLS is enabled on a collection, Milvus automatically limits which rows a request can `query`, `search`, `hybrid_search`, `delete`, `insert`, or `upsert` based on the request's RLS principal, RLS principal tags, and administrator-defined row policies.
+RLS moves user-owned data isolation and department-scoped data isolation from application code into the database layer. This avoids data leaks caused by application paths that forget to add ownership or department filters.
 RLS is enforced in Proxy:
 
-- For read-like paths (`query`, `search`, `delete`), Proxy injects additional filter expressions before request execution.
-- For write-like paths (`insert`, `upsert`), Proxy validates incoming rows against `CHECK` expressions before data is written.
+- For read-like paths (`query`, `search`, `hybrid_search`, `delete`), Proxy injects additional filter expressions before request execution.
+- For write-like paths (`insert`, `upsert`), Proxy validates incoming rows against RLS expressions before data is written.
+- DDL, admin, metadata, bulk/indirect writes, aggregate/statistics, and collection-level operations are outside the RLS enforcement scope. They remain controlled by Milvus RBAC and existing Milvus request validation.
 
 Core principles:
 
 1. RLS is disabled by default.
 2. RLS is enabled per collection through collection properties.
-3. When enabled, RLS is fail-closed.
-4. No matching policy means deny access.
+3. When enabled, RLS is fail-closed for row-bearing operations.
+4. No applicable policy expression means deny access.
 5. Policies support PostgreSQL-style `PERMISSIVE` and `RESTRICTIVE` combination semantics.
-6. Policies separate `USING` expressions for existing rows and `CHECK` expressions for incoming rows.
-7. Policies support dynamic expressions through user tags, such as tenant isolation.
-8. Root/admin users bypass RLS by default, unless `rls.force=true` is set on the collection.
-9. RLS management operations require admin privileges.
+6. Policies use one `expr`; the policy `actions` decide whether that expression is evaluated against existing rows or incoming rows.
+7. Policies support dynamic expressions through RLS principal tags, such as ownership and department rules.
+8. RLS uses an RLS principal model that is separate from Milvus RBAC identity.
+9. RLS admin principals bypass RLS by default, unless `rls.force=true` is set on the collection.
+10. RLS management operations require `CollectionReadWrite` or `CollectionAdmin` privilege on the target collection, but do not require an RLS principal.
 
-## 2. Quick Start: Personal Documents and Sharing
+## 2. Main User Interface
+RLS exposes a small user-facing surface:
+
+1. Enable RLS on a collection.
+2. Configure collection-scoped RLS principal metadata.
+3. Create row policies on the collection.
+4. Send row-bearing requests with an explicit RLS principal.
+
+Enable RLS:
+```python
+client.alter_collection_properties(
+    collection_name="documents",
+    properties={
+        "rls.enabled": "true",
+        "rls.force": "false",
+    },
+)
+```
+
+Configure collection-scoped RLS principal tags:
+```python
+client.set_rls_principal_tags(
+    collection_name="documents",
+    principal_name="alice",
+    tags={"department": "engineering"},
+)
+```
+
+Create a row policy:
+```python
+client.create_row_policy(
+    collection_name="documents",
+    policy_name="read_own_documents",
+    policy_type="PERMISSIVE",
+    actions=["query", "search"],
+    expr="owner == $current_principal",
+)
+```
+
+Run a row-bearing request with an RLS principal:
+```python
+client.query(
+    collection_name="documents",
+    filter="title like 'RLS%'",
+    rls_principal="alice",
+)
+```
+
+RLS applies only to row-bearing operations on an RLS-enabled collection:
+
+| Operation category | Examples | RLS behavior |
+| --- | --- | --- |
+| Read existing rows | `query`, `search`, `hybrid_search` | Evaluate `expr` against existing rows |
+| Delete existing rows | `delete` | Evaluate `expr` against existing rows |
+| Write incoming rows | `insert`, `upsert` | Evaluate `expr` against incoming rows |
+
+DDL, admin, metadata, bulk/indirect writes, aggregate/statistics, and collection-level operations are outside the RLS enforcement scope and remain controlled by Milvus RBAC and existing Milvus request validation.
+
+## 3. Detailed API Definition
+This section describes the public configuration, SDK options, and user-visible API semantics. Internal RPC, protobuf, and storage details are covered in the architecture section.
+
+### Authorization, RBAC, and RLS Identity
+
+#### Authorization Requirement
+RLS depends on Milvus authorization, but RLS identity is separate from Milvus connection identity. A cluster must enable authorization before RLS can take effect.
+```yaml
+common:
+  security:
+    authorizationEnabled: true # Required before any collection can enable RLS.
+
+proxy:
+  rls:
+    auditEnabled: true              # Emit audit logs for RLS management and enforcement decisions.
+    cacheExpirationSeconds: 3600    # TTL for cached RLS policy and principal metadata in Proxy.
+    maxCacheEntries: 10000          # Maximum number of cached RLS metadata entries per Proxy.
+    maxPoliciesPerCollection: 100   # Maximum number of row policies allowed on one collection.
+    maxTagsPerPrincipal: 50         # Maximum number of tags allowed on one collection-scoped RLS principal.
+    maxExpressionLength: 4096       # Maximum length of policy expr.
+```
+
+Semantics:
+
+- `common.security.authorizationEnabled=false` means RLS cannot be enabled for any collection.
+- Milvus authorization authenticates and authorizes the Milvus connection credential.
+- The RLS principal is an application end-user identity supplied by a trusted Milvus client or service.
+- Enabling authorization does not enable RLS for every collection automatically.
+- RLS is enabled explicitly at collection level.
+- RLS management APIs are protected by collection-scoped Milvus RBAC privileges. Runtime RLS policy evaluation uses the RLS principal, not the Milvus connection user.
+
+#### RBAC and RLS
+Milvus RBAC and RLS solve different authorization problems:
+
+| Layer | Identity | Scope | Example question |
+| --- | --- | --- | --- |
+| Milvus RBAC | Milvus connection credential, roles, and grants | Cluster, database, collection, partition, index, resource, RBAC, and other Milvus API privileges | Can this Milvus client call `CreateIndex` on this collection? |
+| RLS | Application end-user RLS principal and RLS tags | Rows inside one RLS-enabled collection for row-bearing operations | Which rows can end user `alice` search, query, delete, insert, or upsert? |
+
+RBAC is evaluated before the request is allowed to reach the operation. RLS is evaluated only after RBAC allows a row-bearing operation on an RLS-enabled collection.
+
+This separation lets an application connect to Milvus with a service credential while passing an RLS principal such as `alice`, `bob`, or `support_admin` for row-level enforcement. The service credential is responsible for Milvus API privileges. The RLS principal is responsible for row visibility and write validation.
+
+#### RLS Principal
+An RLS principal is a collection-scoped application end-user identity used for RLS policy evaluation. The RLS principal is not required to be a Milvus RBAC user.
+
+An RLS principal has:
+
+1. A principal name, exposed to expressions as `$current_principal`.
+2. Zero or more collection-scoped RLS tags, exposed to expressions as `$current_principal_tags['key']`.
+3. An optional collection-scoped RLS admin marker.
+
+The principal name, tags, and admin marker belong to one collection's RLS metadata. Application membership and similar application concepts should be represented as collection-scoped tags.
+
+RLS admin principals are an RLS concept, not a synonym for Milvus `root` or the Milvus `admin` RBAC role. RLS admin status is scoped to one collection. When `rls.force=false`, an RLS admin principal bypasses RLS policies for row-bearing operations on that collection. When `rls.force=true`, even an RLS admin principal must satisfy applicable RLS policies.
+
+#### Collection-Level RLS Properties
+RLS is controlled by collection properties, not by separate enable/disable APIs. A Milvus user with `CollectionReadWrite` or `CollectionAdmin` privilege enables, disables, or forces RLS by updating collection properties.
+```python
+client.alter_collection_properties(
+    collection_name="documents",
+    properties={
+        "rls.enabled": "true",
+        "rls.force": "false",
+    },
+)
+```
+
+Collection-level properties:
+
+| Property | Default | Meaning |
+| --- | --- | --- |
+| `rls.enabled` | `false` | Whether RLS is enabled for this collection |
+| `rls.force` | `false` | Whether RLS admin principals must also follow RLS policies |
+
+Enable RLS for normal RLS principals while RLS admin principals still bypass RLS:
+```python
+client.alter_collection_properties(
+    collection_name="documents",
+    properties={
+        "rls.enabled": "true",
+        "rls.force": "false",
+    },
+)
+```
+
+Enable FORCE RLS so every RLS principal, including RLS admin principals, must satisfy applicable RLS policies:
+```python
+client.alter_collection_properties(
+    collection_name="documents",
+    properties={
+        "rls.enabled": "true",
+        "rls.force": "true",
+    },
+)
+```
+
+Disable RLS for the collection:
+```python
+client.alter_collection_properties(
+    collection_name="documents",
+    properties={
+        "rls.enabled": "false",
+    },
+)
+```
+
+Semantics:
+
+- RLS is disabled by default for every collection.
+- RLS configuration is scoped to one collection.
+- Policies may exist on a collection before RLS is enabled, but they do not affect requests until `rls.enabled=true`.
+- When `rls.enabled=true`, row-bearing operations must include an explicit RLS principal.
+- If the RLS principal is an RLS admin principal and `rls.force=false`, policies are bypassed for that collection.
+- Non-admin RLS principals must be admitted by applicable policies for the requested action.
+- If no applicable policy expression exists for the action, access is denied.
+- RLS admin principals bypass RLS by default when `rls.force=false`.
+- When `rls.force=true`, RLS admin principals must also be admitted by applicable policies for the requested action.
+- When `rls.enabled=false`, RLS does not change `query`, `search`, `hybrid_search`, `delete`, `insert`, or `upsert` behavior for that collection, regardless of `rls.force`.
+
+#### Enforcement Scope
+RLS applies only to row-bearing operations on an RLS-enabled collection:
+
+| Operation category | Examples | RLS behavior |
+| --- | --- | --- |
+| Read existing rows | `query`, `search`, `hybrid_search` | Evaluate `expr` against existing rows |
+| Delete existing rows | `delete` | Evaluate `expr` against existing rows |
+| Write incoming rows | `insert`, `upsert` | Evaluate `expr` against incoming rows |
+
+The following operations are outside RLS enforcement scope and do not require an RLS principal:
+
+| Operation category | Examples | Authorization model |
+| --- | --- | --- |
+| DDL and admin operations | `create_collection`, `drop_collection`, `add_collection_field`, `alter_collection_schema`, `create_index`, `drop_index`, `create_partition`, `drop_partition`, alias operations, load/release, compaction, resource group operations | Milvus RBAC and existing Milvus checks |
+| Bulk or indirect writes | `import`, `ImportV2`, external collection refresh | Milvus RBAC and existing Milvus checks |
+| Aggregate and statistics operations | `get_statistics`, `get_collection_statistics`, `get_partition_statistics`, load/index progress APIs | Milvus RBAC and existing Milvus checks |
+| Collection-level destructive operations | `truncate_collection`, `drop_collection`, `drop_partition` | Milvus RBAC and existing Milvus checks |
+
+These out-of-scope operations may affect the collection as a whole, but they are not row-level policy decisions. Applications that expose those operations to end users should protect them at the application layer or through Milvus RBAC.
+
+### Row Policy API
+
+#### Policy Fields
+The public row policy API exposes the following fields:
+```plaintext
+collection_name
+policy_name
+policy_type
+actions
+expr
+description
+```
+
+
+| Field | Description |
+| --- | --- |
+| `collection_name` | Target collection. A row policy belongs to exactly one collection |
+| `policy_name` | Human-readable policy name, unique within a collection |
+| `policy_type` | `PERMISSIVE` or `RESTRICTIVE` |
+| `actions` | Operations this policy applies to |
+| `expr` | Row policy expression evaluated for all listed actions |
+| `description` | Optional description |
+
+A row policy is scoped by `collection_name`, and `policy_name` only needs to be unique within that collection. Public APIs do not expose or require internal database IDs, collection IDs, or policy IDs.
+
+A collection-level RLS switch controls whether row policies are enforced:
+
+| Collection property | Effect |
+| --- | --- |
+| `rls.enabled=false` | Policies exist but are not enforced |
+| `rls.enabled=true` | Policies are enforced for non-admin RLS principals |
+| `rls.force=true` | Policies are also enforced for RLS admin principals |
+
+Policy creation and policy enforcement are separate steps:
+
+1. Create one or more policies on a collection.
+2. Set `rls.enabled=true` on that collection.
+3. Row-bearing requests apply policies whose `actions` contain the current action.
+
+#### Policy Applicability
+A policy participates in RLS expression construction when its `actions` contain the current row-bearing action. There is no separate principal-group matching step in the first version. Differences between principals are expressed through `$current_principal` and `$current_principal_tags` inside policy expressions.
+Tags are not a separate policy binding mechanism. Policy selection is action-based; tag checks are normal expression predicates inside `expr`.
+
+Example policy that applies to the current action and filters rows by the current principal:
+```python
+client.create_row_policy(
+    collection_name="documents",
+    policy_name="read_shared_documents",
+    policy_type="PERMISSIVE",
+    actions=["query", "search"],
+    expr="array_contains(shared_users, $current_principal)",
+)
+```
+
+Example policy that uses a tag to grant department-based access:
+```python
+client.create_row_policy(
+    collection_name="documents",
+    policy_name="read_department_documents",
+    policy_type="PERMISSIVE",
+    actions=["query", "search"],
+    expr="department == $current_principal_tags['department']",
+)
+```
+
+If an RLS principal does not have a `department` tag, the second policy evaluates to false for that principal. If no applicable policy expression admits rows for the action, RLS denies access.
+
+#### Supported Actions
+RLS supports the following actions:
+```plaintext
+query
+search
+hybrid_search
+delete
+insert
+upsert
+```
+
+For `query`, `search`, `hybrid_search`, and `delete`, `expr` is evaluated against existing rows.
+For `insert` and `upsert`, `expr` is evaluated against incoming rows.
+
+#### Policy Types
+
+##### PERMISSIVE
+Multiple permissive policies are combined with `OR`:
+```plaintext
+department == 'engineering'
+OR
+visibility == 'public'
+```
+
+A row passes the permissive part if it satisfies at least one permissive policy.
+
+##### RESTRICTIVE
+Multiple restrictive policies are combined with `AND`:
+```plaintext
+status != 'archived'
+AND
+region in ['us', 'eu']
+```
+
+A row passes the restrictive part only if it satisfies all restrictive policies.
+
+##### Combined Semantics
+The final RLS expression is:
+```plaintext
+(permissive_1 OR permissive_2 OR ...)
+AND
+(restrictive_1)
+AND
+(restrictive_2)
+...
+```
+
+If the user request also contains a filter, the final execution expression is:
+```plaintext
+(user_filter) AND (rls_filter)
+```
+
+If no applicable policy exists, the RLS expression is `false`, which denies all rows.
+
+### Expression Semantics
+Row policies expose one public `expr` field. The requested action decides which row version the expression is evaluated against.
+
+For existing-row actions, `expr` limits which stored rows an RLS principal can read or delete:
+```plaintext
+query
+search
+hybrid_search
+delete
+```
+
+Example:
+```plaintext
+department == $current_principal_tags['department']
+```
+
+If the user request filter is:
+```plaintext
+category == 'report'
+```
+
+and the current RLS principal's `department` tag is `engineering`, Proxy injects:
+```plaintext
+(category == 'report') AND (department == 'engineering')
+```
+
+`delete` evaluates existing rows because it chooses which stored rows can be deleted. It does not validate newly inserted row values.
+
+For `hybrid_search`, Proxy applies the RLS filter to each sub-search request.
+
+For incoming-row actions, `expr` validates each proposed row before it is written:
+```plaintext
+insert
+upsert
+```
+
+Example:
+```plaintext
+department == $current_principal_tags['department']
+```
+
+If the current RLS principal's tags are:
+```json
+{
+  "department": "engineering"
+}
+```
+
+then every inserted or upserted row must satisfy:
+```plaintext
+department == 'engineering'
+```
+
+If read and write actions need different semantics, define separate policies with different `actions` and `expr` values.
+
+### Variables
+RLS expressions support variable substitution.
+
+#### `$current_principal`
+`$current_principal` represents the current RLS principal name, not the Milvus connection username.
+Example:
+```plaintext
+owner == $current_principal
+```
+
+If the current RLS principal is `alice`, the expression becomes:
+```plaintext
+owner == 'alice'
+```
+
+#### `$current_principal_tags['key']`
+`$current_principal_tags['key']` represents a tag value attached to the current RLS principal.
+Example:
+```plaintext
+department == $current_principal_tags['department']
+```
+
+If the current RLS principal's tags are:
+```json
+{
+  "department": "engineering"
+}
+```
+
+then the expression becomes:
+```plaintext
+department == 'engineering'
+```
+
+#### Missing Tags
+If an expression references a missing tag, expression construction must fail closed.
+Example expression:
+```plaintext
+department == $current_principal_tags['department']
+```
+
+If the current RLS principal has no `department` tag, the expression becomes:
+```plaintext
+false
+```
+
+### Supported Operators
+The first version supports only the following expression operators:
+
+| Operator | Field type | Operand | Meaning |
+| --- | --- | --- | --- |
+| `==` | Scalar field | Single literal or variable | Field equals operand |
+| `in` | Scalar field | Array literal | Field value is in the literal list |
+| `array_contains` | Array field | Single literal or variable | Array field contains the operand |
+| `array_contains_all` | Array field | Array literal | Array field contains every literal in the operand |
+| `array_contains_any` | Array field | Array literal | Array field contains at least one literal in the operand |
+
+`in` is for scalar fields:
+```plaintext
+department in ['engineering', 'product']
+```
+
+`array_contains` and its variants are for array fields:
+```plaintext
+array_contains(shared_users, $current_principal)
+array_contains_all(required_labels, ['security', 'approved'])
+array_contains_any(shared_departments, ['engineering', 'product'])
+```
+
+### Public Management APIs
+RLS management APIs are collection-scoped Milvus management operations. They require the Milvus connection user to have `CollectionReadWrite` or `CollectionAdmin` privilege on the target collection, and they do not require an RLS principal in the request.
+
+Row-bearing runtime APIs on an RLS-enabled collection must carry an explicit RLS principal. The exact SDK transport can be request options, client context, or request metadata, but the request must provide enough information for Proxy to resolve the current RLS principal name, tags, and admin marker.
+
+#### Create Policy
+Go client option:
+```go
+client.NewCreateRowPolicyOption(
+    "documents",
+    "department_access",
+    []entity.RowPolicyAction{
+        entity.RowPolicyActionQuery,
+        entity.RowPolicyActionSearch,
+        entity.RowPolicyActionDelete,
+        entity.RowPolicyActionInsert,
+        entity.RowPolicyActionUpsert,
+    },
+    "department == $current_principal_tags['department']",
+).WithDescription(
+    "department access policy",
+)
+```
+
+#### Drop Policy
+```go
+client.DropRowPolicy(
+    ctx,
+    client.NewDropRowPolicyOption("documents", "department_access"),
+)
+```
+
+#### List Policies
+```go
+policies, err := client.ListRowPolicies(
+    ctx,
+    client.NewListRowPoliciesOption("documents"),
+)
+```
+
+#### Manage RLS Principal Tags
+RLS principal tag APIs manage metadata for one RLS principal in one collection. The `alice` argument below is an RLS principal name, not necessarily a Milvus RBAC username.
+```go
+client.SetRLSPrincipalTags(
+    ctx,
+    client.NewSetRLSPrincipalTagsOption(
+        "documents",
+        "alice",
+        map[string]string{
+            "department": "engineering",
+        },
+    ),
+)
+
+tags, err := client.GetRLSPrincipalTags(
+    ctx,
+    client.NewGetRLSPrincipalTagsOption("documents", "alice"),
+)
+
+client.DeleteRLSPrincipalTags(
+    ctx,
+    client.NewDeleteRLSPrincipalTagsOption("documents", "alice", "department"),
+)
+```
+
+#### Manage RLS Principal Admin Status
+RLS admin status is collection-scoped RLS principal metadata. An RLS admin principal bypasses row policies for that collection when `rls.force=false`; it is still subject to row policies when `rls.force=true`.
+
+The API should provide a collection-scoped management operation to mark or unmark an RLS principal as an RLS admin principal. This does not grant any Milvus RBAC privilege.
+
+Conceptual API:
+```go
+client.SetRLSPrincipalAdmin(
+    ctx,
+    client.NewSetRLSPrincipalAdminOption("documents", "support_admin", true),
+)
+```
+
+#### Manage Collection RLS Properties
+```go
+client.AlterCollectionProperties(
+    ctx,
+    client.NewAlterCollectionPropertiesOption(
+        "documents",
+        map[string]string{
+            "rls.enabled": "true",
+            "rls.force": "false",
+        },
+    ),
+)
+```
+
+#### Runtime Request Principal
+Runtime row-bearing requests must provide an RLS principal when RLS is enabled for the target collection:
+```go
+client.Search(
+    ctx,
+    client.NewSearchOption("documents", limit, vectors).
+        WithRLSPrincipal("alice"),
+)
+```
+
+If the collection has `rls.enabled=true` and the request does not include an RLS principal, Proxy rejects the request before execution.
+SDKs should use explicit names such as `rls_principal` and `WithRLSPrincipal` instead of generic `principal`, so the application end-user identity is not confused with the Milvus connection credential.
+
+### End-to-End Example: Personal Documents and Sharing
 This quick start shows how to use RLS to build a document collection where:
 
 1. Each user can read their own documents.
@@ -38,7 +588,7 @@ This quick start shows how to use RLS to build a document collection where:
 4. A user can share their documents with an entire department.
 5. Shared users or departments can read shared documents, but cannot modify or delete them.
 
-### 2.1 Create a Document Collection
+#### Create a Document Collection
 Assume a collection named `documents` with the following fields:
 ```plaintext
 id: int64 primary key
@@ -90,33 +640,36 @@ Field meanings:
 
 `shared_users` does not need to include the owner. The owner is represented separately by `owner`, and owner access is granted by owner-specific policies.
 
-### 2.2 Assign User Tags
-RLS can use user tags to express dynamic policies.
+#### Assign RLS Principal Tags
+RLS can use collection-scoped RLS principal tags to express dynamic policies.
 ```python
-client.set_user_tags(
-    user_name="alice",
+client.set_rls_principal_tags(
+    collection_name="documents",
+    principal_name="alice",
     tags={"department": "engineering"},
 )
 
-client.set_user_tags(
-    user_name="bob",
+client.set_rls_principal_tags(
+    collection_name="documents",
+    principal_name="bob",
     tags={"department": "engineering"},
 )
 
-client.set_user_tags(
-    user_name="carol",
+client.set_rls_principal_tags(
+    collection_name="documents",
+    principal_name="carol",
     tags={"department": "product"},
 )
 ```
 
-RLS expressions can reference:
+RLS expressions can reference the current RLS principal:
 ```plaintext
-$current_user_name
-$current_user_tags['department']
+$current_principal
+$current_principal_tags['department']
 ```
 
-### 2.3 Enable RLS on the Collection
-RLS is controlled by collection properties. An admin enables RLS by updating the target collection:
+#### Enable RLS on the Collection
+RLS is controlled by collection properties. A Milvus user with `CollectionReadWrite` or `CollectionAdmin` privilege enables RLS by updating the target collection:
 ```python
 client.alter_collection_properties(
     collection_name="documents",
@@ -127,28 +680,24 @@ client.alter_collection_properties(
 )
 ```
 
-### 2.4 Allow Users to Read Their Own Documents
+#### Allow Users to Read Their Own Documents
 ```python
 client.create_row_policy(
     collection_name="documents",
     policy_name="read_own_documents",
     policy_type="PERMISSIVE",
     actions=["query", "search"],
-    roles=["PUBLIC"],
-    using_expr="owner == $current_user_name",
+    expr="owner == $current_principal",
 )
 ```
 
 If Alice runs:
 ```python
-alice_client = MilvusClient()
-alice_client.set_current_user("alice")
-alice_client.query(
+client.query(
     collection_name="documents",
     filter="title like 'RLS%'",
+    rls_principal="alice",
 )
-alice_client.search
-alice_client.insert
 ```
 
 Milvus executes:
@@ -158,72 +707,64 @@ Milvus executes:
 
 Alice only sees documents she owns.
 
-### 2.5 Allow Users to Read Documents Shared Directly With Them
+#### Allow Users to Read Documents Shared Directly With Them
 ```python
 client.create_row_policy(
     collection_name="documents",
     policy_name="read_user_shared_documents",
     policy_type="PERMISSIVE",
     actions=["query", "search"],
-    roles=["PUBLIC"],
-    using_expr="$current_user_name in shared_users",
+    expr="array_contains(shared_users, $current_principal)",
 )
 ```
 
 Because `read_own_documents` and `read_user_shared_documents` are both `PERMISSIVE`, they are combined with `OR`.
 For Bob, the effective read expression becomes:
 ```plaintext
-(owner == 'bob') OR ('bob' in shared_users)
+(owner == 'bob') OR array_contains(shared_users, 'bob')
 ```
 
 Bob can read documents he owns and documents explicitly shared with him.
 
-### 2.6 Allow Users to Read Documents Shared With Their Department
+#### Allow Users to Read Documents Shared With Their Department
 ```python
 client.create_row_policy(
     collection_name="documents",
     policy_name="read_department_shared_documents",
     policy_type="PERMISSIVE",
     actions=["query", "search"],
-    roles=["PUBLIC"],
-    using_expr="$current_user_tags['department'] in shared_departments",
+    expr="array_contains(shared_departments, $current_principal_tags['department'])",
 )
-doc0: [a b c d...]
-
-a: [doc0]
-b: [doc0]
-shared_departments: [dev, qa]
 ```
 
 For Carol, whose department tag is `product`, the effective read expression becomes:
 ```plaintext
 (owner == 'carol')
 OR
-('carol' in shared_users)
+array_contains(shared_users, 'carol')
 OR
-('product' in shared_departments)
+array_contains(shared_departments, 'product')
 ```
 
 Carol can read documents she owns, documents shared directly with her, and documents shared with the Product department.
 
-### 2.7 Allow Users to Insert Only Their Own Documents
-Reading shared documents should not imply write permission. For `insert`, use `CHECK` to ensure every inserted row is owned by the current user.
+#### Allow Users to Insert Only Their Own Documents
+Reading shared documents should not imply write permission. For `insert`, use a write policy whose `expr` ensures every inserted row is owned by the current RLS principal.
 ```python
 client.create_row_policy(
     collection_name="documents",
     policy_name="insert_own_documents",
     policy_type="PERMISSIVE",
     actions=["insert"],
-    roles=["PUBLIC"],
-    using_expr="owner == $current_user_name",
-    check_expr="owner == $current_user_name",
+    expr="owner == $current_principal",
 )
 ```
 
 Alice can insert:
 ```python
-alice_client.insert(
+client.insert(
     collection_name="documents",
+    rls_principal="alice",
     data=[
         {
             "id": 100,
@@ -241,8 +782,9 @@ alice_client.insert(
 
 Alice cannot insert a document owned by Bob:
 ```python
-alice_client.insert(
+client.insert(
     collection_name="documents",
+    rls_principal="alice",
     data=[
         {
             "id": 101,
@@ -265,26 +807,25 @@ owner == 'alice'
 
 Example error:
 ```plaintext
-row 0 violates RLS CHECK: field 'owner' value 'bob' not allowed by policy
+row 0 violates RLS expression: field 'owner' value 'bob' not allowed by policy
 ```
 
-### 2.8 Allow Users to Upsert Only Their Own Documents
+#### Allow Users to Upsert Only Their Own Documents
 ```python
 client.create_row_policy(
     collection_name="documents",
     policy_name="upsert_own_documents",
     policy_type="PERMISSIVE",
     actions=["upsert"],
-    roles=["PUBLIC"],
-    using_expr="owner == $current_user_name",
-    check_expr="owner == $current_user_name",
+    expr="owner == $current_principal",
 )
 ```
 
 This allows Alice to update her own document, including its sharing fields:
 ```python
-alice_client.upsert(
+client.upsert(
     collection_name="documents",
+    rls_principal="alice",
     data=[
         {
             "id": 100,
@@ -302,13 +843,14 @@ alice_client.upsert(
 
 After this, Bob can read document `100` because:
 ```plaintext
-'bob' in shared_users
+array_contains(shared_users, 'bob')
 ```
 
 Alice can also share the same document with an entire department:
 ```python
-alice_client.upsert(
+client.upsert(
     collection_name="documents",
+    rls_principal="alice",
     data=[
         {
             "id": 100,
@@ -325,9 +867,9 @@ alice_client.upsert(
 ```
 
 After this, all users whose `department` tag is `product` can read the document.
-For the first version, RLS `CHECK` validates the incoming row. If an application allows user-controlled primary keys, it should also ensure one user cannot upsert over another user's existing primary key. A common approach is to use server-generated document IDs or include ownership in the application's ID allocation logic. Future versions may add stronger existing-row validation for upsert.
+For the first version, RLS validates the incoming row for `upsert`. If an application allows user-controlled primary keys, it should also ensure one user cannot upsert over another user's existing primary key. A common approach is to use server-generated document IDs or include ownership in the application's ID allocation logic. Future versions may add stronger existing-row validation for upsert.
 
-### 2.9 Allow Users to Delete Only Their Own Documents
+#### Allow Users to Delete Only Their Own Documents
 Delete should not use the same expression as read sharing. Otherwise, users could delete documents merely shared with them.
 ```python
 client.create_row_policy(
@@ -335,16 +877,16 @@ client.create_row_policy(
     policy_name="delete_own_documents",
     policy_type="PERMISSIVE",
     actions=["delete"],
-    roles=["PUBLIC"],
-    using_expr="owner == $current_user_name",
+    expr="owner == $current_principal",
 )
 ```
 
 Alice can delete her own documents:
 ```python
-alice_client.delete(
+client.delete(
     collection_name="documents",
     filter="id == 100",
+    rls_principal="alice",
 )
 ```
 
@@ -355,24 +897,24 @@ Milvus executes:
 
 Bob cannot delete Alice's document even if Alice shared it with Bob, because delete does not use the sharing policies.
 
-### 2.10 Final Effective Behavior
+#### Final Effective Behavior
 For `query` and `search`, the effective RLS expression is:
 ```plaintext
-owner == $current_user_name
+owner == $current_principal
 OR
-$current_user_name in shared_users
+array_contains(shared_users, $current_principal)
 OR
-$current_user_tags['department'] in shared_departments
+array_contains(shared_departments, $current_principal_tags['department'])
 ```
 
-For `insert` and `upsert`, the effective `CHECK` expression is:
+For `insert` and `upsert`, the effective RLS expression is:
 ```plaintext
-owner == $current_user_name
+owner == $current_principal
 ```
 
 For `delete`, the effective RLS expression is:
 ```plaintext
-owner == $current_user_name
+owner == $current_principal
 ```
 
 
@@ -380,460 +922,17 @@ owner == $current_user_name
 | --- | --- |
 | `query` | Own documents, directly shared documents, and department-shared documents |
 | `search` | Own documents, directly shared documents, and department-shared documents |
-| `insert` | Only incoming rows where `owner == current user` |
-| `upsert` | Only incoming rows where `owner == current user` |
-| `delete` | Only existing rows where `owner == current user` |
+| `insert` | Only incoming rows where `owner == current RLS principal` |
+| `upsert` | Only incoming rows where `owner == current RLS principal` |
+| `delete` | Only existing rows where `owner == current RLS principal` |
 
 If shared users or shared departments must also write documents, the schema should separate read ACLs from write ACLs, for example `shared_read_users`, `shared_write_users`, `shared_read_departments`, and `shared_write_departments`. The read and write policies should then be defined separately. The first version's upsert validation only checks the incoming row, so secure shared-write semantics over existing documents need additional existing-row validation or application-level ID ownership guarantees.
 
-## 3. User-Facing Semantics
+## 4. Architecture
 
-### 3.1 Authorization Requirement
-RLS depends on Milvus authorization. A cluster must enable authorization before RLS can take effect.
-```yaml
-common:
-  authorizationEnabled: true
+### Component Architecture
 
-proxy:
-  rls:
-    auditEnabled: true
-    cacheExpirationSeconds: 3600
-    maxCacheEntries: 10000
-    maxPoliciesPerCollection: 100
-    maxUserTags: 50
-    maxExpressionLength: 4096
-```
-
-Semantics:
-
-- `authorizationEnabled=false` means RLS cannot be enabled for any collection.
-- Authorization provides authenticated users and roles for RLS evaluation.
-- Enabling authorization does not enable RLS for every collection automatically.
-- RLS is enabled explicitly at collection level.
-
-### 3.2 Collection-Level RLS Properties
-RLS is controlled by collection properties, not by separate enable/disable APIs. An admin enables, disables, or forces RLS by updating collection properties.
-```python
-client.alter_collection_properties(
-    collection_name="documents",
-    properties={
-        "rls.enabled": "true",
-        "rls.force": "false",
-    },
-)
-```
-
-Collection-level properties:
-
-| Property | Default | Meaning |
-| --- | --- | --- |
-| `rls.enabled` | `false` | Whether RLS is enabled for this collection |
-| `rls.force` | `false` | Whether root/admin users must also follow RLS policies |
-
-Enable RLS for normal users while root/admin users still bypass RLS:
-```python
-client.alter_collection_properties(
-    collection_name="documents",
-    properties={
-        "rls.enabled": "true",
-        "rls.force": "false",
-    },
-)
-```
-
-Enable FORCE RLS so every user, including root/admin users, must satisfy applicable RLS policies:
-```python
-client.alter_collection_properties(
-    collection_name="documents",
-    properties={
-        "rls.enabled": "true",
-        "rls.force": "true",
-    },
-)
-```
-
-Disable RLS for the collection:
-```python
-client.alter_collection_properties(
-    collection_name="documents",
-    properties={
-        "rls.enabled": "false",
-    },
-)
-```
-
-Semantics:
-
-- RLS is disabled by default for every collection.
-- RLS configuration is scoped to one collection.
-- Policies may exist on a collection before RLS is enabled, but they do not affect requests until `rls.enabled=true`.
-- When `rls.enabled=true`, non-root/admin users must match an applicable policy for the requested action.
-- If no applicable policy exists for the action and user, access is denied.
-- Root/admin users bypass RLS by default when `rls.force=false`.
-- When `rls.force=true`, root/admin users must also match an applicable policy for the requested action.
-- When `rls.enabled=false`, RLS does not change `query`, `search`, `delete`, `insert`, or `upsert` behavior for that collection, regardless of `rls.force`.
-
-## 4. Policy Model
-
-### 4.1 Policy Fields
-An RLS policy contains the following fields:
-```plaintext
-policy_name
-db_id
-collection_id
-policy_type
-actions
-roles
-using_expr
-check_expr
-description
-created_at
-policy_id
-```
-
-
-| Field | Description |
-| --- | --- |
-| `policy_name` | Human-readable policy name, unique within a collection |
-| `db_id` | Database ID |
-| `collection_id` | Collection ID |
-| `policy_type` | `PERMISSIVE` or `RESTRICTIVE` |
-| `actions` | Operations this policy applies to |
-| `roles` | Roles this policy applies to; supports `PUBLIC` |
-| `using_expr` | Filter expression for `query`, `search`, and `delete` |
-| `check_expr` | Validation expression for `insert` and `upsert` |
-| `description` | Optional description |
-| `created_at` | Creation timestamp |
-| `policy_id` | Globally unique ID allocated by RootCoord |
-
-Go model validation is implemented by `RLSPolicy.Validate()` in `internal/metastore/model/rls_policy.go`.
-
-### 4.2 Protobuf Model
-```protobuf
-message RLSPolicy {
-    string policy_name = 1;
-    string collection_name = 2;
-    int64 collection_id = 3;
-    RLSPolicyType policy_type = 4;
-    repeated string actions = 5;
-    repeated string roles = 6;
-    string using_expr = 7;
-    string check_expr = 8;
-    string description = 9;
-    int64 created_at = 10;
-    int64 policy_id = 11;
-    int64 db_id = 12;
-}
-```
-
-`policy_id` is allocated by RootCoord and used in the storage key. `policy_name` is still unique within a collection and is used by user-facing APIs such as `DropRowPolicy`.
-
-### 4.3 Collection and Policy Association
-A collection uses the row policies whose `db_id` and `collection_id` match the collection.
-There is no separate policy binding table. The association is encoded directly in each policy object:
-```plaintext
-policy.db_id == collection.db_id
-AND
-policy.collection_id == collection.collection_id
-```
-
-When a request reaches Proxy, Proxy resolves the target collection to `db_id` and `collection_id`, then loads all policies under that collection:
-```plaintext
-rls/policy/{dbID}/{collectionID}/{policyID}
-```
-
-Only policies from that collection can participate in RLS expression construction. Policies from other collections are ignored, even if they have the same policy name, role, action, or expression.
-A collection-level RLS switch controls whether those associated policies are enforced:
-
-| Collection property | Effect |
-| --- | --- |
-| `rls.enabled=false` | Associated policies exist but are not enforced |
-| `rls.enabled=true` | Associated policies are enforced for non-root/admin users |
-| `rls.force=true` | Associated policies are also enforced for root/admin users |
-
-Policy creation and policy enforcement are separate steps:
-
-1. Create one or more policies on a collection.
-2. Set `rls.enabled=true` on that collection.
-3. Proxy loads the collection's policies and applies policies matching the current action and user roles.
-
-### 4.4 Roles
-`roles` controls which users a policy applies to. It does not grant Milvus privileges by itself; normal authorization still decides whether the user can issue `query`, `search`, `insert`, `delete`, or `upsert`. RLS `roles` only decides whether this policy participates in row-level filtering for that request.
-A policy applies to a user when either:
-
-1. The policy contains one of the user's roles.
-2. The policy contains `PUBLIC`.
-
-`PUBLIC` means the policy applies to all authenticated users.
-Example policy that applies to every authenticated user:
-```python
-client.create_row_policy(
-    collection_name="documents",
-    policy_name="read_shared_documents",
-    policy_type="PERMISSIVE",
-    actions=["query", "search"],
-    roles=["PUBLIC"],
-    using_expr="$current_user_name in shared_users",
-)
-```
-
-Example policy that applies only to users with the `auditor` role:
-```python
-client.create_row_policy(
-    collection_name="documents",
-    policy_name="auditor_read_published_documents",
-    policy_type="PERMISSIVE",
-    actions=["query", "search"],
-    roles=["auditor"],
-    using_expr="status == 'published'",
-)
-```
-
-If a user does not have the `auditor` role, the second policy is ignored for that user. If no other applicable policy matches the user and action, RLS denies access.
-
-### 4.5 Supported Actions
-RLS supports the following actions:
-```plaintext
-query
-search
-delete
-insert
-upsert
-```
-
-`query`, `search`, and `delete` use `USING` expressions because they operate on existing rows.
-`insert` and `upsert` use `CHECK` expressions because they validate incoming rows.
-
-### 4.6 Policy Types
-
-#### PERMISSIVE
-Multiple permissive policies are combined with `OR`:
-```plaintext
-tenant_id == 'acme'
-OR
-visibility == 'public'
-```
-
-A row passes the permissive part if it satisfies at least one permissive policy.
-
-#### RESTRICTIVE
-Multiple restrictive policies are combined with `AND`:
-```plaintext
-status != 'archived'
-AND
-region in ['us', 'eu']
-```
-
-A row passes the restrictive part only if it satisfies all restrictive policies.
-
-#### Combined Semantics
-The final RLS expression is:
-```plaintext
-(permissive_1 OR permissive_2 OR ...)
-AND
-(restrictive_1)
-AND
-(restrictive_2)
-...
-```
-
-If the user request also contains a filter, the final execution expression is:
-```plaintext
-(user_filter) AND (rls_filter)
-```
-
-If no applicable policy exists, the RLS expression is `false`, which denies all rows.
-
-## 5. USING and CHECK
-
-### 5.1 USING
-`USING` limits which existing rows a user can read or delete.
-Applicable actions:
-```plaintext
-query
-search
-delete
-```
-
-Example:
-```plaintext
-tenant_id == $current_user_tags['tenant']
-```
-
-If the user request filter is:
-```plaintext
-category == 'report'
-```
-
-and the current user's `tenant` tag is `acme`, Proxy injects:
-```plaintext
-(category == 'report') AND (tenant_id == 'acme')
-```
-
-`delete` uses `USING`, not `CHECK`, because delete chooses which existing rows can be deleted. It does not validate newly inserted row values.
-
-### 5.2 CHECK
-`CHECK` limits which rows a user can write.
-Applicable actions:
-```plaintext
-insert
-upsert
-```
-
-Example:
-```plaintext
-tenant_id == $current_user_tags['tenant']
-```
-
-If the current user's tags are:
-```json
-{
-  "tenant": "acme"
-}
-```
-
-then every inserted or upserted row must satisfy:
-```plaintext
-tenant_id == 'acme'
-```
-
-### 5.3 USING to CHECK Fallback
-If a policy contains `insert` or `upsert` in `actions` but does not explicitly configure `check_expr`, the system automatically uses `using_expr` as `check_expr`.
-This allows a single policy to protect both read and write paths:
-```python
-client.create_row_policy(
-    collection_name="docs",
-    policy_name="tenant_isolation",
-    policy_type="PERMISSIVE",
-    actions=["query", "search", "delete", "insert", "upsert"],
-    roles=["PUBLIC"],
-    using_expr="tenant_id == $current_user_tags['tenant']",
-)
-```
-
-## 6. Variables
-RLS expressions support variable substitution.
-
-### 6.1 `$current_user_name`
-`$current_user_name` represents the authenticated username.
-Example:
-```plaintext
-owner == $current_user_name
-```
-
-If the current user is `alice`, the expression becomes:
-```plaintext
-owner == 'alice'
-```
-
-### 6.2 `$current_user_tags['key']`
-`$current_user_tags['key']` represents a tag value attached to the current user.
-Example:
-```plaintext
-tenant_id == $current_user_tags['tenant']
-```
-
-If the current user's tags are:
-```json
-{
-  "tenant": "acme"
-}
-```
-
-then the expression becomes:
-```plaintext
-tenant_id == 'acme'
-```
-
-### 6.3 Missing Tags
-If an expression references a missing tag, expression construction must fail closed.
-Example expression:
-```plaintext
-tenant_id == $current_user_tags['tenant']
-```
-
-If the current user has no `tenant` tag, the expression becomes:
-```plaintext
-false
-```
-
-## 7. Management APIs
-
-### 7.1 Create Policy
-Go client option:
-```go
-client.NewCreateRowPolicyOption(
-    "documents",
-    "tenant_isolation",
-    []entity.RowPolicyAction{
-        entity.RowPolicyActionQuery,
-        entity.RowPolicyActionSearch,
-        entity.RowPolicyActionDelete,
-        entity.RowPolicyActionInsert,
-        entity.RowPolicyActionUpsert,
-    },
-    []string{"PUBLIC"},
-    "tenant_id == $current_user_tags['tenant']",
-).WithCheckExpr(
-    "tenant_id == $current_user_tags['tenant']",
-).WithDescription(
-    "tenant isolation policy",
-)
-```
-
-### 7.2 Drop Policy
-```go
-client.DropRowPolicy(
-    ctx,
-    client.NewDropRowPolicyOption("documents", "tenant_isolation"),
-)
-```
-
-### 7.3 List Policies
-```go
-policies, err := client.ListRowPolicies(
-    ctx,
-    client.NewListRowPoliciesOption("documents"),
-)
-```
-
-### 7.4 Manage User Tags
-```go
-client.SetUserTags(
-    ctx,
-    client.NewSetUserTagsOption("alice", map[string]string{
-        "tenant": "acme",
-    }),
-)
-
-tags, err := client.GetUserTags(
-    ctx,
-    client.NewGetUserTagsOption("alice"),
-)
-
-client.DeleteUserTags(
-    ctx,
-    client.NewDeleteUserTagsOption("alice", "tenant"),
-)
-```
-
-### 7.5 Manage Collection RLS Properties
-```go
-client.AlterCollectionProperties(
-    ctx,
-    client.NewAlterCollectionPropertiesOption(
-        "documents",
-        map[string]string{
-            "rls.enabled": "true",
-            "rls.force": "false",
-        },
-    ),
-)
-```
-
-## 8. Architecture
-
-### 8.1 High-Level Components
+#### High-Level Components
 ```plaintext
 Client
   |
@@ -853,13 +952,14 @@ Proxy
        +-- RLSDeleteInterceptor
        +-- RLSInsertInterceptor
        +-- RLSUpsertInterceptor
-       +-- RLSCheckValidator
+       +-- RLSWriteExpressionValidator
   |
   v
 Task Layer
   |
   +-- query task
   +-- search task
+  +-- hybrid search task
   +-- delete task
   +-- insert task
   +-- upsert task
@@ -878,14 +978,14 @@ MetaStore
   |
   +-- collection meta, including collection-level RLS config
   +-- rls/policy/{dbID}/{collectionID}/{policyID}
-  +-- rls/user_tags/{userName}
+  +-- rls/principal/{dbID}/{collectionID}/{principalName}
 ```
 
-### 8.2 Why Enforce in Proxy
+#### Why Enforce in Proxy
 RLS is enforced in Proxy because:
 
-1. Proxy is the user request entry point and can access user context.
-2. Query/search/delete requests still have original filters at the Proxy layer.
+1. Proxy is the user request entry point and can access the RLS principal context.
+2. Query/search/hybrid_search/delete requests still have original filters at the Proxy layer.
 3. Insert/upsert row data is available at the Proxy layer for schema validation and per-row validation.
 4. QueryNode and DataNode execution engines do not need to be changed.
 5. RLS enforcement stays close to existing authorization checks.
@@ -896,13 +996,13 @@ Tradeoffs:
 2. Every relevant operation must go through Proxy hooks.
 3. Proxy cache must fail closed and must not bypass RLS when RootCoord is temporarily unavailable.
 
-## 9. Request Flow
+### Request Flow
 
-### 9.1 Create Policy Flow
+#### Create Policy Flow
 ```plaintext
 Client
   -> Proxy.CreateRowPolicy
-  -> require admin privilege
+  -> require CollectionReadWrite or CollectionAdmin privilege on the target collection
   -> RootCoord.CreateRowPolicy
   -> RootCoord DDL task
   -> allocate policyID
@@ -912,28 +1012,30 @@ Client
   -> return success
 ```
 
-### 9.2 Query Flow
+#### Query Flow
 ```plaintext
 Proxy query task
   -> resolve dbID / collectionID
   -> check collection RLS config
-  -> check root/admin bypass unless rls.force=true
+  -> resolve RLS principal
+  -> check RLS admin principal bypass unless rls.force=true
   -> ensure policies loaded
-  -> ensure user tags loaded
+  -> ensure RLS principal tags loaded
   -> RLSQueryInterceptor.InterceptQuery
   -> RLSExpressionBuilder.BuildExpression(action=query)
   -> merge user filter and RLS filter
   -> continue query plan generation
 ```
 
-### 9.3 Search Flow
+#### Search Flow
 ```plaintext
 Proxy search task
   -> resolve dbID / collectionID
   -> check collection RLS config
-  -> check root/admin bypass unless rls.force=true
+  -> resolve RLS principal
+  -> check RLS admin principal bypass unless rls.force=true
   -> ensure policies loaded
-  -> ensure user tags loaded
+  -> ensure RLS principal tags loaded
   -> RLSSearchInterceptor.InterceptSearch
   -> RLSExpressionBuilder.BuildExpression(action=search)
   -> merge search filter and RLS filter
@@ -941,85 +1043,88 @@ Proxy search task
 
 Hybrid search applies the RLS filter to each sub-request independently.
 
-### 9.4 Delete Flow
+#### Delete Flow
 ```plaintext
 Proxy delete task
   -> resolve dbID / collectionID
   -> check collection RLS config
-  -> check root/admin bypass unless rls.force=true
+  -> resolve RLS principal
+  -> check RLS admin principal bypass unless rls.force=true
   -> ensure policies loaded
-  -> ensure user tags loaded
+  -> ensure RLS principal tags loaded
   -> RLSDeleteInterceptor.InterceptDelete
   -> RLSExpressionBuilder.BuildExpression(action=delete)
   -> merge delete filter and RLS filter
   -> continue delete execution
 ```
 
-### 9.5 Insert Flow
+#### Insert Flow
 Insert has two validation stages.
 Stage 1: collection-level and policy gate:
 ```plaintext
 insert task
   -> resolve dbID / collectionID
   -> check collection RLS config
-  -> check root/admin bypass unless rls.force=true
+  -> resolve RLS principal
+  -> check RLS admin principal bypass unless rls.force=true
   -> ensure policies loaded
-  -> ensure user tags loaded
+  -> ensure RLS principal tags loaded
   -> RLSInsertInterceptor.InterceptInsert
-  -> build action=insert CHECK expression
-  -> if no matching policy: reject request
-  -> save check expression
+  -> build action=insert RLS expression
+  -> if no applicable policy expression exists: reject request
+  -> save write expression
 ```
 
-Stage 2: per-row CHECK validation:
+Stage 2: per-row expression validation:
 ```plaintext
 insert task
   -> normal schema/data validation
-  -> validateInsertAgainstRLSCheck(checkExpr, fieldsData)
-  -> parse CHECK expression
+  -> validateInsertAgainstRLSExpression(expr, fieldsData)
+  -> parse RLS expression
   -> find target field
   -> validate each row
   -> any violation rejects whole batch
 ```
 
-### 9.6 Upsert Flow
+#### Upsert Flow
 Upsert follows the same structure as insert:
 ```plaintext
 upsert task
   -> resolve dbID / collectionID
   -> check collection RLS config
-  -> check root/admin bypass unless rls.force=true
+  -> resolve RLS principal
+  -> check RLS admin principal bypass unless rls.force=true
   -> ensure policies loaded
-  -> ensure user tags loaded
-  -> build action=upsert CHECK expression
-  -> save check expression
+  -> ensure RLS principal tags loaded
+  -> build action=upsert RLS expression
+  -> save write expression
   -> validate incoming rows before execution
 ```
 
 The first version validates the incoming row. It does not validate the previous stored row that may be overwritten by the upsert.
 
-## 10. Expression Builder
+### Expression Builder
 
-### 10.1 Applicable Policy Selection
+#### Applicable Policy Selection
 A policy participates in expression construction only when both conditions are true:
 
 1. The policy `actions` contains the current action.
-2. The policy `roles` contains one of the current user's roles or contains `PUBLIC`.
+2. The policy has a non-empty expression for that action.
 
-### 10.2 No Policy Semantics
+#### No Policy Semantics
 If a collection has no policies:
 ```plaintext
 false
 ```
 
-If a collection has policies but none are applicable to the current action and user:
+If a collection has policies but none are applicable to the current action:
 ```plaintext
 false
 ```
 
 This means deny all.
 
-### 10.3 Expression Merge
+#### Expression Merge
 If the user request filter is empty:
 ```plaintext
 rls_expr
@@ -1035,7 +1140,7 @@ If both user filter and RLS expression exist:
 (user_filter) AND (rls_expr)
 ```
 
-### 10.4 PostgreSQL-Style Policy Combination
+#### PostgreSQL-Style Policy Combination
 ```plaintext
 Final RLS Filter = (Permissive_1 OR Permissive_2 OR ...)
                    AND
@@ -1050,35 +1155,38 @@ Then merge with user filter:
 Final Execution Filter = (User Filter) AND (Final RLS Filter)
 ```
 
-## 11. CHECK Expression Validator
+### Incoming-Row Expression Validator
 
-### 11.1 Supported CHECK Expressions
-The first version supports simple per-row CHECK expressions:
+#### Supported Incoming-Row Expressions
+The first version supports simple per-row expressions:
 ```plaintext
 field == 'string'
 field == 123
 field in ['a', 'b', 'c']
 field in [1, 2, 3]
+array_contains(array_field, 'a')
+array_contains_all(array_field, ['a', 'b'])
+array_contains_any(array_field, ['a', 'b'])
 ```
 
-### 11.2 Unsupported CHECK Expressions
-The first version does not support these CHECK expressions for per-row insert/upsert validation:
+#### Unsupported Incoming-Row Expressions
+The first version does not support these expressions for per-row insert/upsert validation:
 ```plaintext
-tenant_id == 'acme' AND region == 'us'
-tenant_id == 'acme' OR visibility == 'public'
+department == 'engineering' AND region == 'us'
+department == 'engineering' OR visibility == 'public'
 score > 10
 field != 'x'
 nested function calls
 subqueries
 ```
 
-Unsupported CHECK expressions must return clear errors and must not bypass validation.
-These expressions are not supported in v1 because read-path filters can be delegated to the existing Milvus filter execution engine, but write-path CHECK validation runs in Proxy before rows are written. Proxy needs a row evaluator that can parse the expression, bind one incoming row at a time, and evaluate the expression safely. The first version intentionally supports only `==` and `IN` so insert/upsert validation can be implemented safely and fail closed without building a full expression interpreter in Proxy.
+Unsupported expressions must return clear errors and must not bypass validation.
+These expressions are not supported in v1 because read-path filters can be delegated to the existing Milvus filter execution engine, but write-path validation runs in Proxy before rows are written. Proxy needs a row evaluator that can parse the expression, bind one incoming row at a time, and evaluate the expression safely. The first version intentionally supports only `==`, `in`, and `array_contains*` so insert/upsert validation can be implemented safely and fail closed without building a full expression interpreter in Proxy.
 
-### 11.3 Validation Behavior
+#### Validation Behavior
 Validation flow:
 ```plaintext
-parse CHECK expression
+parse RLS expression
   -> extract field name
   -> extract operator
   -> extract allowed values
@@ -1087,31 +1195,31 @@ parse CHECK expression
   -> first violation returns error
 ```
 
-If the CHECK field does not exist:
+If the expression field does not exist:
 ```plaintext
-RLS CHECK field 'tenant_id' not found in insert data
+RLS expression field 'department' not found in insert data
 ```
 
-If the field is not scalar:
+If the field type is incompatible with the operator:
 ```plaintext
-RLS CHECK field 'tenant_id' is not a scalar field
+RLS expression field 'department' is not compatible with the operator
 ```
 
-If a row does not satisfy the CHECK:
+If a row does not satisfy the expression:
 ```plaintext
-row 2 violates RLS CHECK: field 'tenant_id' value 'globex' not allowed by policy
+row 2 violates RLS expression: field 'department' value 'sales' not allowed by policy
 ```
 
-## 12. Cache Design
+### Cache Design
 
-### 12.1 Cache Types
+#### Cache Types
 Proxy has two RLS cache layers:
 
 1. `RLSCache`
 
   - Stores collection policies.
   - Stores collection meta RLS config.
-  - Stores user tags.
+  - Stores RLS principal metadata, including tags and admin marker.
 
 2. `RLSCacheWithLoader`
 
@@ -1119,7 +1227,7 @@ Proxy has two RLS cache layers:
   - Uses TTL for expiration.
   - Uses double-checked locking to avoid thundering herd.
 
-### 12.2 Policy Load
+#### Policy Load
 When a request enters Proxy, Proxy calls:
 ```plaintext
 EnsurePoliciesLoaded
@@ -1130,18 +1238,18 @@ If the cache does not contain policies for the current collection, Proxy loads p
 ListRowPolicies
 ```
 
-### 12.3 User Tags Load
+#### RLS Principal Metadata Load
 When a request enters Proxy, Proxy calls:
 ```plaintext
-EnsureUserTagsLoaded
+EnsureRLSPrincipalLoaded
 ```
 
-If the cache does not contain tags for the current user, Proxy loads tags through RootCoord:
+If the cache does not contain metadata for the current RLS principal, Proxy loads principal metadata through RootCoord:
 ```plaintext
-GetUserTags
+GetRLSPrincipal(collection, principal)
 ```
 
-### 12.4 Load Failure
+#### Load Failure
 RLS is a security feature. Policy load failure must not bypass enforcement.
 Current design:
 ```plaintext
@@ -1155,18 +1263,19 @@ cache miss
 
 If Proxy cannot load policies for a collection with RLS enabled, continuing to serve requests may cause unauthorized access. Failing closed is required.
 
-### 12.5 Cache Refresh
+#### Cache Refresh
 RootCoord broadcasts cache refresh events when any of the following changes:
 
 1. Policy created.
 2. Policy dropped.
-3. User tags updated.
-4. User tags deleted.
+3. RLS principal tags updated.
+4. RLS principal tags deleted.
 5. Collection RLS properties changed.
+6. RLS principal admin status changed.
 
-## 13. Storage Design
+### Storage Design
 
-### 13.1 Policy Storage
+#### Policy Storage
 Policy storage key:
 ```plaintext
 rls/policy/{dbID}/{collectionID}/{policyID}
@@ -1180,15 +1289,15 @@ Use `policyID` instead of `policy_name` in the storage key because:
 3. It avoids key migration when a policy name changes.
 4. Policy name uniqueness is only required within a collection.
 
-### 13.2 User Tags Storage
-User tags storage key:
+#### RLS Principal Storage
+RLS principal storage key:
 ```plaintext
-rls/user_tags/{userName}
+rls/principal/{dbID}/{collectionID}/{principalName}
 ```
 
-The value is a protobuf-serialized user tags map.
+The value is protobuf-serialized RLS principal metadata, including tags and admin marker.
 
-### 13.3 Collection-Level RLS Config Storage
+#### Collection-Level RLS Config Storage
 Collection-level RLS config is stored together with collection metadata, not as a separate RLS metastore key.
 Collection meta should contain fields similar to:
 ```plaintext
@@ -1199,94 +1308,99 @@ force_rls: bool
 Semantics:
 
 - `rls_enabled=false` means RLS is disabled for this collection.
-- `rls_enabled=true` means non-root/admin users are enforced by policies on this collection.
-- `force_rls=false` means root/admin users bypass RLS by default.
-- `force_rls=true` means root/admin users are also enforced by RLS.
+- `rls_enabled=true` means row-bearing requests are enforced by policies on this collection.
+- `force_rls=false` means RLS admin principals bypass RLS by default.
+- `force_rls=true` means RLS admin principals are also enforced by RLS.
 
 Storing the switch in collection meta keeps RLS enable/disable consistent with other collection-level properties and avoids maintaining a separate collection config object.
 
-## 14. Security Model
+## 5. Remaining Details
 
-### 14.1 Admin-Only Management
-The following operations require admin privileges:
+### Security Model
+
+#### Collection-Scoped Management
+The following operations require the Milvus connection user to have `CollectionReadWrite` or `CollectionAdmin` privilege on the target collection. They are RLS management operations, not row-bearing runtime operations, so they do not require an RLS principal:
 ```plaintext
 CreateRowPolicy
 DropRowPolicy
 ListRowPolicies
-SetUserTags
-GetUserTags
-DeleteUserTags
+SetRLSPrincipalTags
+GetRLSPrincipalTags
+DeleteRLSPrincipalTags
+SetRLSPrincipalAdmin
 AlterCollectionProperties for rls.enabled / rls.force
 ```
 
-### 14.2 Runtime Enforcement
-Normal users are enforced by RLS for these operations when `rls.enabled=true`:
+#### Runtime Enforcement
+RLS principals are enforced by RLS for these row-bearing operations when `rls.enabled=true`:
 ```plaintext
 query
 search
+hybrid_search
 delete
 insert
 upsert
 ```
 
-### 14.3 Bypass and FORCE RLS
-The following users bypass RLS by default:
+DDL/admin operations, bulk/indirect writes, aggregate/statistics APIs, and collection-level operations are outside RLS enforcement scope.
 
-1. Root user.
-2. Users with admin role.
+#### Bypass and FORCE RLS
+RLS bypass is based on RLS principal metadata, not Milvus RBAC identity.
 
-FORCE RLS is a collection-level switch. When `rls.force=true`, root/admin users no longer bypass RLS for that collection and must match applicable policies for the requested action.
+An RLS admin principal bypasses RLS by default when `rls.force=false`.
 
-### 14.4 Fail-Closed Rules
-When RLS is enabled, all of the following deny access:
+FORCE RLS is a collection-level switch. When `rls.force=true`, RLS admin principals no longer bypass RLS for that collection and must be admitted by applicable policies for the requested action.
+
+#### Fail-Closed Rules
+When RLS is enabled for a row-bearing operation, all of the following deny access:
 
 | Scenario | Behavior |
 | --- | --- |
-| No user context | Deny |
+| No RLS principal context | Deny |
 | No policy | Deny |
 | No applicable policy | Deny |
 | Expression construction fails | Deny |
-| Referenced user tag is missing | Deny |
-| CHECK expression is unsupported | Deny |
-| CHECK field is missing | Deny |
+| Referenced RLS principal tag is missing | Deny |
+| Expression operator is unsupported | Deny |
+| Referenced expression field is missing | Deny |
 | Policy load fails | Panic/restart after retries |
 | RootCoord unavailable and cache miss occurs | Panic/restart after retries |
 
-Query/search/delete paths deny by returning a `false` filter or an error.
+Query/search/hybrid_search/delete paths deny by returning a `false` filter or an error.
 Insert/upsert paths deny by returning an error.
 Cache load paths deny by panicking after retry exhaustion so the proxy restarts instead of serving without enforcement.
 
-### 14.5 Injection Prevention
+#### Injection Prevention
 Variable substitution must not allow policy expression injection.
 Rules:
 
-- User tag keys and values are validated.
+- RLS principal tag keys and values are validated.
 - String values are escaped before substitution.
-- Missing user tags become `false` rather than empty strings.
+- Missing RLS principal tags become `false` rather than empty strings.
 - RLS expressions are parsed and validated before use.
-- RLS management APIs require admin privileges.
+- RLS management APIs require collection-scoped Milvus RBAC management privileges.
 
-## 15. Error Handling
+### Error Handling
 
-### 15.1 User-Facing Errors
-No matching insert policy:
+#### User-Facing Errors
+No applicable insert policy:
 ```plaintext
-insert operation denied by RLS: no matching policies
+insert operation denied by RLS: no applicable policies
 ```
 
-RLS CHECK violation:
+RLS expression violation:
 ```plaintext
-row 1 violates RLS CHECK: field 'tenant_id' value 'globex' not allowed by policy
+row 1 violates RLS expression: field 'department' value 'sales' not allowed by policy
 ```
 
-Missing CHECK field:
+Missing expression field:
 ```plaintext
-RLS CHECK field 'tenant_id' not found in insert data
+RLS expression field 'department' not found in insert data
 ```
 
-Unsupported CHECK expression:
+Unsupported expression:
 ```plaintext
-compound CHECK expressions are not supported for per-row insert validation
+compound RLS expressions are not supported for per-row insert validation
 ```
 
 Policy load failure:
@@ -1295,7 +1409,7 @@ RLS policy load failed after retries for collection db/collection.
 Proxy cannot serve requests without RLS enforcement.
 ```
 
-### 15.2 Internal Error Principle
+#### Internal Error Principle
 RLS errors must not be swallowed.
 Read paths:
 ```plaintext
@@ -1312,23 +1426,23 @@ Cache load path:
 error after retry -> panic
 ```
 
-## 16. Observability
+### Observability
 
-### 16.1 Logs
+#### Logs
 Log the following events:
 
 1. Policy created or dropped.
-2. User tags updated or deleted.
+2. RLS principal metadata updated or deleted.
 3. RLS filter injection failure.
-4. RLS CHECK validation failure.
+4. RLS write expression validation failure.
 5. Cache load failure.
-6. Root/admin bypass.
+6. RLS admin principal bypass.
 7. Cache refresh.
-8. FORCE RLS enforcement for root/admin users.
+8. FORCE RLS enforcement for RLS admin principals.
 
 Logs should include:
 ```plaintext
-user
+rls_principal
 db
 collection
 collectionID
@@ -1338,7 +1452,7 @@ error
 requestID / traceID
 ```
 
-### 16.2 Metrics
+#### Metrics
 Recommended metrics:
 ```plaintext
 rls_cache_hit_total
@@ -1346,51 +1460,50 @@ rls_cache_miss_total
 rls_policy_load_failure_total
 rls_active_policy_count
 rls_expression_build_latency
-rls_check_validation_failure_total
+rls_write_expression_validation_failure_total
 rls_denied_total
 rls_bypass_total
 rls_force_enforced_total
 ```
 
-## 17. Limitations
+### Limitations
 First version limitations:
 
-1. CHECK expressions only support `==` and `IN`.
-2. CHECK expressions do not support `AND` / `OR`.
+1. RLS expressions only support `==`, `in`, `array_contains`, `array_contains_all`, and `array_contains_any`.
+2. RLS expressions do not support `AND` / `OR`.
 3. `ALTER POLICY` is not supported; use drop and create.
-4. Role inheritance is not supported.
-5. `$current_role` is not supported.
-6. Policy simulator/explain API is not supported.
-7. Cross-collection policies are not supported.
-8. RLS cache has a short eventual-consistency window before cache refresh reaches every proxy.
-9. Upsert validation checks the incoming row but does not validate the previous existing row that may be overwritten.
+4. Principal grouping is modeled with tags; there is no separate principal-group API.
+5. Policy simulator/explain API is not supported.
+6. Cross-collection policies are not supported.
+7. RLS cache has a short eventual-consistency window before cache refresh reaches every proxy.
+8. Upsert validation checks the incoming row but does not validate the previous existing row that may be overwritten.
 
-## 18. Future Work
+### Future Work
 
-### 18.1 Complex CHECK Evaluator
+#### Complex Expression Evaluator
 Support expressions such as:
 ```plaintext
-tenant_id == 'acme' AND region == 'us'
-visibility == 'public' OR owner == $current_user_name
+department == 'engineering' AND region == 'us'
+visibility == 'public' OR owner == $current_principal
 score >= 10
 ```
 
 Implementation approach:
 
 1. Reuse the Milvus filter parser.
-2. Parse CHECK expressions into an AST.
+2. Parse RLS expressions into an AST.
 3. Build a row evaluator for insert/upsert rows.
 4. Evaluate the AST for each incoming row.
 
-### 18.2 Existing-Row Validation for Upsert
+#### Existing-Row Validation for Upsert
 Strengthen upsert semantics by validating both:
 
-1. The incoming row satisfies `CHECK`.
+1. The incoming row satisfies the write expression.
 2. The existing row being overwritten is visible or writable under the applicable RLS policy.
 
 This is required for stronger shared-write semantics when users can update documents they do not own.
 
-### 18.3 ALTER POLICY
+#### ALTER POLICY
 Add:
 ```plaintext
 AlterRowPolicy
@@ -1399,31 +1512,28 @@ AlterRowPolicy
 Support:
 
 1. Modify actions.
-2. Modify roles.
-3. Modify `using_expr`.
-4. Modify `check_expr`.
-5. Modify description.
-6. Rename policy.
+2. Modify `expr`.
+3. Modify description.
+4. Rename policy.
 
-### 18.4 Policy Explain
+#### Policy Explain
 Provide a debugging API:
 ```plaintext
-ExplainRowPolicy(user, collection, action)
+ExplainRowPolicy(principal, collection, action)
 ```
 
 Example response:
 ```json
 {
-  "user": "alice",
-  "roles": ["analyst"],
-  "tags": {"tenant": "acme"},
-  "matched_policies": ["tenant_isolation"],
-  "rls_expr": "tenant_id == 'acme'",
-  "final_expr": "(category == 'report') AND (tenant_id == 'acme')"
+  "principal": "alice",
+  "tags": {"department": "engineering"},
+  "applicable_policies": ["department_access"],
+  "rls_expr": "department == 'engineering'",
+  "final_expr": "(category == 'report') AND (department == 'engineering')"
 }
 ```
 
-### 18.5 SDK Support
+#### SDK Support
 Complete SDK support for:
 
 1. Python SDK.
@@ -1432,13 +1542,13 @@ Complete SDK support for:
 4. Node SDK.
 5. REST API documentation.
 
-## 19. Testing Plan
+### Testing Plan
 
-### 19.1 Unit Tests
+#### Unit Tests
 Cover:
 
 1. Policy validation.
-2. User tags validation.
+2. RLS principal tag validation.
 3. Collection property validation for `rls.enabled` and `rls.force`.
 4. Expression builder.
 5. Variable substitution.
@@ -1450,33 +1560,32 @@ Cover:
 11. Search filter merge.
 12. Hybrid search filter merge.
 13. Delete filter merge.
-14. Insert CHECK parse.
-15. Insert CHECK row validation.
-16. Upsert CHECK row validation.
+14. Insert expression parse.
+15. Insert expression row validation.
+16. Upsert expression row validation.
 17. Cache update and invalidation.
 18. Policy loader retry failure.
-19. Root/admin bypass when `rls.force=false`.
-20. Root/admin enforcement when `rls.force=true`.
+19. RLS admin principal bypass when `rls.force=false`.
+20. RLS admin principal enforcement when `rls.force=true`.
 
-### 19.2 Integration Tests
+#### Integration Tests
 Cover:
 
 1. Create policy and verify query isolation.
 2. Different users with different tags see different rows.
 3. Delete only deletes allowed rows.
-4. Insert cannot write another tenant's data.
-5. Upsert cannot write another tenant's data in incoming rows.
+4. Insert cannot write another user's data.
+5. Upsert cannot write another user's data in incoming rows.
 6. No policy means deny.
-7. No matching role means deny.
-8. Root/admin bypass when `rls.force=false`.
-9. Root/admin enforced when `rls.force=true`.
-10. Policy deletion refreshes cache.
-11. User tag update refreshes cache.
-12. Collection property update refreshes cache.
-13. RLS disabled collection ignores existing policies.
-14. RLS enabled collection enforces existing policies.
+7. RLS admin principal bypass when `rls.force=false`.
+8. RLS admin principal enforced when `rls.force=true`.
+9. Policy deletion refreshes cache.
+10. RLS principal metadata update refreshes cache.
+11. Collection property update refreshes cache.
+12. RLS disabled collection ignores existing policies.
+13. RLS enabled collection enforces existing policies.
 
-### 19.3 Required Go Test Command
+#### Required Go Test Command
 ```bash
 go test -tags dynamic,test -gcflags="all=-N -l" -count=1 ./internal/proxy/... -run TestRLS
 ```
