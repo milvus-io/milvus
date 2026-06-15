@@ -3458,6 +3458,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Empt
 	s.NoError(err)
 	s.Len(result, 1)
 	s.Equal(int64(100), result[0].GetNumOfRows())
+	s.Equal(datapb.SegmentLevel_L1, result[0].GetLevel())
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_ContextCanceledInLoops() {
