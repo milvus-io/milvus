@@ -303,6 +303,10 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 		return err
 	}
 
+	if cit.fieldSchema.GetDataType() == schemapb.DataType_Text {
+		return merr.WrapErrParameterInvalidMsg("TEXT field does not support user-created scalar index")
+	}
+
 	if err := ValidateAutoIndexMmapConfig(isVecIndex, indexParamsMap); err != nil {
 		return err
 	}

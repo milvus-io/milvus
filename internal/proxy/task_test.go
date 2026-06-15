@@ -1093,6 +1093,50 @@ func TestAddFieldTask(t *testing.T) {
 		err = task.PreExecute(ctx)
 		assert.NoError(t, err)
 
+		paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+		t.Cleanup(func() {
+			paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+		})
+		fSchema = &schemapb.FieldSchema{
+			Name:     "text_field",
+			DataType: schemapb.DataType_Text,
+			Nullable: true,
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+
+		fSchema = &schemapb.FieldSchema{
+			Name:     "text_not_nullable",
+			DataType: schemapb.DataType_Text,
+			Nullable: false,
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "added field must be nullable")
+
+		fSchema = &schemapb.FieldSchema{
+			Name:     "text_default",
+			DataType: schemapb.DataType_Text,
+			Nullable: true,
+			DefaultValue: &schemapb.ValueField{
+				Data: &schemapb.ValueField_StringData{StringData: "default text"},
+			},
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "default value is not supported when adding TEXT field")
+
 		fSchema = &schemapb.FieldSchema{
 			Name:     "sparse_vec",
 			DataType: schemapb.DataType_SparseFloatVector,
@@ -7172,6 +7216,26 @@ func TestValidateAddFieldRequest(t *testing.T) {
 		}
 		err := validateAddFieldRequest(schema, newField)
 		assert.NoError(t, err)
+	})
+
+	t.Run("text add field does not support default value", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+		t.Cleanup(func() {
+			paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+		})
+		schema := baseSchema()
+		newField := &schemapb.FieldSchema{
+			Name:     "text_field",
+			DataType: schemapb.DataType_Text,
+			Nullable: true,
+			DefaultValue: &schemapb.ValueField{
+				Data: &schemapb.ValueField_StringData{StringData: "default text"},
+			},
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "default value is not supported when adding TEXT field")
 	})
 
 	t.Run("field count exceeds MaxFieldNum", func(t *testing.T) {

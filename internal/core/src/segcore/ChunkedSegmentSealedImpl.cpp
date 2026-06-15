@@ -3064,11 +3064,6 @@ ReadTextLobBatch(
     return cache.ReadBatch(lob_base_path, fs, *properties, encoded_refs);
 }
 
-static milvus_storage::lob_column::EncodedRef
-MakeTextLobEncodedRef(const void* data, size_t size) {
-    return {static_cast<const uint8_t*>(data), size};
-}
-
 void
 ChunkedSegmentSealedImpl::bulk_subscript_text_impl(
     milvus::OpContext* op_ctx,
@@ -3219,7 +3214,6 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id,
                     bool is_valid;
                     size_t text_index;
                 };
-                constexpr size_t kTextLobIndexBuildBatchSize = 1024;
                 std::vector<TextIndexEntry> entries;
                 std::vector<milvus_storage::lob_column::EncodedRef>
                     encoded_refs;

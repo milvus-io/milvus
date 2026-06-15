@@ -790,6 +790,42 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("create scalar index on TEXT field", func(t *testing.T) {
+		for name, extraParams := range map[string][]*commonpb.KeyValuePair{
+			"explicit inverted": {
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.IndexINVERTED,
+				},
+			},
+			"explicit autoindex": {
+				{
+					Key:   common.IndexTypeKey,
+					Value: AutoIndexName,
+				},
+			},
+			"default scalar index": {},
+		} {
+			t.Run(name, func(t *testing.T) {
+				cit := &createIndexTask{
+					req: &milvuspb.CreateIndexRequest{
+						ExtraParams: extraParams,
+						IndexName:   "",
+					},
+					fieldSchema: &schemapb.FieldSchema{
+						FieldID:      101,
+						Name:         "FieldID",
+						IsPrimaryKey: false,
+						DataType:     schemapb.DataType_Text,
+					},
+				}
+				err := cit.parseIndexParams(context.TODO())
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), "TEXT field does not support user-created scalar index")
+			})
+		}
+	})
+
 	t.Run("create index on VarChar field without index type", func(t *testing.T) {
 		cit := &createIndexTask{
 			req: &milvuspb.CreateIndexRequest{
