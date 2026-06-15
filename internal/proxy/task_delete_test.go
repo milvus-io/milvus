@@ -2,28 +2,36 @@ package proxy
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -75,6 +83,32 @@ func Test_getPrimaryKeysFromPlan(t *testing.T) {
 		isSimple, _, rowNum := getPrimaryKeysFromPlan(collSchema, plan)
 		assert.True(t, isSimple)
 		assert.Equal(t, int64(3), rowNum)
+	})
+
+	t.Run("delete with large simple term expr remains simple", func(t *testing.T) {
+		values := make([]string, 0, 1024)
+		for i := 0; i < 1024; i++ {
+			values = append(values, strconv.Itoa(i))
+		}
+		expr := "pk in [" + strings.Join(values, ",") + "]"
+		plan, err := planparserv2.CreateRetrievePlan(schema, expr, nil)
+		assert.NoError(t, err)
+
+		isSimple, pks, rowNum := getPrimaryKeysFromPlan(collSchema, plan)
+		assert.True(t, isSimple)
+		assert.NotNil(t, pks)
+		assert.Equal(t, int64(1024), rowNum)
+	})
+
+	t.Run("delete with pk equality OR expression is complex", func(t *testing.T) {
+		expr := "pk == 1 or pk == 2 or pk == 3"
+		plan, err := planparserv2.CreateRetrievePlan(schema, expr, nil)
+		assert.NoError(t, err)
+
+		isSimple, pks, rowNum := getPrimaryKeysFromPlan(collSchema, plan)
+		assert.False(t, isSimple)
+		assert.Nil(t, pks)
+		assert.Equal(t, int64(0), rowNum)
 	})
 
 	t.Run("delete failed with simple term expr", func(t *testing.T) {
@@ -212,6 +246,166 @@ func TestDeleteTask_Execute(t *testing.T) {
 		}
 		streaming.ExpectErrorOnce(errors.New("mock error"))
 		assert.Error(t, dt.Execute(context.Background()))
+	})
+}
+
+func TestAppendPredicateDeleteMessages(t *testing.T) {
+	collectionName := "test_delete"
+	collectionID := int64(111)
+	partitionName := "default"
+	partitionID := int64(222)
+	dbName := "test_1"
+	vChannel := "test_channel"
+	deleteTs := uint64(1000)
+	expr := "non_pk == 1"
+	serializedPlan := []byte{1, 2, 3}
+	schemaVersion := int32(7)
+	partitionIDs := []int64{partitionID}
+
+	t.Run("alloc failed", func(t *testing.T) {
+		idAllocator := allocator.NewMockAllocator(t)
+		idAllocator.EXPECT().Alloc(uint32(1)).Return(int64(0), int64(0), errors.New("mock alloc error"))
+
+		sessionTS, err := appendPredicateDeleteMessages(
+			context.Background(),
+			collectionID,
+			collectionName,
+			partitionID,
+			partitionName,
+			dbName,
+			[]string{vChannel},
+			idAllocator,
+			deleteTs,
+			expr,
+			serializedPlan,
+			schemaVersion,
+			partitionIDs,
+		)
+
+		require.Error(t, err)
+		assert.Zero(t, sessionTS)
+	})
+
+	t.Run("wal append failed", func(t *testing.T) {
+		idAllocator := allocator.NewMockAllocator(t)
+		idAllocator.EXPECT().Alloc(uint32(1)).Return(int64(10), int64(11), nil)
+
+		mockWAL := mock_streaming.NewMockWALAccesser(t)
+		mockWAL.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, msgs ...message.MutableMessage) streaming.AppendResponses {
+				resp := types.NewAppendResponseN(len(msgs))
+				resp.FillAllError(errors.New("mock wal error"))
+				return resp
+			},
+		)
+		prevWAL := streaming.WAL()
+		streaming.SetWALForTest(mockWAL)
+		defer streaming.SetWALForTest(prevWAL)
+
+		sessionTS, err := appendPredicateDeleteMessages(
+			context.Background(),
+			collectionID,
+			collectionName,
+			partitionID,
+			partitionName,
+			dbName,
+			[]string{vChannel},
+			idAllocator,
+			deleteTs,
+			expr,
+			serializedPlan,
+			schemaVersion,
+			partitionIDs,
+		)
+
+		require.Error(t, err)
+		assert.Zero(t, sessionTS)
+	})
+
+	t.Run("encryption schema fetch failed", func(t *testing.T) {
+		mockEncryption := mockey.Mock(hookutil.IsClusterEncryptionEnabled).Return(true).Build()
+		defer mockEncryption.UnPatch()
+
+		idAllocator := allocator.NewMockAllocator(t)
+		idAllocator.EXPECT().Alloc(uint32(1)).Return(int64(10), int64(11), nil)
+
+		cache := NewMockCache(t)
+		cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(nil, errors.New("mock schema error"))
+		prevMetaCache := globalMetaCache
+		globalMetaCache = cache
+		defer func() { globalMetaCache = prevMetaCache }()
+
+		sessionTS, err := appendPredicateDeleteMessages(
+			context.Background(),
+			collectionID,
+			collectionName,
+			partitionID,
+			partitionName,
+			dbName,
+			[]string{vChannel},
+			idAllocator,
+			deleteTs,
+			expr,
+			serializedPlan,
+			schemaVersion,
+			partitionIDs,
+		)
+
+		require.Error(t, err)
+		assert.Zero(t, sessionTS)
+	})
+
+	t.Run("encryption enabled success", func(t *testing.T) {
+		mockEncryption := mockey.Mock(hookutil.IsClusterEncryptionEnabled).Return(true).Build()
+		defer mockEncryption.UnPatch()
+
+		idAllocator := allocator.NewMockAllocator(t)
+		idAllocator.EXPECT().Alloc(uint32(1)).Return(int64(10), int64(11), nil)
+
+		cache := NewMockCache(t)
+		cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(newSchemaInfo(&schemapb.CollectionSchema{Name: collectionName}), nil)
+		prevMetaCache := globalMetaCache
+		globalMetaCache = cache
+		defer func() { globalMetaCache = prevMetaCache }()
+
+		capturedMsgs := make([]message.MutableMessage, 0, 1)
+		mockWAL := mock_streaming.NewMockWALAccesser(t)
+		mockWAL.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, msgs ...message.MutableMessage) streaming.AppendResponses {
+				capturedMsgs = append(capturedMsgs, msgs...)
+				resp := types.NewAppendResponseN(len(msgs))
+				resp.Responses[0].AppendResult = &types.AppendResult{TimeTick: uint64(200)}
+				return resp
+			},
+		)
+		prevWAL := streaming.WAL()
+		streaming.SetWALForTest(mockWAL)
+		defer streaming.SetWALForTest(prevWAL)
+
+		sessionTS, err := appendPredicateDeleteMessages(
+			context.Background(),
+			collectionID,
+			collectionName,
+			partitionID,
+			partitionName,
+			dbName,
+			[]string{vChannel},
+			idAllocator,
+			deleteTs,
+			expr,
+			serializedPlan,
+			schemaVersion,
+			partitionIDs,
+		)
+
+		require.NoError(t, err)
+		assert.Equal(t, uint64(200), sessionTS)
+		require.Len(t, capturedMsgs, 1)
+		deleteMsg := message.MustAsMutableDeleteMessageV1(capturedMsgs[0])
+		body := deleteMsg.MustBody()
+		require.NotNil(t, body.GetPredicateDelete())
+		assert.Equal(t, vChannel, body.GetShardName())
+		assert.Equal(t, deleteTs, body.GetPredicateDelete().GetDeleteTimestamp())
 	})
 }
 
@@ -648,6 +842,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 			},
 		},
 	}
+	collSchema.Version = 7
 	schema := newSchemaInfo(collSchema)
 
 	metaCache := NewMockCache(t)
@@ -656,6 +851,13 @@ func TestDeleteRunner_Run(t *testing.T) {
 	defer func() {
 		globalMetaCache = nil
 	}()
+
+	setPredicateDelete := func(t *testing.T, enabled bool) {
+		old := paramtable.Get().CommonCfg.EnablePredicateDelete.SwapTempValue(strconv.FormatBool(enabled))
+		t.Cleanup(func() {
+			paramtable.Get().CommonCfg.EnablePredicateDelete.SwapTempValue(old)
+		})
+	}
 
 	t.Run("simple delete task failed", func(t *testing.T) {
 		mockMgr := NewMockChannelsMgr(t)
@@ -695,7 +897,9 @@ func TestDeleteRunner_Run(t *testing.T) {
 		assert.Equal(t, int64(0), dr.result.DeleteCnt)
 	})
 
-	t.Run("complex delete query rpc failed", func(t *testing.T) {
+	t.Run("config disabled complex delete query rpc failed", func(t *testing.T) {
+		setPredicateDelete(t, false)
+
 		mockMgr := NewMockChannelsMgr(t)
 		qn := mocks.NewMockQueryNodeClient(t)
 		lb := shardclient.NewMockLBPolicy(t)
@@ -735,6 +939,8 @@ func TestDeleteRunner_Run(t *testing.T) {
 	})
 
 	t.Run("complex delete query failed", func(t *testing.T) {
+		setPredicateDelete(t, false)
+
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
@@ -801,6 +1007,8 @@ func TestDeleteRunner_Run(t *testing.T) {
 	})
 
 	t.Run("complex delete rate limit check failed", func(t *testing.T) {
+		setPredicateDelete(t, false)
+
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
@@ -864,6 +1072,8 @@ func TestDeleteRunner_Run(t *testing.T) {
 	})
 
 	t.Run("complex delete produce failed", func(t *testing.T) {
+		setPredicateDelete(t, false)
+
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
@@ -927,7 +1137,212 @@ func TestDeleteRunner_Run(t *testing.T) {
 		assert.Equal(t, int64(0), dr.result.DeleteCnt)
 	})
 
+	t.Run("predicate delete success", func(t *testing.T) {
+		setPredicateDelete(t, true)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		mockMgr := NewMockChannelsMgr(t)
+		lb := shardclient.NewMockLBPolicy(t)
+		vChannels := []string{"test_channel_0", "test_channel_1"}
+		expr := "non_pk == 1"
+		plan, err := planparserv2.CreateRetrievePlan(schema.schemaHelper, expr, nil)
+		require.NoError(t, err)
+		expectedPlan, err := proto.Marshal(plan)
+		require.NoError(t, err)
+
+		capturedMsgs := make([]message.MutableMessage, 0, len(vChannels))
+		mockWAL := mock_streaming.NewMockWALAccesser(t)
+		mockWAL.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, msgs ...message.MutableMessage) streaming.AppendResponses {
+				capturedMsgs = append(capturedMsgs, msgs...)
+				resp := types.NewAppendResponseN(len(msgs))
+				for i := range resp.Responses {
+					resp.Responses[i].AppendResult = &types.AppendResult{TimeTick: uint64(100 + i)}
+				}
+				return resp
+			},
+		)
+		prevWAL := streaming.WAL()
+		streaming.SetWALForTest(mockWAL)
+		defer streaming.SetWALForTest(prevWAL)
+
+		dr := deleteRunner{
+			queue:           queue.dmQueue,
+			chMgr:           mockMgr,
+			schema:          schema,
+			collectionID:    collectionID,
+			partitionIDs:    []int64{partitionID},
+			vChannels:       vChannels,
+			idAllocator:     idAllocator,
+			tsoAllocatorIns: tsoAllocator,
+			lb:              lb,
+			result: &milvuspb.MutationResult{
+				Status: merr.Success(),
+				IDs: &schemapb.IDs{
+					IdField: nil,
+				},
+			},
+			req: &milvuspb.DeleteRequest{
+				CollectionName: collectionName,
+				PartitionName:  partitionName,
+				DbName:         dbName,
+				Expr:           expr,
+			},
+			plan: plan,
+		}
+
+		assert.NoError(t, dr.Run(ctx))
+		assert.Equal(t, int64(0), dr.result.DeleteCnt)
+		assert.Equal(t, uint64(101), dr.result.Timestamp)
+		assert.Len(t, capturedMsgs, len(vChannels))
+
+		seenVChannels := typeutil.NewSet[string]()
+		var deleteTs uint64
+		for _, msg := range capturedMsgs {
+			deleteMsg := message.MustAsMutableDeleteMessageV1(msg)
+			body := deleteMsg.MustBody()
+			header := deleteMsg.Header()
+
+			seenVChannels.Insert(msg.VChannel())
+			require.NotNil(t, body.GetPredicateDelete())
+			require.Nil(t, body.GetPrimaryKeys())
+			require.Empty(t, body.GetTimestamps())
+			require.Equal(t, int64(0), body.GetNumRows())
+			require.Equal(t, uint64(0), header.GetRows())
+			require.Equal(t, collectionID, header.GetCollectionId())
+			require.Equal(t, expr, body.GetPredicateDelete().GetExpr())
+			require.Equal(t, expectedPlan, body.GetPredicateDelete().GetSerializedExprPlan())
+			require.Equal(t, body.GetBase().GetTimestamp(), body.GetPredicateDelete().GetDeleteTimestamp())
+			require.Equal(t, schema.GetVersion(), body.GetPredicateDelete().GetSchemaVersion())
+			require.Equal(t, []int64{partitionID}, body.GetPredicateDelete().GetPartitionIds())
+			require.Equal(t, partitionID, body.GetPartitionID())
+
+			if deleteTs == 0 {
+				deleteTs = body.GetPredicateDelete().GetDeleteTimestamp()
+			} else {
+				require.Equal(t, deleteTs, body.GetPredicateDelete().GetDeleteTimestamp())
+			}
+		}
+		require.Equal(t, typeutil.NewSet(vChannels...), seenVChannels)
+	})
+
+	t.Run("predicate delete partition scopes", func(t *testing.T) {
+		setPredicateDelete(t, true)
+
+		cases := []struct {
+			name                 string
+			partitionIDs         []int64
+			expectedPartitionID  int64
+			expectedPartitionIDs []int64
+		}{
+			{
+				name:                 "collection wide",
+				partitionIDs:         nil,
+				expectedPartitionID:  common.AllPartitionsID,
+				expectedPartitionIDs: []int64{common.AllPartitionsID},
+			},
+			{
+				name:                 "multi partition",
+				partitionIDs:         []int64{partitionID, partitionID + 1},
+				expectedPartitionID:  common.AllPartitionsID,
+				expectedPartitionIDs: []int64{partitionID, partitionID + 1},
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+
+				vChannels := []string{"test_channel_0"}
+				expr := "non_pk == 1"
+				plan, err := planparserv2.CreateRetrievePlan(schema.schemaHelper, expr, nil)
+				require.NoError(t, err)
+
+				var capturedMsg message.MutableMessage
+				mockWAL := mock_streaming.NewMockWALAccesser(t)
+				mockWAL.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(
+					func(ctx context.Context, msgs ...message.MutableMessage) streaming.AppendResponses {
+						require.Len(t, msgs, 1)
+						capturedMsg = msgs[0]
+						resp := types.NewAppendResponseN(len(msgs))
+						resp.Responses[0].AppendResult = &types.AppendResult{TimeTick: uint64(100)}
+						return resp
+					},
+				)
+				prevWAL := streaming.WAL()
+				streaming.SetWALForTest(mockWAL)
+				defer streaming.SetWALForTest(prevWAL)
+
+				dr := deleteRunner{
+					queue:           queue.dmQueue,
+					chMgr:           NewMockChannelsMgr(t),
+					schema:          schema,
+					collectionID:    collectionID,
+					partitionIDs:    tc.partitionIDs,
+					vChannels:       vChannels,
+					idAllocator:     idAllocator,
+					tsoAllocatorIns: tsoAllocator,
+					lb:              shardclient.NewMockLBPolicy(t),
+					result: &milvuspb.MutationResult{
+						Status: merr.Success(),
+						IDs:    &schemapb.IDs{},
+					},
+					req: &milvuspb.DeleteRequest{
+						CollectionName: collectionName,
+						DbName:         dbName,
+						Expr:           expr,
+					},
+					plan: plan,
+				}
+
+				require.NoError(t, dr.Run(ctx))
+				deleteMsg := message.MustAsMutableDeleteMessageV1(capturedMsg)
+				body := deleteMsg.MustBody()
+				require.NotNil(t, body.GetPredicateDelete())
+				assert.Equal(t, tc.expectedPartitionID, body.GetPartitionID())
+				assert.Equal(t, tc.expectedPartitionIDs, body.GetPredicateDelete().GetPartitionIds())
+			})
+		}
+	})
+
+	t.Run("predicate delete tso alloc failed", func(t *testing.T) {
+		setPredicateDelete(t, true)
+
+		mockTSO := mockey.Mock((*mockTsoAllocator).AllocOne).Return(uint64(0), errors.New("mock tso error")).Build()
+		defer mockTSO.UnPatch()
+
+		expr := "non_pk == 1"
+		plan, err := planparserv2.CreateRetrievePlan(schema.schemaHelper, expr, nil)
+		require.NoError(t, err)
+
+		dr := deleteRunner{
+			schema:          schema,
+			collectionID:    collectionID,
+			partitionIDs:    []int64{partitionID},
+			vChannels:       channels,
+			idAllocator:     idAllocator,
+			tsoAllocatorIns: tsoAllocator,
+			result: &milvuspb.MutationResult{
+				Status: merr.Success(),
+				IDs:    &schemapb.IDs{},
+			},
+			req: &milvuspb.DeleteRequest{
+				CollectionName: collectionName,
+				DbName:         dbName,
+				Expr:           expr,
+			},
+			plan: plan,
+		}
+
+		require.Error(t, dr.Run(context.Background()))
+	})
+
 	t.Run("complex delete success", func(t *testing.T) {
+		setPredicateDelete(t, false)
+
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
@@ -996,6 +1411,8 @@ func TestDeleteRunner_Run(t *testing.T) {
 	partitionMaps["test_2"] = 3
 
 	t.Run("complex delete with partitionKey mode success", func(t *testing.T) {
+		setPredicateDelete(t, false)
+
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 

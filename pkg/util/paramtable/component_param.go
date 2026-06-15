@@ -346,6 +346,7 @@ type commonConfig struct {
 	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
 
 	EnabledOptimizeExpr               ParamItem `refreshable:"true"`
+	EnablePredicateDelete             ParamItem `refreshable:"true"`
 	EnabledJSONKeyStats               ParamItem `refreshable:"true"`
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"true"`
 
@@ -1379,6 +1380,15 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Export:       true,
 	}
 	p.EnabledOptimizeExpr.Init(base.mgr)
+
+	p.EnablePredicateDelete = ParamItem{
+		Key:          "common.enablePredicateDelete",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Whether to enable predicate delete WAL events for non-simple delete expressions.",
+		Export:       true,
+	}
+	p.EnablePredicateDelete.Init(base.mgr)
 
 	p.UsingJSONStatsForQuery = ParamItem{
 		Key:          "common.usingJSONShreddingForQuery",

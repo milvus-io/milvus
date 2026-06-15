@@ -1073,6 +1073,7 @@ common:
   sync:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr
+  enablePredicateDelete: false # Whether to enable predicate delete WAL events for non-simple delete expressions.
   enabledJSONShredding: true # Indicates sealedsegment whether to enable JSON key stats
   enabledGrowingSegmentJSONShredding: false # Indicates growingsegment whether to enable JSON key stats
   enableConfigParamTypeCheck: true # Indicates whether to enable config param type check

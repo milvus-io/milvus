@@ -367,12 +367,20 @@ func (dr *deleteRunner) Run(ctx context.Context) error {
 			return err
 		}
 	} else {
-		// if get complex delete expr
-		// need query from querynode before delete
-		err := dr.complexDelete(ctx, dr.plan)
-		if err != nil {
-			log.Ctx(ctx).Warn("complex delete failed,but delete some data", zap.Int64("count", dr.result.DeleteCnt), zap.String("expr", dr.req.GetExpr()))
-			return err
+		if paramtable.Get().CommonCfg.EnablePredicateDelete.GetAsBool() {
+			err := dr.predicateDelete(ctx, dr.plan)
+			if err != nil {
+				log.Ctx(ctx).Warn("predicate delete failed", zap.String("expr", dr.req.GetExpr()), zap.Error(err))
+				return err
+			}
+		} else {
+			// if get complex delete expr
+			// need query from querynode before delete
+			err := dr.complexDelete(ctx, dr.plan)
+			if err != nil {
+				log.Ctx(ctx).Warn("complex delete failed,but delete some data", zap.Int64("count", dr.result.DeleteCnt), zap.String("expr", dr.req.GetExpr()))
+				return err
+			}
 		}
 	}
 	return nil
@@ -567,6 +575,51 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 	}
 
 	log.Ctx(ctx).Info("complex delete finished", zap.Int64("deleteCnt", dr.result.GetDeleteCnt()), zap.Duration("interval", rc.ElapseSpan()))
+	return nil
+}
+
+func (dr *deleteRunner) predicateDelete(ctx context.Context, plan *planpb.PlanNode) error {
+	var err error
+	dr.ts, err = dr.tsoAllocatorIns.AllocOne(ctx)
+	if err != nil {
+		return err
+	}
+
+	serializedPlan, err := proto.Marshal(plan)
+	if err != nil {
+		return err
+	}
+
+	partitionID := UniqueID(common.AllPartitionsID)
+	partitionIDs := []int64{common.AllPartitionsID}
+	if len(dr.partitionIDs) == 1 {
+		partitionID = dr.partitionIDs[0]
+		partitionIDs = []int64{dr.partitionIDs[0]}
+	} else if len(dr.partitionIDs) > 1 {
+		partitionIDs = append([]int64(nil), dr.partitionIDs...)
+	}
+
+	sessionTS, err := appendPredicateDeleteMessages(
+		ctx,
+		dr.collectionID,
+		dr.req.GetCollectionName(),
+		partitionID,
+		dr.req.GetPartitionName(),
+		dr.req.GetDbName(),
+		dr.vChannels,
+		dr.idAllocator,
+		dr.ts,
+		dr.req.GetExpr(),
+		serializedPlan,
+		dr.schema.GetVersion(),
+		partitionIDs,
+	)
+	if err != nil {
+		return err
+	}
+
+	dr.result.DeleteCnt = 0
+	dr.result.Timestamp = sessionTS
 	return nil
 }
 
