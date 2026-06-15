@@ -610,7 +610,8 @@ class Import2PCInfraBase(TestBase):
             "target_cluster_id": target_cluster_id,
         }
         missing = [name for name, value in required.items() if not value]
-        assert not missing, f"{case_id} requires CDC REST options: {', '.join(missing)}"
+        if missing:
+            pytest.skip(f"{case_id} requires CDC REST options: {', '.join(missing)}")
 
     def _apply_cdc_topology(
         self, secondary_endpoint, secondary_token, source_cluster_id, target_cluster_id, pchannel_num
