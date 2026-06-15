@@ -21,7 +21,7 @@ from utils.utils import gen_collection_name
 IMPORT_2PC_TIMEOUT = 360
 
 
-@pytest.mark.BulkInsert
+@pytest.mark.tags("L0")
 class TestImport2PCRestOperation(TestBase):
     def _kubectl_get_release_pods(self, release_name, namespace="chaos-testing"):
         if not shutil.which("kubectl"):

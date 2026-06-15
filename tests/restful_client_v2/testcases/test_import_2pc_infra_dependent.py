@@ -1642,8 +1642,7 @@ class Import2PCInfraBase(TestBase):
         return last_progress, last_seen
 
 
-@pytest.mark.BulkInsert
-@pytest.mark.L3
+@pytest.mark.tags("L3")
 class TestImport2PCInfraDependent(Import2PCInfraBase):
     def test_import_2pc_cdc_multiple_manual_jobs_same_collection_primary_secondary_consistent(
         self,
