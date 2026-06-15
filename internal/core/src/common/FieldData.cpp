@@ -730,12 +730,11 @@ FieldDataVectorImpl<Type, is_type_entire_row>::FillFieldData(
             this->valid_data_.data(), this->length_, total_element_count, true);
     }
 
-    // update logical to physical offset mapping
-    l2p_mapping_.build(this->valid_data_.data(),
-                       this->valid_count_,
-                       this->length_,
-                       total_element_count,
-                       valid_count);
+    nullable_row_storage_.build(this->valid_data_.data(),
+                                this->valid_count_,
+                                this->length_,
+                                total_element_count,
+                                valid_count);
 
     if (valid_count > 0) {
         auto source_data = static_cast<const Type*>(field_data);

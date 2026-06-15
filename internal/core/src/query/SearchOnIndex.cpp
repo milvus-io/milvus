@@ -20,7 +20,6 @@
 #include "CachedSearchIterator.h"
 #include "Utils.h"
 #include "common/Consts.h"
-#include "common/OffsetMapping.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Types.h"
@@ -45,56 +44,23 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
         knowhere::GenDataSet(num_queries, dim, search_dataset.query_data);
     dataset->SetIsSparse(is_sparse);
 
-    const auto& offset_mapping = indexing.GetOffsetMapping();
-    TargetBitmap transformed_bitset;
-    BitsetView search_bitset = bitset;
-    const auto has_offset_mapping = offset_mapping.IsEnabled();
-    if (has_offset_mapping) {
-        if (offset_mapping.GetValidCount() == 0) {
-            // All vectors are null, return empty result
-            FillEmptySearchResult(
-                search_result, num_queries, search_conf.topk_);
-            return;
-        }
-        if (!bitset.empty()) {
-            auto status =
-                offset_mapping.TransformBitset(bitset, transformed_bitset);
-            if (status == OffsetMapping::BitsetTransformStatus::AllFiltered) {
-                FillEmptySearchResult(
-                    search_result, num_queries, search_conf.topk_);
-                return;
-            }
-            search_bitset =
-                status == OffsetMapping::BitsetTransformStatus::NoFilter
-                    ? BitsetView{}
-                    : search_result.PinBitset(std::move(transformed_bitset));
-        }
-    }
-
     if (milvus::exec::PrepareVectorIteratorsFromIndex(search_conf,
                                                       num_queries,
                                                       dataset,
                                                       search_result,
-                                                      search_bitset,
+                                                      bitset,
                                                       indexing)) {
         return;
     }
 
     if (search_conf.iterator_v2_info_.has_value()) {
         auto iter =
-            CachedSearchIterator(indexing, dataset, search_conf, search_bitset);
+            CachedSearchIterator(indexing, dataset, search_conf, bitset);
         iter.NextBatch(search_conf, search_result);
-        if (has_offset_mapping) {
-            offset_mapping.TransformOffsets(search_result.seg_offsets_);
-        }
         return;
     }
 
-    indexing.Query(
-        dataset, search_conf, search_bitset, op_context, search_result);
-    if (has_offset_mapping) {
-        offset_mapping.TransformOffsets(search_result.seg_offsets_);
-    }
+    indexing.Query(dataset, search_conf, bitset, op_context, search_result);
 }
 
 }  // namespace milvus::query

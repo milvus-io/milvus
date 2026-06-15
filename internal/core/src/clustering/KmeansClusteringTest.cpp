@@ -91,7 +91,7 @@ CheckResultEmpty(const milvus::clustering::KmeansClusteringPtr& clusteringJob,
     std::string centroid_path =
         centroids_path_prefix + "/" + std::string(CENTROIDS_NAME);
     ASSERT_FALSE(cm->Exist(centroid_path));
-    std::string offset_mapping_name = std::string(OFFSET_MAPPING_NAME);
+    std::string offset_mapping_name = std::string(CLUSTER_ID_MAPPING_NAME);
     std::string centroid_id_mapping_path =
         clusteringJob->GetRemoteCentroidIdMappingObjectPrefix(segment_id) +
         "/" + offset_mapping_name;
@@ -128,7 +128,7 @@ CheckResultCorrectness(
         }
     }
     ASSERT_EQ(centroids.size(), expected_num_clusters * dim);
-    std::string offset_mapping_name = std::string(OFFSET_MAPPING_NAME);
+    std::string offset_mapping_name = std::string(CLUSTER_ID_MAPPING_NAME);
     std::string centroid_id_mapping_path =
         clusteringJob->GetRemoteCentroidIdMappingObjectPrefix(segment_id) +
         "/" + offset_mapping_name;

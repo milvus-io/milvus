@@ -9,7 +9,6 @@
 
 #include "cachinglayer/CacheSlot.h"
 #include "common/Chunk.h"
-#include "common/OffsetMapping.h"
 #include "fmt/core.h"
 #include "folly/FBVector.h"
 #include "index/Index.h"
@@ -26,6 +25,38 @@
 #include "segcore/Utils.h"
 
 namespace milvus::segcore::storagev1translator {
+namespace {
+
+std::vector<int32_t>
+CollectValidExternalIds(const FixedVector<bool>& valid_data,
+                        int64_t begin,
+                        int64_t end) {
+    std::vector<int32_t> ids;
+    ids.reserve(end - begin);
+    for (int64_t i = begin; i < end; ++i) {
+        if (valid_data[i]) {
+            ids.push_back(static_cast<int32_t>(i));
+        }
+    }
+    return ids;
+}
+
+void
+SetDatasetExternalIds(const knowhere::DataSetPtr& dataset,
+                      const FixedVector<bool>& valid_data,
+                      int64_t external_begin,
+                      int64_t external_end,
+                      int64_t external_count) {
+    if (valid_data.empty() || external_count <= 0) {
+        return;
+    }
+    auto ids =
+        CollectValidExternalIds(valid_data, external_begin, external_end);
+    dataset->SetInternalToExternalIds(std::move(ids), external_count);
+}
+
+}  // namespace
+
 InterimSealedIndexTranslator::InterimSealedIndexTranslator(
     std::shared_ptr<ChunkedColumnInterface> vec_data,
     int64_t segment_id,
@@ -123,8 +154,7 @@ InterimSealedIndexTranslator::get_cells(
     if (vec_data_->IsNullable()) {
         vec_data_->BuildValidRowIds(ctx);
     }
-    const auto& offset_mapping = vec_data_->GetOffsetMapping();
-    bool nullable = offset_mapping.IsEnabled();
+    bool nullable = vec_data_->IsNullable();
 
     if (!is_sparse_) {
         auto rows_until_chunk = std::make_shared<std::vector<int64_t>>();
@@ -193,13 +223,26 @@ InterimSealedIndexTranslator::get_cells(
             false);
     }
 
-    int64_t total_valid_count =
-        nullable ? offset_mapping.GetValidCount() : vec_data_->NumRows();
+    int64_t total_valid_count = vec_data_->NumRows();
+    if (nullable) {
+        total_valid_count = 0;
+        for (int64_t i = 0; i < num_chunk; ++i) {
+            total_valid_count += vec_data_->GetValidCountInChunk(i);
+        }
+    }
 
     if (total_valid_count == 0) {
         if (nullable) {
             const auto& valid_data = vec_data_->GetValidData();
-            vec_index->BuildValidData(valid_data.data(), valid_data.size());
+            auto dataset = knowhere::GenDataSet(0, dim_, nullptr);
+            dataset->SetIsOwner(false);
+            dataset->SetIsSparse(is_sparse_);
+            SetDatasetExternalIds(dataset,
+                                  valid_data,
+                                  0,
+                                  valid_data.size(),
+                                  vec_data_->NumRows());
+            vec_index->BuildWithDataset(dataset, build_config_);
         }
         std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
             result;
@@ -208,6 +251,7 @@ InterimSealedIndexTranslator::get_cells(
     }
 
     bool first_build = true;
+    const auto& valid_data = vec_data_->GetValidData();
     for (int i = 0; i < num_chunk; ++i) {
         auto pw = vec_data_->GetChunk(ctx, i);
         auto chunk = pw.get();
@@ -223,6 +267,15 @@ InterimSealedIndexTranslator::get_cells(
             knowhere::GenDataSet(actual_row_count, dim_, chunk->Data());
         dataset->SetIsOwner(false);
         dataset->SetIsSparse(is_sparse_);
+        if (nullable) {
+            auto external_begin = vec_data_->GetNumRowsUntilChunk(i);
+            auto external_end = external_begin + vec_data_->chunk_row_nums(i);
+            SetDatasetExternalIds(dataset,
+                                  valid_data,
+                                  external_begin,
+                                  external_end,
+                                  vec_data_->NumRows());
+        }
 
         if (first_build) {
             vec_index->BuildWithDataset(dataset, build_config_);
@@ -232,10 +285,6 @@ InterimSealedIndexTranslator::get_cells(
         }
     }
 
-    if (nullable) {
-        const auto& valid_data = vec_data_->GetValidData();
-        vec_index->BuildValidData(valid_data.data(), valid_data.size());
-    }
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
         result;
     result.emplace_back(std::make_pair(0, std::move(vec_index)));

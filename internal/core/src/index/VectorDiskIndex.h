@@ -52,11 +52,7 @@ class VectorDiskAnnIndex : public VectorIndex {
 
     int64_t
     Count() override {
-        const auto& offset_mapping = GetOffsetMapping();
-        if (offset_mapping.IsEnabled() && offset_mapping.GetValidCount() == 0) {
-            return 0;
-        }
-        if (IsEmptyEmbListIndex()) {
+        if (IsEmptyEmbListIndex() || index_.IsEmptyIndex()) {
             return 0;
         }
         return index_.Count();
@@ -89,14 +85,14 @@ class VectorDiskAnnIndex : public VectorIndex {
     bool
     IsIndexRefineEnabled() const override;
 
-    std::vector<uint8_t>
+    VectorRetrieveResult
     GetVector(const DatasetPtr dataset) const override;
 
-    std::pair<std::vector<uint8_t>, std::vector<size_t>>
+    EmbListRetrieveResult
     GetEmbListByIds(const DatasetPtr dataset,
                     const std::string& metric_type) const override;
 
-    std::unique_ptr<const knowhere::sparse::SparseRow<SparseValueType>[]>
+    SparseVectorRetrieveResult
     GetSparseVector(const DatasetPtr dataset) const override {
         ThrowInfo(ErrorCode::Unsupported,
                   "get sparse vector not supported for disk index");

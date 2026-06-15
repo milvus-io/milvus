@@ -42,7 +42,6 @@
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #include "common/FieldMeta.h"
-#include "common/OffsetMapping.h"
 #include "common/OpContext.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
@@ -442,13 +441,10 @@ TEST(test_chunk_segment, TestSearchOnSealedWithAllNullVectors) {
             std::move(translator), nullptr);
     auto column = std::make_shared<ChunkedColumn>(std::move(slot), field_meta);
 
-    // Build valid row ids to initialize offset_mapping for nullable vectors
+    // Build valid row metadata for nullable vectors
     column->BuildValidRowIds(nullptr);
 
-    // Verify offset_mapping is enabled and valid count is 0
-    const auto& offset_mapping = column->GetOffsetMapping();
-    ASSERT_TRUE(offset_mapping.IsEnabled());
-    ASSERT_EQ(offset_mapping.GetValidCount(), 0);
+    ASSERT_EQ(column->GetValidCountInChunk(0), 0);
 
     SearchInfo search_info;
     auto search_conf = knowhere::Json{
@@ -548,7 +544,7 @@ TEST(test_chunk_segment, TestSearchIteratorOnSealedWithAllNullVectors) {
             std::move(translator), nullptr);
     auto column = std::make_shared<ChunkedColumn>(std::move(slot), field_meta);
 
-    // Build valid row ids to initialize offset_mapping for nullable vectors
+    // Build valid row metadata for nullable vectors
     column->BuildValidRowIds(nullptr);
 
     SearchInfo search_info;
@@ -599,8 +595,8 @@ TEST(test_chunk_segment, TestSearchIteratorOnSealedWithAllNullVectors) {
 // This test verifies:
 // 1. CachedSearchIterator uses valid_count_per_chunk (not total row count)
 //    as chunk_size, preventing out-of-bounds reads
-// 2. TransformOffset is applied after NextBatch, converting physical offsets
-//    (valid-only) back to logical offsets (including nulls)
+// 2. The index layer owns internal-to-external id mapping and returns segment
+//    offsets that still point at valid logical rows.
 TEST(test_chunk_segment, TestSearchIteratorOnSealedWithPartialNullVectors) {
     int dim = 16;
     int chunk_num = 2;
@@ -679,17 +675,17 @@ TEST(test_chunk_segment, TestSearchIteratorOnSealedWithPartialNullVectors) {
             std::move(translator), nullptr);
     auto column = std::make_shared<ChunkedColumn>(std::move(slot), field_meta);
 
-    // Build valid row ids to initialize offset_mapping
+    // Build valid row metadata
     column->BuildValidRowIds(nullptr);
 
-    const auto& offset_mapping = column->GetOffsetMapping();
-    ASSERT_TRUE(offset_mapping.IsEnabled());
     // 50% valid: 50 per chunk * 2 chunks = 100
-    ASSERT_EQ(offset_mapping.GetValidCount(), total_valid);
+    int64_t built_valid_count = 0;
 
     for (int i = 0; i < chunk_num; i++) {
         ASSERT_EQ(column->GetValidCountInChunk(i), valid_per_chunk);
+        built_valid_count += column->GetValidCountInChunk(i);
     }
+    ASSERT_EQ(built_valid_count, total_valid);
 
     SearchInfo search_info;
     auto search_conf = knowhere::Json{
@@ -713,9 +709,9 @@ TEST(test_chunk_segment, TestSearchIteratorOnSealedWithPartialNullVectors) {
     SearchResult search_result;
     milvus::OpContext op_context;
 
-    // This exercises both fixes:
-    // Fix 1: CachedSearchIterator uses valid_count_per_chunk as chunk_size
-    // Fix 2: TransformOffset converts physical -> logical offsets
+    // This exercises nullable chunk search through CachedSearchIterator:
+    // the chunk size is the compact valid-row count, while result ids remain
+    // external segment offsets owned by the index layer.
     query::SearchOnSealedColumn(*schema,
                                 column.get(),
                                 search_info,
@@ -731,15 +727,15 @@ TEST(test_chunk_segment, TestSearchIteratorOnSealedWithPartialNullVectors) {
     ASSERT_EQ(search_result.seg_offsets_.size(), search_info.topk_);
     ASSERT_EQ(search_result.distances_.size(), search_info.topk_);
 
-    // Verify returned offsets are logical offsets (in [0, total_row_count))
-    // and correspond to valid (non-null) rows
+    // Verify returned offsets are segment offsets (in [0, total_row_count))
+    // and correspond to valid (non-null) rows.
     int valid_count = 0;
     for (auto& offset : search_result.seg_offsets_) {
         if (offset == INVALID_SEG_OFFSET) {
             continue;
         }
         valid_count++;
-        // Offset must be a logical offset in valid range
+        // Offset must be a segment offset in valid range.
         ASSERT_GE(offset, 0);
         ASSERT_LT(offset, total_row_count);
         // Offset must refer to a valid (non-null) row

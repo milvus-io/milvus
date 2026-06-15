@@ -20,7 +20,6 @@
 #include <tuple>
 #include <vector>
 
-#include "common/OffsetMapping.h"
 #include "gtest/gtest.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"

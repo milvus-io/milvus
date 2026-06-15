@@ -127,7 +127,7 @@ TEST(test_chunked_column, test_nullable_build_valid_row_ids) {
     }
 }
 
-TEST(test_chunked_column, test_nullable_get_valid_count_non_nullable) {
+TEST(test_chunked_column, test_nullable_non_nullable_rows_are_all_valid) {
     // For non-nullable columns, valid count should equal chunk row count.
     std::vector<int64_t> num_rows_per_chunk = {10, 20, 30};
     auto num_chunks = num_rows_per_chunk.size();
@@ -155,7 +155,7 @@ TEST(test_chunked_column, test_nullable_get_valid_count_non_nullable) {
 }
 
 TEST(test_chunked_column, test_nullable_all_valid) {
-    // All rows valid: physical offsets should equal logical offsets
+    // All rows valid: compact valid-row offsets match segment offsets.
     std::vector<int64_t> num_rows_per_chunk = {4, 6};
     auto num_chunks = num_rows_per_chunk.size();
 

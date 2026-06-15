@@ -145,6 +145,12 @@ PrepareBFDataSet(const dataset::SearchDataset& query_ds,
         base_dataset->SetIsSparse(true);
         query_dataset->SetIsSparse(true);
     }
+    if (!raw_ds.internal_to_external_ids.empty() ||
+        raw_ds.external_count != 0) {
+        base_dataset->SetInternalToExternalIds(
+            raw_ds.internal_to_external_ids,
+            static_cast<size_t>(raw_ds.external_count));
+    }
     base_dataset->SetTensorBeginId(raw_ds.begin_id);
     return std::make_pair(query_dataset, base_dataset);
 };

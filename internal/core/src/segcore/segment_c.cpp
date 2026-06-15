@@ -1064,24 +1064,32 @@ IsCompoundStatsPath(const std::string& path) {
     return basename == "1";
 }
 
+int64_t
+CountValidRowsBefore(const milvus::segcore::ThreadSafeValidDataPtr& valid_data,
+                     int64_t logical_offset) {
+    if (!valid_data) {
+        return logical_offset;
+    }
+    int64_t count = 0;
+    for (int64_t i = 0; i < logical_offset; ++i) {
+        count += valid_data->is_valid(i) ? 1 : 0;
+    }
+    return count;
+}
+
 arrow::Status
 CollectBM25StatsForChunk(const FieldInfo& field_info,
                          int64_t start_offset,
                          int64_t num_rows,
                          BM25StatsAccumulator& stats) {
+    auto physical_offset =
+        CountValidRowsBefore(field_info.valid_data, start_offset);
     for (int64_t i = 0; i < num_rows; i++) {
         auto logical_offset = start_offset + i;
         if (field_info.valid_data &&
             !field_info.valid_data->is_valid(logical_offset)) {
             stats.num_row++;
             continue;
-        }
-
-        auto physical_offset =
-            field_info.vec_base->get_physical_offset(logical_offset);
-        if (physical_offset < 0) {
-            return arrow::Status::Invalid(
-                "valid nullable sparse vector row missing physical data");
         }
 
         auto size_per_chunk = field_info.vec_base->get_size_per_chunk();
@@ -1092,6 +1100,7 @@ CollectBM25StatsForChunk(const FieldInfo& field_info,
             const knowhere::sparse::SparseRow<milvus::SparseValueType>*>(
             chunk_data);
         AppendSparseRowToBM25Stats(rows + offset_in_chunk, stats);
+        physical_offset++;
     }
     return arrow::Status::OK();
 }
@@ -1186,7 +1195,7 @@ BuildNullableFixedWidthVectorArray(const FieldInfo& field_info,
     }
     if (all_valid && num_rows > 0) {
         auto physical_offset =
-            field_info.vec_base->get_physical_offset(start_offset);
+            CountValidRowsBefore(field_info.valid_data, start_offset);
         auto size_per_chunk = field_info.vec_base->get_size_per_chunk();
         if (physical_offset >= 0 &&
             physical_offset / size_per_chunk ==
@@ -1219,6 +1228,8 @@ BuildNullableFixedWidthVectorArray(const FieldInfo& field_info,
     arrow::BinaryBuilder builder;
     ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
 
+    auto physical_offset =
+        CountValidRowsBefore(field_info.valid_data, start_offset);
     for (int64_t i = 0; i < num_rows; i++) {
         auto logical_offset = start_offset + i;
         if (!field_info.valid_data->is_valid(logical_offset)) {
@@ -1226,8 +1237,6 @@ BuildNullableFixedWidthVectorArray(const FieldInfo& field_info,
             continue;
         }
 
-        auto physical_offset =
-            field_info.vec_base->get_physical_offset(logical_offset);
         auto value = GetPhysicalVectorValue(
             field_info.vec_base, physical_offset, byte_width);
         if (value == nullptr) {
@@ -1235,6 +1244,7 @@ BuildNullableFixedWidthVectorArray(const FieldInfo& field_info,
                 "valid nullable vector row missing physical data");
         }
         ARROW_RETURN_NOT_OK(builder.Append(value, byte_width));
+        physical_offset++;
     }
 
     return builder.Finish();
@@ -1247,19 +1257,14 @@ BuildSparseFloatVectorArrayForChunk(const FieldInfo& field_info,
     arrow::BinaryBuilder builder;
     ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
 
+    auto physical_offset =
+        CountValidRowsBefore(field_info.valid_data, start_offset);
     for (int64_t i = 0; i < num_rows; i++) {
         auto logical_offset = start_offset + i;
         if (field_info.valid_data &&
             !field_info.valid_data->is_valid(logical_offset)) {
             ARROW_RETURN_NOT_OK(builder.AppendNull());
             continue;
-        }
-
-        auto physical_offset =
-            field_info.vec_base->get_physical_offset(logical_offset);
-        if (physical_offset < 0) {
-            return arrow::Status::Invalid(
-                "valid nullable sparse vector row missing physical data");
         }
 
         auto size_per_chunk = field_info.vec_base->get_size_per_chunk();
@@ -1277,6 +1282,7 @@ BuildSparseFloatVectorArrayForChunk(const FieldInfo& field_info,
             ARROW_RETURN_NOT_OK(builder.Append(
                 static_cast<const uint8_t*>(row->data()), byte_size));
         }
+        physical_offset++;
     }
 
     return builder.Finish();

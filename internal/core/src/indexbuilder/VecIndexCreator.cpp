@@ -16,6 +16,7 @@
 #include "index/IndexInfo.h"
 #include "index/Utils.h"
 #include "index/VectorIndex.h"
+#include "index/VectorIndexValidDataUtils.h"
 #include "indexbuilder/VecIndexCreator.h"
 #include "nlohmann/json.hpp"
 #include "storage/Types.h"
@@ -71,15 +72,8 @@ VecIndexCreator::Build(const milvus::DatasetPtr& dataset,
                        const bool* valid_data,
                        const int64_t valid_data_len) {
     if (valid_data && valid_data_len > 0) {
-        auto vec_index = dynamic_cast<index::VectorIndex*>(index_.get());
-        AssertInfo(vec_index != nullptr, "failed to cast index to VectorIndex");
-        if (dataset->GetRows() == 0) {
-            vec_index->SetDim(dataset->GetDim());
-            vec_index->BuildValidData(valid_data, valid_data_len);
-            return;
-        }
+        index::SetDatasetValidBitmap(dataset, valid_data, valid_data_len);
         index_->BuildWithDataset(dataset, config_);
-        vec_index->BuildValidData(valid_data, valid_data_len);
         return;
     }
     index_->BuildWithDataset(dataset, config_);

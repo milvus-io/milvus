@@ -1471,11 +1471,11 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
         int64_t valid_count = count;
         const bool* valid_data = nullptr;
         const int64_t* valid_offsets = seg_offsets;
-        ValidResult filter_result;
+        RawVectorValidResult filter_result;
 
         if (field_meta.is_nullable()) {
             filter_result =
-                FilterVectorValidOffsets(op_ctx, field_id, seg_offsets, count);
+                CollectValidRawVectorRows(field_id, seg_offsets, count);
             valid_count = filter_result.valid_count;
             valid_data = filter_result.valid_data.get();
             valid_offsets = filter_result.valid_offsets.data();
@@ -1751,7 +1751,7 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
                 [&](size_t i) {
                     auto offset = seg_offsets[i];
                     return offset != INVALID_SEG_OFFSET
-                               ? vec_raw->get_physical_element(offset)
+                               ? vec_raw->get_element(offset)
                                : nullptr;
                 },
                 count,
@@ -1833,7 +1833,11 @@ SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
             for (int i = 0; i < count; ++i) {
                 auto dst = output_base + i * element_sizeof;
                 auto offset = seg_offsets[i];
-                auto src = (const uint8_t*)vec.get_physical_element(offset);
+                auto src =
+                    reinterpret_cast<const uint8_t*>(vec.get_element(offset));
+                AssertInfo(src != nullptr,
+                           "Cannot find vector data at segment offset {}",
+                           offset);
                 milvus::fastmem::FastMemcpy(dst, src, element_sizeof);
             }
             return;
@@ -2798,56 +2802,31 @@ SegmentGrowingImpl::BuildGeometryCacheForLoad(
     }
 }
 
-SegmentGrowingImpl::ValidResult
-SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
-                                             FieldId field_id,
-                                             const int64_t* seg_offsets,
-                                             int64_t count) const {
-    ValidResult result;
+SegmentGrowingImpl::RawVectorValidResult
+SegmentGrowingImpl::CollectValidRawVectorRows(FieldId field_id,
+                                              const int64_t* seg_offsets,
+                                              int64_t count) const {
+    RawVectorValidResult result;
     result.valid_count = count;
 
-    if (indexing_record_.SyncDataWithIndex(field_id)) {
-        const auto& field_indexing =
-            indexing_record_.get_vec_field_indexing(field_id);
-        auto indexing = field_indexing.get_segment_indexing();
-        auto vec_index = dynamic_cast<index::VectorIndex*>(indexing.get());
-
-        if (vec_index != nullptr && vec_index->HasValidData()) {
+    auto vec_base = insert_record_.get_data_base(field_id);
+    if (vec_base != nullptr) {
+        auto valid_data_vec = vec_base->get_valid_data();
+        if (!valid_data_vec.empty()) {
             result.valid_data = std::make_unique<bool[]>(count);
-            vec_index->GetOffsetMapping().FilterValidLogicalOffsets(
-                seg_offsets,
-                count,
-                result.valid_data.get(),
-                result.valid_offsets);
-            result.valid_count = result.valid_offsets.size();
-        }
-    } else {
-        auto vec_base = insert_record_.get_data_base(field_id);
-        if (vec_base != nullptr) {
-            auto valid_data_vec = vec_base->get_valid_data();
-            bool is_mapping_storage = vec_base->is_mapping_storage();
-            if (!valid_data_vec.empty()) {
-                result.valid_data = std::make_unique<bool[]>(count);
-
-                if (is_mapping_storage) {
-                    vec_base->get_offset_mapping().FilterValidLogicalOffsets(
-                        seg_offsets,
-                        count,
-                        result.valid_data.get(),
-                        result.valid_offsets);
-                } else {
-                    result.valid_offsets.reserve(count);
-                    for (int64_t i = 0; i < count; ++i) {
-                        auto offset = seg_offsets[i];
-                        bool is_valid = offset >= 0 &&
-                                        offset < static_cast<int64_t>(
-                                                     valid_data_vec.size()) &&
-                                        valid_data_vec[offset];
-                        result.valid_data[i] = is_valid;
-                    }
+            result.valid_offsets.reserve(count);
+            for (int64_t i = 0; i < count; ++i) {
+                auto offset = seg_offsets[i];
+                bool is_valid =
+                    offset >= 0 &&
+                    offset < static_cast<int64_t>(valid_data_vec.size()) &&
+                    valid_data_vec[offset];
+                result.valid_data[i] = is_valid;
+                if (is_valid) {
+                    result.valid_offsets.push_back(offset);
                 }
-                result.valid_count = result.valid_offsets.size();
             }
+            result.valid_count = result.valid_offsets.size();
         }
     }
     return result;

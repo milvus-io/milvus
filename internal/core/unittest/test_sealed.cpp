@@ -2949,6 +2949,240 @@ TEST(SealedVectorArrayNullable, BulkSubscriptEmptyThenSingleVectorArrayRows) {
                     static_cast<float>(dim));
 }
 
+TEST(SealedVectorNullable, BulkSubscriptDenseVectorFromIndexKeepsLogicalRows) {
+    int64_t collection_id = 1;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t index_build_id = 5200;
+    int64_t index_version = 5200;
+
+    constexpr int64_t dim = 4;
+    constexpr int64_t row_count = 12;
+    auto schema = std::make_shared<Schema>();
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto vec_id = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2, true);
+    schema->set_primary_field_id(int64_field);
+
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      vec_id.get(),
+                                                      DataType::VECTOR_FLOAT,
+                                                      DataType::NONE,
+                                                      true);
+    auto index_meta =
+        gen_index_meta(segment_id, vec_id.get(), index_build_id, index_version);
+
+    std::vector<uint8_t> valid_bitmap((row_count + 7) / 8, 0);
+    std::vector<float> compact_vectors;
+    for (int64_t row = 0; row < row_count; ++row) {
+        if (row % 3 == 0) {
+            continue;
+        }
+        valid_bitmap[row >> 3] |= (1 << (row & 0x07));
+        for (int64_t d = 0; d < dim; ++d) {
+            compact_vectors.push_back(static_cast<float>(row * 10 + d));
+        }
+    }
+
+    std::string root_path = TestLocalPath;
+    auto storage_config = gen_local_storage_config(root_path);
+    auto cm = CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, true, dim);
+    field_data->FillFieldData(
+        compact_vectors.data(), valid_bitmap.data(), row_count, 0);
+
+    auto segment = CreateSealedSegment(schema);
+    auto field_data_info = PrepareSingleFieldInsertBinlog(collection_id,
+                                                          partition_id,
+                                                          segment_id,
+                                                          vec_id.get(),
+                                                          {field_data},
+                                                          cm);
+    segment->LoadFieldData(field_data_info);
+    auto sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    insert_data.SetFieldDataMeta(field_meta);
+    insert_data.SetTimestamps(0, 100);
+    auto serialized_bytes = insert_data.Serialize(storage::Remote);
+
+    auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
+                                TestLocalPath,
+                                collection_id,
+                                partition_id,
+                                segment_id,
+                                vec_id.get(),
+                                0);
+    auto cm_w = ChunkManagerWrapper(cm);
+    cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
+
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = DataType::VECTOR_FLOAT;
+    create_index_info.metric_type = knowhere::metric::L2;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+
+    auto hnsw_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info,
+        storage::FileManagerContext(field_meta, index_meta, cm, fs));
+
+    Config config;
+    config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
+    config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+    config[knowhere::meta::METRIC_TYPE] = create_index_info.metric_type;
+    config[knowhere::indexparam::M] = "16";
+    config[knowhere::indexparam::EF] = "10";
+    config[DIM_KEY] = dim;
+    hnsw_index->Build(config);
+
+    LoadIndexInfo load_info;
+    load_info.field_id = vec_id.get();
+    load_info.field_type = DataType::VECTOR_FLOAT;
+    load_info.index_params = GenIndexParams(hnsw_index.get());
+    load_info.cache_index = CreateTestCacheIndex("test", std::move(hnsw_index));
+    load_info.index_params["metric_type"] = knowhere::metric::L2;
+
+    segment->DropFieldData(vec_id);
+    segment->LoadIndex(load_info);
+
+    std::vector<int64_t> offsets = {0, 1, 3, 4, 8, 11};
+    auto result =
+        sealed->bulk_subscript(nullptr, vec_id, offsets.data(), offsets.size());
+
+    ASSERT_NE(result, nullptr);
+    ASSERT_EQ(result->valid_data_size(), offsets.size());
+    const auto& values = result->vectors().float_vector().data();
+    int64_t compact_pos = 0;
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        const auto logical_offset = offsets[i];
+        const bool expected_valid = logical_offset % 3 != 0;
+        EXPECT_EQ(result->valid_data(i), expected_valid);
+        if (!expected_valid) {
+            continue;
+        }
+        for (int64_t d = 0; d < dim; ++d) {
+            EXPECT_FLOAT_EQ(values.Get(compact_pos * dim + d),
+                            static_cast<float>(logical_offset * 10 + d));
+        }
+        ++compact_pos;
+    }
+    EXPECT_EQ(values.size(), compact_pos * dim);
+}
+
+TEST(SealedVectorNullable, BulkSubscriptAllNullDenseVectorFromIndex) {
+    int64_t collection_id = 1;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t index_build_id = 5201;
+    int64_t index_version = 5201;
+
+    constexpr int64_t dim = 4;
+    constexpr int64_t row_count = 8;
+    auto schema = std::make_shared<Schema>();
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto vec_id = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2, true);
+    schema->set_primary_field_id(int64_field);
+
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      vec_id.get(),
+                                                      DataType::VECTOR_FLOAT,
+                                                      DataType::NONE,
+                                                      true);
+    auto index_meta =
+        gen_index_meta(segment_id, vec_id.get(), index_build_id, index_version);
+
+    std::string root_path = TestLocalPath;
+    auto storage_config = gen_local_storage_config(root_path);
+    auto cm = CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, true, dim);
+    std::vector<uint8_t> valid_bitmap((row_count + 7) / 8, 0);
+    std::vector<float> compact_vectors;
+    field_data->FillFieldData(
+        compact_vectors.data(), valid_bitmap.data(), row_count, 0);
+
+    auto segment = CreateSealedSegment(schema);
+    auto field_data_info = PrepareSingleFieldInsertBinlog(collection_id,
+                                                          partition_id,
+                                                          segment_id,
+                                                          vec_id.get(),
+                                                          {field_data},
+                                                          cm);
+    segment->LoadFieldData(field_data_info);
+    auto sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    insert_data.SetFieldDataMeta(field_meta);
+    insert_data.SetTimestamps(0, 100);
+    auto serialized_bytes = insert_data.Serialize(storage::Remote);
+
+    auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
+                                TestLocalPath,
+                                collection_id,
+                                partition_id,
+                                segment_id,
+                                vec_id.get(),
+                                0);
+    auto cm_w = ChunkManagerWrapper(cm);
+    cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
+
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = DataType::VECTOR_FLOAT;
+    create_index_info.metric_type = knowhere::metric::L2;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+
+    auto hnsw_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info,
+        storage::FileManagerContext(field_meta, index_meta, cm, fs));
+
+    Config config;
+    config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
+    config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+    config[knowhere::meta::METRIC_TYPE] = create_index_info.metric_type;
+    config[knowhere::indexparam::M] = "16";
+    config[knowhere::indexparam::EF] = "10";
+    config[DIM_KEY] = dim;
+    hnsw_index->Build(config);
+
+    LoadIndexInfo load_info;
+    load_info.field_id = vec_id.get();
+    load_info.field_type = DataType::VECTOR_FLOAT;
+    load_info.index_params = GenIndexParams(hnsw_index.get());
+    load_info.cache_index = CreateTestCacheIndex("test", std::move(hnsw_index));
+    load_info.index_params["metric_type"] = knowhere::metric::L2;
+
+    segment->DropFieldData(vec_id);
+    segment->LoadIndex(load_info);
+
+    std::vector<int64_t> offsets = {0, 1, 7};
+    auto result =
+        sealed->bulk_subscript(nullptr, vec_id, offsets.data(), offsets.size());
+
+    ASSERT_NE(result, nullptr);
+    ASSERT_EQ(result->valid_data_size(), offsets.size());
+    EXPECT_EQ(result->vectors().float_vector().data_size(), 0);
+    for (int i = 0; i < result->valid_data_size(); ++i) {
+        EXPECT_FALSE(result->valid_data(i));
+    }
+}
+
 TEST(SealedVectorArrayNullable,
      BulkSubscriptVectorArrayFromIndexKeepsLogicalRows) {
     int64_t collection_id = 1;
@@ -3051,8 +3285,6 @@ TEST(SealedVectorArrayNullable,
     auto vec_index =
         dynamic_cast<milvus::index::VectorIndex*>(emb_list_hnsw_index.get());
     ASSERT_NE(vec_index, nullptr);
-    EXPECT_TRUE(vec_index->HasValidData());
-    EXPECT_EQ(vec_index->GetValidCount(), vector_arrays.size());
 
     LoadIndexInfo load_info;
     load_info.field_id = array_vec.get();
@@ -3180,8 +3412,6 @@ TEST(SealedVectorArrayNullable, BulkSubscriptAllNullVectorArrayFromIndex) {
     auto vec_index =
         dynamic_cast<milvus::index::VectorIndex*>(emb_list_hnsw_index.get());
     ASSERT_NE(vec_index, nullptr);
-    EXPECT_TRUE(vec_index->HasValidData());
-    EXPECT_EQ(vec_index->GetValidCount(), 0);
     EXPECT_TRUE(vec_index->HasRawData());
 
     LoadIndexInfo load_info;

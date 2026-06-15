@@ -35,6 +35,7 @@
 #include "common/Types.h"
 #include "index/IndexFactory.h"
 #include "index/VectorIndex.h"
+#include "index/VectorIndexValidDataUtils.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
 #include "mmap/ChunkedColumn.h"
@@ -102,7 +103,7 @@ MakeGroupBySearchInfo(FieldId vector_field,
 void
 AssertVectorIteratorUsableAfterSearchReturns(SearchResult& search_result,
                                              int64_t max_results) {
-    ASSERT_EQ(search_result.pinned_bitsets_.size(), 1);
+    ASSERT_TRUE(search_result.pinned_bitsets_.empty());
     ASSERT_TRUE(search_result.vector_iterators_.has_value());
     ASSERT_FALSE(search_result.vector_iterators_->empty());
 
@@ -201,20 +202,19 @@ BuildNullableVectorIndex(int64_t total_count,
 
     auto build_dataset =
         knowhere::GenDataSet(vectors.size() / dim, dim, vectors.data());
+    index::SetDatasetValidBitmap(build_dataset, valid_data, total_count);
     auto build_conf = knowhere::Json{
         {knowhere::meta::METRIC_TYPE, knowhere::metric::COSINE},
         {knowhere::meta::DIM, std::to_string(dim)},
         {knowhere::indexparam::NLIST, "128"},
     };
     index_base->BuildWithDataset(build_dataset, build_conf);
-    vector_index->BuildValidData(valid_data, total_count);
     return index_base;
 }
 
 }  // namespace
 
-TEST(SearchOnSealedIndexBitsetLifetime,
-     GroupByIteratorMustNotKeepDanglingTransformedBitset) {
+TEST(SearchOnSealedIndexBitsetLifetime, GroupByIteratorSurvivesSearchReturn) {
     constexpr int64_t total_count = 10000;
 
     int64_t valid_count = 0;
@@ -231,7 +231,6 @@ TEST(SearchOnSealedIndexBitsetLifetime,
         BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
     auto* vector_index = dynamic_cast<index::VectorIndex*>(index_base.get());
     ASSERT_NE(vector_index, nullptr);
-    ASSERT_TRUE(vector_index->GetOffsetMapping().IsEnabled());
 
     segcore::SealedIndexingRecord indexing_record;
     indexing_record.append_field_indexing(
@@ -331,8 +330,6 @@ TEST(SearchOnSealedIndexNullableNoFilter,
         BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
     auto* vector_index = dynamic_cast<index::VectorIndex*>(index_base.get());
     ASSERT_NE(vector_index, nullptr);
-    ASSERT_TRUE(vector_index->GetOffsetMapping().IsEnabled());
-    ASSERT_EQ(vector_index->GetOffsetMapping().GetValidCount(), valid_count);
 
     segcore::SealedIndexingRecord indexing_record;
     indexing_record.append_field_indexing(
@@ -423,8 +420,7 @@ TEST(SearchOnSealedIndexNullableIteratorNoFilter,
     EXPECT_GT(valid_results, 0);
 }
 
-TEST(SearchOnGrowingBitsetLifetime,
-     GroupByIteratorMustNotKeepDanglingTransformedBitset) {
+TEST(SearchOnGrowingBitsetLifetime, GroupByIteratorSurvivesSearchReturn) {
     constexpr int64_t total_count = 512;
 
     auto schema = std::make_shared<Schema>();
@@ -481,8 +477,7 @@ TEST(SearchOnGrowingBitsetLifetime,
     AssertVectorIteratorUsableAfterSearchReturns(search_result, valid_count);
 }
 
-TEST(SearchOnSealedColumnBitsetLifetime,
-     GroupByIteratorMustNotKeepDanglingTransformedBitset) {
+TEST(SearchOnSealedColumnBitsetLifetime, GroupByIteratorSurvivesSearchReturn) {
     constexpr int64_t total_count = 512;
 
     int64_t valid_count = 0;
@@ -502,8 +497,11 @@ TEST(SearchOnSealedColumnBitsetLifetime,
                                                  valid_data.get(),
                                                  vectors,
                                                  chunk_buffers);
-    ASSERT_TRUE(column->GetOffsetMapping().IsEnabled());
-    ASSERT_EQ(column->GetOffsetMapping().GetValidCount(), valid_count);
+    int64_t column_valid_count = 0;
+    for (int64_t i = 0; i < column->num_chunks(); ++i) {
+        column_valid_count += column->GetValidCountInChunk(i);
+    }
+    ASSERT_EQ(column_valid_count, valid_count);
 
     auto logical_bitset_bytes = MakeLogicalBitsetBytes(total_count);
     BitsetView logical_bitset(logical_bitset_bytes.data(), total_count);

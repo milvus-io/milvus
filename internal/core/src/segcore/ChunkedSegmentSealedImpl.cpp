@@ -68,7 +68,6 @@
 #include "common/Json.h"
 #include "common/JsonCastType.h"
 #include "common/LoadInfo.h"
-#include "common/OffsetMapping.h"
 #include "common/QueryInfo.h"
 #include "common/Schema.h"
 #include "common/ScopedTimer.h"
@@ -1718,39 +1717,13 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
     }
 }
 
-ChunkedSegmentSealedImpl::ValidResult
-ChunkedSegmentSealedImpl::FilterVectorValidOffsetsFromIndex(
-    milvus::OpContext* op_ctx,
-    FieldId field_id,
-    const int64_t* seg_offsets,
-    int64_t count) const {
-    ValidResult result;
-    result.valid_count = count;
-
-    AssertInfo(vector_indexings_.is_ready(field_id),
-               "vector index is not ready");
-    auto field_indexing = vector_indexings_.get_field_indexing(field_id);
-    auto cache_index = field_indexing->indexing_;
-    auto ca = SemiInlineGet(cache_index->PinCells(op_ctx, {0}));
-    auto vec_index = dynamic_cast<index::VectorIndex*>(ca->get_cell_of(0));
-    AssertInfo(vec_index != nullptr, "invalid vector indexing");
-    AssertInfo(vec_index->HasValidData(),
-               "nullable vector index does not contain valid data");
-
-    result.valid_data = std::make_unique<bool[]>(count);
-    vec_index->GetOffsetMapping().FilterValidLogicalOffsets(
-        seg_offsets, count, result.valid_data.get(), result.valid_offsets);
-    result.valid_count = result.valid_offsets.size();
-    return result;
-}
-
-ChunkedSegmentSealedImpl::ValidResult
-ChunkedSegmentSealedImpl::FilterVectorValidOffsetsFromColumn(
+ChunkedSegmentSealedImpl::RawColumnValidResult
+ChunkedSegmentSealedImpl::CollectValidRawColumnOffsets(
     milvus::OpContext* op_ctx,
     const ChunkedColumnInterface* column,
     const int64_t* seg_offsets,
     int64_t count) const {
-    ValidResult result;
+    RawColumnValidResult result;
     result.valid_data = std::make_unique<bool[]>(count);
     result.valid_offsets.reserve(count);
 
@@ -1792,40 +1765,57 @@ ChunkedSegmentSealedImpl::get_vector(milvus::OpContext* op_ctx,
     auto has_raw_data = vec_index->HasRawData();
 
     if (has_raw_data) {
-        // If index has raw data, get vector from memory.
-        ValidResult filter_result;
-        knowhere::DataSetPtr ids_ds;
-        int64_t valid_count = count;
-        const bool* valid_data = nullptr;
-        if (field_meta.is_nullable()) {
-            if (!vec_index->HasValidData()) {
-                auto column = get_column(field_id);
-                if (column != nullptr) {
-                    return get_raw_data(
-                        op_ctx, field_id, field_meta, ids, count);
-                }
-                ThrowInfo(ErrorCode::UnexpectedError,
-                          "nullable vector index has raw data but no valid "
-                          "data, and field data is unavailable");
+        auto ids_ds = GenIdsDataset(count, ids);
+        auto append_valid_data = [&](auto* data_array, const auto& valid_data) {
+            if (!field_meta.is_nullable()) {
+                return;
             }
-            filter_result =
-                FilterVectorValidOffsetsFromIndex(op_ctx, field_id, ids, count);
-            ids_ds = GenIdsDataset(filter_result.valid_count,
-                                   filter_result.valid_offsets.data());
-            valid_count = filter_result.valid_count;
-            valid_data = filter_result.valid_data.get();
-        } else {
-            ids_ds = GenIdsDataset(count, ids);
-        }
+            auto* dst = data_array->mutable_valid_data();
+            dst->Reserve(count);
+            if (valid_data.empty()) {
+                for (int64_t i = 0; i < count; ++i) {
+                    dst->Add(true);
+                }
+                return;
+            }
+            for (auto valid : valid_data) {
+                dst->Add(valid != 0);
+            }
+        };
         if (field_meta.get_data_type() == DataType::VECTOR_SPARSE_U32_F32) {
-            auto res = vec_index->GetSparseVector(ids_ds);
-            return segcore::CreateVectorDataArrayFrom(
-                res.get(), valid_data, count, valid_count, field_meta);
+            auto retrieve_result = vec_index->GetSparseVector(ids_ds);
+            auto valid_count = retrieve_result.valid_data.empty()
+                                   ? count
+                                   : static_cast<int64_t>(std::count(
+                                         retrieve_result.valid_data.begin(),
+                                         retrieve_result.valid_data.end(),
+                                         1));
+            auto data_array =
+                valid_count == 0
+                    ? segcore::CreateEmptyVectorDataArray(0, field_meta)
+                    : segcore::CreateVectorDataArrayFrom(
+                          retrieve_result.sparse_data.get(),
+                          valid_count,
+                          field_meta);
+            append_valid_data(data_array.get(), retrieve_result.valid_data);
+            return data_array;
         } else {
-            // dense vector:
-            auto vector = vec_index->GetVector(ids_ds);
-            return segcore::CreateVectorDataArrayFrom(
-                vector.data(), valid_data, count, valid_count, field_meta);
+            auto retrieve_result = vec_index->GetVector(ids_ds);
+            auto valid_count = retrieve_result.valid_data.empty()
+                                   ? count
+                                   : static_cast<int64_t>(std::count(
+                                         retrieve_result.valid_data.begin(),
+                                         retrieve_result.valid_data.end(),
+                                         1));
+            auto data_array =
+                valid_count == 0
+                    ? segcore::CreateEmptyVectorDataArray(0, field_meta)
+                    : segcore::CreateVectorDataArrayFrom(
+                          retrieve_result.raw_data.data(),
+                          valid_count,
+                          field_meta);
+            append_valid_data(data_array.get(), retrieve_result.valid_data);
+            return data_array;
         }
     }
 
@@ -1860,44 +1850,30 @@ ChunkedSegmentSealedImpl::get_emb_list(milvus::OpContext* op_ctx,
 
     auto metric_type = vec_index->GetMetricType();
 
-    ValidResult filter_result;
-    int64_t valid_count = count;
-    const bool* valid_data = nullptr;
-    const int64_t* valid_offsets = seg_offsets;
-    if (field_meta.is_nullable()) {
-        if (!vec_index->HasValidData()) {
-            auto column = get_column(field_id);
-            if (column != nullptr) {
-                return get_raw_data(
-                    op_ctx, field_id, field_meta, seg_offsets, count);
-            }
-            ThrowInfo(ErrorCode::UnexpectedError,
-                      "nullable vector index has raw data but no valid "
-                      "data, and field data is unavailable");
-        }
-        filter_result = FilterVectorValidOffsetsFromIndex(
-            op_ctx, field_id, seg_offsets, count);
-        valid_count = filter_result.valid_count;
-        valid_data = filter_result.valid_data.get();
-        valid_offsets = filter_result.valid_offsets.data();
-    }
-
-    auto data_array =
-        CreateEmptyVectorDataArray(count, valid_count, valid_data, field_meta);
-    if (valid_count == 0) {
-        return data_array;
-    }
-
-    // Build el_ids dataset from valid_offsets. For nullable VECTOR_ARRAY, the
-    // index offset mapping maps logical row offsets to compact physical
-    // embedding-list ids.
-    auto ids_ds = GenIdsDataset(valid_count, valid_offsets);
-
-    auto [raw_data, offsets] = vec_index->GetEmbListByIds(ids_ds, metric_type);
-    AssertInfo(offsets.size() == static_cast<size_t>(valid_count + 1),
+    auto ids_ds = GenIdsDataset(count, seg_offsets);
+    auto retrieve_result = vec_index->GetEmbListByIds(ids_ds, metric_type);
+    auto& raw_data = retrieve_result.raw_data;
+    auto& offsets = retrieve_result.offsets;
+    auto& valid_data = retrieve_result.valid_data;
+    AssertInfo(offsets.size() == static_cast<size_t>(count + 1),
                "GetEmbListByIds returned invalid offsets size {}, expected {}",
                offsets.size(),
-               valid_count + 1);
+               count + 1);
+
+    auto data_array = CreateEmptyVectorDataArray(count, field_meta);
+    if (field_meta.is_nullable()) {
+        auto* dst = data_array->mutable_valid_data();
+        dst->Reserve(count);
+        if (valid_data.empty()) {
+            for (int64_t i = 0; i < count; ++i) {
+                dst->Add(true);
+            }
+        } else {
+            for (auto valid : valid_data) {
+                dst->Add(valid != 0);
+            }
+        }
+    }
 
     auto dim = field_meta.get_dim();
     auto element_type = field_meta.get_element_type();
@@ -1907,20 +1883,12 @@ ChunkedSegmentSealedImpl::get_emb_list(milvus::OpContext* op_ctx,
     auto vector_array = data_array->mutable_vectors();
     auto obj = vector_array->mutable_vector_array();
 
-    std::vector<int64_t> valid_logical_offsets;
-    if (valid_data != nullptr) {
-        valid_logical_offsets.reserve(valid_count);
-        for (int64_t i = 0; i < count; ++i) {
-            if (valid_data[i]) {
-                valid_logical_offsets.push_back(i);
-            }
-        }
-    }
-
     // Build a VectorFieldProto for each embedding list
-    for (int64_t i = 0; i < valid_count; i++) {
-        auto dst_index = valid_data != nullptr ? valid_logical_offsets[i] : i;
-        auto* entry = obj->mutable_data()->Mutable(dst_index);
+    for (int64_t i = 0; i < count; i++) {
+        if (!valid_data.empty() && valid_data[i] == 0) {
+            continue;
+        }
+        auto* entry = obj->mutable_data()->Mutable(i);
         entry->set_dim(dim);
         size_t vec_start = offsets[i];
         size_t vec_count = offsets[i + 1] - offsets[i];
@@ -3569,12 +3537,12 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
     int64_t valid_count = count;
     const bool* valid_data = nullptr;
     const int64_t* valid_offsets = seg_offsets;
-    ValidResult filter_result;
+    RawColumnValidResult filter_result;
 
     const bool nullable_vector =
         field_meta.is_vector() && field_meta.is_nullable();
     if (nullable_vector) {
-        filter_result = FilterVectorValidOffsetsFromColumn(
+        filter_result = CollectValidRawColumnOffsets(
             op_ctx, column.get(), seg_offsets, count);
         valid_count = filter_result.valid_count;
         valid_data = filter_result.valid_data.get();
@@ -4114,20 +4082,8 @@ ChunkedSegmentSealedImpl::CalcDistByIDs(
     if (vec_index == nullptr) {
         return false;
     }
-    // Callers pass logical offsets (already translated from physical by
-    // SearchOnIndex). When the index carries an offset_mapping (nullable
-    // vector), the underlying knowhere index operates on physical offsets,
-    // so translate logical -> physical before the call.
-    const auto& offset_mapping = vec_index->GetOffsetMapping();
-    std::vector<int64_t> physical_offsets;
-    const int64_t* labels = seg_offsets;
-    if (offset_mapping.IsEnabled()) {
-        physical_offsets.assign(seg_offsets, seg_offsets + count);
-        offset_mapping.TransformLogicalOffsets(physical_offsets);
-        labels = physical_offsets.data();
-    }
     auto res = vec_index->CalcDistByIDs(
-        query_dataset, BitsetView(), labels, count, is_cosine, op_ctx);
+        query_dataset, BitsetView(), seg_offsets, count, is_cosine, op_ctx);
     if (!res.has_value()) {
         return false;
     }
@@ -4436,11 +4392,10 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
         int64_t row_count = num_rows;
         if (field_meta.is_nullable()) {
             vec_data->BuildValidRowIds(op_ctx);
-            const auto& offset_mapping = vec_data->GetOffsetMapping();
-            if (!offset_mapping.IsEnabled()) {
-                return false;
+            row_count = 0;
+            for (int64_t i = 0; i < vec_data->num_chunks(); ++i) {
+                row_count += vec_data->GetValidCountInChunk(i);
             }
-            row_count = offset_mapping.GetValidCount();
         }
 
         // generate index params

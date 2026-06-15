@@ -38,6 +38,7 @@
 #include "index/Meta.h"
 #include "index/ScalarIndexSort.h"
 #include "index/VectorIndex.h"
+#include "index/VectorMemIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/operands.h"
 #include "pb/common.pb.h"
@@ -3733,12 +3734,6 @@ LoadNullableElementFlatIndex(SegmentSealed* segment,
                                    flat_data.data(),
                                    knowhere::IndexEnum::INDEX_FAISS_IDMAP);
 
-    std::unique_ptr<bool[]> valid_rows(new bool[kNullableElemN]);
-    for (int row = 0; row < kNullableElemN; ++row) {
-        valid_rows[row] = true;
-    }
-    indexing->BuildValidData(valid_rows.get(), kNullableElemN);
-
     LoadIndexInfo load_index_info;
     load_index_info.field_id = vec_fid.get();
     load_index_info.index_params = GenIndexParams(indexing.get());
@@ -3750,21 +3745,52 @@ LoadNullableElementFlatIndex(SegmentSealed* segment,
     segment->LoadIndex(load_index_info);
 }
 
-inline void
-LoadNullableElementFlatIndexWithValidRows(SegmentSealed* segment,
-                                          FieldId vec_fid,
-                                          const std::vector<float>& flat_data,
-                                          const std::vector<bool>& valid_rows) {
-    auto indexing = GenVecIndexing(flat_data.size() / kNullableElemDim,
-                                   kNullableElemDim,
-                                   flat_data.data(),
-                                   knowhere::IndexEnum::INDEX_FAISS_IDMAP);
+inline std::unique_ptr<milvus::index::VectorIndex>
+GenElementIndexingWithExternalIds(const std::vector<float>& flat_data,
+                                  const std::vector<int32_t>& external_ids,
+                                  int64_t external_count) {
+    const auto rows = flat_data.size() / kNullableElemDim;
+    auto conf =
+        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                       {knowhere::meta::DIM, std::to_string(kNullableElemDim)},
+                       {knowhere::indexparam::NLIST, "1024"},
+                       {knowhere::meta::DEVICE_ID, 0}};
+    auto dataset =
+        knowhere::GenDataSet(rows, kNullableElemDim, flat_data.data());
+    dataset->SetInternalToExternalIds(external_ids, external_count);
+    milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
+    milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
+    milvus::storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = TestRemotePath;
+    auto chunk_manager = milvus::storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, chunk_manager, fs);
+    auto indexing = std::make_unique<index::VectorMemIndex<float>>(
+        DataType::NONE,
+        knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        true,
+        file_manager_context);
+    indexing->BuildWithDataset(dataset, conf);
+    auto create_index_result = indexing->Upload();
+    conf["index_files"] = create_index_result->GetIndexFiles();
+    conf[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+    indexing->Load(milvus::tracer::TraceContext{}, conf);
+    return indexing;
+}
 
-    std::unique_ptr<bool[]> valid_data(new bool[valid_rows.size()]);
-    for (size_t row = 0; row < valid_rows.size(); ++row) {
-        valid_data[row] = valid_rows[row];
-    }
-    indexing->BuildValidData(valid_data.get(), valid_rows.size());
+inline void
+LoadNullableElementFlatIndexWithExternalIds(
+    SegmentSealed* segment,
+    FieldId vec_fid,
+    const std::vector<float>& flat_data,
+    const std::vector<int32_t>& external_ids,
+    int64_t external_count) {
+    auto indexing = GenElementIndexingWithExternalIds(
+        flat_data, external_ids, external_count);
 
     LoadIndexInfo load_index_info;
     load_index_info.field_id = vec_fid.get();
@@ -3916,8 +3942,14 @@ TEST(ElementVectorSearch, NullableSealedBruteForce_NullAndEmptyRows) {
 TEST(ElementVectorSearch, NullableSealedIndex_NullAndEmptyRows) {
     auto f = MakeNullableElementSearchWithNullAndEmptyRowsFixture();
     auto segment = CreateNullableSealedSegment(f);
-    LoadNullableElementFlatIndexWithValidRows(
-        segment.get(), f.vec_fid, f.flat_data, {false, true, true});
+    LoadNullableElementFlatIndexWithExternalIds(
+        segment.get(),
+        f.vec_fid,
+        f.flat_data,
+        // Element-level search external ids use ArrayOffsets' compact element-id
+        // space. Null and empty rows do not create element-id gaps.
+        {0, 1},
+        /*external_count=*/2);
 
     auto sr = RunNullableElementSearch(segment.get(), f);
     ASSERT_NE(sr, nullptr);

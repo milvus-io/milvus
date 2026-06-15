@@ -1161,23 +1161,17 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                  const int64_t* seg_offsets,
                  int64_t count) const;
 
-    struct ValidResult {
+    struct RawColumnValidResult {
         int64_t valid_count = 0;
         std::unique_ptr<bool[]> valid_data;
         std::vector<int64_t> valid_offsets;
     };
 
-    ValidResult
-    FilterVectorValidOffsetsFromIndex(milvus::OpContext* op_ctx,
-                                      FieldId field_id,
-                                      const int64_t* seg_offsets,
-                                      int64_t count) const;
-
-    ValidResult
-    FilterVectorValidOffsetsFromColumn(milvus::OpContext* op_ctx,
-                                       const ChunkedColumnInterface* column,
-                                       const int64_t* seg_offsets,
-                                       int64_t count) const;
+    RawColumnValidResult
+    CollectValidRawColumnOffsets(milvus::OpContext* op_ctx,
+                                 const ChunkedColumnInterface* column,
+                                 const int64_t* seg_offsets,
+                                 int64_t count) const;
 
     void
     update_row_count(int64_t row_count) {

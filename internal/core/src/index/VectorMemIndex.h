@@ -84,14 +84,13 @@ class VectorMemIndex : public VectorIndex {
 
     int64_t
     Count() override {
-        const auto& offset_mapping = GetOffsetMapping();
-        if (offset_mapping.IsEnabled() && offset_mapping.GetValidCount() == 0) {
-            return 0;
+        if (IsEmbListIndex()) {
+            if (IsEmptyEmbListIndex() || index_.IsEmptyIndex()) {
+                return 0;
+            }
+            return index_.Count();
         }
-        if (IsEmptyEmbListIndex()) {
-            return 0;
-        }
-        return index_.Count();
+        return index_.Node()->ExternalCount();
     }
 
     void
@@ -107,14 +106,14 @@ class VectorMemIndex : public VectorIndex {
     bool
     IsIndexRefineEnabled() const override;
 
-    std::vector<uint8_t>
+    VectorRetrieveResult
     GetVector(const DatasetPtr dataset) const override;
 
-    std::pair<std::vector<uint8_t>, std::vector<size_t>>
+    EmbListRetrieveResult
     GetEmbListByIds(const DatasetPtr dataset,
                     const std::string& metric_type) const override;
 
-    std::unique_ptr<const knowhere::sparse::SparseRow<SparseValueType>[]>
+    SparseVectorRetrieveResult
     GetSparseVector(const DatasetPtr dataset) const override;
 
     IndexStatsPtr
@@ -142,8 +141,13 @@ class VectorMemIndex : public VectorIndex {
     LoadFromFile(const Config& config);
 
     bool
+    IsEmbListIndex() const {
+        return elem_type_ != DataType::NONE;
+    }
+
+    bool
     IsEmptyEmbListIndex() const {
-        return elem_type_ != DataType::NONE && !empty_emb_list_offsets_.empty();
+        return IsEmbListIndex() && !empty_emb_list_offsets_.empty();
     }
 
  protected:
