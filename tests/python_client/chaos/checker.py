@@ -315,13 +315,59 @@ class Op(Enum):
 
 
 timeout = 120
-search_timeout = 30
-query_timeout = 30
+DEFAULT_SEARCH_TIMEOUT = 30
+DEFAULT_QUERY_TIMEOUT = 30
+search_timeout = DEFAULT_SEARCH_TIMEOUT
+query_timeout = DEFAULT_QUERY_TIMEOUT
+search_consistency_level = ""
+query_consistency_level = ""
 
 enable_traceback = False
 DEFAULT_FMT = "[start time:{start_time}][time cost:{elapsed:0.8f}s][operation_name:{operation_name}][collection name:{collection_name}] -> {result!r}"
 
 request_records = RequestRecords()
+
+
+def _parse_timeout(value, default):
+    if value is None or str(value).strip() == "":
+        return default
+    return float(value)
+
+
+def configure_request_options(
+    search_timeout_value=None,
+    query_timeout_value=None,
+    search_consistency_level_value="",
+    query_consistency_level_value="",
+):
+    global search_timeout, query_timeout, search_consistency_level, query_consistency_level
+    search_timeout = _parse_timeout(search_timeout_value, DEFAULT_SEARCH_TIMEOUT)
+    query_timeout = _parse_timeout(query_timeout_value, DEFAULT_QUERY_TIMEOUT)
+    search_consistency_level = (search_consistency_level_value or "").strip()
+    query_consistency_level = (query_consistency_level_value or "").strip()
+
+
+def search_request_options(default_consistency_level=""):
+    opts = {"timeout": search_timeout}
+    consistency_level = search_consistency_level or default_consistency_level
+    if consistency_level:
+        opts["consistency_level"] = consistency_level
+    return opts
+
+
+def query_request_options(default_consistency_level=""):
+    opts = {"timeout": query_timeout}
+    consistency_level = query_consistency_level or default_consistency_level
+    if consistency_level:
+        opts["consistency_level"] = consistency_level
+    return opts
+
+
+def query_consistency_options(default_consistency_level=""):
+    consistency_level = query_consistency_level or default_consistency_level
+    if consistency_level:
+        return {"consistency_level": consistency_level}
+    return {}
 
 
 def create_index_params_from_dict(field_name: str, index_param_dict: dict) -> IndexParams:
@@ -1031,7 +1077,7 @@ class SearchChecker(Checker):
                 search_params=self.search_param,
                 limit=5,
                 partition_names=self.p_names,
-                timeout=search_timeout,
+                **search_request_options(),
             )
             return res, True
         except Exception as e:
@@ -1090,7 +1136,7 @@ class TensorSearchChecker(Checker):
                 search_params=self.search_param,
                 limit=5,
                 partition_names=self.p_names,
-                timeout=search_timeout,
+                **search_request_options(),
             )
             return res, True
         except Exception as e:
@@ -1156,7 +1202,7 @@ class FullTextSearchChecker(Checker):
                 search_params=constants.DEFAULT_BM25_SEARCH_PARAM,
                 limit=5,
                 partition_names=self.p_names,
-                timeout=search_timeout,
+                **search_request_options(),
                 highlighter=highlighter,
             )
             return res, True
@@ -1221,7 +1267,7 @@ class HybridSearchChecker(Checker):
                 ranker=RRFRanker(),
                 limit=10,
                 partition_names=self.p_names,
-                timeout=search_timeout,
+                **search_request_options(),
             )
             return res, True
         except Exception as e:
@@ -1364,7 +1410,10 @@ class AddFieldChecker(Checker):
             time.sleep(1)
             _, result = self.insert_data()
             self.milvus_client.query(
-                collection_name=self.c_name, filter=f"{new_field_name} >= 0", output_fields=[new_field_name]
+                collection_name=self.c_name,
+                filter=f"{new_field_name} >= 0",
+                output_fields=[new_field_name],
+                **query_consistency_options(),
             )
             result = True
             if result:
@@ -1493,6 +1542,7 @@ class InsertChecker(Checker):
             output_fields=[f"{self.int64_field_name}"],
             limit=len(data_in_client) * 2,
             timeout=timeout,
+            **query_consistency_options(),
         )
         data_in_server = []
         for r in res:
@@ -1551,6 +1601,7 @@ class InsertFreshnessChecker(Checker):
                     filter=self.term_expr,
                     output_fields=[f"{self.int64_field_name}"],
                     timeout=timeout,
+                    **query_consistency_options(),
                 )
                 result = True
             except Exception as e:
@@ -1652,6 +1703,7 @@ class UpsertFreshnessChecker(Checker):
                     filter=self.term_expr,
                     output_fields=[f"{self.int64_field_name}"],
                     timeout=timeout,
+                    **query_consistency_options(),
                 )
                 result = True
             except Exception as e:
@@ -2092,7 +2144,10 @@ class QueryChecker(Checker):
     def query(self):
         try:
             res = self.milvus_client.query(
-                collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout
+                collection_name=self.c_name,
+                filter=self.term_expr,
+                limit=5,
+                **query_request_options(),
             )
             return res, True
         except Exception as e:
@@ -2144,7 +2199,7 @@ class TextMatchChecker(Checker):
                 filter=self.term_expr,
                 limit=5,
                 output_fields=[self.text_match_field_name],
-                timeout=search_timeout,
+                **search_request_options(),
                 highlighter=highlighter,
             )
             return res, True
@@ -2189,7 +2244,10 @@ class PhraseMatchChecker(Checker):
     def phrase_match(self):
         try:
             res = self.milvus_client.query(
-                collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout
+                collection_name=self.c_name,
+                filter=self.term_expr,
+                limit=5,
+                **query_request_options(),
             )
             return res, True
         except Exception as e:
@@ -2245,7 +2303,10 @@ class JsonQueryChecker(Checker):
     def json_query(self):
         try:
             res = self.milvus_client.query(
-                collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout
+                collection_name=self.c_name,
+                filter=self.term_expr,
+                limit=5,
+                **query_request_options(),
             )
             return res, True
         except Exception as e:
@@ -2288,7 +2349,10 @@ class GeoQueryChecker(Checker):
     def geo_query(self):
         try:
             res = self.milvus_client.query(
-                collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout
+                collection_name=self.c_name,
+                filter=self.term_expr,
+                limit=5,
+                **query_request_options(),
             )
             return res, True
         except Exception as e:
@@ -2324,6 +2388,7 @@ class DeleteChecker(Checker):
             filter=query_expr,
             output_fields=[self.int64_field_name],
             partition_name=self.p_name,
+            **query_consistency_options(),
         )
         self.ids = [r[self.int64_field_name] for r in res]
         self.query_expr = query_expr
@@ -2336,6 +2401,7 @@ class DeleteChecker(Checker):
             filter=self.query_expr,
             output_fields=[self.int64_field_name],
             partition_name=self.p_name,
+            **query_consistency_options(),
         )
         all_ids = [r[self.int64_field_name] for r in res]
         if len(all_ids) < 100:
@@ -2346,6 +2412,7 @@ class DeleteChecker(Checker):
                 filter=self.query_expr,
                 output_fields=[self.int64_field_name],
                 partition_name=self.p_name,
+                **query_consistency_options(),
             )
             all_ids = [r[self.int64_field_name] for r in res]
         delete_ids = all_ids[:3000]  # delete 3000 ids
@@ -2391,6 +2458,7 @@ class DeleteFreshnessChecker(Checker):
             filter=query_expr,
             output_fields=[self.int64_field_name],
             partition_name=self.p_name,
+            **query_consistency_options(),
         )
         self.ids = [r[self.int64_field_name] for r in res]
         self.query_expr = query_expr
@@ -2403,6 +2471,7 @@ class DeleteFreshnessChecker(Checker):
             filter=self.query_expr,
             output_fields=[self.int64_field_name],
             partition_name=self.p_name,
+            **query_consistency_options(),
         )
         all_ids = [r[self.int64_field_name] for r in res]
         if len(all_ids) < 100:
@@ -2413,6 +2482,7 @@ class DeleteFreshnessChecker(Checker):
                 filter=self.query_expr,
                 output_fields=[self.int64_field_name],
                 partition_name=self.p_name,
+                **query_consistency_options(),
             )
             all_ids = [r[self.int64_field_name] for r in res]
         delete_ids = all_ids[: len(all_ids) // 2]  # delete half of ids
@@ -2437,6 +2507,7 @@ class DeleteFreshnessChecker(Checker):
                     filter=self.delete_expr,
                     output_fields=[f"{self.int64_field_name}"],
                     timeout=timeout,
+                    **query_consistency_options(),
                 )
                 if len(res) == 0:
                     break
@@ -2729,7 +2800,7 @@ class NullVectorSearchChecker(Checker):
                 search_params=self.search_param,
                 limit=5,
                 partition_names=self.p_names,
-                timeout=search_timeout,
+                **search_request_options(),
             )
             return res, True
         except Exception as e:
@@ -2825,7 +2896,7 @@ class NullVectorQueryChecker(Checker):
                     filter=self.term_expr,
                     output_fields=[self.int64_field_name, field_name],
                     limit=500,
-                    timeout=query_timeout,
+                    **query_request_options(),
                 )
                 non_null_pks = [r[self.int64_field_name] for r in res if r.get(field_name) is not None]
                 samples[field_name] = non_null_pks[:sample_size]
@@ -2849,7 +2920,7 @@ class NullVectorQueryChecker(Checker):
                     collection_name=self.c_name,
                     filter=f"{self.int64_field_name} in {sample_pks}",
                     output_fields=[self.int64_field_name, vec_field],
-                    timeout=query_timeout,
+                    **query_request_options(),
                 )
                 if not res:
                     # Empty result: sampled PKs may have been deleted by concurrent DeleteChecker.
@@ -2878,7 +2949,7 @@ class NullVectorQueryChecker(Checker):
                 filter=self.term_expr,
                 output_fields=[self.int64_field_name, vec_field],
                 limit=50,
-                timeout=query_timeout,
+                **query_request_options(),
             )
             non_null_rows = [r for r in res if r.get(vec_field) is not None]
             log.debug(
@@ -2953,7 +3024,7 @@ class AddVectorFieldChecker(Checker):
                 filter=f"{self.int64_field_name} > 0",
                 output_fields=[new_vec_field],
                 limit=10,
-                timeout=query_timeout,
+                **query_request_options(),
             )
             if len(res) == 0:
                 return "query returned 0 rows after add vector field", False

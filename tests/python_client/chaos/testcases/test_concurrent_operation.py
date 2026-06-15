@@ -4,7 +4,7 @@ from time import sleep
 
 import pytest
 from chaos import chaos_commons as cc
-from chaos import constants
+from chaos import checker, constants
 from chaos.chaos_commons import assert_statistic
 from chaos.checker import (
     AddFieldChecker,
@@ -128,10 +128,25 @@ class TestOperations(TestBase):
             yield request.param
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_operations(self, request_duration, is_check, collection_name):
+    def test_operations(
+        self,
+        request_duration,
+        is_check,
+        collection_name,
+        search_timeout,
+        query_timeout,
+        search_consistency_level,
+        query_consistency_level,
+    ):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
         log.info(connections.get_connection_addr("default"))
+        checker.configure_request_options(
+            search_timeout_value=search_timeout,
+            query_timeout_value=query_timeout,
+            search_consistency_level_value=search_consistency_level,
+            query_consistency_level_value=query_consistency_level,
+        )
         # event_records = EventRecords()
         c_name = collection_name if collection_name else cf.gen_unique_str("Checker_")
         # event_records.insert("init_health_checkers", "start")
