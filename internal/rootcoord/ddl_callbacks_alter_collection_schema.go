@@ -261,7 +261,11 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 
 	switch id := dropReq.GetIdentifier().(type) {
 	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FunctionName:
-		schema, properties, droppedFieldIds, err = buildSchemaForDropFunction(coll, id.FunctionName)
+		if dropReq.GetDropFunctionOutputFields() {
+			schema, properties, droppedFieldIds, err = buildSchemaForDropFunctionField(coll, id.FunctionName)
+		} else {
+			schema, properties, droppedFieldIds, err = buildSchemaForDetachFunction(coll, id.FunctionName)
+		}
 	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName:
 		schema, properties, droppedFieldIds, err = buildSchemaForDropField(coll, id.FieldName, 0)
 	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId:
@@ -383,9 +387,7 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 	return nil, nil, nil, merr.WrapErrParameterInvalidMsg("field not found with id: %d", fieldID)
 }
 
-// buildSchemaForDropFunction builds the new schema for dropping a function and its output fields.
-// It removes the function from Functions, removes all output fields from Fields, and updates max_field_id.
-func buildSchemaForDropFunction(coll *model.Collection, functionName string) (
+func buildSchemaForDetachFunction(coll *model.Collection, functionName string) (
 	schema *schemapb.CollectionSchema,
 	properties []*commonpb.KeyValuePair,
 	droppedFieldIds []int64,
@@ -400,6 +402,62 @@ func buildSchemaForDropFunction(coll *model.Collection, functionName string) (
 	}
 	if targetFunc == nil {
 		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("function not found: %s", functionName)
+	}
+	if targetFunc.Type == schemapb.FunctionType_BM25 {
+		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("BM25 function must be dropped with its output field in drop_function_field interface: %s", functionName)
+	}
+
+	outputFieldIDSet := make(map[int64]struct{}, len(targetFunc.OutputFieldIDs))
+	for _, fid := range targetFunc.OutputFieldIDs {
+		outputFieldIDSet[fid] = struct{}{}
+	}
+
+	newFields := make([]*schemapb.FieldSchema, 0, len(coll.Fields))
+	for _, field := range coll.Fields {
+		fieldSchema := model.MarshalFieldModel(field)
+		if _, ok := outputFieldIDSet[field.FieldID]; ok {
+			fieldSchema.IsFunctionOutput = false
+		}
+		newFields = append(newFields, fieldSchema)
+	}
+
+	newFunctions := make([]*schemapb.FunctionSchema, 0, len(coll.Functions)-1)
+	for _, fn := range coll.Functions {
+		if fn.Name != functionName {
+			newFunctions = append(newFunctions, model.MarshalFunctionModel(fn))
+		}
+	}
+
+	schema = coll.ToCollectionSchemaPB()
+	properties = coll.Properties
+	schema.Fields = newFields
+	schema.Functions = newFunctions
+	schema.Properties = properties
+	schema.Version = coll.SchemaVersion + 1
+
+	return schema, properties, nil, nil
+}
+
+func buildSchemaForDropFunctionField(coll *model.Collection, functionName string) (
+	schema *schemapb.CollectionSchema,
+	properties []*commonpb.KeyValuePair,
+	droppedFieldIds []int64,
+	err error,
+) {
+	var targetFunc *model.Function
+	for _, fn := range coll.Functions {
+		if fn.Name == functionName {
+			targetFunc = fn
+			break
+		}
+	}
+	if targetFunc == nil {
+		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("function not found: %s", functionName)
+	}
+	switch targetFunc.Type {
+	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
+	default:
+		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("only BM25 and MinHash functions support dropping output fields: %s", functionName)
 	}
 
 	droppedFieldIds = append(droppedFieldIds, targetFunc.OutputFieldIDs...)
