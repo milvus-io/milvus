@@ -6,8 +6,7 @@
 | Status | Draft |
 | Author | James Luan (@xiaofan-luan) Buqian Zheng (@zhengbuqian) |
 | Initial Draft | 2025-04-10 |
-| Consolidated | 2026-05-25 |
-| Related Branch | [rls-feature](https://github.com/milvus-io/milvus/pull/48448) |
+| Consolidated | 2026-06-15 |
 
 ## 1. Summary
 Row-Level Security (RLS) provides fine-grained row-level access control for Milvus collections. After RLS is enabled on a collection, Milvus automatically limits which rows a request can `query`, `search`, `hybrid_search`, `delete`, `insert`, or `upsert` based on the request's RLS principal, RLS principal tags, and administrator-defined row policies.
