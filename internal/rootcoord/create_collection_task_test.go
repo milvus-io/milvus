@@ -1714,8 +1714,6 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 			util.DefaultDBID: {1, 2},
 		}).Once()
 		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
-		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
 		defer cleanTestEnv()
 
 		collectionName := funcutil.GenRandomStr()
