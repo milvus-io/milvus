@@ -28,6 +28,10 @@ type ShardManager interface {
 
 	CreateCollection(msg message.ImmutableCreateCollectionMessageV1)
 
+	// CreateVChannel registers a shard split target vchannel (the genesis
+	// message of the new vchannel) for DML and segment assignment.
+	CreateVChannel(msg message.ImmutableCreateVChannelMessageV2)
+
 	DropCollection(msg message.ImmutableDropCollectionMessageV1)
 
 	CheckIfPartitionCanBeCreated(uniquePartitionKey PartitionUniqueKey) error

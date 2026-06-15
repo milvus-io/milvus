@@ -4,6 +4,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -94,16 +95,28 @@ func (m *shardManagerImpl) SplitShard(msg message.ImmutableSplitShardMessageV2) 
 // CreateCollection creates a new partition manager when create collection message is written into wal.
 // After CreateCollection is called, the ddl and dml on the collection can be applied.
 func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectionMessageV1) {
-	collectionID := msg.Header().CollectionId
-	partitionIDs := msg.Header().PartitionIds
-	vchannel := msg.VChannel()
-	timetick := msg.TimeTick()
-	schema := msg.MustBody().GetCollectionSchema()
 	logger := m.Logger().With(log.FieldMessage(msg))
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.createCollectionLocked(msg.Header().CollectionId, msg.Header().PartitionIds, msg.VChannel(),
+		msg.TimeTick(), msg.MustBody().GetCollectionSchema(), logger)
+}
 
+// CreateVChannel registers a shard split target vchannel. CreateVChannel is
+// the genesis message of the target vchannel and shares the CreateCollection
+// body shape, so it registers the collection for DML and segment assignment
+// on this pchannel exactly as CreateCollection does.
+func (m *shardManagerImpl) CreateVChannel(msg message.ImmutableCreateVChannelMessageV2) {
+	logger := m.Logger().With(log.FieldMessage(msg))
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.createCollectionLocked(msg.Header().CollectionId, msg.Header().PartitionIds, msg.VChannel(),
+		msg.TimeTick(), msg.MustBody().GetCollectionSchema(), logger)
+}
+
+// createCollectionLocked registers the collection and its partition managers on
+// this pchannel for DML and segment assignment. The caller must hold m.mu.
+func (m *shardManagerImpl) createCollectionLocked(collectionID int64, partitionIDs []int64, vchannel string, timetick uint64, schema *schemapb.CollectionSchema, logger *log.MLogger) {
 	if err := m.checkIfCollectionCanBeCreated(collectionID); err != nil {
 		logger.Warn("collection already exists")
 		return
