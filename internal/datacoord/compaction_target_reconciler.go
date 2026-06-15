@@ -61,7 +61,7 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	for _, label := range sortedCompactionTargetLabels(segmentsByLabel) {
 		groupSegments := segmentsByLabel[label]
 		for _, target := range targets {
-			record := target.Record()
+			record := target.Clone()
 			scopedSegments := target.SegmentsInScope(groupSegments)
 			if len(scopedSegments) == 0 {
 				continue
@@ -80,7 +80,7 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	}
 
 	for _, target := range targets {
-		record := target.Record()
+		record := target.Clone()
 		if !target.Satisfied(segmentsInScope[record.GetTargetID()]) {
 			continue
 		}

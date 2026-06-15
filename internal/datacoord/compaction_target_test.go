@@ -130,6 +130,9 @@ func (s *CompactionTargetMetaSuite) TestSaveUpdateDrop() {
 	s.Equal(datapb.TargetState_TARGET_STATE_INACTIVE, (*updates)[0].state)
 	s.NotZero((*updates)[0].inactivatedAtTS)
 
+	s.Require().NoError(meta.UpdateCompactionTargetState(s.ctx, 10, datapb.TargetState_TARGET_STATE_INACTIVE))
+	s.Require().Len(*updates, 1)
+
 	s.Require().NoError(meta.UpdateCompactionTargetState(s.ctx, 10, datapb.TargetState_TARGET_STATE_ACTIVE))
 	s.Equal(datapb.TargetState_TARGET_STATE_ACTIVE, meta.GetCompactionTarget(10).GetState())
 	s.Zero(meta.GetCompactionTarget(10).GetInactivatedAtTS())
@@ -139,6 +142,9 @@ func (s *CompactionTargetMetaSuite) TestSaveUpdateDrop() {
 		state:           datapb.TargetState_TARGET_STATE_ACTIVE,
 		inactivatedAtTS: 0,
 	}, (*updates)[1])
+
+	s.Require().NoError(meta.UpdateCompactionTargetState(s.ctx, 10, datapb.TargetState_TARGET_STATE_ACTIVE))
+	s.Require().Len(*updates, 2)
 
 	s.Require().NoError(meta.DropCompactionTarget(s.ctx, record.GetTargetID()))
 	s.Nil(meta.GetCompactionTarget(10))
@@ -168,7 +174,7 @@ func (s *CompactionTargetMetaSuite) TestMaterializesTargetsOnRecordMutation() {
 
 	activeTargets := meta.GetActiveCompactionTargets()
 	s.Require().Len(activeTargets, 1)
-	s.Equal(int64(10), activeTargets[0].Record().GetTargetID())
+	s.Equal(int64(10), activeTargets[0].Clone().GetTargetID())
 	oldTarget := activeTargets[0]
 	probe := targetSegmentWithDataTS(1, 100, 10, "ch-1", 1500, 1500, false)
 	s.False(oldTarget.Match(probe))
@@ -196,7 +202,7 @@ func (s *CompactionTargetMetaSuite) TestInvalidRewriteTargetPropertiesStayDurabl
 		CollectionID: 100,
 		Intent:       datapb.TargetIntent_INTENT_REWRITE,
 		Properties: map[string]string{
-			compactionTargetSegmentIDsProperty: "not-json",
+			compactionTargetPropertySegmentIDs: "not-json",
 		},
 		ExpectedTS: 1000,
 		TailLimit:  0,
@@ -211,27 +217,31 @@ func (s *CompactionTargetMetaSuite) TestInvalidRewriteTargetPropertiesStayDurabl
 	s.Empty(meta.GetActiveCompactionTargets())
 }
 
-func TestCompactionTargetFactoryRejectsUnsupportedIntent(t *testing.T) {
+func TestCompactionTargetFactoryKeepsUnsupportedIntentInert(t *testing.T) {
 	target, err := newCompactionTarget(&datapb.CompactionTarget{
 		Intent: datapb.TargetIntent_INTENT_SIZE,
 		State:  datapb.TargetState_TARGET_STATE_ACTIVE,
 	})
 
 	require.ErrorIs(t, err, errUnsupportedCompactionTarget)
-	require.Nil(t, target)
+	require.NotNil(t, target)
+	require.False(t, target.active())
+	require.False(t, target.ScopeIn(targetSegment(1, 0, 10, "ch-1", 0, false)))
 }
 
-func TestCompactionTargetFactoryRejectsInvalidRewriteProperties(t *testing.T) {
+func TestCompactionTargetFactoryKeepsInvalidRewriteTargetInert(t *testing.T) {
 	target, err := newCompactionTarget(&datapb.CompactionTarget{
 		Intent: datapb.TargetIntent_INTENT_REWRITE,
 		Properties: map[string]string{
-			compactionTargetSegmentIDsProperty: "not-json",
+			compactionTargetPropertySegmentIDs: "not-json",
 		},
 		State: datapb.TargetState_TARGET_STATE_ACTIVE,
 	})
 
 	require.Error(t, err)
-	require.Nil(t, target)
+	require.NotNil(t, target)
+	require.False(t, target.active())
+	require.False(t, target.ScopeIn(targetSegment(1, 0, 10, "ch-1", 0, false)))
 }
 
 func TestFiniteCompactionTargetMatchUsesRewriteBoundaryPredicate(t *testing.T) {
