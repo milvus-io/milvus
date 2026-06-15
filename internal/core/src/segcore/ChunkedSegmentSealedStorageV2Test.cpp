@@ -92,6 +92,27 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         return seg;
     }
 
+    segcore::SegmentSealedUPtr
+    CreateSegmentByLoadInfo(proto::segcore::SegmentLoadInfo proto,
+                            bool is_sorted_by_pk) {
+        auto seg = segcore::CreateSealedSegment(
+            schema_,
+            nullptr,
+            -1,
+            segcore::SegcoreConfig::default_config(),
+            is_sorted_by_pk);
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(seg.get());
+        EXPECT_NE(sealed, nullptr);
+        if (sealed == nullptr) {
+            return seg;
+        }
+        sealed->SetLoadInfo(std::move(proto));
+        milvus::OpContext op_ctx;
+        milvus::tracer::TraceContext trace_ctx;
+        sealed->Load(trace_ctx, &op_ctx);
+        return seg;
+    }
+
     void
     SetUp() override {
         bool pk_is_string = GetParam();
@@ -369,6 +390,104 @@ TEST_P(TestChunkSegmentStorageV2, TestCompareExpr) {
     final = query::ExecuteQueryExpr(
         plan, segment.get(), chunk_num * test_data_count, MAX_TIMESTAMP);
     ASSERT_EQ(chunk_num * test_data_count, final.count());
+}
+
+TEST_P(TestChunkSegmentStorageV2, LoadGroupedBinlogPreservesChildFieldIds) {
+    auto segment_load_info = proto::segcore::SegmentLoadInfo();
+    segment_load_info.set_segmentid(100);
+    segment_load_info.set_num_of_rows(chunk_num * test_data_count);
+    segment_load_info.set_storageversion(2);
+    segment_load_info.set_is_sorted(true);
+
+    auto* grouped_binlog = segment_load_info.add_binlog_paths();
+    grouped_binlog->set_fieldid(0);
+    grouped_binlog->add_child_fields(fields.at("int64").get());
+    grouped_binlog->add_child_fields(fields.at("pk").get());
+    grouped_binlog->add_child_fields(TimestampFieldID.get());
+    auto* grouped_log = grouped_binlog->add_binlogs();
+    grouped_log->set_log_path(load_info_.field_infos.at(0).insert_files[0]);
+    grouped_log->set_entries_num(chunk_num * test_data_count);
+    grouped_log->set_memory_size(
+        load_info_.field_infos.at(0).memory_sizes.front());
+
+    auto* string1_binlog = segment_load_info.add_binlog_paths();
+    string1_binlog->set_fieldid(102);
+    string1_binlog->add_child_fields(fields.at("string1").get());
+    auto* string1_log = string1_binlog->add_binlogs();
+    string1_log->set_log_path(load_info_.field_infos.at(102).insert_files[0]);
+    string1_log->set_entries_num(chunk_num * test_data_count);
+    string1_log->set_memory_size(
+        load_info_.field_infos.at(102).memory_sizes.front());
+
+    auto* string2_binlog = segment_load_info.add_binlog_paths();
+    string2_binlog->set_fieldid(103);
+    string2_binlog->add_child_fields(fields.at("string2").get());
+    auto* string2_log = string2_binlog->add_binlogs();
+    string2_log->set_log_path(load_info_.field_infos.at(103).insert_files[0]);
+    string2_log->set_entries_num(chunk_num * test_data_count);
+    string2_log->set_memory_size(
+        load_info_.field_infos.at(103).memory_sizes.front());
+
+    auto loaded_segment =
+        CreateSegmentByLoadInfo(std::move(segment_load_info), true);
+
+    auto int64_chunk =
+        loaded_segment->chunk_data<int64_t>(nullptr, fields.at("int64"), 0);
+    ASSERT_EQ(int64_chunk.get().row_count(), chunk_num * test_data_count);
+    ASSERT_EQ(int64_chunk.get().data()[0], 0);
+    ASSERT_EQ(int64_chunk.get().data()[1], 1);
+    ASSERT_EQ(int64_chunk.get().data()[test_data_count], test_data_count);
+
+    if (GetParam()) {
+        auto pk_chunk = loaded_segment->get_batch_views<std::string_view>(
+            nullptr, fields.at("pk"), 0, 0, chunk_num * test_data_count);
+        ASSERT_EQ(pk_chunk.get().first.size(), chunk_num * test_data_count);
+        ASSERT_EQ(pk_chunk.get().first[0], "test0");
+        ASSERT_EQ(pk_chunk.get().first[1], "test1");
+        ASSERT_EQ(pk_chunk.get().first[test_data_count],
+                  std::string_view("test18999"));
+    } else {
+        auto pk_chunk =
+            loaded_segment->chunk_data<int64_t>(nullptr, fields.at("pk"), 0);
+        ASSERT_EQ(pk_chunk.get().row_count(), chunk_num * test_data_count);
+        ASSERT_EQ(pk_chunk.get().data()[0], 0);
+        ASSERT_EQ(pk_chunk.get().data()[1], 1);
+        ASSERT_EQ(pk_chunk.get().data()[test_data_count], test_data_count);
+    }
+
+    std::vector<proto::plan::GenericValue> filter_data;
+    for (int i = 1; i <= 10; ++i) {
+        proto::plan::GenericValue value;
+        value.set_int64_val(i);
+        filter_data.push_back(value);
+    }
+    auto term_filter_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(fields.at("int64"), milvus::DataType::INT64),
+        filter_data);
+    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                       term_filter_expr);
+    auto final = query::ExecuteQueryExpr(
+        plan, loaded_segment.get(), chunk_num * test_data_count, MAX_TIMESTAMP);
+    ASSERT_EQ(10, final.count());
+
+    std::vector<proto::plan::GenericValue> pk_filter_data;
+    proto::plan::GenericValue pk_value;
+    if (GetParam()) {
+        pk_value.set_string_val("test42");
+    } else {
+        pk_value.set_int64_val(42);
+    }
+    pk_filter_data.push_back(pk_value);
+    auto pk_term_filter_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(
+            fields.at("pk"),
+            GetParam() ? milvus::DataType::VARCHAR : milvus::DataType::INT64),
+        pk_filter_data);
+    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                  pk_term_filter_expr);
+    final = query::ExecuteQueryExpr(
+        plan, loaded_segment.get(), chunk_num * test_data_count, MAX_TIMESTAMP);
+    ASSERT_EQ(1, final.count());
 }
 
 // Test DropFieldData behavior based on parquet file structure.
