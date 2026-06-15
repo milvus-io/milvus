@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
@@ -26,6 +27,42 @@ func newSplitShardMessage(vchannel string, collectionID int64, timetick uint64) 
 		WithTimeTick(timetick).
 		WithLastConfirmedUseMessageID()
 	return message.MustAsImmutableSplitShardMessageV2(msg.IntoImmutableMessage(rmq.NewRmqID(3)))
+}
+
+func newCreateVChannelMessage(vchannel string, collectionID int64, partitionIDs []int64, timetick uint64) message.ImmutableCreateVChannelMessageV2 {
+	msg := message.NewCreateVChannelMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.CreateVChannelMessageHeader{
+			CollectionId:        collectionID,
+			PartitionIds:        partitionIDs,
+			SplitTaskId:         100,
+			SplitSourceVchannel: "v1",
+			KeyRange:            &message.KeyRange{Upper: []byte{0x80}},
+		}).
+		WithBody(&message.CreateCollectionRequest{
+			CollectionSchema: &schemapb.CollectionSchema{Name: "col"},
+		}).
+		MustBuildMutable().
+		WithTimeTick(timetick).
+		WithLastConfirmedUseMessageID()
+	return message.MustAsImmutableCreateVChannelMessageV2(msg.IntoImmutableMessage(rmq.NewRmqID(4)))
+}
+
+func TestRecoveryStorageHandleCreateVChannel(t *testing.T) {
+	rs := newTestRecoveryStorage(t)
+
+	// the genesis of a target vchannel is exempt from the vchannel-not-found
+	// check and seeds a new vchannel meta exactly as create collection does.
+	rs.handleMessage(newCreateVChannelMessage("v2", 7, []int64{8}, 100))
+	info, ok := rs.vchannels["v2"]
+	assert.True(t, ok)
+	assert.Equal(t, int64(7), info.meta.CollectionInfo.CollectionId)
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, info.meta.State)
+	assert.Equal(t, "col", info.meta.CollectionInfo.Schemas[0].Schema.GetName())
+	assert.True(t, info.dirty)
+
+	// re-applying the genesis is idempotent.
+	rs.handleCreateVChannel(newCreateVChannelMessage("v2", 7, []int64{8}, 200))
 }
 
 func TestRecoveryStorageHandleSplitShard(t *testing.T) {

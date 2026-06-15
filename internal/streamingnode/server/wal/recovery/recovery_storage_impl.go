@@ -325,6 +325,7 @@ func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 	}
 
 	if msg.VChannel() != "" && !msg.IsPChannelLevel() && msg.MessageType() != message.MessageTypeCreateCollection &&
+		msg.MessageType() != message.MessageTypeCreateVChannel &&
 		msg.MessageType() != message.MessageTypeDropCollection && r.vchannels[msg.VChannel()] == nil && !funcutil.IsControlChannel(msg.VChannel()) {
 		r.detectInconsistency(msg, "vchannel not found")
 	}
@@ -351,6 +352,9 @@ func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 	case message.MessageTypeCreateCollection:
 		immutableMsg := message.MustAsImmutableCreateCollectionMessageV1(msg)
 		r.handleCreateCollection(immutableMsg)
+	case message.MessageTypeCreateVChannel:
+		immutableMsg := message.MustAsImmutableCreateVChannelMessageV2(msg)
+		r.handleCreateVChannel(immutableMsg)
 	case message.MessageTypeDropCollection:
 		immutableMsg := message.MustAsImmutableDropCollectionMessageV1(msg)
 		r.handleDropCollection(immutableMsg)
@@ -530,6 +534,17 @@ func (r *recoveryStorageImpl) handleCreateCollection(msg message.ImmutableCreate
 	}
 	r.vchannels[msg.VChannel()] = newVChannelRecoveryInfoFromCreateCollectionMessage(msg)
 	r.Logger().Info(context.TODO(), "create collection", mlog.FieldMessage(msg))
+}
+
+// handleCreateVChannel handles the create-vchannel message, the genesis of a
+// shard split target vchannel: it seeds the vchannel meta exactly as create
+// collection does so the new vchannel survives a streamingnode restart.
+func (r *recoveryStorageImpl) handleCreateVChannel(msg message.ImmutableCreateVChannelMessageV2) {
+	if _, ok := r.vchannels[msg.VChannel()]; ok {
+		return
+	}
+	r.vchannels[msg.VChannel()] = newVChannelRecoveryInfoFromCreateVChannelMessage(msg)
+	r.Logger().Info("create vchannel", log.FieldMessage(msg))
 }
 
 // handleDropCollection handles the drop collection message.
