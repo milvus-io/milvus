@@ -1982,6 +1982,18 @@ IsByteVectorListInput(DataType data_type) {
            data_type == DataType::VECTOR_BFLOAT16;
 }
 
+// External function output vectors can round-trip through schemaless Arrow
+// paths that erase the semantic element type and surface the column as a raw
+// list<uint8> (the physical Milvus vector bytes). In that case the uint8 bytes
+// already match our on-disk storage layout, so we accept them as raw bytes
+// instead of demanding the semantic element type (e.g. FLOAT for FloatVector).
+//
+// Restrictions:
+//   - Only dense vector columns qualify (IsVectorDataType).
+//   - Sparse float vectors are excluded: they are not fixed-width and do not
+//     use the raw fixed-size-binary layout.
+//   - VECTOR_ARRAY is excluded: its inner vectors are normalized recursively by
+//     the per-element semantic type, not as a flat byte list at this level.
 bool
 CanTreatVectorListAsRawBytes(
     DataType data_type, const std::shared_ptr<arrow::DataType>& actual_type) {
@@ -2037,6 +2049,9 @@ ExpectedVectorListLength(DataType data_type,
                          const std::shared_ptr<arrow::DataType>& actual_type) {
     // Float-like vector lists are element-counted by dim. Byte vector lists are
     // raw-byte encoded, so their list length must match the physical byte width.
+    // The same byte-width rule applies when a semantic vector column arrives as
+    // a raw uint8 byte list (CanTreatVectorListAsRawBytes), hence actual_type is
+    // needed here to disambiguate float-element lists from raw-byte lists.
     if (IsByteVectorListInput(data_type) ||
         CanTreatVectorListAsRawBytes(data_type, actual_type)) {
         return GetDataTypeSize(data_type, dim);
@@ -2051,6 +2066,10 @@ ValidateVectorListElementType(
     const FieldMeta& field_meta) {
     auto expected_type =
         ExpectedVectorListElementArrowType(data_type, field_meta);
+    // Accept either the semantic element type (e.g. FLOAT for FloatVector) or a
+    // raw uint8 byte list carrying the physical vector bytes. The list-length
+    // check downstream still enforces the correct byte width, so mismatched
+    // non-uint8 element types remain rejected below.
     if (actual_type->id() == expected_type ||
         CanTreatVectorListAsRawBytes(data_type, actual_type)) {
         return;
@@ -2099,6 +2118,9 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
             auto values = list_array->values();
             ValidateVectorListElementType(
                 values->type(), data_type, field_meta);
+            // Computed per array: the expected length depends on the actual
+            // element type (dim elements for float lists, byte-width for raw
+            // uint8 byte lists), so it cannot be hoisted out of the loop.
             int expected_list_length =
                 ExpectedVectorListLength(data_type, dim, values->type());
             int elem_bit_width = values->type()->bit_width();
@@ -2135,6 +2157,9 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
             auto values = fsl_array->values();
             ValidateVectorListElementType(
                 values->type(), data_type, field_meta);
+            // Computed per array: the expected length depends on the actual
+            // element type (dim elements for float lists, byte-width for raw
+            // uint8 byte lists), so it cannot be hoisted out of the loop.
             int expected_list_length =
                 ExpectedVectorListLength(data_type, dim, values->type());
             int elem_bit_width = values->type()->bit_width();
