@@ -46,14 +46,14 @@ func TestEmbeddingOK(t *testing.T) {
 
 	{
 		c, _ := NewTEIClient("mock_key", url)
-		ret, err := c.Embedding([]string{"sentence"}, true, "left", "query", 0)
+		ret, err := c.Embedding([]string{"sentence"}, true, "left", "query", 2, 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret, &EmbeddingResponse{{0.0, 0.1}, {1.0, 1.1}, {2.0, 2.1}})
 	}
 
 	{
 		c, _ := NewTEIClient("mock_key", url)
-		ret, err := c.Embedding([]string{"sentence"}, false, "", "", 0)
+		ret, err := c.Embedding([]string{"sentence"}, false, "", "", 0, 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret, &EmbeddingResponse{{0.0, 0.1}, {1.0, 1.1}, {2.0, 2.1}})
 	}
@@ -69,7 +69,7 @@ func TestEmbeddingFailed(t *testing.T) {
 
 	{
 		c, _ := NewTEIClient("mock_key", url)
-		_, err := c.Embedding([]string{"sentence"}, true, "left", "query", 0)
+		_, err := c.Embedding([]string{"sentence"}, true, "left", "query", 0, 0)
 		assert.True(t, err != nil)
 	}
 }
