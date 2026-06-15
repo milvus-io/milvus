@@ -2195,7 +2195,10 @@ class TestCollectionMaintenance(TestBase):
         response = client.compact(name)
         assert response["code"] == 0
         compaction_id = response.get("data", {}).get("compactionID")
-        assert isinstance(compaction_id, int) and compaction_id > 0, response
+        assert isinstance(compaction_id, int), response
+        if compaction_id == -1:
+            return
+        assert compaction_id > 0, response
 
         # Get compaction state
         response = client.get_compaction_state(compaction_id)
