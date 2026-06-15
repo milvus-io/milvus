@@ -17,9 +17,12 @@
 #pragma once
 
 #include <algorithm>
+#include <deque>
 #include <memory>
+#include <optional>
 #include <string>
 #include <type_traits>
+#include <vector>
 
 #include "common/Array.h"
 #include "common/ArrayOffsets.h"
@@ -34,6 +37,7 @@
 #include "index/Index.h"
 #include "index/JsonFlatIndex.h"
 #include "log/Log.h"
+#include "mmap/ChunkedColumnInterface.h"
 #include "query/PlanProto.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/SegmentInterface.h"
@@ -72,6 +76,152 @@ PinIndex(milvus::OpContext* op_ctx,
     } else {
         return segment->PinIndex(op_ctx, field_meta.get_id());
     }
+}
+
+struct RowIdScanBitmaps {
+    TargetBitmap result;
+    TargetBitmap validity;
+};
+
+struct RowIdScanEntry {
+    int64_t row_id;
+    bool valid;
+};
+
+inline RowIdScanBitmaps
+RowIdScanToBitmaps(ChunkedColumnInterface::ScanCursor* cursor,
+                   std::deque<RowIdScanEntry>& buffered_entries,
+                   ChunkedColumnInterface::ScanBatch& scan_batch,
+                   int64_t batch_start,
+                   int64_t batch_size,
+                   const TargetBitmap& bitmap_input,
+                   bool mask_validity_by_bitmap_input = true) {
+    AssertInfo(cursor != nullptr, "row id scan cursor is null");
+    const int64_t batch_end = batch_start + batch_size;
+    RowIdScanBitmaps bitmaps{TargetBitmap(batch_size, false),
+                             TargetBitmap(batch_size, true)};
+
+    auto apply_entry = [&](const RowIdScanEntry& entry) {
+        const auto row_id = entry.row_id;
+        if (row_id < batch_start || row_id >= batch_end) {
+            return;
+        }
+        const auto local_index = static_cast<size_t>(row_id - batch_start);
+        if (!entry.valid) {
+            if (!mask_validity_by_bitmap_input || bitmap_input.empty() ||
+                bitmap_input[local_index]) {
+                bitmaps.validity[local_index] = false;
+            }
+            return;
+        }
+        if (bitmap_input.empty() || bitmap_input[local_index]) {
+            bitmaps.result[local_index] = true;
+        }
+    };
+
+    auto buffer_scan_batch_entries = [&]() {
+        AssertInfo(scan_batch.values.empty(),
+                   "row id payload scan batch should not contain values");
+        AssertInfo(scan_batch.validity.size ==
+                       static_cast<int64_t>(scan_batch.row_ids.size()),
+                   "row id payload scan validity size {} does not match "
+                   "row ids size {}",
+                   scan_batch.validity.size,
+                   scan_batch.row_ids.size());
+        AssertInfo(
+            scan_batch.size == static_cast<int64_t>(scan_batch.row_ids.size()),
+            "row id payload scan size {} does not match row ids size {}",
+            scan_batch.size,
+            scan_batch.row_ids.size());
+        for (size_t i = 0; i < scan_batch.row_ids.size(); ++i) {
+            const auto row_id = scan_batch.row_ids[i];
+            if (!buffered_entries.empty()) {
+                AssertInfo(buffered_entries.back().row_id <= row_id,
+                           "row id payload is not ordered: {} before {}",
+                           buffered_entries.back().row_id,
+                           row_id);
+            }
+            buffered_entries.push_back(RowIdScanEntry{
+                row_id, scan_batch.validity.IsValid(static_cast<int64_t>(i))});
+        }
+    };
+
+    auto apply_all_valid_scan_batch_entries = [&]() {
+        AssertInfo(scan_batch.values.empty(),
+                   "row id payload scan batch should not contain values");
+        AssertInfo(scan_batch.validity.size ==
+                       static_cast<int64_t>(scan_batch.row_ids.size()),
+                   "row id payload scan validity size {} does not match "
+                   "row ids size {}",
+                   scan_batch.validity.size,
+                   scan_batch.row_ids.size());
+        AssertInfo(
+            scan_batch.size == static_cast<int64_t>(scan_batch.row_ids.size()),
+            "row id payload scan size {} does not match row ids size {}",
+            scan_batch.size,
+            scan_batch.row_ids.size());
+
+        std::optional<int64_t> previous_row_id;
+        size_t i = 0;
+        for (; i < scan_batch.row_ids.size(); ++i) {
+            const auto row_id = scan_batch.row_ids[i];
+            if (previous_row_id.has_value()) {
+                AssertInfo(previous_row_id.value() <= row_id,
+                           "row id payload is not ordered: {} before {}",
+                           previous_row_id.value(),
+                           row_id);
+            }
+            previous_row_id = row_id;
+            if (row_id < batch_start) {
+                continue;
+            }
+            if (row_id >= batch_end) {
+                break;
+            }
+            const auto local_index = static_cast<size_t>(row_id - batch_start);
+            if (bitmap_input.empty() || bitmap_input[local_index]) {
+                bitmaps.result[local_index] = true;
+            }
+        }
+
+        for (; i < scan_batch.row_ids.size(); ++i) {
+            const auto row_id = scan_batch.row_ids[i];
+            if (previous_row_id.has_value()) {
+                AssertInfo(previous_row_id.value() <= row_id,
+                           "row id payload is not ordered: {} before {}",
+                           previous_row_id.value(),
+                           row_id);
+            }
+            previous_row_id = row_id;
+            buffered_entries.push_back(RowIdScanEntry{row_id, true});
+        }
+        return !buffered_entries.empty();
+    };
+
+    while (true) {
+        while (!buffered_entries.empty()) {
+            const auto entry = buffered_entries.front();
+            if (entry.row_id >= batch_end) {
+                return bitmaps;
+            }
+            buffered_entries.pop_front();
+            apply_entry(entry);
+        }
+        if (!cursor->Next(&scan_batch)) {
+            break;
+        }
+        AssertInfo(scan_batch.size > 0, "invalid row id scan batch");
+        if (scan_batch.validity.encoding ==
+                ChunkedColumnInterface::ValidityEncoding::AllValid ||
+            scan_batch.validity.all_valid) {
+            if (apply_all_valid_scan_batch_entries()) {
+                return bitmaps;
+            }
+            continue;
+        }
+        buffer_scan_batch_entries();
+    }
+    return bitmaps;
 }
 
 class Expr {
@@ -161,6 +311,32 @@ class Expr {
     }
 
  protected:
+    static bool
+    IsSortedOffsetInput(const OffsetVector* input) {
+        for (size_t i = 1; i < input->size(); ++i) {
+            if ((*input)[i - 1] > (*input)[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static bool
+    IsDenseOffsetInputForScan(const OffsetVector* input,
+                              int64_t max_scan_span_hint) {
+        if (input == nullptr || input->empty()) {
+            return false;
+        }
+        if (!IsSortedOffsetInput(input)) {
+            return false;
+        }
+        const auto span = static_cast<int64_t>((*input)[input->size() - 1]) -
+                          static_cast<int64_t>((*input)[0]) + 1;
+        return span <=
+               std::max<int64_t>(max_scan_span_hint,
+                                 4 * static_cast<int64_t>(input->size()));
+    }
+
     DataType type_;
     std::vector<std::shared_ptr<Expr>> inputs_;
     std::string name_;
@@ -355,6 +531,123 @@ class SegmentExpr : public Expr {
             } else {
                 // RawData, PkIndex, TextIndex, JsonStats all use data cursor.
                 MoveCursorForData();
+            }
+        }
+    }
+
+    template <typename T>
+    static ChunkedColumnInterface::ScanValueKind
+    DataScanValueKind() {
+        if constexpr (std::is_same_v<T, std::string_view> ||
+                      std::is_same_v<T, std::string>) {
+            return ChunkedColumnInterface::ScanValueKind::StringView;
+        } else if constexpr (std::is_same_v<T, Json>) {
+            return ChunkedColumnInterface::ScanValueKind::JsonView;
+        } else if constexpr (std::is_same_v<T, ArrayView>) {
+            return ChunkedColumnInterface::ScanValueKind::ArrayView;
+        } else {
+            return ChunkedColumnInterface::ScanValueKind::FixedWidth;
+        }
+    }
+
+    template <typename T>
+    bool
+    InitDataScanCursorIfNeeded(
+        ChunkedColumnInterface::ScanProjection projection =
+            ChunkedColumnInterface::ScanProjection::Data) {
+        if (data_scan_initialized_) {
+            return data_scan_cursor_ != nullptr;
+        }
+        data_scan_initialized_ = true;
+        auto column = segment_->GetChunkedColumn(field_id_);
+        if (column == nullptr) {
+            return false;
+        }
+        PrefetchRawDataChunksForScanIfNeeded(column.get());
+        auto options = ChunkedColumnInterface::ScanOptions::ForData(
+            current_data_global_pos_,
+            active_count_ - current_data_global_pos_,
+            projection,
+            DataScanValueKind<T>());
+        data_scan_cursor_ = column->Scan(op_ctx_, options);
+        return data_scan_cursor_ != nullptr;
+    }
+
+    void
+    PrefetchRawDataChunksForScanIfNeeded(const ChunkedColumnInterface* column) {
+        if (column == nullptr ||
+            column->GetLocalFormat() !=
+                ChunkedColumnInterface::LocalFormat::Raw ||
+            prefetched_ || !segment_->is_chunked()) {
+            return;
+        }
+        std::vector<int64_t> chunk_ids;
+        chunk_ids.reserve(num_data_chunk_ - current_data_chunk_);
+        for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
+            chunk_ids.push_back(i);
+        }
+        segment_->prefetch_chunks(op_ctx_, field_id_, chunk_ids);
+        prefetched_ = true;
+    }
+
+    bool
+    EnsureDataScanBatch() {
+        while (data_scan_batch_pos_ >= data_scan_batch_.size) {
+            data_scan_batch_pos_ = 0;
+            if (!data_scan_cursor_->Next(&data_scan_batch_)) {
+                return false;
+            }
+            AssertInfo(data_scan_batch_.size > 0, "invalid data scan batch");
+        }
+        return true;
+    }
+
+    static const bool*
+    BoolValidityData(const ChunkedColumnInterface::ScanBatch& batch,
+                     int64_t batch_pos) {
+        if (batch.validity.encoding !=
+                ChunkedColumnInterface::ValidityEncoding::BoolArray ||
+            batch.validity.all_valid || batch.validity.data == nullptr) {
+            return nullptr;
+        }
+        return static_cast<const bool*>(batch.validity.data) +
+               batch.validity.offset + batch_pos;
+    }
+
+    static void
+    ApplyScanValidity(const ChunkedColumnInterface::ScanBatch& batch,
+                      int64_t batch_pos,
+                      TargetBitmapView res,
+                      TargetBitmapView valid_res,
+                      int64_t size) {
+        if (batch.validity.encoding ==
+                ChunkedColumnInterface::ValidityEncoding::AllValid ||
+            batch.validity.all_valid) {
+            return;
+        }
+        for (int64_t i = 0; i < size; ++i) {
+            if (!batch.validity.IsValid(batch_pos + i)) {
+                res[i] = false;
+                valid_res[i] = false;
+            }
+        }
+    }
+
+    static void
+    ApplyScanValidityByOffsets(const ChunkedColumnInterface::ScanBatch& batch,
+                               const int32_t* offsets,
+                               TargetBitmapView res,
+                               TargetBitmapView valid_res,
+                               int64_t size) {
+        if (batch.validity.encoding ==
+                ChunkedColumnInterface::ValidityEncoding::AllValid ||
+            batch.validity.all_valid) {
+            return;
+        }
+        for (int64_t i = 0; i < size; ++i) {
+            if (!batch.validity.IsValid(offsets[i])) {
+                res[i] = false;
+                valid_res[i] = false;
             }
         }
     }
@@ -615,11 +908,9 @@ class SegmentExpr : public Expr {
         return batch_size;
     }
 
-    // accept offsets array and process on the scalar data by offsets
-    // stateless! Just check and set bitset as result, does not need to move cursor
     template <typename T, typename FUNC, typename... ValTypes>
     int64_t
-    ProcessDataByOffsets(
+    ProcessDataByOffsetsByChunkFallback(
         FUNC func,
         std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
         OffsetVector* input,
@@ -627,17 +918,8 @@ class SegmentExpr : public Expr {
         TargetBitmapView valid_res,
         const ValTypes&... values) {
         int64_t processed_size = 0;
-
-        // index reverse lookup (only for ScalarIndex path)
-        if (UseIndexCursor() && num_data_chunk_ == 0) {
-            return ProcessIndexLookupByOffsets<T>(
-                func, skip_func, input, res, valid_res, values...);
-        }
-
         auto& skip_index = segment_->GetSkipIndex();
 
-        // raw data scan
-        // sealed segment
         if (segment_->type() == SegmentType::Sealed) {
             if (segment_->is_chunked()) {
                 if constexpr (std::is_same_v<T, std::string_view> ||
@@ -664,11 +946,10 @@ class SegmentExpr : public Expr {
                                 valid_res + processed_size,
                                 values...);
                         } else {
-                            if (valid_data.size() > processed_size &&
-                                !valid_data[processed_size]) {
-                                res[processed_size] =
-                                    valid_res[processed_size] = false;
-                            }
+                            ApplyValidData(valid_data.data(),
+                                           res + processed_size,
+                                           valid_res + processed_size,
+                                           1);
                         }
                         processed_size++;
                     }
@@ -705,62 +986,245 @@ class SegmentExpr : public Expr {
                     processed_size++;
                 }
                 return input->size();
+            }
+
+            if constexpr (std::is_same_v<T, std::string_view> ||
+                          std::is_same_v<T, Json> ||
+                          std::is_same_v<T, ArrayView>) {
+                return ProcessDataByOffsetsForSealedSeg<T>(
+                    func, skip_func, input, res, valid_res, values...);
+            }
+            auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, 0);
+            auto chunk = pw.get();
+            const T* data = chunk.data();
+            const bool* valid_data = chunk.valid_data();
+            if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
+                func.template operator()<FilterType::random>(data,
+                                                             valid_data,
+                                                             input->data(),
+                                                             input->size(),
+                                                             res,
+                                                             valid_res,
+                                                             values...);
             } else {
-                if constexpr (std::is_same_v<T, std::string_view> ||
-                              std::is_same_v<T, Json> ||
-                              std::is_same_v<T, ArrayView>) {
-                    return ProcessDataByOffsetsForSealedSeg<T>(
-                        func, skip_func, input, res, valid_res, values...);
-                }
-                auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, 0);
-                auto chunk = pw.get();
-                const T* data = chunk.data();
-                const bool* valid_data = chunk.valid_data();
-                if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
-                    func.template operator()<FilterType::random>(data,
-                                                                 valid_data,
-                                                                 input->data(),
-                                                                 input->size(),
-                                                                 res,
-                                                                 valid_res,
-                                                                 values...);
-                } else {
-                    ApplyValidData(valid_data, res, valid_res, input->size());
-                }
-                return input->size();
+                ApplyValidData(valid_data, res, valid_res, input->size());
             }
-        } else {
-            // growing segment
-            for (size_t i = 0; i < input->size(); ++i) {
-                int64_t offset = (*input)[i];
-                auto chunk_id = offset / size_per_chunk_;
-                auto chunk_offset = offset % size_per_chunk_;
-                auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id);
-                auto chunk = pw.get();
-                const T* data = chunk.data() + chunk_offset;
-                const bool* valid_data = chunk.valid_data();
-                if (valid_data != nullptr) {
-                    valid_data += chunk_offset;
-                }
-                if (!skip_func || !skip_func(skip_index, field_id_, chunk_id)) {
-                    func.template operator()<FilterType::random>(
-                        data,
-                        valid_data,
-                        nullptr,
-                        1,
-                        res + processed_size,
-                        valid_res + processed_size,
-                        values...);
-                } else {
-                    ApplyValidData(valid_data,
-                                   res + processed_size,
-                                   valid_res + processed_size,
-                                   1);
-                }
-                processed_size++;
+            return input->size();
+        }
+
+        for (size_t i = 0; i < input->size(); ++i) {
+            int64_t offset = (*input)[i];
+            auto chunk_id = offset / size_per_chunk_;
+            auto chunk_offset = offset % size_per_chunk_;
+            auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id);
+            auto chunk = pw.get();
+            const T* data = chunk.data() + chunk_offset;
+            const bool* valid_data = chunk.valid_data();
+            if (valid_data != nullptr) {
+                valid_data += chunk_offset;
             }
+            if (!skip_func || !skip_func(skip_index, field_id_, chunk_id)) {
+                func.template operator()<FilterType::random>(
+                    data,
+                    valid_data,
+                    nullptr,
+                    1,
+                    res + processed_size,
+                    valid_res + processed_size,
+                    values...);
+            } else {
+                ApplyValidData(valid_data,
+                               res + processed_size,
+                               valid_res + processed_size,
+                               1);
+            }
+            processed_size++;
         }
         return input->size();
+    }
+
+    // accept sorted offsets array and process with one continuous Scan.
+    // TODO: push the offset bitmap down into Scan when Vortex supports bitmap scan.
+    template <typename T, typename FUNC, typename... ValTypes>
+    int64_t
+    ProcessSortedDataByOffsetsByScan(
+        FUNC func,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        OffsetVector* input,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        const ValTypes&... values) {
+        auto column = segment_->GetChunkedColumn(field_id_);
+        if (column == nullptr) {
+            return -1;
+        }
+        if (input->empty()) {
+            return 0;
+        }
+
+        const auto scan_start = static_cast<int64_t>((*input)[0]);
+        const auto scan_end =
+            static_cast<int64_t>((*input)[input->size() - 1]) + 1;
+        const auto scan_length = scan_end - scan_start;
+        AssertInfo(scan_length > 0,
+                   "invalid offset scan range [{}, {})",
+                   scan_start,
+                   scan_end);
+
+        TargetBitmap offset_bitmap(scan_length, false);
+        for (auto offset : *input) {
+            offset_bitmap[static_cast<size_t>(static_cast<int64_t>(offset) -
+                                              scan_start)] = true;
+        }
+
+        auto options = ChunkedColumnInterface::ScanOptions::ForData(
+            scan_start,
+            scan_length,
+            ChunkedColumnInterface::ScanProjection::Data,
+            DataScanValueKind<T>());
+        auto cursor = column->Scan(op_ctx_, options);
+        if (cursor == nullptr) {
+            return -1;
+        }
+
+        auto& skip_index = segment_->GetSkipIndex();
+        size_t processed_offsets = 0;
+        std::vector<int32_t> batch_offsets;
+        batch_offsets.reserve(std::min<int64_t>(batch_size_, input->size()));
+
+        ChunkedColumnInterface::ScanBatch batch;
+        while (processed_offsets < input->size() && cursor->Next(&batch)) {
+            AssertInfo(!batch.values.empty() && batch.size > 0,
+                       "invalid offset data scan batch");
+
+            int64_t batch_pos = 0;
+            while (batch_pos < batch.size &&
+                   processed_offsets < input->size()) {
+                const auto interval_start = batch.row_id_start + batch_pos;
+                const auto batch_end = batch.row_id_start + batch.size;
+                if (static_cast<int64_t>((*input)[processed_offsets]) >=
+                    batch_end) {
+                    break;
+                }
+
+                auto [chunk_id, _] =
+                    segment_->type() == SegmentType::Growing
+                        ? std::make_pair(interval_start / size_per_chunk_,
+                                         interval_start % size_per_chunk_)
+                        : segment_->get_chunk_by_offset(field_id_,
+                                                        interval_start);
+                const auto chunk_end =
+                    segment_->type() == SegmentType::Growing
+                        ? std::min<int64_t>((chunk_id + 1) * size_per_chunk_,
+                                            active_count_)
+                        : segment_->num_rows_until_chunk(field_id_, chunk_id) +
+                              segment_->chunk_size(field_id_, chunk_id);
+                const auto interval_end = std::min(batch_end, chunk_end);
+                if (static_cast<int64_t>((*input)[processed_offsets]) >=
+                    interval_end) {
+                    batch_pos += interval_end - interval_start;
+                    continue;
+                }
+
+                const bool skipped =
+                    skip_func && skip_func(skip_index, field_id_, chunk_id);
+                const auto group_start = processed_offsets;
+                batch_offsets.clear();
+                for (int64_t row = interval_start;
+                     row < interval_end && processed_offsets < input->size();
+                     ++row) {
+                    const auto bitmap_pos = row - scan_start;
+                    if (!offset_bitmap[static_cast<size_t>(bitmap_pos)]) {
+                        continue;
+                    }
+                    while (processed_offsets < input->size() &&
+                           static_cast<int64_t>((*input)[processed_offsets]) ==
+                               row) {
+                        batch_offsets.push_back(
+                            static_cast<int32_t>(row - batch.row_id_start));
+                        ++processed_offsets;
+                    }
+                }
+
+                const auto group_size =
+                    static_cast<int64_t>(processed_offsets - group_start);
+                if (group_size > 0) {
+                    if (!skipped) {
+                        const auto* data = batch.values.data_as<T>();
+                        const auto* valid_data = BoolValidityData(batch, 0);
+                        func.template operator()<FilterType::random>(
+                            data,
+                            valid_data,
+                            batch_offsets.data(),
+                            static_cast<int>(group_size),
+                            res + group_start,
+                            valid_res + group_start,
+                            values...);
+                        if (valid_data == nullptr) {
+                            ApplyScanValidityByOffsets(batch,
+                                                       batch_offsets.data(),
+                                                       res + group_start,
+                                                       valid_res + group_start,
+                                                       group_size);
+                        }
+                    } else {
+                        ApplyScanValidityByOffsets(batch,
+                                                   batch_offsets.data(),
+                                                   res + group_start,
+                                                   valid_res + group_start,
+                                                   group_size);
+                    }
+                }
+
+                batch_pos += interval_end - interval_start;
+            }
+        }
+
+        AssertInfo(processed_offsets == input->size(),
+                   "offset scan processed {} offsets, expected {}",
+                   processed_offsets,
+                   input->size());
+        return input->size();
+    }
+
+    template <typename T, typename FUNC, typename... ValTypes>
+    int64_t
+    ProcessDataByOffsetsByScan(
+        FUNC func,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        OffsetVector* input,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        const ValTypes&... values) {
+        if (IsDenseOffsetInputForScan(input, batch_size_)) {
+            return ProcessSortedDataByOffsetsByScan<T>(
+                func, skip_func, input, res, valid_res, values...);
+        }
+        return -1;
+    }
+
+    template <typename T, typename FUNC, typename... ValTypes>
+    int64_t
+    ProcessDataByOffsets(
+        FUNC func,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        OffsetVector* input,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        const ValTypes&... values) {
+        // index reverse lookup (only for ScalarIndex path)
+        if (UseIndexCursor() && num_data_chunk_ == 0) {
+            return ProcessIndexLookupByOffsets<T>(
+                func, skip_func, input, res, valid_res, values...);
+        }
+
+        const auto processed_size = ProcessDataByOffsetsByScan<T>(
+            func, skip_func, input, res, valid_res, values...);
+        if (processed_size >= 0) {
+            return processed_size;
+        }
+        return ProcessDataByOffsetsByChunkFallback<T>(
+            func, skip_func, input, res, valid_res, values...);
     }
 
     // Process element-level data by element IDs
@@ -1181,7 +1645,6 @@ class SegmentExpr : public Expr {
         return processed_elems;
     }
 
-    // Template parameter to control whether segment offsets are needed (for GIS functions)
     template <typename T,
               bool NeedSegmentOffsets = false,
               typename FUNC,
@@ -1215,8 +1678,9 @@ class SegmentExpr : public Expr {
                     : size_per_chunk_ - data_pos;
 
             size = std::min(size, batch_size_ - processed_size);
-            if (size == 0)
-                continue;  //do not go empty-loop at the bound of the chunk
+            if (size == 0) {
+                continue;
+            }
 
             auto& skip_index = segment_->GetSkipIndex();
             auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
@@ -1229,7 +1693,6 @@ class SegmentExpr : public Expr {
                 const T* data = chunk.data() + data_pos;
 
                 if constexpr (NeedSegmentOffsets) {
-                    // For GIS functions: construct segment offsets array
                     std::vector<int32_t> segment_offsets_array(size);
                     for (int64_t j = 0; j < size; ++j) {
                         segment_offsets_array[j] = static_cast<int32_t>(
@@ -1253,16 +1716,10 @@ class SegmentExpr : public Expr {
                          values...);
                 }
             } else {
-                // Chunk is skipped by SkipIndex.
-                // We still need to:
-                // 1. Apply valid_data to handle nullable fields
-                // 2. Call func with nullptr to update internal cursors
-                //    (e.g., processed_cursor for bitmap_input indexing)
                 ApplyValidData(valid_data,
                                res + processed_size,
                                valid_res + processed_size,
                                size);
-                // Call func with nullptr to update internal cursors
                 if constexpr (NeedSegmentOffsets) {
                     std::vector<int32_t> segment_offsets_array(size);
                     for (int64_t j = 0; j < size; ++j) {
@@ -1312,7 +1769,6 @@ class SegmentExpr : public Expr {
         const ValTypes&... values) {
         int64_t processed_size = 0;
 
-        // prefetch chunks to reduce cache miss latency
         if (!prefetched_) {
             std::vector<int64_t> pf_chunk_ids;
             pf_chunk_ids.reserve(num_data_chunk_ - current_data_chunk_);
@@ -1326,29 +1782,28 @@ class SegmentExpr : public Expr {
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 i == current_data_chunk_ ? current_data_chunk_pos_ : 0;
-
-            // if segment is chunked, type won't be growing
             int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
             size = std::min(size, batch_size_ - processed_size);
 
-            if (size == 0)
-                continue;  //do not go empty-loop at the bound of the chunk
+            if (size == 0) {
+                continue;
+            }
+
             std::vector<int32_t> segment_offsets_array(size);
             auto start_offset =
                 segment_->num_rows_until_chunk(field_id_, i) + data_pos;
             for (int64_t j = 0; j < size; ++j) {
-                int64_t offset = start_offset + j;
-                segment_offsets_array[j] = static_cast<int32_t>(offset);
+                segment_offsets_array[j] =
+                    static_cast<int32_t>(start_offset + j);
             }
+
             auto& skip_index = segment_->GetSkipIndex();
             if (!skip_func || !skip_func(skip_index, field_id_, i)) {
-                bool is_seal = false;
+                bool is_seal_variable_column = false;
                 if constexpr (std::is_same_v<T, std::string_view> ||
                               std::is_same_v<T, Json> ||
                               std::is_same_v<T, ArrayView>) {
                     if (segment_->type() == SegmentType::Sealed) {
-                        // first is the raw data, second is valid_data
-                        // use valid_data to see if raw data is null
                         auto pw = segment_->get_batch_views<T>(
                             op_ctx_, field_id_, i, data_pos, size);
                         const auto& [data_vec, valid_data] = pw.get();
@@ -1372,10 +1827,10 @@ class SegmentExpr : public Expr {
                                  values...);
                         }
 
-                        is_seal = true;
+                        is_seal_variable_column = true;
                     }
                 }
-                if (!is_seal) {
+                if (!is_seal_variable_column) {
                     auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
                     auto chunk = pw.get();
                     const T* data = chunk.data() + data_pos;
@@ -1385,7 +1840,6 @@ class SegmentExpr : public Expr {
                     }
 
                     if constexpr (NeedSegmentOffsets) {
-                        // For GIS functions: construct segment offsets array
                         func(data,
                              valid_data,
                              nullptr,
@@ -1405,26 +1859,20 @@ class SegmentExpr : public Expr {
                     }
                 }
             } else {
-                // Chunk is skipped by SkipIndex.
-                // We still need to:
-                // 1. Apply valid_data to handle nullable fields
-                // 2. Call func with nullptr to update internal cursors
-                //    (e.g., processed_cursor for bitmap_input indexing)
-                const bool* valid_data;
                 if constexpr (std::is_same_v<T, std::string_view> ||
                               std::is_same_v<T, Json> ||
                               std::is_same_v<T, ArrayView>) {
                     auto pw = segment_->get_batch_views<T>(
                         op_ctx_, field_id_, i, data_pos, size);
-                    valid_data = pw.get().second.data();
-                    ApplyValidData(valid_data,
+                    auto views = pw.get();
+                    ApplyValidData(views.second.data(),
                                    res + processed_size,
                                    valid_res + processed_size,
                                    size);
                 } else {
                     auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
                     auto chunk = pw.get();
-                    valid_data = chunk.valid_data();
+                    const bool* valid_data = chunk.valid_data();
                     if (valid_data != nullptr) {
                         valid_data += data_pos;
                     }
@@ -1433,7 +1881,6 @@ class SegmentExpr : public Expr {
                                    valid_res + processed_size,
                                    size);
                 }
-                // Call func with nullptr to update internal cursors
                 if constexpr (NeedSegmentOffsets) {
                     func(nullptr,
                          nullptr,
@@ -1455,7 +1902,6 @@ class SegmentExpr : public Expr {
             }
 
             processed_size += size;
-
             if (processed_size >= batch_size_) {
                 current_data_chunk_ = i;
                 current_data_chunk_pos_ = data_pos + size;
@@ -1471,19 +1917,152 @@ class SegmentExpr : public Expr {
               typename FUNC,
               typename... ValTypes>
     int64_t
+    ProcessDataChunksByScan(
+        FUNC func,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        const ValTypes&... values) {
+        if (!InitDataScanCursorIfNeeded<T>()) {
+            return -1;
+        }
+
+        int64_t processed_size = 0;
+        const auto real_batch_size = GetNextBatchSize();
+        auto& skip_index = segment_->GetSkipIndex();
+
+        while (processed_size < real_batch_size) {
+            if (!EnsureDataScanBatch()) {
+                break;
+            }
+
+            const auto row =
+                data_scan_batch_.row_id_start + data_scan_batch_pos_;
+            const auto expected_row = current_data_global_pos_ + processed_size;
+            AssertInfo(row == expected_row,
+                       "data scan row mismatch, got {}, expected {}",
+                       row,
+                       expected_row);
+
+            auto size =
+                std::min<int64_t>(real_batch_size - processed_size,
+                                  data_scan_batch_.size - data_scan_batch_pos_);
+            auto [chunk_id, _] =
+                segment_->type() == SegmentType::Growing
+                    ? std::make_pair(row / size_per_chunk_,
+                                     row % size_per_chunk_)
+                    : segment_->get_chunk_by_offset(field_id_, row);
+            const auto chunk_end =
+                segment_->type() == SegmentType::Growing
+                    ? std::min<int64_t>((chunk_id + 1) * size_per_chunk_,
+                                        active_count_)
+                    : segment_->num_rows_until_chunk(field_id_, chunk_id) +
+                          segment_->chunk_size(field_id_, chunk_id);
+            size = std::min<int64_t>(size, chunk_end - row);
+            const auto* data =
+                data_scan_batch_.values.data_as<T>() + data_scan_batch_pos_;
+            const auto* valid_data =
+                BoolValidityData(data_scan_batch_, data_scan_batch_pos_);
+            const bool skipped =
+                skip_func && skip_func(skip_index, field_id_, chunk_id);
+
+            auto make_segment_offsets = [&]() {
+                std::vector<int32_t> segment_offsets_array(size);
+                for (int64_t i = 0; i < size; ++i) {
+                    segment_offsets_array[i] = static_cast<int32_t>(row + i);
+                }
+                return segment_offsets_array;
+            };
+
+            if (!skipped) {
+                if constexpr (NeedSegmentOffsets) {
+                    auto segment_offsets_array = make_segment_offsets();
+                    func(data,
+                         valid_data,
+                         nullptr,
+                         segment_offsets_array.data(),
+                         size,
+                         res + processed_size,
+                         valid_res + processed_size,
+                         values...);
+                } else {
+                    func(data,
+                         valid_data,
+                         nullptr,
+                         size,
+                         res + processed_size,
+                         valid_res + processed_size,
+                         values...);
+                }
+                if (valid_data == nullptr) {
+                    ApplyScanValidity(data_scan_batch_,
+                                      data_scan_batch_pos_,
+                                      res + processed_size,
+                                      valid_res + processed_size,
+                                      size);
+                }
+            } else {
+                ApplyScanValidity(data_scan_batch_,
+                                  data_scan_batch_pos_,
+                                  res + processed_size,
+                                  valid_res + processed_size,
+                                  size);
+                if constexpr (NeedSegmentOffsets) {
+                    auto segment_offsets_array = make_segment_offsets();
+                    func(nullptr,
+                         nullptr,
+                         nullptr,
+                         segment_offsets_array.data(),
+                         size,
+                         res + processed_size,
+                         valid_res + processed_size,
+                         values...);
+                } else {
+                    func(nullptr,
+                         nullptr,
+                         nullptr,
+                         size,
+                         res + processed_size,
+                         valid_res + processed_size,
+                         values...);
+                }
+            }
+
+            processed_size += size;
+            data_scan_batch_pos_ += size;
+        }
+
+        AssertInfo(processed_size == real_batch_size,
+                   "data scan processed {} rows, expected {}",
+                   processed_size,
+                   real_batch_size);
+        MoveCursor();
+        return processed_size;
+    }
+
+    template <typename T,
+              bool NeedSegmentOffsets = false,
+              typename FUNC,
+              typename... ValTypes>
+    int64_t
     ProcessDataChunks(
         FUNC func,
         std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
         TargetBitmapView res,
         TargetBitmapView valid_res,
         const ValTypes&... values) {
+        const auto processed_size =
+            ProcessDataChunksByScan<T, NeedSegmentOffsets>(
+                func, skip_func, res, valid_res, values...);
+        if (processed_size >= 0) {
+            return processed_size;
+        }
         if (segment_->is_chunked()) {
             return ProcessDataChunksForMultipleChunk<T, NeedSegmentOffsets>(
                 func, skip_func, res, valid_res, values...);
-        } else {
-            return ProcessDataChunksForSingleChunk<T, NeedSegmentOffsets>(
-                func, skip_func, res, valid_res, values...);
         }
+        return ProcessDataChunksForSingleChunk<T, NeedSegmentOffsets>(
+            func, skip_func, res, valid_res, values...);
     }
 
     // Specialized method for ngram post-filter: processes data in a specific range
@@ -1807,7 +2386,7 @@ class SegmentExpr : public Expr {
 
     template <typename T>
     TargetBitmap
-    ProcessDataChunksForValid() {
+    ProcessDataChunksForValidByChunkFallback() {
         TargetBitmap valid_result(GetNextBatchSize());
         valid_result.set();
         int64_t processed_size = 0;
@@ -1829,8 +2408,9 @@ class SegmentExpr : public Expr {
             }
 
             size = std::min(size, batch_size_ - processed_size);
-            if (size == 0)
-                continue;  //do not go empty-loop at the bound of the chunk
+            if (size == 0) {
+                continue;
+            }
             segment_->ApplyFieldValidData(op_ctx_,
                                           field_id_,
                                           i,
@@ -1845,6 +2425,40 @@ class SegmentExpr : public Expr {
                 break;
             }
         }
+        return valid_result;
+    }
+
+    template <typename T>
+    TargetBitmap
+    ProcessDataChunksForValid() {
+        const auto batch_size = GetNextBatchSize();
+        TargetBitmap valid_result(batch_size);
+        valid_result.set();
+        if (!InitDataScanCursorIfNeeded<T>(
+                ChunkedColumnInterface::ScanProjection::NoData)) {
+            return ProcessDataChunksForValidByChunkFallback<T>();
+        }
+        int64_t processed_size = 0;
+        while (processed_size < batch_size) {
+            if (!EnsureDataScanBatch()) {
+                break;
+            }
+            const auto size =
+                std::min<int64_t>(batch_size - processed_size,
+                                  data_scan_batch_.size - data_scan_batch_pos_);
+            ApplyScanValidity(data_scan_batch_,
+                              data_scan_batch_pos_,
+                              valid_result + processed_size,
+                              valid_result + processed_size,
+                              size);
+            processed_size += size;
+            data_scan_batch_pos_ += size;
+        }
+        AssertInfo(processed_size == batch_size,
+                   "validity scan processed {} rows, expected {}",
+                   processed_size,
+                   batch_size);
+        MoveCursor();
         return valid_result;
     }
 
@@ -2238,6 +2852,11 @@ class SegmentExpr : public Expr {
     int64_t current_index_chunk_{0};
     int64_t current_index_chunk_pos_{0};
     int64_t size_per_chunk_{0};
+    bool data_scan_initialized_{false};
+    std::unique_ptr<ChunkedColumnInterface::ScanCursor> data_scan_cursor_{
+        nullptr};
+    ChunkedColumnInterface::ScanBatch data_scan_batch_;
+    int64_t data_scan_batch_pos_{0};
 
     // Unified cache for all index paths (ScalarIndex, PkIndex, TextIndex, JsonStats).
     // Populated once per segment, then sliced per batch via SliceCachedResult().

@@ -99,6 +99,7 @@ endif()
 add_subdirectory( pb )
 add_subdirectory( config )
 add_subdirectory( common )
+add_subdirectory( mmap )
 add_subdirectory( monitor )
 add_subdirectory( storage )
 add_subdirectory( index )
@@ -132,7 +133,7 @@ if (MILVUS_USE_PCH)
     # which are incompatible with PCH compiled under default target features.
     foreach(_target
         milvus_common milvus_config milvus_monitor milvus_storage milvus_index
-        milvus_query milvus_segcore milvus_indexbuilder milvus_clustering
+        milvus_mmap milvus_query milvus_segcore milvus_indexbuilder milvus_clustering
         milvus_exec milvus_futures milvus_rescores
         milvus_plan)
         target_precompile_headers(${_target} PRIVATE ${MILVUS_PCH_HEADERS})
@@ -143,6 +144,7 @@ add_library(milvus_core SHARED
     $<TARGET_OBJECTS:milvus_pb>
     $<TARGET_OBJECTS:milvus_config>
     $<TARGET_OBJECTS:milvus_common>
+    $<TARGET_OBJECTS:milvus_mmap>
     $<TARGET_OBJECTS:milvus_monitor>
     $<TARGET_OBJECTS:milvus_storage>
     $<TARGET_OBJECTS:milvus_index>
