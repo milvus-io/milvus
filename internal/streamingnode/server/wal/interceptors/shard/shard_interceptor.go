@@ -33,6 +33,7 @@ type shardInterceptor struct {
 func (impl *shardInterceptor) initOpTable() {
 	impl.ops = map[message.MessageType]interceptors.AppendInterceptorCall{
 		message.MessageTypeCreateCollection:   impl.handleCreateCollection,
+		message.MessageTypeCreateVChannel:     impl.handleCreateVChannel,
 		message.MessageTypeDropCollection:     impl.handleDropCollection,
 		message.MessageTypeCreatePartition:    impl.handleCreatePartition,
 		message.MessageTypeDropPartition:      impl.handleDropPartition,
@@ -85,6 +86,25 @@ func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg me
 	if schema := createCollectionMsg.MustBody().GetCollectionSchema(); schema != nil {
 		impl.allocFunctionRunners(header.GetCollectionId(), createCollectionMsg.VChannel(), schema)
 	}
+	return msgID, nil
+}
+
+// handleCreateVChannel handles the create-vchannel message, the genesis
+// message of a shard split target vchannel. It registers the collection on
+// this pchannel for DML and segment assignment exactly as create collection.
+func (impl *shardInterceptor) handleCreateVChannel(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	createVChannelMsg := message.MustAsMutableCreateVChannelMessageV2(msg)
+	header := createVChannelMsg.Header()
+	if err := impl.shardManager.CheckIfCollectionCanBeCreated(header.GetCollectionId()); err != nil {
+		impl.shardManager.Logger().Warn("collection already exists when creating vchannel", zap.Int64("collectionID", header.GetCollectionId()))
+		// The collection can not be created at current shard, ignored.
+	}
+
+	msgID, err := appendOp(ctx, msg)
+	if err != nil {
+		return msgID, err
+	}
+	impl.shardManager.CreateVChannel(message.MustAsImmutableCreateVChannelMessageV2(msg.IntoImmutableMessage(msgID)))
 	return msgID, nil
 }
 

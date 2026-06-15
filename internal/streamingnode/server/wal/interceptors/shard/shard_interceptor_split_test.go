@@ -72,6 +72,66 @@ func TestShardInterceptorSplitShardMessage(t *testing.T) {
 	assert.Equal(t, []int64{7}, header.GetFlushedSegmentIds())
 }
 
+func newTestCreateVChannelMutableMessage(vchannel string, collectionID int64) message.MutableMessage {
+	return message.NewCreateVChannelMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.CreateVChannelMessageHeader{
+			CollectionId:        collectionID,
+			PartitionIds:        []int64{2},
+			SplitTaskId:         100,
+			SplitSourceVchannel: "v1",
+			KeyRange:            &message.KeyRange{Upper: []byte{0x80}},
+		}).
+		WithBody(&message.CreateCollectionRequest{}).
+		MustBuildMutable().
+		WithTimeTick(100).
+		WithLastConfirmedUseMessageID()
+}
+
+func TestShardInterceptorCreateVChannelMessage(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	shardManager.EXPECT().CheckIfCollectionCanBeCreated(int64(7)).Return(nil).Once()
+	shardManager.EXPECT().CreateVChannel(mock.Anything).Once()
+
+	appended := false
+	msgID, err := i.DoAppend(context.Background(), newTestCreateVChannelMutableMessage("v2", 7),
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			appended = true
+			return rmq.NewRmqID(1), nil
+		})
+	assert.NoError(t, err)
+	assert.True(t, appended)
+	assert.True(t, msgID.EQ(rmq.NewRmqID(1)))
+}
+
+func TestShardInterceptorCreateVChannelMessageAppendFailure(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	shardManager.EXPECT().CheckIfCollectionCanBeCreated(int64(7)).Return(nil).Once()
+
+	_, err := i.DoAppend(context.Background(), newTestCreateVChannelMutableMessage("v2", 7),
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			return nil, errors.New("mock append error")
+		})
+	assert.Error(t, err)
+}
+
+func TestShardInterceptorCreateVChannelMessageOnExistingCollection(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	// the collection already exists on this pchannel: the genesis is still
+	// appended and applied (idempotent), only a warning is logged.
+	shardManager.EXPECT().CheckIfCollectionCanBeCreated(int64(7)).Return(errors.New("already exists")).Once()
+	shardManager.EXPECT().CreateVChannel(mock.Anything).Once()
+
+	appended := false
+	_, err := i.DoAppend(context.Background(), newTestCreateVChannelMutableMessage("v2", 7),
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			appended = true
+			return rmq.NewRmqID(1), nil
+		})
+	assert.NoError(t, err)
+	assert.True(t, appended)
+}
+
 func TestShardInterceptorSplitShardMessageOnFencedVChannel(t *testing.T) {
 	i, shardManager := newTestShardInterceptor(t)
 	// idempotent: the vchannel is already fenced by a previous split message.

@@ -111,7 +111,25 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.createCollectionLocked(msg.Header().CollectionId, msg.Header().PartitionIds, msg.VChannel(),
+		msg.TimeTick(), msg.MustBody().GetCollectionSchema(), logger)
+}
 
+// CreateVChannel registers a shard split target vchannel. CreateVChannel is
+// the genesis message of the target vchannel and shares the CreateCollection
+// body shape, so it registers the collection for DML and segment assignment
+// on this pchannel exactly as CreateCollection does.
+func (m *shardManagerImpl) CreateVChannel(msg message.ImmutableCreateVChannelMessageV2) {
+	logger := m.Logger().With(log.FieldMessage(msg))
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.createCollectionLocked(msg.Header().CollectionId, msg.Header().PartitionIds, msg.VChannel(),
+		msg.TimeTick(), msg.MustBody().GetCollectionSchema(), logger)
+}
+
+// createCollectionLocked registers the collection and its partition managers on
+// this pchannel for DML and segment assignment. The caller must hold m.mu.
+func (m *shardManagerImpl) createCollectionLocked(collectionID int64, partitionIDs []int64, vchannel string, timetick uint64, schema *schemapb.CollectionSchema, logger *log.MLogger) {
 	if err := m.checkIfCollectionCanBeCreated(collectionID); err != nil {
 		logger.Warn(context.TODO(), "collection already exists")
 		return

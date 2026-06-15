@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -97,4 +98,56 @@ func TestShardManagerRecoverSplittedVChannel(t *testing.T) {
 	// a vchannel recovered in SPLITTED state keeps rejecting DML.
 	m := newTestShardManagerWithVChannelState(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED)
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1), ErrVChannelFenced)
+}
+
+func newTestCreateVChannelImmutableMessage(vchannel string, collectionID int64, partitionIDs []int64, timetick uint64) message.ImmutableCreateVChannelMessageV2 {
+	msg := message.NewCreateVChannelMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.CreateVChannelMessageHeader{
+			CollectionId:        collectionID,
+			PartitionIds:        partitionIDs,
+			SplitTaskId:         100,
+			SplitSourceVchannel: "v1",
+			KeyRange:            &message.KeyRange{Upper: []byte{0x80}},
+		}).
+		WithBody(&message.CreateCollectionRequest{
+			CollectionSchema: &schemapb.CollectionSchema{Name: "col"},
+		}).
+		MustBuildMutable().
+		WithTimeTick(timetick).
+		WithLastConfirmedUseMessageID()
+	return message.MustAsImmutableCreateVChannelMessageV2(msg.IntoImmutableMessage(rmq.NewRmqID(3)))
+}
+
+func TestShardManagerCreateVChannel(t *testing.T) {
+	m := newTestShardManagerWithVChannelState(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL)
+	// a shard split target vchannel of a new collection is registered for DML,
+	// exactly as a create collection genesis would register it.
+	m.CreateVChannel(newTestCreateVChannelImmutableMessage("v2", 7, []int64{8}, 2000))
+	assert.NoError(t, m.CheckIfVChannelCanBeWritten(7))
+
+	// a target without a schema still registers the collection.
+	m.CreateVChannel(newTestCreateVChannelImmutableMessageNoSchema("v3", 9, []int64{10}, 2500))
+	assert.NoError(t, m.CheckIfVChannelCanBeWritten(9))
+
+	// re-registering an already-known collection is a no-op (idempotent).
+	m.CreateVChannel(newTestCreateVChannelImmutableMessage("v1-dup", 1, []int64{2}, 3000))
+	assert.NoError(t, m.CheckIfVChannelCanBeWritten(1))
+}
+
+func newTestCreateVChannelImmutableMessageNoSchema(vchannel string, collectionID int64, partitionIDs []int64, timetick uint64) message.ImmutableCreateVChannelMessageV2 {
+	msg := message.NewCreateVChannelMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.CreateVChannelMessageHeader{
+			CollectionId:        collectionID,
+			PartitionIds:        partitionIDs,
+			SplitTaskId:         100,
+			SplitSourceVchannel: "v1",
+			KeyRange:            &message.KeyRange{Lower: []byte{0x80}},
+		}).
+		WithBody(&message.CreateCollectionRequest{}).
+		MustBuildMutable().
+		WithTimeTick(timetick).
+		WithLastConfirmedUseMessageID()
+	return message.MustAsImmutableCreateVChannelMessageV2(msg.IntoImmutableMessage(rmq.NewRmqID(4)))
 }
