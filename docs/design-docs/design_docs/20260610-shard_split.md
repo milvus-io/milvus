@@ -308,10 +308,11 @@ interceptor chain.
    proxy retries the refresh (with backoff) until its cached table reaches
    that version, then re-dispatches the writes in order — the
    reject→refresh loop terminates by construction. Writes go directly to
-   the new WALs from then on. The write-unavailability window —
-   fence → create → routing commit → proxy refresh — is scoped to the
-   split shard's key range; it now includes target creation (see §10 for
-   the failure-mode trade this ordering accepts), and still fits the
+   the new WALs from then on. The new shards are routable only after the
+   routing/meta commit (the proxy cannot see a shard before its
+   collection-meta write lands), so the write-unavailability window —
+   fence → routing commit → proxy refresh, scoped to the split shard's key
+   range — has the same shape in any ordering (§10), and fits the
    short-latency-increase goal of §1.2.
 
 WAL transactions need no special machinery and there is no drain step:
@@ -657,21 +658,23 @@ by the namespace hard limit instead.
 
 ## 10. Failure Handling
 
-- **Ordering: fence first (deliberate trade).** The `SplitShard` fence is
-  the first WAL action and the single commit point; the new vchannels are
-  created only *after* it, because `CreateVChannel` must carry
-  `BarrierTimeTick = T_switch` and `T_switch` only exists once the fence is
-  appended. The cost: if target creation fails after the fence, the source
-  vchannel is already rejecting writes while no target is routable yet — a
-  write-unavailability window on the split key range. It is **bounded**:
-  `CreateVChannel` is an idempotent append to an already-open pchannel and
-  is retried (across pchannel reassignment) to success, so the window
-  closes in retry/reassignment time, not indefinitely. The alternative —
-  create the targets *before* the fence (so a creation failure aborts
-  cleanly with no outage) — needs a separate post-fence `Activate` to
-  apply the barrier and cannot carry per-cluster start positions cleanly
-  for CDC; fence-first is chosen for fewer phases, a cleaner disjoint axis,
-  and CDC uniformity.
+- **Ordering: fence first.** The `SplitShard` fence is the first WAL
+  action and the single commit point; the new vchannels are created only
+  *after* it, because `CreateVChannel` must carry `BarrierTimeTick =
+  T_switch` and `T_switch` only exists once the fence is appended. This
+  does not change write availability: in *either* ordering the new shards
+  become routable only at the final routing/meta commit (the proxy cannot
+  see a new shard before its collection-meta write lands), so the
+  write-unavailability window for the split key range is fence → routing
+  commit either way, gated on one idempotent post-fence append (here
+  `CreateVChannel`; create-first would instead gate on `Activate`). The
+  one property fence-first gives up is a clean abort on a *target-creation*
+  failure: in create-first the targets are built before the fence, so a
+  creation failure aborts with no commitment; in fence-first the fence is
+  already committed, so a creation failure must roll forward — the append
+  is idempotent and retried across pchannel reassignment to success. We
+  accept losing that clean-abort for fewer phases, a cleaner disjoint
+  axis, and CDC uniformity.
 - **Before the fence** (state `Preparing`): abort is allowed — drop the
   target shard metadata and the allocated vchannel names; nothing has been
   written to any WAL, so there are no external side effects.
