@@ -155,19 +155,20 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 		logger.Info("source vchannel fenced", zap.Uint64("switchTimeTick", result.SwitchTimeTick))
 	}
 
-	if err := streaming.InitSplitTargetVChannels(m.ctx, m.wal, streaming.InitSplitTargetVChannelsParam{
-		CollectionID:    task.GetCollectionId(),
-		DBID:            collection.DatabaseID,
-		DBName:          collection.DatabaseName,
-		CollectionName:  collection.Schema.GetName(),
-		Schema:          collection.Schema,
-		PartitionIDs:    collection.Partitions,
-		SplitTaskID:     task.GetTaskId(),
-		SourceVChannel:  task.GetSourceVchannel(),
-		SwitchTimeTick:  task.GetSwitchTimeTick(),
-		TargetVChannels: splitTargetVChannels(task.GetTargets()),
-	}); err != nil {
-		logger.Warn("initialize the target vchannels failed", zap.Error(err))
+	startPositions, err := streaming.InitSplitTargetVChannels(m.ctx, m.wal, streaming.InitSplitTargetVChannelsParam{
+		CollectionID:   task.GetCollectionId(),
+		DBID:           collection.DatabaseID,
+		DBName:         collection.DatabaseName,
+		CollectionName: collection.Schema.GetName(),
+		Schema:         collection.Schema,
+		PartitionIDs:   collection.Partitions,
+		SplitTaskID:    task.GetTaskId(),
+		SourceVChannel: task.GetSourceVchannel(),
+		SwitchTimeTick: task.GetSwitchTimeTick(),
+		Targets:        toMessageSplitTargets(task.GetTargets()),
+	})
+	if err != nil {
+		logger.Warn("create the target vchannels failed", zap.Error(err))
 		return
 	}
 
@@ -176,12 +177,19 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 	// (authoritative routing table milestone, issue #50463).
 
 	if err := m.updateTask(task, func(task *datapb.SplitShardTask) {
+		// persist the consume start position of each target so the child
+		// delegators can be spawned from it after a crash.
+		for _, target := range task.GetTargets() {
+			if pos, ok := startPositions[target.GetVchannel()]; ok {
+				target.StartPosition = pos
+			}
+		}
 		task.State = datapb.SplitShardTaskState_SplitShardTaskRedistributing
 	}); err != nil {
 		logger.Warn("persist the fenced split task failed", zap.Error(err))
 		return
 	}
-	logger.Info("target vchannels initialized, advance to redistributing")
+	logger.Info("target vchannels created, advance to redistributing")
 }
 
 // advanceRedistributing relabels one batch of the source shard's segments to

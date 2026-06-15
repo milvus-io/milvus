@@ -194,14 +194,14 @@ func TestAdvanceFencing(t *testing.T) {
 		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
 			return msg.MessageType() == message.MessageTypeSplitShard
 		})).Return(&types.AppendResult{MessageID: rmq.NewRmqID(2), TimeTick: 2000}, nil).Once()
-		// one initialization message per target vchannel.
+		// one CreateVChannel message per target vchannel.
 		initialized := make(map[string]uint64, 2)
 		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
-			return msg.MessageType() == message.MessageTypeCreateCollection
+			return msg.MessageType() == message.MessageTypeCreateVChannel
 		}), mock.Anything).RunAndReturn(
 			func(ctx context.Context, msg message.MutableMessage, opts ...streaming.AppendOption) (*types.AppendResult, error) {
 				initialized[msg.VChannel()] = opts[0].BarrierTimeTick
-				return &types.AppendResult{MessageID: rmq.NewRmqID(3), TimeTick: 2100}, nil
+				return &types.AppendResult{MessageID: rmq.NewRmqID(3), TimeTick: 2100, LastConfirmedMessageID: rmq.NewRmqID(9)}, nil
 			}).Times(2)
 
 		manager, catalog := newSplitExecutorManager(t, m, fencingTask(), wal, nil, &fakeSplitPlanner{})
@@ -212,8 +212,12 @@ func TestAdvanceFencing(t *testing.T) {
 		task := manager.mustGetTask(100)
 		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, task.GetState())
 		assert.Equal(t, uint64(2000), task.GetSwitchTimeTick())
-		// every target initialized with T_switch as the barrier.
+		// every target created with T_switch as the barrier.
 		assert.Equal(t, map[string]uint64{"v1": 2000, "v2": 2000}, initialized)
+		// the consume start position of each target is persisted.
+		for _, target := range task.GetTargets() {
+			assert.Equal(t, rmq.NewRmqID(9).Marshal(), target.GetStartPosition())
+		}
 	})
 
 	t.Run("already fenced without recorded T_switch stays", func(t *testing.T) {
@@ -236,14 +240,85 @@ func TestAdvanceFencing(t *testing.T) {
 		task.SwitchTimeTick = 2000
 		wal := mock_streaming.NewMockWALAccesser(t)
 		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
-			return msg.MessageType() == message.MessageTypeCreateCollection
-		}), mock.Anything).Return(&types.AppendResult{MessageID: rmq.NewRmqID(3), TimeTick: 2100}, nil).Times(2)
+			return msg.MessageType() == message.MessageTypeCreateVChannel
+		}), mock.Anything).Return(&types.AppendResult{MessageID: rmq.NewRmqID(3), TimeTick: 2100, LastConfirmedMessageID: rmq.NewRmqID(9)}, nil).Times(2)
 
 		manager, catalog := newSplitExecutorManager(t, m, task, wal, nil, &fakeSplitPlanner{})
 		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Once()
 
 		manager.advanceTasks()
 		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, manager.mustGetTask(100).GetState())
+	})
+
+	t.Run("collection dropped before the fence aborts", func(t *testing.T) {
+		m := newSplitTestMeta(true, "v0", map[int64]int64{10: 80})
+		task := fencingTask()
+		task.CollectionId = 999 // not in meta
+		wal := mock_streaming.NewMockWALAccesser(t)
+		manager, catalog := newSplitExecutorManager(t, m, task, wal, nil, &fakeSplitPlanner{})
+		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Once()
+		manager.advanceTasks()
+		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAborted, manager.mustGetTask(100).GetState())
+	})
+
+	t.Run("split shard append error stays in fencing", func(t *testing.T) {
+		m := newSplitTestMeta(true, "v0", map[int64]int64{10: 80})
+		wal := mock_streaming.NewMockWALAccesser(t)
+		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
+			return msg.MessageType() == message.MessageTypeSplitShard
+		})).Return(nil, errors.New("mock append error")).Once()
+		manager, _ := newSplitExecutorManager(t, m, fencingTask(), wal, nil, &fakeSplitPlanner{})
+		manager.advanceTasks()
+		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskFencing, manager.mustGetTask(100).GetState())
+	})
+
+	t.Run("create vchannel error keeps T_switch and stays in fencing", func(t *testing.T) {
+		m := newSplitTestMeta(true, "v0", map[int64]int64{10: 80})
+		wal := mock_streaming.NewMockWALAccesser(t)
+		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
+			return msg.MessageType() == message.MessageTypeSplitShard
+		})).Return(&types.AppendResult{MessageID: rmq.NewRmqID(2), TimeTick: 2000}, nil).Once()
+		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
+			return msg.MessageType() == message.MessageTypeCreateVChannel
+		}), mock.Anything).Return(nil, errors.New("mock append error")).Once()
+		manager, catalog := newSplitExecutorManager(t, m, fencingTask(), wal, nil, &fakeSplitPlanner{})
+		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Once() // T_switch persist
+		manager.advanceTasks()
+		task := manager.mustGetTask(100)
+		// T_switch is persisted, but target creation failed: stay in fencing and retry.
+		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskFencing, task.GetState())
+		assert.Equal(t, uint64(2000), task.GetSwitchTimeTick())
+	})
+
+	t.Run("T_switch persist failure does not record the switch", func(t *testing.T) {
+		m := newSplitTestMeta(true, "v0", map[int64]int64{10: 80})
+		wal := mock_streaming.NewMockWALAccesser(t)
+		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
+			return msg.MessageType() == message.MessageTypeSplitShard
+		})).Return(&types.AppendResult{MessageID: rmq.NewRmqID(2), TimeTick: 2000}, nil).Once()
+		manager, catalog := newSplitExecutorManager(t, m, fencingTask(), wal, nil, &fakeSplitPlanner{})
+		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(errors.New("save failed")).Once()
+		manager.advanceTasks()
+		task := manager.mustGetTask(100)
+		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskFencing, task.GetState())
+		assert.Zero(t, task.GetSwitchTimeTick())
+	})
+
+	t.Run("final persist failure stays in fencing", func(t *testing.T) {
+		m := newSplitTestMeta(true, "v0", map[int64]int64{10: 80, 11: 40})
+		wal := mock_streaming.NewMockWALAccesser(t)
+		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
+			return msg.MessageType() == message.MessageTypeSplitShard
+		})).Return(&types.AppendResult{MessageID: rmq.NewRmqID(2), TimeTick: 2000}, nil).Once()
+		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
+			return msg.MessageType() == message.MessageTypeCreateVChannel
+		}), mock.Anything).Return(&types.AppendResult{MessageID: rmq.NewRmqID(3), TimeTick: 2100, LastConfirmedMessageID: rmq.NewRmqID(9)}, nil).Times(2)
+		manager, catalog := newSplitExecutorManager(t, m, fencingTask(), wal, nil, &fakeSplitPlanner{})
+		// T_switch persist succeeds, the final state-transition persist fails.
+		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Once()
+		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(errors.New("save failed")).Once()
+		manager.advanceTasks()
+		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskFencing, manager.mustGetTask(100).GetState())
 	})
 }
 

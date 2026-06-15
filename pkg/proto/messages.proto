@@ -257,12 +257,6 @@ message CreateCollectionMessageHeader {
     int64 collection_id          = 1;
     repeated int64 partition_ids = 2;
     int64 db_id                  = 3;
-    // Transitional: these two fields carry the shard split correlation when a
-    // CreateCollection message is reused as a target vchannel's genesis entry.
-    // They move to CreateVChannelMessageHeader once the write switch appends a
-    // dedicated CreateVChannel message instead of reusing CreateCollection.
-    int64 split_task_id          = 4; // 0 means not born by shard split.
-    string split_source_vchannel = 5; // the fenced source vchannel of the split.
 }
 
 // CreateVChannelMessageHeader is the header of the create-vchannel message,
