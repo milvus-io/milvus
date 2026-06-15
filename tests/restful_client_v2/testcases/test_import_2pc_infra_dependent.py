@@ -14,6 +14,7 @@ import pytest
 from api.milvus import CollectionClient, ImportJobClient, StorageClient, VectorClient
 from base.testbase import TestBase
 from pymilvus import MilvusClient
+from utils.constant import CaseLabel
 from utils.utils import gen_collection_name
 
 IMPORT_2PC_TIMEOUT = 360
@@ -1642,7 +1643,7 @@ class Import2PCInfraBase(TestBase):
         return last_progress, last_seen
 
 
-@pytest.mark.tags("L3")
+@pytest.mark.tags(CaseLabel.L3)
 class TestImport2PCInfraDependent(Import2PCInfraBase):
     def test_import_2pc_cdc_multiple_manual_jobs_same_collection_primary_secondary_consistent(
         self,

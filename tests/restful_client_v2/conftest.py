@@ -1,8 +1,6 @@
 import pytest
 import yaml
 
-LEVEL_TAGS = ("L0", "L1", "L2", "L3")
-
 
 def pytest_addoption(parser):
     parser.addoption("--endpoint", action="store", default="http://127.0.0.1:19530", help="endpoint")
@@ -39,19 +37,6 @@ def pytest_addoption(parser):
         default="http://text-rerank-service.milvus-ci.svc.cluster.local:80",
         help="tei reranker endpoint",
     )
-
-
-@pytest.hookimpl(hookwrapper=True, tryfirst=True)
-def pytest_collection_modifyitems(session, config, items):
-    for item in items:
-        tags = []
-        tags_marker = item.get_closest_marker("tags")
-        if tags_marker:
-            tags.extend(tags_marker.args)
-        tags.extend(label for label in LEVEL_TAGS if item.get_closest_marker(label))
-        if tags:
-            item.add_marker(pytest.mark.tags(*dict.fromkeys(tags)), append=False)
-    yield
 
 
 @pytest.fixture

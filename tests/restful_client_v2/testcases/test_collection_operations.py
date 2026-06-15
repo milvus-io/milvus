@@ -9,12 +9,12 @@ import pytest
 from api.milvus import CollectionClient
 from base.testbase import TestBase
 from pymilvus import Collection, CollectionSchema, DataType, FieldSchema
-from utils.constant import default_nb
+from utils.constant import CaseLabel, default_nb
 from utils.util_log import test_log as logger
 from utils.utils import gen_collection_name, gen_vector, get_data_by_payload
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestCreateCollection(TestBase):
     @pytest.mark.parametrize("dim", [128])
     def test_create_collections_quick_setup(self, dim):
@@ -766,7 +766,7 @@ class TestCreateCollection(TestBase):
         assert rsp["data"]["fields"][2]["nullable"] is True
 
 
-@pytest.mark.L1
+@pytest.mark.tags(CaseLabel.L1)
 class TestCreateCollectionNegative(TestBase):
     def test_create_collections_custom_with_invalid_datatype(self):
         """
@@ -941,7 +941,7 @@ class TestCreateCollectionNegative(TestBase):
         assert "convert defaultValue fail" in rsp["message"]
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestHasCollections(TestBase):
     def test_has_collections_default(self):
         """
@@ -989,7 +989,7 @@ class TestHasCollections(TestBase):
             assert rsp["data"]["has"] is False
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestGetCollectionStats(TestBase):
     def test_get_collections_stats(self):
         """
@@ -1025,7 +1025,7 @@ class TestGetCollectionStats(TestBase):
         assert rsp["data"]["rowCount"] == nb
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestLoadReleaseCollection(TestBase):
     def test_load_and_release_collection(self):
         name = gen_collection_name()
@@ -1070,7 +1070,7 @@ class TestLoadReleaseCollection(TestBase):
         assert rsp["data"]["loadState"] == "LoadStateNotLoad"
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestGetCollectionLoadState(TestBase):
     def test_get_collection_load_state(self):
         """
@@ -1111,7 +1111,7 @@ class TestGetCollectionLoadState(TestBase):
         assert rsp["data"]["loadState"] == "LoadStateLoaded"
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestListCollections(TestBase):
     def test_list_collections_default(self):
         """
@@ -1139,7 +1139,7 @@ class TestListCollections(TestBase):
             assert name in all_collections
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestDescribeCollection(TestBase):
     def test_describe_collections_default(self):
         """
@@ -1211,7 +1211,7 @@ class TestDescribeCollection(TestBase):
         assert rsp["data"]["enableDynamicField"] is True
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestDescribeCollectionNegative(TestBase):
     def test_describe_collections_with_invalid_collection_name(self):
         """
@@ -1238,7 +1238,7 @@ class TestDescribeCollectionNegative(TestBase):
         assert "can't find collection" in rsp["message"]
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestDropCollection(TestBase):
     def test_drop_collections_default(self):
         """
@@ -1272,7 +1272,7 @@ class TestDropCollection(TestBase):
             assert name not in all_collections
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestDropCollectionNegative(TestBase):
     def test_drop_collections_with_invalid_collection_name(self):
         """
@@ -1301,7 +1301,7 @@ class TestDropCollectionNegative(TestBase):
         assert rsp["code"] == 0
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestRenameCollection(TestBase):
     def test_rename_collection(self):
         """
@@ -1335,7 +1335,7 @@ class TestRenameCollection(TestBase):
         assert name not in all_collections
 
 
-@pytest.mark.L1
+@pytest.mark.tags(CaseLabel.L1)
 class TestCollectionWithAuth(TestBase):
     def test_drop_collections_with_invalid_api_key(self):
         """
@@ -1432,7 +1432,7 @@ class TestCollectionWithAuth(TestBase):
         assert rsp["code"] == 1800
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestCollectionProperties(TestBase):
     """Test collection property operations"""
 
@@ -1919,7 +1919,7 @@ class TestCollectionAddField(TestBase):
             np.testing.assert_allclose(actual["sub_vec"], expected["sub_vec"], rtol=1e-5, atol=1e-5)
 
 
-@pytest.mark.L1
+@pytest.mark.tags(CaseLabel.L1)
 class TestCollectionAddFieldNegative(TestBase):
     """Test collection add field negative cases"""
 
@@ -2107,7 +2107,7 @@ class TestCollectionAddFieldNegative(TestBase):
         assert "collection" in rsp.get("message", "").lower() or "not found" in rsp.get("message", "").lower()
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestCollectionMaintenance(TestBase):
     """Test collection maintenance operations"""
 
@@ -2301,7 +2301,7 @@ def _gen_struct_array_row(row_id, num_elems, dim=DEFAULT_STRUCT_ARRAY_DIM):
     }
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestStructArrayCollection(TestBase):
     def test_create_struct_array_collection(self):
         name = gen_collection_name()
@@ -2328,7 +2328,7 @@ class TestStructArrayCollection(TestBase):
         assert by_name["sub_vec"]["elementType"] == "FloatVector"
 
 
-@pytest.mark.L1
+@pytest.mark.tags(CaseLabel.L1)
 class TestStructArraySchemaValidation(TestBase):
     def _create_with_bad_sub_field(self, name, bad_sub_field):
         payload = {
@@ -2503,7 +2503,7 @@ class TestStructArraySchemaValidation(TestBase):
         assert rsp["code"] != 0, rsp
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestStructArrayInsertQuery(TestBase):
     def _create_and_load(self, name, dim=DEFAULT_STRUCT_ARRAY_DIM):
         payload = _build_struct_array_schema_payload(name, dim=dim, include_index_params=True)
@@ -2571,7 +2571,7 @@ class TestStructArrayInsertQuery(TestBase):
         assert rsp["code"] != 0, rsp
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestStructSubVectorSearch(TestBase):
     def _setup_collection_with_sub_index(self, name, dim=DEFAULT_STRUCT_ARRAY_DIM, nb=50, sub_metric="COSINE"):
         payload = _build_struct_array_schema_payload(name, dim=dim, include_index_params=False)
@@ -2678,7 +2678,7 @@ class TestStructSubVectorSearch(TestBase):
         assert rsp["code"] != 0, rsp
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestStructSubVectorSearchOneStep(TestBase):
     def _create_load_insert(self, name, sub_metric, nb=50):
         payload = _build_struct_array_schema_payload(
