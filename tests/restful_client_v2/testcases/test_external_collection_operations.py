@@ -874,7 +874,6 @@ def _assert_basic_row_body(row, row_id, include_embedding=True):
         _assert_vector_close(row["embedding"], _expected_embedding(row_id))
 
 
-@pytest.mark.ExternalCollection
 class TestRestExternalCollection(TestBase):
     def _external_job_post(self, action, payload):
         url = f"{self.endpoint}/v2/vectordb/jobs/external_collection/{action}"
