@@ -716,6 +716,7 @@ func (s *Server) initShardSplitManager() error {
 	if err != nil {
 		return err
 	}
+	manager.setImportMeta(s.importMeta)
 	s.shardSplitManager = manager
 	return nil
 }
