@@ -46,13 +46,16 @@ class PhyColumnExpr : public Expr {
         auto& field_meta = schema[expr_->GetColumn().field_id_];
         pinned_index_ = PinIndex(op_ctx_, segment, field_meta);
         is_indexed_ = pinned_index_.size() > 0;
+        use_index_data_ =
+            is_indexed_ &&
+            segment->HasRawData(expr_->GetColumn().field_id_.get());
         if (segment->is_chunked()) {
             num_chunk_ =
-                is_indexed_
+                use_index_data_
                     ? pinned_index_.size()
                     : segment->num_chunk_data(expr_->GetColumn().field_id_);
         } else {
-            num_chunk_ = is_indexed_
+            num_chunk_ = use_index_data_
                              ? pinned_index_.size()
                              : upper_div(segment_chunk_reader_.active_count_,
                                          segment_chunk_reader_.SizePerChunk());
@@ -70,12 +73,16 @@ class PhyColumnExpr : public Expr {
     MoveCursor() override {
         if (!has_offset_input_) {
             if (segment_chunk_reader_.segment_->is_chunked()) {
-                segment_chunk_reader_.MoveCursorForMultipleChunk(
-                    current_chunk_id_,
-                    current_chunk_pos_,
-                    expr_->GetColumn().field_id_,
-                    num_chunk_,
-                    batch_size_);
+                if (use_index_data_) {
+                    MoveCursorForIndexed();
+                } else {
+                    segment_chunk_reader_.MoveCursorForMultipleChunk(
+                        current_chunk_id_,
+                        current_chunk_pos_,
+                        expr_->GetColumn().field_id_,
+                        num_chunk_,
+                        batch_size_);
+                }
             } else {
                 segment_chunk_reader_.MoveCursorForSingleChunk(
                     current_chunk_id_,
@@ -86,13 +93,21 @@ class PhyColumnExpr : public Expr {
         }
     }
 
+    void
+    MoveCursorForIndexed() {
+        current_chunk_pos_ = current_chunk_pos_ + batch_size_ >=
+                                     segment_chunk_reader_.active_count_
+                                 ? segment_chunk_reader_.active_count_
+                                 : current_chunk_pos_ + batch_size_;
+    }
+
  private:
     int64_t
     GetCurrentRows() const {
         if (segment_chunk_reader_.segment_->is_chunked()) {
             auto current_rows =
-                is_indexed_ && segment_chunk_reader_.segment_->type() ==
-                                   SegmentType::Sealed
+                use_index_data_ && segment_chunk_reader_.segment_->type() ==
+                                       SegmentType::Sealed
                     ? current_chunk_pos_
                     : segment_chunk_reader_.segment_->num_rows_until_chunk(
                           expr_->GetColumn().field_id_, current_chunk_id_) +
@@ -131,7 +146,16 @@ class PhyColumnExpr : public Expr {
     }
 
  private:
+    segcore::PinnedIndexView
+    PinnedIndexForRawLookup() const {
+        if (!use_index_data_) {
+            return {};
+        }
+        return {pinned_index_.data(), pinned_index_.size()};
+    }
+
     bool is_indexed_;
+    bool use_index_data_;
 
     int64_t num_chunk_{0};
     int64_t current_chunk_id_{0};
