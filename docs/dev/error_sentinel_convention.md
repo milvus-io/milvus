@@ -2,7 +2,10 @@
 
 Milvus error handling has two distinct layers. This document describes the rules
 that separate them, the rationale, and an audit of where the codebase currently
-violates them.
+violates them. Companions: [error_handling_guide.md](./error_handling_guide.md)
+(day-to-day how-to) and
+[error_handling_casebook.md](./error_handling_casebook.md) (real
+positive/negative examples of the mistakes that survive review).
 
 ## The two layers
 
@@ -105,6 +108,52 @@ Every sentinel also carries an Input-vs-System classification (who is to
 blame) that drives `Status.Retriable`, the `fail_input`/`fail_system` metric
 labels, lb_policy failover and `retry.Do`; see "Input vs System: who is to
 blame?" in [error_handling_guide.md](error_handling_guide.md).
+
+#### Code-range partition
+
+Codes are allocated in families. Before adding a sentinel, scan the registry
+(`grep -nE "= newMilvusError\(" pkg/util/merr/errors.go`) and place the new
+code inside its family's range — the init-time registry panics on a
+*duplicate*, but it cannot tell you that 1305 belongs to the MQ family. Don't
+open a new range for a one-off; most "new" errors fit an existing family or an
+existing sentinel (check before inventing: both `ErrSegcore` and
+`ErrMqInternal` were nearly re-invented during the standardization work).
+
+| Range | Family | Range | Family |
+|---|---|---|---|
+| 1–99 | service-level (`NotReady` 1, `Unavailable` 2, `Internal` 5, …) | 1300–1399 | MQ |
+| 100–199 | collection | 1400–1499 | privilege / RBAC |
+| 200–299 | partition | 1600–1699 | alias |
+| 300–399 | resource group | 1700–1799 | field |
+| 400–499 | replica | 1800–1899 | HTTP / REST gateway |
+| 500–599 | channel | 1900–1999 | replicate / CDC |
+| 600–699 | segment | 2000–2099 | segcore + knowhere (cgo; table-driven, see below) |
+| 700–799 | index | 2100–2199 | import |
+| 800–899 | database | 2200–2299 | query / requery plan |
+| 901–999 | node | 2300–2399 | compaction |
+| 1000–1099 | io / storage / serialization / data integrity | 2400–2499 | function pipeline (`ErrFunctionFailed` 2400) — but `ErrDataNodeSlotExhausted` is 2401, so check occupants before assuming |
+| 1100–1199 | request parameter | 2500–2599 | KMS |
+| 1200–1299 | metrics | 2600–2699 | snapshot |
+| | | 3000+ | misc (`ErrOperationNotSupported` 3000, `ErrOldSessionExists` 3001) |
+
+`65535` (`(1<<16)-1`) is `errUnexpected` — the wire fallback for errors that
+carry no merr code. It is reserved; never originate it deliberately. The
+2000–2099 segcore range is owned by the cgo conversion table: go through
+`merr.SegcoreError` (`pkg/util/merr/utils.go`), which consults the
+code/retriability table in `pkg/util/merr/segcore.go` — don't hand-pick
+numbers in the range (casebook Pattern 7).
+
+#### `milvusError.Is` matches by code — two consequences
+
+1. **One code, one sentinel.** Two sentinels sharing a code would be
+   `errors.Is`-equal; the init-time registry panic exists to make that
+   unrepresentable.
+2. **Promoting an internal `errors.New` sentinel to a merr widens every
+   guard.** A bare sentinel matches by pointer identity; a merr matches by
+   code. After a conversion, `errors.Is(err, thatSentinel)` matches *any*
+   error with the same code — silently. Before converting, run
+   `grep -rn "errors.Is(.*<sentinelName>"` and audit every hit (casebook
+   Pattern 6 documents the data-loss-class near-miss this rule comes from).
 
 ### Internal-sentinel layer — lowercase `errXxx`, same-package only
 
