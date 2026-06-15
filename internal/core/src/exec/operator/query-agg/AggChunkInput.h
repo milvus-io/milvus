@@ -204,9 +204,13 @@ class AggChunkInput {
         std::vector<int64_t> bounds;
         const auto num_chunks = segment.num_chunk_data(anchor_field);
         bounds.reserve(num_chunks + 1);
-        for (int64_t i = 0; i <= num_chunks; ++i) {
+        for (int64_t i = 0; i < num_chunks; ++i) {
             bounds.emplace_back(segment.num_rows_until_chunk(anchor_field, i));
         }
+        bounds.emplace_back(segment.type() == SegmentType::Growing
+                                ? static_cast<int64_t>(filter_mask.size())
+                                : segment.num_rows_until_chunk(anchor_field,
+                                                               num_chunks));
         return FromChunkBounds(bounds, filter_mask);
     }
 

@@ -35,7 +35,9 @@ toAggregateInfo(const plan::AggregationNode& aggregationNode,
     const auto numAggregates = aggregationNode.aggregates().size();
     std::vector<AggregateInfo> aggregates;
     aggregates.reserve(numAggregates);
-    const auto& inputType = aggregationNode.sources()[0]->output_type();
+    const auto& inputType = aggregationNode.input_type() != nullptr
+                                ? aggregationNode.input_type()
+                                : aggregationNode.sources()[0]->output_type();
 
     for (auto i = 0; i < numAggregates; i++) {
         const auto& aggregate = aggregationNode.aggregates()[i];

@@ -20,6 +20,9 @@
 #include <string>
 #include <vector>
 
+#include "common/OpContext.h"
+#include "common/Types.h"
+
 #include "common/Promise.h"
 #include "common/Vector.h"
 #include "common/protobuf_utils.h"
@@ -29,6 +32,9 @@
 #include "plan/PlanNode.h"
 
 namespace milvus {
+namespace segcore {
+class SegmentInternalInterface;
+}
 namespace exec {
 class PhyAggregationNode : public Operator {
  public:
@@ -78,10 +84,18 @@ class PhyAggregationNode : public Operator {
     }
 
  private:
+    void
+    AddRawInput(RowVectorPtr& input);
+
     RowVectorPtr output_;
     std::unique_ptr<GroupingSet> grouping_set_;
     std::shared_ptr<const plan::AggregationNode> aggregationNode_;
     const bool isGlobal_;
+    bool use_raw_input_{false};
+    RowTypePtr input_type_;
+    std::vector<FieldId> raw_input_field_ids_;
+    const segcore::SegmentInternalInterface* segment_{nullptr};
+    OpContext* op_context_{nullptr};
 
     // Count the number of input rows. It is reset on partial aggregation output
     // flush.
