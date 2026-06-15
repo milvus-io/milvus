@@ -151,6 +151,68 @@ func TestCommonPartitionKeyIsolation(t *testing.T) {
 	})
 }
 
+func TestNamespaceMode(t *testing.T) {
+	t.Run("default mode is partition key", func(t *testing.T) {
+		assert.Equal(t, NamespaceModePartitionKey, GetNamespaceMode())
+		assert.True(t, IsNamespaceModePartitionKey())
+		assert.False(t, IsNamespaceModePartition())
+		assert.NoError(t, ValidateNamespaceMode())
+	})
+
+	t.Run("accepts partition key mode", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: NamespaceModeKey, Value: NamespaceModePartitionKey},
+		}
+		assert.Equal(t, NamespaceModePartitionKey, GetNamespaceMode(kvs...))
+		assert.True(t, IsNamespaceModePartitionKey(kvs...))
+		assert.False(t, IsNamespaceModePartition(kvs...))
+		assert.NoError(t, ValidateNamespaceMode(kvs...))
+	})
+
+	t.Run("accepts partition mode", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: NamespaceModeKey, Value: NamespaceModePartition},
+		}
+		assert.Equal(t, NamespaceModePartition, GetNamespaceMode(kvs...))
+		assert.False(t, IsNamespaceModePartitionKey(kvs...))
+		assert.True(t, IsNamespaceModePartition(kvs...))
+		assert.NoError(t, ValidateNamespaceMode(kvs...))
+	})
+
+	t.Run("rejects invalid value", func(t *testing.T) {
+		for _, val := range []string{"invalid", "multitenant"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: NamespaceModeKey, Value: val},
+			}
+			err := ValidateNamespaceMode(kvs...)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "valid values")
+		}
+	})
+
+	t.Run("rejects wrong case value", func(t *testing.T) {
+		for _, val := range []string{"PARTITION_KEY", "Partition"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: NamespaceModeKey, Value: val},
+			}
+			err := ValidateNamespaceMode(kvs...)
+			assert.Error(t, err, "value %q should be rejected", val)
+			assert.Contains(t, err.Error(), "valid values")
+		}
+	})
+
+	t.Run("rejects wrong case key", func(t *testing.T) {
+		for _, key := range []string{"NAMESPACE.MODE", "Namespace.Mode", "namespace.Mode"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: key, Value: NamespaceModePartition},
+			}
+			err := ValidateNamespaceMode(kvs...)
+			assert.Error(t, err, "key %q should be rejected", key)
+			assert.Contains(t, err.Error(), "did you mean")
+		}
+	})
+}
+
 func TestShouldFieldBeLoaded(t *testing.T) {
 	type testCase struct {
 		tag          string

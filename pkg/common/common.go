@@ -61,6 +61,11 @@ const (
 	// NamespaceFieldName defines the name of the Namespace field
 	NamespaceFieldName = "$namespace_id"
 
+	NamespaceModeKey          = "namespace.mode"
+	NamespaceModePartitionKey = "partition_key"
+	NamespaceModePartition    = "partition"
+	ValidNamespaceModes       = NamespaceModePartitionKey + ", " + NamespaceModePartition
+
 	// MetaFieldName is the field name of dynamic schema
 	MetaFieldName = "$meta"
 
@@ -592,6 +597,53 @@ func IsPartitionKeyIsolationPropEnabled(props map[string]string) (bool, error) {
 		return false, merr.WrapErrParameterInvalidMsg("failed to parse partition key isolation property: %v", parseErr)
 	}
 	return iso, nil
+}
+
+func GetNamespaceMode(kvs ...*commonpb.KeyValuePair) string {
+	for _, kv := range kvs {
+		if kv.GetKey() == NamespaceModeKey {
+			mode, ok := normalizeNamespaceMode(kv.GetValue())
+			if ok {
+				return mode
+			}
+			return kv.GetValue()
+		}
+	}
+	return NamespaceModePartitionKey
+}
+
+func IsNamespaceModePartitionKey(kvs ...*commonpb.KeyValuePair) bool {
+	return GetNamespaceMode(kvs...) == NamespaceModePartitionKey
+}
+
+func IsNamespaceModePartition(kvs ...*commonpb.KeyValuePair) bool {
+	return GetNamespaceMode(kvs...) == NamespaceModePartition
+}
+
+func ValidateNamespaceMode(kvs ...*commonpb.KeyValuePair) error {
+	for _, kv := range kvs {
+		if kv.GetKey() == NamespaceModeKey {
+			if _, ok := normalizeNamespaceMode(kv.GetValue()); !ok {
+				return fmt.Errorf("invalid namespace.mode value %q, valid values: [%s]", kv.GetValue(), ValidNamespaceModes)
+			}
+			return nil
+		}
+		if strings.EqualFold(kv.GetKey(), NamespaceModeKey) {
+			return fmt.Errorf("invalid property key %q, did you mean %q?", kv.GetKey(), NamespaceModeKey)
+		}
+	}
+	return nil
+}
+
+func normalizeNamespaceMode(mode string) (string, bool) {
+	switch mode {
+	case "", NamespaceModePartitionKey:
+		return NamespaceModePartitionKey, true
+	case NamespaceModePartition:
+		return NamespaceModePartition, true
+	default:
+		return "", false
+	}
 }
 
 const (
