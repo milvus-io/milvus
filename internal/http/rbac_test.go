@@ -96,6 +96,17 @@ func TestErrorMessages(t *testing.T) {
 	assert.Equal(t, "service unavailable", unavailableErr.Error())
 }
 
+func TestEnforceErrorMapsToInternalServerError(t *testing.T) {
+	// A generic wrapped error from Casbin Enforce is not an authn/authz type,
+	// so the HTTP response should stay a server error instead of becoming 403.
+	err := errors.Wrapf(errors.New("casbin enforce boom"), "privilege check failed")
+
+	assert.False(t, IsAuthenticationError(err))
+	assert.False(t, IsPermissionDeniedError(err))
+	assert.False(t, IsServiceUnavailableError(err))
+	assert.Equal(t, http.StatusInternalServerError, HTTPStatusFromPrivilegeError(err))
+}
+
 func TestCheckExprAuth(t *testing.T) {
 	paramtable.Init()
 	originalPasswordVerify := passwordVerifyFunc

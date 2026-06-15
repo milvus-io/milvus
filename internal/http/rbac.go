@@ -184,7 +184,7 @@ func CheckPrivilege(ctx context.Context, req *http.Request, objectType commonpb.
 		isPermit, err := e.Enforce(roleName, object, privilegeName)
 		if err != nil {
 			log.Warn("privilege check failed", zap.Error(err))
-			return fmt.Errorf("privilege check failed: %w", err)
+			return errors.Wrapf(err, "privilege check failed")
 		}
 		privilege.SetResultCache(roleName, object, privilegeName, isPermit, version)
 		if isPermit {
