@@ -143,6 +143,13 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 			if sErr.IsIgnoredOperation() {
 				return nil, errors.Mark(err, errs.ErrIgnoredOperation)
 			}
+			// A pk-state CAS conflict must not be retried inside the streaming
+			// client: retrying with the same stale expected version would just
+			// conflict again forever. Bubble it up so the proxy OCC retry loop
+			// can re-read the latest row versions and rebuild the request.
+			if sErr.IsPKStateConflict() {
+				return nil, errors.Mark(err, errs.ErrPKStateConflict)
+			}
 			if sErr.IsRateLimitRejected() {
 				// current message is rate limit rejected, wait until the rate limit is available.
 				if err := p.rateLimiter.WaitUntilAvailable(ctx); err != nil {

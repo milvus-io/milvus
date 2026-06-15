@@ -147,6 +147,80 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 	ez *message.CipherConfig,
 	schemaVersion int32,
 ) ([]message.MutableMessage, error) {
+	msgs, err := repackInsertDataWithPartitionKeyForStreamingServiceOCC(ctx, channelNames, insertMsg, result, partitionKeys, ez, schemaVersion, nil)
+	return msgs, err
+}
+
+// repackInsertDataForStreamingServiceOCC repacks insert data into WAL
+// messages and, when occInput is non-nil, attaches an InsertMessageHeader
+// with OCCMode=CAS plus the per-row expected versions.
+func repackInsertDataForStreamingServiceOCC(
+	ctx context.Context,
+	channelNames []string,
+	insertMsg *msgstream.InsertMsg,
+	result *milvuspb.MutationResult,
+	ez *message.CipherConfig,
+	schemaVersion int32,
+	occInput *OCCRowMeta,
+) ([]message.MutableMessage, error) {
+	messages := make([]message.MutableMessage, 0)
+
+	channel2RowOffsets := assignChannelsByPK(result.IDs, channelNames, insertMsg)
+	for channel, rowOffsets := range channel2RowOffsets {
+		partitionName := insertMsg.PartitionName
+		partitionID, err := globalMetaCache.GetPartitionID(ctx, insertMsg.GetDbName(), insertMsg.CollectionName, partitionName)
+		if err != nil {
+			return nil, err
+		}
+		// segment id is assigned at streaming node.
+		msgs, occOuts, err := genInsertMsgsByPartitionWithOCC(ctx, 0, partitionID, partitionName, rowOffsets, channel, insertMsg, occInput)
+		if err != nil {
+			return nil, err
+		}
+		for i, msg := range msgs {
+			insertRequest := msg.(*msgstream.InsertMsg).InsertRequest
+			header := &message.InsertMessageHeader{
+				CollectionId: insertMsg.CollectionID,
+				Partitions: []*message.PartitionSegmentAssignment{
+					{
+						PartitionId: partitionID,
+						Rows:        insertRequest.GetNumRows(),
+						BinarySize:  0, // TODO: current not used, message estimate size is used.
+					},
+				},
+				SchemaVersion: &schemaVersion,
+			}
+			if occInput != nil {
+				attachOCCToInsertHeader(header, occOuts[i])
+			}
+			newMsg, err := message.NewInsertMessageBuilderV1().
+				WithVChannel(channel).
+				WithHeader(header).
+				WithBody(insertRequest).
+				WithCipher(ez).
+				BuildMutable()
+			if err != nil {
+				return nil, err
+			}
+			messages = append(messages, newMsg)
+		}
+	}
+	return messages, nil
+}
+
+// repackInsertDataWithPartitionKeyForStreamingServiceOCC is the OCC-aware
+// variant of repackInsertDataWithPartitionKeyForStreamingService. occInput
+// rows are aligned with insertMsg row order.
+func repackInsertDataWithPartitionKeyForStreamingServiceOCC(
+	ctx context.Context,
+	channelNames []string,
+	insertMsg *msgstream.InsertMsg,
+	result *milvuspb.MutationResult,
+	partitionKeys *schemapb.FieldData,
+	ez *message.CipherConfig,
+	schemaVersion int32,
+	occInput *OCCRowMeta,
+) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
 
 	channel2RowOffsets := assignChannelsByPK(result.IDs, channelNames, insertMsg)
@@ -190,25 +264,29 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 		}
 
 		for partitionName, rowOffsets := range partition2RowOffsets {
-			msgs, err := genInsertMsgsByPartition(ctx, 0, partitionIDs[partitionName], partitionName, rowOffsets, channel, insertMsg)
+			msgs, occOuts, err := genInsertMsgsByPartitionWithOCC(ctx, 0, partitionIDs[partitionName], partitionName, rowOffsets, channel, insertMsg, occInput)
 			if err != nil {
 				return nil, err
 			}
-			for _, msg := range msgs {
+			for i, msg := range msgs {
 				insertRequest := msg.(*msgstream.InsertMsg).InsertRequest
+				header := &message.InsertMessageHeader{
+					CollectionId: insertMsg.CollectionID,
+					Partitions: []*message.PartitionSegmentAssignment{
+						{
+							PartitionId: partitionIDs[partitionName],
+							Rows:        insertRequest.GetNumRows(),
+							BinarySize:  0, // TODO: current not used, message estimate size is used.
+						},
+					},
+					SchemaVersion: &schemaVersion,
+				}
+				if occInput != nil {
+					attachOCCToInsertHeader(header, occOuts[i])
+				}
 				newMsg, err := message.NewInsertMessageBuilderV1().
 					WithVChannel(channel).
-					WithHeader(&message.InsertMessageHeader{
-						CollectionId: insertMsg.CollectionID,
-						Partitions: []*message.PartitionSegmentAssignment{
-							{
-								PartitionId: partitionIDs[partitionName],
-								Rows:        insertRequest.GetNumRows(),
-								BinarySize:  0, // TODO: current not used, message estimate size is used.
-							},
-						},
-						SchemaVersion: &schemaVersion,
-					}).
+					WithHeader(header).
 					WithBody(insertRequest).
 					WithCipher(ez).
 					BuildMutable()

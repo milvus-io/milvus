@@ -229,3 +229,121 @@ func TestRepackInsertDataWithPartitionKey(t *testing.T) {
 		insertMsg.RowIDs[index] = int64(index)
 	}
 }
+
+// =========================================================================
+// Partial-update OCC repack tests (genInsertMsgsByPartitionWithOCC)
+// =========================================================================
+
+// buildOCCInsertMsg builds a minimal column-based InsertMsg with `nb` rows
+// (single Int64 PK column) suitable for genInsertMsgsByPartitionWithOCC.
+func buildOCCInsertMsg(nb int) *msgstream.InsertMsg {
+	pks := make([]int64, nb)
+	for i := 0; i < nb; i++ {
+		pks[i] = int64(i + 1)
+	}
+	pkField := &schemapb.FieldData{
+		FieldId:   100,
+		FieldName: "pk",
+		Type:      schemapb.DataType_Int64,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: pks}},
+			},
+		},
+	}
+	im := &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{HashValues: make([]uint32, nb)},
+		InsertRequest: &msgpb.InsertRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_Insert,
+				SourceID: paramtable.GetNodeID(),
+			},
+			NumRows:    uint64(nb),
+			FieldsData: []*schemapb.FieldData{pkField},
+			Version:    msgpb.InsertDataVersion_ColumnBased,
+		},
+	}
+	im.Timestamps = make([]uint64, nb)
+	im.RowIDs = make([]UniqueID, nb)
+	for i := 0; i < nb; i++ {
+		im.Timestamps[i] = uint64(i)
+		im.RowIDs[i] = int64(i)
+	}
+	return im
+}
+
+func TestGenInsertMsgsByPartitionWithOCC_NilOccInputBackwardCompat(t *testing.T) {
+	paramtable.Init()
+	nb := 4
+	insertMsg := buildOCCInsertMsg(nb)
+	rowOffsets := []int{0, 1, 2, 3}
+
+	msgs, occOuts, err := genInsertMsgsByPartitionWithOCC(
+		context.Background(), 0, 1, "p1", rowOffsets, "ch", insertMsg, nil,
+	)
+	assert.NoError(t, err)
+	assert.Nil(t, occOuts, "occOuts should be nil when occInput is nil")
+	assert.Len(t, msgs, 1)
+	im := msgs[0].(*msgstream.InsertMsg)
+	assert.EqualValues(t, nb, im.NumRows)
+}
+
+func TestGenInsertMsgsByPartitionWithOCC_AlignsOccMeta(t *testing.T) {
+	paramtable.Init()
+	nb := 3
+	insertMsg := buildOCCInsertMsg(nb)
+	occInput := &OCCRowMeta{
+		PKs: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10, 20, 30}}},
+		},
+		ExpectedTs:     []uint64{100, 200, 300},
+		ExpectedExists: []bool{true, false, true},
+	}
+
+	rowOffsets := []int{0, 1, 2}
+	msgs, occOuts, err := genInsertMsgsByPartitionWithOCC(
+		context.Background(), 0, 1, "p1", rowOffsets, "ch", insertMsg, occInput,
+	)
+	assert.NoError(t, err)
+	assert.Len(t, msgs, 1, "small payload should fit into a single InsertMsg")
+	assert.Len(t, occOuts, 1, "occOuts must be aligned 1:1 with msgs")
+	out := occOuts[0]
+	assert.Equal(t, []int64{10, 20, 30}, out.PKs.GetIntId().GetData())
+	assert.Equal(t, []uint64{100, 200, 300}, out.ExpectedTs)
+	assert.Equal(t, []bool{true, false, true}, out.ExpectedExists)
+}
+
+func TestGenInsertMsgsByPartitionWithOCC_SplitsAcrossThreshold(t *testing.T) {
+	paramtable.Init()
+	// Force the WAL message-size threshold to 1 byte so every row triggers a
+	// new InsertMsg, exercising the split path that also needs to slice
+	// OCCRowMeta.
+	origVal := Params.PulsarCfg.MaxMessageSize.GetValue()
+	paramtable.Get().Save(Params.PulsarCfg.MaxMessageSize.Key, "1")
+	defer paramtable.Get().Save(Params.PulsarCfg.MaxMessageSize.Key, origVal)
+
+	nb := 3
+	insertMsg := buildOCCInsertMsg(nb)
+	occInput := &OCCRowMeta{
+		PKs: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}}},
+		},
+		ExpectedTs:     []uint64{11, 22, 33},
+		ExpectedExists: []bool{true, true, false},
+	}
+
+	rowOffsets := []int{0, 1, 2}
+	msgs, occOuts, err := genInsertMsgsByPartitionWithOCC(
+		context.Background(), 0, 1, "p1", rowOffsets, "ch", insertMsg, occInput,
+	)
+	assert.NoError(t, err)
+	// One row per output message because threshold=1 forces a flush after
+	// each row beyond the first.
+	assert.Len(t, msgs, nb)
+	assert.Len(t, occOuts, nb)
+	for i := 0; i < nb; i++ {
+		assert.Equal(t, []int64{int64(i + 1)}, occOuts[i].PKs.GetIntId().GetData())
+		assert.Equal(t, []uint64{occInput.ExpectedTs[i]}, occOuts[i].ExpectedTs)
+		assert.Equal(t, []bool{occInput.ExpectedExists[i]}, occOuts[i].ExpectedExists)
+	}
+}

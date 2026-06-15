@@ -85,6 +85,7 @@ func NewQueryPipeline(
 	aggregates []*planpb.Aggregate,
 	outputMap *agg.AggregationFieldMap,
 	outputFieldIDs []int64,
+	keepTimestamp bool,
 ) (*QueryPipeline, error) {
 	hasAggregation := len(groupByFieldIDs) > 0 || len(aggregates) > 0
 	hasOrderBy := len(orderByFields) > 0
@@ -98,7 +99,7 @@ func NewQueryPipeline(
 	} else if hasOrderBy {
 		p = buildOrderByPipeline(schema, limit, offset, orderByFields, outputFieldIDs)
 	} else {
-		p = buildPlainQueryPipeline(schema, limit, offset, reduceType)
+		p = buildPlainQueryPipeline(schema, limit, offset, reduceType, keepTimestamp)
 	}
 	if err != nil {
 		return nil, err
@@ -116,11 +117,12 @@ func buildPlainQueryPipeline(
 	schema *schemapb.CollectionSchema,
 	limit, offset int64,
 	reduceType reduce.IReduceType,
+	keepTimestamp bool,
 ) *queryutil.Pipeline {
 	b := queryutil.NewPipelineBuilder("proxy-query-plain")
 	b.Add(queryutil.OpReduceByPK, in(), ch(chanReduced), queryutil.NewSortAndCheckPKOperator(reduceType, schema))
 	b.Add(queryutil.OpSlice, ch(chanReduced), ch(chanSliced), queryutil.NewSliceOperator(limit, offset))
-	b.Add("complement_fields", ch(chanSliced), out(), newComplementFieldOperator(schema))
+	b.Add("complement_fields", ch(chanSliced), out(), newComplementFieldOperator(schema, keepTimestamp))
 	return b.Build()
 }
 
@@ -140,7 +142,7 @@ func buildOrderByPipeline(
 	// Uses FieldID matching instead of name matching to correctly handle dynamic
 	// field subkeys (e.g., user requests "x" which maps to $meta's FieldID).
 	b.Add(queryutil.OpRemap, ch(chanSliced), ch("remapped"), queryutil.NewFieldIDRemapOperator(outputFieldIDs))
-	b.Add("complement_fields", ch("remapped"), out(), newComplementFieldOperator(schema))
+	b.Add("complement_fields", ch("remapped"), out(), newComplementFieldOperator(schema, false))
 	return b.Build()
 }
 
@@ -225,7 +227,10 @@ func (p *QueryPipeline) Execute(ctx context.Context, results []*internalpb.Retri
 
 // newComplementFieldOperator sets FieldName/Type/IsDynamic from schema and
 // drops the internal timestamp column. Used for non-aggregation queries.
-func newComplementFieldOperator(schema *schemapb.CollectionSchema) queryutil.Operator {
+// When keepTimestamp is true (partial-update OCC), the hidden Timestamp
+// system column is preserved (with FieldName/FieldId/Type filled in) so the
+// proxy can observe the per-row version.
+func newComplementFieldOperator(schema *schemapb.CollectionSchema, keepTimestamp bool) queryutil.Operator {
 	return queryutil.NewLambdaOperator("complement_fields", func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 		result := inputs[0].(*internalpb.RetrieveResults)
 		if result == nil {
@@ -244,9 +249,15 @@ func newComplementFieldOperator(schema *schemapb.CollectionSchema) queryutil.Ope
 			}
 		}
 
-		// Drop internal timestamp column (FieldID=1).
+		// Drop internal timestamp column (FieldID=1) unless OCC asks to keep it.
 		for i := 0; i < len(result.FieldsData); i++ {
 			if result.FieldsData[i] != nil && result.FieldsData[i].FieldId == common.TimeStampField {
+				if keepTimestamp {
+					result.FieldsData[i].FieldName = common.TimeStampFieldName
+					result.FieldsData[i].FieldId = common.TimeStampField
+					result.FieldsData[i].Type = schemapb.DataType_Int64
+					continue
+				}
 				result.FieldsData = append(result.FieldsData[:i], result.FieldsData[i+1:]...)
 				i--
 			}

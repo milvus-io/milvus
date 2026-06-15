@@ -2107,6 +2107,10 @@ type proxyConfig struct {
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
 
 	MetaCacheGCTimeInterval ParamItem `refreshable:"true"`
+
+	// partial_update upsert OCC retry settings
+	PartialUpdateRetryOnConflict ParamItem `refreshable:"true"`
+	PartialUpdateRetryBackoffMs  ParamItem `refreshable:"true"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -2692,6 +2696,24 @@ Disabled if the value is less or equal to 0.`,
 		Export:       true,
 	}
 	p.MetaCacheGCTimeInterval.Init(base.mgr)
+
+	p.PartialUpdateRetryOnConflict = ParamItem{
+		Key:          "proxy.partialUpdate.retryOnConflict",
+		Version:      "2.6.0",
+		DefaultValue: "3",
+		Doc:          "Maximum number of retries when a partial-update upsert hits a CAS conflict at the streaming node.",
+		Export:       false,
+	}
+	p.PartialUpdateRetryOnConflict.Init(base.mgr)
+
+	p.PartialUpdateRetryBackoffMs = ParamItem{
+		Key:          "proxy.partialUpdate.retryBackoffMs",
+		Version:      "2.6.0",
+		DefaultValue: "5",
+		Doc:          "Initial backoff (in milliseconds) between partial-update retries; doubles each attempt up to 100ms.",
+		Export:       false,
+	}
+	p.PartialUpdateRetryBackoffMs.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -7421,6 +7443,9 @@ type streamingConfig struct {
 	// Replication pending message queue configuration
 	ReplicationPendingMessagesQueueLength  ParamItem `refreshable:"true"`
 	ReplicationPendingMessagesQueueMaxSize ParamItem `refreshable:"true"`
+
+	// partial_update OCC settings
+	PartialUpdatePKVersionCacheTimeout ParamItem `refreshable:"false"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -8010,6 +8035,15 @@ so we set 1 second here as a threshold.`,
 		RecoveryIncreaseInterval:     "1s",
 		Export:                       false,
 	})
+
+	p.PartialUpdatePKVersionCacheTimeout = ParamItem{
+		Key:          "streaming.partialUpdate.pkVersionCacheTimeout",
+		Version:      "2.6.0",
+		DefaultValue: "60s",
+		Doc:          "LRU idle timeout for the per-streamingnode hot PK version cache used by the partial_update interceptor. PK entries not touched by a CAS Check within this duration are evicted.",
+		Export:       true,
+	}
+	p.PartialUpdatePKVersionCacheTimeout.Init(base.mgr)
 }
 
 type AdaptiveRateLimitConfigDefaultValue struct {
