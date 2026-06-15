@@ -149,6 +149,16 @@
         },
         {
             "MessageSpecializedType": {
+                "HeaderType": "messagespb.CreateVChannelMessageHeader",
+                "BodyType": "msgpb.CreateCollectionRequest"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeCreateVChannel",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
                 "HeaderType": "messagespb.CreateSegmentMessageHeader",
                 "BodyType": "messagespb.CreateSegmentMessageBody"
             },
