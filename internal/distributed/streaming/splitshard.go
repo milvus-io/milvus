@@ -12,9 +12,9 @@ import (
 )
 
 // ErrSourceVChannelFenced is returned by SplitShard when the source vchannel
-// has already been fenced by a previous split message. The caller should
-// treat the split as already switched and recover T_switch from its own
-// persisted state.
+// has already been fenced by a previous split message. The caller treats this
+// as success — the fence holds — and rolls forward: the target vchannels are
+// created with a freshly allocated barrier, so no exact T_switch is needed.
 var ErrSourceVChannelFenced = errors.New("source vchannel is already fenced by shard split")
 
 // SplitShardParam is the parameter of SplitShard.
@@ -120,11 +120,11 @@ type InitSplitTargetVChannelsParam struct {
 	// SplitTaskID and SourceVChannel record the origin of the new vchannels.
 	SplitTaskID    int64
 	SourceVChannel string
-	// SwitchTimeTick is T_switch returned by SplitShard. It is carried as
-	// the barrier time tick of the initialization messages, so every
-	// message of the new WALs is strictly greater than T_switch even if
-	// the hosting node holds an older prefetched TSO batch.
-	SwitchTimeTick uint64
+	// BarrierTimeTick is a freshly allocated time tick (always greater than
+	// T_switch). It is carried as the barrier time tick of the CreateVChannel
+	// messages, so every message of the new WALs is strictly greater than
+	// T_switch even if the hosting node holds an older prefetched TSO batch.
+	BarrierTimeTick uint64
 	// Targets are the target shards to create, each with its vchannel and the
 	// routing key range it owns (embedded into the CreateVChannel header).
 	Targets []*message.SplitShardTarget
@@ -144,8 +144,8 @@ func (p *InitSplitTargetVChannelsParam) Validate() error {
 	if p.SourceVChannel == "" {
 		return errors.New("source vchannel must be set")
 	}
-	if p.SwitchTimeTick == 0 {
-		return errors.New("switch time tick must be set")
+	if p.BarrierTimeTick == 0 {
+		return errors.New("barrier time tick must be set")
 	}
 	if len(p.Targets) == 0 {
 		return errors.New("targets must not be empty")
@@ -207,7 +207,7 @@ func InitSplitTargetVChannels(ctx context.Context, w WALAccesser, param InitSpli
 		if err != nil {
 			return nil, errors.Wrapf(err, "build create vchannel message for target %s failed", vchannel)
 		}
-		result, err := w.RawAppend(ctx, msg, AppendOption{BarrierTimeTick: param.SwitchTimeTick})
+		result, err := w.RawAppend(ctx, msg, AppendOption{BarrierTimeTick: param.BarrierTimeTick})
 		if err != nil {
 			return nil, errors.Wrapf(err, "create split target vchannel %s failed", vchannel)
 		}

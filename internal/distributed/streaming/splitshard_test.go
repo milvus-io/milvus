@@ -83,10 +83,10 @@ func newInitSplitTargetParam() streaming.InitSplitTargetVChannelsParam {
 		Schema: &schemapb.CollectionSchema{
 			Name: "col",
 		},
-		PartitionIDs:   []int64{10, 11},
-		SplitTaskID:    100,
-		SourceVChannel: "by-dev-rootcoord-dml_0_1v0",
-		SwitchTimeTick: 2000,
+		PartitionIDs:    []int64{10, 11},
+		SplitTaskID:     100,
+		SourceVChannel:  "by-dev-rootcoord-dml_0_1v0",
+		BarrierTimeTick: 2000,
 		Targets: []*message.SplitShardTarget{
 			{Vchannel: "by-dev-rootcoord-dml_1_1v1", KeyRange: &message.KeyRange{Upper: []byte{0x80}}},
 			{Vchannel: "by-dev-rootcoord-dml_2_1v2", KeyRange: &message.KeyRange{Lower: []byte{0x80}}},
@@ -163,7 +163,7 @@ func TestInitSplitTargetVChannelsParamValidate(t *testing.T) {
 	assert.Error(t, param.Validate())
 
 	param = newInitSplitTargetParam()
-	param.SwitchTimeTick = 0
+	param.BarrierTimeTick = 0
 	assert.Error(t, param.Validate())
 
 	param = newInitSplitTargetParam()
