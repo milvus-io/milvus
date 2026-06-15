@@ -264,6 +264,25 @@ func (s *RerankModelSuite) TestNewProvider() {
 		_, err := NewModelProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "ali"},
+			{Key: models.ModelNameParamKey, Value: "ali-test"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+			{Key: models.TimeoutMsParamKey, Value: "invalid"},
+		}
+		_, err := NewModelProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
+		s.ErrorContains(err, "is not a valid number")
+	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "ali"},
+			{Key: models.ModelNameParamKey, Value: "ali-test"},
+			{Key: models.TimeoutMsParamKey, Value: "0"},
+		}
+		_, err := NewModelProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
+		s.ErrorContains(err, "must be greater than 0")
+	}
 }
 
 func (s *RerankModelSuite) TestCallVllm() {

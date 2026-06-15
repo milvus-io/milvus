@@ -1454,6 +1454,8 @@ credential:
 
 # Any configuration related to functions
 function:
+  model:
+    requestTimeout: 30s # Global timeout for external model requests, e.g. 30s. Function param timeout_ms overrides it.
   textEmbedding:
     providers:
       azure_openai:

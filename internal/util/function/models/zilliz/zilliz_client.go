@@ -182,9 +182,10 @@ type ZillizClient struct {
 	clusterID         string
 	dbName            string
 	conn              *grpc.ClientConn
+	timeout           time.Duration
 }
 
-func NewZilliClient(modelDeploymentID string, clusterID string, dbName string, info map[string]string) (*ZillizClient, error) {
+func NewZilliClient(modelDeploymentID string, clusterID string, dbName string, info map[string]string, timeoutMs int64) (*ZillizClient, error) {
 	mgr := getClientManager()
 	clientConf, err := loadConfig(info)
 	if err != nil {
@@ -195,12 +196,43 @@ func NewZilliClient(modelDeploymentID string, clusterID string, dbName string, i
 		// failing to connect to the model serving backend is transient
 		return nil, merr.WrapErrServiceUnavailable(err.Error(), "connect model serving failed")
 	}
+	timeout := clientConf.Timeout
+	if timeoutMs > 0 {
+		timeout = time.Duration(timeoutMs) * time.Millisecond
+	}
+	if timeout <= 0 {
+		timeout = 30000 * time.Millisecond
+	}
 	return &ZillizClient{
 		modelDeploymentID: modelDeploymentID,
 		clusterID:         clusterID,
 		dbName:            dbName,
 		conn:              conn,
+		timeout:           timeout,
 	}, nil
+}
+
+func NewZilliClientForTests(modelDeploymentID string, clusterID string, dbName string, conn *grpc.ClientConn, timeoutMs int64) *ZillizClient {
+	timeout := 30000 * time.Millisecond
+	if timeoutMs > 0 {
+		timeout = time.Duration(timeoutMs) * time.Millisecond
+	}
+	return &ZillizClient{
+		modelDeploymentID: modelDeploymentID,
+		clusterID:         clusterID,
+		dbName:            dbName,
+		conn:              conn,
+		timeout:           timeout,
+	}
+}
+
+func (c *ZillizClient) requestContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	timeout := c.timeout
+	if timeout <= 0 {
+		timeout = 30000 * time.Millisecond
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, timeout)
+	return c.setMeta(requestCtx), cancel
 }
 
 func (c *ZillizClient) setMeta(ctx context.Context) context.Context {
@@ -219,8 +251,9 @@ func (c *ZillizClient) Embedding(ctx context.Context, texts []string, params map
 		Texts:  texts,
 		Params: params,
 	}
-	ctx = c.setMeta(ctx)
-	res, err := stub.Embedding(ctx, req)
+	callCtx, cancel := c.requestContext(ctx)
+	defer cancel()
+	res, err := stub.Embedding(callCtx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -246,8 +279,9 @@ func (c *ZillizClient) Rerank(ctx context.Context, query string, texts []string,
 		Documents: texts,
 		Params:    params,
 	}
-	ctx = c.setMeta(ctx)
-	res, err := stub.Rerank(ctx, req)
+	callCtx, cancel := c.requestContext(ctx)
+	defer cancel()
+	res, err := stub.Rerank(callCtx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -261,8 +295,9 @@ func (c *ZillizClient) Highlight(ctx context.Context, query string, texts []stri
 		Documents: texts,
 		Params:    params,
 	}
-	ctx = c.setMeta(ctx)
-	res, err := stub.Highlight(ctx, req)
+	callCtx, cancel := c.requestContext(ctx)
+	defer cancel()
+	res, err := stub.Highlight(callCtx, req)
 	if err != nil {
 		return nil, nil, err
 	}

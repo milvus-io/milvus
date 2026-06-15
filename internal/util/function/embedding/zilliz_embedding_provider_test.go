@@ -199,11 +199,11 @@ func (s *ZillizEmbeddingProviderSuite) TestDefaultValues() {
 	// but we can test the default values that should be set
 
 	expectedMaxBatch := 64
-	expectedTimeoutSec := int64(30)
+	expectedTimeoutMs := int64(30000)
 
 	// These are the default values that should be set in the constructor
 	s.Equal(64, expectedMaxBatch)
-	s.Equal(int64(30), expectedTimeoutSec)
+	s.Equal(int64(30000), expectedTimeoutMs)
 }
 
 func (s *ZillizEmbeddingProviderSuite) TestEdgeCases() {
