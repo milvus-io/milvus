@@ -233,5 +233,6 @@ func Register(r prometheus.Registerer) {
 	r.MustRegister(RuntimeInfo)
 	r.MustRegister(ThreadNum)
 	r.MustRegister(ThreadCPUActiveNumByPool)
+	r.MustRegister(FeatureReportTotal)
 	metricRegisterer = r
 }
