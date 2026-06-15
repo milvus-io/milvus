@@ -1581,6 +1581,7 @@ class TestCollectionProperties(TestBase):
                         assert p["value"] == "100"
 
 
+@pytest.mark.tags(CaseLabel.L1)
 class TestCollectionAddField(TestBase):
     """Test collection add field operations"""
 

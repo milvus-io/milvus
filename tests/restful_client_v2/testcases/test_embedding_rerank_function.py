@@ -927,6 +927,7 @@ class TestTextEmbeddingSearchNegative(TestBase):
         assert rsp["code"] != 0, f"Expected creation to fail with dimension mismatch, but got: {rsp}"
 
 
+@pytest.mark.tags(CaseLabel.L1)
 class TestTextEmbeddingFunctionOutput(TestBase):
     """
     ******************************************************************
@@ -1165,6 +1166,7 @@ class TestTextEmbeddingFunctionOutput(TestBase):
         assert "bm25" in rsp["message"].lower() or "function output" in rsp["message"].lower()
 
 
+@pytest.mark.tags(CaseLabel.L1)
 class TestModelRerankFunction(TestBase):
     """
     ******************************************************************
