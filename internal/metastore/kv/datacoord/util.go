@@ -264,7 +264,7 @@ func buildCompactionTaskPath(task *datapb.CompactionTask) string {
 func buildCompactionTargetKV(record *datapb.CompactionTarget) (string, string, error) {
 	valueBytes, err := proto.Marshal(record)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to marshal CompactionTarget: %d/%d, err: %w", record.GetTargetID(), record.GetCollectionID(), err)
+		return "", "", merr.WrapErrSerializationFailed(err, "marshal CompactionTarget: %d/%d", record.GetTargetID(), record.GetCollectionID())
 	}
 	key := buildCompactionTargetPath(record.GetTargetID())
 	return key, string(valueBytes), nil
