@@ -124,8 +124,10 @@ type InitSplitTargetVChannelsParam struct {
 	// the barrier time tick of the initialization messages, so every
 	// message of the new WALs is strictly greater than T_switch even if
 	// the hosting node holds an older prefetched TSO batch.
-	SwitchTimeTick  uint64
-	TargetVChannels []string
+	SwitchTimeTick uint64
+	// Targets are the target shards to create, each with its vchannel and the
+	// routing key range it owns (embedded into the CreateVChannel header).
+	Targets []*message.SplitShardTarget
 }
 
 // Validate validates the parameter.
@@ -145,46 +147,52 @@ func (p *InitSplitTargetVChannelsParam) Validate() error {
 	if p.SwitchTimeTick == 0 {
 		return errors.New("switch time tick must be set")
 	}
-	if len(p.TargetVChannels) == 0 {
-		return errors.New("target vchannels must not be empty")
+	if len(p.Targets) == 0 {
+		return errors.New("targets must not be empty")
 	}
-	vchannels := make(map[string]struct{}, len(p.TargetVChannels)+1)
+	vchannels := make(map[string]struct{}, len(p.Targets)+1)
 	vchannels[p.SourceVChannel] = struct{}{}
-	for _, vchannel := range p.TargetVChannels {
-		if vchannel == "" {
+	for _, target := range p.Targets {
+		if target.GetVchannel() == "" {
 			return errors.New("target vchannel must be set")
 		}
-		if _, ok := vchannels[vchannel]; ok {
-			return errors.Errorf("duplicated vchannel %s in split target initialization", vchannel)
+		if _, ok := vchannels[target.GetVchannel()]; ok {
+			return errors.Errorf("duplicated vchannel %s in split target initialization", target.GetVchannel())
 		}
-		vchannels[vchannel] = struct{}{}
+		vchannels[target.GetVchannel()] = struct{}{}
 	}
 	return nil
 }
 
-// InitSplitTargetVChannels initializes every target vchannel of a shard split
-// by appending a CreateCollection message — the vchannel-genesis message that
-// the shard manager, the recovery storage and the flusher already handle —
-// carrying the collection's current schema and partition snapshot, and
-// BarrierTimeTick = T_switch.
+// InitSplitTargetVChannels creates every target vchannel of a shard split by
+// appending a CreateVChannel message — the dedicated genesis message that the
+// shard manager, the recovery storage and the flusher handle — carrying the
+// collection's current schema and partition snapshot, the target's routing key
+// range, and BarrierTimeTick = T_switch (so every message of the new WAL is
+// strictly greater than T_switch, and creation doubles as activation).
 //
-// The call is idempotent: every consumer of the CreateCollection message
-// skips an already-known vchannel, so a retry after a partial failure is
-// safe. A target vchannel rejects DML until its initialization message is
-// processed, so no write can slip in before the barrier.
-func InitSplitTargetVChannels(ctx context.Context, w WALAccesser, param InitSplitTargetVChannelsParam) error {
+// It returns the marshaled consume start position (the LastConfirmedMessageID
+// of each append) per target vchannel; the child delegators consume the new
+// WAL from there.
+//
+// The call is idempotent: every consumer of the CreateVChannel message skips an
+// already-known vchannel, so a retry after a partial failure is safe.
+func InitSplitTargetVChannels(ctx context.Context, w WALAccesser, param InitSplitTargetVChannelsParam) (map[string]string, error) {
 	if err := param.Validate(); err != nil {
-		return err
+		return nil, err
 	}
-	for _, vchannel := range param.TargetVChannels {
-		msg, err := message.NewCreateCollectionMessageBuilderV1().
+	startPositions := make(map[string]string, len(param.Targets))
+	for _, target := range param.Targets {
+		vchannel := target.GetVchannel()
+		msg, err := message.NewCreateVChannelMessageBuilderV2().
 			WithVChannel(vchannel).
-			WithHeader(&message.CreateCollectionMessageHeader{
+			WithHeader(&message.CreateVChannelMessageHeader{
 				CollectionId:        param.CollectionID,
 				PartitionIds:        param.PartitionIDs,
 				DbId:                param.DBID,
 				SplitTaskId:         param.SplitTaskID,
 				SplitSourceVchannel: param.SourceVChannel,
+				KeyRange:            target.GetKeyRange(),
 			}).
 			WithBody(&message.CreateCollectionRequest{
 				DbName:               param.DBName,
@@ -197,11 +205,13 @@ func InitSplitTargetVChannels(ctx context.Context, w WALAccesser, param InitSpli
 			}).
 			BuildMutable()
 		if err != nil {
-			return errors.Wrapf(err, "build initialization message for target vchannel %s failed", vchannel)
+			return nil, errors.Wrapf(err, "build create vchannel message for target %s failed", vchannel)
 		}
-		if _, err := w.RawAppend(ctx, msg, AppendOption{BarrierTimeTick: param.SwitchTimeTick}); err != nil {
-			return errors.Wrapf(err, "initialize split target vchannel %s failed", vchannel)
+		result, err := w.RawAppend(ctx, msg, AppendOption{BarrierTimeTick: param.SwitchTimeTick})
+		if err != nil {
+			return nil, errors.Wrapf(err, "create split target vchannel %s failed", vchannel)
 		}
+		startPositions[vchannel] = result.LastConfirmedMessageID.Marshal()
 	}
-	return nil
+	return startPositions, nil
 }

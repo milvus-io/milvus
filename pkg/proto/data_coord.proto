@@ -1825,6 +1825,10 @@ message SplitShardTaskTarget {
   string vchannel          = 1;
   bytes  routing_key_lower = 2;
   bytes  routing_key_upper = 3;
+  // start_position is the marshaled consume start position (the
+  // LastConfirmedMessageID of the target's CreateVChannel append). The child
+  // delegators consume the new WAL from here. Empty until the target is created.
+  string start_position    = 4;
 }
 
 // SplitShardTask is the persisted state of a shard split task,
