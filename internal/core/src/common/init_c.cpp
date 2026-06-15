@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <cstddef>
+#include <algorithm>
 #include <mutex>
 
 #include <arrow/io/interfaces.h>
@@ -30,7 +31,9 @@
 #include "storage/ThreadPool.h"
 #include "exec/expression/ExprCache.h"
 #include "log/Log.h"
+#include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/ThreadPool.h"
 
 std::once_flag traceFlag;
@@ -48,8 +51,8 @@ SetIndexSliceSize(const int64_t size) {
 }
 
 void
-SetStreamBudgetRatio(const double ratio) {
-    milvus::SetStreamBudgetRatio(ratio);
+SetLoadTransientBudgetBytes(int64_t bytes) {
+    milvus::SetLoadTransientBudgetBytes(bytes);
 }
 
 void

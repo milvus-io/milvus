@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #include <gtest/gtest.h>
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <future>
@@ -23,10 +25,12 @@
 
 #include "arrow/api.h"
 #include <folly/CancellationToken.h>
+#include "folly/ScopeGuard.h"
 #include "common/EasyAssert.h"
 #include "gtest/gtest.h"
 #include "milvus-storage/common/metadata.h"
 #include "segcore/memory_planner.h"
+#include "storage/EntryStreamUtils.h"
 
 using namespace milvus::segcore;
 
@@ -179,6 +183,32 @@ TEST(ParallelDegreeSplitStrategy, ContinuousExceedingAvgSize) {
     EXPECT_EQ(blocks[1], (RowGroupBlock{5, 4}));
 }
 
+TEST(FieldDataLoadBatchSplitTargetBytes, UsesBatchTargetByDefault) {
+    auto& budget =
+        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto old_capacity = budget.CapacityBytes();
+    auto cleanup = folly::makeGuard(
+        [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
+
+    budget.SetCapacityBytes(kDefaultFieldDataLoadBatchTargetBytes * 4);
+
+    EXPECT_EQ(FieldDataLoadBatchSplitTargetBytes(),
+              kDefaultFieldDataLoadBatchTargetBytes);
+}
+
+TEST(FieldDataLoadBatchSplitTargetBytes, CapsTargetByConfiguredBudget) {
+    constexpr int64_t MB = 1 << 20;
+    auto& budget =
+        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto old_capacity = budget.CapacityBytes();
+    auto cleanup = folly::makeGuard(
+        [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
+
+    budget.SetCapacityBytes(8 * MB);
+
+    EXPECT_EQ(FieldDataLoadBatchSplitTargetBytes(), 8 * MB);
+}
+
 // ---- LoadCellBatchAsync tests ----
 
 namespace {
@@ -190,7 +220,8 @@ MakeMockReaderFactory() {
     return [](size_t /*batch_key*/,
               int64_t /*rg_offset*/,
               int64_t total_rg_count,
-              int64_t /*reader_memory_limit*/)
+              int64_t /*reader_memory_limit*/,
+              uint64_t /*read_parallelism*/)
                -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
         // Return one empty table per row group
         auto schema = arrow::schema({arrow::field("x", arrow::int64())});
@@ -205,12 +236,16 @@ MakeMockReaderFactory() {
 // Helper to run LoadCellBatchAsync and return future count (= batch count).
 size_t
 RunAndCountBatches(std::vector<CellSpec> cell_specs, int64_t memory_limit) {
-    auto channel = std::make_shared<CellReaderChannel>(64);
+    auto channel = std::make_shared<CellReaderChannel>();
     auto futures = LoadCellBatchAsync(nullptr,
                                       std::move(cell_specs),
                                       MakeMockReaderFactory(),
                                       channel,
                                       memory_limit);
+    std::shared_ptr<CellLoadResult> cell_data;
+    while (channel->pop(cell_data)) {
+        ReleaseCellLoadResultBudget(cell_data);
+    }
     for (auto& f : futures) {
         f.get();
     }
@@ -274,6 +309,91 @@ TEST(LoadCellBatchAsync, SingleCellExceedsLimit) {
     EXPECT_EQ(batches, 1);
 }
 
+TEST(LoadCellBatchAsync, ReadParallelismScalesWithBatchBudget) {
+    constexpr int64_t MB = 1 << 20;
+
+    std::atomic<uint64_t> observed_parallelism{0};
+    std::atomic<int64_t> observed_reader_memory_limit{0};
+    BatchReaderFactory factory = [&observed_parallelism,
+                                  &observed_reader_memory_limit](
+                                     size_t /*batch_key*/,
+                                     int64_t /*rg_offset*/,
+                                     int64_t total_rg_count,
+                                     int64_t reader_memory_limit,
+                                     uint64_t read_parallelism)
+        -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
+        observed_parallelism.store(read_parallelism);
+        observed_reader_memory_limit.store(reader_memory_limit);
+        auto schema = arrow::schema({arrow::field("x", arrow::int64())});
+        std::vector<std::shared_ptr<arrow::Table>> tables;
+        for (int64_t i = 0; i < total_rg_count; ++i) {
+            tables.push_back(arrow::Table::MakeEmpty(schema).ValueOrDie());
+        }
+        return tables;
+    };
+
+    std::vector<CellSpec> specs = {{/*cid=*/0,
+                                    /*file_idx=*/0,
+                                    /*local_rg_offset=*/0,
+                                    /*rg_count=*/8,
+                                    /*memory_size=*/128 * MB}};
+
+    auto channel = std::make_shared<CellReaderChannel>();
+    auto futures = LoadCellBatchAsync(
+        nullptr, std::move(specs), std::move(factory), channel, 32 * MB);
+    std::shared_ptr<CellLoadResult> cell_data;
+    while (channel->pop(cell_data)) {
+        ReleaseCellLoadResultBudget(cell_data);
+    }
+    for (auto& future : futures) {
+        future.get();
+    }
+
+    EXPECT_EQ(observed_parallelism.load(), 8);
+    EXPECT_EQ(observed_reader_memory_limit.load(), 32 * MB);
+}
+
+TEST(LoadCellBatchAsync, FinalizeCellBeforePush) {
+    constexpr int64_t MB = 1 << 20;
+    std::vector<CellSpec> specs = {
+        {0, 0, 0, 1, 8 * MB},
+        {1, 0, 1, 1, 8 * MB},
+    };
+
+    std::atomic<int> finalized{0};
+    auto channel = std::make_shared<CellReaderChannel>();
+    auto futures = LoadCellBatchAsync(
+        nullptr,
+        std::move(specs),
+        MakeMockReaderFactory(),
+        channel,
+        32 * MB,
+        milvus::proto::common::LoadPriority::HIGH,
+        [&finalized](const std::vector<std::shared_ptr<arrow::Table>>& tables,
+                     int64_t /*cid*/) {
+            EXPECT_EQ(tables.size(), 1);
+            finalized.fetch_add(1);
+            return std::make_unique<milvus::GroupChunk>();
+        });
+
+    int received = 0;
+    std::shared_ptr<CellLoadResult> cell_data;
+    while (channel->pop(cell_data)) {
+        ASSERT_NE(cell_data, nullptr);
+        EXPECT_NE(cell_data->chunk, nullptr);
+        EXPECT_TRUE(cell_data->tables.empty());
+        EXPECT_EQ(cell_data->budget_bytes, 0);
+        ReleaseCellLoadResultBudget(cell_data);
+        ++received;
+    }
+    for (auto& future : futures) {
+        future.get();
+    }
+
+    EXPECT_EQ(received, 2);
+    EXPECT_EQ(finalized.load(), 2);
+}
+
 TEST(LoadCellBatchAsync, FileBoundarySplit) {
     // 4 cells x 32MB across 2 files, limit=128MB
     // File boundary forces a split even though memory fits
@@ -332,12 +452,14 @@ TEST(LoadCellBatchAsync, CancellationStopsMidBatchPush) {
     ASSERT_TRUE(channel->pop(cell_data));
     ASSERT_NE(cell_data, nullptr);
     EXPECT_EQ(cell_data->cid, 0);
+    ReleaseCellLoadResultBudget(cell_data);
 
     source.requestCancellation();
 
     size_t received = 1;
     while (channel->pop(cell_data)) {
         ASSERT_NE(cell_data, nullptr);
+        ReleaseCellLoadResultBudget(cell_data);
         ++received;
     }
 
@@ -348,4 +470,63 @@ TEST(LoadCellBatchAsync, CancellationStopsMidBatchPush) {
         EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::FollyCancel);
     }
     EXPECT_LT(received, specs.size());
+}
+
+TEST(LoadCellBatchAsync, CancellationWhileWaitingForBudgetSkipsRead) {
+    auto& budget =
+        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto old_capacity = budget.CapacityBytes();
+    budget.SetCapacityBytes(1);
+    budget.Acquire(1);
+    auto cleanup = folly::makeGuard([&budget, old_capacity]() {
+        budget.Release(1);
+        budget.SetCapacityBytes(old_capacity);
+    });
+
+    std::atomic<int> read_calls{0};
+    BatchReaderFactory factory = [&read_calls](size_t /*batch_key*/,
+                                               int64_t /*rg_offset*/,
+                                               int64_t total_rg_count,
+                                               int64_t /*reader_memory_limit*/,
+                                               uint64_t /*read_parallelism*/)
+        -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
+        read_calls.fetch_add(1);
+        auto schema = arrow::schema({arrow::field("x", arrow::int64())});
+        std::vector<std::shared_ptr<arrow::Table>> tables;
+        for (int64_t i = 0; i < total_rg_count; ++i) {
+            tables.push_back(arrow::Table::MakeEmpty(schema).ValueOrDie());
+        }
+        return tables;
+    };
+
+    folly::CancellationSource source;
+    milvus::OpContext op_ctx(source.getToken());
+    auto channel = std::make_shared<CellReaderChannel>(1);
+    std::vector<CellSpec> specs = {{/*cid=*/0,
+                                    /*file_idx=*/0,
+                                    /*local_rg_offset=*/0,
+                                    /*rg_count=*/1,
+                                    /*memory_size=*/1}};
+    auto futures = LoadCellBatchAsync(
+        &op_ctx, std::move(specs), std::move(factory), channel, 1);
+
+    ASSERT_EQ(futures.size(), 1);
+    EXPECT_EQ(futures[0].wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+    EXPECT_EQ(read_calls.load(), 0);
+
+    source.requestCancellation();
+
+    ASSERT_EQ(futures[0].wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    try {
+        futures[0].get();
+        FAIL() << "expected cancellation";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::FollyCancel);
+    }
+
+    std::shared_ptr<CellLoadResult> cell_data;
+    EXPECT_FALSE(channel->pop(cell_data));
+    EXPECT_EQ(read_calls.load(), 0);
 }

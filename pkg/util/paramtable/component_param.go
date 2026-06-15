@@ -42,7 +42,7 @@ import (
 const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize                      = 16
-	DefaultStreamBudgetRatio                   = 3.0
+	DefaultLoadTransientBudgetBytes            = 0
 	DefaultGracefulTime                        = 5000 // ms
 	DefaultGracefulStopTimeout                 = 1800 // s, for node
 	DefaultProxyGracefulStopTimeout            = 30   // s，for proxy
@@ -233,7 +233,7 @@ type commonConfig struct {
 	DefaultIndexName     ParamItem `refreshable:"true"`
 
 	IndexSliceSize                      ParamItem `refreshable:"false"`
-	StreamBudgetRatio                   ParamItem `refreshable:"true"`
+	LoadTransientBudgetBytes            ParamItem `refreshable:"true"`
 	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"true"`
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
@@ -558,14 +558,27 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	}
 	p.IndexSliceSize.Init(base.mgr)
 
-	p.StreamBudgetRatio = ParamItem{
-		Key:          "common.entryStream.streamBudgetRatio",
+	p.LoadTransientBudgetBytes = ParamItem{
+		Key:          "common.loadTransientBudgetBytes",
 		Version:      "3.0.0",
-		DefaultValue: fmt.Sprintf("%f", DefaultStreamBudgetRatio),
-		Doc:          "Multiplier for entry stream transient memory budget, relative to CPU core count",
-		Export:       true,
+		DefaultValue: strconv.Itoa(DefaultLoadTransientBudgetBytes),
+		Doc: `Process-wide transient memory budget in bytes shared by scalar ` +
+			`index entry reading and storage v2 field-data loading. It gates ` +
+			`in-flight transient data across concurrent load tasks. Lower ` +
+			`values reduce peak transient memory at the cost of load throughput. ` +
+			`Oversized requests are still allowed to proceed exclusively to ` +
+			`guarantee progress. Set to 0 to disable the limit.`,
+		Export: true,
+		Formatter: func(v string) string {
+			if getAsInt64(v) < 0 {
+				log.Warn("common.loadTransientBudgetBytes must be non-negative, using unlimited",
+					zap.String("configured", v))
+				return strconv.Itoa(DefaultLoadTransientBudgetBytes)
+			}
+			return v
+		},
 	}
-	p.StreamBudgetRatio.Init(base.mgr)
+	p.LoadTransientBudgetBytes.Init(base.mgr)
 
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",

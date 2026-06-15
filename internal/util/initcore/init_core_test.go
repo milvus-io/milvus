@@ -149,6 +149,13 @@ func TestInitArrowReaderConfig(t *testing.T) {
 	assert.NoError(t, InitArrowReaderConfig(pt))
 }
 
+func TestUpdateLoadTransientBudgetBytes(t *testing.T) {
+	assert.NotPanics(t, func() {
+		UpdateLoadTransientBudgetBytes(0)
+		UpdateLoadTransientBudgetBytes(128 * 1024 * 1024)
+	})
+}
+
 func TestInitStorageV2FileSystem(t *testing.T) {
 	// init local storage
 	paramtable.Init()

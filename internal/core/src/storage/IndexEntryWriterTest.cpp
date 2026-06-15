@@ -20,6 +20,8 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <future>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -27,6 +29,8 @@
 #include <utility>
 #include <vector>
 
+#include "folly/CancellationToken.h"
+#include "folly/ScopeGuard.h"
 #include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "filemanager/InputStream.h"
@@ -48,24 +52,18 @@ namespace {
 class IndexEntryStreamConfigGuard {
  public:
     IndexEntryStreamConfigGuard()
-        : budget_ratio_(milvus::ENTRY_STREAM_BUDGET_RATIO.load()) {
+        : budget_(TransientMemoryBudget::GetLoadTransientBudget()),
+          capacity_bytes_(budget_.CapacityBytes()) {
     }
 
     ~IndexEntryStreamConfigGuard() {
-        milvus::SetStreamBudgetRatio(budget_ratio_);
+        budget_.SetCapacityBytes(capacity_bytes_);
     }
 
  private:
-    double budget_ratio_;
+    TransientMemoryBudget& budget_;
+    size_t capacity_bytes_;
 };
-
-size_t
-ExpectedEntryStreamBudgetBytes(double ratio) {
-    auto slice_size = DefaultStreamSliceSize();
-    auto core_num = std::max(1, milvus::CPU_NUM);
-    auto capacity = static_cast<size_t>(core_num * ratio) * slice_size;
-    return std::max(capacity, slice_size);
-}
 
 // Simple XOR-based mock cipher for testing (NOT for production use!)
 class MockEncryptor : public plugin::IEncryptor {
@@ -1198,17 +1196,21 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamRejectsInvalidSliceSize) {
 
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamUsesDefaultSliceSize) {
     IndexEntryStreamConfigGuard guard;
-    milvus::SetStreamBudgetRatio(2.5);
     const size_t slice_size = DEFAULT_INDEX_FILE_SLICE_SIZE;
-    ASSERT_EQ(DefaultStreamSliceSize(), slice_size);
-    ASSERT_DOUBLE_EQ(StreamBudgetRatio(), 2.5);
-    ASSERT_EQ(TransientMemoryBudget::GetEntryStreamBudget().CapacityBytes(),
-              ExpectedEntryStreamBudgetBytes(2.5));
+    auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
 
-    milvus::SetStreamBudgetRatio(3.5);
-    ASSERT_DOUBLE_EQ(StreamBudgetRatio(), 3.5);
-    ASSERT_EQ(TransientMemoryBudget::GetEntryStreamBudget().CapacityBytes(),
-              ExpectedEntryStreamBudgetBytes(3.5));
+    ASSERT_EQ(DefaultStreamSliceSize(), slice_size);
+    milvus::SetLoadTransientBudgetBytes(0);
+    ASSERT_EQ(budget.CapacityBytes(), 0);
+    ASSERT_EQ(EntryStreamMaxTransientBytes(),
+              std::numeric_limits<size_t>::max());
+
+    const size_t configured_budget = 3 * slice_size;
+    milvus::SetLoadTransientBudgetBytes(
+        static_cast<int64_t>(configured_budget));
+    ASSERT_EQ(budget.CapacityBytes(), configured_budget);
+    ASSERT_EQ(EntryStreamMaxTransientBytes(),
+              configured_budget + kTailMergeGrace);
 
     const std::string file_path = kV3FilePath + "_stream_configured_default";
     const size_t tail_size = kTailMergeGrace + 17;
@@ -1490,6 +1492,60 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamDrainsActiveTasksAfterError) {
         },
         slice_size);
     EXPECT_EQ(streamed, data);
+}
+
+TEST_F(IndexEntryWriterV3Test, ReadEntryStreamCancellationWhileWaitingBudget) {
+    const std::string file_path = kV3FilePath + "_stream_cancel_budget_wait";
+    const size_t slice_size = kMinStreamSliceSize;
+    auto data = GeneratePattern(slice_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
+    auto old_capacity = budget.CapacityBytes();
+    budget.SetCapacityBytes(slice_size);
+    budget.Acquire(slice_size);
+    auto cleanup = folly::makeGuard([&budget, old_capacity, slice_size]() {
+        budget.Release(slice_size);
+        budget.SetCapacityBytes(old_capacity);
+    });
+
+    folly::CancellationSource source;
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    auto reader = IndexEntryReader::Open(
+        input, file_size, 0, milvus::HIGH, source.getToken());
+
+    std::atomic<size_t> slice_count{0};
+    auto future = std::async(std::launch::async, [&]() {
+        reader->ReadEntryStream(
+            "data",
+            [&slice_count](const uint8_t*, size_t) {
+                slice_count.fetch_add(1);
+            },
+            slice_size);
+    });
+
+    EXPECT_EQ(future.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+    EXPECT_EQ(slice_count.load(), 0);
+
+    source.requestCancellation();
+
+    ASSERT_EQ(future.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    try {
+        future.get();
+        FAIL() << "expected cancellation";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::FollyCancel);
+    }
+    EXPECT_EQ(slice_count.load(), 0);
 }
 
 TEST_F(IndexEntryWriterV3Test, GetEntrySize) {
