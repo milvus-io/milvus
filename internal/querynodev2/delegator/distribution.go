@@ -47,19 +47,6 @@ const (
 	unreadableTargetVersion = int64(-2)
 )
 
-var (
-	closedCh  chan struct{}
-	closeOnce sync.Once
-)
-
-func getClosedCh() chan struct{} {
-	closeOnce.Do(func() {
-		closedCh = make(chan struct{})
-		close(closedCh)
-	})
-	return closedCh
-}
-
 // channelQueryView maintains the sealed segment list which should be used for search/query.
 // for new delegator, will got a new channelQueryView from WatchChannel, and get the queryView update from querycoord before it becomes serviceable
 // after delegator becomes serviceable, it only update the queryView by SyncTargetVersion
@@ -111,6 +98,7 @@ type distribution struct {
 	// map[SegmentID]=>segmentEntry
 	growingSegments map[UniqueID]SegmentEntry
 	sealedSegments  map[UniqueID]SegmentEntry
+	changeVersion   int64
 
 	// snapshotVersion indicator
 	snapshotVersion int64
@@ -133,6 +121,20 @@ type distribution struct {
 	// distribution info
 	channelName string
 	queryView   *channelQueryView
+}
+
+type distributionSnapshotState struct {
+	changeVersion   int64
+	queryView       *channelQueryView
+	sealedSegments  []SegmentEntry
+	growingSegments []SegmentEntry
+}
+
+type serviceableState struct {
+	loadedRatio            float64
+	loadedSealedRowCount   int64
+	totalSealedRowCount    int64
+	unloadedSealedSegments []SegmentEntry
 }
 
 // SegmentEntry stores the segment meta information.
@@ -165,7 +167,7 @@ func NewDistribution(channelName string, queryView *channelQueryView) *distribut
 		snapshotDone:     make(chan struct{}),
 		closed:           atomic.NewBool(false),
 	}
-	// generate initial snapshot synchronously
+	// dist is not visible to other goroutines yet, so no lock is needed here.
 	dist.genSnapshot()
 	dist.updateServiceable("NewDistribution")
 	// start background snapshot loop
@@ -193,11 +195,143 @@ func (d *distribution) snapshotLoop() {
 			return
 		case <-d.snapshotNotifier:
 			d.mut.Lock()
-			d.genSnapshot()
-			d.updateServiceable("snapshotLoop")
+			state := d.captureSnapshotState()
+			d.mut.Unlock()
+
+			snap, sealedByID := buildSnapshot(state)
+			serviceable := buildServiceableState(state, sealedByID)
+
+			d.mut.Lock()
+			if d.changeVersion != state.changeVersion || d.queryView != state.queryView {
+				d.mut.Unlock()
+				d.notifySnapshotUpdate()
+				continue
+			}
+			d.publishSnapshotLocked(snap)
+			d.applyServiceableStateLocked(serviceable, "snapshotLoop")
 			d.mut.Unlock()
 		}
 	}
+}
+
+func (d *distribution) captureSnapshotState() distributionSnapshotState {
+	sealed := make([]SegmentEntry, 0, len(d.sealedSegments))
+	for _, entry := range d.sealedSegments {
+		sealed = append(sealed, entry)
+	}
+
+	growing := make([]SegmentEntry, 0, len(d.growingSegments))
+	for _, entry := range d.growingSegments {
+		growing = append(growing, entry)
+	}
+
+	return distributionSnapshotState{
+		changeVersion:   d.changeVersion,
+		queryView:       d.queryView,
+		sealedSegments:  sealed,
+		growingSegments: growing,
+	}
+}
+
+func buildSnapshot(state distributionSnapshotState) (*snapshot, map[UniqueID]SegmentEntry) {
+	nodeSegments := make(map[int64][]SegmentEntry)
+	sealedByID := buildSealedByID(state.sealedSegments)
+	for _, entry := range state.sealedSegments {
+		nodeSegments[entry.NodeID] = append(nodeSegments[entry.NodeID], entry)
+	}
+
+	dist := make([]SnapshotItem, 0, len(nodeSegments))
+	for nodeID, items := range nodeSegments {
+		dist = append(dist, SnapshotItem{
+			NodeID: nodeID,
+			Segments: lo.Map(items, func(entry SegmentEntry, _ int) SegmentEntry {
+				if !state.queryView.partitions.Contain(entry.PartitionID) {
+					entry.TargetVersion = unreadableTargetVersion
+				}
+				return entry
+			}),
+		})
+	}
+
+	growing := make([]SegmentEntry, 0, len(state.growingSegments))
+	for _, entry := range state.growingSegments {
+		if !state.queryView.partitions.Contain(entry.PartitionID) {
+			entry.TargetVersion = unreadableTargetVersion
+		}
+		growing = append(growing, entry)
+	}
+
+	snap := NewSnapshot(dist, growing, nil, 0, state.queryView.GetVersion())
+	snap.partitions = state.queryView.partitions
+
+	return snap, sealedByID
+}
+
+func buildSealedByID(sealedSegments []SegmentEntry) map[UniqueID]SegmentEntry {
+	sealedByID := make(map[UniqueID]SegmentEntry, len(sealedSegments))
+	for _, entry := range sealedSegments {
+		sealedByID[entry.SegmentID] = entry
+	}
+	return sealedByID
+}
+
+func buildServiceableState(state distributionSnapshotState, sealedByID map[UniqueID]SegmentEntry) serviceableState {
+	loadedSealedSegments := int64(0)
+	totalSealedRowCount := int64(0)
+	unloadedSealedSegments := make([]SegmentEntry, 0)
+	for id, rowCount := range state.queryView.sealedSegmentRowCount {
+		if entry, ok := sealedByID[id]; ok && !entry.Offline {
+			loadedSealedSegments += rowCount
+		} else {
+			unloadedSealedSegments = append(unloadedSealedSegments, SegmentEntry{SegmentID: id, NodeID: -1})
+		}
+		totalSealedRowCount += rowCount
+	}
+
+	loadedRatio := 0.0
+	if len(state.queryView.sealedSegmentRowCount) == 0 {
+		loadedRatio = 1.0
+	} else if loadedSealedSegments > 0 {
+		loadedRatio = float64(loadedSealedSegments) / float64(totalSealedRowCount)
+	}
+
+	return serviceableState{
+		loadedRatio:            loadedRatio,
+		loadedSealedRowCount:   loadedSealedSegments,
+		totalSealedRowCount:    totalSealedRowCount,
+		unloadedSealedSegments: unloadedSealedSegments,
+	}
+}
+
+func (d *distribution) publishSnapshotLocked(snap *snapshot) {
+	last := d.current.Load()
+	d.snapshotVersion++
+	snap.version = d.snapshotVersion
+	snap.last = last
+	d.current.Store(snap)
+	d.snapshots.GetOrInsert(d.snapshotVersion, snap)
+
+	if last != nil {
+		last.Expire(d.getCleanup(last.version))
+	}
+}
+
+func (d *distribution) applyServiceableStateLocked(serviceable serviceableState, triggerAction string) {
+	isServiceable := serviceable.loadedRatio >= 1.0
+	if isServiceable != d.queryView.Serviceable() {
+		log.Info("channel distribution serviceable changed",
+			zap.String("channel", d.channelName),
+			zap.Bool("serviceable", isServiceable),
+			zap.Float64("loadedRatio", serviceable.loadedRatio),
+			zap.Int64("loadedSealedRowCount", serviceable.loadedSealedRowCount),
+			zap.Int64("totalSealedRowCount", serviceable.totalSealedRowCount),
+			zap.Int("unloadedSealedSegmentNum", len(serviceable.unloadedSealedSegments)),
+			zap.Int("totalSealedSegmentNum", len(d.queryView.sealedSegmentRowCount)),
+			zap.String("action", triggerAction))
+	}
+
+	d.queryView.unloadedSealedSegments = serviceable.unloadedSealedSegments
+	d.queryView.loadedRatio.Store(serviceable.loadedRatio)
 }
 
 func (d *distribution) SetIDFOracle(idfOracle IDFOracle) {
@@ -348,44 +482,9 @@ func (d *distribution) Serviceable() bool {
 // for now, delegator become serviceable only when watchDmChannel is done
 // so we regard all needed growing is loaded and we compute loadRatio based on sealed segments
 func (d *distribution) updateServiceable(triggerAction string) {
-	loadedSealedSegments := int64(0)
-	totalSealedRowCount := int64(0)
-	unloadedSealedSegments := make([]SegmentEntry, 0)
-	for id, rowCount := range d.queryView.sealedSegmentRowCount {
-		if entry, ok := d.sealedSegments[id]; ok && !entry.Offline {
-			loadedSealedSegments += rowCount
-		} else {
-			unloadedSealedSegments = append(unloadedSealedSegments, SegmentEntry{SegmentID: id, NodeID: -1})
-		}
-		totalSealedRowCount += rowCount
-	}
-
-	// unloaded segment entry list for partial result
-	d.queryView.unloadedSealedSegments = unloadedSealedSegments
-
-	loadedRatio := 0.0
-	if len(d.queryView.sealedSegmentRowCount) == 0 {
-		loadedRatio = 1.0
-	} else if loadedSealedSegments == 0 {
-		loadedRatio = 0.0
-	} else {
-		loadedRatio = float64(loadedSealedSegments) / float64(totalSealedRowCount)
-	}
-
-	serviceable := loadedRatio >= 1.0
-	if serviceable != d.queryView.Serviceable() {
-		log.Info("channel distribution serviceable changed",
-			zap.String("channel", d.channelName),
-			zap.Bool("serviceable", serviceable),
-			zap.Float64("loadedRatio", loadedRatio),
-			zap.Int64("loadedSealedRowCount", loadedSealedSegments),
-			zap.Int64("totalSealedRowCount", totalSealedRowCount),
-			zap.Int("unloadedSealedSegmentNum", len(unloadedSealedSegments)),
-			zap.Int("totalSealedSegmentNum", len(d.queryView.sealedSegmentRowCount)),
-			zap.String("action", triggerAction))
-	}
-
-	d.queryView.loadedRatio.Store(loadedRatio)
+	state := d.captureSnapshotState()
+	serviceable := buildServiceableState(state, buildSealedByID(state.sealedSegments))
+	d.applyServiceableStateLocked(serviceable, triggerAction)
 }
 
 // AddDistributions add multiple segment entries.
@@ -403,6 +502,7 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 	}
 
 	d.mut.Lock()
+	updated := false
 	for _, entry := range entries {
 		oldEntry, ok := d.sealedSegments[entry.SegmentID]
 		if ok && oldEntry.Version >= entry.Version {
@@ -428,6 +528,10 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 			entry.TargetVersion = unreadableTargetVersion
 		}
 		d.sealedSegments[entry.SegmentID] = entry
+		updated = true
+	}
+	if updated {
+		d.changeVersion++
 	}
 	d.mut.Unlock()
 
@@ -443,7 +547,7 @@ func refundCandidates(candidates []pkoracle.Candidate) {
 }
 
 // AddGrowing adds growing segment distribution.
-// genSnapshot is called synchronously so that the growing segment is
+// Snapshot is rebuilt synchronously so that the growing segment is
 // immediately visible to searches. Growing segments are created
 // infrequently (only on the first insert for each segment), so this
 // does not regress the lock-contention optimization.
@@ -451,6 +555,9 @@ func (d *distribution) AddGrowing(entries ...SegmentEntry) {
 	d.mut.Lock()
 	for _, entry := range entries {
 		d.growingSegments[entry.SegmentID] = entry
+	}
+	if len(entries) > 0 {
+		d.changeVersion++
 	}
 	d.genSnapshot()
 	d.mut.Unlock()
@@ -470,6 +577,9 @@ func (d *distribution) MarkOfflineSegments(segmentIDs ...int64) {
 		entry.Version = unreadableTargetVersion
 		entry.NodeID = -1
 		d.sealedSegments[segmentID] = entry
+	}
+	if updated {
+		d.changeVersion++
 	}
 	d.mut.Unlock()
 
@@ -491,6 +601,7 @@ func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions 
 	defer d.mut.Unlock()
 
 	oldValue := d.queryView.version
+	d.changeVersion++
 	d.queryView = &channelQueryView{
 		growingSegments:       typeutil.NewUniqueSet(action.GetGrowingInTarget()...),
 		sealedSegmentRowCount: action.GetSealedSegmentRowCount(),
@@ -537,7 +648,7 @@ func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions 
 		d.sealedSegments[id] = entry
 	}
 
-	// SyncTargetVersion needs synchronous genSnapshot because idfOracle.SetNext
+	// SyncTargetVersion needs synchronous snapshot rebuild because idfOracle.SetNext
 	// depends on the snapshot just generated.
 	d.genSnapshot()
 	if d.idfOracle != nil {
@@ -573,6 +684,7 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 	var toRefund []pkoracle.Candidate
 
 	d.mut.Lock()
+	updated := false
 	for _, sealed := range sealedSegments {
 		entry, ok := d.sealedSegments[sealed.SegmentID]
 		if !ok {
@@ -583,6 +695,7 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 				toRefund = append(toRefund, entry.Candidate)
 			}
 			delete(d.sealedSegments, sealed.SegmentID)
+			updated = true
 		}
 	}
 
@@ -592,9 +705,13 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 			continue
 		}
 		delete(d.growingSegments, growing.SegmentID)
+		updated = true
+	}
+	if updated {
+		d.changeVersion++
 	}
 
-	// Capture current snapshot's cleared channel. The next genSnapshot will
+	// Capture current snapshot's cleared channel. The next snapshot publish will
 	// create a new snapshot and expire this one, closing the channel.
 	var signal chan struct{}
 	if current := d.current.Load(); current != nil {
@@ -621,57 +738,10 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 // getSnapshot converts current distribution to snapshot format.
 // in which, user could use found nodeID=>segmentID list.
 // mutex RLock is required before calling this method.
-func (d *distribution) genSnapshot() chan struct{} {
-	// stores last snapshot
-	// ok to be nil
-	last := d.current.Load()
-
-	nodeSegments := make(map[int64][]SegmentEntry)
-	for _, entry := range d.sealedSegments {
-		nodeSegments[entry.NodeID] = append(nodeSegments[entry.NodeID], entry)
-	}
-
-	// only store working partition entry in snapshot to reduce calculation
-	dist := make([]SnapshotItem, 0, len(nodeSegments))
-	for nodeID, items := range nodeSegments {
-		dist = append(dist, SnapshotItem{
-			NodeID: nodeID,
-			Segments: lo.Map(items, func(entry SegmentEntry, _ int) SegmentEntry {
-				if !d.queryView.partitions.Contain(entry.PartitionID) {
-					entry.TargetVersion = unreadableTargetVersion
-				}
-				return entry
-			}),
-		})
-	}
-
-	growing := make([]SegmentEntry, 0, len(d.growingSegments))
-	for _, entry := range d.growingSegments {
-		if !d.queryView.partitions.Contain(entry.PartitionID) {
-			entry.TargetVersion = unreadableTargetVersion
-		}
-		growing = append(growing, entry)
-	}
-
-	// update snapshot version
-	d.snapshotVersion++
-	newSnapShot := NewSnapshot(dist, growing, last, d.snapshotVersion, d.queryView.GetVersion())
-	newSnapShot.partitions = d.queryView.partitions
-
-	d.current.Store(newSnapShot)
-	// shall be a new one
-	d.snapshots.GetOrInsert(d.snapshotVersion, newSnapShot)
-
-	// first snapshot, return closed chan
-	if last == nil {
-		ch := make(chan struct{})
-		close(ch)
-		return ch
-	}
-
-	last.Expire(d.getCleanup(last.version))
-
-	return last.cleared
+func (d *distribution) genSnapshot() {
+	state := d.captureSnapshotState()
+	snap, _ := buildSnapshot(state)
+	d.publishSnapshotLocked(snap)
 }
 
 func (d *distribution) readableFilter(targetVersion int64) func(entry SegmentEntry, _ int) bool {
