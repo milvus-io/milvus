@@ -139,8 +139,8 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     auto reader_result =
         milvus_storage::FileRowGroupReader::Make(fs_, paths_[0]);
     AssertInfo(reader_result.ok(),
-               "[StorageV2] Failed to create file row group reader: " +
-                   reader_result.status().ToString());
+               "[StorageV2] Failed to create file row group reader: {}",
+               reader_result.status().ToString());
     auto fr = reader_result.ValueOrDie();
     auto row_group_metadata_vector =
         fr->file_metadata()->GetRowGroupMetadataVector();
@@ -273,8 +273,8 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         auto reader_result =
             milvus_storage::FileRowGroupReader::Make(fs_, file_path);
         AssertInfo(reader_result.ok(),
-                   "[StorageV2] Failed to create file row group reader: " +
-                       reader_result.status().ToString());
+                   "[StorageV2] Failed to create file row group reader: {}",
+                   reader_result.status().ToString());
         auto fr = reader_result.ValueOrDie();
         expected_row_groups_per_file.push_back(
             fr->file_metadata()->GetRowGroupMetadataVector().size());
@@ -379,8 +379,8 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         auto reader_result = milvus_storage::FileRowGroupReader::Make(
             fs_, multi_file_paths[file_idx]);
         AssertInfo(reader_result.ok(),
-                   "[StorageV2] Failed to create file row group reader: " +
-                       reader_result.status().ToString());
+                   "[StorageV2] Failed to create file row group reader: {}",
+                   reader_result.status().ToString());
         auto fr = reader_result.ValueOrDie();
         all_rg_metas.emplace_back(
             file_idx, fr->file_metadata()->GetRowGroupMetadataVector());

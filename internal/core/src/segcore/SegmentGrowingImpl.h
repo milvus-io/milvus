@@ -119,8 +119,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     bool
     is_nullable(FieldId field_id) const override {
         AssertInfo(insert_record_.is_data_exist(field_id),
-                   "Cannot find field_data with field_id: " +
-                       std::to_string(field_id.get()));
+                   "Cannot find field_data with field_id: {}",
+                   field_id.get());
         return insert_record_.is_valid_data_exist(field_id);
     };
 

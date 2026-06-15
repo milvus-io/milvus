@@ -349,8 +349,8 @@ class Schema {
     operator[](FieldId field_id) const {
         Assert(field_id.get() >= 0);
         AssertInfo(fields_.find(field_id) != fields_.end(),
-                   "Cannot find field with field_id: " +
-                       std::to_string(field_id.get()));
+                   "Cannot find field with field_id: {}",
+                   field_id.get());
         return fields_.at(field_id);
     }
 
@@ -390,7 +390,8 @@ class Schema {
     operator[](const FieldName& field_name) const {
         auto id_iter = name_ids_.find(field_name);
         AssertInfo(id_iter != name_ids_.end(),
-                   "Cannot find field with field_name: " + field_name.get());
+                   "Cannot find field with field_name: {}",
+                   field_name.get());
         return fields_.at(id_iter->second);
     }
 
