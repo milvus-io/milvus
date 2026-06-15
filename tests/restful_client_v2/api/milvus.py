@@ -928,6 +928,53 @@ class ImportJobClient(Requests):
         return rsp, finished
 
 
+class SnapshotJobClient(Requests):
+    def __init__(self, endpoint, token):
+        super().__init__(url=endpoint, api_key=token)
+        self.endpoint = endpoint
+        self.api_key = token
+        self.db_name = None
+        self.headers = self.update_headers()
+
+    def export_snapshot(self, payload, db_name="default"):
+        if self.db_name is not None:
+            db_name = self.db_name
+        payload["dbName"] = db_name
+        if db_name is None:
+            payload.pop("dbName")
+        url = f"{self.endpoint}/v2/vectordb/jobs/snapshot/export"
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
+    def restore_external_snapshot(self, payload, db_name="default"):
+        if self.db_name is not None:
+            db_name = self.db_name
+        payload["dbName"] = db_name
+        if db_name is None:
+            payload.pop("dbName")
+        url = f"{self.endpoint}/v2/vectordb/jobs/snapshot/restore_external"
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
+    def get_restore_snapshot_state(self, job_id):
+        payload = {"jobId": str(job_id)}
+        url = f"{self.endpoint}/v2/vectordb/jobs/snapshot/describe"
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
+    def list_restore_snapshot_jobs(self, payload=None, db_name="default"):
+        if payload is None:
+            payload = {}
+        if self.db_name is not None:
+            db_name = self.db_name
+        payload["dbName"] = db_name
+        if db_name is None:
+            payload.pop("dbName")
+        url = f"{self.endpoint}/v2/vectordb/jobs/snapshot/list"
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
+
 class DatabaseClient(Requests):
     def __init__(self, endpoint, token):
         super().__init__(url=endpoint, api_key=token)

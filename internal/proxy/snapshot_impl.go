@@ -27,6 +27,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -199,6 +201,137 @@ func (node *Proxy) ListSnapshots(ctx context.Context, req *milvuspb.ListSnapshot
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return t.result, nil
+}
+
+func (node *Proxy) RestoreExternalSnapshotInternal(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RestoreExternalSnapshot")
+	defer sp.End()
+
+	if req == nil {
+		err := merr.WrapErrParameterInvalidMsg("restore external snapshot request is nil")
+		return &datapb.RestoreSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	req.External = true
+	if req.Base == nil {
+		req.Base = commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_RestoreExternalSnapshot),
+		)
+	}
+	resp, err := node.mixCoord.RestoreSnapshot(ctx, req)
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		log.Ctx(ctx).Warn("RestoreExternalSnapshot failed", zap.Error(err))
+		return &datapb.RestoreSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	return resp, nil
+}
+
+func (node *Proxy) RestoreExternalSnapshot(ctx context.Context, req *milvuspb.RestoreExternalSnapshotRequest) (*milvuspb.RestoreExternalSnapshotResponse, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RestoreExternalSnapshot")
+	defer sp.End()
+
+	if req == nil {
+		err := merr.WrapErrParameterInvalidMsg("restore external snapshot request is nil")
+		return &milvuspb.RestoreExternalSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+
+	method := "RestoreExternalSnapshot"
+	tr := timerecord.NewTimeRecorder(method)
+	log := log.Ctx(ctx).With(
+		zap.String("targetDb", req.GetDbName()),
+		zap.String("targetCollection", req.GetTargetCollectionName()),
+		zap.Bool("snapshotMetadataURISet", req.GetSnapshotMetadataUri() != ""),
+		zap.Bool("externalSpecSet", req.GetExternalSpec() != ""),
+	)
+	log.Info(rpcReceived(method))
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, req.GetDbName(), req.GetTargetCollectionName()).Inc()
+	resp, err := node.RestoreExternalSnapshotInternal(ctx, &datapb.RestoreSnapshotRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_RestoreExternalSnapshot),
+		),
+		TargetDbName:         req.GetDbName(),
+		TargetCollectionName: req.GetTargetCollectionName(),
+		External:             true,
+		SnapshotS3Location:   req.GetSnapshotMetadataUri(),
+		ExternalSpec:         req.GetExternalSpec(),
+	})
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetTargetCollectionName()).Inc()
+		log.Warn("RestoreExternalSnapshot failed", zap.Error(err))
+		return &milvuspb.RestoreExternalSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel, req.GetDbName(), req.GetTargetCollectionName()).Inc()
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return &milvuspb.RestoreExternalSnapshotResponse{
+		Status: resp.GetStatus(),
+		JobId:  resp.GetJobId(),
+	}, nil
+}
+
+func (node *Proxy) ExportSnapshot(ctx context.Context, req *milvuspb.ExportSnapshotRequest) (*milvuspb.ExportSnapshotResponse, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ExportSnapshot")
+	defer sp.End()
+
+	if req == nil {
+		err := merr.WrapErrParameterInvalidMsg("export snapshot request is nil")
+		return &milvuspb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+
+	method := "ExportSnapshot"
+	tr := timerecord.NewTimeRecorder(method)
+	log := log.Ctx(ctx).With(
+		zap.String("snapshotName", req.GetName()),
+		zap.String("dbName", req.GetDbName()),
+		zap.String("collectionName", req.GetCollectionName()),
+		zap.Bool("targetS3PathSet", req.GetTargetS3Path() != ""),
+		zap.Bool("externalSpecSet", req.GetExternalSpec() != ""),
+	)
+	log.Info(rpcReceived(method))
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+	if err := ValidateSnapshotName(req.GetName()); err != nil {
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+		return &milvuspb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	if req.GetCollectionName() == "" {
+		err := merr.WrapErrParameterInvalidMsg("collection_name is required for export snapshot")
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+		return &milvuspb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	if req.GetTargetS3Path() == "" {
+		err := merr.WrapErrParameterInvalidMsg("target_s3_path is required for export snapshot")
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+		return &milvuspb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+		log.Warn("ExportSnapshot failed to resolve collection", zap.Error(err))
+		return &milvuspb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	resp, err := node.mixCoord.ExportSnapshot(ctx, &datapb.ExportSnapshotRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_ExportSnapshot),
+		),
+		Name:         req.GetName(),
+		CollectionId: collectionID,
+		TargetS3Path: req.GetTargetS3Path(),
+		ExternalSpec: req.GetExternalSpec(),
+	})
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+		log.Warn("ExportSnapshot failed", zap.Error(err))
+		return &milvuspb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return &milvuspb.ExportSnapshotResponse{
+		Status:              resp.GetStatus(),
+		SnapshotMetadataUri: resp.GetSnapshotMetadataUri(),
+	}, nil
 }
 
 func (node *Proxy) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error) {

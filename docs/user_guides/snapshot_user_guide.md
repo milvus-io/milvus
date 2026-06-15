@@ -246,6 +246,89 @@ Parameters:
 Returns:
 - job_id (int64): Restore job ID for tracking progress
 
+### Export Snapshot
+
+Export a snapshot as a self-contained object-storage bundle. The returned
+`snapshotMetadataURI` points to the exported metadata file and can be used for
+external restore in another cluster that can access the same object storage
+location. The export target may be in another bucket when the object-storage
+provider supports server-side copy and one resolved credential can read the
+source bucket and write the target bucket.
+
+**Go SDK Example:**
+```go
+metadataURI, err := client.ExportSnapshot(context.Background(),
+    milvusclient.NewExportSnapshotOption(
+        "backup_20240101",
+        "my_collection",
+        "s3://bucket/snapshot-exports/backup_20240101",
+    ).WithExternalSpec(`{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`))
+if err != nil {
+    log.Fatal(err)
+}
+log.Printf("Exported snapshot metadata: %s", metadataURI)
+```
+
+**REST Example:**
+```text
+POST /v2/vectordb/jobs/snapshot/export
+```
+
+```json
+{
+  "collectionName": "my_collection",
+  "snapshotName": "backup_20240101",
+  "targetS3Path": "s3://bucket/snapshot-exports/backup_20240101",
+  "externalSpec": "{\"extfs\":{\"cloud_provider\":\"aws\",\"region\":\"us-west-2\",\"use_iam\":\"true\"}}"
+}
+```
+
+### Restore External Snapshot
+
+Restore a snapshot from a metadata URI instead of from the target cluster's
+local snapshot registry. This is intended for cross-cluster restore after a
+snapshot has been exported.
+
+A self-contained snapshot generated from an existing snapshot and an explicit
+file mapping can be restored with the same external restore API. The metadata
+URI must point to the generated snapshot metadata file, and every file reference
+inside that metadata must be readable from the target cluster object storage
+configuration before the restore job is created.
+
+**Go SDK Example:**
+```go
+jobID, err := client.RestoreExternalSnapshot(context.Background(),
+    milvusclient.NewRestoreExternalSnapshotOption(
+        "restored_collection",
+        metadataURI,
+    ).WithExternalSpec(`{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`))
+if err != nil {
+    log.Fatal(err)
+}
+log.Printf("Restore job ID: %d", jobID)
+```
+
+**REST Example:**
+```text
+POST /v2/vectordb/jobs/snapshot/restore_external
+```
+
+```json
+{
+  "targetCollectionName": "restored_collection",
+  "snapshotMetadataURI": "s3://bucket/snapshot-exports/backup_20240101/snapshots/100/metadata/1.json",
+  "externalSpec": "{\"extfs\":{\"cloud_provider\":\"aws\",\"region\":\"us-west-2\",\"use_iam\":\"true\"}}"
+}
+```
+
+`targetS3Path` and `snapshotMetadataURI` can be object keys or `s3://bucket/key`
+URIs. `externalSpec` is optional. When it is empty, Milvus uses the instance
+object-storage credential and relies on bucket policy to authorize the other
+bucket. When it is set, only storage-config-compatible `extfs` fields are
+accepted. Avoid raw access keys in restore `externalSpec` unless operationally
+required, because restore job state must propagate the spec through persistent
+metadata before DataNode can execute the copy.
+
 ### Drop Snapshot
 
 Delete a snapshot permanently.
@@ -681,7 +764,7 @@ Use consistent and descriptive naming:
 ### Current Limitations
 
 1. **Read-only snapshots**: Snapshots are immutable once created
-2. **Cross-cluster restoration**: Snapshots are currently tied to the originating cluster (cross-cluster restore not yet supported)
+2. **Cross-cluster restoration**: The target cluster must be able to read the exported snapshot files, and cross-bucket copy requires provider-side copy support with one credential that can read the source and write the destination
 3. **Schema compatibility**: Restored collections maintain original schema
 4. **Resource usage**: Snapshot creation may impact system performance during metadata collection
 5. **Channel/Partition matching**:
