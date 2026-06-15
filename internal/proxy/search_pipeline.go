@@ -359,7 +359,7 @@ func (op *elementBestCollapseOperator) run(ctx context.Context, span trace.Span,
 		if i < len(op.configs) && op.configs[i].Strategy != "" {
 			config = op.configs[i]
 		}
-		collapsed[i], err = collapseElementLevelResult(result, metric.PositivelyRelated(metricType), config)
+		collapsed[i], err = collapseElementLevelResultByMetricType(result, metricType, config)
 		if err != nil {
 			return nil, err
 		}
@@ -404,13 +404,17 @@ func collapseElementLevelResultByBestScore(result *milvuspb.SearchResults, large
 }
 
 func collapseElementLevelResult(result *milvuspb.SearchResults, largerScoreIsBetter bool, config elementCollapseConfig) (*milvuspb.SearchResults, error) {
+	return collapseElementLevelResultWithMetricDirection(result, largerScoreIsBetter, true, config)
+}
+
+func collapseElementLevelResultByMetricType(result *milvuspb.SearchResults, metricType string, config elementCollapseConfig) (*milvuspb.SearchResults, error) {
+	metricType = strings.TrimSpace(metricType)
+	return collapseElementLevelResultWithMetricDirection(result, metric.PositivelyRelated(metricType), metricType != "", config)
+}
+
+func collapseElementLevelResultWithMetricDirection(result *milvuspb.SearchResults, largerScoreIsBetter bool, metricKnown bool, config elementCollapseConfig) (*milvuspb.SearchResults, error) {
 	if result == nil || result.GetResults() == nil || result.GetResults().GetElementIndices() == nil {
 		return result, nil
-	}
-	if isElementCollapseSumFamily(config.Strategy) && !largerScoreIsBetter {
-		return nil, merr.WrapErrParameterInvalidMsg(
-			"%s.collapse.strategy %s is only supported for positively related metrics",
-			elementScopeKey, config.Strategy)
 	}
 
 	data := result.GetResults()
@@ -418,6 +422,12 @@ func collapseElementLevelResult(result *milvuspb.SearchResults, largerScoreIsBet
 	totalRows := int64(0)
 	for _, topk := range topks {
 		totalRows += topk
+	}
+
+	if isElementCollapseSumFamily(config.Strategy) && metricKnown && !largerScoreIsBetter {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"%s.collapse.strategy %s is only supported for positively related metrics",
+			elementScopeKey, config.Strategy)
 	}
 	if totalRows == 0 {
 		return copySearchResultsWithData(result, &schemapb.SearchResultData{
@@ -431,6 +441,10 @@ func collapseElementLevelResult(result *milvuspb.SearchResults, largerScoreIsBet
 			PrimaryFieldName:        data.GetPrimaryFieldName(),
 			SearchIteratorV2Results: data.GetSearchIteratorV2Results(),
 		}), nil
+	}
+
+	if !metricKnown {
+		return nil, merr.WrapErrServiceInternal("element best collapse: missing metric type for element-level result")
 	}
 
 	if typeutil.GetSizeOfIDs(data.GetIds()) < int(totalRows) {
@@ -561,7 +575,7 @@ func aggregateElementHits(hits []bestElementHit, config elementCollapseConfig, l
 		for _, hit := range hits {
 			sum += hit.score
 		}
-		selected := hits[0]
+		selected := bestHits[0]
 		selected.aggregate = sum
 		selected.groupCount = len(hits)
 		if config.Strategy == elementCollapseAvg {

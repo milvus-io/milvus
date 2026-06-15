@@ -424,19 +424,33 @@ func (s *SearchPipelineSuite) TestElementBestCollapseOp_AllowsEmptyElementLevelR
 		},
 	}
 
-	op := &elementBestCollapseOperator{}
-	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{""})
-	s.Require().NoError(err)
+	tests := []struct {
+		name   string
+		config elementCollapseConfig
+	}{
+		{name: "default max"},
+		{name: "topk sum", config: elementCollapseConfig{Strategy: elementCollapseTopKSum, TopK: 2}},
+	}
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			op := &elementBestCollapseOperator{}
+			if test.config.Strategy != "" {
+				op.configs = []elementCollapseConfig{test.config}
+			}
+			out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{""})
+			s.Require().NoError(err)
 
-	results := out[0].([]*milvuspb.SearchResults)
-	result := results[0].GetResults()
+			results := out[0].([]*milvuspb.SearchResults)
+			result := results[0].GetResults()
 
-	s.Nil(result.GetElementIndices())
-	s.Equal(int64(1), result.GetNumQueries())
-	s.Equal(int64(0), result.GetTopK())
-	s.Equal([]int64{0}, result.GetTopks())
-	s.Empty(result.GetScores())
-	s.Equal(int64(10), result.GetAllSearchCount())
+			s.Nil(result.GetElementIndices())
+			s.Equal(int64(1), result.GetNumQueries())
+			s.Equal(int64(0), result.GetTopK())
+			s.Equal([]int64{0}, result.GetTopks())
+			s.Empty(result.GetScores())
+			s.Equal(int64(10), result.GetAllSearchCount())
+		})
+	}
 }
 
 func (s *SearchPipelineSuite) TestElementBestCollapseOp_DeduplicatesEqualScoreElementsByRowID() {
@@ -680,6 +694,25 @@ func (s *SearchPipelineSuite) TestElementBestCollapseOp_RejectsSumCollapseForNeg
 			},
 			Scores:         []float32{0.8, 0.2},
 			ElementIndices: &schemapb.LongArray{Data: []int64{0, 1}},
+		},
+	}
+	op := &elementBestCollapseOperator{configs: []elementCollapseConfig{{Strategy: elementCollapseTopKSum, TopK: 2}}}
+
+	_, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{"L2"})
+
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.Contains(err.Error(), "only supported for positively related metrics")
+}
+
+func (s *SearchPipelineSuite) TestElementBestCollapseOp_RejectsSumCollapseForNegativeMetricsWithEmptyResult() {
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries:     1,
+			TopK:           0,
+			Topks:          []int64{0},
+			ElementIndices: &schemapb.LongArray{},
 		},
 	}
 	op := &elementBestCollapseOperator{configs: []elementCollapseConfig{{Strategy: elementCollapseTopKSum, TopK: 2}}}

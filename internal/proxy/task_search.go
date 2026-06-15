@@ -563,6 +563,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 
 		subSearchInfo := classifyHybridSubSearch(t.schema.CollectionSchema, queryInfo.GetQueryFieldId(), placeholderType)
+		annsField := typeutil.GetField(t.schema.CollectionSchema, queryInfo.GetQueryFieldId())
 		collapseConfig, elementScopeProvided, sanitizedSearchParams, err := parseAndRemoveElementScope(queryInfo.GetSearchParams())
 		if err != nil {
 			return err
@@ -571,7 +572,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			if subSearchInfo.Kind != hybridSubSearchStructElement {
 				return merr.WrapErrParameterInvalidMsg("%s is only supported for element-level search on struct array vector sub-fields", elementScopeKey)
 			}
-			if err := validateElementCollapseMetricType(collapseConfig, queryInfo.GetMetricType()); err != nil {
+			if err := validateElementCollapseMetricType(collapseConfig, resolveElementCollapseMetricType(queryInfo.GetMetricType(), annsField)); err != nil {
 				return err
 			}
 			queryInfo.SearchParams = sanitizedSearchParams
@@ -581,7 +582,6 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 
 		// Hybrid search only supports plain top-K on ArrayOfVector fields. Both
 		// element-level and embedding-list searches reject advanced controls here.
-		annsField := typeutil.GetField(t.schema.CollectionSchema, queryInfo.GetQueryFieldId())
 		if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
 			isStructElementSubSearch := subSearchInfo.Kind == hybridSubSearchStructElement
 			isStructEmbListSubSearch := subSearchInfo.Kind == hybridSubSearchStructEmbList
@@ -985,7 +985,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 			}
 		} else if t.isIterator && queryInfo.GetSearchIteratorV2Info() == nil {
 			return merr.WrapErrParameterInvalid("", "",
-				"legacy search iterator is not supported for element-level search on embedding list fields; use search iterator v2")
+				"legacy search iterator is not supported for element-level search; use search iterator v2")
 		}
 
 		groupByFieldIDs := queryInfo.GetGroupByFieldIds()
@@ -1001,7 +1001,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 			for _, groupByFieldID := range groupByFieldIDs {
 				if pkField == nil || groupByFieldID != pkField.GetFieldID() {
 					return merr.WrapErrParameterInvalid("", "",
-						"only group by primary key is supported for element-level search on embedding list fields")
+						"only group by primary key is supported for element-level search")
 				}
 			}
 		}
