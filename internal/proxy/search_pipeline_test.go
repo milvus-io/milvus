@@ -2531,6 +2531,31 @@ func (s *SearchPipelineSuite) TestEndOperatorKeepsScoresWhenRoundDecimalDisabled
 	s.Equal([]float32{float32(0.49), float32(0.36)}, resultData.GetScores())
 }
 
+func (s *SearchPipelineSuite) TestEndOperatorKeepsAdvancedRerankScores() {
+	task := &searchTask{
+		SearchRequest: &internalpb.SearchRequest{IsAdvanced: true},
+		rankParams:    &rankParams{roundDecimal: 0},
+		schema: &schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{},
+		},
+	}
+
+	op, err := newEndOperator(task, nil)
+	s.NoError(err)
+
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Scores: []float32{0.99, 0.88},
+		},
+	}
+
+	results, err := op.run(context.Background(), s.span, searchResults, []*milvuspb.SearchResults{{Results: &schemapb.SearchResultData{AllSearchCount: 0}}})
+	s.NoError(err)
+
+	resultData := results[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]float32{float32(0.99), float32(0.88)}, resultData.GetScores())
+}
+
 func (s *SearchPipelineSuite) TestHybridSearchWithRequeryAndRerankByDataPipe() {
 	task := getHybridSearchTask("test_collection", [][]string{
 		{"1", "2"},

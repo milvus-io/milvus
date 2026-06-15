@@ -1779,9 +1779,7 @@ type endOperator struct {
 
 func newEndOperator(t *searchTask, _ map[string]any) (operator, error) {
 	roundDecimal := int64(-1)
-	if t.GetIsAdvanced() {
-		roundDecimal = t.rankParams.GetRoundDecimal()
-	} else if len(t.queryInfos) > 0 && t.queryInfos[0] != nil {
+	if !t.GetIsAdvanced() && len(t.queryInfos) > 0 && t.queryInfos[0] != nil {
 		roundDecimal = t.queryInfos[0].GetRoundDecimal()
 	}
 	return &endOperator{
