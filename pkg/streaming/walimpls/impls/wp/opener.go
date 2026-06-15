@@ -41,7 +41,7 @@ func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimp
 		log.Ctx(ctx).Error("failed to open log writer", zap.String("log_name", opt.Channel.Name), zap.Error(err))
 		return nil, err
 	}
-	log.Ctx(ctx).Info("finish to open log writer", zap.String("log_name", opt.Channel.Name), zap.Error(err))
+	log.Ctx(ctx).Info("finish to open log writer", zap.String("log_name", opt.Channel.Name))
 	return &walImpl{
 		WALHelper: helper.NewWALHelper(opt),
 		p:         p,
