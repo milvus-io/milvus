@@ -222,7 +222,7 @@ func (m *shardSplitManager) advanceRedistributing(task *datapb.SplitShardTask) {
 			skippedCompacting++
 			continue
 		}
-		idx, err := m.planner.AssignSegment(segment, task.GetTargets())
+		idx, err := m.planner.AssignSegment(m.ctx, segment, task.GetTargets())
 		if err != nil {
 			logger.Warn("assign a segment to the split targets failed",
 				zap.Int64("segmentID", segment.GetID()), zap.Error(err))

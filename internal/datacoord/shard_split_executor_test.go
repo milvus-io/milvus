@@ -73,7 +73,7 @@ func (f *fakeSplitPlanner) PlanTargets(ctx context.Context, collection *collecti
 	return targets, nil
 }
 
-func (f *fakeSplitPlanner) AssignSegment(segment *SegmentInfo, targets []*datapb.SplitShardTaskTarget) (int, error) {
+func (f *fakeSplitPlanner) AssignSegment(ctx context.Context, segment *SegmentInfo, targets []*datapb.SplitShardTaskTarget) (int, error) {
 	if f.assignErr != nil {
 		return 0, f.assignErr
 	}
