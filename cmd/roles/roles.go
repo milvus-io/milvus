@@ -72,6 +72,7 @@ func init() {
 	metrics.RegisterMetaMetrics(Registry.GoRegistry)
 	metrics.RegisterMsgStreamMetrics(Registry.GoRegistry)
 	metrics.RegisterStorageMetrics(Registry.GoRegistry)
+	metrics.RegisterGRPCMetrics(Registry.GoRegistry)
 }
 
 // stopRocksmqIfUsed closes the RocksMQ if it is used.
