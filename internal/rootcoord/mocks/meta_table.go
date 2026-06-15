@@ -315,6 +315,54 @@ func (_c *IMetaTable_AlterDatabase_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// AlterRole provides a mock function with given fields: ctx, tenant, entity
+func (_m *IMetaTable) AlterRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
+	ret := _m.Called(ctx, tenant, entity)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AlterRole")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, *milvuspb.RoleEntity) error); ok {
+		r0 = rf(ctx, tenant, entity)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_AlterRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterRole'
+type IMetaTable_AlterRole_Call struct {
+	*mock.Call
+}
+
+// AlterRole is a helper method to define mock.On call
+//   - ctx context.Context
+//   - tenant string
+//   - entity *milvuspb.RoleEntity
+func (_e *IMetaTable_Expecter) AlterRole(ctx interface{}, tenant interface{}, entity interface{}) *IMetaTable_AlterRole_Call {
+	return &IMetaTable_AlterRole_Call{Call: _e.mock.On("AlterRole", ctx, tenant, entity)}
+}
+
+func (_c *IMetaTable_AlterRole_Call) Run(run func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity)) *IMetaTable_AlterRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(*milvuspb.RoleEntity))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_AlterRole_Call) Return(_a0 error) *IMetaTable_AlterRole_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_AlterRole_Call) RunAndReturn(run func(context.Context, string, *milvuspb.RoleEntity) error) *IMetaTable_AlterRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // BackupRBAC provides a mock function with given fields: ctx, tenant
 func (_m *IMetaTable) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error) {
 	ret := _m.Called(ctx, tenant)
@@ -610,6 +658,53 @@ func (_c *IMetaTable_CheckIfAliasDroppable_Call) Return(_a0 error) *IMetaTable_C
 }
 
 func (_c *IMetaTable_CheckIfAliasDroppable_Call) RunAndReturn(run func(context.Context, string, string) error) *IMetaTable_CheckIfAliasDroppable_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CheckIfAlterRole provides a mock function with given fields: ctx, req
+func (_m *IMetaTable) CheckIfAlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckIfAlterRole")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterRoleRequest) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_CheckIfAlterRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckIfAlterRole'
+type IMetaTable_CheckIfAlterRole_Call struct {
+	*mock.Call
+}
+
+// CheckIfAlterRole is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *milvuspb.AlterRoleRequest
+func (_e *IMetaTable_Expecter) CheckIfAlterRole(ctx interface{}, req interface{}) *IMetaTable_CheckIfAlterRole_Call {
+	return &IMetaTable_CheckIfAlterRole_Call{Call: _e.mock.On("CheckIfAlterRole", ctx, req)}
+}
+
+func (_c *IMetaTable_CheckIfAlterRole_Call) Run(run func(ctx context.Context, req *milvuspb.AlterRoleRequest)) *IMetaTable_CheckIfAlterRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AlterRoleRequest))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfAlterRole_Call) Return(_a0 error) *IMetaTable_CheckIfAlterRole_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfAlterRole_Call) RunAndReturn(run func(context.Context, *milvuspb.AlterRoleRequest) error) *IMetaTable_CheckIfAlterRole_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -23,6 +24,15 @@ func Test_GetPrivilegeExtObj(t *testing.T) {
 	request2 := &milvuspb.GetPersistentSegmentInfoRequest{}
 	_, err = GetPrivilegeExtObj(request2)
 	assert.Error(t, err)
+}
+
+func Test_GetPrivilegeExtObjAlterRole(t *testing.T) {
+	createRolePrivilege, err := GetPrivilegeExtObj(&milvuspb.CreateRoleRequest{})
+	assert.NoError(t, err)
+
+	alterRolePrivilege, err := GetPrivilegeExtObj(&milvuspb.AlterRoleRequest{})
+	assert.NoError(t, err)
+	assert.True(t, proto.Equal(&createRolePrivilege, &alterRolePrivilege))
 }
 
 func Test_GetResourceName(t *testing.T) {
