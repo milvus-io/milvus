@@ -68,6 +68,7 @@ enum MessageType {
     DropSnapshotsByCollection    = 44;
     CommitImport                 = 45;
     RollbackImport               = 46;
+    SplitShard                   = 47;
 
     // AlterWAL is used to alter the wal configuration to the current cluster.
     AlterWAL             = 700;
@@ -206,6 +207,41 @@ message ManualFlushMessageHeader {
     int64 collection_id = 1;
     uint64 flush_ts     = 2;
     repeated int64 segment_ids   = 3; // the segment ids to be flushed, will be filled by wal shard manager.
+}
+
+// KeyRange is a byte-comparable routing key range [lower, upper).
+// The routing key encoding must be order-preserving (byte order = logical order).
+message KeyRange {
+    bytes lower = 1; // inclusive lower bound, an empty value means unbounded.
+    bytes upper = 2; // exclusive upper bound, an empty value means unbounded.
+}
+
+// SplitShardTarget describes one target shard of a shard split.
+message SplitShardTarget {
+    // the vchannel name of the target shard.
+    string vchannel = 1;
+    // the routing key range owned by the target shard after the split.
+    KeyRange key_range = 2;
+}
+
+// SplitShardMessageHeader is the header of the split shard message.
+// The message is appended to the source shard's vchannel as the write fence:
+// its time tick is T_switch, after this message the source vchannel never
+// accepts new DML messages, and the new writes of the source key range are
+// served by the target shards.
+message SplitShardMessageHeader {
+    int64 collection_id = 1;
+    // the unique split task id allocated by the coordinator,
+    // used for idempotency and split task correlation.
+    int64 split_task_id = 2;
+    // the target shards that the source shard splits into.
+    // the key ranges of all targets are disjoint and their union is exactly
+    // the key range owned by the source shard.
+    repeated SplitShardTarget targets = 3;
+}
+
+// SplitShardMessageBody is the body of the split shard message.
+message SplitShardMessageBody {
 }
 
 // CreateCollectionMessageHeader is the header of create collection message.

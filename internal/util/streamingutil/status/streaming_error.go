@@ -57,7 +57,21 @@ func (e *StreamingError) IsSkippedOperation() bool {
 func (e *StreamingError) IsUnrecoverable() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE ||
 		e.IsReplicateViolation() ||
-		e.IsTxnUnavilable() || e.IsSchemaVersionMismatch()
+		e.IsTxnUnavilable() || e.IsSchemaVersionMismatch() ||
+		e.IsShardFenced() || e.IsRoutingStale()
+}
+
+// IsShardFenced returns true if the error is caused by the vchannel fenced by shard split.
+// Retrying on the same vchannel never succeeds; the caller should refresh
+// the routing table and redispatch the messages to the new shards.
+func (e *StreamingError) IsShardFenced() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_SHARD_FENCED
+}
+
+// IsRoutingStale returns true if the error is caused by a stale client routing version.
+// The caller should refresh the routing table and retry.
+func (e *StreamingError) IsRoutingStale() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_ROUTING_STALE
 }
 
 // IsReplicateViolation returns true if the error is caused by replicate violation.
@@ -185,6 +199,16 @@ func NewResourceAcquired(format string, args ...interface{}) *StreamingError {
 // NewRateLimitRejected creates a new StreamingError with code STREAMING_CODE_RATE_LIMIT_REJECTED.
 func NewRateLimitRejected(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_RATE_LIMIT_REJECTED, format, args...)
+}
+
+// NewShardFenced creates a new StreamingError with code STREAMING_CODE_SHARD_FENCED.
+func NewShardFenced(vchannel string) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_SHARD_FENCED, "%s is fenced by shard split", vchannel)
+}
+
+// NewRoutingStale creates a new StreamingError with code STREAMING_CODE_ROUTING_STALE.
+func NewRoutingStale(format string, args ...interface{}) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_ROUTING_STALE, format, args...)
 }
 
 // New creates a new StreamingError with the given code and cause.
