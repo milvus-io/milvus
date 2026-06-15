@@ -106,6 +106,7 @@ type meta struct {
 	analyzeMeta                   *analyzeMeta
 	partitionStatsMeta            *partitionStatsMeta
 	compactionTaskMeta            *compactionTaskMeta
+	compactionTargetMeta          *compactionTargetMeta
 	statsTaskMeta                 *statsTaskMeta
 	externalCollectionRefreshMeta *externalCollectionRefreshMeta
 
@@ -131,6 +132,10 @@ func (m *meta) GetPartitionStatsMeta() *partitionStatsMeta {
 
 func (m *meta) GetCompactionTaskMeta() *compactionTaskMeta {
 	return m.compactionTaskMeta
+}
+
+func (m *meta) GetCompactionTargetMeta() *compactionTargetMeta {
+	return m.compactionTargetMeta
 }
 
 func (m *meta) GetSnapshotMeta() *snapshotMeta {
@@ -272,6 +277,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		am   *analyzeMeta
 		psm  *partitionStatsMeta
 		ctm  *compactionTaskMeta
+		crm  *compactionTargetMeta
 		stm  *statsTaskMeta
 		ecrm *externalCollectionRefreshMeta
 		spm  *snapshotMeta
@@ -317,6 +323,14 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		return err
 	})
 
+	if Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() {
+		g.Go(func() error {
+			var err error
+			crm, err = newCompactionTargetMeta(ctx, catalog)
+			return err
+		})
+	}
+
 	g.Go(func() error {
 		var err error
 		stm, err = newStatsTaskMeta(ctx, catalog)
@@ -350,6 +364,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	mt.analyzeMeta = am
 	mt.partitionStatsMeta = psm
 	mt.compactionTaskMeta = ctm
+	mt.compactionTargetMeta = crm
 	mt.statsTaskMeta = stm
 	mt.externalCollectionRefreshMeta = ecrm
 	mt.snapshotMeta = spm
@@ -2284,6 +2299,10 @@ func normalizePositionTimestamp(pos *msgpb.MsgPosition, commitTs uint64) *msgpb.
 	}
 }
 
+func compactionTaskCreateTS(t *datapb.CompactionTask) uint64 {
+	return t.GetCreateTs()
+}
+
 func validateCompactionFallbackStartPosition(compactFromSegInfos []*SegmentInfo, fallbackStart *msgpb.MsgPosition) error {
 	if fallbackStart == nil {
 		return nil
@@ -2368,6 +2387,7 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			CreatedByCompaction: true,
 			CompactionFrom:      compactFromSegIDs,
 			LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0), 0),
+			CreateTs:            compactionTaskCreateTS(t),
 			Level:               datapb.SegmentLevel_L2,
 			StartPosition:       startPos,
 			DmlPosition:         dmlPos,
@@ -2502,6 +2522,7 @@ func (m *meta) completeMixCompactionMutation(
 				CreatedByCompaction: true,
 				CompactionFrom:      compactFromSegIDs,
 				LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0), 0),
+				CreateTs:            compactionTaskCreateTS(t),
 				Level:               datapb.SegmentLevel_L1,
 				StorageVersion:      compactToSegment.GetStorageVersion(),
 				StartPosition:       startPos,
@@ -3230,6 +3251,7 @@ func (m *meta) completeSortCompactionMutation(
 		Bm25Statslogs:             resultSegment.GetBm25Logs(),
 		Deltalogs:                 resultSegment.GetDeltalogs(),
 		CompactionFrom:            []int64{compactFromSegID},
+		CreateTs:                  compactionTaskCreateTS(t),
 		IsSorted:                  resultSegment.GetIsSorted(),
 		ManifestPath:              resultSegment.GetManifest(),
 		ExpirQuantiles:            resultSegment.GetExpirQuantiles(),
@@ -3433,6 +3455,7 @@ func (m *meta) completeBumpSchemaVersionReplacementMutation(
 		Bm25Statslogs:             resultSegment.GetBm25Logs(),
 		Deltalogs:                 resultSegment.GetDeltalogs(),
 		CompactionFrom:            []int64{oldSegment.GetID()},
+		CreateTs:                  compactionTaskCreateTS(t),
 		IsSorted:                  oldSegment.GetIsSorted(),
 		ManifestPath:              resultSegment.GetManifest(),
 		ExpirQuantiles:            resultSegment.GetExpirQuantiles(),

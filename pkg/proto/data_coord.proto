@@ -463,6 +463,10 @@ message SegmentInfo {
   // timestamps to commit_timestamp, then clears this field back to 0. L0 delete
   // compaction is excluded because it only compacts delete logs.
   uint64 commit_timestamp = 36;
+
+  // create_ts records the planning/create timestamp for replacement segment metadata.
+  // Legacy segments keep the zero value, which means unknown.
+  uint64 create_ts = 37;
 }
 
 message SegmentStartPosition {
@@ -1368,6 +1372,32 @@ enum CompactionTaskState {
   statistic = 10;
 }
 
+enum TargetState {
+  TARGET_STATE_ACTIVE = 0;
+  TARGET_STATE_INACTIVE = 1;
+}
+
+enum TargetIntent {
+  INTENT_UNKNOWN = 0;
+  INTENT_REWRITE = 1;
+  INTENT_SIZE = 2;
+  INTENT_SORT = 3;
+  INTENT_OPTIMIZE = 4;
+  INTENT_BACKFILL = 5;
+}
+
+message CompactionTarget {
+  int64 targetID = 1;
+  int64 collectionID = 2;
+  TargetIntent intent = 3;
+  map<string, string> properties = 4;
+  uint64 expectedTS = 5;
+  int32 tail_limit = 6;
+  TargetState state = 7;
+  uint64 activatedAtTS = 8;
+  uint64 inactivatedAtTS = 9;
+}
+
 message CompactionTask{
   int64 planID = 1;
   int64 triggerID = 2;
@@ -1398,6 +1428,7 @@ message CompactionTask{
   repeated int64 tmpSegments = 27;
   IDRange pre_allocated_segmentIDs = 28;
   repeated schema.FunctionSchema diff_functions = 29;
+  uint64 create_ts = 30;
 }
 
 message PartitionStatsInfo {

@@ -1335,8 +1335,9 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 
 	var id int64
 	var err error
-	if req.GetMajorCompaction() || req.GetL0Compaction() || req.GetTargetSize() != 0 {
-		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req.CollectionID, req.GetMajorCompaction(), req.GetL0Compaction(), req.GetTargetSize())
+	if req.GetMajorCompaction() || req.GetL0Compaction() || req.GetTargetSize() != 0 ||
+		isTargetBasedManualRewriteCompactionRequest(req) {
+		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req)
 	} else {
 		id, err = s.compactionTrigger.TriggerCompaction(ctx, NewCompactionSignal().
 			WithIsForce(true).
@@ -1349,6 +1350,13 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 	if err != nil {
 		log.Error("failed to trigger manual compaction", zap.Error(err))
 		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	if isTargetBasedManualRewriteCompactionRequest(req) {
+		resp.CompactionID = id
+		resp.CompactionPlanCount = 0
+		log.Info("success to record manual rewrite compaction target", zap.Int64("compactionID", id))
 		return resp, nil
 	}
 

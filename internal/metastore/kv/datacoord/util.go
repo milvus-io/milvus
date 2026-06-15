@@ -261,6 +261,19 @@ func buildCompactionTaskPath(task *datapb.CompactionTask) string {
 	return fmt.Sprintf("%s/%s/%d/%d", CompactionTaskPrefix, task.GetType(), task.TriggerID, task.PlanID)
 }
 
+func buildCompactionTargetKV(record *datapb.CompactionTarget) (string, string, error) {
+	valueBytes, err := proto.Marshal(record)
+	if err != nil {
+		return "", "", merr.WrapErrSerializationFailed(err, "marshal CompactionTarget: %d/%d", record.GetTargetID(), record.GetCollectionID())
+	}
+	key := buildCompactionTargetPath(record.GetTargetID())
+	return key, string(valueBytes), nil
+}
+
+func buildCompactionTargetPath(targetID int64) string {
+	return fmt.Sprintf("%s/%d", CompactionTargetPrefix, targetID)
+}
+
 func buildPartitionStatsInfoKv(info *datapb.PartitionStatsInfo) (string, string, error) {
 	valueBytes, err := proto.Marshal(info)
 	if err != nil {

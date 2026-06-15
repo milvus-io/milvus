@@ -5041,6 +5041,7 @@ type dataCoordConfig struct {
 	// compaction
 	EnableCompaction                       ParamItem `refreshable:"false"`
 	EnableAutoCompaction                   ParamItem `refreshable:"true"`
+	EnableTargetBasedCompaction            ParamItem `refreshable:"false"`
 	IndexBasedCompaction                   ParamItem `refreshable:"true"`
 	CompactionTaskPrioritizer              ParamItem `refreshable:"true"`
 	CompactionTaskQueueCapacity            ParamItem `refreshable:"false"`
@@ -5401,6 +5402,15 @@ This configuration takes effect only when dataCoord.enableCompaction is set as t
 		Export: true,
 	}
 	p.EnableAutoCompaction.Init(base.mgr)
+
+	p.EnableTargetBasedCompaction = ParamItem{
+		Key:          "dataCoord.compaction.enableTargetBasedCompaction",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Whether target-based compaction is enabled.",
+		Export:       true,
+	}
+	p.EnableTargetBasedCompaction.Init(base.mgr)
 
 	p.IndexBasedCompaction = ParamItem{
 		Key:          "dataCoord.compaction.indexBasedCompaction",

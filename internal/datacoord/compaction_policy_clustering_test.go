@@ -57,6 +57,7 @@ func (s *ClusteringCompactionPolicySuite) SetupTest() {
 	catalog.EXPECT().SavePartitionStatsInfo(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
