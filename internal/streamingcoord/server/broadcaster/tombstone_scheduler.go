@@ -57,7 +57,14 @@ func (s *tombstoneScheduler) Initialize(bm *broadcastTaskManager, tombstoneBroad
 func (s *tombstoneScheduler) AddPending(broadcastID uint64) {
 	select {
 	case <-s.notifier.Context().Done():
-		panic("unreachable: tombstone scheduler is closing when adding pending tombstone")
+		// The scheduler is closing while an in-flight ack callback still tries to
+		// enqueue a tombstone. This is reachable under concurrent shutdown, so it
+		// must not panic. Dropping the in-memory enqueue is safe: the task state is
+		// already persisted as TOMBSTONE (MarkAckCallbackDone) before reaching here,
+		// and will be recovered into the GC list on the next startup.
+		s.Logger().Info("tombstone scheduler is closing, skip adding pending tombstone",
+			zap.Uint64("broadcastID", broadcastID))
+		return
 	case s.pending <- broadcastID:
 	}
 }
