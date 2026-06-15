@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.8.0-devel-ubuntu22.04 as builder
+FROM nvidia/cuda:12.9.1-devel-ubuntu22.04 as builder
 
 ARG TARGETARCH
 
