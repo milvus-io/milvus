@@ -25,6 +25,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v3/log"
@@ -54,34 +55,48 @@ type streamPipeline struct {
 
 	lastAccessTime          *atomic.Time
 	emptyTimeTickSlowdowner *emptyTimeTickSlowdowner
+	msgPackBatcher          MsgPackBatcher
 }
 
 func (p *streamPipeline) work() {
 	defer p.closeWg.Done()
+	var pending *msgstream.MsgPack
 	for {
-		select {
-		case <-p.closeCh:
-			log.Ctx(context.TODO()).Debug("stream pipeline input closed")
-			return
-		case msg, ok := <-p.input:
-			if !ok {
+		var msg *msgstream.MsgPack
+		if pending != nil {
+			msg = pending
+			pending = nil
+		} else {
+			select {
+			case <-p.closeCh:
 				log.Ctx(context.TODO()).Debug("stream pipeline input closed")
 				return
+			case msgPack, ok := <-p.input:
+				if !ok {
+					log.Ctx(context.TODO()).Debug("stream pipeline input closed")
+					return
+				}
+				msg = msgPack
 			}
-
-			p.lastAccessTime.Store(time.Now())
-			// Currently, milvus use the timetick to synchronize the system periodically,
-			// so the wal will still produce empty timetick message after the last write operation is done.
-			// When there're huge amount of vchannel in one pchannel, it will introduce a great overhead.
-			// So we filter out the empty time tick message as much as possible.
-			// TODO: After 3.0, we can remove the filter logic by LSN+MVCC.
-			if p.emptyTimeTickSlowdowner.Filter(msg) {
-				continue
-			}
-			log.Ctx(context.TODO()).RatedDebug(10, "stream pipeline fetch msg", zap.Int("sum", len(msg.Msgs)))
-			p.pipeline.inputChannel <- msg
-			p.pipeline.process()
 		}
+
+		p.lastAccessTime.Store(time.Now())
+		// Currently, milvus use the timetick to synchronize the system periodically,
+		// so the wal will still produce empty timetick message after the last write operation is done.
+		// When there're huge amount of vchannel in one pchannel, it will introduce a great overhead.
+		// So we filter out the empty time tick message as much as possible.
+		// TODO: After 3.0, we can remove the filter logic by LSN+MVCC.
+		if p.emptyTimeTickSlowdowner.Filter(msg) {
+			continue
+		}
+
+		if p.msgPackBatcher != nil {
+			msg, pending = p.msgPackBatcher.Batch(msg, p.input)
+		}
+
+		log.Ctx(context.TODO()).RatedDebug(10, "stream pipeline fetch msg", zap.Int("sum", len(msg.Msgs)))
+		p.pipeline.inputChannel <- msg
+		p.pipeline.process()
 	}
 }
 
@@ -161,6 +176,7 @@ func NewPipelineWithStream(dispatcher msgdispatcher.Client,
 	enableTtChecker bool,
 	vChannel string,
 	lastestMVCCTimeTickGetter LastestMVCCTimeTickGetter,
+	options ...StreamPipelineOption,
 ) StreamPipeline {
 	pipeline := &streamPipeline{
 		pipeline: &pipeline{
@@ -176,5 +192,87 @@ func NewPipelineWithStream(dispatcher msgdispatcher.Client,
 		emptyTimeTickSlowdowner: newEmptyTimeTickSlowdowner(lastestMVCCTimeTickGetter, vChannel),
 	}
 
+	for _, option := range options {
+		option(pipeline)
+	}
+
 	return pipeline
+}
+
+type StreamPipelineOption func(*streamPipeline)
+
+func WithMsgPackBatcher(batcher MsgPackBatcher) StreamPipelineOption {
+	return func(pipeline *streamPipeline) {
+		pipeline.msgPackBatcher = batcher
+	}
+}
+
+type MsgPackBatcher interface {
+	Batch(first *msgstream.MsgPack, input <-chan *msgstream.MsgPack) (merged *msgstream.MsgPack, pending *msgstream.MsgPack)
+}
+
+type dmlMsgPackBatcher struct {
+	maxPacks int
+}
+
+func NewDMLMsgPackBatcher(maxPacks int) MsgPackBatcher {
+	return &dmlMsgPackBatcher{maxPacks: maxPacks}
+}
+
+func (b *dmlMsgPackBatcher) Batch(first *msgstream.MsgPack, input <-chan *msgstream.MsgPack) (*msgstream.MsgPack, *msgstream.MsgPack) {
+	if b.maxPacks <= 1 || !isDMLMsgPack(first) {
+		return first, nil
+	}
+
+	packs := []*msgstream.MsgPack{first}
+	for len(packs) < b.maxPacks {
+		select {
+		case next, ok := <-input:
+			if !ok {
+				return mergeMsgPacks(packs), nil
+			}
+			if !isDMLMsgPack(next) {
+				return mergeMsgPacks(packs), next
+			}
+			packs = append(packs, next)
+		default:
+			return mergeMsgPacks(packs), nil
+		}
+	}
+	return mergeMsgPacks(packs), nil
+}
+
+func isDMLMsgPack(pack *msgstream.MsgPack) bool {
+	if pack == nil || len(pack.Msgs) == 0 {
+		return false
+	}
+
+	for _, msg := range pack.Msgs {
+		switch msg.Type() {
+		case commonpb.MsgType_Insert, commonpb.MsgType_Delete:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func mergeMsgPacks(packs []*msgstream.MsgPack) *msgstream.MsgPack {
+	if len(packs) == 1 {
+		return packs[0]
+	}
+
+	first := packs[0]
+	last := packs[len(packs)-1]
+	merged := &msgstream.MsgPack{
+		BeginTs:        first.BeginTs,
+		EndTs:          last.EndTs,
+		StartPositions: first.StartPositions,
+		EndPositions:   last.EndPositions,
+		Msgs:           make([]msgstream.TsMsg, 0),
+	}
+	for _, pack := range packs {
+		merged.Msgs = append(merged.Msgs, pack.Msgs...)
+	}
+	return merged
 }

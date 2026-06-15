@@ -827,6 +827,39 @@ func (_c *MockShardDelegator_ProcessDelete_Call) RunAndReturn(run func([]*Delete
 	return _c
 }
 
+// ProcessDeleteBatches provides a mock function with given fields: batches
+func (_m *MockShardDelegator) ProcessDeleteBatches(batches []DeleteBatch) {
+	_m.Called(batches)
+}
+
+// MockShardDelegator_ProcessDeleteBatches_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ProcessDeleteBatches'
+type MockShardDelegator_ProcessDeleteBatches_Call struct {
+	*mock.Call
+}
+
+// ProcessDeleteBatches is a helper method to define mock.On call
+//   - batches []DeleteBatch
+func (_e *MockShardDelegator_Expecter) ProcessDeleteBatches(batches interface{}) *MockShardDelegator_ProcessDeleteBatches_Call {
+	return &MockShardDelegator_ProcessDeleteBatches_Call{Call: _e.mock.On("ProcessDeleteBatches", batches)}
+}
+
+func (_c *MockShardDelegator_ProcessDeleteBatches_Call) Run(run func(batches []DeleteBatch)) *MockShardDelegator_ProcessDeleteBatches_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]DeleteBatch))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_ProcessDeleteBatches_Call) Return() *MockShardDelegator_ProcessDeleteBatches_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardDelegator_ProcessDeleteBatches_Call) RunAndReturn(run func([]DeleteBatch)) *MockShardDelegator_ProcessDeleteBatches_Call {
+	_c.Run(run)
+	return _c
+}
+
 // ProcessInsert provides a mock function with given fields: insertRecords
 func (_m *MockShardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 	_m.Called(insertRecords)
