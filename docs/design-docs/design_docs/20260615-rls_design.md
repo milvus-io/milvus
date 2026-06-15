@@ -19,22 +19,30 @@ RLS is enforced in Proxy:
 
 Core principles:
 
-1. RLS is disabled by default.
-2. RLS is enabled per collection through collection properties.
-3. When enabled, RLS is fail-closed for row-bearing operations.
-4. No applicable policy expression means deny access.
-5. Policies support PostgreSQL-style `PERMISSIVE` and `RESTRICTIVE` combination semantics.
-6. Policies use one `expr`; the policy `actions` decide whether that expression is evaluated against existing rows or incoming rows.
-7. Policies support dynamic expressions through RLS principal tags, such as ownership and department rules.
-8. RLS uses an RLS principal model that is separate from Milvus RBAC identity.
-9. RLS admin principals bypass RLS by default, unless `rls.force=true` is set on the collection.
-10. RLS management operations require `CollectionReadWrite` or `CollectionAdmin` privilege on the target collection, but do not require an RLS principal.
+1. RLS is disabled by default and can be enabled per collection through collection properties.
+2. When enabled, RLS is fail-closed for row-bearing operations: no applicable policy means denied access.
+3. Policies support PostgreSQL-style `PERMISSIVE` and `RESTRICTIVE` combination semantics.
+4. Each policy has an `expr` and a list of `actions`, the principal may perform the `actions` only on rows admitted by `expr`.
+5. Principals may include tags.
+6. RLS management operations require `CollectionReadWrite` or `CollectionAdmin` privilege on the target collection, but do not require an RLS principal.
+
+> #### RBAC and RLS
+> Milvus RBAC and RLS solve different authorization problems:
+
+| Layer | Identity | Scope | Example question |
+| --- | --- | --- | --- |
+| Milvus RBAC | Milvus connection credential, roles, and grants | Cluster, database, collection, partition, index, resource, RBAC, and other Milvus API privileges | Can this Milvus client call `CreateIndex` on this collection? |
+| RLS | Application end-user RLS principal and RLS tags | Rows inside one RLS-enabled collection for row-bearing operations | Which rows can end user `alice` search, query, delete, insert, or upsert? |
+>
+> RBAC is evaluated before the request is allowed to reach the operation. RLS is evaluated only after RBAC allows a row-bearing operation on an RLS-enabled collection.
+>
+> This separation lets an application connect to Milvus with a service credential while passing an RLS principal such as `alice`, `bob`, or `support_admin` for row-level enforcement. The service credential is responsible for Milvus API privileges. The RLS principal is responsible for row visibility and write validation.
 
 ## 2. Main User Interface
 RLS exposes a small user-facing surface:
 
 1. Enable RLS on a collection.
-2. Configure collection-scoped RLS principal metadata.
+2. Create collection-scoped RLS principals.
 3. Create row policies on the collection.
 4. Send row-bearing requests with an explicit RLS principal.
 
@@ -49,7 +57,7 @@ client.alter_collection_properties(
 )
 ```
 
-Configure collection-scoped RLS principal tags:
+Create collection-scoped RLS principals with tags:
 ```python
 client.set_rls_principal_tags(
     collection_name="documents",
@@ -119,20 +127,8 @@ Semantics:
 - RLS is enabled explicitly at collection level.
 - RLS management APIs are protected by collection-scoped Milvus RBAC privileges. Runtime RLS policy evaluation uses the RLS principal, not the Milvus connection user.
 
-#### RBAC and RLS
-Milvus RBAC and RLS solve different authorization problems:
-
-| Layer | Identity | Scope | Example question |
-| --- | --- | --- | --- |
-| Milvus RBAC | Milvus connection credential, roles, and grants | Cluster, database, collection, partition, index, resource, RBAC, and other Milvus API privileges | Can this Milvus client call `CreateIndex` on this collection? |
-| RLS | Application end-user RLS principal and RLS tags | Rows inside one RLS-enabled collection for row-bearing operations | Which rows can end user `alice` search, query, delete, insert, or upsert? |
-
-RBAC is evaluated before the request is allowed to reach the operation. RLS is evaluated only after RBAC allows a row-bearing operation on an RLS-enabled collection.
-
-This separation lets an application connect to Milvus with a service credential while passing an RLS principal such as `alice`, `bob`, or `support_admin` for row-level enforcement. The service credential is responsible for Milvus API privileges. The RLS principal is responsible for row visibility and write validation.
-
 #### RLS Principal
-An RLS principal is a collection-scoped application end-user identity used for RLS policy evaluation. The RLS principal is not required to be a Milvus RBAC user.
+An RLS principal is a collection-scoped application end-user identity used for RLS policy evaluation.
 
 An RLS principal has:
 
@@ -145,7 +141,7 @@ The principal name, tags, and admin marker belong to one collection's RLS metada
 RLS admin principals are an RLS concept, not a synonym for Milvus `root` or the Milvus `admin` RBAC role. RLS admin status is scoped to one collection. When `rls.force=false`, an RLS admin principal bypasses RLS policies for row-bearing operations on that collection. When `rls.force=true`, even an RLS admin principal must satisfy applicable RLS policies.
 
 #### Collection-Level RLS Properties
-RLS is controlled by collection properties, not by separate enable/disable APIs. A Milvus user with `CollectionReadWrite` or `CollectionAdmin` privilege enables, disables, or forces RLS by updating collection properties.
+RLS is controlled by collection properties, not by separate enable/disable APIs. A Milvus RBAC user with `CollectionReadWrite` or `CollectionAdmin` privilege enables, disables, or forces RLS by updating collection properties.
 ```python
 client.alter_collection_properties(
     collection_name="documents",
@@ -232,15 +228,6 @@ These out-of-scope operations may affect the collection as a whole, but they are
 
 #### Policy Fields
 The public row policy API exposes the following fields:
-```plaintext
-collection_name
-policy_name
-policy_type
-actions
-expr
-description
-```
-
 
 | Field | Description |
 | --- | --- |
@@ -251,25 +238,7 @@ description
 | `expr` | Row policy expression evaluated for all listed actions |
 | `description` | Optional description |
 
-A row policy is scoped by `collection_name`, and `policy_name` only needs to be unique within that collection. Public APIs do not expose or require internal database IDs, collection IDs, or policy IDs.
-
-A collection-level RLS switch controls whether row policies are enforced:
-
-| Collection property | Effect |
-| --- | --- |
-| `rls.enabled=false` | Policies exist but are not enforced |
-| `rls.enabled=true` | Policies are enforced for non-admin RLS principals |
-| `rls.force=true` | Policies are also enforced for RLS admin principals |
-
-Policy creation and policy enforcement are separate steps:
-
-1. Create one or more policies on a collection.
-2. Set `rls.enabled=true` on that collection.
-3. Row-bearing requests apply policies whose `actions` contain the current action.
-
 #### Policy Applicability
-A policy participates in RLS expression construction when its `actions` contain the current row-bearing action. There is no separate principal-group matching step in the first version. Differences between principals are expressed through `$current_principal` and `$current_principal_tags` inside policy expressions.
-Tags are not a separate policy binding mechanism. Policy selection is action-based; tag checks are normal expression predicates inside `expr`.
 
 Example policy that applies to the current action and filters rows by the current principal:
 ```python
@@ -461,18 +430,6 @@ The first version supports only the following expression operators:
 | `array_contains_all` | Array field | Array literal | Array field contains every literal in the operand |
 | `array_contains_any` | Array field | Array literal | Array field contains at least one literal in the operand |
 
-`in` is for scalar fields:
-```plaintext
-department in ['engineering', 'product']
-```
-
-`array_contains` and its variants are for array fields:
-```plaintext
-array_contains(shared_users, $current_principal)
-array_contains_all(required_labels, ['security', 'approved'])
-array_contains_any(shared_departments, ['engineering', 'product'])
-```
-
 ### Public Management APIs
 RLS management APIs are collection-scoped Milvus management operations. They require the Milvus connection user to have `CollectionReadWrite` or `CollectionAdmin` privilege on the target collection, and they do not require an RLS principal in the request.
 
@@ -628,17 +585,6 @@ Example document owned by Alice and shared with the Product department:
 }
 ```
 
-Field meanings:
-
-| Field | Meaning |
-| --- | --- |
-| `owner` | The user who owns the document |
-| `department` | The owner's department |
-| `shared_users` | Additional users who can read this document |
-| `shared_departments` | Departments whose members can read this document |
-
-`shared_users` does not need to include the owner. The owner is represented separately by `owner`, and owner access is granted by owner-specific policies.
-
 #### Assign RLS Principal Tags
 RLS can use collection-scoped RLS principal tags to express dynamic policies.
 ```python
@@ -659,12 +605,6 @@ client.set_rls_principal_tags(
     principal_name="carol",
     tags={"department": "product"},
 )
-```
-
-RLS expressions can reference the current RLS principal:
-```plaintext
-$current_principal
-$current_principal_tags['department']
 ```
 
 #### Enable RLS on the Collection
