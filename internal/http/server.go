@@ -19,6 +19,7 @@ package http
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -30,7 +31,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/http/healthz"
-	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/eventlog"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/util/expr"
@@ -76,6 +76,12 @@ type Handler struct {
 	Handler     http.Handler
 }
 
+func writeJSONError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"msg": msg})
+}
+
 func registerDefaults() {
 	Register(&Handler{
 		Path: LogLevelRouterPath,
@@ -116,8 +122,7 @@ func registerDefaults() {
 			}
 
 			if err := CheckExprAuth(req.Context(), req); err != nil {
-				w.WriteHeader(HTTPStatusFromPrivilegeError(err))
-				fmt.Fprintf(w, `{"msg": "%s"}`, err.Error()) //nolint:gosec // error message is authored by CheckExprAuth and safe to include in response
+				writeJSONError(w, HTTPStatusFromPrivilegeError(err), err.Error())
 				return
 			}
 			// Use bypass since we've already authenticated
@@ -125,8 +130,8 @@ func registerDefaults() {
 
 			output, err := expr.Exec(code, auth)
 			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, `{"msg": "failed to execute expression, %s"}`, err.Error()) //nolint:gosec // error message is safe to include in response
+				writeJSONError(w, http.StatusInternalServerError,
+					fmt.Sprintf("failed to execute expression, %s", err.Error()))
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")

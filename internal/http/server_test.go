@@ -352,6 +352,63 @@ func (suite *HTTPServerTestSuite) TestExprHandler() {
 		suite.True(strings.Contains(string(body), "hello"))
 	})
 
+	suite.Run("invalid_auth_mode_returns_valid_json", func() {
+		paramtable.Get().Save("common.security.exprEnabled", "true")
+		paramtable.Get().Save("common.security.exprAuthMode", "rbca")
+		paramtable.Get().Save("common.security.authorizationEnabled", "true")
+		paramtable.Get().Save("common.security.rootShouldBindRole", "false")
+		expr.Register("proxy", "mock_proxy")
+
+		RegisterPasswordVerifyFunc(func(ctx context.Context, username, password string) bool {
+			return (username == "root" && password == "Milvus") ||
+				(username == "admin" && password == "admin123")
+		})
+
+		url := "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
+		client := http.Client{}
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		req.SetBasicAuth("root", "Milvus")
+		resp, err := client.Do(req)
+		suite.Nil(err)
+		defer resp.Body.Close()
+		suite.Equal(http.StatusForbidden, resp.StatusCode)
+
+		body, _ := io.ReadAll(resp.Body)
+		var parsed map[string]string
+		err = json.Unmarshal(body, &parsed)
+		suite.NoError(err)
+		suite.Contains(parsed["msg"], "rbca")
+	})
+
+	suite.Run("exec_error_returns_valid_json", func() {
+		paramtable.Get().Save("common.security.exprEnabled", "true")
+		paramtable.Get().Save("common.security.exprAuthMode", ExprAuthModeRootOnly)
+		paramtable.Get().Save("common.security.authorizationEnabled", "false")
+		paramtable.Get().Save("common.security.rootShouldBindRole", "false")
+		expr.Register("proxy", "mock_proxy")
+
+		RegisterPasswordVerifyFunc(func(ctx context.Context, username, password string) bool {
+			return (username == "root" && password == "Milvus") ||
+				(username == "admin" && password == "admin123")
+		})
+
+		url := "http://localhost:" + DefaultListenPort + ExprPath + "?code=1%2B"
+		client := http.Client{}
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		req.SetBasicAuth("root", "Milvus")
+		resp, err := client.Do(req)
+		suite.Nil(err)
+		defer resp.Body.Close()
+		suite.Equal(http.StatusInternalServerError, resp.StatusCode)
+
+		body, _ := io.ReadAll(resp.Body)
+		var parsed map[string]string
+		err = json.Unmarshal(body, &parsed)
+		suite.NoError(err)
+		suite.Contains(parsed["msg"], "failed to execute expression")
+		suite.Contains(parsed["msg"], "unexpected token EOF")
+	})
+
 	suite.Run("enabled_on_proxy_non_root_user_without_privilege", func() {
 		// Non-root user with valid credentials but without PrivilegeExpr privilege
 		// should get 403 Forbidden
