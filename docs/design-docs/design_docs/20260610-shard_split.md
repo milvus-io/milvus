@@ -419,8 +419,26 @@ sequenceDiagram
    segments of their namespace. Segments flushed by the fence (the former
    growing data of WAL0) are included; segments flushed from the
    children's WALs are born on the target vchannels and need no relabel.
+   `IsImporting` segments are skipped to the next round (the same shape as
+   the `isCompacting` skip the compaction policies already apply): an
+   import worker is still committing binlogs through meta updates on those
+   segments, and relabeling mid-import would race with those writes. They
+   are picked up once flushed.
 2. Redistribution runs in rounds: each round processes the segments
-   visible at that time, until the source shard has none left.
+   visible at that time. The source shard is "drained" only when **both**
+   DC-local conditions hold: no healthy segment remains on the source
+   vchannel (any state — `isSegmentHealthy` already keeps `Importing`
+   segments visible until they reach a terminal state), **and** no active
+   import job has the source vchannel in its `Vchannels`. The second
+   conjunct closes a blind window: a job still in `Pending`/`PreImporting`
+   has not registered any segment in meta yet (`AllocImportSegment` adds
+   `SegmentInfo{State: Importing, IsImporting: true}` only when it starts
+   writing), so a job planned against the pre-split routing is invisible
+   to the segment scan and could otherwise allocate its segments onto the
+   just-dropped shard after the empty check passed. A job's target
+   vchannels are fixed at creation (`ImportJob.GetVchannels()`), so this
+   check is purely DataCoord-local and needs no import/split mutual
+   exclusion.
 3. Only then do the target shards leave state `Creating`; QueryCoord picks
    them up, issues `WatchDmChannel`, and — because the child delegators
    already exist on that QueryNode with all segments loaded — converts
@@ -588,6 +606,19 @@ The view of one segment `S` across the phases:
    children's distributions are registered — with segment instances shared
    by ID so that the release never unloads data still referenced by a new
    shard.
+10. **Import × split interaction.** No mutual exclusion between import and
+    split is needed — the conjunction completion check of §6.3 step 2
+    already waits out every import that has registered segments, and
+    relabel skips `IsImporting` segments (§6.3 step 1). The one case that
+    needs handling is an import job *created during the split*: an `Import`
+    broadcast targets the collection's vchannels, so a job created in the
+    fence→activation gap includes the source vchannel and bounces with
+    `SHARD_FENCED`. Job creation is queued while the split task is in
+    `Fencing` (the same seconds-long critical section that already holds
+    the Broadcaster's `ExclusiveCollectionName` key, §6.1) and re-planned
+    against the new routing after activation. Jobs created after
+    activation plan against the new shards directly and are fully
+    orthogonal to redistribution.
 
 ## 9. Configuration
 
@@ -640,7 +671,7 @@ by the namespace hard limit instead.
 | Component | Work |
 |-----------|------|
 | Common | `SplitShard` / `CreateVChannel` / `Activate` message types (codegen; `SplitShard` is `ExclusiveRequired`); `SHARD_FENCED` / `ROUTING_STALE` error codes (unrecoverable, `SHARD_FENCED` carries the expected routing version); `etcdpb` shard routing fields; range routing table derived from collection meta |
-| DataCoord | Split task FSM driving the sequence via streaming-client appends (`CreateVChannel` → `ManualFlush` + `SplitShard` → `Activate`, start positions persisted in task meta, Broadcaster `ExclusiveCollectionName` key held across create→fence→activate), trigger and split-point selection, batched relabel (segments + L0), multi-round redistribution, source-shard freeze, adoption gate |
+| DataCoord | Split task FSM driving the sequence via streaming-client appends (`CreateVChannel` → `ManualFlush` + `SplitShard` → `Activate`, start positions persisted in task meta, Broadcaster `ExclusiveCollectionName` key held across create→fence→activate), trigger and split-point selection, batched relabel (segments + L0, skipping `IsImporting`), multi-round redistribution with the segment-and-import-job conjunction drain check, import-job queueing during `Fencing`, source-shard freeze, adoption gate |
 | StreamingCoord | vchannel allocation for existing collections (per-collection increasing shard index, distinct pchannels), pchannel headroom and expansion |
 | StreamingNode | Target-vchannel `Creating`/`Active` lifecycle (DML rejected until activation; the `VCHANNEL_STATE_SPLITTED = 3` reservation in `streaming.proto` covers only the fenced **source** vchannel — the targets need a new state, e.g. `VCHANNEL_STATE_CREATING = 4`, with `Activate` transitioning it to `VCHANNEL_STATE_NORMAL`, persisted through the same RecoveryStorage observe path so the non-writable state survives restarts), vchannel fence on the lock interceptor, persisted fence state, rejection codes, `Activate` handling with `BarrierTimeTick = T_switch` plus a TimeTick lower-bound assertion |
 | Proxy | Range routing lookup, reject-and-refetch loop, routing-version header, cache invalidation on adoption |
