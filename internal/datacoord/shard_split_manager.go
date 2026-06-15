@@ -133,6 +133,7 @@ func (m *shardSplitManager) Start() {
 			case <-time.After(interval):
 				m.detectOnce()
 				m.advanceTasks()
+				m.refreshMetrics()
 			}
 		}
 	}()
