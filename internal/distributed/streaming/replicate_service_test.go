@@ -90,6 +90,68 @@ func TestReplicateService(t *testing.T) {
 	}
 }
 
+func TestReplicateServiceAppendTxnSystemMessage(t *testing.T) {
+	c := mock_client.NewMockClient(t)
+	as := mock_client.NewMockAssignmentService(t)
+	c.EXPECT().Assignment().Return(as).Maybe()
+
+	h := mock_handler.NewMockHandlerClient(t)
+	p := mock_producer.NewMockProducer(t)
+	var appended bool
+	p.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
+		appended = true
+		assert.Equal(t, message.MessageTypeBeginTxn, mm.MessageType())
+		assert.Equal(t, "by-dev-rootcoord-dml_0_1v0", mm.VChannel())
+		return &types.AppendResult{
+			MessageID: walimplstest.NewTestMessageID(1),
+			TimeTick:  1,
+		}, nil
+	}).Maybe()
+	p.EXPECT().IsAvailable().Return(true).Maybe()
+	p.EXPECT().Available().Return(make(chan struct{})).Maybe()
+	h.EXPECT().CreateProducer(mock.Anything, mock.Anything).Return(p, nil).Maybe()
+
+	as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(replicateutil.MustNewConfigHelper(
+		"by-dev",
+		&commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "primary", Pchannels: []string{"primary-rootcoord-dml_0"}},
+				{ClusterId: "by-dev", Pchannels: []string{"by-dev-rootcoord-dml_0"}},
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "primary", TargetClusterId: "by-dev"},
+			},
+		},
+	), nil)
+
+	rs := &replicateService{
+		walAccesserImpl: &walAccesserImpl{
+			lifetime:             typeutil.NewLifetime(),
+			clusterID:            "by-dev",
+			streamingCoordClient: c,
+			handlerClient:        h,
+			producers:            make(map[string]*producer.ResumableProducer),
+		},
+	}
+
+	beginMsg := message.NewBeginTxnMessageBuilderV2().
+		WithHeader(&message.BeginTxnMessageHeader{}).
+		WithBody(&message.BeginTxnMessageBody{}).
+		WithVChannel("primary-rootcoord-dml_0_1v0").
+		MustBuildMutable()
+	immutableMsg := beginMsg.WithLastConfirmedUseMessageID().WithTimeTick(1).IntoImmutableMessage(pulsar2.NewPulsarID(
+		pulsar.NewMessageID(1, 2, 3, 4),
+	))
+	replicateMsg := message.MustNewReplicateMessage("primary", immutableMsg.IntoImmutableMessageProto())
+
+	var err error
+	assert.NotPanics(t, func() {
+		_, err = rs.Append(context.Background(), replicateMsg)
+	})
+	assert.NoError(t, err)
+	assert.True(t, appended)
+}
+
 func TestReplicateService_GetReplicateConfiguration(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		c := mock_client.NewMockClient(t)

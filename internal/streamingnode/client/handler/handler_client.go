@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/ratelimit"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/tracer"
 	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
@@ -43,6 +44,9 @@ type (
 type ProducerOptions struct {
 	// PChannel is the pchannel of the producer.
 	PChannel string
+
+	// RateLimitObserver is the observer of the rate limit.
+	RateLimitObserver ratelimit.RateLimitObserver
 }
 
 // ConsumerOptions is the options for creating a consumer.

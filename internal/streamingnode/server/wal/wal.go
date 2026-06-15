@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/ratelimit"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
@@ -16,6 +17,8 @@ type (
 // WAL is the WAL framework interface.
 // !!! Don't implement it directly, implement walimpls.WAL instead.
 type WAL interface {
+	ratelimit.RateLimitObserverRegistry
+
 	ROWAL
 
 	// GetLatestMVCCTimestamp get the latest mvcc timestamp of the wal at vchannel.
