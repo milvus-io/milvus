@@ -66,14 +66,28 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 	nodeMsg := in.(*deleteNodeMsg)
 
 	if len(nodeMsg.deleteMsgs) > 0 {
-		// partition id = > DeleteData
-		deleteDatas := make(map[UniqueID]*delegator.DeleteData)
+		deleteDataByTs := make(map[uint64]map[UniqueID]*delegator.DeleteData)
+		tsOrder := make([]uint64, 0)
 
 		for _, msg := range nodeMsg.deleteMsgs {
+			ts := msg.EndTs()
+			deleteDatas, ok := deleteDataByTs[ts]
+			if !ok {
+				deleteDatas = make(map[UniqueID]*delegator.DeleteData)
+				deleteDataByTs[ts] = deleteDatas
+				tsOrder = append(tsOrder, ts)
+			}
 			dNode.addDeleteData(deleteDatas, msg)
 		}
-		// do Delete, use ts range max as ts
-		dNode.delegator.ProcessDelete(lo.Values(deleteDatas), nodeMsg.timeRange.timestampMax)
+
+		batches := make([]delegator.DeleteBatch, 0, len(tsOrder))
+		for _, ts := range tsOrder {
+			batches = append(batches, delegator.DeleteBatch{
+				Ts:   ts,
+				Data: lo.Values(deleteDataByTs[ts]),
+			})
+		}
+		dNode.delegator.ProcessDeleteBatches(batches)
 	}
 
 	if nodeMsg.schema != nil {
