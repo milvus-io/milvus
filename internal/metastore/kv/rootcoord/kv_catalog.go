@@ -1146,7 +1146,36 @@ func (kc *Catalog) remove(ctx context.Context, k string) error {
 
 func (kc *Catalog) CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
 	k := RolePrefix + "/" + entity.Name
-	return kc.Txn.Save(ctx, k, "")
+	value, err := model.MarshalRoleModel(&model.Role{
+		Name:        entity.GetName(),
+		Description: entity.GetDescription(),
+	})
+	if err != nil {
+		return err
+	}
+	return kc.Txn.Save(ctx, k, value)
+}
+
+func (kc *Catalog) AlterRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
+	k := RolePrefix + "/" + entity.GetName()
+	value, err := kc.Txn.Load(ctx, k)
+	if err != nil {
+		log.Ctx(ctx).Warn("fail to load a role", zap.String("key", k), zap.Error(err))
+		return err
+	}
+	role, err := model.UnmarshalRoleModel(entity.GetName(), value)
+	if err != nil {
+		log.Ctx(ctx).Warn("undecodable role value, fallback to empty description",
+			zap.String("role", entity.GetName()),
+			zap.Error(err))
+		role = &model.Role{Name: entity.GetName()}
+	}
+	role.Description = entity.GetDescription()
+	newValue, err := model.MarshalRoleModel(role)
+	if err != nil {
+		return err
+	}
+	return kc.Txn.Save(ctx, k, newValue)
 }
 
 func (kc *Catalog) DropRole(ctx context.Context, tenant string, roleName string) error {
@@ -1211,43 +1240,54 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 		}
 	}
 
-	appendRoleResult := func(roleName string) {
+	appendRoleResult := func(roleName string, value string) {
+		role, err := model.UnmarshalRoleModel(roleName, value)
+		if err != nil {
+			log.Ctx(ctx).Warn("undecodable role value, fallback to empty description",
+				zap.String("role", roleName),
+				zap.Error(err))
+			role = &model.Role{Name: roleName}
+		}
 		var users []*milvuspb.UserEntity
 		for _, username := range roleToUsers[roleName] {
 			users = append(users, &milvuspb.UserEntity{Name: username})
 		}
 		results = append(results, &milvuspb.RoleResult{
-			Role:  &milvuspb.RoleEntity{Name: roleName},
+			Role:  &milvuspb.RoleEntity{Name: role.Name, Description: role.Description},
 			Users: users,
 		})
 	}
 
 	if entity == nil {
 		roleKey := funcutil.HandleTenantForEtcdPrefix(RolePrefix, tenant)
-		keys, _, err := kc.Txn.LoadWithPrefix(ctx, roleKey)
+		keys, values, err := kc.Txn.LoadWithPrefix(ctx, roleKey)
 		if err != nil {
 			log.Ctx(ctx).Error("fail to load roles", zap.String("key", roleKey), zap.Error(err))
 			return results, err
 		}
-		for _, key := range keys {
+		for i, key := range keys {
 			infoArr := typeutil.AfterN(key, roleKey, "/")
 			if len(infoArr) != 1 || len(infoArr[0]) == 0 {
 				log.Ctx(ctx).Warn("invalid role key", zap.String("string", key), zap.String("sub_string", roleKey))
 				continue
 			}
-			appendRoleResult(infoArr[0])
+			value := ""
+			if i < len(values) {
+				value = values[i]
+			}
+			appendRoleResult(infoArr[0], value)
 		}
 	} else {
 		if funcutil.IsEmptyString(entity.Name) {
 			return results, errors.New("role name in the role entity is empty")
 		}
 		roleKey := RolePrefix + "/" + entity.Name
-		_, err := kc.Txn.Load(ctx, roleKey)
+		value, err := kc.Txn.Load(ctx, roleKey)
 		if err != nil {
 			log.Ctx(ctx).Warn("fail to load a role", zap.String("key", roleKey), zap.Error(err))
 			return results, err
 		}
-		appendRoleResult(entity.Name)
+		appendRoleResult(entity.Name, value)
 	}
 
 	return results, nil

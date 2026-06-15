@@ -130,6 +130,7 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/roles/list":                "SelectRole",
 	"/v2/vectordb/roles/describe":            "SelectGrant",
 	"/v2/vectordb/roles/create":              "CreateRole",
+	"/v2/vectordb/roles/alter":               "AlterRole",
 	"/v2/vectordb/roles/drop":                "DropRole",
 	"/v2/vectordb/roles/grant_privilege":     "OperatePrivilege",
 	"/v2/vectordb/roles/revoke_privilege":    "OperatePrivilege",
@@ -274,6 +275,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(RoleCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &RoleReq{} }, wrapperTraceLog(h.describeRole))))
 
 	router.POST(RoleCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &RoleReq{} }, wrapperTraceLog(h.createRole))))
+	router.POST(RoleCategory+AlterAction, timeoutMiddleware(wrapperPost(func() any { return &RoleReq{} }, wrapperTraceLog(h.alterRole))))
 	router.POST(RoleCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &RoleReq{} }, wrapperTraceLog(h.dropRole))))
 	router.POST(RoleCategory+GrantPrivilegeAction, timeoutMiddleware(wrapperPost(func() any { return &GrantReq{} }, wrapperTraceLog(h.addPrivilegeToRole))))
 	router.POST(RoleCategory+RevokePrivilegeAction, timeoutMiddleware(wrapperPost(func() any { return &GrantReq{} }, wrapperTraceLog(h.removePrivilegeFromRole))))
@@ -2491,6 +2493,19 @@ func (h *HandlersV2) listRoles(ctx context.Context, c *gin.Context, anyReq any, 
 
 func (h *HandlersV2) describeRole(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	getter, _ := anyReq.(RoleNameGetter)
+	roleReq := &milvuspb.SelectRoleRequest{
+		Role: &milvuspb.RoleEntity{Name: getter.GetRoleName()},
+	}
+	roleResp, err := wrapperProxy(ctx, c, roleReq, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/SelectRole", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.SelectRole(reqCtx, req.(*milvuspb.SelectRoleRequest))
+	})
+	if err != nil {
+		return roleResp, err
+	}
+	description := ""
+	if results := roleResp.(*milvuspb.SelectRoleResponse).GetResults(); len(results) > 0 {
+		description = results[0].GetRole().GetDescription()
+	}
 	req := &milvuspb.SelectGrantRequest{
 		Entity: &milvuspb.GrantEntity{Role: &milvuspb.RoleEntity{Name: getter.GetRoleName()}, DbName: dbName},
 	}
@@ -2509,18 +2524,33 @@ func (h *HandlersV2) describeRole(ctx context.Context, c *gin.Context, anyReq an
 			}
 			privileges = append(privileges, privilege)
 		}
-		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: privileges})
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: privileges, HTTPReturnDescription: description})
 	}
 	return resp, err
 }
 
 func (h *HandlersV2) createRole(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
-	getter, _ := anyReq.(RoleNameGetter)
+	httpReq := anyReq.(*RoleReq)
 	req := &milvuspb.CreateRoleRequest{
-		Entity: &milvuspb.RoleEntity{Name: getter.GetRoleName()},
+		Entity: &milvuspb.RoleEntity{Name: httpReq.GetRoleName(), Description: httpReq.GetDescription()},
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateRole", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.CreateRole(reqCtx, req.(*milvuspb.CreateRoleRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) alterRole(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*RoleReq)
+	req := &milvuspb.AlterRoleRequest{
+		RoleName:    httpReq.GetRoleName(),
+		Description: httpReq.GetDescription(),
+	}
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterRole", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.AlterRole(reqCtx, req.(*milvuspb.AlterRoleRequest))
 	})
 	if err == nil {
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())

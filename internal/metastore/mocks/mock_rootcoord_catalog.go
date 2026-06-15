@@ -369,6 +369,54 @@ func (_c *RootCoordCatalog_AlterPartition_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// AlterRole provides a mock function with given fields: ctx, tenant, entity
+func (_m *RootCoordCatalog) AlterRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
+	ret := _m.Called(ctx, tenant, entity)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AlterRole")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, *milvuspb.RoleEntity) error); ok {
+		r0 = rf(ctx, tenant, entity)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RootCoordCatalog_AlterRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterRole'
+type RootCoordCatalog_AlterRole_Call struct {
+	*mock.Call
+}
+
+// AlterRole is a helper method to define mock.On call
+//   - ctx context.Context
+//   - tenant string
+//   - entity *milvuspb.RoleEntity
+func (_e *RootCoordCatalog_Expecter) AlterRole(ctx interface{}, tenant interface{}, entity interface{}) *RootCoordCatalog_AlterRole_Call {
+	return &RootCoordCatalog_AlterRole_Call{Call: _e.mock.On("AlterRole", ctx, tenant, entity)}
+}
+
+func (_c *RootCoordCatalog_AlterRole_Call) Run(run func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity)) *RootCoordCatalog_AlterRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(*milvuspb.RoleEntity))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_AlterRole_Call) Return(_a0 error) *RootCoordCatalog_AlterRole_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RootCoordCatalog_AlterRole_Call) RunAndReturn(run func(context.Context, string, *milvuspb.RoleEntity) error) *RootCoordCatalog_AlterRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AlterUserRole provides a mock function with given fields: ctx, tenant, userEntity, roleEntity, operateType
 func (_m *RootCoordCatalog) AlterUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
 	ret := _m.Called(ctx, tenant, userEntity, roleEntity, operateType)
