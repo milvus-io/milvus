@@ -595,7 +595,14 @@ queryNode:
   delegatorPostLoadConcurrencyFactor: 1 # delegator post-load concurrency factor after worker LoadSegments returns. Concurrency is hardware.GetCPUNum * factor
   exprCache:
     enabled: false # enable expression result cache
-    capacityBytes: 268435456 # max capacity in bytes for expression result cache
+    mode: disk # cache mode: 'disk' (sealed segments only, pread/pwrite + fixed slots) or 'memory' (sealed and growing segments, malloc + Clock + compression)
+    minEvalDurationUs: 1000 # global latency filter: skip expressions that eval faster than this (0=disabled)
+    admissionThreshold: 2 # frequency admission for memory and disk mode: cache after N+ occurrences (1=no gating)
+    memory:
+      maxBytes: 268435456 # max memory for expression cache in memory mode (default 256MB)
+      compressionEnabled: true # enable Roaring/Raw adaptive compression in memory mode
+    disk:
+      maxFileSizeBytes: 268435456 # max file size per sealed segment in disk mode (default 256MB)
   dataSync:
     flowGraph:
       maxQueueLength: 16 # The maximum size of task queue cache in flow graph in query node.

@@ -1647,11 +1647,13 @@ TEST(TextMatch, ExprResCacheFilterBitsDoesNotDuplicateTextMatchEntry) {
     ExprResCacheManager::Key filter_key{seg->get_segment_id(),
                                         expr->ToString()};
     ExprResCacheManager::Value filter_value;
+    filter_value.active_count = N;
     ASSERT_TRUE(mgr.Get(filter_key, filter_value));
 
     ExprResCacheManager::Key text_match_key{seg->get_segment_id(),
                                             expr->filter()->ToString()};
     ExprResCacheManager::Value text_match_value;
+    text_match_value.active_count = N;
     ASSERT_FALSE(mgr.Get(text_match_key, text_match_value));
 
     mgr.Clear();
