@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -7082,9 +7083,19 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 		}
 	}()
 
+	var checkpointProto *commonpb.ReplicateCheckpoint
 	checkpoint, err := streaming.WAL().Replicate().GetReplicateCheckpoint(ctx, req.GetTargetPchannel())
 	if err != nil {
-		return nil, err
+		// On a standalone-primary cluster (e.g. after force_promote) the WAL is no
+		// longer a secondary, so the live replicate checkpoint is unavailable. That
+		// must not hide the salvage checkpoint, which is exactly what callers need
+		// after a force_promote. Other errors are still fatal.
+		if !status.AsStreamingError(err).IsReplicateViolation() {
+			return nil, err
+		}
+		logger.Info("not a secondary cluster, live replicate checkpoint unavailable; continue to salvage checkpoint")
+	} else {
+		checkpointProto = checkpoint.IntoProto()
 	}
 
 	// Get the salvage checkpoint for the specified source cluster.
@@ -7102,7 +7113,7 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 	}
 
 	return &milvuspb.GetReplicateInfoResponse{
-		Checkpoint:        checkpoint.IntoProto(),
+		Checkpoint:        checkpointProto,
 		SalvageCheckpoint: salvageCheckpointProto,
 	}, nil
 }

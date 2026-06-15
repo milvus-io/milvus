@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -206,4 +207,40 @@ func TestProxy_GetReplicateInfo_Success_NoSourceClusterIDFilter(t *testing.T) {
 	assert.NotNil(t, resp)
 	assert.Equal(t, "cluster-a", resp.GetCheckpoint().GetClusterId())
 	assert.Nil(t, resp.GetSalvageCheckpoint()) // no source cluster filter → no match
+}
+
+func TestProxy_GetReplicateInfo_ReplicateViolation_ReturnsSalvageCheckpoint(t *testing.T) {
+	// On a standalone-primary cluster (e.g. after force_promote) the live
+	// replicate checkpoint is unavailable (REPLICATE_VIOLATION). GetReplicateInfo
+	// must treat that as non-fatal: leave the live checkpoint nil and still return
+	// the salvage checkpoint, which is exactly what callers need post-promote.
+	salvageCPs := []*utility.ReplicateCheckpoint{
+		{ClusterID: "source-cluster", PChannel: "source-pchannel", TimeTick: 200},
+	}
+	replicateService := mock_streaming.NewMockReplicateService(t)
+	replicateService.EXPECT().GetReplicateCheckpoint(mock.Anything, "test-pchannel").
+		Return(nil, streamingstatus.NewReplicateViolation("wal is not a secondary cluster in replicating topology"))
+	replicateService.EXPECT().GetSalvageCheckpoint(mock.Anything, "test-pchannel").
+		Return(salvageCPs, nil)
+
+	mockWAL := mock_streaming.NewMockWALAccesser(t)
+	mockWAL.EXPECT().Replicate().Return(replicateService)
+	prevWAL := streaming.WAL()
+	streaming.SetWALForTest(mockWAL)
+	defer streaming.SetWALForTest(prevWAL)
+
+	node := &Proxy{}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	resp, err := node.GetReplicateInfo(context.Background(), &milvuspb.GetReplicateInfoRequest{
+		TargetPchannel:  "test-pchannel",
+		SourceClusterId: "source-cluster",
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.Nil(t, resp.GetCheckpoint()) // live checkpoint unavailable on a primary
+	assert.NotNil(t, resp.GetSalvageCheckpoint())
+	assert.Equal(t, "source-cluster", resp.GetSalvageCheckpoint().GetClusterId())
+	assert.Equal(t, "source-pchannel", resp.GetSalvageCheckpoint().GetPchannel())
+	assert.Equal(t, uint64(200), resp.GetSalvageCheckpoint().GetTimeTick())
 }
