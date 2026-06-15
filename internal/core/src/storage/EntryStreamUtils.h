@@ -25,10 +25,12 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "common/Common.h"
 #include "common/EasyAssert.h"
+#include "folly/CancellationToken.h"
 
 namespace milvus::storage {
 
@@ -44,6 +46,14 @@ IsStreamSliceSizeAligned(size_t slice_size) {
 inline size_t
 DefaultStreamSliceSize() {
     return DEFAULT_INDEX_FILE_SLICE_SIZE;
+}
+
+inline void
+ThrowIfCancelled(const folly::CancellationToken& cancellation_token,
+                 const std::string& operation) {
+    if (cancellation_token.isCancellationRequested()) {
+        ThrowInfo(ErrorCode::FollyCancel, "{} cancelled", operation);
+    }
 }
 
 /// A slice read from a V3 entry. `error` carries an exception captured in

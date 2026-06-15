@@ -563,7 +563,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Version:      "3.0.0",
 		DefaultValue: strconv.Itoa(DefaultLoadTransientBudgetBytes),
 		Doc: `Process-wide transient memory budget in bytes shared by scalar ` +
-			`index entry reading and storage v2 field-data loading. It gates ` +
+			`index V3 entry streaming and storage v2/v3 field-data loading. It gates ` +
 			`in-flight transient data across concurrent load tasks. Lower ` +
 			`values reduce peak transient memory at the cost of load throughput. ` +
 			`Oversized requests are still allowed to proceed exclusively to ` +

@@ -45,14 +45,6 @@ namespace {
 using SliceLoader = std::function<std::vector<uint8_t>(size_t seq)>;
 using SliceBudgetBytes = std::function<size_t(size_t seq)>;
 
-void
-ThrowIfCancelled(const folly::CancellationToken& cancellation_token,
-                 const std::string& operation) {
-    if (cancellation_token.isCancellationRequested()) {
-        ThrowInfo(ErrorCode::FollyCancel, "{} cancelled", operation);
-    }
-}
-
 struct ActiveSliceTask {
     size_t budget_bytes{0};
     std::shared_ptr<StreamSliceResult> result;

@@ -13,6 +13,7 @@
 #include <boost/filesystem/operations.hpp>
 #include <fmt/core.h>
 #include <folly/FBVector.h>
+#include <folly/ScopeGuard.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <stdint.h>
@@ -33,6 +34,7 @@
 #include "common/TracerBase.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "cachinglayer/LoadingOverheadTracker.h"
 #include "gtest/gtest.h"
 #include "index/HybridScalarIndex.h"
 #include "index/Index.h"
@@ -750,6 +752,12 @@ TYPED_TEST_P(HybridIndexTestInverted,
 
 TYPED_TEST_P(HybridIndexTestInverted,
              ScalarIndexLoadingOverheadDoesNotCapFileDimension) {
+    auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto old_capacity = budget.CapacityBytes();
+    auto cleanup = folly::makeGuard(
+        [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
+    budget.SetCapacityBytes(0);
+
     std::map<std::string, std::string> index_params{
         {"index_type", milvus::index::HYBRID_INDEX_TYPE},
         {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
@@ -791,6 +799,9 @@ TYPED_TEST_P(HybridIndexTestInverted,
     ASSERT_TRUE(translator.meta()->loading_overhead.has_value());
     EXPECT_EQ(translator.meta()->loading_overhead->group,
               milvus::segcore::kLoadTransientOverheadGroup);
+    EXPECT_EQ(
+        translator.meta()->loading_overhead->upper_bound.memory_bytes,
+        milvus::cachinglayer::LoadingOverheadTracker::kUnlimited.memory_bytes);
     EXPECT_EQ(translator.meta()->loading_overhead->upper_bound.file_bytes, 0);
 }
 
