@@ -596,7 +596,10 @@ class AggregationNode : public PlanNode {
         std::vector<expr::FieldAccessTypeExprPtr>&& groupingKeys,
         std::vector<std::string>&& aggNames,
         std::vector<Aggregate>&& aggregates,
-        std::vector<PlanNodePtr> sources = std::vector<PlanNodePtr>{});
+        std::vector<PlanNodePtr> sources = std::vector<PlanNodePtr>{},
+        RowTypePtr input_type = nullptr,
+        std::vector<FieldId>&& raw_input_field_ids = std::vector<FieldId>{},
+        bool use_raw_input = false);
 
     RowTypePtr
     output_type() const override {
@@ -628,11 +631,29 @@ class AggregationNode : public PlanNode {
         return aggregates_;
     }
 
+    RowTypePtr
+    input_type() const {
+        return input_type_;
+    }
+
+    const std::vector<FieldId>&
+    RawInputFieldIds() const {
+        return raw_input_field_ids_;
+    }
+
+    bool
+    UseRawInput() const {
+        return use_raw_input_;
+    }
+
  private:
     const std::vector<expr::FieldAccessTypeExprPtr> groupingKeys_;
     const std::vector<std::string> aggregateNames_;
     const std::vector<Aggregate> aggregates_;
     const std::vector<PlanNodePtr> sources_;
+    const RowTypePtr input_type_;
+    const std::vector<FieldId> raw_input_field_ids_;
+    const bool use_raw_input_;
     const RowTypePtr output_type_;
 };
 

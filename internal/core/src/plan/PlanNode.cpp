@@ -52,12 +52,18 @@ AggregationNode::AggregationNode(
     std::vector<expr::FieldAccessTypeExprPtr>&& groupingKeys,
     std::vector<std::string>&& aggNames,
     std::vector<Aggregate>&& aggregates,
-    std::vector<PlanNodePtr> sources)
+    std::vector<PlanNodePtr> sources,
+    RowTypePtr input_type,
+    std::vector<FieldId>&& raw_input_field_ids,
+    bool use_raw_input)
     : PlanNode(id),
       groupingKeys_(std::move(groupingKeys)),
       aggregateNames_(std::move(aggNames)),
       aggregates_(std::move(aggregates)),
       sources_(std::move(sources)),
+      input_type_(std::move(input_type)),
+      raw_input_field_ids_(std::move(raw_input_field_ids)),
+      use_raw_input_(use_raw_input),
       output_type_(getAggregationOutputType(
           groupingKeys_, aggregateNames_, aggregates_)) {
 }

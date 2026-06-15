@@ -19,6 +19,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <string_view>
 
 #include "segcore/SegcoreConfig.h"
 #include <optional>
@@ -252,6 +253,7 @@ ProcessGroupByFields(
     std::vector<FieldId>& project_id_list,
     std::vector<std::string>& project_name_list,
     std::vector<milvus::DataType>& project_type_list,
+    std::vector<milvus::DataType>& raw_input_type_list,
     std::vector<plan::ProjectNode::ProjectionMode>& project_mode_list) {
     auto group_by_field_count = query.group_by_field_ids_size();
     groupingKeys.reserve(group_by_field_count);
@@ -269,6 +271,7 @@ ProcessGroupByFields(
             project_id_list.emplace_back(field_id);
             project_name_list.emplace_back(field_name);
             project_type_list.emplace_back(field_type);
+            raw_input_type_list.emplace_back(field_type);
             project_mode_list.emplace_back(
                 plan::ProjectNode::ProjectionMode::Value);
         }
@@ -300,6 +303,7 @@ ProcessAggregates(
     std::vector<FieldId>& project_id_list,
     std::vector<std::string>& project_name_list,
     std::vector<milvus::DataType>& project_type_list,
+    std::vector<milvus::DataType>& raw_input_type_list,
     std::vector<plan::ProjectNode::ProjectionMode>& project_mode_list) {
     aggregates.reserve(query.aggregates_size());
     agg_names.reserve(query.aggregates_size());
@@ -318,6 +322,7 @@ ProcessAggregates(
                     projection_mode == plan::ProjectNode::ProjectionMode::Value
                         ? field_type
                         : DataType::INT8);
+                raw_input_type_list.emplace_back(field_type);
                 project_mode_list.emplace_back(projection_mode);
                 return;
             }
@@ -326,6 +331,7 @@ ProcessAggregates(
                 project_mode_list[index] !=
                     plan::ProjectNode::ProjectionMode::Value) {
                 project_type_list[index] = field_type;
+                raw_input_type_list[index] = field_type;
                 project_mode_list[index] = projection_mode;
             }
         };
@@ -369,6 +375,76 @@ ProcessAggregates(
     }
 }
 
+bool
+SupportsRawNumericAggregationType(DataType type) {
+    switch (type) {
+        case DataType::BOOL:
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+        case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
+        case DataType::FLOAT:
+        case DataType::DOUBLE:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool
+SupportsRawStringAggregationType(DataType type) {
+    return type == DataType::VARCHAR || type == DataType::STRING;
+}
+
+bool
+SupportsRawGroupingType(DataType type) {
+    return SupportsRawNumericAggregationType(type) ||
+           SupportsRawStringAggregationType(type);
+}
+
+bool
+SupportsRawAggregationFunction(std::string_view name,
+                               const std::vector<DataType>& raw_input_types) {
+    if (name == KCount) {
+        return raw_input_types.empty() ||
+               (raw_input_types.size() == 1 &&
+                SupportsRawGroupingType(raw_input_types[0]));
+    }
+    if (raw_input_types.size() != 1) {
+        return false;
+    }
+    const auto input_type = raw_input_types[0];
+    if (name == KSum) {
+        return SupportsRawNumericAggregationType(input_type);
+    }
+    if (name == KMin || name == KMax) {
+        return SupportsRawGroupingType(input_type);
+    }
+    return false;
+}
+
+bool
+CanUseRawAggregation(
+    const std::vector<expr::FieldAccessTypeExprPtr>& groupingKeys,
+    const std::vector<std::string>& agg_names,
+    const std::vector<plan::AggregationNode::Aggregate>& aggregates) {
+    for (const auto& key : groupingKeys) {
+        if (!SupportsRawGroupingType(key->type())) {
+            return false;
+        }
+    }
+    AssertInfo(agg_names.size() == aggregates.size(),
+               "aggregate names and aggregate calls must have the same size");
+    for (auto i = 0; i < aggregates.size(); ++i) {
+        if (!SupportsRawAggregationFunction(agg_names[i],
+                                            aggregates[i].rawInputTypes_)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // Helper function to build ProjectNode and AggregationNode
 plan::PlanNodePtr
 BuildProjectAndAggregationNodes(
@@ -380,14 +456,20 @@ BuildProjectAndAggregationNodes(
     std::vector<FieldId> project_id_list,
     std::vector<std::string> project_name_list,
     std::vector<milvus::DataType> project_type_list,
-    std::vector<plan::ProjectNode::ProjectionMode> project_mode_list) {
+    std::vector<milvus::DataType> raw_input_type_list,
+    std::vector<plan::ProjectNode::ProjectionMode> project_mode_list,
+    bool allow_raw_input) {
+    const bool use_raw_input = allow_raw_input &&
+                               CanUseRawAggregation(
+                                   groupingKeys, agg_names, aggregates);
+    auto input_type =
+        std::make_shared<RowType>(std::vector<std::string>(project_name_list),
+                                  std::vector<DataType>(raw_input_type_list));
+    auto raw_input_field_ids =
+        std::vector<FieldId>(project_id_list.begin(), project_id_list.end());
     plan::PlanNodePtr plannode = sources.empty() ? nullptr : sources[0];
 
-    // Always build ProjectNode when aggregation is present.
-    // ProjectNode consumes the MVCC bitmap from upstream and materializes
-    // filtered rows, so AggregationNode always receives input where
-    // size() == number of existing rows (needed for count(*)).
-    {
+    if (!use_raw_input) {
         auto project_field_id_list = std::vector<FieldId>(
             project_id_list.begin(), project_id_list.end());
         plannode = std::make_shared<plan::ProjectNode>(
@@ -399,7 +481,6 @@ BuildProjectAndAggregationNodes(
             sources);
     }
 
-    // Build AggregationNode
     std::vector<plan::PlanNodePtr> agg_sources =
         plannode ? std::vector<plan::PlanNodePtr>{plannode} : sources;
     return std::make_shared<plan::AggregationNode>(
@@ -407,7 +488,10 @@ BuildProjectAndAggregationNodes(
         std::move(groupingKeys),
         std::move(agg_names),
         std::move(aggregates),
-        agg_sources);
+        agg_sources,
+        use_raw_input ? std::move(input_type) : nullptr,
+        use_raw_input ? std::move(raw_input_field_ids) : std::vector<FieldId>{},
+        use_raw_input);
 }
 // Helper function to build ProjectNode for ORDER BY queries.
 // Returns {ProjectNode, deferred_field_ids, pipeline_field_ids}.
@@ -825,6 +909,7 @@ ProtoParser::RetrievePlanNodeFromProto(
             std::vector<FieldId> project_id_list;
             std::vector<std::string> project_name_list;
             std::vector<milvus::DataType> project_type_list;
+            std::vector<milvus::DataType> raw_input_type_list;
             std::vector<plan::ProjectNode::ProjectionMode> project_mode_list;
             std::vector<expr::FieldAccessTypeExprPtr> groupingKeys;
             std::vector<plan::AggregationNode::Aggregate> aggregates;
@@ -837,6 +922,7 @@ ProtoParser::RetrievePlanNodeFromProto(
                                  project_id_list,
                                  project_name_list,
                                  project_type_list,
+                                 raw_input_type_list,
                                  project_mode_list);
 
             // Process aggregates
@@ -847,6 +933,7 @@ ProtoParser::RetrievePlanNodeFromProto(
                               project_id_list,
                               project_name_list,
                               project_type_list,
+                              raw_input_type_list,
                               project_mode_list);
 
             // Build ProjectNode and AggregationNode
@@ -859,7 +946,9 @@ ProtoParser::RetrievePlanNodeFromProto(
                                                 std::move(project_id_list),
                                                 std::move(project_name_list),
                                                 std::move(project_type_list),
-                                                std::move(project_mode_list));
+                                                std::move(raw_input_type_list),
+                                                std::move(project_mode_list),
+                                                query.order_by_fields_size() == 0);
             sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
         }
 
