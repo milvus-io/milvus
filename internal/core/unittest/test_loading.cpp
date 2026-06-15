@@ -337,6 +337,25 @@ TEST_P(IndexLoadTest, ResourceEstimate) {
     ASSERT_EQ(request.max_disk_cost, expected.max_disk_cost);
 }
 
+TEST(IndexLoadTest, LoadResourceRequestCacheIsOptional) {
+    milvus::segcore::LoadIndexInfo loadIndexInfo;
+    ASSERT_FALSE(loadIndexInfo.load_resource_request.has_value());
+
+    LoadResourceRequest request{1, 2, 3, 4, true};
+    loadIndexInfo.load_resource_request = request;
+
+    ASSERT_TRUE(loadIndexInfo.load_resource_request.has_value());
+    ASSERT_EQ(loadIndexInfo.load_resource_request->max_memory_cost, 1);
+
+    auto copied = loadIndexInfo;
+    ASSERT_TRUE(copied.load_resource_request.has_value());
+    ASSERT_EQ(copied.load_resource_request->final_disk_cost, 4);
+
+    copied.load_resource_request.reset();
+    ASSERT_FALSE(copied.load_resource_request.has_value());
+    ASSERT_TRUE(loadIndexInfo.load_resource_request.has_value());
+}
+
 TEST(IndexLoadTest, ScalarSortMmapEstimateReservesLegacyAux) {
     constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;
     constexpr int64_t kNumRows = 1025;

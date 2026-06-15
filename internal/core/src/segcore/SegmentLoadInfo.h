@@ -30,6 +30,8 @@
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "index/IndexFactory.h"
+#include "index/Meta.h"
 #include "milvus-storage/column_groups.h"
 #include "pb/common.pb.h"
 #include "pb/index_cgo_msg.pb.h"
@@ -1096,6 +1098,24 @@ class SegmentLoadInfo {
             }
             auto load_index_info = ConvertFieldIndexInfoToLoadIndexInfo(
                 &index_info, info_.segmentid());
+            auto index_type_it =
+                load_index_info.index_params.find(milvus::index::INDEX_TYPE);
+            auto needs_file_context =
+                !IsVectorDataType(load_index_info.field_type) &&
+                index_type_it != load_index_info.index_params.end() &&
+                index_type_it->second == milvus::index::HYBRID_INDEX_TYPE;
+            if (!needs_file_context) {
+                load_index_info.load_resource_request =
+                    milvus::index::IndexFactory::GetInstance()
+                        .IndexLoadResource(load_index_info.field_type,
+                                           load_index_info.element_type,
+                                           load_index_info.index_engine_version,
+                                           load_index_info.index_size,
+                                           load_index_info.index_params,
+                                           load_index_info.enable_mmap,
+                                           load_index_info.num_rows,
+                                           load_index_info.dim);
+            }
             converted_index_infos_.push_back(load_index_info);
             // Check if index has raw data before moving
             if (CheckIndexHasRawData(load_index_info)) {
