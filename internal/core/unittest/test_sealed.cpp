@@ -3620,6 +3620,44 @@ TEST(SealedSegmentReopen, SchemaOnlyReopenPublishesDefaultFilledState) {
     EXPECT_TRUE(snapshot->IsFieldFilledWithDefault(FieldId(101)));
 }
 
+TEST(SealedSegmentReopen,
+     CancelledReopenDoesNotPublishNewSchemaBeforeDefaultFieldReady) {
+    auto old_schema = std::make_shared<Schema>();
+    old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(FieldId(100));
+    old_schema->set_schema_version(100);
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->AddDebugField("pk", DataType::INT64);
+    auto new_field = new_schema->AddDebugField("new_field", DataType::INT64);
+    new_schema->set_primary_field_id(FieldId(100));
+    new_schema->set_schema_version(200);
+
+    auto dataset = DataGen(old_schema, 1);
+    auto segment = CreateSealedWithFieldDataLoaded(old_schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    folly::CancellationSource source;
+    source.requestCancellation();
+    milvus::OpContext op_ctx(source.getToken());
+    EXPECT_THROW(
+        {
+            try {
+                sealed->Reopen(&op_ctx,
+                               sealed->TestGetSegmentLoadInfo()->GetProto(),
+                               new_schema);
+            } catch (const SegcoreError& e) {
+                EXPECT_EQ(e.get_error_code(), ErrorCode::FollyCancel);
+                throw;
+            }
+        },
+        SegcoreError);
+
+    EXPECT_FALSE(sealed->TestGetSegmentLoadInfo()->HasFieldInSchema(new_field));
+    EXPECT_FALSE(sealed->HasFieldData(new_field));
+}
+
 TEST(SealedSegmentReopen, SchemaAwareReopenDiscardsOlderSchema) {
     auto old_schema = std::make_shared<Schema>();
     auto pk_id = old_schema->AddDebugField("pk", DataType::INT64);

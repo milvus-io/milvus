@@ -3562,9 +3562,11 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
     // we have to clone the shared pointer,
     // to make sure it won't get released if segment released
     auto column = get_column(field_id);
-    AssertInfo(column != nullptr,
-               "field {} must exist when getting raw data",
-               field_id.get());
+    if (column == nullptr) {
+        ThrowInfo(FieldNotLoaded,
+                  "field {} is not loaded when getting raw data",
+                  field_id.get());
+    }
 
     int64_t valid_count = count;
     const bool* valid_data = nullptr;
@@ -4762,13 +4764,16 @@ ChunkedSegmentSealedImpl::Reopen(milvus::OpContext* op_ctx, SchemaPtr sch) {
     LOG_INFO(
         "Schema-only reopen segment {} with diff {}", id_, diff.ToString());
 
+    ApplySchemaForReopen(sch);
+    ApplyLoadDiff(op_ctx, new_local, diff);
+    for (auto field_id : diff.fields_to_fill_default) {
+        new_local.SetFieldFilledWithDefault(field_id);
+    }
+
     auto published = std::make_shared<const SegmentLoadInfo>(new_local);
     std::atomic_store(&segment_load_info_, published);
     use_take_for_output_.store(published->GetUseTakeForOutput(),
                                std::memory_order_relaxed);
-
-    ApplySchemaForReopen(sch);
-    ApplyLoadDiff(op_ctx, new_local, diff);
 
     LOG_INFO("Schema-only reopen segment {} done", id_);
 }
@@ -4821,13 +4826,16 @@ ChunkedSegmentSealedImpl::Reopen(
         current_mutable.GetDefaultFilledFieldsForNewInfo(new_local));
     LOG_INFO("Reopen segment {} with diff {}", id_, diff.ToString());
 
+    ApplySchemaForReopen(target_schema);
+    ApplyLoadDiff(op_ctx, new_local, diff);
+    for (auto field_id : diff.fields_to_fill_default) {
+        new_local.SetFieldFilledWithDefault(field_id);
+    }
+
     auto published = std::make_shared<const SegmentLoadInfo>(new_local);
     std::atomic_store(&segment_load_info_, published);
     use_take_for_output_.store(published->GetUseTakeForOutput(),
                                std::memory_order_relaxed);
-
-    ApplySchemaForReopen(target_schema);
-    ApplyLoadDiff(op_ctx, new_local, diff);
 
     LOG_INFO("Reopen segment {} done", id_);
 }
