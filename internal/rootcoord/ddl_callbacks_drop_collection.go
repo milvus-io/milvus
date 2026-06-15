@@ -162,7 +162,7 @@ func (c *DDLCallback) dropCollectionV1AckOnceCallback(ctx context.Context, resul
 		ChannelName: msg.VChannel(),
 	})
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		return errors.Wrap(err, "failed to drop virtual channel")
+		return merr.Wrap(err, "failed to drop virtual channel")
 	}
 	return nil
 }

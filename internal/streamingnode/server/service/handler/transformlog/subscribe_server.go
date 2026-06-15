@@ -35,7 +35,7 @@ func CreateSubscribeServer(
 ) (*SubscribeServer, error) {
 	createReq, err := contextutil.GetCreateTransformStream(stream.Context())
 	if err != nil {
-		return nil, status.NewInvaildArgument("create transform stream request is required")
+		return nil, status.NewInvalidArgument("create transform stream request is required")
 	}
 	w, err := walManager.GetAvailableWAL(types.NewPChannelInfoFromProto(createReq.GetPchannel()))
 	if err != nil {
@@ -121,7 +121,7 @@ func (s *SubscribeServer) closeSubscription(subscriptionID int64) string {
 
 func (s *SubscribeServer) createSubscription(req *streamingpb.CreateTransformSubscriptionRequest) error {
 	if req == nil {
-		return status.NewInvaildArgument("create transform subscription request is nil")
+		return status.NewInvalidArgument("create transform subscription request is nil")
 	}
 	scanner := s.accesser.Read(s.stream.Context(), transformlogapi.ReadOption{
 		Name:               req.GetVchannel(),
