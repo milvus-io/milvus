@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -62,6 +63,7 @@ type shardSplitManager struct {
 	vchannelAllocator splitVChannelAllocator
 	planner           splitPlanner
 	preempter         compactionPreempter // set after the compaction inspector is built.
+	importMeta        ImportMeta          // set during the server initialization; the redistribution drain check consults it.
 
 	tasks *typeutil.ConcurrentMap[int64, *datapb.SplitShardTask] // task id -> task
 }
@@ -71,6 +73,33 @@ type shardSplitManager struct {
 // shard split manager because it also consumes the freeze predicate).
 func (m *shardSplitManager) setCompactionPreempter(preempter compactionPreempter) {
 	m.preempter = preempter
+}
+
+// setImportMeta wires the import meta in; it is called once during the server
+// initialization. The redistribution drain check uses it to wait out the
+// import jobs that target the source vchannel, including the ones still in
+// Pending/PreImporting that have not registered any segment in meta yet.
+func (m *shardSplitManager) setImportMeta(importMeta ImportMeta) {
+	m.importMeta = importMeta
+}
+
+// hasActiveImportOnVChannel reports whether an unfinished import job targets
+// the vchannel. A job's target vchannels are fixed at creation, so this is a
+// purely datacoord-local check that needs no import/split mutual exclusion.
+func (m *shardSplitManager) hasActiveImportOnVChannel(vchannel string) bool {
+	if m.importMeta == nil {
+		return false
+	}
+	jobs := m.importMeta.GetJobBy(m.ctx, WithoutJobStates(
+		internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed))
+	for _, job := range jobs {
+		for _, vc := range job.GetVchannels() {
+			if vc == vchannel {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // shardStats is the aggregated statistics of one shard (vchannel).

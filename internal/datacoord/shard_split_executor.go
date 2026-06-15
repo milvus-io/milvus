@@ -196,7 +196,13 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 func (m *shardSplitManager) advanceRedistributing(task *datapb.SplitShardTask) {
 	logger := m.taskLogger(task)
 	segments := m.meta.GetSegmentsByChannel(task.GetSourceVchannel())
-	if len(segments) == 0 {
+	// The source shard is drained only when both datacoord-local conditions
+	// hold: no segment remains on the source vchannel, AND no active import
+	// job targets it. The second conjunct closes a blind window: a job still
+	// in Pending/PreImporting has registered no segment in meta yet, so the
+	// segment scan cannot see it, and it could otherwise allocate its segments
+	// onto the just-dropped shard after this empty check passed.
+	if len(segments) == 0 && !m.hasActiveImportOnVChannel(task.GetSourceVchannel()) {
 		if err := m.updateTask(task, func(task *datapb.SplitShardTask) {
 			task.State = datapb.SplitShardTaskState_SplitShardTaskAdopting
 		}); err != nil {
@@ -210,7 +216,7 @@ func (m *shardSplitManager) advanceRedistributing(task *datapb.SplitShardTask) {
 	batchSize := paramtable.Get().DataCoordCfg.ShardSplitRelabelBatchSize.GetAsInt()
 	operators := make([]UpdateOperator, 0, batchSize)
 	relabeled := make([]int64, 0, batchSize)
-	skippedCompacting := 0
+	skipped := 0
 	for _, segment := range segments {
 		if len(operators) >= batchSize {
 			break
@@ -219,7 +225,15 @@ func (m *shardSplitManager) advanceRedistributing(task *datapb.SplitShardTask) {
 			// Defensive: the preemption of advancePreparing plus the enqueue
 			// freeze should leave no compacting segment on the source shard;
 			// a leftover one is skipped and retried on the next round.
-			skippedCompacting++
+			skipped++
+			continue
+		}
+		if segment.GetIsImporting() {
+			// An import worker is still committing this segment's binlogs
+			// through meta updates; relabeling it mid-import would race with
+			// those writes. It is picked up once it is flushed (the drain
+			// check keeps the task in Redistributing until then).
+			skipped++
 			continue
 		}
 		idx, err := m.planner.AssignSegment(m.ctx, segment, task.GetTargets())
@@ -231,9 +245,9 @@ func (m *shardSplitManager) advanceRedistributing(task *datapb.SplitShardTask) {
 		operators = append(operators, UpdateInsertChannelOperator(segment.GetID(), task.GetTargets()[idx].GetVchannel()))
 		relabeled = append(relabeled, segment.GetID())
 	}
-	if skippedCompacting > 0 {
-		logger.Warn("skipped compacting segments during relabel, retry on the next round",
-			zap.Int("skipped", skippedCompacting))
+	if skipped > 0 {
+		logger.Warn("skipped compacting/importing segments during relabel, retry on the next round",
+			zap.Int("skipped", skipped))
 	}
 	if len(operators) == 0 {
 		return
