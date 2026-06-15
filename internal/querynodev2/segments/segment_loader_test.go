@@ -39,10 +39,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -1235,9 +1237,150 @@ func (suite *SegmentLoaderDetailSuite) TestRequestResource() {
 		suite.NoError(err)
 		suite.EqualValues(1100000, resource.Resource.MemorySize)
 	})
+
+	suite.Run("commits_estimated_resource", func() {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.Key, "2")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.Key)
+
+		patchUsedMemory := mockey.Mock(hardware.GetUsedMemoryCount).To(func() uint64 {
+			return 100
+		}).Build()
+		defer patchUsedMemory.UnPatch()
+		patchTotalMemory := mockey.Mock(hardware.GetMemoryCount).To(func() uint64 {
+			return 1024 * 1024 * 1024
+		}).Build()
+		defer patchTotalMemory.UnPatch()
+		patchCPU := mockey.Mock(hardware.GetCPUNum).To(func() int {
+			return 8
+		}).Build()
+		defer patchCPU.UnPatch()
+
+		suite.loader.duf.usage.Store(200)
+		suite.loader.committedResource = LoadResource{
+			MemorySize: 10,
+			DiskSize:   20,
+		}
+
+		resource, err := suite.loader.requestResource(context.Background(), loadInfo)
+
+		suite.NoError(err)
+		suite.EqualValues(44000, resource.Resource.MemorySize)
+		suite.EqualValues(10, resource.CommittedResource.MemorySize)
+		suite.EqualValues(20, resource.CommittedResource.DiskSize)
+		suite.Equal(1, resource.ConcurrencyLevel)
+		suite.EqualValues(44010, suite.loader.committedResource.MemorySize)
+		suite.EqualValues(20, suite.loader.committedResource.DiskSize)
+	})
+
+	suite.Run("estimate_failed", func() {
+		_, err := suite.loader.requestResource(context.Background(), &querypb.SegmentLoadInfo{
+			SegmentID:    101,
+			CollectionID: suite.collectionID,
+			BinlogPaths: []*datapb.FieldBinlog{
+				{
+					FieldID: 999,
+					Binlogs: []*datapb.Binlog{
+						{LogSize: 10, MemorySize: 10},
+					},
+				},
+			},
+		})
+
+		suite.Error(err)
+	})
 }
 
-func (suite *SegmentLoaderDetailSuite) TestCheckSegmentSizeWithDiskLimit() {
+func (suite *SegmentLoaderDetailSuite) TestEstimateSegmentLoadingResourceUsage() {
+	ctx := context.Background()
+
+	emptyUsage, maxSegmentSize, err := suite.loader.estimateSegmentLoadingResourceUsage(ctx)
+	suite.NoError(err)
+	suite.Zero(emptyUsage.MemorySize)
+	suite.Zero(emptyUsage.DiskSize)
+	suite.Zero(maxSegmentSize)
+
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.Key, "2")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.Key)
+
+	loadInfo1 := &querypb.SegmentLoadInfo{
+		SegmentID:    100,
+		CollectionID: suite.collectionID,
+		Level:        datapb.SegmentLevel_L0,
+		Deltalogs: []*datapb.FieldBinlog{
+			{
+				Binlogs: []*datapb.Binlog{
+					{LogSize: 10, MemorySize: 10},
+				},
+			},
+		},
+	}
+	loadInfo2 := &querypb.SegmentLoadInfo{
+		SegmentID:    101,
+		CollectionID: suite.collectionID,
+		Level:        datapb.SegmentLevel_L0,
+		Deltalogs: []*datapb.FieldBinlog{
+			{
+				Binlogs: []*datapb.Binlog{
+					{LogSize: 30, MemorySize: 30},
+				},
+			},
+		},
+	}
+
+	usage, maxSegmentSize, err := suite.loader.estimateSegmentLoadingResourceUsage(ctx, loadInfo1, loadInfo2)
+
+	suite.NoError(err)
+	suite.EqualValues(80, usage.MemorySize)
+	suite.Zero(usage.DiskSize)
+	suite.Zero(usage.MmapFieldCount)
+	suite.Empty(usage.FieldGpuMemorySize)
+	suite.EqualValues(60, maxSegmentSize)
+}
+
+func (suite *SegmentLoaderDetailSuite) TestCheckLoadingResourceWithGpuLimit() {
+	ctx := context.Background()
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.Key)
+
+	patchGpu := mockey.Mock(hardware.GetAllGPUMemoryInfo).To(func() ([]hardware.GPUMemoryInfo, error) {
+		return []hardware.GPUMemoryInfo{{TotalMemory: 100, FreeMemory: 100}}, nil
+	}).Build()
+	defer patchGpu.UnPatch()
+
+	err := suite.loader.checkLoadingResource(log.Ctx(ctx), &ResourceUsage{
+		MemorySize:         10,
+		FieldGpuMemorySize: []uint64{100},
+	}, 10, 1000, 100, 0)
+
+	suite.Error(err)
+	suite.True(errors.Is(err, merr.ErrSegmentRequestResourceFailed))
+}
+
+func (suite *SegmentLoaderDetailSuite) TestCheckLoadingResourceReleasesTieredReservationOnGpuLimit() {
+	ctx := context.Background()
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.Key, "true")
+	suite.Require().NoError(initcore.InitTieredStorage(paramtable.Get()))
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.Key)
+		suite.Require().NoError(initcore.InitTieredStorage(paramtable.Get()))
+	}()
+
+	patchGpu := mockey.Mock(hardware.GetAllGPUMemoryInfo).To(func() ([]hardware.GPUMemoryInfo, error) {
+		return []hardware.GPUMemoryInfo{{TotalMemory: 100, FreeMemory: 100}}, nil
+	}).Build()
+	defer patchGpu.UnPatch()
+
+	err := suite.loader.checkLoadingResource(log.Ctx(ctx), &ResourceUsage{
+		MemorySize:         10,
+		DiskSize:           10,
+		FieldGpuMemorySize: []uint64{100},
+	}, 10, 1000, 100, 0)
+
+	suite.Error(err)
+	suite.True(errors.Is(err, merr.ErrSegmentRequestResourceFailed))
+}
+
+func (suite *SegmentLoaderDetailSuite) TestCheckLoadingResourceWithDiskLimit() {
 	ctx := context.Background()
 
 	// Save original value and restore after test
@@ -1291,12 +1434,15 @@ func (suite *SegmentLoaderDetailSuite) TestCheckSegmentSizeWithDiskLimit() {
 	totalMem := uint64(1024 * 1024 * 1024) // 1GB
 	localDiskUsage := int64(100 * 1024)    // 100KB
 
-	_, _, err = suite.loader.checkSegmentSize(ctx, []*querypb.SegmentLoadInfo{loadInfo}, memUsage, totalMem, localDiskUsage)
+	loadingUsage, maxSegmentSize, err := suite.loader.estimateSegmentLoadingResourceUsage(ctx, loadInfo)
+	suite.NoError(err)
+
+	err = suite.loader.checkLoadingResource(log.Ctx(ctx), loadingUsage, maxSegmentSize, totalMem, memUsage, localDiskUsage)
 	suite.Error(err)
 	suite.True(errors.Is(err, merr.ErrSegmentRequestResourceFailed))
 }
 
-func (suite *SegmentLoaderDetailSuite) TestCheckSegmentSizeWithMemoryLimit() {
+func (suite *SegmentLoaderDetailSuite) TestCheckLoadingResourceWithMemoryLimit() {
 	ctx := context.Background()
 
 	// Create a test segment that would exceed the memory limit
@@ -1325,10 +1471,24 @@ func (suite *SegmentLoaderDetailSuite) TestCheckSegmentSizeWithMemoryLimit() {
 
 	// Set memory threshold to 80%
 	paramtable.Get().Save("queryNode.overloadedMemoryThresholdPercentage", "0.8")
+	defer paramtable.Get().Reset("queryNode.overloadedMemoryThresholdPercentage")
 
-	_, _, err := suite.loader.checkSegmentSize(ctx, []*querypb.SegmentLoadInfo{loadInfo}, memUsage, totalMem, localDiskUsage)
+	loadingUsage, maxSegmentSize, err := suite.loader.estimateSegmentLoadingResourceUsage(ctx, loadInfo)
+	suite.NoError(err)
+
+	err = suite.loader.checkLoadingResource(log.Ctx(ctx), loadingUsage, maxSegmentSize, totalMem, memUsage, localDiskUsage)
 	suite.Error(err)
 	suite.True(errors.Is(err, merr.ErrSegmentRequestResourceFailed))
+}
+
+func (suite *SegmentLoaderDetailSuite) TestCheckSegmentGpuMemSizeWithBatchedEstimates() {
+	patch := mockey.Mock(hardware.GetAllGPUMemoryInfo).To(func() ([]hardware.GPUMemoryInfo, error) {
+		return []hardware.GPUMemoryInfo{{TotalMemory: 100, FreeMemory: 100}}, nil
+	}).Build()
+	defer patch.UnPatch()
+
+	err := checkSegmentGpuMemSize([]uint64{30, 30, 30}, 1.0)
+	suite.NoError(err)
 }
 
 // SegmentLoaderTextIndexEstimateSuite tests resource estimation for text index (TextStatsLogs).
