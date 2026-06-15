@@ -1111,6 +1111,29 @@ func TestSearchTask_initSearchAggregation(t *testing.T) {
 		assert.Contains(t, err.Error(), "highlighter and search_aggregation cannot be used simultaneously")
 	})
 
+	t.Run("search iterator conflict", func(t *testing.T) {
+		task := &searchTask{
+			SearchRequest: &internalpb.SearchRequest{Nq: 1},
+			request: &milvuspb.SearchRequest{
+				SearchParams: []*commonpb.KeyValuePair{
+					{Key: IteratorField, Value: "True"},
+					{Key: SearchIterV2Key, Value: "True"},
+				},
+				SearchAggregation: &commonpb.SearchAggregationSpec{Fields: []string{"brand"}},
+			},
+			schema: &schemaInfo{
+				CollectionSchema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{{FieldID: 101, Name: "brand", DataType: schemapb.DataType_VarChar}},
+				},
+			},
+		}
+
+		err := task.initSearchAggregation()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "search_aggregation is not supported with search iterator")
+	})
+
 	t.Run("build agg context and agg info", func(t *testing.T) {
 		task := &searchTask{
 			SearchRequest: &internalpb.SearchRequest{Nq: 1, OutputFieldsId: []int64{102}},
