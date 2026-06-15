@@ -21,6 +21,8 @@ package chain
 import (
 	"fmt"
 
+	"github.com/apache/arrow/go/v17/arrow"
+
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -94,6 +96,10 @@ func (o *MapOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, e
 			len(outputs), len(o.outputs))
 	}
 
+	return o.buildOutputDataFrame(input, outputs)
+}
+
+func (o *MapOp) buildOutputDataFrame(input *DataFrame, outputs []*arrow.Chunked) (*DataFrame, error) {
 	// 4. Create builder
 	builder := NewDataFrameBuilder()
 	defer builder.Release()
