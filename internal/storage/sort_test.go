@@ -18,14 +18,154 @@ package storage
 
 import (
 	"fmt"
+	"io"
 	"testing"
 
+	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+type mockRecordReader struct {
+	mock.Mock
+}
+
+func (m *mockRecordReader) Next() (Record, error) {
+	args := m.Called()
+	if rec := args.Get(0); rec != nil {
+		return rec.(Record), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *mockRecordReader) Close() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+type mockRecordWriter struct {
+	mock.Mock
+}
+
+func (m *mockRecordWriter) GetWrittenUncompressed() uint64 {
+	panic("implement me")
+}
+
+func (m *mockRecordWriter) Close() error {
+	panic("implement me")
+}
+
+func (m *mockRecordWriter) Write(rec Record) error {
+	args := m.Called(rec)
+	return args.Error(0)
+}
+
+type mockRecord struct {
+	mock.Mock
+	*simpleArrowRecord // embed to satisfy interface if needed
+}
+
+func (m *mockRecord) Column(fieldID int64) arrow.Array {
+	args := m.Called(fieldID)
+	return args.Get(0).(arrow.Array)
+}
+
+func (m *mockRecord) Len() int {
+	args := m.Called()
+	return args.Int(0)
+}
+
+func (m *mockRecord) Retain() {
+	m.Called()
+}
+
+func (m *mockRecord) Release() {
+	m.Called()
+}
+
+func testSchema() *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64},
+		},
+	}
+}
+
+func TestSort_ErrorCases(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+	origPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	defer func() {
+		paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, origPath)
+	}()
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, t.TempDir())
+
+	schema := testSchema()
+	batchSize := uint64(100)
+	sortBy := []int64{100}
+
+	predicate := func(r Record, ri, i int) bool { return true }
+
+	t.Run("MkdirTemp fails", func(t *testing.T) {
+		badPath := "/nonexistent/invalid/path/that/should/fail"
+		paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, badPath)
+
+		rr := []RecordReader{&mockRecordReader{}}
+		rw := &mockRecordWriter{}
+
+		_, _, err := Sort(batchSize, schema, rr, rw, predicate, sortBy)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to create temp dir")
+	})
+
+	t.Run("flushRun - unsupported sort type", func(t *testing.T) {
+		tmpRoot := t.TempDir()
+		paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, tmpRoot)
+		builder := array.NewBooleanBuilder(memory.DefaultAllocator)
+		builder.AppendValues([]bool{true, false, true}, nil)
+		arr := builder.NewBooleanArray()
+
+		mockRec := &mockRecord{}
+		mockRec.On("Retain").Return()
+		mockRec.On("Len").Return(1)
+		// Return a type not handled (e.g. Boolean)
+		mockRec.On("Column", mock.Anything).Return(arr)
+		mockRec.On("Release").Return()
+
+		mrr := &mockRecordReader{}
+		mrr.On("Next").Return(mockRec, nil).Once()
+		mrr.On("Next").Return(nil, io.EOF).Once()
+
+		rr := []RecordReader{mrr}
+		rw := &mockRecordWriter{}
+
+		_, _, err := Sort(batchSize, schema, rr, rw, predicate, sortBy)
+		assert.Error(t, err)
+	})
+
+	t.Run("Next() returns non-EOF error", func(t *testing.T) {
+		tmpRoot := t.TempDir()
+		paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, tmpRoot)
+
+		expectedErr := errors.New("reader error")
+		mrr := &mockRecordReader{}
+		mrr.On("Next").Return(nil, expectedErr)
+
+		rr := []RecordReader{mrr}
+		rw := &mockRecordWriter{}
+
+		_, _, err := Sort(batchSize, schema, rr, rw, predicate, sortBy)
+		assert.Error(t, err)
+		assert.Equal(t, expectedErr, err)
+	})
+}
 
 func TestSort(t *testing.T) {
 	const batchSize = 64 * 1024 * 1024
@@ -142,6 +282,48 @@ func TestSort(t *testing.T) {
 		assert.Error(t, err)
 		assert.Equal(t, 0, gotNumRows)
 		assert.Nil(t, timings)
+	})
+
+	t.Run("sort with disk merge", func(t *testing.T) {
+		oldRowLimit := runRowLimit
+		defer func() {
+			runRowLimit = oldRowLimit
+		}()
+		runRowLimit = 3
+		gotNumRows, timings, err := Sort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
+			return true
+		}, []int64{common.RowIDField})
+		assert.NoError(t, err)
+		assert.Equal(t, 6, gotNumRows)
+		assert.NotNil(t, timings)
+		assert.Equal(t, 6, timings.NumRows)
+		assert.Greater(t, timings.NumBatches, 0)
+		assert.GreaterOrEqual(t, timings.ReadCost.Nanoseconds(), int64(0))
+		assert.GreaterOrEqual(t, timings.SortCost.Nanoseconds(), int64(0))
+		assert.GreaterOrEqual(t, timings.WriteCost.Nanoseconds(), int64(0))
+		err = rw.Close()
+		assert.NoError(t, err)
+	})
+
+	t.Run("sort by string with disk merge", func(t *testing.T) {
+		oldRowLimit := runRowLimit
+		defer func() {
+			runRowLimit = oldRowLimit
+		}()
+		runRowLimit = 3
+		gotNumRows, timings, err := Sort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
+			return true
+		}, []int64{17})
+		assert.NoError(t, err)
+		assert.Equal(t, 6, gotNumRows)
+		assert.NotNil(t, timings)
+		assert.Equal(t, 6, timings.NumRows)
+		assert.Greater(t, timings.NumBatches, 0)
+		assert.GreaterOrEqual(t, timings.ReadCost.Nanoseconds(), int64(0))
+		assert.GreaterOrEqual(t, timings.SortCost.Nanoseconds(), int64(0))
+		assert.GreaterOrEqual(t, timings.WriteCost.Nanoseconds(), int64(0))
+		err = rw.Close()
+		assert.NoError(t, err)
 	})
 }
 
