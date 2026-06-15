@@ -68,6 +68,12 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	MessageTypeSplitShard: {
 		ExclusiveRequired: true,
 	},
+	// CreateVChannel is the genesis entry of a shard split target vchannel.
+	// Like CreateCollection it registers a vchannel and carries the schema,
+	// so it is appended exclusively under the collection's DDL lock.
+	MessageTypeCreateVChannel: {
+		ExclusiveRequired: true,
+	},
 	MessageTypeBatchUpdateManifest: {},
 	MessageTypeCreateSegment: {
 		SelfControlled: true,
