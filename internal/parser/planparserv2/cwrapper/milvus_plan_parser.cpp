@@ -72,6 +72,11 @@ std::vector<uint8_t> PlanParser::Parse(SchemaHandle handle, const std::string& e
         throw std::runtime_error("Failed to parse expression: " + err_str);
     }
 
+    if (length < 0) {
+        ::Free(result);
+        throw std::runtime_error("Failed to parse expression: invalid result length");
+    }
+
     std::vector<uint8_t> plan(length);
     if (length > 0) {
         std::memcpy(plan.data(), result, length);
@@ -102,6 +107,11 @@ std::vector<uint8_t> PlanParser::ParseSearch(SchemaHandle handle,
             ::Free(err_msg);
         }
         throw std::runtime_error("Failed to parse search expression: " + err_str);
+    }
+
+    if (length < 0) {
+        ::Free(result);
+        throw std::runtime_error("Failed to parse search expression: invalid result length");
     }
 
     std::vector<uint8_t> plan(length);
