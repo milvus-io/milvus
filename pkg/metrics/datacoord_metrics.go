@@ -434,6 +434,38 @@ var (
 			Name:      "snapshot_active_pins",
 			Help:      "number of active (un-expired) pins on a given source snapshot",
 		}, []string{collectionIDLabelName, "snapshot_name"})
+
+	// DataCoordShardSplitTaskNum records the number of active shard split tasks
+	// in each FSM state (preparing/fencing/redistributing/adopting). It lets
+	// operators see how many splits are in flight and where they are stuck.
+	DataCoordShardSplitTaskNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "shard_split_task_num",
+			Help:      "number of active shard split tasks per FSM state",
+		}, []string{statusLabelName})
+
+	// DataCoordShardSplitTaskTotal counts the shard split tasks that reached a
+	// terminal state, labeled by outcome (done/aborted).
+	DataCoordShardSplitTaskTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "shard_split_task_total",
+			Help:      "total number of finished shard split tasks per outcome",
+		}, []string{statusLabelName})
+
+	// DataCoordShardSplitDuration records the wall-clock duration of a finished
+	// shard split, from task creation to the terminal state, in milliseconds.
+	DataCoordShardSplitDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "shard_split_duration",
+			Help:      "duration of a finished shard split in milliseconds",
+			Buckets:   longTaskBuckets,
+		}, []string{statusLabelName})
 )
 
 // RegisterDataCoord registers DataCoord metrics
@@ -473,6 +505,9 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(TaskVersion)
 	registry.MustRegister(TaskNumInGlobalScheduler)
 	registry.MustRegister(DataCoordSnapshotActivePins)
+	registry.MustRegister(DataCoordShardSplitTaskNum)
+	registry.MustRegister(DataCoordShardSplitTaskTotal)
+	registry.MustRegister(DataCoordShardSplitDuration)
 	registerStreamingCoord(registry)
 }
 
