@@ -349,7 +349,7 @@ sequenceDiagram
     DC->>SN0: append SplitShard{targets, ranges} @T_switch
     Note over SN0: handler auto-flushes growing + force-fails txns, vchannel0 fenced
     DC->>SNT: append CreateVChannel, BarrierTimeTick=T_switch (create == activate)
-    SNT-->>DC: start position; DC persists into collection meta
+    SNT-->>DC: start position, persisted into collection meta
     DC->>DC: routing commit: targets routable, routing_version++
     PX->>SN0: write to old vchannel
     SN0-->>PX: reject (SHARD_FENCED, expected routing_version)
