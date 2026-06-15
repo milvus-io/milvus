@@ -302,8 +302,11 @@ Minimum procedure when a task touches error handling:
 
 1. Read [error_handling_guide.md](./error_handling_guide.md) §"Decision tree"
    and §"Input vs System" — then this casebook's pattern list.
-2. Apply the blame test: *would a correctly implemented Milvus ever hit this
-   branch, given this request?* Yes → Input factory. No → System factory.
+2. Apply the blame test: is the **request content itself** what forces this
+   branch? → Input factory. A Milvus bug, or an internal/transient failure
+   (e.g. the not-ready condition in Pattern 5, a TOCTOU race), → System
+   factory — even when a correct Milvus does reach it on a valid request
+   (those must stay SystemError so `retry.Do` keeps retrying).
 3. Never use `WrapErrXxxErr`/`WrapErrXxxMsg("%s", err)` to add context —
    `merr.Wrap(f)` only (Patterns 3–4).
 4. Before adding/marking InputError: grep `retry.Do` consumers (Pattern 5).
