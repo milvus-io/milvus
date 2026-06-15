@@ -5713,9 +5713,10 @@ func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	if err := ValidateRoleName(req.RoleName); err != nil {
-		return merr.Status(err), nil
-	}
+	// No need to check role name
+	// Validation shall be performed in `CreateRole`
+	// also permit dropping role with bad name, e.g. legacy roles persisted
+	// with leading/trailing whitespace before validation rejected them
 	if req.Base == nil {
 		req.Base = &commonpb.MsgBase{}
 	}
