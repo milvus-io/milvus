@@ -44,7 +44,10 @@ type ForceMergeSegmentView struct {
 
 	topology *CollectionTopology
 
-	targetSegmentSize  float64
+	targetSegmentSize float64
+	// targetSegmentCount records the ForceTriggerAll planning result for logging
+	// and callers of GetTargetSegmentCount. Scheduler ID allocation is derived
+	// from targetSegmentSize so stale counts cannot over-reserve IDs.
 	targetSegmentCount int64
 }
 
@@ -62,6 +65,20 @@ func (v *ForceMergeSegmentView) GetGroupLabel() *CompactionGroupLabel {
 
 func (v *ForceMergeSegmentView) GetSegmentsView() []*SegmentView {
 	return v.segments
+}
+
+func (v *ForceMergeSegmentView) GetTotalSize() float64 {
+	if v == nil {
+		return 0
+	}
+	return sumSegmentSize(v.segments)
+}
+
+func (v *ForceMergeSegmentView) GetCollectionTTL() time.Duration {
+	if v == nil {
+		return 0
+	}
+	return v.collectionTTL
 }
 
 func (v *ForceMergeSegmentView) Append(segments ...*SegmentView) {
@@ -108,8 +125,8 @@ func (v *ForceMergeSegmentView) calculateTargetSizeCount() (maxSafeSize float64,
 		}
 	}
 
-	totalSize := sumSegmentSize(v.segments)
-	targetCount = max(1, int64(totalSize/maxSafeSize))
+	totalSize := v.GetTotalSize()
+	targetCount = estimateResultSegmentCount(totalSize, maxSafeSize)
 
 	queryNodeCount := int64(len(v.topology.QueryNodeMemory))
 	numReplicas := int64(v.topology.NumReplicas)
@@ -157,6 +174,13 @@ func (v *ForceMergeSegmentView) ForceTriggerAll() ([]CompactionView, string) {
 
 	results := make([]CompactionView, 0, len(groups))
 	for _, group := range groups {
+		groupTargetCount := targetCount
+		if len(groups) > 1 {
+			// Once adaptive grouping splits the input, each subgroup needs its
+			// own estimate; the topology-adjusted count applies only to the
+			// unsplit single-group case.
+			groupTargetCount = estimateResultSegmentCount(sumSegmentSize(group), targetSizePerSegment)
+		}
 		results = append(results, &ForceMergeSegmentView{
 			label:              v.label,
 			segments:           group,
@@ -165,7 +189,7 @@ func (v *ForceMergeSegmentView) ForceTriggerAll() ([]CompactionView, string) {
 			configMaxSize:      v.configMaxSize,
 			expectedTargetSize: v.expectedTargetSize,
 			targetSegmentSize:  targetSizePerSegment,
-			targetSegmentCount: targetCount,
+			targetSegmentCount: groupTargetCount,
 			topology:           v.topology,
 		})
 	}
@@ -371,8 +395,4 @@ func (v *ForceMergeSegmentView) calculateMaxSafeSize() float64 {
 		zap.Float64("maxSafeSize", maxSafeSize),
 		zap.Float64("configMaxSize", v.configMaxSize))
 	return maxSafeSize
-}
-
-func sumSegmentSize(views []*SegmentView) float64 {
-	return lo.SumBy(views, func(v *SegmentView) float64 { return v.Size })
 }

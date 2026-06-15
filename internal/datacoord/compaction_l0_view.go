@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"time"
 
 	"github.com/samber/lo"
 
@@ -83,6 +84,17 @@ func (v *LevelZeroCompactionView) GetSegmentsView() []*SegmentView {
 	}
 
 	return v.l0Segments
+}
+
+func (v *LevelZeroCompactionView) GetTotalSize() float64 {
+	if v == nil {
+		return 0
+	}
+	return sumSegmentSize(v.l0Segments)
+}
+
+func (v *LevelZeroCompactionView) GetCollectionTTL() time.Duration {
+	return 0
 }
 
 // ForceTrigger triggers all qualified LevelZeroSegments according to views
