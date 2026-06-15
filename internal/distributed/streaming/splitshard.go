@@ -24,9 +24,6 @@ type SplitShardParam struct {
 	// SplitTaskID is the unique split task id allocated by the coordinator,
 	// used for idempotency and split task correlation.
 	SplitTaskID int64
-	// FlushTs is a timestamp allocated from the TSO by the caller; the
-	// ManualFlush message is appended with it as the barrier time tick.
-	FlushTs uint64
 	// Targets are the target shards the source shard splits into. Their key
 	// ranges must be disjoint and exactly cover the source shard's range,
 	// which is guaranteed by the coordinator.
@@ -64,48 +61,23 @@ type SplitShardResult struct {
 	// The source vchannel holds only messages <= T_switch, and every message
 	// of the target vchannels is strictly greater than it.
 	SwitchTimeTick uint64
-	// FlushedSegmentIDs are the growing segments sealed by the ManualFlush
-	// message written right before the split message.
-	FlushedSegmentIDs []int64
 }
 
 // SplitShard executes the write switch of a shard split on the source
-// vchannel: it appends a ManualFlush message sealing every growing segment,
-// then appends the SplitShard message that fences the source vchannel
-// forever. The returned SwitchTimeTick is T_switch.
+// vchannel: it appends a single SplitShard message that fences the source
+// vchannel forever. The source StreamingNode's shard handler auto-flushes
+// every growing segment of the vchannel as of the message's time tick and
+// embeds the sealed segment ids into the message header, so no separate
+// ManualFlush is needed. The returned SwitchTimeTick is T_switch.
 //
 // The call is idempotent: a retry on an already-fenced source vchannel
-// returns ErrSourceVChannelFenced (the ManualFlush retry is a harmless
-// no-op), and the caller recovers T_switch from its persisted task state.
+// returns ErrSourceVChannelFenced, and the caller recovers T_switch from its
+// persisted task state.
 func SplitShard(ctx context.Context, w WALAccesser, param SplitShardParam) (*SplitShardResult, error) {
 	if err := param.Validate(); err != nil {
 		return nil, err
 	}
 
-	// 1. Seal every growing segment of the source vchannel. The barrier
-	// time tick guarantees the flush time tick is not smaller than FlushTs.
-	flushMsg, err := message.NewManualFlushMessageBuilderV2().
-		WithVChannel(param.SourceVChannel).
-		WithHeader(&message.ManualFlushMessageHeader{
-			CollectionId: param.CollectionID,
-			FlushTs:      param.FlushTs,
-		}).
-		WithBody(&message.ManualFlushMessageBody{}).
-		BuildMutable()
-	if err != nil {
-		return nil, errors.Wrap(err, "build manual flush message failed")
-	}
-	flushResult, err := w.RawAppend(ctx, flushMsg, AppendOption{BarrierTimeTick: param.FlushTs})
-	if err != nil {
-		return nil, errors.Wrap(err, "append manual flush message failed")
-	}
-	var flushExtra message.ManualFlushExtraResponse
-	if err := flushResult.GetExtra(&flushExtra); err != nil {
-		return nil, errors.Wrap(err, "get extra from manual flush append result failed")
-	}
-
-	// 2. Append the SplitShard message: the write fence of the source
-	// vchannel. Its time tick is T_switch.
 	splitMsg, err := message.NewSplitShardMessageBuilderV2().
 		WithVChannel(param.SourceVChannel).
 		WithHeader(&message.SplitShardMessageHeader{
@@ -127,8 +99,7 @@ func SplitShard(ctx context.Context, w WALAccesser, param SplitShardParam) (*Spl
 	}
 
 	return &SplitShardResult{
-		SwitchTimeTick:    splitResult.TimeTick,
-		FlushedSegmentIDs: flushExtra.GetSegmentIds(),
+		SwitchTimeTick: splitResult.TimeTick,
 	}, nil
 }
 

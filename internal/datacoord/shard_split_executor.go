@@ -123,16 +123,13 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 	}
 
 	if task.GetSwitchTimeTick() == 0 {
-		flushTs, err := m.allocator.AllocTimestamp(m.ctx)
-		if err != nil {
-			logger.Warn("allocate the flush timestamp failed", zap.Error(err))
-			return
-		}
+		// A single SplitShard message fences the source vchannel: the source
+		// streamingnode auto-flushes the growing segments as of T_switch and
+		// embeds their ids in the message, so no separate flush is appended.
 		result, err := streaming.SplitShard(m.ctx, m.wal, streaming.SplitShardParam{
 			CollectionID:   task.GetCollectionId(),
 			SourceVChannel: task.GetSourceVchannel(),
 			SplitTaskID:    task.GetTaskId(),
-			FlushTs:        flushTs,
 			Targets:        toMessageSplitTargets(task.GetTargets()),
 		})
 		if errors.Is(err, streaming.ErrSourceVChannelFenced) {
@@ -155,9 +152,7 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 			return
 		}
 		task = m.mustGetTask(task.GetTaskId())
-		logger.Info("source vchannel fenced",
-			zap.Uint64("switchTimeTick", result.SwitchTimeTick),
-			zap.Int64s("flushedSegments", result.FlushedSegmentIDs))
+		logger.Info("source vchannel fenced", zap.Uint64("switchTimeTick", result.SwitchTimeTick))
 	}
 
 	if err := streaming.InitSplitTargetVChannels(m.ctx, m.wal, streaming.InitSplitTargetVChannelsParam{
