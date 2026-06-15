@@ -60,6 +60,13 @@ type GcOption struct {
 
 	broker           broker.Broker
 	removeObjectPool *conc.Pool[struct{}]
+
+	// isChannelSplitting reports whether the channel is referenced by an
+	// active shard split task. The dropped segments of a splitting channel
+	// are kept until the split finishes: the in-place delegator handoff and
+	// the merged recovery view depend on the segment set staying stable
+	// across the split window. Nil disables the check.
+	isChannelSplitting func(channel string) bool
 }
 
 // garbageCollector handles garbage files in object storage
@@ -794,6 +801,10 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 
 		log := log.With(zap.Int64("segmentID", segmentID))
 		segInsertChannel := segment.GetInsertChannel()
+		if gc.option.isChannelSplitting != nil && gc.option.isChannelSplitting(segInsertChannel) {
+			log.Info("skip GC segment since its channel is splitting", zap.String("channel", segInsertChannel))
+			continue
+		}
 		if loadedSegments.Contain(segmentID) {
 			log.Info("skip GC segment since it is loaded", zap.Int64("segmentID", segmentID))
 			continue

@@ -486,7 +486,7 @@ func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
 }
 
 func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
-	s.garbageCollector = newGarbageCollector(s.meta, s.handler, GcOption{
+	opt := GcOption{
 		cli:              cli,
 		broker:           s.broker,
 		enabled:          Params.DataCoordCfg.EnableGarbageCollection.GetAsBool(),
@@ -494,7 +494,15 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 		scanInterval:     Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
 		dropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
-	})
+	}
+	if s.shardSplitManager != nil {
+		// freeze the dropped-segment GC on the channels referenced by an
+		// active shard split task, so the segment set the in-place delegator
+		// handoff and the merged recovery view rely on stays stable across
+		// the split window.
+		opt.isChannelSplitting = s.shardSplitManager.IsVChannelSplitting
+	}
+	s.garbageCollector = newGarbageCollector(s.meta, s.handler, opt)
 }
 
 func (s *Server) initServiceDiscovery() error {
