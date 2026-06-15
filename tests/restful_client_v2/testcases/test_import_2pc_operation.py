@@ -9190,9 +9190,7 @@ class TestImport2PCRestOperation(TestBase):
             )
             assert secondary_completed, secondary_rsp
 
-            primary_seen, primary_visible = self._wait_imported_ids_visible(
-                collection_name, expected_ids, timeout=180
-            )
+            primary_seen, primary_visible = self._wait_imported_ids_visible(collection_name, expected_ids, timeout=180)
             assert primary_visible, {"expected": expected_ids, "seen": primary_seen}
             secondary_seen, secondary_visible = self._wait_imported_ids_visible_with_clients(
                 secondary["collection"],
