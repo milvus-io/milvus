@@ -64,7 +64,8 @@ const (
 	// Version 1: Initial version with format-version field in metadata
 	// Version 2: Adds index_store_path_version to vector/scalar index files
 	// Version 3: Adds commit_timestamp to ManifestEntry (import/CDC segments)
-	SnapshotFormatVersion = 3
+	// Version 4: Adds child_fields to AvroFieldBinlog for packed/external fields
+	SnapshotFormatVersion = 4
 )
 
 var (
@@ -79,12 +80,16 @@ var (
 	manifestSchemaV3Once sync.Once
 	manifestSchemaV3     avro.Schema
 	manifestSchemaV3Err  error
+
+	manifestSchemaV4Once sync.Once
+	manifestSchemaV4     avro.Schema
+	manifestSchemaV4Err  error
 )
 
 // getManifestSchema returns the cached Avro schema for writing new manifest files.
-// New writes always use the current schema version (V3).
+// New writes always use the current schema version (V4).
 func getManifestSchema() (avro.Schema, error) {
-	return getManifestSchemaV3()
+	return getManifestSchemaV4()
 }
 
 func getManifestSchemaV1() (avro.Schema, error) {
@@ -108,6 +113,13 @@ func getManifestSchemaV3() (avro.Schema, error) {
 	return manifestSchemaV3, manifestSchemaV3Err
 }
 
+func getManifestSchemaV4() (avro.Schema, error) {
+	manifestSchemaV4Once.Do(func() {
+		manifestSchemaV4, manifestSchemaV4Err = avro.Parse(getAvroSchemaV4())
+	})
+	return manifestSchemaV4, manifestSchemaV4Err
+}
+
 // getManifestSchemaByVersion returns the Avro schema for the specified format
 // version. Avro binary is positional, so each on-disk version must be decoded
 // with the exact schema it was written with — a single "current" schema with
@@ -117,7 +129,8 @@ func getManifestSchemaV3() (avro.Schema, error) {
 //   - Version 0, 1: Legacy schema (no index_store_path_version, no commit_timestamp)
 //   - Version 2: Adds index_store_path_version
 //   - Version 3: Adds commit_timestamp (import/CDC segments)
-//   - Version 4+: Future schemas (to be added when needed)
+//   - Version 4: Adds child_fields (packed/external field coverage)
+//   - Version 5+: Future schemas (to be added when needed)
 //
 // When adding a new schema version:
 //  1. Create a new schema function (e.g., getAvroSchemaV4) that derives from
@@ -136,6 +149,8 @@ func getManifestSchemaByVersion(version int) (avro.Schema, error) {
 		return getManifestSchemaV2()
 	case 3:
 		return getManifestSchemaV3()
+	case 4:
+		return getManifestSchemaV4()
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported manifest schema version: %d", version)
 	}
@@ -239,6 +254,9 @@ type ManifestEntry struct {
 type AvroFieldBinlog struct {
 	// FieldID is the unique identifier of the field these binlogs belong to.
 	FieldID int64 `avro:"field_id"`
+	// ChildFields records packed-storage child field IDs covered by this
+	// field binlog. External collection materialization checks depend on it.
+	ChildFields []int64 `avro:"child_fields"`
 	// Binlogs contains the list of binlog files for this field.
 	Binlogs []AvroBinlog `avro:"binlogs"`
 }
@@ -1094,8 +1112,9 @@ func convertSegmentToManifestEntry(segment *datapb.SegmentDescription) ManifestE
 // Handles timestamp conversion from uint64 (proto) to int64 (Avro).
 func convertFieldBinlogToAvro(fb *datapb.FieldBinlog) AvroFieldBinlog {
 	avroFieldBinlog := AvroFieldBinlog{
-		FieldID: fb.GetFieldID(),
-		Binlogs: make([]AvroBinlog, len(fb.GetBinlogs())),
+		FieldID:     fb.GetFieldID(),
+		ChildFields: fb.GetChildFields(),
+		Binlogs:     make([]AvroBinlog, len(fb.GetBinlogs())),
 	}
 
 	for i, binlog := range fb.GetBinlogs() {
@@ -1150,8 +1169,9 @@ func convertIndexFilePathInfoToAvro(info *indexpb.IndexFilePathInfo) AvroIndexFi
 // Handles timestamp conversion from int64 (Avro) to uint64 (proto).
 func convertAvroToFieldBinlog(avroFB AvroFieldBinlog) *datapb.FieldBinlog {
 	fieldBinlog := &datapb.FieldBinlog{
-		FieldID: avroFB.FieldID,
-		Binlogs: make([]*datapb.Binlog, len(avroFB.Binlogs)),
+		FieldID:     avroFB.FieldID,
+		ChildFields: avroFB.ChildFields,
+		Binlogs:     make([]*datapb.Binlog, len(avroFB.Binlogs)),
 	}
 
 	for i, avroBinlog := range avroFB.Binlogs {
@@ -1568,5 +1588,16 @@ func getAvroSchemaV3() string {
 		`{"name": "is_sorted", "type": "boolean"},`,
 		`{"name": "is_sorted", "type": "boolean"},
 				{"name": "commit_timestamp", "type": "long", "default": 0},`,
+		1)
+}
+
+// getAvroSchemaV4 returns the V4 schema, derived from V3 by preserving
+// FieldBinlog.child_fields. External and packed-storage segments use these
+// child fields to prove which logical fields are materialized.
+func getAvroSchemaV4() string {
+	return strings.Replace(getAvroSchemaV3(),
+		`{"name": "field_id", "type": "long"},`,
+		`{"name": "field_id", "type": "long"},
+								{"name": "child_fields", "type": {"type": "array", "items": "long"}, "default": []},`,
 		1)
 }

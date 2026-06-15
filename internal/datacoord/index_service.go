@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/externalmaterialization"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -157,6 +158,11 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 
 	if !FieldExists(schema, req.GetFieldID()) {
 		return merr.Status(merr.WrapErrFieldNotFound(req.GetFieldID())), nil
+	}
+
+	if err := s.validateExternalIndexFieldMaterialized(ctx, schema, req); err != nil {
+		log.Warn("external index field is not materialized", zap.Int64("fieldID", req.GetFieldID()), zap.Error(err))
+		return merr.Status(err), nil
 	}
 
 	isJSON := isJSONField(schema, req.GetFieldID())
@@ -332,6 +338,45 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		zap.Strings("channels", channels))
 	metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	return merr.Success(), nil
+}
+
+func (s *Server) validateExternalIndexFieldMaterialized(ctx context.Context, schema *schemapb.CollectionSchema, req *indexpb.CreateIndexRequest) error {
+	if !typeutil.IsExternalCollection(schema) {
+		return nil
+	}
+
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		return err
+	}
+	field, err := helper.GetFieldFromID(req.GetFieldID())
+	if err != nil {
+		return err
+	}
+	if field.GetExternalField() == "" && !field.GetIsFunctionOutput() {
+		return nil
+	}
+
+	segments := s.meta.SelectSegments(ctx,
+		WithCollection(req.GetCollectionID()),
+		SegmentFilterFunc(func(info *SegmentInfo) bool {
+			return info.GetLevel() != datapb.SegmentLevel_L0 && isFlush(info)
+		}),
+	)
+	for _, segment := range segments {
+		if externalmaterialization.SegmentCoversSchemaField(segment.SegmentInfo, field, req.GetFieldID()) {
+			continue
+		}
+		fieldName := field.GetName()
+		if fieldName == "" {
+			fieldName = fmt.Sprint(req.GetFieldID())
+		}
+		return merr.WrapErrParameterInvalidMsg(
+			"external field %s is not materialized; run RefreshExternalCollection before creating index",
+			fieldName,
+		)
+	}
+	return nil
 }
 
 func ValidateIndexParams(index *model.Index) error {

@@ -687,6 +687,44 @@ func TestSnapshotManifest_CommitTimestampRoundtripV3(t *testing.T) {
 	assert.Equal(t, wantCommitTs, segments[0].GetCommitTimestamp())
 }
 
+func TestSnapshotManifest_ChildFieldsRoundtripV4(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	reader := NewSnapshotReader(cm)
+
+	segment := &datapb.SegmentDescription{
+		SegmentId:   1001,
+		PartitionId: 2001,
+		ChannelName: "ch-0",
+		Binlogs: []*datapb.FieldBinlog{
+			{
+				FieldID:     0,
+				ChildFields: []int64{100, 101, 102},
+				Binlogs: []*datapb.Binlog{
+					{LogID: 1, EntriesNum: 10},
+				},
+			},
+		},
+	}
+	entry := convertSegmentToManifestEntry(segment)
+	require.Equal(t, []int64{100, 101, 102}, entry.BinlogFiles[0].ChildFields)
+
+	assert.Contains(t, getAvroSchemaV4(), "child_fields")
+	schema, err := getManifestSchemaByVersion(4)
+	require.NoError(t, err)
+	binaryData, err := avro.Marshal(schema, entry)
+	require.NoError(t, err)
+
+	manifestPath := path.Join(tempDir, "v4_manifest.avro")
+	require.NoError(t, cm.Write(context.Background(), manifestPath, binaryData))
+
+	segments, err := reader.readManifestFile(context.Background(), manifestPath, 4)
+	require.NoError(t, err)
+	require.Len(t, segments, 1)
+	require.Len(t, segments[0].GetBinlogs(), 1)
+	assert.Equal(t, []int64{100, 101, 102}, segments[0].GetBinlogs()[0].GetChildFields())
+}
+
 // TestSnapshotManifest_LegacyV2NoCommitTimestamp verifies that a manifest
 // written with the V2 schema (no commit_timestamp field) still decodes cleanly
 // under the V2 reader and surfaces CommitTimestamp=0. This guarantees that
@@ -1150,8 +1188,13 @@ func TestValidateFormatVersion(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:        "version_4_future",
-			version:     4,
+			name:    "version_4_current",
+			version: 4,
+			wantErr: false,
+		},
+		{
+			name:        "version_5_future",
+			version:     5,
 			wantErr:     true,
 			errContains: "too new",
 		},
@@ -1167,7 +1210,7 @@ func TestValidateFormatVersion(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validateFormatVersion(tt.version)
 			if tt.wantErr {
-				assert.Error(t, err)
+				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errContains)
 			} else {
 				assert.NoError(t, err)
@@ -1204,10 +1247,9 @@ func TestGetManifestSchemaByVersion(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:        "version_4_unsupported",
-			version:     4,
-			wantErr:     true,
-			errContains: "unsupported manifest schema version",
+			name:    "version_4_current",
+			version: 4,
+			wantErr: false,
 		},
 		{
 			name:        "version_99_unsupported",

@@ -144,6 +144,7 @@ type SegmentEntry struct {
 	TargetVersion int64
 	Level         datapb.SegmentLevel
 	Offline       bool // if delegator failed to execute forwardDelete/Query/Search on segment, it will be offline
+	LoadInfo      *querypb.SegmentLoadInfo
 
 	// Candidate for PK existence check (BF query)
 	// - For sealed segments: *pkoracle.BloomFilterSet
@@ -433,6 +434,31 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 
 	d.notifySnapshotUpdate()
 	refundCandidates(toRefund)
+}
+
+func (d *distribution) UpdateSealedLoadInfos(infos ...*querypb.SegmentLoadInfo) {
+	d.mut.Lock()
+	defer d.mut.Unlock()
+
+	updated := false
+	for _, info := range infos {
+		if info == nil {
+			continue
+		}
+		entry, ok := d.sealedSegments[info.GetSegmentID()]
+		if !ok {
+			continue
+		}
+		entry.LoadInfo = info
+		entry.Level = info.GetLevel()
+		d.sealedSegments[info.GetSegmentID()] = entry
+		updated = true
+	}
+
+	if updated {
+		d.genSnapshot()
+		d.updateServiceable("UpdateSealedLoadInfos")
+	}
 }
 
 // refundCandidates refunds resources for removed candidates.

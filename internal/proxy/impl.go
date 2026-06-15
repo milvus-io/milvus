@@ -1136,13 +1136,7 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 		}, nil
 	}
 
-	// Check for external collection - alter collection schema is not supported
-	if typeutil.IsExternalCollection(dresp.GetSchema()) {
-		return &milvuspb.AlterCollectionSchemaResponse{
-			AlterStatus: merr.Status(merr.WrapErrParameterInvalidMsg(
-				"alter collection schema operation is not supported for external collection %s", request.GetCollectionName())),
-		}, nil
-	}
+	isExternalCollection := typeutil.IsExternalCollection(dresp.GetSchema())
 
 	task := &alterCollectionSchemaTask{
 		ctx:                          ctx,
@@ -1150,6 +1144,7 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 		AlterCollectionSchemaRequest: request,
 		mixCoord:                     node.mixCoord,
 		oldSchema:                    dresp.GetSchema(),
+		isExternalCollection:         isExternalCollection,
 	}
 	method := "AlterCollectionSchema"
 	tr := timerecord.NewTimeRecorder(method)

@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
@@ -2473,6 +2474,82 @@ func TestDelegatorSearchBM25InvalidMetricType(t *testing.T) {
 	_, err := sd.search(context.Background(), searchReq, []SnapshotItem{}, []SegmentEntry{}, map[int64]int64{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must use BM25 metric type when searching against BM25 Function output field")
+}
+
+func TestDelegatorSearchBM25ExternalMissingMaterialization(t *testing.T) {
+	paramtable.Init()
+	key := paramtable.Get().QueryNodeCfg.ExternalCollectionAllowUnmaterializedFieldAccess.Key
+	original := paramtable.Get().QueryNodeCfg.ExternalCollectionAllowUnmaterializedFieldAccess.GetValue()
+	defer paramtable.Get().Save(key, original)
+
+	schema := &schemapb.CollectionSchema{
+		Name: "external_bm25",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "id"},
+			{
+				FieldID:       101,
+				Name:          "text",
+				DataType:      schemapb.DataType_VarChar,
+				ExternalField: "text",
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "256"},
+				},
+			},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Name:           "bm25",
+			Type:           schemapb.FunctionType_BM25,
+			InputFieldIds:  []int64{101},
+			OutputFieldIds: []int64{102},
+		}},
+	}
+	collection, err := segments.NewCollection(1000, schema, nil, &querypb.LoadMetaInfo{SchemaVersion: 1})
+	require.NoError(t, err)
+
+	sd := &shardDelegator{
+		collectionID:               1000,
+		vchannelName:               "rootcoord-dml_1000_v0",
+		collection:                 collection,
+		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
+		catchingUpStreamingData:    atomic.NewBool(false),
+	}
+	searchReq := &querypb.SearchRequest{
+		Req: &internalpb.SearchRequest{
+			Base:       commonpbutil.NewMsgBase(),
+			FieldId:    102,
+			MetricType: metric.BM25,
+		},
+	}
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    10,
+		CollectionID: 1000,
+		PartitionID:  20,
+		ManifestPath: "manifest",
+		BinlogPaths: []*datapb.FieldBinlog{
+			{ChildFields: []int64{100, 101}},
+		},
+	}
+	sealed := []SnapshotItem{
+		{
+			NodeID: 1,
+			Segments: []SegmentEntry{{
+				NodeID:      1,
+				SegmentID:   10,
+				PartitionID: 20,
+				LoadInfo:    loadInfo,
+			}},
+		},
+	}
+
+	paramtable.Get().Save(key, "false")
+	_, err = sd.search(context.Background(), searchReq, sealed, nil, map[int64]int64{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "external field sparse is not materialized")
+	assert.Contains(t, err.Error(), "RefreshExternalCollection")
+
+	paramtable.Get().Save(key, "true")
+	assert.NoError(t, sd.validateExternalSearchMaterialized(searchReq, sealed, nil))
 }
 
 func TestNewRowCountBasedEvaluator_SearchAndQueryTasks(t *testing.T) {

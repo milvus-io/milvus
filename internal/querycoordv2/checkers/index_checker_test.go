@@ -25,6 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
@@ -38,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -50,6 +53,61 @@ type IndexCheckerSuite struct {
 	broker    *meta.MockBroker
 	nodeMgr   *session.NodeManager
 	targetMgr *meta.MockTargetManager
+}
+
+type externalBM25IndexCheckerBroker struct {
+	segment        *datapb.SegmentInfo
+	indexes        []*indexpb.IndexInfo
+	segmentIndexes map[int64][]*querypb.FieldIndexInfo
+}
+
+func (b *externalBM25IndexCheckerBroker) DescribeCollection(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) {
+	return nil, nil
+}
+
+func (b *externalBM25IndexCheckerBroker) GetPartitions(context.Context, int64) ([]int64, error) {
+	return []int64{1}, nil
+}
+
+func (b *externalBM25IndexCheckerBroker) GetRecoveryInfo(context.Context, int64, int64) ([]*datapb.VchannelInfo, []*datapb.SegmentBinlogs, error) {
+	return nil, nil, nil
+}
+
+func (b *externalBM25IndexCheckerBroker) ListIndexes(context.Context, int64) ([]*indexpb.IndexInfo, error) {
+	return b.indexes, nil
+}
+
+func (b *externalBM25IndexCheckerBroker) GetSegmentInfo(context.Context, ...int64) ([]*datapb.SegmentInfo, error) {
+	return []*datapb.SegmentInfo{b.segment}, nil
+}
+
+func (b *externalBM25IndexCheckerBroker) GetIndexInfo(context.Context, int64, ...int64) (map[int64][]*querypb.FieldIndexInfo, error) {
+	return b.segmentIndexes, nil
+}
+
+func (b *externalBM25IndexCheckerBroker) GetRecoveryInfoV2(context.Context, int64, ...int64) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error) {
+	return []*datapb.VchannelInfo{{
+		CollectionID: b.segment.GetCollectionID(),
+		ChannelName:  b.segment.GetInsertChannel(),
+		SeekPosition: &msgpb.MsgPosition{Timestamp: 1},
+	}}, []*datapb.SegmentInfo{b.segment}, nil
+}
+
+func (b *externalBM25IndexCheckerBroker) DescribeDatabase(context.Context, string) (*rootcoordpb.DescribeDatabaseResponse, error) {
+	return nil, nil
+}
+
+func (b *externalBM25IndexCheckerBroker) GetCollectionLoadInfo(context.Context, int64) ([]string, int64, error) {
+	return nil, 0, nil
+}
+
+type externalIndexCheckerTargetManager struct {
+	meta.TargetManagerInterface
+	segment *datapb.SegmentInfo
+}
+
+func (m *externalIndexCheckerTargetManager) GetSealedSegment(context.Context, int64, int64, meta.TargetScope) *datapb.SegmentInfo {
+	return m.segment
 }
 
 func (suite *IndexCheckerSuite) SetupSuite() {
@@ -354,6 +412,159 @@ func (suite *IndexCheckerSuite) TestCreateNewIndex() {
 	suite.Len(tasks, 1)
 	suite.Len(tasks[0].Actions(), 1)
 	suite.Equal(tasks[0].Actions()[0].(*task.SegmentAction).Type(), task.ActionTypeReopen)
+}
+
+func (suite *IndexCheckerSuite) TestExternalUnmaterializedIndexDoesNotScheduleReopen() {
+	checker := suite.checker
+	ctx := context.Background()
+
+	coll := utils.CreateTestCollection(1, 1)
+	coll.FieldIndexID = map[int64]int64{101: 1000}
+	coll.Schema = &schemapb.CollectionSchema{
+		Name: "external",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64, Name: "id", ExternalField: "id"},
+			{FieldID: 101, DataType: schemapb.DataType_FloatVector, Name: "vec", ExternalField: "vec"},
+		},
+	}
+	checker.meta.PutCollection(ctx, coll)
+	checker.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	checker.meta.HandleNodeUp(ctx, 1)
+
+	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel"))
+	suite.targetMgr.ExpectedCalls = nil
+	suite.targetMgr.EXPECT().GetSealedSegment(ctx, int64(1), int64(2), meta.CurrentTargetFirst).Return(&datapb.SegmentInfo{
+		ID:           2,
+		CollectionID: 1,
+		ManifestPath: `{"base_path":"seg2","ver":1}`,
+		Binlogs: []*datapb.FieldBinlog{{
+			FieldID:     0,
+			ChildFields: []int64{100},
+		}},
+	}).Maybe()
+	suite.broker.EXPECT().ListIndexes(ctx, int64(1)).Return([]*indexpb.IndexInfo{
+		{
+			FieldID: 101,
+			IndexID: 1000,
+		},
+	}, nil)
+
+	tasks := checker.Check(ctx)
+	suite.Require().Len(tasks, 0)
+}
+
+func (suite *IndexCheckerSuite) TestExternalSegmentCoversIndexFieldBranches() {
+	ctx := context.Background()
+	loadedSegment := &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 2}}
+	externalSchema := &schemapb.CollectionSchema{
+		Name: "external",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64, Name: "id", ExternalField: "id"},
+			{FieldID: 101, DataType: schemapb.DataType_SparseFloatVector, Name: "bm25_sparse", IsFunctionOutput: true},
+			{FieldID: 102, DataType: schemapb.DataType_Int64, Name: "age"},
+		},
+	}
+
+	checker := &IndexChecker{targetMgr: &externalIndexCheckerTargetManager{}}
+	suite.True(checker.externalSegmentCoversIndexField(ctx, 1, loadedSegment, nil, 101))
+
+	invalidSchema := &schemapb.CollectionSchema{
+		Name: "external",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64, Name: "dup", ExternalField: "id"},
+			{FieldID: 101, DataType: schemapb.DataType_Int64, Name: "dup", ExternalField: "id2"},
+		},
+	}
+	suite.True(checker.externalSegmentCoversIndexField(ctx, 1, loadedSegment, invalidSchema, 101))
+	suite.True(checker.externalSegmentCoversIndexField(ctx, 1, loadedSegment, externalSchema, 999))
+	suite.True(checker.externalSegmentCoversIndexField(ctx, 1, loadedSegment, externalSchema, 102))
+	suite.True(checker.externalSegmentCoversIndexField(ctx, 1, loadedSegment, externalSchema, 101))
+
+	coveredSegment := &datapb.SegmentInfo{
+		ID:           2,
+		CollectionID: 1,
+		ManifestPath: `{"base_path":"seg2","ver":1}`,
+		Bm25Statslogs: []*datapb.FieldBinlog{{
+			FieldID: 101,
+			Binlogs: []*datapb.Binlog{{
+				LogPath: "bm25/101/stats",
+			}},
+		}},
+	}
+	checker = &IndexChecker{targetMgr: &externalIndexCheckerTargetManager{segment: coveredSegment}}
+	suite.True(checker.externalSegmentCoversIndexField(ctx, 1, loadedSegment, externalSchema, 101))
+
+	coveredSegment.Bm25Statslogs = nil
+	suite.False(checker.externalSegmentCoversIndexField(ctx, 1, loadedSegment, externalSchema, 101))
+}
+
+func (suite *IndexCheckerSuite) TestExternalBM25StatsIndexSchedulesReopen() {
+	ctx := context.Background()
+
+	coll := utils.CreateTestCollection(1, 1)
+	coll.FieldIndexID = map[int64]int64{101: 1000}
+	coll.Schema = &schemapb.CollectionSchema{
+		Name: "external",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64, Name: "id", ExternalField: "id"},
+			{FieldID: 102, DataType: schemapb.DataType_VarChar, Name: "text", ExternalField: "text"},
+			{FieldID: 101, DataType: schemapb.DataType_SparseFloatVector, Name: "bm25_sparse", IsFunctionOutput: true},
+		},
+	}
+	suite.meta.PutCollection(ctx, coll)
+	suite.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	suite.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.meta.HandleNodeUp(ctx, 1)
+
+	segment := &datapb.SegmentInfo{
+		ID:            2,
+		CollectionID:  1,
+		PartitionID:   1,
+		InsertChannel: "test-insert-channel",
+		ManifestPath:  `{"base_path":"seg2","ver":1}`,
+		Bm25Statslogs: []*datapb.FieldBinlog{{
+			FieldID: 101,
+			Binlogs: []*datapb.Binlog{{
+				LogPath: "bm25/101/stats",
+			}},
+		}},
+	}
+	broker := &externalBM25IndexCheckerBroker{
+		segment: segment,
+		indexes: []*indexpb.IndexInfo{{
+			FieldID: 101,
+			IndexID: 1000,
+		}},
+		segmentIndexes: map[int64][]*querypb.FieldIndexInfo{
+			2: {{
+				FieldID:        101,
+				IndexID:        1000,
+				EnableIndex:    true,
+				IndexFilePaths: []string{"index"},
+			}},
+		},
+	}
+	targetMgr := meta.NewTargetManager(broker, suite.meta)
+	suite.Require().NoError(targetMgr.UpdateCollectionNextTarget(ctx, 1))
+	suite.Require().True(targetMgr.UpdateCollectionCurrentTarget(ctx, 1))
+
+	checker := NewIndexChecker(suite.meta, suite.checker.dist, broker, suite.nodeMgr, targetMgr)
+	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel"))
+
+	tasks := checker.Check(ctx)
+	suite.Require().Len(tasks, 1)
+	suite.Require().Len(tasks[0].Actions(), 1)
+	suite.Equal(task.ActionTypeReopen, tasks[0].Actions()[0].(*task.SegmentAction).Type())
 }
 
 func TestRemoveRedundantIndex(t *testing.T) {

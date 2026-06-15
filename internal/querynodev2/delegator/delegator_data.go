@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"sort"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -106,6 +107,15 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 		newGrowingSegment := false
 		if growing == nil {
 			var err error
+			loadInfo := &querypb.SegmentLoadInfo{
+				SegmentID:     segmentID,
+				PartitionID:   insertData.PartitionID,
+				CollectionID:  sd.collectionID,
+				InsertChannel: sd.vchannelName,
+				StartPosition: insertData.StartPosition,
+				DeltaPosition: insertData.StartPosition,
+				Level:         datapb.SegmentLevel_L1,
+			}
 			// TODO: It's a wired implementation that growing segment have load info.
 			// we should separate the growing segment and sealed segment by type system.
 			growing, err = segments.NewSegment(
@@ -114,15 +124,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 				sd.segmentManager,
 				segments.SegmentTypeGrowing,
 				0,
-				&querypb.SegmentLoadInfo{
-					SegmentID:     segmentID,
-					PartitionID:   insertData.PartitionID,
-					CollectionID:  sd.collectionID,
-					InsertChannel: sd.vchannelName,
-					StartPosition: insertData.StartPosition,
-					DeltaPosition: insertData.StartPosition,
-					Level:         datapb.SegmentLevel_L1,
-				},
+				loadInfo,
 			)
 			if err != nil {
 				log.Error("failed to create new segment",
@@ -176,6 +178,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 					PartitionID:   insertData.PartitionID,
 					Version:       0,
 					TargetVersion: initialTargetVersion,
+					LoadInfo:      growing.LoadInfo(),
 					Candidate:     growing, // growing segment itself is the Candidate
 				})
 			}
@@ -408,13 +411,18 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 			idfOracle.RegisterGrowing(segment.ID(), segment.GetBM25Stats())
 		}
 	}
-	sd.addGrowing(lo.Map(loaded, func(segment segments.Segment, _ int) SegmentEntry {
+	sd.addGrowing(lo.Map(loaded, func(segment segments.Segment, idx int) SegmentEntry {
+		var loadInfo *querypb.SegmentLoadInfo
+		if idx < len(infos) {
+			loadInfo = infos[idx]
+		}
 		return SegmentEntry{
 			NodeID:        paramtable.GetNodeID(),
 			SegmentID:     segment.ID(),
 			PartitionID:   segment.Partition(),
 			Version:       version,
 			TargetVersion: sd.distribution.getTargetVersion(),
+			LoadInfo:      loadInfo,
 			Candidate:     segment, // growing segment itself is the Candidate
 		}
 	})...)
@@ -436,6 +444,18 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 	for _, info := range infos {
 		info := info
 		futures = append(futures, pool.Submit(func() (any, error) {
+			bm25Paths, err := packed.NewStatsResolverFromLoadInfo(info).BM25StatsPaths()
+			if err != nil {
+				log.Warn("failed to resolve bm25 stats paths for segment",
+					zap.Int64("collectionID", req.GetCollectionID()),
+					zap.Int64("segmentID", info.GetSegmentID()),
+					zap.Error(err))
+				return nil, err
+			}
+			materializeBM25StatsLogs(info, bm25Paths)
+			if len(bm25Paths) == 0 {
+				return nil, nil
+			}
 			if err := idfOracle.LoadSealed(ctx, info.GetSegmentID(), info, cm); err != nil {
 				log.Warn("failed to load bm25 stats for segment",
 					zap.Int64("collectionID", req.GetCollectionID()),
@@ -455,6 +475,61 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 	return nil
 }
 
+func materializeBM25StatsLogs(info *querypb.SegmentLoadInfo, bm25Paths map[int64][]string) {
+	if info == nil || len(bm25Paths) == 0 {
+		return
+	}
+
+	logsByField := make(map[int64]*datapb.FieldBinlog, len(info.GetBm25Logs())+len(bm25Paths))
+	for _, fieldBinlog := range info.GetBm25Logs() {
+		if fieldBinlog == nil {
+			continue
+		}
+		logsByField[fieldBinlog.GetFieldID()] = proto.Clone(fieldBinlog).(*datapb.FieldBinlog)
+	}
+
+	for fieldID, paths := range bm25Paths {
+		if len(paths) == 0 {
+			continue
+		}
+		fieldBinlog := logsByField[fieldID]
+		if fieldBinlog == nil {
+			fieldBinlog = &datapb.FieldBinlog{FieldID: fieldID}
+			logsByField[fieldID] = fieldBinlog
+		}
+
+		existingPaths := make(map[string]struct{}, len(fieldBinlog.GetBinlogs()))
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			if binlog.GetLogPath() != "" {
+				existingPaths[binlog.GetLogPath()] = struct{}{}
+			}
+		}
+		for _, path := range paths {
+			if path == "" {
+				continue
+			}
+			if _, ok := existingPaths[path]; ok {
+				continue
+			}
+			fieldBinlog.Binlogs = append(fieldBinlog.Binlogs, &datapb.Binlog{LogPath: path})
+			existingPaths[path] = struct{}{}
+		}
+	}
+
+	fieldIDs := make([]int64, 0, len(logsByField))
+	for fieldID := range logsByField {
+		fieldIDs = append(fieldIDs, fieldID)
+	}
+	sort.Slice(fieldIDs, func(i, j int) bool {
+		return fieldIDs[i] < fieldIDs[j]
+	})
+
+	info.Bm25Logs = make([]*datapb.FieldBinlog, 0, len(fieldIDs))
+	for _, fieldID := range fieldIDs {
+		info.Bm25Logs = append(info.Bm25Logs, logsByField[fieldID])
+	}
+}
+
 func (sd *shardDelegator) handleReopenPostLoad(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
 	log := sd.getLogger(ctx).With(
 		zap.Int64s("segments", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })),
@@ -468,6 +543,7 @@ func (sd *shardDelegator) handleReopenPostLoad(ctx context.Context, req *querypb
 			log.Warn("resolve reopened bm25 stats failed", zap.Int64("segmentID", info.GetSegmentID()), zap.Error(err))
 			return err
 		}
+		materializeBM25StatsLogs(info, bm25Paths)
 		if len(bm25Paths) > 0 {
 			infosWithBM25Stats = append(infosWithBM25Stats, info)
 		}
@@ -627,7 +703,11 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return nil
 	}
 	if req.GetLoadScope() == querypb.LoadScope_Reopen {
-		return sd.handleReopenPostLoad(ctx, req)
+		if err := sd.handleReopenPostLoad(ctx, req); err != nil {
+			return err
+		}
+		sd.distribution.UpdateSealedLoadInfos(req.GetInfos()...)
+		return nil
 	}
 
 	return sd.withPostLoadLimit(ctx, func() error {
@@ -666,6 +746,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 				NodeID:      req.GetDstNodeID(),
 				Version:     req.GetVersion(),
 				Level:       info.GetLevel(),
+				LoadInfo:    info,
 				Candidate:   bfMap[info.GetSegmentID()],
 			})
 		}

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/externalmaterialization"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -134,7 +135,7 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 		if roNodeSet.Contain(segment.Node) {
 			continue
 		}
-		missing := c.checkSegment(segment, indexInfos)
+		missing := c.checkSegment(ctx, collection.GetCollectionID(), segment, indexInfos, schema)
 		missingStats := c.checkSegmentStats(segment, schema, collection.LoadFields)
 		if len(missing) > 0 {
 			targets[segment.GetID()] = missing
@@ -199,10 +200,13 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 	return tasks
 }
 
-func (c *IndexChecker) checkSegment(segment *meta.Segment, indexInfos []*indexpb.IndexInfo) (fieldIDs []int64) {
+func (c *IndexChecker) checkSegment(ctx context.Context, collectionID int64, segment *meta.Segment, indexInfos []*indexpb.IndexInfo, schema *schemapb.CollectionSchema) (fieldIDs []int64) {
 	var result []int64
 	for _, indexInfo := range indexInfos {
 		fieldID, indexID := indexInfo.FieldID, indexInfo.IndexID
+		if !c.externalSegmentCoversIndexField(ctx, collectionID, segment, schema, fieldID) {
+			continue
+		}
 		info, ok := segment.IndexInfo[indexID]
 		if !ok {
 			result = append(result, fieldID)
@@ -213,6 +217,32 @@ func (c *IndexChecker) checkSegment(segment *meta.Segment, indexInfos []*indexpb
 		}
 	}
 	return result
+}
+
+func (c *IndexChecker) externalSegmentCoversIndexField(ctx context.Context, collectionID int64, segment *meta.Segment, schema *schemapb.CollectionSchema, fieldID int64) bool {
+	if schema == nil || !typeutil.IsExternalCollection(schema) {
+		return true
+	}
+
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		log.Warn("failed to build schema helper for external index check", zap.Int64("collection", collectionID), zap.Error(err))
+		return true
+	}
+	field, err := helper.GetFieldFromID(fieldID)
+	if err != nil {
+		log.Warn("failed to get index field schema for external index check", zap.Int64("collection", collectionID), zap.Int64("fieldID", fieldID), zap.Error(err))
+		return true
+	}
+	if field.GetExternalField() == "" && !field.GetIsFunctionOutput() {
+		return true
+	}
+
+	targetSegment := c.targetMgr.GetSealedSegment(ctx, collectionID, segment.GetID(), meta.CurrentTargetFirst)
+	if targetSegment == nil {
+		return true
+	}
+	return externalmaterialization.SegmentCoversSchemaField(targetSegment, field, fieldID)
 }
 
 // checkRedundantIndices returns redundant indexIDs for each segment

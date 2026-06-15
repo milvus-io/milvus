@@ -7421,6 +7421,23 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 			},
 		},
 	}
+	externalOldSchema := &schemapb.CollectionSchema{
+		Name: "external_coll",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64, Name: "id", ExternalField: "id"},
+			{
+				FieldID: 101, DataType: schemapb.DataType_VarChar, Name: "text", ExternalField: "text",
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "max_length", Value: "65535"},
+					{Key: "enable_analyzer", Value: "true"},
+				},
+			},
+			{
+				FieldID: 102, DataType: schemapb.DataType_FloatVector, Name: "dense", ExternalField: "dense",
+				TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}},
+			},
+		},
+	}
 
 	// sparseOutputField is the output field for the BM25 function.
 	sparseOutputField := &schemapb.FieldSchema{
@@ -7475,6 +7492,11 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 			mixCoord:                      rc,
 			oldSchema:                     schema,
 		}
+	}
+	buildExternalTask := func(req *milvuspb.AlterCollectionSchemaRequest) *alterCollectionSchemaTask {
+		task := buildTask(req, externalOldSchema)
+		task.isExternalCollection = true
+		return task
 	}
 
 	t.Run("OnEnqueue", func(t *testing.T) {
@@ -7684,14 +7706,14 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
-	t.Run("PreExecute happy path for MinHash", func(t *testing.T) {
+	t.Run("External PreExecute happy path for MinHash", func(t *testing.T) {
 		functionSchema := &schemapb.FunctionSchema{
 			Name:             "minhash_func",
 			Type:             schemapb.FunctionType_MinHash,
 			InputFieldNames:  []string{"text"},
 			OutputFieldNames: []string{"minhash_binary"},
 		}
-		task := buildTask(buildAddFunctionRequest(minHashOutputField, functionSchema), oldSchema)
+		task := buildExternalTask(buildAddFunctionRequest(minHashOutputField, functionSchema))
 		err := task.PreExecute(ctx)
 		assert.NoError(t, err)
 	})
@@ -7707,7 +7729,186 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.ErrorContains(t, err, "only BM25 and MinHash functions are supported")
+		assert.ErrorContains(t, err, "only BM25 function is supported")
+	})
+
+	t.Run("External PreExecute rejects physical backfill", func(t *testing.T) {
+		req := buildValidRequest()
+		req.GetAction().GetAddRequest().DoPhysicalBackfill = true
+		task := buildExternalTask(req)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "does not support physical backfill")
+	})
+
+	t.Run("External PreExecute rejects output external field mapping", func(t *testing.T) {
+		req := buildValidRequest()
+		req.GetAction().GetAddRequest().GetFieldInfos()[0].FieldSchema.ExternalField = "sparse_bm25"
+		task := buildExternalTask(req)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "must not have external_field")
+	})
+
+	t.Run("External PreExecute allows MinHash output field", func(t *testing.T) {
+		req := buildValidRequest()
+		req.GetAction().GetAddRequest().FieldInfos = []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+			{FieldSchema: &schemapb.FieldSchema{
+				Name:       "mh",
+				DataType:   schemapb.DataType_BinaryVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "512"}},
+			}},
+		}
+		req.GetAction().GetAddRequest().FuncSchema = []*schemapb.FunctionSchema{{
+			Name:             "minhash_func",
+			Type:             schemapb.FunctionType_MinHash,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"mh"},
+		}}
+		task := buildExternalTask(req)
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("External PreExecute rejects output missing from field infos", func(t *testing.T) {
+		req := buildValidRequest()
+		req.GetAction().GetAddRequest().FuncSchema[0].OutputFieldNames = []string{"missing_sparse"}
+		task := buildExternalTask(req)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "must be included in AddRequest.field_infos")
+	})
+
+	t.Run("External PreExecute rejects extra field info", func(t *testing.T) {
+		req := buildValidRequest()
+		req.GetAction().GetAddRequest().FieldInfos = append(req.GetAction().GetAddRequest().FieldInfos,
+			&milvuspb.AlterCollectionSchemaRequest_FieldInfo{FieldSchema: &schemapb.FieldSchema{Name: "extra", DataType: schemapb.DataType_Int64}})
+		task := buildExternalTask(req)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "is not referenced by function")
+	})
+
+	t.Run("External PreExecute allows source-backed add field", func(t *testing.T) {
+		req := &milvuspb.AlterCollectionSchemaRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+							{FieldSchema: &schemapb.FieldSchema{
+								Name:          "category",
+								DataType:      schemapb.DataType_VarChar,
+								Nullable:      true,
+								ExternalField: "category",
+								TypeParams:    []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "1024"}},
+							}},
+						},
+					},
+				},
+			},
+		}
+		task := buildExternalTask(req)
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Internal PreExecute rejects source-backed add field", func(t *testing.T) {
+		req := &milvuspb.AlterCollectionSchemaRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+							{FieldSchema: &schemapb.FieldSchema{
+								Name:     "category",
+								DataType: schemapb.DataType_VarChar,
+								Nullable: true,
+								TypeParams: []*commonpb.KeyValuePair{
+									{Key: common.MaxLengthKey, Value: "1024"},
+								},
+							}},
+						},
+					},
+				},
+			},
+		}
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "only supported for external collection")
+	})
+
+	t.Run("External PreExecute rejects source-backed add field without external mapping", func(t *testing.T) {
+		req := &milvuspb.AlterCollectionSchemaRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+							{FieldSchema: &schemapb.FieldSchema{
+								Name:       "category",
+								DataType:   schemapb.DataType_VarChar,
+								Nullable:   true,
+								TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "1024"}},
+							}},
+						},
+					},
+				},
+			},
+		}
+		task := buildExternalTask(req)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "requires external_field mapping")
+	})
+
+	t.Run("External Execute keeps source-backed add field as non-function output", func(t *testing.T) {
+		req := &milvuspb.AlterCollectionSchemaRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+							{FieldSchema: &schemapb.FieldSchema{
+								Name:          "category",
+								DataType:      schemapb.DataType_VarChar,
+								Nullable:      true,
+								ExternalField: "category",
+								TypeParams:    []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "1024"}},
+							}},
+						},
+					},
+				},
+			},
+		}
+		task := buildExternalTask(req)
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+		assert.False(t, req.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema().GetIsFunctionOutput())
+	})
+
+	t.Run("Internal PreExecute still rejects MinHash", func(t *testing.T) {
+		req := buildValidRequest()
+		req.GetAction().GetAddRequest().FuncSchema[0].Type = schemapb.FunctionType_MinHash
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "only BM25 function is supported")
 	})
 
 	t.Run("PreExecute ignores legacy DoPhysicalBackfill", func(t *testing.T) {
@@ -8080,7 +8281,7 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 		assert.Contains(t, err.Error(), "action is nil")
 	})
 
-	t.Run("empty add request fails validation", func(t *testing.T) {
+	t.Run("nil add request fails validation", func(t *testing.T) {
 		task := &alterCollectionSchemaTask{
 			ctx:       ctx,
 			oldSchema: baseSchema,
@@ -8093,7 +8294,7 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 		}
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "exactly one function schema is required")
+		assert.Contains(t, err.Error(), "add_request is nil")
 	})
 
 	t.Run("drop by field_name - validation error", func(t *testing.T) {

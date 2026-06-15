@@ -28,6 +28,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -57,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
@@ -487,6 +489,273 @@ func TestServer_CreateIndex(t *testing.T) {
 		assert.Equal(t, 1, len(indexes))
 		assert.NotEqual(t, int64(0), indexes[0].IndexID)
 	})
+}
+
+type createIndexTestBroker struct {
+	collectionID UniqueID
+	schema       *schemapb.CollectionSchema
+}
+
+func (b *createIndexTestBroker) DescribeCollectionInternal(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+	if collectionID != b.collectionID {
+		return nil, errors.Errorf("unexpected collectionID: %d", collectionID)
+	}
+	return &milvuspb.DescribeCollectionResponse{
+		Status:              merr.Success(),
+		Schema:              b.schema,
+		CollectionID:        b.collectionID,
+		CollectionName:      b.schema.GetName(),
+		DbName:              "default",
+		VirtualChannelNames: []string{"vchan1"},
+	}, nil
+}
+
+func (b *createIndexTestBroker) DescribeCollectionByName(ctx context.Context, dbName, collectionName string) (*milvuspb.DescribeCollectionResponse, error) {
+	return nil, errors.New("unexpected DescribeCollectionByName")
+}
+
+func (b *createIndexTestBroker) ShowPartitionsInternal(ctx context.Context, collectionID int64) ([]int64, error) {
+	return nil, errors.New("unexpected ShowPartitionsInternal")
+}
+
+func (b *createIndexTestBroker) ShowCollections(ctx context.Context, dbName string) (*milvuspb.ShowCollectionsResponse, error) {
+	return nil, errors.New("unexpected ShowCollections")
+}
+
+func (b *createIndexTestBroker) ShowCollectionIDs(ctx context.Context, dbNames ...string) (*rootcoordpb.ShowCollectionIDsResponse, error) {
+	return nil, errors.New("unexpected ShowCollectionIDs")
+}
+
+func (b *createIndexTestBroker) ListDatabases(ctx context.Context) (*milvuspb.ListDatabasesResponse, error) {
+	return nil, errors.New("unexpected ListDatabases")
+}
+
+func (b *createIndexTestBroker) HasCollection(ctx context.Context, collectionID int64) (bool, error) {
+	return false, errors.New("unexpected HasCollection")
+}
+
+func (b *createIndexTestBroker) ShowPartitions(ctx context.Context, collectionID int64) (*milvuspb.ShowPartitionsResponse, error) {
+	return nil, errors.New("unexpected ShowPartitions")
+}
+
+func (b *createIndexTestBroker) CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest) error {
+	return errors.New("unexpected CreateCollection")
+}
+
+func (b *createIndexTestBroker) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) error {
+	return errors.New("unexpected CreatePartition")
+}
+
+func (b *createIndexTestBroker) DropCollection(ctx context.Context, dbName, collectionName string) error {
+	return errors.New("unexpected DropCollection")
+}
+
+func (b *createIndexTestBroker) DescribeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error) {
+	return nil, errors.New("unexpected DescribeDatabase")
+}
+
+func TestCreateIndexRejectsUnmaterializedExternalField(t *testing.T) {
+	initStreamingSystem(t)
+
+	const (
+		collID  = UniqueID(100)
+		fieldID = UniqueID(101)
+	)
+	schema := &schemapb.CollectionSchema{
+		Name: "ext",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			{
+				FieldID:       fieldID,
+				Name:          "vec",
+				DataType:      schemapb.DataType_FloatVector,
+				ExternalField: "vec",
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		},
+	}
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	indexMeta := newSegmentIndexMeta(catalog)
+
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(collID, &collectionInfo{
+		ID:     collID,
+		Schema: schema,
+	})
+	server := &Server{
+		meta: &meta{
+			catalog:     catalog,
+			collections: collections,
+			segments:    NewSegmentsInfo(),
+			indexMeta:   indexMeta,
+		},
+		allocator:       newMockAllocator(t),
+		notifyIndexChan: make(chan UniqueID, 1),
+		broker:          &createIndexTestBroker{collectionID: collID, schema: schema},
+	}
+	RegisterDDLCallbacks(server)
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.meta.segments.SetSegment(10, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           10,
+		CollectionID: collID,
+		State:        commonpb.SegmentState_Flushed,
+		Level:        datapb.SegmentLevel_L1,
+		ManifestPath: `{"base_path":"seg10","ver":1}`,
+		Binlogs: []*datapb.FieldBinlog{{
+			FieldID:     0,
+			ChildFields: []int64{100},
+		}},
+	}))
+
+	status, err := server.CreateIndex(context.Background(), &indexpb.CreateIndexRequest{
+		CollectionID: collID,
+		FieldID:      fieldID,
+		IndexName:    "_default_idx",
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "128"},
+		},
+		IndexParams: []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: indexparamcheck.AutoIndex},
+		},
+	})
+	require.NoError(t, err)
+	require.Error(t, merr.Error(status))
+	require.Contains(t, status.GetReason(), "not materialized")
+	require.Contains(t, status.GetReason(), "RefreshExternalCollection")
+}
+
+func TestValidateExternalIndexFieldMaterialized_Branches(t *testing.T) {
+	const collID = UniqueID(100)
+
+	newServer := func() *Server {
+		return &Server{meta: &meta{segments: NewSegmentsInfo()}}
+	}
+	t.Run("non_external_collection", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "regular",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64},
+			},
+		}
+		err := newServer().validateExternalIndexFieldMaterialized(context.Background(), schema, &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      100,
+		})
+		require.NoError(t, err)
+	})
+	t.Run("invalid_schema", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "ext",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "dup", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+				{FieldID: 101, Name: "dup", DataType: schemapb.DataType_Int64, ExternalField: "id2"},
+			},
+		}
+		err := newServer().validateExternalIndexFieldMaterialized(context.Background(), schema, &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      100,
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "duplicated fieldName")
+	})
+	t.Run("missing_field_id", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "ext",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			},
+		}
+		err := newServer().validateExternalIndexFieldMaterialized(context.Background(), schema, &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      999,
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "fieldID(999) not found")
+	})
+	t.Run("internal_field_in_external_collection", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "ext",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+				{FieldID: 101, Name: "age", DataType: schemapb.DataType_Int64},
+			},
+		}
+		err := newServer().validateExternalIndexFieldMaterialized(context.Background(), schema, &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      101,
+		})
+		require.NoError(t, err)
+	})
+	t.Run("unnamed_unmaterialized_field", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "ext",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+				{FieldID: 101, DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+			},
+		}
+		server := newServer()
+		server.meta.segments.SetSegment(10, NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           10,
+			CollectionID: collID,
+			State:        commonpb.SegmentState_Flushed,
+			Level:        datapb.SegmentLevel_L1,
+			ManifestPath: `{"base_path":"seg10","ver":1}`,
+		}))
+		err := server.validateExternalIndexFieldMaterialized(context.Background(), schema, &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      101,
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "101")
+	})
+}
+
+func TestValidateExternalIndexFieldMaterialized_BM25Statslog(t *testing.T) {
+	const (
+		collID  = UniqueID(100)
+		fieldID = UniqueID(101)
+	)
+	schema := &schemapb.CollectionSchema{
+		Name: "ext",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			{FieldID: 102, Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text"},
+			{FieldID: fieldID, Name: "bm25_sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+	}
+	server := &Server{meta: &meta{segments: NewSegmentsInfo()}}
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           10,
+		CollectionID: collID,
+		State:        commonpb.SegmentState_Flushed,
+		Level:        datapb.SegmentLevel_L1,
+		ManifestPath: `{"base_path":"seg10","ver":1}`,
+		Bm25Statslogs: []*datapb.FieldBinlog{{
+			FieldID: fieldID,
+			Binlogs: []*datapb.Binlog{{
+				LogPath: "bm25/101/stats",
+			}},
+		}},
+	})
+	server.meta.segments.SetSegment(segment.GetID(), segment)
+
+	err := server.validateExternalIndexFieldMaterialized(context.Background(), schema, &indexpb.CreateIndexRequest{
+		CollectionID: collID,
+		FieldID:      fieldID,
+	})
+	require.NoError(t, err)
+
+	segment.Bm25Statslogs = nil
+	err = server.validateExternalIndexFieldMaterialized(context.Background(), schema, &indexpb.CreateIndexRequest{
+		CollectionID: collID,
+		FieldID:      fieldID,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "bm25_sparse")
 }
 
 func TestServer_AlterIndex(t *testing.T) {

@@ -202,6 +202,24 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerSchedulesReadySegmentWhenColle
 	s.EqualValues(101, views[0].GetSegmentsView()[0].ID)
 }
 
+func (s *BumpSchemaVersionPolicySuite) TestTriggerSkipsExternalCollection() {
+	ctx := context.Background()
+	collID := int64(100)
+	collection := newBumpSchemaVersionTestCollection(collID, 2)
+	collection.Schema.Fields = append(collection.Schema.Fields, &schemapb.FieldSchema{
+		FieldID:       200,
+		Name:          "external_text",
+		DataType:      schemapb.DataType_VarChar,
+		ExternalField: "text",
+	})
+	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, collection)
+	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(101, newBumpSchemaVersionTestSegment(collID, 101, 1, storage.StorageV3, "manifest"))
+
+	events, err := s.bumpSchemaVersionPolicy.Trigger(ctx)
+	s.NoError(err)
+	s.Empty(events[TriggerTypeBumpSchemaVersion])
+}
+
 func (s *BumpSchemaVersionPolicySuite) TestTriggerCapturesSchemaSnapshot() {
 	ctx := context.Background()
 	collID := int64(100)

@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -246,6 +247,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Sing
 		ExternalSource:         "s3://bucket/data/",
 		ExternalSpec:           `{"format":"parquet"}`,
 		Schema: &schemapb.CollectionSchema{
+			Version: 4,
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "text", ExternalField: "text_col"},
 				{FieldID: 101, Name: "vec", ExternalField: "vec_col"},
@@ -276,6 +278,8 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Sing
 	s.NoError(err)
 	s.Len(result, 1)
 	s.Equal(int64(500), result[0].GetNumOfRows())
+	s.Equal(int32(4), result[0].GetSchemaVersion(),
+		"new external segments should use the request schema version")
 	s.Equal(storage.StorageV3, result[0].GetStorageVersion(),
 		"external segments should have StorageVersion=V3")
 
@@ -1119,6 +1123,95 @@ func (s *RefreshExternalCollectionTaskSuite) TestSegmentHasFunctionOutputColumns
 	s.True(hasColumns)
 }
 
+func (s *RefreshExternalCollectionTaskSuite) TestExternalColumnCoverageHelpers() {
+	s.Empty(targetExternalFields(nil))
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			{FieldID: 2, Name: "internal", DataType: schemapb.DataType_VarChar},
+			{FieldID: 3, Name: "category", DataType: schemapb.DataType_VarChar, ExternalField: "category"},
+		},
+	}
+	s.Equal(map[int64]string{1: "id", 3: "category"}, targetExternalFields(schema))
+
+	seg := &datapb.SegmentInfo{
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 1},
+			{FieldID: 100, ChildFields: []int64{2}},
+			{FieldID: 0},
+		},
+	}
+	coveredFields := coveredFieldsFromChildFields(seg)
+	_, covered := coveredFields[1]
+	s.True(covered)
+	_, covered = coveredFields[2]
+	s.True(covered)
+	_, covered = coveredFields[0]
+	s.False(covered)
+
+	s.False(segmentChildFieldsContainColumns(seg, []string{"bad"}))
+	s.False(segmentChildFieldsContainColumns(seg, []string{"1", "3"}))
+	s.True(segmentChildFieldsContainColumns(seg, []string{"2"}))
+
+	s.Nil(missingExternalColumns(seg, nil))
+	s.Equal([]string{"category"}, missingExternalColumns(seg, schema))
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestPatchSegmentForMissingColumnsErrors() {
+	paramtable.Init()
+
+	ctx := context.Background()
+	schema := &schemapb.CollectionSchema{
+		Version: 4,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "score", DataType: schemapb.DataType_Double, ExternalField: "score"},
+		},
+	}
+	task := NewRefreshExternalCollectionTask(ctx, &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:   s.collectionID,
+		ExternalSpec:   `{"format":"parquet"}`,
+		ExternalSource: "s3://bucket/data/",
+		StorageConfig:  &indexpb.StorageConfig{StorageType: "local"},
+		Schema:         schema,
+	})
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+	seg := &datapb.SegmentInfo{
+		ID:           10,
+		NumOfRows:    100,
+		ManifestPath: `{"base_path":"seg10","ver":1}`,
+	}
+	fragments := []packed.Fragment{{FilePath: "s3://bucket/data/a.parquet", StartRow: 0, EndRow: 100, RowCount: 100}}
+
+	mockAppend := mockey.Mock(packed.AppendSegmentManifestColumns).Return("", fmt.Errorf("append failed")).Build()
+	patched, err := task.patchSegmentForMissingColumns(ctx, seg, fragments, []string{"score"})
+	s.ErrorContains(err, "append failed")
+	s.Nil(patched)
+	mockAppend.UnPatch()
+
+	mockAppend = mockey.Mock(packed.AppendSegmentManifestColumns).Return(`{"base_path":"seg10","ver":2}`, nil).Build()
+	mockSample := mockey.Mock(packed.SampleExternalFieldSizes).Return(nil, fmt.Errorf("sample failed")).Build()
+	patched, err = task.patchSegmentForMissingColumns(ctx, seg, fragments, []string{"score"})
+	s.ErrorContains(err, "sample failed")
+	s.Nil(patched)
+	mockSample.UnPatch()
+
+	mockSample = mockey.Mock(packed.SampleExternalFieldSizes).Return(map[string]int64{"score": 0}, nil).Build()
+	patched, err = task.patchSegmentForMissingColumns(ctx, seg, fragments, []string{"score"})
+	s.ErrorContains(err, "non-positive average size")
+	s.Nil(patched)
+	mockSample.UnPatch()
+
+	zeroRowSegment := proto.Clone(seg).(*datapb.SegmentInfo)
+	zeroRowSegment.NumOfRows = 0
+	mockSample = mockey.Mock(packed.SampleExternalFieldSizes).Return(map[string]int64{"score": 8}, nil).Build()
+	patched, err = task.patchSegmentForMissingColumns(ctx, zeroRowSegment, fragments, []string{"score"})
+	s.ErrorContains(err, "non-positive memory size")
+	s.Nil(patched)
+	mockSample.UnPatch()
+	mockAppend.UnPatch()
+}
+
 func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegmentsFunctionOutputColumnError() {
 	ctx := context.Background()
 	req := &datapb.RefreshExternalCollectionTaskRequest{
@@ -1394,16 +1487,19 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestWithFunctionsUses
 			segmentID int64,
 			basePath string,
 			clusterID string,
-		) (string, error) {
+			bm25StatsLogIDs map[int64]int64,
+		) (*FunctionExecutionResult, error) {
 			gotBasePath = basePath
 			gotStorageConfig = storageConfig
-			return "manifest-path", nil
+			s.Equal(map[int64]int64{101: 3002}, bm25StatsLogIDs)
+			return &FunctionExecutionResult{ManifestPath: "manifest-path"}, nil
 		}).Build()
 	defer mockExec.UnPatch()
 
-	manifestPath, err := task.createManifestWithFunctions(ctx, 3000, []packed.Fragment{{FragmentID: 1}})
+	result, err := task.createManifestWithFunctions(ctx, 3000, []packed.Fragment{{FragmentID: 1}}, map[int64]int64{101: 3002})
 	s.NoError(err)
-	s.Equal("manifest-path", manifestPath)
+	s.Require().NotNil(result)
+	s.Equal("manifest-path", result.ManifestPath)
 	s.Equal("files/insert_log/1000/2000/3000", gotBasePath)
 	s.Same(req.GetStorageConfig(), gotStorageConfig)
 }
@@ -1441,7 +1537,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentUsesP
 		}).Build()
 	defer mockCreate.UnPatch()
 
-	manifestPath, err := ExecuteFunctionsForSegment(
+	result, err := ExecuteFunctionsForSegment(
 		ctx,
 		schema,
 		fragments,
@@ -1451,10 +1547,11 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentUsesP
 		3000,
 		"files/insert_log/1000/2000/3000",
 		"cluster",
+		map[int64]int64{101: 3002},
 	)
 	s.Error(err)
 	s.Contains(err.Error(), "create input manifest")
-	s.Empty(manifestPath)
+	s.Nil(result)
 	s.Equal("files/insert_log/1000/2000/3000", gotBasePath)
 	s.Equal([]string{"text_col"}, gotColumns)
 	s.Equal(fragments, gotFragments)
@@ -1482,7 +1579,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentRequi
 		}).Build()
 	defer mockCreate.UnPatch()
 
-	manifestPath, err := ExecuteFunctionsForSegment(
+	result, err := ExecuteFunctionsForSegment(
 		ctx,
 		schema,
 		[]packed.Fragment{{FragmentID: 1}},
@@ -1492,10 +1589,11 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentRequi
 		3000,
 		"files/insert_log/1000/2000/3000",
 		"cluster",
+		nil,
 	)
 	s.Error(err)
 	s.Contains(err.Error(), "no function output fields")
-	s.Empty(manifestPath)
+	s.Nil(result)
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestFunctionExecutorSchemaHelpers() {
@@ -1603,6 +1701,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestFinalizeBM25Stats() {
 
 	stats := storage.NewBM25Stats()
 	stats.Append(map[uint32]float32{1: 2})
+	basePath := "files/insert_log/1000/2000/3000"
 	var gotFilePath string
 	var gotEntries []packed.StatEntry
 	mockWrite := mockey.Mock(packed.WriteFile).
@@ -1612,6 +1711,23 @@ func (s *RefreshExternalCollectionTaskSuite) TestFinalizeBM25Stats() {
 			return nil
 		}).Build()
 	defer mockWrite.UnPatch()
+
+	updates := &packed.ManifestUpdates{}
+	bm25Statslogs, err := appendBM25Stats(ctx, map[int64]*storage.BM25Stats{101: stats}, storageConfig, basePath, updates, map[int64]int64{101: 3001})
+	s.NoError(err)
+	s.Equal("files/insert_log/1000/2000/3000/_stats/bm25.101/3001", gotFilePath)
+	s.Require().Len(updates.Stats, 1)
+	s.Equal("bm25.101", updates.Stats[0].Key)
+	s.Require().Len(updates.Stats[0].Files, 1)
+	s.Require().Len(bm25Statslogs, 1)
+	s.Equal(int64(101), bm25Statslogs[0].GetFieldID())
+	s.Require().Len(bm25Statslogs[0].GetBinlogs(), 1)
+	s.Empty(bm25Statslogs[0].GetBinlogs()[0].GetLogPath())
+	s.Equal(int64(3001), bm25Statslogs[0].GetBinlogs()[0].GetLogID())
+	s.Positive(bm25Statslogs[0].GetBinlogs()[0].GetLogSize())
+	s.Equal(bm25Statslogs[0].GetBinlogs()[0].GetLogSize(), bm25Statslogs[0].GetBinlogs()[0].GetMemorySize())
+	s.Equal(int64(1), bm25Statslogs[0].GetBinlogs()[0].GetEntriesNum())
+
 	mockCommit := mockey.Mock(packed.CommitManifestUpdates).
 		To(func(basePath string, version int64, storageConfig *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
 			s.Equal("files/insert_log/1000/2000/3000", basePath)
@@ -1624,7 +1740,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestFinalizeBM25Stats() {
 	gotManifest, err = finalizeBM25Stats(ctx, map[int64]*storage.BM25Stats{101: stats}, storageConfig, manifestPath)
 	s.NoError(err)
 	s.Equal("updated-manifest", gotManifest)
-	s.Equal("files/insert_log/1000/2000/3000/_stats/bm25.101/0", gotFilePath)
+	s.Equal("files/insert_log/1000/2000/3000/_stats/bm25.101/1", gotFilePath)
 	s.Require().Len(gotEntries, 1)
 	s.Equal("bm25.101", gotEntries[0].Key)
 }
@@ -1633,8 +1749,21 @@ func (s *RefreshExternalCollectionTaskSuite) TestFinalizeBM25StatsErrors() {
 	ctx := context.Background()
 	storageConfig := &indexpb.StorageConfig{RootPath: "files", StorageType: "local"}
 	manifestPath := packed.MarshalManifestPath("files/insert_log/1000/2000/3000", 42)
+	basePath := "files/insert_log/1000/2000/3000"
 	stats := storage.NewBM25Stats()
 	stats.Append(map[uint32]float32{1: 2})
+
+	bm25Statslogs, err := appendBM25Stats(ctx, nil, storageConfig, basePath, &packed.ManifestUpdates{}, nil)
+	s.NoError(err)
+	s.Nil(bm25Statslogs)
+
+	bm25Statslogs, err = appendBM25Stats(ctx, map[int64]*storage.BM25Stats{101: stats}, storageConfig, basePath, nil, map[int64]int64{101: 1})
+	s.ErrorContains(err, "manifest updates is nil")
+	s.Nil(bm25Statslogs)
+
+	bm25Statslogs, err = appendBM25Stats(ctx, map[int64]*storage.BM25Stats{101: stats}, storageConfig, basePath, &packed.ManifestUpdates{}, nil)
+	s.ErrorContains(err, "bm25 stats log id not allocated for field 101")
+	s.Nil(bm25Statslogs)
 
 	mockSerialize := mockey.Mock(mockey.GetMethod(stats, "Serialize")).Return(nil, fmt.Errorf("serialize failed")).Build()
 	gotManifest, err := finalizeBM25Stats(ctx, map[int64]*storage.BM25Stats{101: stats}, storageConfig, manifestPath)
@@ -1957,7 +2086,8 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentSucce
 	output := new(packed.ColumnGroups)
 	mockClose := mockey.Mock(mockey.GetMethod(writer, "Close")).Return(output, nil).Build()
 	defer mockClose.UnPatch()
-	mockAppend := mockey.Mock(appendBM25Stats).Return(nil).Build()
+	expectedBm25Statslogs := []*datapb.FieldBinlog{{FieldID: 101}}
+	mockAppend := mockey.Mock(appendBM25Stats).Return(expectedBm25Statslogs, nil).Build()
 	defer mockAppend.UnPatch()
 	mockCommit := mockey.Mock(packed.CommitManifestUpdates).
 		To(func(basePath string, version int64, storageConfig *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
@@ -1967,7 +2097,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentSucce
 		}).Build()
 	defer mockCommit.UnPatch()
 
-	manifestPath, err := ExecuteFunctionsForSegment(
+	result, err := ExecuteFunctionsForSegment(
 		ctx,
 		schema,
 		[]packed.Fragment{{FragmentID: 1}},
@@ -1977,9 +2107,12 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentSucce
 		3000,
 		basePath,
 		"cluster",
+		map[int64]int64{101: 3002},
 	)
 	s.NoError(err)
-	s.Equal("final-manifest", manifestPath)
+	s.Require().NotNil(result)
+	s.Equal("final-manifest", result.ManifestPath)
+	s.Equal(expectedBm25Statslogs, result.Bm25Statslogs)
 	s.Equal([]string{"text_col", "vec_col"}, sourceColumns)
 	s.Require().NotNil(gotInputSchema)
 	s.Require().Len(gotInputSchema.GetFields(), 1)
@@ -2003,9 +2136,9 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 	s.T().Run("parse input manifest", func(t *testing.T) {
 		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePath).Return("bad manifest", nil).Build()
 		defer mockCreate.UnPatch()
-		manifestPath, err := ExecuteFunctionsForSegment(ctx, schema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster")
+		result, err := ExecuteFunctionsForSegment(ctx, schema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster", map[int64]int64{101: 3002})
 		s.Error(err)
-		s.Empty(manifestPath)
+		s.Nil(result)
 	})
 
 	s.T().Run("output schema conversion", func(t *testing.T) {
@@ -2016,9 +2149,9 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 		}
 		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePath).Return(packed.MarshalManifestPath(basePath, 42), nil).Build()
 		defer mockCreate.UnPatch()
-		manifestPath, err := ExecuteFunctionsForSegment(ctx, badSchema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster")
+		result, err := ExecuteFunctionsForSegment(ctx, badSchema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster", nil)
 		s.Error(err)
-		s.Empty(manifestPath)
+		s.Nil(result)
 	})
 
 	s.T().Run("execution schema", func(t *testing.T) {
@@ -2034,9 +2167,9 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 		}
 		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePath).Return(packed.MarshalManifestPath(basePath, 42), nil).Build()
 		defer mockCreate.UnPatch()
-		manifestPath, err := ExecuteFunctionsForSegment(ctx, badSchema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster")
+		result, err := ExecuteFunctionsForSegment(ctx, badSchema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster", map[int64]int64{101: 3002})
 		s.Error(err)
-		s.Empty(manifestPath)
+		s.Nil(result)
 		s.Contains(err.Error(), "has no external_field")
 	})
 
@@ -2045,9 +2178,9 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 		defer mockCreate.UnPatch()
 		mockOpen := mockey.Mock(openInputReader).Return(nil, fmt.Errorf("open failed")).Build()
 		defer mockOpen.UnPatch()
-		manifestPath, err := ExecuteFunctionsForSegment(ctx, schema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster")
+		result, err := ExecuteFunctionsForSegment(ctx, schema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster", map[int64]int64{101: 3002})
 		s.Error(err)
-		s.Empty(manifestPath)
+		s.Nil(result)
 	})
 
 	s.T().Run("new writer", func(t *testing.T) {
@@ -2058,9 +2191,9 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 		defer mockOpen.UnPatch()
 		mockWriter := mockey.Mock(packed.NewFFIPackedWriter).Return(nil, fmt.Errorf("writer failed")).Build()
 		defer mockWriter.UnPatch()
-		manifestPath, err := ExecuteFunctionsForSegment(ctx, schema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster")
+		result, err := ExecuteFunctionsForSegment(ctx, schema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster", map[int64]int64{101: 3002})
 		s.Error(err)
-		s.Empty(manifestPath)
+		s.Nil(result)
 	})
 
 	s.T().Run("stream", func(t *testing.T) {
@@ -2074,9 +2207,9 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 		defer mockWriter.UnPatch()
 		mockStream := mockey.Mock(streamBatches).Return(int64(0), fmt.Errorf("stream failed")).Build()
 		defer mockStream.UnPatch()
-		manifestPath, err := ExecuteFunctionsForSegment(ctx, schema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster")
+		result, err := ExecuteFunctionsForSegment(ctx, schema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster", map[int64]int64{101: 3002})
 		s.Error(err)
-		s.Empty(manifestPath)
+		s.Nil(result)
 	})
 
 	s.T().Run("close writer", func(t *testing.T) {
@@ -2092,9 +2225,9 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 		defer mockStream.UnPatch()
 		mockClose := mockey.Mock(mockey.GetMethod(writer, "Close")).Return(nil, fmt.Errorf("close failed")).Build()
 		defer mockClose.UnPatch()
-		manifestPath, err := ExecuteFunctionsForSegment(ctx, schema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster")
+		result, err := ExecuteFunctionsForSegment(ctx, schema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster", map[int64]int64{101: 3002})
 		s.Error(err)
-		s.Empty(manifestPath)
+		s.Nil(result)
 	})
 
 	s.T().Run("finalize stats", func(t *testing.T) {
@@ -2110,11 +2243,11 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 		defer mockStream.UnPatch()
 		mockClose := mockey.Mock(mockey.GetMethod(writer, "Close")).Return(new(packed.ColumnGroups), nil).Build()
 		defer mockClose.UnPatch()
-		mockAppend := mockey.Mock(appendBM25Stats).Return(fmt.Errorf("finalize failed")).Build()
+		mockAppend := mockey.Mock(appendBM25Stats).Return(nil, fmt.Errorf("finalize failed")).Build()
 		defer mockAppend.UnPatch()
-		manifestPath, err := ExecuteFunctionsForSegment(ctx, schema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster")
+		result, err := ExecuteFunctionsForSegment(ctx, schema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster", map[int64]int64{101: 3002})
 		s.Error(err)
-		s.Empty(manifestPath)
+		s.Nil(result)
 	})
 }
 
@@ -2323,9 +2456,26 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegmentsWithF
 			segmentID int64,
 			basePath string,
 			clusterID string,
-		) (string, error) {
+			bm25StatsLogIDs map[int64]int64,
+		) (*FunctionExecutionResult, error) {
 			gotBasePath = basePath
-			return packed.MarshalManifestPath(basePath, 42), nil
+			s.Equal(map[int64]int64{101: 3002}, bm25StatsLogIDs)
+			return &FunctionExecutionResult{
+				ManifestPath: packed.MarshalManifestPath(basePath, 42),
+				Bm25Statslogs: []*datapb.FieldBinlog{
+					{
+						FieldID: 101,
+						Binlogs: []*datapb.Binlog{
+							{
+								LogID:      bm25StatsLogIDs[101],
+								LogSize:    128,
+								MemorySize: 128,
+								EntriesNum: 10,
+							},
+						},
+					},
+				},
+			}, nil
 		}).Build()
 	defer mockExec.UnPatch()
 	mockSample := mockey.Mock(packed.SampleExternalFieldSizes).
@@ -2338,6 +2488,11 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegmentsWithF
 	s.Equal("files/insert_log/1000/2000/3000", gotBasePath)
 	s.Equal(int64(3000), result[0].GetID())
 	s.NotZero(result[0].GetBinlogs()[0].GetBinlogs()[0].GetMemorySize())
+	s.Require().Len(result[0].GetBm25Statslogs(), 1)
+	s.Equal(int64(101), result[0].GetBm25Statslogs()[0].GetFieldID())
+	s.Require().Len(result[0].GetBm25Statslogs()[0].GetBinlogs(), 1)
+	s.Equal(int64(3002), result[0].GetBm25Statslogs()[0].GetBinlogs()[0].GetLogID())
+	s.Empty(result[0].GetBm25Statslogs()[0].GetBinlogs()[0].GetLogPath())
 }
 
 func (s *RefreshExternalCollectionTaskSuite) makeStringRecord(name string, values []string) arrow.Record {

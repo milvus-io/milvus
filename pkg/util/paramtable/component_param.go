@@ -3682,11 +3682,12 @@ type queryNodeConfig struct {
 	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
 
 	// output fields take
-	InternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
-	ExternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
-	ExternalCollectionSamplePerSegment ParamItem `refreshable:"true"`
-	ExternalCollectionSampleRows       ParamItem `refreshable:"true"`
-	ExternalCollectionRawDataFactor    ParamItem `refreshable:"true"`
+	InternalCollectionUseTakeForOutput               ParamItem `refreshable:"true"`
+	ExternalCollectionUseTakeForOutput               ParamItem `refreshable:"true"`
+	ExternalCollectionAllowUnmaterializedFieldAccess ParamItem `refreshable:"true"`
+	ExternalCollectionSamplePerSegment               ParamItem `refreshable:"true"`
+	ExternalCollectionSampleRows                     ParamItem `refreshable:"true"`
+	ExternalCollectionRawDataFactor                  ParamItem `refreshable:"true"`
 }
 
 func formatDurationWithMillisecondFallback(v string) string {
@@ -4987,6 +4988,15 @@ user-task-polling:
 		Export:       false,
 	}
 	p.ExternalCollectionUseTakeForOutput.Init(base.mgr)
+
+	p.ExternalCollectionAllowUnmaterializedFieldAccess = ParamItem{
+		Key:          "queryNode.externalCollection.allowUnmaterializedFieldAccess",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "When true, QueryNode skips the external materialization gate for search/query and lets unmaterialized external fields fall through to the storage path.",
+		Export:       true,
+	}
+	p.ExternalCollectionAllowUnmaterializedFieldAccess.Init(base.mgr)
 
 	p.ExternalCollectionSamplePerSegment = ParamItem{
 		Key:          "queryNode.externalCollection.samplePerSegment",
@@ -6487,7 +6497,7 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	p.ExternalCollectionPreAllocSegments = ParamItem{
 		Key:          "dataCoord.externalCollectionPreAllocSegments",
 		Version:      "2.6.8",
-		Doc:          "The number of IDs to pre-allocate for each external collection refresh task. Each segment consumes 2 IDs (1 for segment, 1 for fake binlog logID).",
+		Doc:          "The number of IDs to pre-allocate for each external collection refresh task. Each segment consumes 2 IDs plus one extra ID per BM25 function output statslog.",
 		DefaultValue: "10000",
 		PanicIfEmpty: false,
 	}

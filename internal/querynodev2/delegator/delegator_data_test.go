@@ -2387,6 +2387,51 @@ func TestDeleteBuffer_ListAfterUsesCommitTs(t *testing.T) {
 		"segmentEffectiveTs must return startPosition for normal segment")
 }
 
+func TestMaterializeBM25StatsLogsMarksExternalBM25OutputCovered(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "external_bm25",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			{
+				FieldID:       101,
+				Name:          "text",
+				DataType:      schemapb.DataType_VarChar,
+				ExternalField: "text",
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "256"},
+				},
+			},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+	}
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    10,
+		CollectionID: 1000,
+		PartitionID:  20,
+		ManifestPath: "manifest",
+	}
+
+	err := segments.ValidateExternalMaterializedFields(schema, []*querypb.SegmentLoadInfo{loadInfo}, []int64{102})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "external field sparse is not materialized")
+
+	materializeBM25StatsLogs(loadInfo, map[int64][]string{
+		101: {"stats/101/0"},
+		102: {"stats/102/0", "stats/102/0", "stats/102/1"},
+	})
+
+	assert.Len(t, loadInfo.GetBm25Logs(), 2)
+	assert.Equal(t, int64(101), loadInfo.GetBm25Logs()[0].GetFieldID())
+	assert.Equal(t, int64(102), loadInfo.GetBm25Logs()[1].GetFieldID())
+	assert.Equal(t, []string{"stats/102/0", "stats/102/1"}, []string{
+		loadInfo.GetBm25Logs()[1].GetBinlogs()[0].GetLogPath(),
+		loadInfo.GetBm25Logs()[1].GetBinlogs()[1].GetLogPath(),
+	})
+
+	err = segments.ValidateExternalMaterializedFields(schema, []*querypb.SegmentLoadInfo{loadInfo}, []int64{102})
+	assert.NoError(t, err)
+}
+
 func TestDeleteBuffer_CatchUpUsesCommitTs(t *testing.T) {
 	// Invariant I10: catchUpTs in loadStreamDelete must start at segmentEffectiveTs,
 	// not StartPosition.Timestamp. This ensures the catch-up phase doesn't

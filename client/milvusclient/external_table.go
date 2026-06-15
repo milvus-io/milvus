@@ -92,6 +92,16 @@ func (c *Client) ListRefreshExternalCollectionJobs(ctx context.Context, option L
 	return jobs, err
 }
 
+// AlterCollectionSchema alters a collection schema through the generic schema evolution API.
+func (c *Client) AlterCollectionSchema(ctx context.Context, option AlterCollectionSchemaOption, callOptions ...grpc.CallOption) error {
+	req := option.Request()
+
+	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.AlterCollectionSchema(ctx, req, callOptions...)
+		return merr.CheckRPCCall(resp.GetAlterStatus(), err)
+	})
+}
+
 // convertToEntityJobInfo converts a proto RefreshExternalCollectionJobInfo to entity.RefreshExternalCollectionJobInfo.
 func convertToEntityJobInfo(info *milvuspb.RefreshExternalCollectionJobInfo) *entity.RefreshExternalCollectionJobInfo {
 	if info == nil {

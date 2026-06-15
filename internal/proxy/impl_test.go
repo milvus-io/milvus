@@ -2812,28 +2812,88 @@ func TestProxy_AlterCollectionSchema(t *testing.T) {
 		})
 	})
 
-	t.Run("external collection rejected", func(t *testing.T) {
-		mockey.PatchConvey("external collection", t, func() {
-			node := createTestProxy()
-			defer node.sched.Close()
+	t.Run("external collection unloaded is enqueued", func(t *testing.T) {
+		node := createTestProxy()
+		defer node.sched.Close()
 
-			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(),
-				Schema: &schemapb.CollectionSchema{
-					Name: "ext_col",
-					Fields: []*schemapb.FieldSchema{
-						{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
-					},
+		describeMock := mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+			Status:       merr.Success(),
+			CollectionID: 19530,
+			Schema: &schemapb.CollectionSchema{
+				Name: "ext_col",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 				},
-			}, nil).Build()
+			},
+		}, nil).Build()
+		defer describeMock.UnPatch()
 
-			resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
-				CollectionName: "ext_col",
-			})
-			assert.NoError(t, err)
-			assert.Error(t, merr.Error(resp.GetAlterStatus()))
-			assert.Contains(t, resp.GetAlterStatus().GetReason(), "external collection")
+		enqueueMock := mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, taskArg task) error {
+			require.NoError(t, taskArg.OnEnqueue())
+			alterTask := taskArg.(*alterCollectionSchemaTask)
+			require.True(t, alterTask.isExternalCollection)
+			alterTask.AlterCollectionSchemaResponse = &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Success()}
+			return nil
+		}).Build()
+		defer enqueueMock.UnPatch()
+
+		waitMock := mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
+		defer waitMock.UnPatch()
+
+		resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+			CollectionName: "ext_col",
 		})
+		require.NoError(t, err)
+		require.True(t, merr.Ok(resp.GetAlterStatus()))
+	})
+
+	t.Run("loaded external collection alter is enqueued", func(t *testing.T) {
+		node := createTestProxy()
+		defer node.sched.Close()
+		node.mixCoord = NewMixCoordMock()
+
+		describeMock := mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+			Status:       merr.Success(),
+			CollectionID: 19531,
+			Schema: &schemapb.CollectionSchema{
+				Name: "ext_col",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+				},
+			},
+		}, nil).Build()
+		defer describeMock.UnPatch()
+
+		showLoadMock := mockey.Mock((*MixCoordMock).ShowLoadCollections).
+			To(func(context.Context, *querypb.ShowCollectionsRequest, ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error) {
+				require.FailNow(t, "AlterCollectionSchema must not reject or check loaded state for external collections")
+				return nil, nil
+			}).Build()
+		defer showLoadMock.UnPatch()
+
+		enqueueMock := mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, task task) error {
+			require.NoError(t, task.OnEnqueue())
+			alterTask := task.(*alterCollectionSchemaTask)
+			require.True(t, alterTask.isExternalCollection)
+			alterTask.AlterCollectionSchemaResponse = &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Success()}
+			return nil
+		}).Build()
+		defer enqueueMock.UnPatch()
+
+		waitMock := mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
+		defer waitMock.UnPatch()
+
+		resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+			DbName:         "default",
+			CollectionName: "ext_col",
+			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{},
+				},
+			},
+		})
+		require.NoError(t, err)
+		require.True(t, merr.Ok(resp.GetAlterStatus()))
 	})
 
 	t.Run("does not query schema version stats before enqueue", func(t *testing.T) {

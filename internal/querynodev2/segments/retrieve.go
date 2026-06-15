@@ -47,6 +47,14 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 	resultCh := make(chan RetrieveSegmentResult, len(segments))
 
 	plan.SetIgnoreNonPk(shouldEnableIgnoreNonPk(req, len(segments), plan.ShouldIgnoreNonPk()))
+	if err := validateExternalMaterializedFieldsForCollection(
+		mgr,
+		req.GetReq().GetCollectionID(),
+		segments,
+		RetrieveRequiredFieldIDs(req),
+	); err != nil {
+		return nil, err
+	}
 
 	label := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
@@ -113,11 +121,20 @@ func shouldEnableIgnoreNonPk(req *querypb.QueryRequest, segmentNum int, planShou
 	return !hasGroupBy && segmentNum > 1 && req.GetReq().GetLimit() != typeutil.Unlimited && planShouldIgnoreNonPk
 }
 
-func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, svr streamrpc.QueryStreamServer) error {
+func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, req *querypb.QueryRequest, svr streamrpc.QueryStreamServer) error {
 	var (
 		errs = make([]error, len(segments))
 		wg   sync.WaitGroup
 	)
+
+	if err := validateExternalMaterializedFieldsForCollection(
+		mgr,
+		req.GetReq().GetCollectionID(),
+		segments,
+		RetrieveRequiredFieldIDs(req),
+	); err != nil {
+		return err
+	}
 
 	label := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
@@ -219,6 +236,6 @@ func RetrieveStream(ctx context.Context, manager *Manager, plan *RetrievePlan, r
 		return retrieveSegments, err
 	}
 
-	err = retrieveOnSegmentsWithStream(ctx, manager, retrieveSegments, SegType, plan, srv)
+	err = retrieveOnSegmentsWithStream(ctx, manager, retrieveSegments, SegType, plan, req, srv)
 	return retrieveSegments, err
 }
