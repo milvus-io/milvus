@@ -351,7 +351,7 @@ using Factories =
     ::testing::Types<ChunkedColumnFactory, ProxyChunkColumnFactory>;
 TYPED_TEST_SUITE(ChunkedColumnInterfaceTest, Factories);
 
-TYPED_TEST(ChunkedColumnInterfaceTest, BuildValidRowIdsBuildsFullMapping) {
+TYPED_TEST(ChunkedColumnInterfaceTest, BuildValidRowIdsBuildsValidMetadata) {
     ColumnSpec spec{{5, 3, 4},
                     {{true, false, true, true, false},
                      {false, false, false},
@@ -371,19 +371,20 @@ TYPED_TEST(ChunkedColumnInterfaceTest, BuildValidRowIdsBuildsFullMapping) {
     EXPECT_EQ(fx.column->GetValidCountInChunk(1), 0);
     EXPECT_EQ(fx.column->GetValidCountInChunk(2), 4);
 
-    const auto& m = fx.column->GetOffsetMapping();
-    EXPECT_TRUE(m.IsEnabled());
-    EXPECT_EQ(m.GetTotalCount(), 12);
-    EXPECT_EQ(m.GetValidCount(), 7);
-    EXPECT_EQ(m.GetPhysicalOffset(0), 0);
-    EXPECT_EQ(m.GetPhysicalOffset(2), 1);
-    EXPECT_EQ(m.GetPhysicalOffset(3), 2);
-    EXPECT_EQ(m.GetPhysicalOffset(1), -1);
-    EXPECT_EQ(m.GetPhysicalOffset(4), -1);
-    EXPECT_EQ(m.GetPhysicalOffset(8), 3);
-    EXPECT_EQ(m.GetPhysicalOffset(9), 4);
-    EXPECT_EQ(m.GetPhysicalOffset(10), 5);
-    EXPECT_EQ(m.GetPhysicalOffset(11), 6);
+    const auto& valid_data = fx.column->GetValidData();
+    ASSERT_EQ(valid_data.size(), 12);
+    EXPECT_TRUE(valid_data[0]);
+    EXPECT_FALSE(valid_data[1]);
+    EXPECT_TRUE(valid_data[2]);
+    EXPECT_TRUE(valid_data[3]);
+    EXPECT_FALSE(valid_data[4]);
+    EXPECT_FALSE(valid_data[5]);
+    EXPECT_FALSE(valid_data[6]);
+    EXPECT_FALSE(valid_data[7]);
+    EXPECT_TRUE(valid_data[8]);
+    EXPECT_TRUE(valid_data[9]);
+    EXPECT_TRUE(valid_data[10]);
+    EXPECT_TRUE(valid_data[11]);
 }
 
 TYPED_TEST(ChunkedColumnInterfaceTest, BuildValidRowIdsNonNullableIsNoop) {
@@ -392,7 +393,6 @@ TYPED_TEST(ChunkedColumnInterfaceTest, BuildValidRowIdsNonNullableIsNoop) {
 
     fx.column->BuildValidRowIds(nullptr);
 
-    EXPECT_FALSE(fx.column->GetOffsetMapping().IsEnabled());
     EXPECT_EQ(fx.column->GetValidCountInChunk(0), 5);
     EXPECT_TRUE(fx.fetched->empty());
 }
@@ -412,7 +412,6 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
         nullptr, values.data(), offsets, kElementSize, std::size(offsets));
 
     EXPECT_EQ(values, (std::vector<int32_t>{0, 2, 3, 8, 11}));
-    EXPECT_FALSE(fx.column->GetOffsetMapping().IsEnabled());
     EXPECT_TRUE(fx.column->GetValidData().empty());
     EXPECT_EQ(fx.fetched->size(), 2u);
     EXPECT_EQ(fx.fetched->count(0), 1u);
@@ -441,7 +440,6 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
         std::size(offsets));
 
     EXPECT_EQ(values, (std::vector<int32_t>{0, 2, 3, 8, 11}));
-    EXPECT_FALSE(fx.column->GetOffsetMapping().IsEnabled());
     EXPECT_TRUE(fx.column->GetValidData().empty());
 }
 
@@ -455,7 +453,6 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
     EXPECT_THROW(fx.column->BulkVectorValueAt(
                      nullptr, &value, null_offset, kElementSize, 1),
                  std::exception);
-    EXPECT_FALSE(fx.column->GetOffsetMapping().IsEnabled());
 }
 
 template <typename Factory>

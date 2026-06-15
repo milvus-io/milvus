@@ -1000,13 +1000,10 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
             }
         }
 
-        // For nullable vector fields, FillTargetEntry compacts the vector
-        // buffer via FilterVectorValidOffsets (null rows dropped), while the
-        // valid_data bitmap keeps its logical length. MergeDataArray reads
-        // vectors at physical_offset = getValidDataOffset(), which falls back
-        // to the logical offset unless we set it. Compute the per-row physical
-        // offset = count of valid rows preceding this one, mirroring the
-        // logic in master's reduce/Reduce.cpp.
+        // For nullable vector output fields, FillTargetEntry stores only valid
+        // vectors in a compact buffer while valid_data still has one entry per
+        // requested result row. Tell MergeDataArray which compact vector entry
+        // corresponds to each result row.
         for (auto& [seg_idx, seg_res] : seg_results) {
             for (auto field_id : plan->target_entries_) {
                 auto& field_meta = plan->schema_->operator[](field_id);

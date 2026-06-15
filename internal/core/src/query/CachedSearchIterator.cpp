@@ -86,9 +86,11 @@ CachedSearchIterator::InitializeChunkedIterators(
     int64_t offset = 0;
     chunked_heaps_.resize(nq_);
     for (int64_t chunk_id = 0; chunk_id < num_chunks_; ++chunk_id) {
-        auto [chunk_data, chunk_size] = get_chunk_data(chunk_id);
-        auto sub_data = query::dataset::RawDataset{
-            offset, query_ds.dim, chunk_size, chunk_data};
+        auto sub_data = get_chunk_data(chunk_id);
+        if (sub_data.internal_to_external_ids.empty() &&
+            sub_data.external_count == 0) {
+            sub_data.begin_id = offset;
+        }
 
         auto expected_iterators = GetBruteForceSearchIterators(
             query_ds, sub_data, search_info, index_info, bitset, data_type);
@@ -101,7 +103,7 @@ CachedSearchIterator::InitializeChunkedIterators(
             ThrowInfo(ErrorCode::UnexpectedError,
                       "Failed to create iterators from index");
         }
-        offset += chunk_size;
+        offset += sub_data.num_raw_data;
     }
 }
 
@@ -110,6 +112,7 @@ CachedSearchIterator::CachedSearchIterator(
     const dataset::SearchDataset& query_ds,
     const segcore::VectorBase* vec_data,
     const int64_t row_count,
+    const int64_t logical_row_count,
     const SearchInfo& search_info,
     const std::map<std::string, std::string>& index_info,
     const BitsetView& bitset,
@@ -125,7 +128,19 @@ CachedSearchIterator::CachedSearchIterator(
     }
 
     const int64_t vec_size_per_chunk = vec_data->get_size_per_chunk();
-    num_chunks_ = upper_div(row_count, vec_size_per_chunk);
+    const auto valid_data = vec_data->get_valid_data();
+    std::vector<int32_t> valid_external_ids;
+    if (!valid_data.empty()) {
+        valid_external_ids.reserve(logical_row_count);
+        for (int64_t i = 0; i < logical_row_count; ++i) {
+            if (valid_data[i]) {
+                valid_external_ids.push_back(static_cast<int32_t>(i));
+            }
+        }
+    }
+    const int64_t storage_row_count =
+        valid_external_ids.empty() ? row_count : valid_external_ids.size();
+    num_chunks_ = upper_div(storage_row_count, vec_size_per_chunk);
     nq_ = query_ds.num_queries;
     Init(search_info);
 
@@ -147,14 +162,34 @@ CachedSearchIterator::CachedSearchIterator(
         index_info,
         bitset,
         data_type,
-        [this, &vec_data, vec_size_per_chunk, row_count, is_element_level](
-            int64_t chunk_id) {
+        [this,
+         &vec_data,
+         vec_size_per_chunk,
+         storage_row_count,
+         logical_row_count,
+         is_element_level,
+         valid_external_ids = std::move(valid_external_ids),
+         dim = query_ds.dim](int64_t chunk_id) {
             const void* chunk_data = vec_data->get_chunk_data(chunk_id);
             // no need to store a PinWrapper for growing, because vec_data is guaranteed to not be evicted.
-            int64_t chunk_size = std::min(
-                vec_size_per_chunk, row_count - chunk_id * vec_size_per_chunk);
+            const int64_t row_begin = chunk_id * vec_size_per_chunk;
+            int64_t chunk_size =
+                std::min(vec_size_per_chunk, storage_row_count - row_begin);
             if (!is_element_level) {
-                return std::make_pair(chunk_data, chunk_size);
+                std::vector<int32_t> internal_to_external_ids;
+                if (!valid_external_ids.empty()) {
+                    internal_to_external_ids.assign(
+                        valid_external_ids.begin() + row_begin,
+                        valid_external_ids.begin() + row_begin + chunk_size);
+                }
+                return query::dataset::RawDataset{
+                    valid_external_ids.empty() ? row_begin : 0,
+                    dim,
+                    chunk_size,
+                    chunk_data,
+                    nullptr,
+                    valid_external_ids.empty() ? 0 : logical_row_count,
+                    std::move(internal_to_external_ids)};
             }
 
             auto va_ptr = reinterpret_cast<const VectorArray*>(chunk_data);
@@ -173,7 +208,8 @@ CachedSearchIterator::CachedSearchIterator(
             }
             const void* flat_data = buf.get();
             chunk_buffers_.emplace_back(std::move(buf));
-            return std::make_pair(flat_data, total_elements);
+            return query::dataset::RawDataset{
+                0, dim, total_elements, flat_data};
         });
 }
 
@@ -203,15 +239,26 @@ CachedSearchIterator::CachedSearchIterator(
         index_info,
         bitset,
         data_type,
-        [this, column, &search_info](int64_t chunk_id) {
+        [this, column, &search_info, dim = query_ds.dim](int64_t chunk_id) {
             auto pw = column->DataOfChunk(nullptr, chunk_id)
                           .transform<const void*>([](const auto& x) {
                               return static_cast<const void*>(x);
                           });
-            int64_t chunk_size = column->chunk_row_nums(chunk_id);
-            const auto& offset_mapping = column->GetOffsetMapping();
-            if (offset_mapping.IsEnabled()) {
+            const auto chunk_begin = column->GetNumRowsUntilChunk(chunk_id);
+            const auto logical_chunk_size = column->chunk_row_nums(chunk_id);
+            int64_t chunk_size = logical_chunk_size;
+            std::vector<int32_t> internal_to_external_ids;
+            if (column->IsNullable() && search_info.array_offsets_ == nullptr) {
                 chunk_size = column->GetValidCountInChunk(chunk_id);
+                internal_to_external_ids.reserve(chunk_size);
+                const auto& valid_data = column->GetValidData();
+                for (int64_t j = 0; j < logical_chunk_size; ++j) {
+                    const auto row_id = chunk_begin + j;
+                    if (valid_data[row_id]) {
+                        internal_to_external_ids.push_back(
+                            static_cast<int32_t>(row_id));
+                    }
+                }
             }
             // For element-level search on vector array field, chunk_size
             // must be the element count in this chunk, not the row count.
@@ -223,7 +270,18 @@ CachedSearchIterator::CachedSearchIterator(
             // pw guarantees chunk_data is kept alive.
             auto chunk_data = pw.get();
             pin_wrappers_.emplace_back(std::move(pw));
-            return std::make_pair(chunk_data, chunk_size);
+            return query::dataset::RawDataset{
+                column->IsNullable() && search_info.array_offsets_ == nullptr
+                    ? 0
+                    : chunk_begin,
+                dim,
+                chunk_size,
+                chunk_data,
+                nullptr,
+                column->IsNullable() && search_info.array_offsets_ == nullptr
+                    ? static_cast<int64_t>(column->NumRows())
+                    : 0,
+                std::move(internal_to_external_ids)};
         });
 }
 

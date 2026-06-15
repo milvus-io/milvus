@@ -59,6 +59,7 @@ class CachedSearchIterator {
     CachedSearchIterator(const dataset::SearchDataset& dataset,
                          const segcore::VectorBase* vec_data,
                          const int64_t row_count,
+                         const int64_t logical_row_count,
                          const SearchInfo& search_info,
                          const std::map<std::string, std::string>& index_info,
                          const BitsetView& bitset,
@@ -89,8 +90,7 @@ class CachedSearchIterator {
     using DisIdPair = std::pair<float, int64_t>;
     using IterIdx = size_t;
     using IterIdDisIdPair = std::pair<IterIdx, DisIdPair>;
-    using GetChunkDataFunc =
-        std::function<std::pair<const void*, int64_t>(int64_t)>;
+    using GetChunkDataFunc = std::function<dataset::RawDataset(int64_t)>;
 
     // used only for sealed segment with chunked data
     std::vector<milvus::cachinglayer::PinWrapper<const void*>> pin_wrappers_;

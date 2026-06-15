@@ -152,67 +152,70 @@ class FieldData<VectorArray> : public FieldDataVectorArrayImpl {
 template <typename Type, bool is_type_entire_row = false>
 class FieldDataVectorImpl : public FieldDataImpl<Type, is_type_entire_row> {
  private:
-    struct LogicalToPhysicalMapping {
-        bool mapping{false};
-        std::unordered_map<int64_t, int64_t> l2p_map;
-        std::vector<int64_t> l2p_vec;
+    struct NullableRowStorageLayout {
+        bool compact{false};
+        std::unordered_map<int64_t, int64_t> segment_to_compact_map;
+        std::vector<int64_t> segment_to_compact_offsets;
 
         int64_t
-        get_physical_offset(int64_t logical_offset) const {
-            if (!mapping) {
-                return logical_offset;
+        get_compact_offset(int64_t segment_offset) const {
+            if (!compact) {
+                return segment_offset;
             }
-            if (!l2p_map.empty()) {
-                auto it = l2p_map.find(logical_offset);
-                if (it != l2p_map.end()) {
+            if (!segment_to_compact_map.empty()) {
+                auto it = segment_to_compact_map.find(segment_offset);
+                if (it != segment_to_compact_map.end()) {
                     return it->second;
                 }
                 return -1;
             }
-            if (logical_offset < static_cast<int64_t>(l2p_vec.size())) {
-                return l2p_vec[logical_offset];
+            if (segment_offset <
+                static_cast<int64_t>(segment_to_compact_offsets.size())) {
+                return segment_to_compact_offsets[segment_offset];
             }
             return -1;
         }
 
         void
         build(const uint8_t* valid_data,
-              int64_t start_physical,
-              int64_t start_logical,
+              int64_t start_compact,
+              int64_t start_segment,
               int64_t total_count,
               int64_t valid_count) {
             if (total_count == 0) {
                 return;
             }
 
-            mapping = true;
+            compact = true;
 
             // use map when valid ratio < 10%
             bool use_map = (valid_count * 10 < total_count);
 
             if (use_map) {
-                int64_t physical_idx = start_physical;
+                int64_t compact_offset = start_compact;
                 for (int64_t i = 0; i < total_count; ++i) {
-                    int64_t bit_pos = start_logical + i;
+                    int64_t bit_pos = start_segment + i;
                     if (valid_data == nullptr ||
                         ((valid_data[bit_pos >> 3] >> (bit_pos & 0x07)) & 1)) {
-                        l2p_map[start_logical + i] = physical_idx++;
+                        segment_to_compact_map[start_segment + i] =
+                            compact_offset++;
                     }
                 }
             } else {
-                // resize l2p_vec if needed
-                int64_t required_size = start_logical + total_count;
-                if (static_cast<int64_t>(l2p_vec.size()) < required_size) {
-                    l2p_vec.resize(required_size, -1);
+                int64_t required_size = start_segment + total_count;
+                if (static_cast<int64_t>(segment_to_compact_offsets.size()) <
+                    required_size) {
+                    segment_to_compact_offsets.resize(required_size, -1);
                 }
-                int64_t physical_idx = start_physical;
+                int64_t compact_offset = start_compact;
                 for (int64_t i = 0; i < total_count; ++i) {
-                    int64_t bit_pos = start_logical + i;
+                    int64_t bit_pos = start_segment + i;
                     if (valid_data == nullptr ||
                         ((valid_data[bit_pos >> 3] >> (bit_pos & 0x07)) & 1)) {
-                        l2p_vec[start_logical + i] = physical_idx++;
+                        segment_to_compact_offsets[start_segment + i] =
+                            compact_offset++;
                     } else {
-                        l2p_vec[start_logical + i] = -1;
+                        segment_to_compact_offsets[start_segment + i] = -1;
                     }
                 }
             }
@@ -232,7 +235,7 @@ class FieldDataVectorImpl : public FieldDataImpl<Type, is_type_entire_row> {
         }
     }
 
-    LogicalToPhysicalMapping l2p_mapping_;
+    NullableRowStorageLayout nullable_row_storage_;
 
  public:
     using FieldDataImpl<Type, is_type_entire_row>::FieldDataImpl;
@@ -246,11 +249,11 @@ class FieldDataVectorImpl : public FieldDataImpl<Type, is_type_entire_row> {
 
     const void*
     RawValue(ssize_t offset) const override {
-        auto physical_offset = l2p_mapping_.get_physical_offset(offset);
-        if (physical_offset == -1) {
+        auto compact_offset = nullable_row_storage_.get_compact_offset(offset);
+        if (compact_offset == -1) {
             return nullptr;
         }
-        return &this->data_[physical_offset * this->dim_];
+        return &this->data_[compact_offset * this->dim_];
     }
 
     int64_t

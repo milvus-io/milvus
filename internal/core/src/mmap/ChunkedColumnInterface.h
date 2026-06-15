@@ -20,7 +20,6 @@
 
 #include "cachinglayer/CacheSlot.h"
 #include "common/Chunk.h"
-#include "common/OffsetMapping.h"
 #include "common/bson_view.h"
 namespace milvus {
 
@@ -159,7 +158,7 @@ class ChunkedColumnInterface {
             return chunk_row_nums(chunk_id);
         }
         AssertInfo(!valid_count_per_chunk_.empty(),
-                   "Valid row mapping is not built for nullable column");
+                   "Valid row metadata is not built for nullable column");
         AssertInfo(
             chunk_id >= 0 &&
                 chunk_id < static_cast<int64_t>(valid_count_per_chunk_.size()),
@@ -167,11 +166,6 @@ class ChunkedColumnInterface {
             chunk_id,
             valid_count_per_chunk_.size());
         return valid_count_per_chunk_[chunk_id];
-    }
-
-    const OffsetMapping&
-    GetOffsetMapping() const {
-        return offset_mapping_;
     }
 
     virtual void
@@ -182,7 +176,7 @@ class ChunkedColumnInterface {
         if (valid_row_ids_built_.load(std::memory_order_acquire)) {
             return;
         }
-        std::lock_guard<std::mutex> lock(offset_mapping_build_mutex_);
+        std::lock_guard<std::mutex> lock(valid_row_ids_build_mutex_);
         if (valid_row_ids_built_.load(std::memory_order_relaxed)) {
             return;
         }
@@ -214,16 +208,7 @@ class ChunkedColumnInterface {
             num_valid_rows_until_chunk_.push_back(
                 num_valid_rows_until_chunk_.back() + valid_count_per_chunk_[i]);
         }
-        BuildOffsetMapping();
         valid_row_ids_built_.store(true, std::memory_order_release);
-    }
-
-    // Build offset mapping from valid_data
-    void
-    BuildOffsetMapping() {
-        if (!valid_data_.empty()) {
-            offset_mapping_.Build(valid_data_.data(), valid_data_.size());
-        }
     }
 
     virtual void
@@ -336,9 +321,8 @@ class ChunkedColumnInterface {
     FixedVector<bool> valid_data_;
     std::vector<int64_t> valid_count_per_chunk_;
     std::vector<int64_t> num_valid_rows_until_chunk_;
-    SealedOffsetMapping offset_mapping_;
     std::atomic<bool> valid_row_ids_built_{false};
-    std::mutex offset_mapping_build_mutex_;
+    std::mutex valid_row_ids_build_mutex_;
 
     std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
     ToChunkIdAndOffset(const int64_t* offsets, int64_t count) const {

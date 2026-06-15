@@ -16,26 +16,21 @@
 
 #pragma once
 
-#include <algorithm>
 #include <cstddef>
-#include "common/FastMem.h"
 #include <cstdint>
-#include <cstring>
 #include <limits>
-#include <memory>
 #include <string>
 #include <vector>
 
 #include "common/EasyAssert.h"
-#include "common/OffsetMapping.h"
-#include "index/VectorIndex.h"
+#include "knowhere/dataset.h"
 
 namespace milvus::index {
 
-inline bool
-IsValidDataBinary(const std::string& name) {
-    return name == VALID_DATA_COUNT_KEY || name == VALID_DATA_KEY;
-}
+// Local staging file name used while building disk vector indexes from compact
+// raw data. It is not a Milvus index sidecar.
+constexpr const char* NULLABLE_VECTOR_VALID_DATA_FILE = "valid_data";
+constexpr const char* DISK_INDEX_EXTERNAL_ID_MAP_FILE = "_id_map";
 
 inline std::string
 GetIndexFileName(const std::string& file) {
@@ -46,54 +41,19 @@ GetIndexFileName(const std::string& file) {
     return file.substr(pos + 1);
 }
 
-inline bool
-IsValidDataDiskFileSlice(const std::string& file) {
-    const auto file_name = GetIndexFileName(file);
-    const std::string prefix = std::string(VALID_DATA_KEY) + "_";
-    if (file_name.size() <= prefix.size() ||
-        file_name.compare(0, prefix.size(), prefix) != 0) {
-        return false;
-    }
-    return std::all_of(file_name.begin() + prefix.size(),
-                       file_name.end(),
-                       [](char c) { return c >= '0' && c <= '9'; });
-}
-
-inline std::vector<std::string>
-FilterValidDataDiskFileSlices(const std::vector<std::string>& files) {
-    std::vector<std::string> valid_data_files;
-    for (const auto& file : files) {
-        if (IsValidDataDiskFileSlice(file)) {
-            valid_data_files.emplace_back(file);
-        }
-    }
-    return valid_data_files;
-}
-
 inline std::vector<std::string>
 GetCacheFilesForDiskIndexLoad(const std::vector<std::string>& index_files,
                               bool load_index_with_stream) {
-    return load_index_with_stream ? FilterValidDataDiskFileSlices(index_files)
-                                  : index_files;
-}
-
-inline bool
-ContainsOnlyValidData(const BinarySet& binary_set) {
-    if (!binary_set.Contains(VALID_DATA_COUNT_KEY) ||
-        !binary_set.Contains(VALID_DATA_KEY)) {
-        return false;
-    }
-    for (const auto& [name, _] : binary_set.binary_map_) {
-        if (!IsValidDataBinary(name)) {
-            return false;
+    (void)load_index_with_stream;
+    std::vector<std::string> cache_files;
+    cache_files.reserve(index_files.size());
+    for (const auto& file : index_files) {
+        if (GetIndexFileName(file) == DISK_INDEX_EXTERNAL_ID_MAP_FILE) {
+            continue;
         }
+        cache_files.emplace_back(file);
     }
-    return true;
-}
-
-inline bool
-IsAllNullNullable(const OffsetMapping& offset_mapping) {
-    return offset_mapping.IsEnabled() && offset_mapping.GetValidCount() == 0;
+    return cache_files;
 }
 
 inline size_t
@@ -113,11 +73,33 @@ FromValidDataCount(uint64_t count) {
     return static_cast<size_t>(count);
 }
 
+inline bool
+IsValidInBitmap(const uint8_t* bitmap, size_t offset) {
+    return (bitmap[offset / 8] >> (offset % 8)) & 1;
+}
+
 inline size_t
 CountValidDataBitmap(size_t count, const uint8_t* bitmap) {
+    if (bitmap == nullptr) {
+        return count;
+    }
     size_t valid_count = 0;
     for (size_t i = 0; i < count; ++i) {
-        if ((bitmap[i / 8] >> (i % 8)) & 1) {
+        if (IsValidInBitmap(bitmap, i)) {
+            ++valid_count;
+        }
+    }
+    return valid_count;
+}
+
+inline size_t
+CountValidData(const bool* valid_data, size_t count) {
+    if (valid_data == nullptr) {
+        return count;
+    }
+    size_t valid_count = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (valid_data[i]) {
             ++valid_count;
         }
     }
@@ -125,75 +107,42 @@ CountValidDataBitmap(size_t count, const uint8_t* bitmap) {
 }
 
 inline std::vector<uint8_t>
-PackValidDataBitmap(const OffsetMapping& offset_mapping) {
-    auto count = static_cast<size_t>(offset_mapping.GetTotalCount());
-    std::vector<uint8_t> data(GetValidDataBitmapSize(count), 0);
+PackValidDataBitmap(const bool* valid_data, size_t count) {
+    std::vector<uint8_t> bitmap(GetValidDataBitmapSize(count), 0);
+    if (valid_data == nullptr) {
+        for (size_t i = 0; i < count; ++i) {
+            bitmap[i / 8] |= static_cast<uint8_t>(1U << (i % 8));
+        }
+        return bitmap;
+    }
     for (size_t i = 0; i < count; ++i) {
-        if (offset_mapping.IsValid(i)) {
-            data[i / 8] |= (1 << (i % 8));
+        if (valid_data[i]) {
+            bitmap[i / 8] |= static_cast<uint8_t>(1U << (i % 8));
         }
     }
-    return data;
+    return bitmap;
 }
 
 inline void
-BuildValidDataFromBitmap(VectorIndex* vector_index,
-                         size_t count,
-                         const uint8_t* bitmap) {
-    std::unique_ptr<bool[]> valid_data(new bool[count]);
-    for (size_t i = 0; i < count; ++i) {
-        valid_data[i] = (bitmap[i / 8] >> (i % 8)) & 1;
-    }
-    vector_index->BuildValidData(valid_data.get(), count);
-}
-
-inline void
-AppendValidDataToBinarySet(const OffsetMapping& offset_mapping,
-                           BinarySet& binary_set) {
-    if (!offset_mapping.IsEnabled()) {
+SetDatasetValidBitmap(const knowhere::DataSetPtr& dataset,
+                      const uint8_t* valid_bitmap,
+                      int64_t total_count) {
+    if (dataset == nullptr || valid_bitmap == nullptr || total_count <= 0) {
         return;
     }
-
-    auto count = static_cast<size_t>(offset_mapping.GetTotalCount());
-    auto wire_count = ToValidDataCount(count);
-    std::shared_ptr<uint8_t[]> count_buf(new uint8_t[sizeof(uint64_t)]);
-    milvus::fastmem::FastMemcpy(count_buf.get(), &wire_count, sizeof(uint64_t));
-    binary_set.Append(VALID_DATA_COUNT_KEY, count_buf, sizeof(uint64_t));
-
-    auto packed_data = PackValidDataBitmap(offset_mapping);
-    std::shared_ptr<uint8_t[]> data(new uint8_t[packed_data.size()]);
-    if (!packed_data.empty()) {
-        milvus::fastmem::FastMemcpy(
-            data.get(), packed_data.data(), packed_data.size());
-    }
-    binary_set.Append(VALID_DATA_KEY, data, packed_data.size());
+    dataset->SetValidBitmap(valid_bitmap, total_count);
 }
 
-inline bool
-LoadValidDataFromBinarySet(const BinarySet& binary_set,
-                           VectorIndex* vector_index) {
-    bool has_count = binary_set.Contains(VALID_DATA_COUNT_KEY);
-    bool has_data = binary_set.Contains(VALID_DATA_KEY);
-    if (!has_count && !has_data) {
-        return false;
+inline void
+SetDatasetValidBitmap(const knowhere::DataSetPtr& dataset,
+                      const bool* valid_data,
+                      int64_t total_count) {
+    if (dataset == nullptr || valid_data == nullptr || total_count <= 0) {
+        return;
     }
-    AssertInfo(has_count && has_data,
-               "nullable vector index valid_data files are incomplete");
-
-    auto count_ptr = binary_set.GetByName(VALID_DATA_COUNT_KEY);
-    AssertInfo(count_ptr != nullptr && count_ptr->size == sizeof(uint64_t),
-               "nullable vector index valid_data count file is invalid");
-    uint64_t wire_count = 0;
-    milvus::fastmem::FastMemcpy(
-        &wire_count, count_ptr->data.get(), sizeof(uint64_t));
-    auto count = FromValidDataCount(wire_count);
-
-    auto data_ptr = binary_set.GetByName(VALID_DATA_KEY);
-    AssertInfo(
-        data_ptr != nullptr && data_ptr->size >= GetValidDataBitmapSize(count),
-        "nullable vector index valid_data bitmap file is invalid");
-    BuildValidDataFromBitmap(vector_index, count, data_ptr->data.get());
-    return true;
+    auto bitmap =
+        PackValidDataBitmap(valid_data, static_cast<size_t>(total_count));
+    dataset->SetValidBitmap(bitmap.data(), total_count);
 }
 
 }  // namespace milvus::index

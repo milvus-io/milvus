@@ -289,7 +289,7 @@ KmeansClustering::StreamingAssignandUpload(
             data.get(),
             byte_size,
             GetRemoteCentroidIdMappingObjectPrefix(segment_id) + "/" +
-                std::string(OFFSET_MAPPING_NAME),
+                std::string(CLUSTER_ID_MAPPING_NAME),
             remote_paths_to_size);
         LOG_INFO(
             msg_header_ +

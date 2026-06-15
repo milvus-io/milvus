@@ -1272,7 +1272,7 @@ class InsertRecordSealed {
     }
 
     // Replace the pk2offset_ with a VirtualPKOffsetMap for external tables.
-    // This avoids materializing the pk→offset mapping (saves ~17 GB for 1B rows).
+    // This avoids materializing the pk-to-offset table (saves ~17 GB for 1B rows).
     void
     set_virtual_pk_offset_map(int64_t segment_id, int64_t num_rows) {
         std::lock_guard lck(shared_mutex_);
@@ -1766,15 +1766,16 @@ class InsertRecordGrowing {
                 int64_t size_per_chunk,
                 const storage::MmapChunkDescriptorPtr mmap_descriptor) {
         static_assert(std::is_base_of_v<VectorTrait, VectorType>);
-        bool use_mapping_storage = is_valid_data_exist(field_id);
+        bool use_compact_nullable_storage = is_valid_data_exist(field_id);
         data_.emplace(
             field_id,
             std::make_unique<ConcurrentVector<VectorType>>(
                 dim,
                 size_per_chunk,
                 mmap_descriptor,
-                use_mapping_storage ? get_valid_data(field_id) : nullptr,
-                use_mapping_storage));
+                use_compact_nullable_storage ? get_valid_data(field_id)
+                                             : nullptr,
+                use_compact_nullable_storage));
     }
 
     // append a column of scalar or sparse float vector type
@@ -1784,22 +1785,24 @@ class InsertRecordGrowing {
                 int64_t size_per_chunk,
                 const storage::MmapChunkDescriptorPtr mmap_descriptor) {
         static_assert(IsScalar<Type> || IsSparse<Type>);
-        bool use_mapping_storage = is_valid_data_exist(field_id);
+        bool use_compact_nullable_storage = is_valid_data_exist(field_id);
         if constexpr (IsSparse<Type>) {
             data_.emplace(
                 field_id,
                 std::make_unique<ConcurrentVector<Type>>(
                     size_per_chunk,
                     mmap_descriptor,
-                    use_mapping_storage ? get_valid_data(field_id) : nullptr,
-                    use_mapping_storage));
+                    use_compact_nullable_storage ? get_valid_data(field_id)
+                                                 : nullptr,
+                    use_compact_nullable_storage));
         } else {
             data_.emplace(
                 field_id,
                 std::make_unique<ConcurrentVector<Type>>(
                     size_per_chunk,
                     mmap_descriptor,
-                    use_mapping_storage ? get_valid_data(field_id) : nullptr));
+                    use_compact_nullable_storage ? get_valid_data(field_id)
+                                                 : nullptr));
         }
     }
 

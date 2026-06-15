@@ -30,7 +30,6 @@
 #include "common/BitsetView.h"
 #include "common/FieldMeta.h"
 #include "common/ArrayOffsets.h"
-#include "common/OffsetMapping.h"
 #include "common/Types.h"
 #include "pb/schema.pb.h"
 #include "knowhere/index/index_node.h"
@@ -158,13 +157,8 @@ class VectorIterator {
 // returning results in distance-sorted order.
 class ChunkMergeIterator : public VectorIterator {
  public:
-    // Pass nullptr for VECTOR_ARRAY element-level search: the iterator
-    // returns element IDs, which will be processed by IArrayOffsets.
-    ChunkMergeIterator(int chunk_count,
-                       const milvus::OffsetMapping* offset_mapping,
-                       bool larger_is_closer = false)
-        : offset_mapping_(offset_mapping),
-          heap_(OffsetDisPairComparator(larger_is_closer)) {
+    ChunkMergeIterator(int chunk_count, bool larger_is_closer = false)
+        : heap_(OffsetDisPairComparator(larger_is_closer)) {
         iterators_.reserve(chunk_count);
     }
 
@@ -185,9 +179,6 @@ class ChunkMergeIterator : public VectorIterator {
                 heap_.push(off_dis_pair);
             }
             auto result = top->GetOffDis();
-            if (offset_mapping_ != nullptr) {
-                result.first = offset_mapping_->GetLogicalOffset(result.first);
-            }
             return result;
         }
         return std::nullopt;
@@ -223,7 +214,6 @@ class ChunkMergeIterator : public VectorIterator {
                         OffsetDisPairComparator>
         heap_;
     bool sealed = false;
-    const milvus::OffsetMapping* offset_mapping_ = nullptr;
     //currently, ChunkMergeIterator is guaranteed to be used serially without concurrent problem, in the future
     //we may need to add mutex to protect the variable sealed
 };
@@ -248,7 +238,6 @@ struct SearchResult {
         int64_t nq,
         int chunk_count,
         const std::vector<knowhere::IndexNode::IteratorPtr>& kw_iterators,
-        const milvus::OffsetMapping* offset_mapping,
         bool larger_is_closer = false) {
         AssertInfo(kw_iterators.size() == nq * chunk_count,
                    "kw_iterators count:{} is not equal to nq*chunk_count:{}, "
@@ -261,7 +250,7 @@ struct SearchResult {
             vec_iter_idx = vec_iter_idx % nq;
             if (vector_iterators.size() < nq) {
                 auto chunk_merge_iter = std::make_shared<ChunkMergeIterator>(
-                    chunk_count, offset_mapping, larger_is_closer);
+                    chunk_count, larger_is_closer);
                 vector_iterators.emplace_back(chunk_merge_iter);
             }
             const auto& kw_iterator = kw_iterators[i];

@@ -351,6 +351,8 @@ class VectorFieldIndexing : public FieldIndexing {
     recreate_index(DataType data_type, const VectorBase* field_raw_data);
     // current number of rows in index.
     std::atomic<idx_t> index_cur_ = 0;
+    // current number of external segment rows covered by the index id map.
+    std::atomic<idx_t> indexed_external_count_ = 0;
     // whether the growing index has been built.
     std::atomic<bool> built_;
     // whether all insertd data has been added to growing index and can be

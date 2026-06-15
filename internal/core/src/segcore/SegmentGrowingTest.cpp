@@ -725,14 +725,12 @@ TEST_P(GrowingNullableTest, SearchAndQueryNullableVectors) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    // Store all inserted data for verification
-    // For nullable vectors, data is stored sparsely (only valid vectors)
-    // We need a mapping from logical offset to physical offset
-    std::vector<float> all_float_vectors;  // Physical storage (only valid)
+    // Store all inserted data for verification. Nullable vector data is compact:
+    // only valid vectors are stored, while validity is tracked per segment row.
+    std::vector<float> all_float_vectors;  // Compact storage (only valid)
     std::vector<knowhere::sparse::SparseRow<float>> all_sparse_vectors;
-    std::vector<bool> all_valid_data;  // Logical storage (all rows)
-    std::vector<int64_t>
-        logical_to_physical;  // Maps logical offset to physical
+    std::vector<bool> all_valid_data;  // Segment-row validity.
+    std::vector<int64_t> segment_to_compact_offset;
 
     // Insert data in multiple rounds and test after each round
     for (int64_t round = 0; round < num_rounds; round++) {
@@ -752,25 +750,25 @@ TEST_P(GrowingNullableTest, SearchAndQueryNullableVectors) {
                                false,
                                null_percent);
 
-        // Build logical to physical mapping for this batch
-        int64_t base_physical = all_float_vectors.size() / dim;
+        // Build segment-row to compact-storage mapping for this batch.
+        int64_t base_compact_offset = all_float_vectors.size() / dim;
         if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
-            base_physical = all_sparse_vectors.size();
+            base_compact_offset = all_sparse_vectors.size();
         }
 
         auto valid_data_from_dataset = dataset.get_col_valid(vec);
-        int64_t physical_idx = base_physical;
+        int64_t compact_idx = base_compact_offset;
         for (size_t i = 0; i < valid_data_from_dataset.size(); i++) {
             if (valid_data_from_dataset[i]) {
-                logical_to_physical.push_back(physical_idx);
-                physical_idx++;
+                segment_to_compact_offset.push_back(compact_idx);
+                compact_idx++;
             } else {
-                logical_to_physical.push_back(-1);  // null
+                segment_to_compact_offset.push_back(-1);  // null
             }
         }
 
-        // Get original data directly from proto (sparse storage for nullable)
-        // Data is stored sparsely - only valid vectors are in the proto
+        // Get original data directly from proto. Nullable vector payloads only
+        // contain valid vectors.
         if (data_type == DataType::VECTOR_FLOAT) {
             auto field_data = dataset.get_col(vec);
             auto& float_data = field_data->vectors().float_vector().data();
@@ -840,13 +838,13 @@ TEST_P(GrowingNullableTest, SearchAndQueryNullableVectors) {
                 if (offset < 0) {
                     continue;  // Skip invalid offsets
                 }
-                auto physical_idx = logical_to_physical[offset];
+                auto compact_idx = segment_to_compact_offset[offset];
                 for (int d = 0; d < dim; d++) {
                     float expected_val =
-                        all_float_vectors[physical_idx * dim + d];
+                        all_float_vectors[compact_idx * dim + d];
                     float actual_val = float_data.data(valid_idx * dim + d);
                     ASSERT_FLOAT_EQ(expected_val, actual_val)
-                        << "Round " << round << ": Mismatch at logical offset "
+                        << "Round " << round << ": Mismatch at segment offset "
                         << offset << " dim " << d;
                 }
                 valid_idx++;
@@ -859,23 +857,23 @@ TEST_P(GrowingNullableTest, SearchAndQueryNullableVectors) {
                 if (offset < 0) {
                     continue;  // Skip invalid offsets
                 }
-                auto physical_idx = logical_to_physical[offset];
+                auto compact_idx = segment_to_compact_offset[offset];
                 auto& content = sparse_data.contents(valid_idx);
                 auto retrieved_row =
                     CopyAndWrapSparseRow(content.data(), content.size());
-                const auto& expected_row = all_sparse_vectors[physical_idx];
+                const auto& expected_row = all_sparse_vectors[compact_idx];
                 ASSERT_EQ(retrieved_row.size(), expected_row.size())
                     << "Round " << round
-                    << ": Sparse vector size mismatch at logical offset "
+                    << ": Sparse vector size mismatch at segment offset "
                     << offset;
                 for (size_t j = 0; j < retrieved_row.size(); j++) {
                     ASSERT_EQ(retrieved_row[j].id, expected_row[j].id)
                         << "Round " << round
-                        << ": Sparse vector id mismatch at logical offset "
+                        << ": Sparse vector id mismatch at segment offset "
                         << offset << " element " << j;
                     ASSERT_FLOAT_EQ(retrieved_row[j].val, expected_row[j].val)
                         << "Round " << round
-                        << ": Sparse vector val mismatch at logical offset "
+                        << ": Sparse vector val mismatch at segment offset "
                         << offset << " element " << j;
                 }
                 valid_idx++;

@@ -30,7 +30,6 @@
 #include "index/Index.h"
 #include "common/Types.h"
 #include "common/BitsetView.h"
-#include "common/OffsetMapping.h"
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
 #include "common/OpContext.h"
@@ -39,17 +38,28 @@
 
 namespace milvus::index {
 
-// valid data keys for nullable vector index serialization
-constexpr const char* VALID_DATA_KEY = "valid_data";
-constexpr const char* VALID_DATA_COUNT_KEY = "valid_data_count";
+struct EmbListRetrieveResult {
+    std::vector<uint8_t> raw_data;
+    std::vector<size_t> offsets;
+    std::vector<uint8_t> valid_data;
+};
+
+struct VectorRetrieveResult {
+    std::vector<uint8_t> raw_data;
+    std::vector<uint8_t> valid_data;
+};
+
+struct SparseVectorRetrieveResult {
+    std::unique_ptr<const knowhere::sparse::SparseRow<SparseValueType>[]>
+        sparse_data;
+    std::vector<uint8_t> valid_data;
+};
 
 class VectorIndex : public IndexBase {
  public:
     explicit VectorIndex(const IndexType& index_type,
                          const MetricType& metric_type)
-        : IndexBase(index_type),
-          offset_mapping_(std::make_unique<milvus::GrowingOffsetMapping>()),
-          metric_type_(metric_type) {
+        : IndexBase(index_type), metric_type_(metric_type) {
     }
 
  public:
@@ -101,7 +111,7 @@ class VectorIndex : public IndexBase {
             "CalcDistByIDs not supported for current index type");
     }
 
-    virtual std::vector<uint8_t>
+    virtual VectorRetrieveResult
     GetVector(const DatasetPtr dataset) const = 0;
 
     /**
@@ -112,15 +122,14 @@ class VectorIndex : public IndexBase {
      * @return A pair of (raw_vector_data, offsets) where offsets has size count+1
      *         and raw_vector_data contains all vectors concatenated.
      */
-    virtual std::pair<std::vector<uint8_t>, std::vector<size_t>>
+    virtual EmbListRetrieveResult
     GetEmbListByIds(const DatasetPtr dataset,
                     const std::string& metric_type) const {
         ThrowInfo(NotImplemented,
                   "GetEmbListByIds not supported for current index type");
     }
 
-    virtual std::unique_ptr<
-        const knowhere::sparse::SparseRow<SparseValueType>[]>
+    virtual SparseVectorRetrieveResult
     GetSparseVector(const DatasetPtr dataset) const = 0;
 
     IndexType
@@ -186,55 +195,6 @@ class VectorIndex : public IndexBase {
         return search_cfg;
     }
 
-    void
-    UpdateValidData(const bool* valid_data, int64_t count) {
-        auto* growing_mapping =
-            dynamic_cast<milvus::GrowingOffsetMapping*>(offset_mapping_.get());
-        AssertInfo(growing_mapping != nullptr,
-                   "cannot update growing valid data from sealed mapping");
-        growing_mapping->Append(valid_data, count);
-    }
-
-    void
-    BuildValidData(const bool* valid_data, int64_t total_count) {
-        auto sealed_mapping = std::make_unique<milvus::SealedOffsetMapping>();
-        sealed_mapping->Build(valid_data, total_count);
-        offset_mapping_ = std::move(sealed_mapping);
-    }
-
-    bool
-    IsRowValid(int64_t logical_offset) const {
-        if (!offset_mapping_->IsEnabled()) {
-            return true;
-        }
-        return offset_mapping_->IsValid(logical_offset);
-    }
-
-    bool
-    HasValidData() const {
-        return offset_mapping_->IsEnabled();
-    }
-
-    int64_t
-    GetValidCount() const {
-        return offset_mapping_->GetValidCount();
-    }
-
-    int64_t
-    GetPhysicalOffset(int64_t logical_offset) const {
-        return offset_mapping_->GetPhysicalOffset(logical_offset);
-    }
-
-    int64_t
-    GetLogicalOffset(int64_t physical_offset) const {
-        return offset_mapping_->GetLogicalOffset(physical_offset);
-    }
-
-    const milvus::OffsetMapping&
-    GetOffsetMapping() const {
-        return *offset_mapping_;
-    }
-
  protected:
     template <typename T>
     static std::vector<uint8_t>
@@ -269,8 +229,6 @@ class VectorIndex : public IndexBase {
         std::vector<size_t> offsets(offsets_ptr, offsets_ptr + num_el_ids + 1);
         return {std::move(raw_data), std::move(offsets)};
     }
-
-    std::unique_ptr<milvus::OffsetMapping> offset_mapping_;
 
  private:
     MetricType metric_type_;

@@ -43,6 +43,7 @@
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
 #include "index/VectorIndex.h"
+#include "index/VectorIndexValidDataUtils.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"
 #include "knowhere/dataset.h"
@@ -386,6 +387,10 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
             intermin_index_has_raw_data = false;
         } else {
             throw std::runtime_error("not implemented");
+        }
+        if (nullable) {
+            milvus::index::SetDatasetValidBitmap(
+                raw_dataset, valid_data.data(), data_n);
         }
     }
 
@@ -748,6 +753,8 @@ TEST(test_chunk_segment,
     auto raw_dataset =
         knowhere::GenDataSet(valid_count, dim, vec_values.data());
     raw_dataset->SetIsOwner(false);
+    milvus::index::SetDatasetValidBitmap(
+        raw_dataset, valid_data.data(), data_n);
 
     milvus::index::CreateIndexInfo create_index_info;
     create_index_info.field_type = DataType::VECTOR_FLOAT;
@@ -816,6 +823,129 @@ TEST(test_chunk_segment,
         for (int64_t d = 0; d < dim; ++d) {
             EXPECT_FLOAT_EQ(returned[i * dim + d],
                             vec_values[physical_offset * dim + d]);
+        }
+    }
+}
+
+TEST(test_chunk_segment,
+     NullableAllValidVectorProjectionFromLoadedIndexReturnsValidData) {
+    auto schema = std::make_shared<Schema>();
+    const int64_t dim = 8;
+    const int64_t data_n = 64;
+    auto vec_field_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2, true);
+    auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+
+    std::map<std::string, std::string> index_params = {
+        {"index_type", knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+        {"metric_type", knowhere::metric::L2},
+        {"nlist", "4"}};
+    std::map<std::string, std::string> type_params = {
+        {"dim", std::to_string(dim)}};
+    FieldIndexMeta field_index_meta(
+        vec_field_id, std::move(index_params), std::move(type_params));
+    IndexMetaPtr collection_index_meta = std::make_shared<CollectionIndexMeta>(
+        226985,
+        std::map<FieldId, FieldIndexMeta>{{vec_field_id, field_index_meta}});
+
+    auto segment = CreateSealedSegment(schema, collection_index_meta);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    std::vector<uint8_t> valid_data((data_n + 7) / 8, 0xFF);
+    std::vector<float> vec_values(data_n * dim);
+    for (int64_t i = 0; i < data_n; ++i) {
+        for (int64_t d = 0; d < dim; ++d) {
+            vec_values[i * dim + d] = static_cast<float>(i * dim + d);
+        }
+    }
+
+    auto vec_field_data = milvus::storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, true, dim);
+    auto vec_field_data_impl =
+        std::dynamic_pointer_cast<milvus::FieldData<milvus::FloatVector>>(
+            vec_field_data);
+    ASSERT_NE(vec_field_data_impl, nullptr);
+    vec_field_data_impl->FillFieldData(
+        vec_values.data(), valid_data.data(), data_n, 0);
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_field_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                          kPartitionID,
+                                                          kSegmentID,
+                                                          vec_field_id.get(),
+                                                          {vec_field_data},
+                                                          cm);
+    ASSERT_NO_THROW(segment->LoadFieldData(load_field_info));
+    ASSERT_TRUE(segment->HasFieldData(vec_field_id));
+    ASSERT_EQ(segment->get_row_count(), data_n);
+
+    auto raw_dataset = knowhere::GenDataSet(data_n, dim, vec_values.data());
+    raw_dataset->SetIsOwner(false);
+    milvus::index::SetDatasetValidBitmap(
+        raw_dataset, valid_data.data(), data_n);
+
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = DataType::VECTOR_FLOAT;
+    create_index_info.metric_type = knowhere::metric::L2;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, milvus::storage::FileManagerContext());
+
+    auto build_conf =
+        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                       {knowhere::meta::DIM, std::to_string(dim)},
+                       {knowhere::indexparam::NLIST, "4"}};
+    indexing->BuildWithDataset(raw_dataset, build_conf);
+    auto* vec_indexing =
+        dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
+    ASSERT_NE(vec_indexing, nullptr);
+    knowhere::Json load_conf{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
+    auto binary_set = indexing->Serialize(load_conf);
+    vec_indexing->Load(binary_set, load_conf);
+
+    LoadIndexInfo load_info;
+    load_info.field_id = vec_field_id.get();
+    load_info.index_params = GenIndexParams(indexing.get());
+    load_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
+    load_info.index_params["metric_type"] = knowhere::metric::L2;
+    ASSERT_NO_THROW(segment->LoadIndex(load_info));
+    ASSERT_TRUE(segment->HasIndex(vec_field_id));
+
+    auto& segcore_config = milvus::segcore::SegcoreConfig::default_config();
+    auto previous_prefer_field_data =
+        segcore_config.get_prefer_field_data_when_index_has_raw_data();
+    struct PreferIndexDataGuard {
+        milvus::segcore::SegcoreConfig& config;
+        bool previous_value;
+
+        ~PreferIndexDataGuard() {
+            config.set_prefer_field_data_when_index_has_raw_data(
+                previous_value);
+        }
+    } prefer_index_data_guard{segcore_config, previous_prefer_field_data};
+    segcore_config.set_prefer_field_data_when_index_has_raw_data(false);
+
+    std::vector<int64_t> offsets = {0, 1, 2, 3};
+    auto result = sealed->bulk_subscript(
+        nullptr, vec_field_id, offsets.data(), offsets.size());
+
+    ASSERT_EQ(result->valid_data_size(), offsets.size());
+    for (int i = 0; i < result->valid_data_size(); ++i) {
+        EXPECT_TRUE(result->valid_data(i));
+    }
+
+    const auto& returned = result->vectors().float_vector().data();
+    ASSERT_EQ(returned.size(), offsets.size() * dim);
+    for (int64_t i = 0; i < static_cast<int64_t>(offsets.size()); ++i) {
+        for (int64_t d = 0; d < dim; ++d) {
+            EXPECT_FLOAT_EQ(returned[i * dim + d],
+                            vec_values[offsets[i] * dim + d]);
         }
     }
 }
@@ -984,17 +1114,6 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
                     {knowhere::meta::METRIC_TYPE, metric_type}};
                 auto binary_set = indexing->Serialize(load_conf);
                 vec_indexing_for_serde->Load(binary_set, load_conf);
-            }
-
-            if (nullable) {
-                auto vec_indexing =
-                    dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
-                ASSERT_NE(vec_indexing, nullptr);
-                std::unique_ptr<bool[]> valid_data_bool(new bool[data_n]);
-                for (int64_t i = 0; i < data_n; ++i) {
-                    valid_data_bool[i] = (valid_data[i >> 3] >> (i & 0x07)) & 1;
-                }
-                vec_indexing->UpdateValidData(valid_data_bool.get(), data_n);
             }
 
             LoadIndexInfo load_info;
@@ -1269,17 +1388,6 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
                 vec_indexing_for_serde->Load(binary_set, load_conf);
             }
 
-            if (nullable) {
-                auto vec_indexing =
-                    dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
-                ASSERT_NE(vec_indexing, nullptr);
-                std::unique_ptr<bool[]> valid_data_bool(new bool[data_n]);
-                for (int64_t i = 0; i < data_n; ++i) {
-                    valid_data_bool[i] = (valid_data[i >> 3] >> (i & 0x07)) & 1;
-                }
-                vec_indexing->UpdateValidData(valid_data_bool.get(), data_n);
-            }
-
             LoadIndexInfo load_info;
             load_info.field_id = vec_field_id.get();
             load_info.index_params = GenIndexParams(indexing.get());
@@ -1414,17 +1522,6 @@ TEST_P(BinlogIndexTest, DisableInterimIndex) {
                 {knowhere::meta::METRIC_TYPE, metric_type}};
             auto binary_set = indexing->Serialize(load_conf);
             vec_indexing_for_serde->Load(binary_set, load_conf);
-        }
-
-        if (nullable) {
-            auto vec_indexing =
-                dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
-            ASSERT_NE(vec_indexing, nullptr);
-            std::unique_ptr<bool[]> valid_data_bool(new bool[data_n]);
-            for (int64_t i = 0; i < data_n; ++i) {
-                valid_data_bool[i] = (valid_data[i >> 3] >> (i & 0x07)) & 1;
-            }
-            vec_indexing->UpdateValidData(valid_data_bool.get(), data_n);
         }
 
         LoadIndexInfo load_info;

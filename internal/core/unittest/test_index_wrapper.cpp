@@ -33,6 +33,7 @@
 #include "gtest/gtest.h"
 #include "index/Meta.h"
 #include "index/VectorMemIndex.h"
+#include "index/VectorIndexValidDataUtils.h"
 #include "indexbuilder/IndexCreatorBase.h"
 #include "indexbuilder/IndexFactory.h"
 #include "indexbuilder/VecIndexCreator.h"
@@ -301,16 +302,30 @@ TEST(VectorMemIndexTest, LoadMmapSlicedValidData) {
         true,
         file_manager_context);
 
-    auto dataset = knowhere::GenDataSet(kRows, kDim, data.data());
-    index.BuildWithDataset(dataset, config);
-
     std::unique_ptr<bool[]> valid_data(new bool[kRows]);
     int64_t valid_count = 0;
     for (int64_t i = 0; i < kRows; ++i) {
         valid_data[i] = i % 3 != 0;
         valid_count += valid_data[i] ? 1 : 0;
     }
-    index.BuildValidData(valid_data.get(), kRows);
+    std::vector<float> compact_data(valid_count * kDim);
+    std::vector<int64_t> valid_ids;
+    valid_ids.reserve(valid_count);
+    int64_t compact_offset = 0;
+    for (int64_t i = 0; i < kRows; ++i) {
+        if (!valid_data[i]) {
+            continue;
+        }
+        std::copy_n(data.data() + i * kDim,
+                    kDim,
+                    compact_data.data() + compact_offset * kDim);
+        valid_ids.push_back(i);
+        compact_offset++;
+    }
+
+    auto dataset = knowhere::GenDataSet(valid_count, kDim, compact_data.data());
+    index::SetDatasetValidBitmap(dataset, valid_data.get(), kRows);
+    index.BuildWithDataset(dataset, config);
 
     auto stats = index.Upload();
     auto index_files = stats->GetIndexFiles();
@@ -324,7 +339,7 @@ TEST(VectorMemIndexTest, LoadMmapSlicedValidData) {
             });
     };
     ASSERT_TRUE(has_file(milvus::INDEX_FILE_SLICE_META));
-    ASSERT_TRUE(has_file("valid_data_1"));
+    ASSERT_FALSE(has_file("valid_data_1"));
 
     storage::FileManagerContext load_file_manager_context(
         field_data_meta, index_meta, chunk_manager, fs);
@@ -347,8 +362,18 @@ TEST(VectorMemIndexTest, LoadMmapSlicedValidData) {
     loaded_index.Load(milvus::tracer::TraceContext{}, load_config);
 
     ASSERT_EQ(loaded_index.Count(), kRows);
-    EXPECT_EQ(loaded_index.GetValidCount(), valid_count);
-    for (int64_t i = 0; i < kRows; ++i) {
-        EXPECT_EQ(loaded_index.IsRowValid(i), valid_data[i]) << i;
+    auto ids_ds = knowhere::GenDataSet(valid_count, 1, nullptr);
+    ids_ds->SetIds(valid_ids.data());
+    auto loaded_vectors = loaded_index.GetVector(ids_ds);
+    ASSERT_EQ(loaded_vectors.raw_data.size(),
+              compact_data.size() * sizeof(float));
+    const auto* loaded_data =
+        reinterpret_cast<const float*>(loaded_vectors.raw_data.data());
+    for (int64_t row = 0; row < valid_count; ++row) {
+        auto external_id = valid_ids[row];
+        for (int64_t d = 0; d < kDim; ++d) {
+            EXPECT_EQ(loaded_data[row * kDim + d],
+                      data[external_id * kDim + d]);
+        }
     }
 }

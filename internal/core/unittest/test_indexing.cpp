@@ -733,12 +733,12 @@ TEST_P(IndexTest, GetVector) {
     auto ids_ds = GenRandomIds(NB);
     if (is_binary) {
         auto results = vec_index->GetVector(ids_ds);
-        EXPECT_EQ(results.size(), xb_bin_data.size());
+        EXPECT_EQ(results.raw_data.size(), xb_bin_data.size());
         const auto data_bytes = dim / 8;
         for (size_t i = 0; i < NB; ++i) {
             auto id = ids_ds->GetIds()[i];
             for (size_t j = 0; j < data_bytes; ++j) {
-                ASSERT_EQ(results[i * data_bytes + j],
+                ASSERT_EQ(results.raw_data[i * data_bytes + j],
                           xb_bin_data[id * data_bytes + j]);
             }
         }
@@ -746,7 +746,7 @@ TEST_P(IndexTest, GetVector) {
         auto sparse_rows = vec_index->GetSparseVector(ids_ds);
         for (size_t i = 0; i < NB; ++i) {
             auto id = ids_ds->GetIds()[i];
-            auto& row = sparse_rows[i];
+            auto& row = sparse_rows.sparse_data[i];
             ASSERT_EQ(row.size(), xb_sparse_data[id].size());
             for (size_t j = 0; j < row.size(); ++j) {
                 ASSERT_EQ(row[j].id, xb_sparse_data[id][j].id);
@@ -755,8 +755,11 @@ TEST_P(IndexTest, GetVector) {
         }
     } else {
         auto results = vec_index->GetVector(ids_ds);
-        std::vector<float> result_vectors(results.size() / (sizeof(float)));
-        memcpy(result_vectors.data(), results.data(), results.size());
+        std::vector<float> result_vectors(results.raw_data.size() /
+                                          (sizeof(float)));
+        memcpy(result_vectors.data(),
+               results.raw_data.data(),
+               results.raw_data.size());
         ASSERT_EQ(result_vectors.size(), xb_data.size());
         for (size_t i = 0; i < NB; ++i) {
             auto id = ids_ds->GetIds()[i];
@@ -834,7 +837,7 @@ TEST_P(IndexTest, GetVector_EmptySparseVector) {
     auto sparse_rows = vec_index->GetSparseVector(ids_ds);
     for (size_t i = 0; i < NB; ++i) {
         auto id = ids_ds->GetIds()[i];
-        auto& row = sparse_rows[i];
+        auto& row = sparse_rows.sparse_data[i];
         ASSERT_EQ(row.size(), vec[id].size());
         for (size_t j = 0; j < row.size(); ++j) {
             ASSERT_EQ(row[j].id, vec[id][j].id);
@@ -901,8 +904,6 @@ TEST(Indexing, HnswEmbListBuildAllNullNullableFromBinlog) {
     ASSERT_NO_THROW(index->Build(build_conf));
     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(index.get());
     ASSERT_NE(vec_index, nullptr);
-    EXPECT_TRUE(vec_index->HasValidData());
-    EXPECT_EQ(vec_index->GetValidCount(), 0);
     EXPECT_EQ(vec_index->Count(), 0);
     EXPECT_TRUE(vec_index->HasRawData());
     EXPECT_FALSE(vec_index->IsIndexRefineEnabled());
@@ -923,8 +924,6 @@ TEST(Indexing, HnswEmbListBuildAllNullNullableFromBinlog) {
         milvus::proto::common::LoadPriority::HIGH;
     load_conf[DIM_KEY] = std::to_string(dim);
     loaded_vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
-    EXPECT_TRUE(loaded_vec_index->HasValidData());
-    EXPECT_EQ(loaded_vec_index->GetValidCount(), 0);
     EXPECT_EQ(loaded_vec_index->Count(), 0);
     EXPECT_TRUE(loaded_vec_index->HasRawData());
     EXPECT_FALSE(loaded_vec_index->IsIndexRefineEnabled());
@@ -1082,7 +1081,6 @@ TEST(Indexing, HnswEmbListBuildAllValidEmptyListsFromBinlog) {
     ASSERT_NO_THROW(index->Build(build_conf));
     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(index.get());
     ASSERT_NE(vec_index, nullptr);
-    EXPECT_FALSE(vec_index->HasValidData());
     EXPECT_TRUE(vec_index->HasRawData());
     EXPECT_EQ(vec_index->Count(), 0);
 
@@ -1102,7 +1100,6 @@ TEST(Indexing, HnswEmbListBuildAllValidEmptyListsFromBinlog) {
         milvus::proto::common::LoadPriority::HIGH;
     load_conf[DIM_KEY] = dim;
     loaded_vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
-    EXPECT_FALSE(loaded_vec_index->HasValidData());
     EXPECT_TRUE(loaded_vec_index->HasRawData());
     EXPECT_EQ(loaded_vec_index->Count(), 0);
 
@@ -1122,10 +1119,10 @@ TEST(Indexing, HnswEmbListBuildAllValidEmptyListsFromBinlog) {
 
     std::vector<int64_t> ids = {0, 3, 7};
     auto ids_ds = GenIdsDataset(ids.size(), ids.data());
-    auto [raw_data, offsets] =
+    auto retrieve_result =
         loaded_vec_index->GetEmbListByIds(ids_ds, metric_type);
-    EXPECT_TRUE(raw_data.empty());
-    EXPECT_EQ(offsets, std::vector<size_t>({0, 0, 0, 0}));
+    EXPECT_TRUE(retrieve_result.raw_data.empty());
+    EXPECT_EQ(retrieve_result.offsets, std::vector<size_t>({0, 0, 0, 0}));
 
     std::vector<float> emb_list_iterator_queries(3 * dim, 0.1F);
     auto emb_list_iterator_dataset =
@@ -1542,10 +1539,10 @@ TEST(Indexing, DiskAnnEmbListBuildWithDataset) {
 
     std::vector<int64_t> empty_ids = {num_emb_lists - 2, num_emb_lists - 1};
     auto empty_ids_ds = GenIdsDataset(empty_ids.size(), empty_ids.data());
-    auto [empty_raw_data, empty_offsets] =
+    auto empty_retrieve_result =
         vec_index->GetEmbListByIds(empty_ids_ds, metric_type);
-    EXPECT_TRUE(empty_raw_data.empty());
-    EXPECT_EQ(empty_offsets, std::vector<size_t>({0, 0, 0}));
+    EXPECT_TRUE(empty_retrieve_result.raw_data.empty());
+    EXPECT_EQ(empty_retrieve_result.offsets, std::vector<size_t>({0, 0, 0}));
 
     // Search: use 2 query emb_lists (3 vectors + 2 vectors)
     int64_t NQ_vecs = 5;
@@ -1790,8 +1787,6 @@ TEST(Indexing, DiskAnnEmbListBuildAllNullNullableFromBinlog) {
     ASSERT_NO_THROW(index->Build(build_conf));
     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(index.get());
     ASSERT_NE(vec_index, nullptr);
-    EXPECT_TRUE(vec_index->HasValidData());
-    EXPECT_EQ(vec_index->GetValidCount(), 0);
     EXPECT_EQ(vec_index->Count(), 0);
     EXPECT_TRUE(vec_index->HasRawData());
     EXPECT_FALSE(vec_index->IsIndexRefineEnabled());
@@ -1813,8 +1808,6 @@ TEST(Indexing, DiskAnnEmbListBuildAllNullNullableFromBinlog) {
     load_conf[DIM_KEY] = dim;
     ASSERT_NO_THROW(
         loaded_vec_index->Load(milvus::tracer::TraceContext{}, load_conf));
-    EXPECT_TRUE(loaded_vec_index->HasValidData());
-    EXPECT_EQ(loaded_vec_index->GetValidCount(), 0);
     EXPECT_EQ(loaded_vec_index->Count(), 0);
     EXPECT_TRUE(loaded_vec_index->HasRawData());
     EXPECT_FALSE(loaded_vec_index->IsIndexRefineEnabled());
