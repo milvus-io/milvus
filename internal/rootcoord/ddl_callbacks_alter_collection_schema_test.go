@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -65,6 +66,48 @@ func buildAlterSchemaReq(dbName, collName, inputField, outputField, funcName str
 					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
 						{FieldSchema: outputFieldSchema},
 					},
+					FuncSchema: []*schemapb.FunctionSchema{functionSchema},
+				},
+			},
+		},
+	}
+}
+
+func buildAlterSchemaAddFieldReq(dbName, collName, fieldName string, doBackfill bool) *milvuspb.AlterCollectionSchemaRequest {
+	return buildAlterSchemaAddFieldSchemaReq(dbName, collName, &schemapb.FieldSchema{
+		Name:     fieldName,
+		DataType: schemapb.DataType_VarChar,
+		Nullable: true,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "128"},
+		},
+	}, doBackfill)
+}
+
+func buildAlterSchemaAddFieldSchemaReq(dbName, collName string, fieldSchema *schemapb.FieldSchema, doBackfill bool) *milvuspb.AlterCollectionSchemaRequest {
+	return &milvuspb.AlterCollectionSchemaRequest{
+		DbName:         dbName,
+		CollectionName: collName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+						{FieldSchema: fieldSchema},
+					},
+					DoPhysicalBackfill: doBackfill,
+				},
+			},
+		},
+	}
+}
+
+func buildAlterSchemaAddFunctionReq(dbName, collName string, functionSchema *schemapb.FunctionSchema) *milvuspb.AlterCollectionSchemaRequest {
+	return &milvuspb.AlterCollectionSchemaRequest{
+		DbName:         dbName,
+		CollectionName: collName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
 					FuncSchema: []*schemapb.FunctionSchema{functionSchema},
 				},
 			},
@@ -98,14 +141,87 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
 
-	// case 3: funcSchemas empty (len != 1)
+	// case 3: add a plain field without funcSchema.
+	resp, err = core.AlterCollectionSchema(ctx, buildAlterSchemaAddFieldReq(dbName, collectionName, "plain_text", false))
+	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.Len(t, coll.Functions, 0)
+	plainFieldFound := false
+	for _, field := range coll.Fields {
+		if field.Name == "plain_text" {
+			plainFieldFound = true
+			require.False(t, field.IsFunctionOutput)
+		}
+	}
+	require.True(t, plainFieldFound)
+
+	// case 3.1: DoPhysicalBackfill is ignored by alter schema.
+	resp, err = core.AlterCollectionSchema(ctx, buildAlterSchemaAddFieldReq(dbName, collectionName, "plain_text_backfill", true))
+	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 2)
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.False(t, coll.ToCollectionSchemaPB().GetDoPhysicalBackfill())
+
+	status, err := core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.TimezoneKey, Value: "Asia/Shanghai"},
+		},
+	})
+	require.NoError(t, merr.CheckRPCCall(status, err))
+
+	// case 3.2: field-only TIMESTAMPTZ add rewrites string default value with collection timezone.
+	defaultTimeString := "2024-01-02T03:04:05"
+	resp, err = core.AlterCollectionSchema(ctx, buildAlterSchemaAddFieldSchemaReq(dbName, collectionName, &schemapb.FieldSchema{
+		Name:     "created_at_tz",
+		DataType: schemapb.DataType_Timestamptz,
+		Nullable: true,
+		DefaultValue: &schemapb.ValueField{
+			Data: &schemapb.ValueField_StringData{StringData: defaultTimeString},
+		},
+	}, false))
+	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 3)
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	expectedTimestamptzDefault, err := timestamptz.ValidateAndReturnUnixMicroTz(defaultTimeString, "Asia/Shanghai")
+	require.NoError(t, err)
+	timestamptzDefaultFound := false
+	for _, field := range coll.Fields {
+		if field.Name == "created_at_tz" {
+			timestamptzDefaultFound = true
+			require.Equal(t, expectedTimestamptzDefault, field.DefaultValue.GetTimestamptzData())
+			require.Empty(t, field.DefaultValue.GetStringData())
+		}
+	}
+	require.True(t, timestamptzDefaultFound)
+
+	// case 3.3: field-only TIMESTAMPTZ add rejects invalid string default value.
+	resp, err = core.AlterCollectionSchema(ctx, buildAlterSchemaAddFieldSchemaReq(dbName, collectionName, &schemapb.FieldSchema{
+		Name:     "invalid_created_at_tz",
+		DataType: schemapb.DataType_Timestamptz,
+		Nullable: true,
+		DefaultValue: &schemapb.ValueField{
+			Data: &schemapb.ValueField_StringData{StringData: "not-a-timestamp"},
+		},
+	}, false))
+	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
+
+	// case 3.4: multiple function schemas remain unsupported.
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
 			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
 				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
-					FuncSchema: []*schemapb.FunctionSchema{},
+					FuncSchema: []*schemapb.FunctionSchema{
+						{Name: "fn_multi_1", Type: schemapb.FunctionType_BM25},
+						{Name: "fn_multi_2", Type: schemapb.FunctionType_BM25},
+					},
 					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
 						{FieldSchema: &schemapb.FieldSchema{Name: "sparse1", DataType: schemapb.DataType_SparseFloatVector}},
 					},
@@ -115,7 +231,62 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
 
-	// case 4: fieldInfos empty
+	// case 3.5: nil function schema is rejected.
+	resp, err = core.AlterCollectionSchema(ctx, buildAlterSchemaAddFunctionReq(dbName, collectionName, nil))
+	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
+	require.Contains(t, resp.GetAlterStatus().GetReason(), "function schema is nil")
+
+	// case 3.6: multiple fieldInfos remain unsupported.
+	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+						{FieldSchema: &schemapb.FieldSchema{Name: "plain_text_multi_1", DataType: schemapb.DataType_Int64}},
+						{FieldSchema: &schemapb.FieldSchema{Name: "plain_text_multi_2", DataType: schemapb.DataType_Int64}},
+					},
+				},
+			},
+		},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
+
+	// case 3.7: invalid field schema is rejected by RootCoord schema checks.
+	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+						{FieldSchema: &schemapb.FieldSchema{
+							Name:         "invalid_primary",
+							DataType:     schemapb.DataType_Int64,
+							IsPrimaryKey: true,
+							Nullable:     true,
+						}},
+					},
+				},
+			},
+		},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
+
+	// case 4: both fieldInfos and funcSchema are empty.
+	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{},
+			},
+		},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
+
+	// case 4.1: BM25 function must add its output field in the same request.
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -131,6 +302,63 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 		},
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
+	require.Contains(t, resp.GetAlterStatus().GetReason(), "add_function_field")
+
+	// case 4.2: function-only output field must exist.
+	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+					FuncSchema: []*schemapb.FunctionSchema{
+						{
+							Name:             "minhash_missing_output",
+							Type:             schemapb.FunctionType_MinHash,
+							InputFieldNames:  []string{"field1"},
+							OutputFieldNames: []string{"missing_minhash_output"},
+							Params: []*commonpb.KeyValuePair{
+								{Key: "num_hashes", Value: "128"},
+								{Key: "shingle_size", Value: "3"},
+								{Key: "hash_function", Value: "xxhash64"},
+								{Key: "seed", Value: "42"},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
+	require.Contains(t, resp.GetAlterStatus().GetReason(), "output field missing_minhash_output")
+
+	// case 4.3: BM25 function with multiple output fields is rejected.
+	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+					FuncSchema: []*schemapb.FunctionSchema{
+						{
+							Name:             "bm25_multi_output",
+							Type:             schemapb.FunctionType_BM25,
+							InputFieldNames:  []string{"field1"},
+							OutputFieldNames: []string{"sparse_multi_output", "sparse_multi_output_extra"},
+						},
+					},
+					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+						{FieldSchema: &schemapb.FieldSchema{
+							Name:     "sparse_multi_output",
+							DataType: schemapb.DataType_SparseFloatVector,
+						}},
+					},
+				},
+			},
+		},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
+	require.Contains(t, resp.GetAlterStatus().GetReason(), "exactly one output field")
 
 	// case 5: BM25 arity invalid
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
@@ -140,7 +368,12 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
 				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
 					FuncSchema: []*schemapb.FunctionSchema{
-						{Name: "fn_bad_arity", Type: schemapb.FunctionType_BM25, InputFieldNames: []string{"field1"}},
+						{
+							Name:             "fn_bad_arity",
+							Type:             schemapb.FunctionType_BM25,
+							InputFieldNames:  []string{"field1", "field2", "field3"},
+							OutputFieldNames: []string{"sparse_bad_arity"},
+						},
 					},
 					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
 						{FieldSchema: &schemapb.FieldSchema{Name: "sparse_bad_arity", DataType: schemapb.DataType_SparseFloatVector}},
@@ -151,7 +384,7 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	})
 	arityErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
 	require.ErrorIs(t, arityErr, merr.ErrParameterInvalid)
-	require.ErrorContains(t, arityErr, "one or two input fields and exactly one output field")
+	require.ErrorContains(t, arityErr, "exactly one input field and exactly one output field")
 
 	// case 6: fieldSchema nil in fieldInfos
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
@@ -217,6 +450,7 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 		Nullable: true,
 		TypeParams: []*commonpb.KeyValuePair{
 			{Key: common.MaxLengthKey, Value: "256"},
+			{Key: common.EnableAnalyzerKey, Value: "true"},
 		},
 	}
 	varcharBytes, err := proto.Marshal(varcharFieldSchema)
@@ -228,23 +462,31 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	})
 	require.NoError(t, merr.CheckRPCCall(addFieldResp, err))
 
-	// MinHash happy path: add binary vector output field + MinHash function.
-	minHashReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "minhash_output", "minhash_fn")
-	minHashReq.GetAction().GetAddRequest().GetFuncSchema()[0].Type = schemapb.FunctionType_MinHash
-	minHashReq.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema().DataType = schemapb.DataType_BinaryVector
-	minHashReq.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema().TypeParams = []*commonpb.KeyValuePair{
-		{Key: common.DimKey, Value: "32"},
+	// happy path: add binary vector output field + MinHash function.
+	minHashReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "binary_minhash_output", "minhash_fn")
+	minHashFieldSchema := minHashReq.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema()
+	minHashFieldSchema.DataType = schemapb.DataType_BinaryVector
+	minHashFieldSchema.TypeParams = []*commonpb.KeyValuePair{
+		{Key: common.DimKey, Value: "4096"},
+	}
+	minHashFunction := minHashReq.GetAction().GetAddRequest().GetFuncSchema()[0]
+	minHashFunction.Type = schemapb.FunctionType_MinHash
+	minHashFunction.Params = []*commonpb.KeyValuePair{
+		{Key: "num_hashes", Value: "128"},
+		{Key: "shingle_size", Value: "3"},
+		{Key: "hash_function", Value: "xxhash64"},
+		{Key: "seed", Value: "42"},
 	}
 	resp, err = core.AlterCollectionSchema(ctx, minHashReq)
 	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
-	assertSchemaVersion(t, ctx, core, dbName, collectionName, 2)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 5)
 
 	minHashBadArityReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "minhash_bad_arity", "minhash_bad_arity_fn")
 	minHashBadArityReq.GetAction().GetAddRequest().GetFuncSchema()[0].Type = schemapb.FunctionType_MinHash
 	minHashBadArityReq.GetAction().GetAddRequest().GetFuncSchema()[0].InputFieldNames = []string{"text_input", "field1"}
 	minHashBadArityReq.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema().DataType = schemapb.DataType_BinaryVector
 	minHashBadArityReq.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema().TypeParams = []*commonpb.KeyValuePair{
-		{Key: common.DimKey, Value: "32"},
+		{Key: common.DimKey, Value: "4096"},
 	}
 	resp, err = core.AlterCollectionSchema(ctx, minHashBadArityReq)
 	alterErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
@@ -258,22 +500,97 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	require.ErrorIs(t, alterErr, merr.ErrParameterInvalid)
 	require.ErrorContains(t, alterErr, "function output field cannot be nullable")
 
-	// happy path: add sparse vector output field + BM25 function → schema version bumps.
+	existingOutputFieldSchema := &schemapb.FieldSchema{
+		Name:     "existing_minhash_output",
+		DataType: schemapb.DataType_BinaryVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "4096"},
+		},
+	}
+	existingOutputBytes, err := proto.Marshal(existingOutputFieldSchema)
+	require.NoError(t, err)
+	addFieldResp, err = core.AddCollectionField(ctx, &milvuspb.AddCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         existingOutputBytes,
+	})
+	require.NoError(t, merr.CheckRPCCall(addFieldResp, err))
+
+	resp, err = core.AlterCollectionSchema(ctx, buildAlterSchemaAddFunctionReq(dbName, collectionName, &schemapb.FunctionSchema{
+		Name:             "minhash_missing_output_late",
+		Type:             schemapb.FunctionType_MinHash,
+		InputFieldNames:  []string{"text_input"},
+		OutputFieldNames: []string{"missing_minhash_output_late"},
+		Params: []*commonpb.KeyValuePair{
+			{Key: "num_hashes", Value: "128"},
+			{Key: "shingle_size", Value: "3"},
+			{Key: "hash_function", Value: "xxhash64"},
+			{Key: "seed", Value: "42"},
+		},
+	}))
+	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
+	require.Contains(t, resp.GetAlterStatus().GetReason(), "output field missing_minhash_output_late")
+
+	// happy path: add only a function and mark an existing output field.
+	functionOnlyReq := buildAlterSchemaAddFunctionReq(dbName, collectionName, &schemapb.FunctionSchema{
+		Name:             "minhash_existing_fn",
+		Type:             schemapb.FunctionType_MinHash,
+		InputFieldNames:  []string{"text_input"},
+		OutputFieldNames: []string{"existing_minhash_output"},
+		Params: []*commonpb.KeyValuePair{
+			{Key: "num_hashes", Value: "128"},
+			{Key: "shingle_size", Value: "3"},
+			{Key: "hash_function", Value: "xxhash64"},
+			{Key: "seed", Value: "42"},
+		},
+	})
+	resp, err = core.AlterCollectionSchema(ctx, functionOnlyReq)
+	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 7)
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.Len(t, coll.Functions, 2)
+	existingOutputFound := false
+	for _, field := range coll.Fields {
+		if field.Name == "existing_minhash_output" {
+			existingOutputFound = true
+			require.True(t, field.IsFunctionOutput)
+		}
+	}
+	require.True(t, existingOutputFound)
+
+	// function-only rejects output fields already owned by another function.
+	resp, err = core.AlterCollectionSchema(ctx, buildAlterSchemaAddFunctionReq(dbName, collectionName, &schemapb.FunctionSchema{
+		Name:             "minhash_existing_fn2",
+		Type:             schemapb.FunctionType_MinHash,
+		InputFieldNames:  []string{"text_input"},
+		OutputFieldNames: []string{"existing_minhash_output"},
+		Params: []*commonpb.KeyValuePair{
+			{Key: "num_hashes", Value: "128"},
+			{Key: "shingle_size", Value: "3"},
+			{Key: "hash_function", Value: "xxhash64"},
+			{Key: "seed", Value: "42"},
+		},
+	}))
+	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
+
+	// happy path: add sparse vector output field + BM25 function.
 	firstAlterReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_output", "bm25_fn")
 	resp, err = core.AlterCollectionSchema(ctx, firstAlterReq)
 	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
-	assertSchemaVersion(t, ctx, core, dbName, collectionName, 3)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 8)
 
-	// second happy path: schema version bumps again.
+	// second happy path with DoPhysicalBackfill=true: the flag is ignored by alter schema.
 	secondAlterReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_output2", "bm25_fn2")
+	secondAlterReq.GetAction().GetAddRequest().DoPhysicalBackfill = true
 	resp, err = core.AlterCollectionSchema(ctx, secondAlterReq)
 	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
-	assertSchemaVersion(t, ctx, core, dbName, collectionName, 4)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 9)
 	updated, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	schema := updated.ToCollectionSchemaPB()
 	require.False(t, schema.GetDoPhysicalBackfill())
-	require.EqualValues(t, 4, schema.GetVersion())
+	require.EqualValues(t, 9, schema.GetVersion())
 
 	// case 9: function already exists (same name "bm25_fn")
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
@@ -331,6 +648,91 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 		},
 	})
 	require.Error(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+}
+
+func TestDDLCallbacksAlterCollectionSchemaValidatesFunctionOnlyFinalSchema(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+
+	createCollectionForTest(t, ctx, core, dbName, collectionName)
+
+	inputFieldBytes, err := proto.Marshal(&schemapb.FieldSchema{
+		Name:     "text_input",
+		DataType: schemapb.DataType_VarChar,
+		Nullable: true,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "256"},
+		},
+	})
+	require.NoError(t, err)
+	addFieldResp, err := core.AddCollectionField(ctx, &milvuspb.AddCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         inputFieldBytes,
+	})
+	require.NoError(t, merr.CheckRPCCall(addFieldResp, err))
+
+	invalidOutputBytes, err := proto.Marshal(&schemapb.FieldSchema{
+		Name:     "invalid_minhash_output",
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "128"},
+		},
+	})
+	require.NoError(t, err)
+	addFieldResp, err = core.AddCollectionField(ctx, &milvuspb.AddCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         invalidOutputBytes,
+	})
+	require.NoError(t, merr.CheckRPCCall(addFieldResp, err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 2)
+
+	resp, err := core.AlterCollectionSchema(ctx, buildAlterSchemaAddFunctionReq(dbName, collectionName, &schemapb.FunctionSchema{
+		Name:             "minhash_invalid_output",
+		Type:             schemapb.FunctionType_MinHash,
+		InputFieldNames:  []string{"text_input"},
+		OutputFieldNames: []string{"invalid_minhash_output"},
+		Params: []*commonpb.KeyValuePair{
+			{Key: "num_hashes", Value: "128"},
+			{Key: "shingle_size", Value: "3"},
+			{Key: "hash_function", Value: "xxhash64"},
+			{Key: "seed", Value: "42"},
+		},
+	}))
+	alterErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
+	require.ErrorIs(t, alterErr, merr.ErrParameterInvalid)
+	require.ErrorContains(t, alterErr, "MinHash function output field must be a BinaryVector field")
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 2)
+}
+
+func TestDDLCallbacksAlterCollectionSchemaAddRejectsStructFieldNameConflicts(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+	createCollectionForTest(t, ctx, core, dbName, collectionName)
+
+	resp, err := core.AddCollectionStructField(ctx, &milvuspb.AddCollectionStructFieldRequest{
+		DbName:                 dbName,
+		CollectionName:         collectionName,
+		StructArrayFieldSchema: newRootAddStructFieldSchema("profile"),
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+
+	for _, fieldName := range []string{"profile", "profile[ints]", storedRootStructSubFieldName("profile", "profile[ints]")} {
+		t.Run(fieldName, func(t *testing.T) {
+			resp, err := core.AlterCollectionSchema(ctx, buildAlterSchemaAddFieldReq(dbName, collectionName, fieldName, false))
+			require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
+			require.Contains(t, resp.GetAlterStatus().GetReason(), "field already exists")
+			assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+		})
+	}
 }
 
 func TestDDLCallbacksAlterCollectionDropField(t *testing.T) {
@@ -479,6 +881,7 @@ func TestDDLCallbacksAlterCollectionSchemaAddSkipsSchemaDropReady(t *testing.T) 
 		DataType: schemapb.DataType_VarChar,
 		TypeParams: []*commonpb.KeyValuePair{
 			{Key: common.MaxLengthKey, Value: "256"},
+			{Key: common.EnableAnalyzerKey, Value: "true"},
 		},
 	}
 	varcharBytes, err := proto.Marshal(varcharFieldSchema)
