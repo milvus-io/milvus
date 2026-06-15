@@ -276,12 +276,18 @@ func (impl *shardInterceptor) handleSplitShardMessage(ctx context.Context, msg m
 		}
 		return nil, status.NewUnrecoverableError(err.Error())
 	}
-	// Defensively flush and fence the segment allocation until the split message.
-	// The ManualFlush message written right before the split message should
-	// have sealed all growing segments already.
-	if _, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(collectionID, msg.TimeTick()); err != nil {
+	// Auto-flush every growing segment of the vchannel as of the fence time
+	// tick and embed the sealed segment ids into the message header, exactly
+	// as the AlterCollection schema-change path does. This SplitShard message
+	// is the single authoritative seal record for T_switch — there is no
+	// separate ManualFlush anymore — so the downstream consumers (flusher,
+	// delegator, recovery) learn the sealed set only from here.
+	segmentIDs, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(collectionID, msg.TimeTick())
+	if err != nil {
 		return nil, status.NewUnrecoverableError(err.Error())
 	}
+	header.FlushedSegmentIds = segmentIDs
+	splitShardMsg.OverwriteHeader(header)
 
 	msgID, err := appendOp(ctx, msg)
 	if err != nil {
