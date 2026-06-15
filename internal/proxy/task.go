@@ -547,6 +547,11 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	// validate namespace sharding
+	if err := common.ValidateNamespaceShardingEnabled(t.GetProperties()...); err != nil {
+		return err
+	}
+
 	// Validate timezone
 	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.GetProperties())
 	if exist && !timestamptz.IsTimezoneValid(tz) {
@@ -2177,6 +2182,9 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 				"cannot delete %s; external source/spec are immutable post-create except via RefreshExternalCollection",
 				key)
 		}
+	}
+	if err := common.ValidateNamespaceShardingEnabledNotAltered(t.GetProperties(), t.GetDeleteKeys()); err != nil {
+		return err
 	}
 
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
