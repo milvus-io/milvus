@@ -2187,6 +2187,14 @@ func Test_validateMultiAnalyzerParams(t *testing.T) {
 
 func Test_validateAnalyzer(t *testing.T) {
 	createTestCollectionSchemaWithBM25 := func(fields []*schemapb.FieldSchema, inputFieldName string) *schemapb.CollectionSchema {
+		inputFieldIDs := []int64{}
+		for idx, field := range fields {
+			field.FieldID = int64(common.StartOfUserFieldID + idx)
+			if field.GetName() == inputFieldName {
+				inputFieldIDs = append(inputFieldIDs, field.GetFieldID())
+			}
+		}
+
 		return &schemapb.CollectionSchema{
 			Name:   "test_collection",
 			Fields: fields,
@@ -2194,6 +2202,7 @@ func Test_validateAnalyzer(t *testing.T) {
 				{
 					Name:             "bm25_func",
 					Type:             schemapb.FunctionType_BM25,
+					InputFieldIds:    inputFieldIDs,
 					InputFieldNames:  []string{inputFieldName},
 					OutputFieldNames: []string{"bm25_output"},
 				},
