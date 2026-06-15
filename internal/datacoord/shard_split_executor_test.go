@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -319,6 +321,61 @@ func TestAdvanceRedistributing(t *testing.T) {
 	manager2, _ := newSplitExecutorManager(t, m2, task2, nil, nil, &fakeSplitPlanner{assignErr: errors.New("mock assign error")})
 	manager2.advanceTasks()
 	assert.Len(t, m2.GetSegmentsByChannel("v9"), 1)
+}
+
+func TestAdvanceRedistributingSkipsImportingSegments(t *testing.T) {
+	paramtable.Init()
+	task := fencingTask()
+	task.State = datapb.SplitShardTaskState_SplitShardTaskRedistributing
+	task.SwitchTimeTick = 2000
+
+	// one flushed segment and one still importing on the source vchannel.
+	m := newSplitTestMeta(true, "v0", map[int64]int64{10: 10})
+	m.segments.SetSegment(5000, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID: 5000, CollectionID: 1, PartitionID: 11, InsertChannel: "v0",
+			State: commonpb.SegmentState_Importing, IsImporting: true,
+			Binlogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: 5000, MemorySize: 100}}}},
+		},
+	})
+	manager, catalog := newSplitExecutorManager(t, m, task, nil, nil, &fakeSplitPlanner{})
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Once()
+
+	// only the flushed segment is relabeled; the importing one stays on source.
+	manager.advanceTasks()
+	remaining := m.GetSegmentsByChannel("v0")
+	assert.Len(t, remaining, 1)
+	assert.Equal(t, int64(5000), remaining[0].GetID())
+	assert.True(t, remaining[0].GetIsImporting())
+	// the source is not drained while the importing segment remains.
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, manager.mustGetTask(100).GetState())
+}
+
+func TestAdvanceRedistributingDrainWaitsForImportJob(t *testing.T) {
+	paramtable.Init()
+	task := fencingTask()
+	task.State = datapb.SplitShardTaskState_SplitShardTaskRedistributing
+	task.SwitchTimeTick = 2000
+
+	// no segment remains on the source vchannel.
+	m := newSplitTestMeta(true, "v0", map[int64]int64{})
+	manager, catalog := newSplitExecutorManager(t, m, task, nil, nil, &fakeSplitPlanner{})
+	importMeta := NewMockImportMeta(t)
+	manager.setImportMeta(importMeta)
+
+	// an active import job still targets the source vchannel: stay redistributing
+	// even though the segment scan is empty (the Pending job has no segment yet).
+	importMeta.EXPECT().GetJobBy(mock.Anything, mock.Anything).Return([]ImportJob{
+		&importJob{ImportJob: &datapb.ImportJob{Vchannels: []string{"v0"}, State: internalpb.ImportJobState_Pending}},
+	}).Once()
+	manager.advanceTasks()
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, manager.mustGetTask(100).GetState())
+
+	// once no active import job targets the source, the source is drained.
+	importMeta.EXPECT().GetJobBy(mock.Anything, mock.Anything).Return(nil).Once()
+	catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Once()
+	manager.advanceTasks()
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, manager.mustGetTask(100).GetState())
 }
 
 func TestAbortTaskRefusedPastFence(t *testing.T) {
