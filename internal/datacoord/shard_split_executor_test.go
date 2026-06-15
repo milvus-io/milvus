@@ -23,7 +23,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -34,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
@@ -188,19 +186,11 @@ func TestAdvancePreparing(t *testing.T) {
 func TestAdvanceFencing(t *testing.T) {
 	paramtable.Init()
 
-	newManualFlushResult := func(t *testing.T) *types.AppendResult {
-		extra, err := anypb.New(&messagespb.ManualFlushExtraResponse{SegmentIds: []int64{7}})
-		assert.NoError(t, err)
-		return &types.AppendResult{MessageID: rmq.NewRmqID(1), TimeTick: 1500, Extra: extra}
-	}
-
 	t.Run("fence and initialize targets", func(t *testing.T) {
 		m := newSplitTestMeta(true, "v0", map[int64]int64{10: 80, 11: 40})
 		wal := mock_streaming.NewMockWALAccesser(t)
-		// ManualFlush + SplitShard on the source vchannel.
-		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
-			return msg.MessageType() == message.MessageTypeManualFlush
-		}), mock.Anything).Return(newManualFlushResult(t), nil).Once()
+		// a single SplitShard message fences the source vchannel (the source
+		// streamingnode auto-flushes the growing segments, no ManualFlush).
 		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
 			return msg.MessageType() == message.MessageTypeSplitShard
 		})).Return(&types.AppendResult{MessageID: rmq.NewRmqID(2), TimeTick: 2000}, nil).Once()
@@ -229,9 +219,6 @@ func TestAdvanceFencing(t *testing.T) {
 	t.Run("already fenced without recorded T_switch stays", func(t *testing.T) {
 		m := newSplitTestMeta(true, "v0", map[int64]int64{10: 80, 11: 40})
 		wal := mock_streaming.NewMockWALAccesser(t)
-		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
-			return msg.MessageType() == message.MessageTypeManualFlush
-		}), mock.Anything).Return(newManualFlushResult(t), nil).Once()
 		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
 			return msg.MessageType() == message.MessageTypeSplitShard
 		})).Return(nil, status.NewShardFenced("v0")).Once()

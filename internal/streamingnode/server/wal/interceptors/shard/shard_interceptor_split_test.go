@@ -57,15 +57,19 @@ func TestShardInterceptorSplitShardMessage(t *testing.T) {
 	shardManager.EXPECT().FlushAndFenceSegmentAllocUntil(int64(1), uint64(100)).Return([]int64{7}, nil).Once()
 	shardManager.EXPECT().SplitShard(mock.Anything).Once()
 
-	appended := false
+	var appendedMsg message.MutableMessage
 	msgID, err := i.DoAppend(context.Background(), newTestSplitShardMutableMessage(),
 		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-			appended = true
+			appendedMsg = msg
 			return rmq.NewRmqID(1), nil
 		})
 	assert.NoError(t, err)
-	assert.True(t, appended)
+	assert.NotNil(t, appendedMsg)
 	assert.True(t, msgID.EQ(rmq.NewRmqID(1)))
+	// the auto-flushed segment ids are embedded into the split message header,
+	// the single seal record for T_switch.
+	header := message.MustAsMutableSplitShardMessageV2(appendedMsg).Header()
+	assert.Equal(t, []int64{7}, header.GetFlushedSegmentIds())
 }
 
 func TestShardInterceptorSplitShardMessageOnFencedVChannel(t *testing.T) {
