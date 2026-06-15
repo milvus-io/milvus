@@ -6,6 +6,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 )
 
 // mustAsSpecializedMutableMessage converts a MutableMessage to a specialized MutableMessage.
@@ -185,6 +187,28 @@ func (m *specializedMutableMessageImpl[H, B]) OverwriteBody(body B) {
 	payload, err := proto.Marshal(body)
 	if err != nil {
 		panic(fmt.Sprintf("failed to marshal specialized body, %s", err.Error()))
+	}
+	if ch := m.cipherHeader(); ch != nil {
+		cipher := mustGetCipher()
+		encryptor, safeKey, err := cipher.GetEncryptor(ch.EzId, ch.CollectionId)
+		if err != nil {
+			panic(fmt.Sprintf("failed to get encryptor when overwriting specialized body, %s", err.Error()))
+		}
+		payloadBytes := len(payload)
+		payload, err = encryptor.Encrypt(payload)
+		if err != nil {
+			panic(fmt.Sprintf("failed to encrypt overwritten specialized body, %s", err.Error()))
+		}
+		cipherHeader, err := EncodeProto(&messagespb.CipherHeader{
+			EzId:         ch.EzId,
+			CollectionId: ch.CollectionId,
+			SafeKey:      safeKey,
+			PayloadBytes: int64(payloadBytes),
+		})
+		if err != nil {
+			panic(fmt.Sprintf("failed to encode overwritten specialized body cipher header, %s", err.Error()))
+		}
+		m.properties.Set(messageCipherHeader, cipherHeader)
 	}
 	m.payload = payload
 }

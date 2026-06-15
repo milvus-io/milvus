@@ -8,6 +8,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/shard/mock_shards"
@@ -19,6 +23,87 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 )
+
+func TestShardInterceptorLogsOmittedSchemaVersionAsNotProvided(t *testing.T) {
+	core, logs := observer.New(zapcore.WarnLevel)
+	logger := &log.MLogger{Logger: zap.New(core)}
+	b := NewInterceptorBuilder()
+	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().Logger().Return(logger).Maybe()
+	i := b.Build(&interceptors.InterceptorBuildParam{
+		ShardManager: shardManager,
+	})
+	defer i.Close()
+
+	msg := message.NewInsertMessageBuilderV1().
+		WithVChannel("v1").
+		WithHeader(&messagespb.InsertMessageHeader{
+			CollectionId: 1,
+			Partitions: []*messagespb.PartitionSegmentAssignment{
+				{
+					PartitionId: 1,
+					Rows:        1,
+					BinarySize:  100,
+				},
+			},
+		}).
+		WithBody(&msgpb.InsertRequest{}).
+		MustBuildMutable().WithTimeTick(1)
+
+	insertHdrMatcher := mock.MatchedBy(func(h *message.InsertMessageHeader) bool {
+		return h != nil && h.GetCollectionId() == int64(1) && h.SchemaVersion == nil
+	})
+	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(insertHdrMatcher).Return(int32(5), shards.ErrCollectionSchemaVersionNotMatch)
+
+	msgID, err := i.DoAppend(context.Background(), msg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		return rmq.NewRmqID(1), nil
+	})
+	assert.Error(t, err)
+	assert.Nil(t, msgID)
+
+	entries := logs.FilterMessage("insertMessage schema version mismatch").All()
+	assert.Len(t, entries, 1)
+	assert.Equal(t, false, entries[0].ContextMap()["schemaVersionProvided"])
+}
+
+func TestShardInterceptorReportsExplicitZeroSchemaVersionInMismatchError(t *testing.T) {
+	b := NewInterceptorBuilder()
+	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
+	i := b.Build(&interceptors.InterceptorBuildParam{
+		ShardManager: shardManager,
+	})
+	defer i.Close()
+
+	zero := proto.Int32(0)
+	msg := message.NewInsertMessageBuilderV1().
+		WithVChannel("v1").
+		WithHeader(&messagespb.InsertMessageHeader{
+			CollectionId: 1,
+			Partitions: []*messagespb.PartitionSegmentAssignment{
+				{
+					PartitionId: 1,
+					Rows:        1,
+					BinarySize:  100,
+				},
+			},
+			SchemaVersion: zero,
+		}).
+		WithBody(&msgpb.InsertRequest{}).
+		MustBuildMutable().WithTimeTick(1)
+
+	insertHdrMatcher := mock.MatchedBy(func(h *message.InsertMessageHeader) bool {
+		return h != nil && h.GetCollectionId() == int64(1) && h.SchemaVersion != nil && h.GetSchemaVersion() == 0
+	})
+	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(insertHdrMatcher).Return(int32(5), shards.ErrCollectionSchemaVersionNotMatch)
+
+	msgID, err := i.DoAppend(context.Background(), msg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		return rmq.NewRmqID(1), nil
+	})
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "input schema version: 0")
+	assert.Nil(t, msgID)
+}
 
 func TestShardInterceptorDeleteAppliesBeforeAppend(t *testing.T) {
 	b := NewInterceptorBuilder()
