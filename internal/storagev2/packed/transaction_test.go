@@ -16,6 +16,7 @@ package packed
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -29,6 +30,34 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestWriteFileLocalStorageStripsRootPath(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	dir := t.TempDir()
+	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+	})
+
+	storageConfig := &indexpb.StorageConfig{
+		RootPath:    dir,
+		StorageType: "local",
+	}
+
+	filePath := filepath.Join(dir, "insert_log/1/2/3/_stats/bloom_filter.100/1")
+	require.NoError(t, WriteFile(storageConfig, filePath, []byte("bloom-filter")))
+
+	got, err := os.ReadFile(filePath)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("bloom-filter"), got)
+
+	doubleRootPath := filepath.Join(dir, dir, "insert_log/1/2/3/_stats/bloom_filter.100/1")
+	_, err = os.Stat(doubleRootPath)
+	assert.True(t, os.IsNotExist(err), "local WriteFile must not prepend rootPath twice")
+}
 
 func TestDeltaLogEntry(t *testing.T) {
 	entry := DeltaLogEntry{
