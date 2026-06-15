@@ -1536,8 +1536,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::shared_ptr<const SegmentLoadInfo> segment_load_info_;
 
     // Serializes top-level writers of segment_load_info_
-    // (Reopen(pb), SetLoadInfo, Load) so their diff → publish → ApplyLoadDiff
-    // sequences never interleave. Does NOT block readers — reader paths access
+    // (Reopen(pb), SetLoadInfo, Load) so their diff/apply/publish sequences
+    // never interleave. Does NOT block readers — reader paths access
     // segment_load_info_ via atomic_load.
     // Lock order: reopen_mutex_ → mutex_ (outer → inner) only. Never inverse,
     // and reader paths that take mutex_ must not take reopen_mutex_.
