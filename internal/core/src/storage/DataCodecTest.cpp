@@ -452,7 +452,7 @@ TEST(storage, ExternalVectorArrayByteListNormalizesInnerVectors) {
 
     auto normalized_list =
         std::static_pointer_cast<arrow::ListArray>(normalized);
-    EXPECT_EQ(normalized_list->length(), 2);     // two rows
+    EXPECT_EQ(normalized_list->length(), 2);         // two rows
     EXPECT_EQ(normalized_list->value_length(0), 1);  // row0 has 1 vector
     EXPECT_EQ(normalized_list->value_length(1), 2);  // row1 has 2 vectors
     // Inner vectors normalized from raw uint8 byte lists to FixedSizeBinary.
