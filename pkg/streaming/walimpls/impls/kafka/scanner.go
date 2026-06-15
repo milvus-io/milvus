@@ -52,7 +52,7 @@ func (s *scannerImpl) executeConsume() {
 		msg, err := s.consumer.ReadMessage(200 * time.Millisecond)
 		if err != nil {
 			if s.Context().Err() != nil {
-				// context canceled, means the the scanner is closed.
+				// context canceled, means the scanner is closed.
 				s.Finish(nil)
 				return
 			}

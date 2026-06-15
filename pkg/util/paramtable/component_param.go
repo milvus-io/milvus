@@ -1986,7 +1986,7 @@ Segments with smaller size than this parameter will not be indexed, and will be 
 		Key:          "rootCoord.maxGeneralCapacity",
 		Version:      "2.3.5",
 		DefaultValue: "65536",
-		Doc:          "upper limit for the sum of of product of partitionNumber and shardNumber",
+		Doc:          "upper limit for the sum of product of partitionNumber and shardNumber",
 		Export:       true,
 		Formatter: func(v string) string {
 			if getAsInt(v) < 512 {
