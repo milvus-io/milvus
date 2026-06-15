@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -1743,12 +1744,20 @@ func (op *lambdaOperator) run(ctx context.Context, span trace.Span, inputs ...an
 type endOperator struct {
 	outputFieldNames []string
 	fieldSchemas     []*schemapb.FieldSchema
+	roundDecimal     int64
 }
 
 func newEndOperator(t *searchTask, _ map[string]any) (operator, error) {
+	roundDecimal := int64(-1)
+	if t.GetIsAdvanced() {
+		roundDecimal = t.rankParams.GetRoundDecimal()
+	} else if len(t.queryInfos) > 0 && t.queryInfos[0] != nil {
+		roundDecimal = t.queryInfos[0].GetRoundDecimal()
+	}
 	return &endOperator{
 		outputFieldNames: t.translatedOutputFields,
 		fieldSchemas:     typeutil.GetAllFieldSchemas(t.schema.CollectionSchema),
+		roundDecimal:     roundDecimal,
 	}, nil
 }
 
@@ -1768,7 +1777,18 @@ func (op *endOperator) run(ctx context.Context, span trace.Span, inputs ...any) 
 	})
 	allSearchCount := aggregatedAllSearchCount(inputs[1].([]*milvuspb.SearchResults))
 	result.GetResults().AllSearchCount = allSearchCount
+	roundSearchScores(result.GetResults(), op.roundDecimal)
 	return []any{result}, nil
+}
+
+func roundSearchScores(result *schemapb.SearchResultData, roundDecimal int64) {
+	if result == nil || roundDecimal < 0 {
+		return
+	}
+	multiplier := math.Pow(10.0, float64(roundDecimal))
+	for i, score := range result.Scores {
+		result.Scores[i] = float32(math.Floor(float64(score)*multiplier+0.5) / multiplier)
+	}
 }
 
 func newHighlightOperator(t *searchTask, _ map[string]any) (operator, error) {
