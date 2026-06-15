@@ -3,6 +3,9 @@
 How to produce and return errors in Milvus server code — the day-to-day how-to.
 For the underlying rules, the sentinel naming convention, and the enforcement
 roadmap, see [error_sentinel_convention.md](./error_sentinel_convention.md). For
+real positive/negative examples of the mistakes that survive review — wrong
+classification, masked codes, broken `errors.Is` chains — see
+[error_handling_casebook.md](./error_handling_casebook.md). For
 the canonical numeric code list, see the sentinel definitions in
 [`pkg/util/merr/errors.go`](../../pkg/util/merr/errors.go). (The
 [appendix_d_error_code.md](../developer_guides/appendix_d_error_code.md)
@@ -173,7 +176,29 @@ would have healed it, and a dashboard blames users for Milvus bugs.
 
 - **Don't mark a shared sentinel InputError globally** to fix one callsite —
   every internal `retry.Do` loop waiting on that error stops retrying. Use
-  boundary marking instead.
+  boundary marking instead. Pre-flight scan before adding
+  `WithErrorType(InputError)` to a sentinel (or stamping at a new boundary).
+  The retrier is usually a **caller in a different file** than the producer,
+  so a same-file overlap check is not enough — trace one level up the call
+  graph:
+
+  ```bash
+  # 1. every site that originates the code (substitute the real wrapper symbol):
+  grep -rn "WrapErrServiceUnavailable" internal/ pkg/ --include='*.go'
+  # 2. for each producing function from step 1, find its callers…
+  grep -rn "CheckAllQnReady" internal/ --include='*.go'
+  # 3. …and check whether any caller invokes it inside a retry.Do body:
+  grep -rn -A8 "retry\.Do" internal/rootcoord/create_collection_task.go | grep CheckAllQnReady
+  ```
+
+  A real save (the example the commands above trace):
+  `WrapErrServiceUnavailableMsg("file resource not synced, …")` originates in
+  `internal/coordinator/file_resource_observer.go` (`CheckAllQnReady`); the
+  `retry.Do` polling it during CreateCollection lives one call up, in
+  `internal/rootcoord/create_collection_task.go` — a same-file scan finds
+  nothing. That error must ride a retriable system code
+  (`ErrServiceUnavailable`), never an InputError-marked one. See casebook
+  Pattern 5.
 - **Don't classify in a helper** what only the boundary can know. The same
   not-found is the user's fault when the name came from a request, and a
   system fault when it came from internal state — stamp at the chokepoint
@@ -282,6 +307,12 @@ Rules for sentinels (full version in
 - It must be `errors.Is`-caught and translated to a typed merr (or
   `merr.Success()`) **before** crossing any gRPC boundary. A sentinel that
   reaches the wire is just an opaque `Code=65535`.
+- **Converting an existing sentinel to a typed merr changes `errors.Is`
+  semantics**: `merr.Is` matches by numeric code alone, so every
+  `errors.Is(err, thatSentinel)` guard widens from "this exact signal" to
+  "any error sharing the code". Run
+  `grep -rn "errors.Is(.*<sentinelName>"` first and audit every hit — see
+  casebook Pattern 6 for the near-miss this prevents.
 
 When unsure between 3.1 and 3.3: if nobody does `errors.Is` on it, you don't need
 a sentinel — just originate a typed merr with a message (3.1).
