@@ -322,6 +322,7 @@ enable_traceback = False
 DEFAULT_FMT = "[start time:{start_time}][time cost:{elapsed:0.8f}s][operation_name:{operation_name}][collection name:{collection_name}] -> {result!r}"
 
 request_records = RequestRecords()
+MAX_ERROR_SAMPLE_LENGTH = 500
 
 
 def create_index_params_from_dict(field_name: str, index_param_dict: dict) -> IndexParams:
@@ -360,6 +361,26 @@ def normalize_error_message(error_msg):
     return msg
 
 
+def compact_error_message(error_msg):
+    msg = str(error_msg).replace("\n", "\\n")
+    msg = re.sub(r"\s+", " ", msg).strip()
+    return msg if len(msg) <= MAX_ERROR_SAMPLE_LENGTH else msg[:MAX_ERROR_SAMPLE_LENGTH] + "..."
+
+
+def record_error_message(checker, operation_name, error_msg, start_time=None):
+    normalized_msg = normalize_error_message(error_msg) or "Unknown error"
+    sample_msg = compact_error_message(error_msg)
+    collection_name = getattr(checker, "c_name", "")
+    if not hasattr(checker, "error_message_samples"):
+        checker.error_message_samples = {}
+    checker.error_message_samples.setdefault(
+        normalized_msg,
+        f"type={normalized_msg}; operation={operation_name}; "
+        f"collection={collection_name}; time={start_time}; sample={sample_msg}",
+    )
+    checker.error_messages = set(checker.error_message_samples.values())
+
+
 def trace(fmt=DEFAULT_FMT, prefix="test", flag=True):
     def decorate(func):
         @functools.wraps(func)
@@ -396,14 +417,13 @@ def trace(fmt=DEFAULT_FMT, prefix="test", flag=True):
             else:
                 self._fail += 1
                 self.fail_records.append(("failure", self._succ + self._fail, start_time, start_time_ts))
-                # Collect unique error messages (normalized to group similar errors)
                 if hasattr(res, "message"):
-                    normalized_msg = normalize_error_message(res.message)
+                    error_msg = res.message
                 elif res is not None:
-                    normalized_msg = normalize_error_message(str(res))
+                    error_msg = str(res)
                 else:
-                    normalized_msg = "Unknown error"
-                self.error_messages.add(normalized_msg)
+                    error_msg = "Unknown error"
+                record_error_message(self, operation_name, error_msg, start_time)
             return res, result
 
         return inner_wrapper
@@ -432,6 +452,9 @@ def exception_handler():
                     log_message = f"Error in {function_name}: {log_e}"
                 log.exception(log_message)
                 log.error(log_e)
+                if hasattr(self, "error_messages"):
+                    start_time = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d %H:%M:%S.%f")
+                    record_error_message(self, function_name, e_str, start_time)
                 return Error(e), False
 
         return inner_wrapper
@@ -462,6 +485,7 @@ class Checker:
         self._fail = 0
         self.fail_records = []
         self.error_messages = set()  # Store unique error messages
+        self.error_message_samples = {}
         self._keep_running = True
         self.rsp_times = []
         self.average_time = 0
@@ -786,6 +810,7 @@ class Checker:
         self.rsp_times = []
         self.fail_records = []
         self.error_messages = set()
+        self.error_message_samples = {}
         self.average_time = 0
 
     def get_rto(self):
@@ -848,6 +873,7 @@ class ExternalTableChecker(Checker):
         self._fail = 0
         self.fail_records = []
         self.error_messages = set()
+        self.error_message_samples = {}
         self.consistency_errors = []
         self._keep_running = True
         self.rsp_times = []
