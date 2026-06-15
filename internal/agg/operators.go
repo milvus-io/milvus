@@ -1,14 +1,13 @@
 package agg
 
 import (
-	"fmt"
-
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func terminateSingleSlot(slots []*FieldValue) (any, error) {
 	if len(slots) != 1 {
-		return nil, fmt.Errorf("aggregate expects 1 accumulator slot, got %d", len(slots))
+		return nil, merr.WrapErrParameterInvalidMsg("aggregate expects 1 accumulator slot, got %d", len(slots))
 	}
 	if slots[0] == nil || slots[0].IsNull() {
 		return nil, nil
@@ -18,7 +17,7 @@ func terminateSingleSlot(slots []*FieldValue) (any, error) {
 
 func terminateAvg(slots []*FieldValue) (any, error) {
 	if len(slots) != 2 {
-		return nil, fmt.Errorf("avg expects 2 accumulator slots, got %d", len(slots))
+		return nil, merr.WrapErrParameterInvalidMsg("avg expects 2 accumulator slots, got %d", len(slots))
 	}
 	sum := slots[0]
 	count := slots[1]
@@ -52,7 +51,7 @@ func fieldValueToFloat64(v any) (float64, error) {
 	case float64:
 		return value, nil
 	default:
-		return 0, fmt.Errorf("avg expects numeric accumulator, got %T", v)
+		return 0, merr.WrapErrParameterInvalidMsg("avg expects numeric accumulator, got %T", v)
 	}
 }
 
@@ -80,7 +79,7 @@ func (sum *SumAggregate) NewState() []*FieldValue {
 
 func (sum *SumAggregate) UpdateState(slots []*FieldValue, new *FieldValue) error {
 	if len(slots) != 1 {
-		return fmt.Errorf("aggregate expects 1 accumulator slot, got %d", len(slots))
+		return merr.WrapErrParameterInvalidMsg("aggregate expects 1 accumulator slot, got %d", len(slots))
 	}
 	return sum.Update(slots[0], new)
 }
@@ -121,7 +120,7 @@ func (count *CountAggregate) NewState() []*FieldValue {
 
 func (count *CountAggregate) UpdateState(slots []*FieldValue, new *FieldValue) error {
 	if len(slots) != 1 {
-		return fmt.Errorf("aggregate expects 1 accumulator slot, got %d", len(slots))
+		return merr.WrapErrParameterInvalidMsg("aggregate expects 1 accumulator slot, got %d", len(slots))
 	}
 	if new == nil || new.IsNull() {
 		return nil
@@ -166,7 +165,7 @@ func (avg *AvgAggregate) Name() string {
 }
 
 func (avg *AvgAggregate) Update(target *FieldValue, new *FieldValue) error {
-	return fmt.Errorf("avg aggregate updates require aggregate state slots")
+	return merr.WrapErrServiceInternalMsg("avg aggregate updates require aggregate state slots")
 }
 
 func (avg *AvgAggregate) NewState() []*FieldValue {
@@ -175,7 +174,7 @@ func (avg *AvgAggregate) NewState() []*FieldValue {
 
 func (avg *AvgAggregate) UpdateState(slots []*FieldValue, new *FieldValue) error {
 	if len(slots) != 2 {
-		return fmt.Errorf("avg expects 2 accumulator slots, got %d", len(slots))
+		return merr.WrapErrParameterInvalidMsg("avg expects 2 accumulator slots, got %d", len(slots))
 	}
 	if err := avg.sum.Update(slots[0], new); err != nil {
 		return err
@@ -204,7 +203,7 @@ func (avg *AvgAggregate) OriginalName() string {
 
 func updateOrderedState(target *FieldValue, new *FieldValue, op string) error {
 	if target == nil || new == nil {
-		return fmt.Errorf("target or new field value is nil")
+		return merr.WrapErrServiceInternalMsg("target or new field value is nil")
 	}
 	if new.IsNull() {
 		return nil
@@ -234,41 +233,41 @@ func shouldReplaceOrderedValue(target, new any, op string) (bool, error) {
 	case int:
 		newVal, ok := new.(int)
 		if !ok {
-			return false, fmt.Errorf("type mismatch: target is int, new is %T", new)
+			return false, merr.WrapErrParameterInvalidMsg("type mismatch: target is int, new is %T", new)
 		}
 		return shouldReplaceOrdered(newVal, targetVal, op), nil
 	case int32:
 		newVal, ok := new.(int32)
 		if !ok {
-			return false, fmt.Errorf("type mismatch: target is int32, new is %T", new)
+			return false, merr.WrapErrParameterInvalidMsg("type mismatch: target is int32, new is %T", new)
 		}
 		return shouldReplaceOrdered(newVal, targetVal, op), nil
 	case int64:
 		newVal, ok := new.(int64)
 		if !ok {
-			return false, fmt.Errorf("type mismatch: target is int64, new is %T", new)
+			return false, merr.WrapErrParameterInvalidMsg("type mismatch: target is int64, new is %T", new)
 		}
 		return shouldReplaceOrdered(newVal, targetVal, op), nil
 	case float32:
 		newVal, ok := new.(float32)
 		if !ok {
-			return false, fmt.Errorf("type mismatch: target is float32, new is %T", new)
+			return false, merr.WrapErrParameterInvalidMsg("type mismatch: target is float32, new is %T", new)
 		}
 		return shouldReplaceOrdered(newVal, targetVal, op), nil
 	case float64:
 		newVal, ok := new.(float64)
 		if !ok {
-			return false, fmt.Errorf("type mismatch: target is float64, new is %T", new)
+			return false, merr.WrapErrParameterInvalidMsg("type mismatch: target is float64, new is %T", new)
 		}
 		return shouldReplaceOrdered(newVal, targetVal, op), nil
 	case string:
 		newVal, ok := new.(string)
 		if !ok {
-			return false, fmt.Errorf("type mismatch: target is string, new is %T", new)
+			return false, merr.WrapErrParameterInvalidMsg("type mismatch: target is string, new is %T", new)
 		}
 		return shouldReplaceOrdered(newVal, targetVal, op), nil
 	default:
-		return false, fmt.Errorf("unsupported type for %s aggregation: %T", op, target)
+		return false, merr.WrapErrParameterInvalidMsg("unsupported type for %s aggregation: %T", op, target)
 	}
 }
 
@@ -299,7 +298,7 @@ func (min *MinAggregate) NewState() []*FieldValue {
 
 func (min *MinAggregate) UpdateState(slots []*FieldValue, new *FieldValue) error {
 	if len(slots) != 1 {
-		return fmt.Errorf("aggregate expects 1 accumulator slot, got %d", len(slots))
+		return merr.WrapErrParameterInvalidMsg("aggregate expects 1 accumulator slot, got %d", len(slots))
 	}
 	return min.Update(slots[0], new)
 }
@@ -339,7 +338,7 @@ func (max *MaxAggregate) NewState() []*FieldValue {
 
 func (max *MaxAggregate) UpdateState(slots []*FieldValue, new *FieldValue) error {
 	if len(slots) != 1 {
-		return fmt.Errorf("aggregate expects 1 accumulator slot, got %d", len(slots))
+		return merr.WrapErrParameterInvalidMsg("aggregate expects 1 accumulator slot, got %d", len(slots))
 	}
 	return max.Update(slots[0], new)
 }

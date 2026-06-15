@@ -270,7 +270,7 @@ func buildRerankChainInternal(
 ) (*FuncChain, error) {
 	rerankerName := rerank.GetRerankName(funcSchema)
 	if rerankerName == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("rerank_builder: reranker name not specified")
+		return nil, merr.WrapErrParameterMissingMsg("rerank_builder: reranker name not specified")
 	}
 
 	if alloc == nil {
@@ -582,13 +582,13 @@ func parseDecayParams(funcSchema *schemapb.FunctionSchema) (MergeStrategy, bool,
 	}
 
 	if !functionSet {
-		return "", false, nil, merr.WrapErrParameterInvalidMsg("decay function not specified")
+		return "", false, nil, merr.WrapErrParameterMissingMsg("decay function not specified")
 	}
 	if !originSet {
-		return "", false, nil, merr.WrapErrParameterInvalidMsg("decay origin not specified")
+		return "", false, nil, merr.WrapErrParameterMissingMsg("decay origin not specified")
 	}
 	if !scaleSet {
-		return "", false, nil, merr.WrapErrParameterInvalidMsg("decay scale not specified")
+		return "", false, nil, merr.WrapErrParameterMissingMsg("decay scale not specified")
 	}
 
 	// Convert score_mode to MergeStrategy
@@ -664,7 +664,7 @@ func parseModelQueries(funcSchema *schemapb.FunctionSchema) ([]string, error) {
 				return nil, merr.WrapErrParameterInvalidMsg("rerank_builder: parse rerank params [queries] failed: %v", err)
 			}
 			if len(queries) == 0 {
-				return nil, merr.WrapErrParameterInvalidMsg("rerank_builder: rerank queries must not be empty")
+				return nil, merr.WrapErrParameterMissingMsg("rerank_builder: rerank queries must not be empty")
 			}
 			return queries, nil
 		}

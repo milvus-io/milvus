@@ -52,10 +52,10 @@ func NewFilterOp(function types.FunctionExpr, inputCols []string) (*FilterOp, er
 	outputTypes := function.OutputDataTypes()
 	if outputTypes != nil {
 		if len(outputTypes) != 1 {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("filter_op: function must return exactly 1 output, got %d", len(outputTypes)))
+			return nil, merr.WrapErrServiceInternalMsg("filter_op: function must return exactly 1 output, got %d", len(outputTypes))
 		}
 		if outputTypes[0].ID() != arrow.BOOL {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("filter_op: function must return boolean type, got %s", outputTypes[0].Name()))
+			return nil, merr.WrapErrServiceInternalMsg("filter_op: function must return boolean type, got %s", outputTypes[0].Name())
 		}
 	}
 
@@ -82,7 +82,7 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 	// Execute FunctionExpr to get boolean result
 	outputs, err := o.function.Execute(ctx, inputs)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("filter_op: function execution failed: %v", err))
+		return nil, merr.WrapErrFunctionFailed(err, "filter_op: function execution failed")
 	}
 
 	// Validate output at runtime (especially important for dynamic output types)
@@ -92,7 +92,7 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 				out.Release()
 			}
 		}
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("filter_op: function must return exactly 1 output, got %d", len(outputs)))
+		return nil, merr.WrapErrFunctionFailedMsg("filter_op: function must return exactly 1 output, got %d", len(outputs))
 	}
 
 	filterCol := outputs[0]
@@ -100,7 +100,7 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 
 	// Validate the output is boolean type
 	if filterCol.DataType().ID() != arrow.BOOL {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("filter_op: function must return boolean type, got %s", filterCol.DataType().Name()))
+		return nil, merr.WrapErrFunctionFailedMsg("filter_op: function must return boolean type, got %s", filterCol.DataType().Name())
 	}
 
 	// Create builder for result DataFrame
@@ -113,7 +113,7 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 	for chunkIdx := range input.NumChunks() {
 		boolChunk, ok := filterCol.Chunk(chunkIdx).(*array.Boolean)
 		if !ok {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("filter_op: chunk %d is not a boolean array", chunkIdx))
+			return nil, merr.WrapErrFunctionFailedMsg("filter_op: chunk %d is not a boolean array", chunkIdx)
 		}
 		filterChunks[chunkIdx] = boolChunk
 
@@ -143,7 +143,7 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 
 			filtered, err := filterArray(ctx.Pool(), dataChunk, filterChunks[chunkIdx])
 			if err != nil {
-				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("filter_op: column %s: %v", colName, err))
+				return nil, merr.WrapErrFunctionFailed(err, "filter_op: column %s", colName)
 			}
 			collector.Set(colName, chunkIdx, filtered)
 		}
@@ -175,14 +175,14 @@ func filterArray(pool memory.Allocator, data arrow.Array, mask *array.Boolean) (
 // NewFilterOpFromRepr creates a FilterOp from an OperatorRepr.
 func NewFilterOpFromRepr(repr *OperatorRepr) (Operator, error) {
 	if repr.Function == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("filter_op: function is required")
+		return nil, merr.WrapErrParameterMissingMsg("filter_op: function is required")
 	}
 	fn, err := FunctionFromRepr(repr.Function)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("filter function: %v", err))
+		return nil, merr.WrapErrParameterInvalidMsg("filter function: %v", err)
 	}
 	if len(repr.Inputs) == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("filter_op: inputs is required")
+		return nil, merr.WrapErrParameterMissingMsg("filter_op: inputs is required")
 	}
 	return NewFilterOp(fn, repr.Inputs)
 }

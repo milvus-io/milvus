@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -142,11 +142,11 @@ func (r *recoveryStorageImpl) GetSchema(ctx context.Context, vchannel string, ti
 			if _, schema = vchannelInfo.GetSchema(0); schema != nil {
 				return schema, nil
 			}
-			return nil, errors.Errorf("critical error: schema not found, vchannel: %s, timetick: %d", vchannel, timetick)
+			return nil, status.NewInner("critical error: schema not found, vchannel: %s, timetick: %d", vchannel, timetick)
 		}
 		return schema, nil
 	}
-	return nil, errors.Errorf("critical error: vchannel not found, vchannel: %s, timetick: %d", vchannel, timetick)
+	return nil, status.NewInner("critical error: vchannel not found, vchannel: %s, timetick: %d", vchannel, timetick)
 }
 
 // ObserveMessage is called when a new message is observed.

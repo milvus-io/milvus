@@ -20,8 +20,11 @@ import (
 	"context"
 	"fmt"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -90,6 +93,15 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForTransferReplica(ctx cont
 	msg, err := job.GenerateAlterLoadConfigMessage(ctx, alterLoadConfigReq)
 	if err != nil {
 		return err
+	}
+	if msg == nil {
+		// The replica distribution already matches the request; the transfer is
+		// an idempotent no-op and succeeds without broadcasting.
+		log.Ctx(ctx).Info("transfer replica ignored, load config is unchanged",
+			zap.Int64("collectionID", req.GetCollectionID()),
+			zap.String("sourceResourceGroup", req.GetSourceResourceGroup()),
+			zap.String("targetResourceGroup", req.GetTargetResourceGroup()))
+		return nil
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

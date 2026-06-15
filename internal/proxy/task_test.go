@@ -1519,7 +1519,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		Params.Save(Params.ProxyCfg.MustUsePartitionKey.Key, "true")
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorIs(t, err, merr.ErrParameterMissing)
 		Params.Reset(Params.ProxyCfg.MustUsePartitionKey.Key)
 
 		task.Schema = []byte{0x1, 0x2, 0x3, 0x4}
@@ -6091,6 +6091,8 @@ func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
 }
 
 func TestAlterCollectionField(t *testing.T) {
+	paramtable.Init()
+
 	qc := NewMixCoordMock()
 	InitMetaCache(context.Background(), qc)
 	collectionName := "test_alter_collection_field"
@@ -6301,6 +6303,27 @@ func TestAlterCollectionField(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("update array field max_capacity with custom limit", func(t *testing.T) {
+		err := paramtable.Get().Save(paramtable.Get().ProxyCfg.MaxArrayCapacity.Key, "5000")
+		assert.NoError(t, err)
+		defer paramtable.Get().Reset(paramtable.Get().ProxyCfg.MaxArrayCapacity.Key)
+
+		task := &alterCollectionFieldTask{
+			AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: collectionName,
+				FieldName:      "array_field",
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.MaxCapacityKey, Value: "5000"},
+				},
+			},
+			mixCoord: qc,
+		}
+
+		err = task.PreExecute(context.Background())
+		assert.NoError(t, err)
+	})
 }
 
 // constructCollectionSchemaWithStructArrayField constructs a collection schema specifically for testing StructArrayField
@@ -7585,7 +7608,7 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		task := buildTask(req, oldSchema)
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorIs(t, err, merr.ErrParameterMissing)
 	})
 
 	t.Run("PreExecute multiple fieldInfos", func(t *testing.T) {

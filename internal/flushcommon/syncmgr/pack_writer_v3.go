@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -325,7 +326,7 @@ func (bw *BulkPackWriterV3) resolveInsertWriterFormats() (string, []string, erro
 		if version != packed.ManifestEarliest {
 			for _, columnGroup := range bw.columnGroups {
 				if columnGroup.Format == "" {
-					return "", nil, fmt.Errorf("column group %d fields %v missing format for existing manifest %s",
+					return "", nil, merr.WrapErrDataIntegrityMsg("column group %d fields %v missing format for existing manifest %s",
 						columnGroup.GroupID, columnGroup.Fields, bw.initialManifestPath)
 				}
 			}
@@ -346,7 +347,7 @@ func (bw *BulkPackWriterV3) writeDelta(ctx context.Context, pack *SyncPack, base
 
 	pkField, err := typeutil.GetPrimaryFieldSchema(bw.schema)
 	if err != nil {
-		return nil, nil, fmt.Errorf("primary key field not found: %w", err)
+		return nil, nil, merr.Wrap(err, "primary key field not found")
 	}
 
 	logID, err := bw.allocator.AllocOne()
@@ -361,20 +362,20 @@ func (bw *BulkPackWriterV3) writeDelta(ctx context.Context, pack *SyncPack, base
 		storage.WithStorageConfig(bw.storageConfig),
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create deltalog writer: %w", err)
+		return nil, nil, merr.Wrap(err, "failed to create deltalog writer")
 	}
 
 	record, _, _, err := storage.BuildDeleteRecord(pack.deltaData.Pks, pack.deltaData.Tss)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to build delete record: %w", err)
+		return nil, nil, merr.Wrap(err, "failed to build delete record")
 	}
 	defer record.Release()
 
 	if err := writer.Write(record); err != nil {
-		return nil, nil, fmt.Errorf("failed to write delta record: %w", err)
+		return nil, nil, merr.Wrap(err, "failed to write delta record")
 	}
 	if err := writer.Close(); err != nil {
-		return nil, nil, fmt.Errorf("failed to close delta writer: %w", err)
+		return nil, nil, merr.Wrap(err, "failed to close delta writer")
 	}
 
 	bw.sizeWritten += pack.deltaData.Size()

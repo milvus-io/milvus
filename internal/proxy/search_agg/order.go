@@ -1,8 +1,9 @@
 package search_agg
 
 import (
-	"fmt"
 	"sort"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func applyOrderAndSize(buckets []*AggBucketResult, level LevelContext) ([]*AggBucketResult, error) {
@@ -72,7 +73,7 @@ func compareBucketKeys(a, b map[int64]any, ownFieldIDs []int64) (int, error) {
 	for _, fieldID := range ownFieldIDs {
 		cmp, err := compareValues(a[fieldID], b[fieldID])
 		if err != nil {
-			return 0, fmt.Errorf("compare _key field %d failed: %w", fieldID, err)
+			return 0, merr.WrapErrServiceInternalMsg("compare _key field %d failed: %v", fieldID, err)
 		}
 		if cmp != 0 {
 			return cmp, nil

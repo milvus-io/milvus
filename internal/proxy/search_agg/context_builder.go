@@ -1,7 +1,6 @@
 package search_agg
 
 import (
-	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -10,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -87,7 +87,7 @@ func NewContext(
 		}
 		plans, err := compileMetricPlans(levels[i].Metrics)
 		if err != nil {
-			return nil, fmt.Errorf("level %d metric compile failed: %w", i, err)
+			return nil, merr.Wrapf(err, "level %d metric compile failed", i)
 		}
 		levels[i].metricPlans = plans
 	}
@@ -132,7 +132,7 @@ func compileMetricPlans(metrics map[string]MetricSpec) ([]metricPlan, error) {
 	for _, alias := range aliases {
 		plan, err := buildMetricPlan(alias, metrics[alias])
 		if err != nil {
-			return nil, fmt.Errorf("metric %q: %w", alias, err)
+			return nil, merr.Wrapf(err, "metric %q", alias)
 		}
 		plans = append(plans, plan)
 	}
@@ -175,7 +175,7 @@ func deriveTopKAndGroupSizeChecked(levels []LevelContext) (topK, groupSize int64
 		var ok bool
 		topK, ok = checkedMulInt64(topK, candidateSize(lvl))
 		if !ok {
-			return 0, 0, fmt.Errorf("search_aggregation derived topK overflows int64")
+			return 0, 0, merr.WrapErrParameterInvalidMsg("search_aggregation derived topK overflows int64")
 		}
 	}
 	return topK, deriveGroupSize(levels), nil
@@ -197,14 +197,14 @@ func validateSearchAggregationResultEntries(nq, topK, groupSize, maxEntries int6
 	}
 	nqTopK, ok := checkedMulInt64(nq, topK)
 	if !ok {
-		return fmt.Errorf("number of search_aggregation result entries is too large")
+		return merr.WrapErrParameterInvalidMsg("number of search_aggregation result entries is too large")
 	}
 	entries, ok := checkedMulInt64(nqTopK, groupSize)
 	if !ok {
-		return fmt.Errorf("number of search_aggregation result entries is too large")
+		return merr.WrapErrParameterInvalidMsg("number of search_aggregation result entries is too large")
 	}
 	if entries > maxEntries {
-		return fmt.Errorf("number of search_aggregation result entries is too large")
+		return merr.WrapErrParameterInvalidMsg("number of search_aggregation result entries is too large")
 	}
 	return nil
 }
@@ -239,17 +239,17 @@ const maxAggregationLevels = 4
 
 func resolveAggregationSpec(groupBy *commonpb.SearchAggregationSpec, schema *schemapb.CollectionSchema) (*resolvedAggregationSpec, error) {
 	if groupBy == nil {
-		return nil, fmt.Errorf("group_by spec is nil")
+		return nil, merr.WrapErrParameterInvalidMsg("group_by spec is nil")
 	}
 	if schema == nil {
-		return nil, fmt.Errorf("collection schema is nil")
+		return nil, merr.WrapErrParameterInvalidMsg("collection schema is nil")
 	}
 
 	depth := 0
 	for cur := groupBy; cur != nil; cur = cur.GetSubAggregation() {
 		depth++
 		if depth > maxAggregationLevels {
-			return nil, fmt.Errorf("search_aggregation nesting exceeds max %d levels", maxAggregationLevels)
+			return nil, merr.WrapErrParameterInvalidMsg("search_aggregation nesting exceeds max %d levels", maxAggregationLevels)
 		}
 	}
 
@@ -265,13 +265,13 @@ func resolveAggregationSpec(groupBy *commonpb.SearchAggregationSpec, schema *sch
 		}
 
 		if len(spec.GetFields()) == 0 {
-			return fmt.Errorf("group_by level has no fields")
+			return merr.WrapErrParameterInvalidMsg("group_by level has no fields")
 		}
 		if spec.GetSize() < 0 {
-			return fmt.Errorf("search_aggregation size must be non-negative")
+			return merr.WrapErrParameterInvalidMsg("search_aggregation size must be non-negative")
 		}
 		if spec.GetSearchSize() < 0 {
-			return fmt.Errorf("search_aggregation search_size must be non-negative")
+			return merr.WrapErrParameterInvalidMsg("search_aggregation search_size must be non-negative")
 		}
 
 		levelSize := normalizeAggregationSize(spec.GetSize())
@@ -280,7 +280,7 @@ func resolveAggregationSpec(groupBy *commonpb.SearchAggregationSpec, schema *sch
 			searchSize = levelSize
 		}
 		if searchSize < levelSize {
-			return fmt.Errorf("search_aggregation search_size must be greater than or equal to size")
+			return merr.WrapErrParameterInvalidMsg("search_aggregation search_size must be greater than or equal to size")
 		}
 
 		level := LevelContext{
@@ -293,7 +293,7 @@ func resolveAggregationSpec(groupBy *commonpb.SearchAggregationSpec, schema *sch
 		for _, fieldName := range spec.GetFields() {
 			fieldID, err := resolveFieldID(fieldName, schema, dynamicField)
 			if err != nil {
-				return fmt.Errorf("invalid group_by field %q: %w", fieldName, err)
+				return merr.Wrapf(err, "invalid group_by field %q", fieldName)
 			}
 			field, err := validateSearchAggregationFieldSupport(fieldName, fieldID, schema, "group_by field")
 			if err != nil {
@@ -301,14 +301,14 @@ func resolveAggregationSpec(groupBy *commonpb.SearchAggregationSpec, schema *sch
 			}
 			if field != nil {
 				if field.GetDataType() == schemapb.DataType_Float || field.GetDataType() == schemapb.DataType_Double {
-					return fmt.Errorf("group_by field %q: FLOAT / DOUBLE fields are not supported with search_aggregation (BucketKeyEntry has no float variant; equality on floats is fragile)", fieldName)
+					return merr.WrapErrParameterInvalidMsg("group_by field %q: FLOAT / DOUBLE fields are not supported with search_aggregation (BucketKeyEntry has no float variant; equality on floats is fragile)", fieldName)
 				}
 			}
 			if _, ok := levelFieldSeen[fieldID]; ok {
-				return fmt.Errorf("duplicated group_by field %q in one level", fieldName)
+				return merr.WrapErrParameterInvalidMsg("duplicated group_by field %q in one level", fieldName)
 			}
 			if _, ok := groupBySeen[fieldID]; ok {
-				return fmt.Errorf("duplicated group_by field %q across levels", fieldName)
+				return merr.WrapErrParameterInvalidMsg("duplicated group_by field %q across levels", fieldName)
 			}
 			levelFieldSeen[fieldID] = struct{}{}
 			groupBySeen[fieldID] = struct{}{}
@@ -329,15 +329,15 @@ func resolveAggregationSpec(groupBy *commonpb.SearchAggregationSpec, schema *sch
 			for _, alias := range aliases {
 				metric := spec.GetMetrics()[alias]
 				if strings.TrimSpace(alias) == "" {
-					return fmt.Errorf("metric alias cannot be empty")
+					return merr.WrapErrParameterMissingMsg("metric alias cannot be empty")
 				}
 				metricSpec, metricSourceFieldID, err := buildMetricSpec(metric, schema, dynamicField)
 				if err != nil {
-					return fmt.Errorf("invalid metric %q: %w", alias, err)
+					return merr.Wrapf(err, "invalid metric %q", alias)
 				}
 				plan, err := buildMetricPlan(alias, metricSpec)
 				if err != nil {
-					return fmt.Errorf("invalid metric %q: %w", alias, err)
+					return merr.Wrapf(err, "invalid metric %q", alias)
 				}
 				level.Metrics[alias] = metricSpec
 				level.metricPlans = append(level.metricPlans, plan)
@@ -373,19 +373,19 @@ func resolveAggregationSpec(groupBy *commonpb.SearchAggregationSpec, schema *sch
 
 func buildMetricSpec(metric *commonpb.MetricAggSpec, schema *schemapb.CollectionSchema, dynamicField *schemapb.FieldSchema) (MetricSpec, int64, error) {
 	if metric == nil {
-		return MetricSpec{}, 0, fmt.Errorf("metric spec is nil")
+		return MetricSpec{}, 0, merr.WrapErrParameterInvalidMsg("metric spec is nil")
 	}
 
 	op := strings.ToLower(strings.TrimSpace(metric.GetOp()))
 	switch op {
 	case "avg", "sum", "count", "min", "max":
 	default:
-		return MetricSpec{}, 0, fmt.Errorf("unsupported metric op %q", metric.GetOp())
+		return MetricSpec{}, 0, merr.WrapErrParameterInvalidMsg("unsupported metric op %q", metric.GetOp())
 	}
 
 	fieldName := strings.TrimSpace(metric.GetFieldName())
 	if fieldName == "" {
-		return MetricSpec{}, 0, fmt.Errorf("metric field_name is empty")
+		return MetricSpec{}, 0, merr.WrapErrParameterInvalidMsg("metric field_name is empty")
 	}
 
 	switch fieldName {
@@ -395,7 +395,7 @@ func buildMetricSpec(metric *commonpb.MetricAggSpec, schema *schemapb.Collection
 		return MetricSpec{Op: op, FieldID: ScoreFieldID, FieldType: schemapb.DataType_Float}, 0, nil
 	case "*":
 		if op != "count" {
-			return MetricSpec{}, 0, fmt.Errorf("field_name '*' only supports count op")
+			return MetricSpec{}, 0, merr.WrapErrParameterInvalidMsg("field_name '*' only supports count op")
 		}
 		// count(*) has no source field; DataType_None is what internal/agg
 		// expects for the synthetic always-1 input.
@@ -422,7 +422,7 @@ func buildTopHitsConfig(topHits *commonpb.TopHitsSpec, schema *schemapb.Collecti
 		return nil, nil, nil
 	}
 	if topHits.GetSize() < 0 {
-		return nil, nil, fmt.Errorf("top_hits size must be non-negative")
+		return nil, nil, merr.WrapErrParameterInvalidMsg("top_hits size must be non-negative")
 	}
 
 	cfg := &TopHitsConfig{
@@ -434,16 +434,16 @@ func buildTopHitsConfig(topHits *commonpb.TopHitsSpec, schema *schemapb.Collecti
 
 	for _, sortSpec := range topHits.GetSort() {
 		if sortSpec == nil {
-			return nil, nil, fmt.Errorf("top_hits.sort contains nil item")
+			return nil, nil, merr.WrapErrParameterInvalidMsg("top_hits.sort contains nil item")
 		}
 		fieldName := strings.TrimSpace(sortSpec.GetFieldName())
 		if fieldName == "" {
-			return nil, nil, fmt.Errorf("top_hits.sort field_name is empty")
+			return nil, nil, merr.WrapErrParameterInvalidMsg("top_hits.sort field_name is empty")
 		}
 
 		direction, err := normalizeDirection(sortSpec.GetDirection(), "desc")
 		if err != nil {
-			return nil, nil, fmt.Errorf("invalid top_hits.sort direction for %q: %w", fieldName, err)
+			return nil, nil, merr.Wrapf(err, "invalid top_hits.sort direction for %q", fieldName)
 		}
 
 		if fieldName == "_score" {
@@ -452,12 +452,12 @@ func buildTopHitsConfig(topHits *commonpb.TopHitsSpec, schema *schemapb.Collecti
 		}
 
 		if isJSONPathFieldExpr(fieldName) {
-			return nil, nil, fmt.Errorf("top_hits.sort JSON path is not yet supported: %q", fieldName)
+			return nil, nil, merr.WrapErrParameterInvalidMsg("top_hits.sort JSON path is not yet supported: %q", fieldName)
 		}
 
 		fieldID, err := resolveFieldID(fieldName, schema, dynamicField)
 		if err != nil {
-			return nil, nil, fmt.Errorf("invalid top_hits.sort field %q: %w", fieldName, err)
+			return nil, nil, merr.Wrapf(err, "invalid top_hits.sort field %q", fieldName)
 		}
 		if _, err := validateSearchAggregationFieldSupport(fieldName, fieldID, schema, "top_hits.sort field"); err != nil {
 			return nil, nil, err
@@ -477,23 +477,23 @@ func buildOrderCriteria(orderSpecs []*commonpb.OrderSpec, metrics map[string]Met
 	order := make([]OrderCriterion, 0, len(orderSpecs))
 	for _, orderSpec := range orderSpecs {
 		if orderSpec == nil {
-			return nil, fmt.Errorf("order contains nil item")
+			return nil, merr.WrapErrParameterInvalidMsg("order contains nil item")
 		}
 
 		key := strings.TrimSpace(orderSpec.GetKey())
 		if key == "" {
-			return nil, fmt.Errorf("order key is empty")
+			return nil, merr.WrapErrParameterInvalidMsg("order key is empty")
 		}
 
 		if key != "_count" && key != "_key" {
 			if _, ok := metrics[key]; !ok {
-				return nil, fmt.Errorf("order key %q is neither reserved key nor metric alias", key)
+				return nil, merr.WrapErrParameterInvalidMsg("order key %q is neither reserved key nor metric alias", key)
 			}
 		}
 
 		direction, err := normalizeDirection(orderSpec.GetDirection(), "desc")
 		if err != nil {
-			return nil, fmt.Errorf("invalid order direction for key %q: %w", key, err)
+			return nil, merr.Wrapf(err, "invalid order direction for key %q", key)
 		}
 		// ES bucket order has no null placement option; OrderSpec.NullFirst is ignored intentionally.
 		order = append(order, OrderCriterion{Key: key, Dir: direction})
@@ -511,7 +511,7 @@ func normalizeDirection(direction string, defaultDir string) (string, error) {
 	case "asc", "desc":
 		return dir, nil
 	default:
-		return "", fmt.Errorf("direction must be asc or desc")
+		return "", merr.WrapErrParameterInvalidMsg("direction must be asc or desc")
 	}
 }
 
@@ -521,7 +521,7 @@ func validateSearchAggregationFieldSupport(fieldName string, fieldID int64, sche
 		return nil, nil
 	}
 	if field.GetDataType() == schemapb.DataType_JSON || field.GetIsDynamic() {
-		return nil, fmt.Errorf("%s %q: JSON / dynamic fields are not yet supported with search_aggregation", usage, fieldName)
+		return nil, merr.WrapErrParameterInvalidMsg("%s %q: JSON / dynamic fields are not yet supported with search_aggregation", usage, fieldName)
 	}
 	return field, nil
 }
@@ -534,7 +534,7 @@ func isJSONPathFieldExpr(fieldExpr string) bool {
 func resolveFieldID(fieldExpr string, schema *schemapb.CollectionSchema, dynamicField *schemapb.FieldSchema) (int64, error) {
 	fieldExpr = strings.TrimSpace(fieldExpr)
 	if fieldExpr == "" {
-		return 0, fmt.Errorf("field is empty")
+		return 0, merr.WrapErrParameterInvalidMsg("field is empty")
 	}
 
 	if field := typeutil.GetFieldByName(schema, fieldExpr); field != nil {
@@ -567,7 +567,7 @@ func resolveFieldID(fieldExpr string, schema *schemapb.CollectionSchema, dynamic
 		}
 	}
 
-	return 0, fmt.Errorf("field %q not found in schema", fieldExpr)
+	return 0, merr.WrapErrParameterInvalidMsg("field %q not found in schema", fieldExpr)
 }
 
 func findDynamicField(schema *schemapb.CollectionSchema) *schemapb.FieldSchema {

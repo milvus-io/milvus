@@ -225,7 +225,7 @@ func (t *compactionTrigger) getCollection(collectionID UniqueID) (*collectionInf
 	defer cancel()
 	coll, err := t.handler.GetCollection(ctx, collectionID)
 	if err != nil {
-		return nil, fmt.Errorf("collection ID %d not found, err: %w", collectionID, err)
+		return nil, merr.Wrapf(err, "collection ID %d not found", collectionID)
 	}
 	return coll, nil
 }
@@ -591,7 +591,10 @@ func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartS
 	segments := t.meta.SelectSegments(context.TODO(), filters...)
 	// some criterion not met or conflicted
 	if len(signal.segmentIDs) > 0 && len(segments) != len(signal.segmentIDs) {
-		return nil, merr.WrapErrServiceInternal("not all segment ids provided could be compacted")
+		// SelectSegments also filters segments that are transiently mid-flush /
+		// compacting / just dropped, so a count mismatch is usually server-side
+		// state, not a bad id from the caller.
+		return nil, merr.WrapErrServiceInternalMsg("not all segment ids provided could be compacted")
 	}
 
 	type category struct {

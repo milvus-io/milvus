@@ -17,7 +17,6 @@
 package storage
 
 import (
-	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -26,7 +25,6 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 
@@ -126,7 +124,7 @@ func NewDeltaDataWithPkType(cap int64, pkType schemapb.DataType) (*DeltaData, er
 
 func NewDeltaDataWithData(pks PrimaryKeys, tss []uint64) (*DeltaData, error) {
 	if pks.Len() != len(tss) {
-		return nil, merr.WrapErrParameterInvalidMsg("length of pks and tss not equal")
+		return nil, merr.WrapErrStorageMsg("length of pks and tss not equal: pks=%d tss=%d", pks.Len(), len(tss))
 	}
 	dd := &DeltaData{
 		deletePks:        pks,
@@ -167,23 +165,23 @@ func (dl *DeleteLog) Parse(val string) error {
 		pkRes := result.Get("pk")
 		pkTypeRes := result.Get("pkType")
 		if !tsRes.Exists() || !pkRes.Exists() || !pkTypeRes.Exists() {
-			return fmt.Errorf("invalid delete log json: missing required fields in %s", val)
+			return merr.WrapErrDataIntegrityMsg("invalid delete log json: missing required fields in %s", val)
 		}
 		dl.Ts = tsRes.Uint()
 		dl.PkType = pkTypeRes.Int()
 		switch dl.PkType {
 		case int64(schemapb.DataType_Int64):
 			if pkRes.Type != gjson.Number {
-				return fmt.Errorf("invalid delete log: pkType is Int64 but pk is not a number in %s", val)
+				return merr.WrapErrDataIntegrityMsg("invalid delete log: pkType is Int64 but pk is not a number in %s", val)
 			}
 			dl.Pk = &Int64PrimaryKey{Value: pkRes.Int()}
 		case int64(schemapb.DataType_VarChar):
 			if pkRes.Type != gjson.String {
-				return fmt.Errorf("invalid delete log: pkType is VarChar but pk is not a string in %s", val)
+				return merr.WrapErrDataIntegrityMsg("invalid delete log: pkType is VarChar but pk is not a string in %s", val)
 			}
 			dl.Pk = &VarCharPrimaryKey{Value: pkRes.String()}
 		default:
-			return fmt.Errorf("invalid delete log: unsupported pkType %d in %s", dl.PkType, val)
+			return merr.WrapErrDataIntegrityMsg("invalid delete log: unsupported pkType %d in %s", dl.PkType, val)
 		}
 		return nil
 	}
@@ -192,7 +190,7 @@ func (dl *DeleteLog) Parse(val string) error {
 	// compatible with fmt.Sprintf("%d,%d", pk, ts)
 	splits := strings.Split(val, ",")
 	if len(splits) != 2 {
-		return fmt.Errorf("the format of delta log is incorrect, %v can not be split", val)
+		return merr.WrapErrDataIntegrityMsg("the format of delta log is incorrect, %v can not be split", val)
 	}
 	pk, err := strconv.ParseInt(splits[0], 10, 64)
 	if err != nil {
@@ -226,7 +224,7 @@ func (dl *DeleteLog) UnmarshalJSON(data []byte) error {
 	case schemapb.DataType_VarChar:
 		dl.Pk = &VarCharPrimaryKey{}
 	default:
-		return fmt.Errorf("unsupported primary key type: %v", schemapb.DataType(dl.PkType))
+		return merr.WrapErrDataIntegrityMsg("unsupported primary key type: %v", schemapb.DataType(dl.PkType))
 	}
 
 	if err = json.Unmarshal(*messageMap["pk"], dl.Pk); err != nil {
@@ -296,10 +294,10 @@ func BuildDeleteRecord(pks []PrimaryKey, tss []Timestamp) (r Record, tsFrom uint
 	tsTo = 0
 
 	if len(pks) == 0 {
-		return nil, 0, 0, errors.New("empty primary keys")
+		return nil, 0, 0, merr.WrapErrServiceInternalMsg("empty primary keys")
 	}
 	if len(pks) != len(tss) {
-		return nil, 0, 0, errors.New("length of pks and tss must be equal")
+		return nil, 0, 0, merr.WrapErrServiceInternalMsg("length of pks and tss must be equal")
 	}
 
 	allocator := memory.DefaultAllocator
@@ -322,7 +320,7 @@ func BuildDeleteRecord(pks []PrimaryKey, tss []Timestamp) (r Record, tsFrom uint
 		}
 		pkArray = builder.NewArray()
 	default:
-		return nil, 0, 0, errors.Newf("unsupported primary key type %T", pks[0])
+		return nil, 0, 0, merr.WrapErrStorageMsg("unsupported primary key type %T", pks[0])
 	}
 
 	// Build timestamp array

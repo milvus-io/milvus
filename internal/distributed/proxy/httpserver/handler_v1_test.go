@@ -1434,7 +1434,7 @@ func TestFp16Bf16VectorsV1(t *testing.T) {
 			assert.Nil(t, err, "case %d: ", i)
 			assert.Equal(t, testcase.errCode, returnBody.Code, "case %d: ", i, string(testcase.requestBody))
 			if testcase.errCode != 0 {
-				assert.Equal(t, testcase.errMsg, returnBody.Message, "case %d: ", i, string(testcase.requestBody))
+				assert.Contains(t, returnBody.Message, testcase.errMsg, "case %d: ", i, string(testcase.requestBody))
 			}
 			fmt.Println(w.Body.String())
 		})

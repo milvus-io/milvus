@@ -133,7 +133,7 @@ func (a *testCompactionAllocator) AllocOne() (int64, error) {
 		if a.failAllocOneErr != nil {
 			return 0, a.failAllocOneErr
 		}
-		return 0, allocator.ErrIDExhausted
+		return 0, allocator.NewIDExhaustedError(0, 0, 1)
 	}
 	a.next++
 	return a.next, nil
@@ -506,7 +506,7 @@ func (s *MultiSegmentWriterSuite) TestLogIDExhaustionDuringRotationReturnsError(
 		allocator: NewCompactionAllocator(segmentAlloc, logAlloc),
 		writer: &storage.BinlogValueWriter{
 			BinlogRecordWriter: closeErrBinlogRecordWriter{writtenUncompressed: 2},
-			SerializeWriter:    closeErrSerializeWriter{err: allocator.ErrIDExhausted},
+			SerializeWriter:    closeErrSerializeWriter{err: allocator.NewIDExhaustedError(0, 0, 1)},
 		},
 		segmentSize:      1,
 		currentSegmentID: 1000,
@@ -519,7 +519,7 @@ func (s *MultiSegmentWriterSuite) TestLogIDExhaustionDuringRotationReturnsError(
 	s.NotPanics(func() {
 		err = writer.rotateWriterOrGrowCurrent()
 	})
-	s.ErrorIs(err, allocator.ErrIDExhausted)
+	s.True(allocator.IsIDExhausted(err))
 	s.Nil(writer.writer)
 	s.Empty(writer.GetCompactionSegments())
 }

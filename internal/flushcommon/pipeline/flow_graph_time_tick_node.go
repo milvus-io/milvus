@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
@@ -154,7 +155,7 @@ func (ttn *ttNode) waitForCheckpointUpdate(fgMsg *FlowGraphMsg, curTs time.Time)
 		}
 		if !needUpdate {
 			// Return a temporary error to trigger retry with backoff
-			return fmt.Errorf("checkpoint not ready yet")
+			return merr.Wrap(merr.ErrServiceUnavailable, "checkpoint not ready yet")
 		}
 		// needUpdate is true, operation succeeded
 		return nil

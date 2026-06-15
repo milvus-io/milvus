@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -109,7 +108,9 @@ func (t *sortCompactionTask) preCompact() error {
 	}
 
 	if len(t.plan.GetSegmentBinlogs()) != 1 {
-		return errors.Newf("sort compaction should handle exactly one segment, but got %d segments, planID = %d",
+		// The plan is produced by datacoord, so a malformed plan is an internal
+		// protocol violation, not user input.
+		return merr.WrapErrServiceInternalMsg("sort compaction should handle exactly one segment, but got %d segments, planID = %d",
 			len(t.plan.GetSegmentBinlogs()), t.GetPlanID())
 	}
 

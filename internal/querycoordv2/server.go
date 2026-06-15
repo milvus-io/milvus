@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
@@ -60,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/expr"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -161,7 +161,7 @@ func (s *Server) Register() error {
 func (s *Server) SetSession(session sessionutil.SessionInterface) error {
 	s.session = session
 	if s.session == nil {
-		return errors.New("session is nil, the etcd client connection may have failed")
+		return merr.WrapErrServiceNotReadyMsg("session is nil, the etcd client connection may have failed")
 	}
 	return nil
 }
@@ -281,7 +281,7 @@ func (s *Server) initQueryCoord() error {
 			etcdkv.WithRequestTimeout(paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 		idAllocatorKV = tsoutil.NewTSOKVBase(s.etcdCli, Params.EtcdCfg.KvRootPath.GetValue(), "querycoord-id-allocator")
 	default:
-		return fmt.Errorf("not supported meta store: %s", metaType)
+		return merr.WrapErrServiceInternalMsg("unsupported meta store: %s", metaType)
 	}
 	log.Info(fmt.Sprintf("query coordinator successfully connected to %s.", metaType))
 
@@ -892,7 +892,7 @@ func (s *Server) GetInternalReplicasByCollection(ctx context.Context, collection
 func (s *Server) CheckAllReplicasServiceable(ctx context.Context, collectionID int64) error {
 	replicas := s.meta.GetByCollection(ctx, collectionID)
 	if len(replicas) == 0 {
-		return errors.New("no replica found")
+		return merr.WrapErrServiceInternalMsg("no replica found")
 	}
 	for _, replica := range replicas {
 		if err := s.checkReplicaServiceable(ctx, replica); err != nil {
@@ -905,17 +905,16 @@ func (s *Server) CheckAllReplicasServiceable(ctx context.Context, collectionID i
 func (s *Server) checkReplicaServiceable(ctx context.Context, replica *meta.Replica) error {
 	channels := s.targetMgr.GetDmChannelsByCollection(ctx, replica.GetCollectionID(), meta.CurrentTarget)
 	if len(channels) == 0 {
-		return errors.New("no channels in current target")
+		return merr.WrapErrServiceInternalMsg("no channels in current target")
 	}
 	for channelName := range channels {
 		leader := s.dist.ChannelDistManager.GetShardLeader(channelName, replica)
 		if leader == nil || leader.View == nil {
-			return fmt.Errorf("replica %d (rg=%s): no leader for channel %s",
+			return merr.WrapErrServiceInternalMsg("replica %d (rg=%s): no leader for channel %s",
 				replica.GetID(), replica.GetResourceGroup(), channelName)
 		}
 		if err := utils.CheckDelegatorDataReady(s.nodeMgr, s.targetMgr, leader.View, meta.CurrentTarget); err != nil {
-			return fmt.Errorf("replica %d (rg=%s) channel %s not serviceable: %w",
-				replica.GetID(), replica.GetResourceGroup(), channelName, err)
+			return merr.Wrapf(err, "replica %d (rg=%s) channel %s not serviceable", replica.GetID(), replica.GetResourceGroup(), channelName)
 		}
 	}
 	return nil

@@ -19,7 +19,6 @@
 package expr
 
 import (
-	"fmt"
 	"math"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -143,17 +142,17 @@ func (s *ScoreCombineExpr) OutputDataTypes() []arrow.DataType {
 // Execute executes the score combine function on input columns and returns output columns.
 func (s *ScoreCombineExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunked) ([]*arrow.Chunked, error) {
 	if len(inputs) < 2 {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("score_combine: expected at least 2 input columns, got %d", len(inputs)))
+		return nil, merr.WrapErrServiceInternalMsg("score_combine: expected at least 2 input columns, got %d", len(inputs))
 	}
 
 	if s.mode == ModeWeighted && len(s.weights) != len(inputs) {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("score_combine: weighted mode requires %d weights, got %d", len(inputs), len(s.weights)))
+		return nil, merr.WrapErrServiceInternalMsg("score_combine: weighted mode requires %d weights, got %d", len(inputs), len(s.weights))
 	}
 
 	numChunks := len(inputs[0].Chunks())
 	for idx := 1; idx < len(inputs); idx++ {
 		if len(inputs[idx].Chunks()) != numChunks {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("score_combine: input 0 has %d chunks but input %d has %d chunks", numChunks, idx, len(inputs[idx].Chunks())))
+			return nil, merr.WrapErrServiceInternalMsg("score_combine: input 0 has %d chunks but input %d has %d chunks", numChunks, idx, len(inputs[idx].Chunks()))
 		}
 	}
 	resultChunks := make([]arrow.Array, numChunks)
@@ -212,7 +211,7 @@ func (s *ScoreCombineExpr) processChunk(ctx *types.FuncContext, inputs []*arrow.
 		for colIdx, input := range inputs {
 			val, err := GetNumericValue(input.Chunk(chunkIdx), rowIdx)
 			if err != nil {
-				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("score_combine: column %d: %v", colIdx, err))
+				return nil, merr.WrapErrServiceInternalMsg("score_combine: column %d: %v", colIdx, err)
 			}
 			values[colIdx] = val
 		}

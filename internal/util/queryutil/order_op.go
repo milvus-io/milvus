@@ -19,7 +19,6 @@ package queryutil
 import (
 	"container/heap"
 	"context"
-	"fmt"
 	"sort"
 
 	"go.opentelemetry.io/otel"
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -96,7 +96,7 @@ func (op *OrderByLimitOperator) Run(ctx context.Context, span trace.Span, inputs
 				}
 			}
 			if op.fieldPositions[i] < 0 {
-				return nil, fmt.Errorf("ORDER BY field '%s' (ID=%d) not found in result FieldsData", f.FieldName, f.FieldID)
+				return nil, merr.WrapErrParameterInvalidMsg("ORDER BY field '%s' (ID=%d) not found in result FieldsData", f.FieldName, f.FieldID)
 			}
 		}
 	}

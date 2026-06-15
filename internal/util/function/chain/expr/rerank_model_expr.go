@@ -20,7 +20,6 @@ package expr
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -51,7 +50,7 @@ func NewRerankModelExpr(provider rerank.ModelProvider, queries []string) (*Reran
 		return nil, merr.WrapErrServiceInternal("model: provider is nil")
 	}
 	if len(queries) == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("model: queries must not be empty")
+		return nil, merr.WrapErrParameterMissingMsg("model: queries must not be empty")
 	}
 	return &RerankModelExpr{
 		BaseExpr: *NewBaseExpr("model", []string{types.StageL2Rerank}),
@@ -69,14 +68,14 @@ func (m *RerankModelExpr) OutputDataTypes() []arrow.DataType {
 // Execute calls the external rerank service for each chunk (NQ) and returns model scores.
 func (m *RerankModelExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunked) ([]*arrow.Chunked, error) {
 	if len(inputs) != 1 {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("model: expected 1 input column (text), got %d", len(inputs)))
+		return nil, merr.WrapErrServiceInternalMsg("model: expected 1 input column (text), got %d", len(inputs))
 	}
 
 	textCol := inputs[0]
 	numChunks := len(textCol.Chunks())
 
 	if len(m.queries) != numChunks {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("model: queries count (%d) != nq count (%d)", len(m.queries), numChunks))
+		return nil, merr.WrapErrServiceInternalMsg("model: queries count (%d) != nq count (%d)", len(m.queries), numChunks)
 	}
 
 	scoreChunks := make([]arrow.Array, numChunks)
@@ -107,7 +106,7 @@ func (m *RerankModelExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunke
 func (m *RerankModelExpr) processChunk(ctx *types.FuncContext, chunk arrow.Array, query string) (arrow.Array, error) {
 	stringArr, ok := chunk.(*array.String)
 	if !ok {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("model: input column must be String/VarChar, got %T", chunk))
+		return nil, merr.WrapErrServiceInternalMsg("model: input column must be String/VarChar, got %T", chunk)
 	}
 
 	n := stringArr.Len()
@@ -159,7 +158,7 @@ func (m *RerankModelExpr) rerankBatch(ctx context.Context, query string, texts [
 			return nil, err
 		}
 		if len(batchScores) != end-i {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("model: rerank service returned %d scores for %d docs", len(batchScores), end-i))
+			return nil, merr.WrapErrServiceInternalMsg("model: rerank service returned %d scores for %d docs", len(batchScores), end-i)
 		}
 		scores = append(scores, batchScores...)
 	}

@@ -17,13 +17,25 @@
 package allocator
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-var ErrIDExhausted = errors.New("ID is exhausted")
+var errIDExhausted = errors.New("ID is exhausted")
+
+// NewIDExhaustedError returns a typed error that still carries the allocator
+// exhaustion signal for in-process control flow.
+func NewIDExhaustedError(start, end, count int64) error {
+	return merr.WrapErrServiceInternalErr(errIDExhausted, "ID is exhausted, start=%d, end=%d, count=%d", start, end, count)
+}
+
+// IsIDExhausted reports whether err came from allocator ID exhaustion.
+func IsIDExhausted(err error) bool {
+	return errors.Is(err, errIDExhausted)
+}
 
 // localAllocator implements the Interface.
 // It is constructed from a range of IDs.
@@ -44,12 +56,12 @@ func NewLocalAllocator(start, end int64) Interface {
 func (a *localAllocator) Alloc(count uint32) (int64, int64, error) {
 	cnt := int64(count)
 	if cnt <= 0 {
-		return 0, 0, fmt.Errorf("non-positive count is not allowed, count=%d", cnt)
+		return 0, 0, merr.WrapErrParameterInvalidMsg("non-positive count is not allowed, count=%d", cnt)
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.idStart+cnt > a.idEnd {
-		return 0, 0, fmt.Errorf("%w, start=%d, end=%d, count=%d", ErrIDExhausted, a.idStart, a.idEnd, cnt)
+		return 0, 0, NewIDExhaustedError(a.idStart, a.idEnd, cnt)
 	}
 	start := a.idStart
 	a.idStart += cnt

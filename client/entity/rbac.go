@@ -17,8 +17,9 @@
 package entity
 
 type User struct {
-	UserName string
-	Roles    []string
+	UserName    string
+	Roles       []string
+	Description string
 }
 
 type Role struct {

@@ -113,7 +113,7 @@ class TestPartitionE2E(TestBase):
         assert rsp['code'] == 0
         # drop partition when it is loaded
         rsp = self.partition_client.partition_drop(collection_name=name, partition_name=partition_name)
-        assert rsp['code'] == 65535
+        assert rsp['code'] == 1100
         # drop partition after release
         rsp = self.partition_client.partition_release(collection_name=name, partition_names=[partition_name])
         rsp = self.partition_client.partition_drop(collection_name=name, partition_name=partition_name)

@@ -19,8 +19,11 @@ package querycoordv2
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -74,6 +77,13 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 	msg, err := job.GenerateAlterLoadConfigMessage(ctx, alterLoadConfigReq)
 	if err != nil {
 		return err
+	}
+	if msg == nil {
+		// load config unchanged, the partitions are already loaded as requested.
+		log.Ctx(ctx).Info("load partitions ignored, load config is unchanged",
+			zap.Int64("collectionID", req.GetCollectionID()),
+			zap.Int64s("partitionIDs", req.GetPartitionIDs()))
+		return nil
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

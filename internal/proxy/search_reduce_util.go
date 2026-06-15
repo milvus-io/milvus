@@ -2,9 +2,7 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -142,7 +140,7 @@ func reduceSearchResultDataWithGroupBy(
 
 	singleFieldGroupBy := len(groupByFieldIDs) == 1
 	if err := reduce.ValidateGroupByFieldsPresent(subSearchResultData, groupByFieldIDs, singleFieldGroupBy); err != nil {
-		return ret, merr.WrapErrServiceInternal("failed to construct group by field data builder", err.Error())
+		return ret, merr.Wrap(err, "failed to construct group by field data builder")
 	}
 	if hitNum == 0 {
 		ret.Results.Topks = make([]int64, nq)
@@ -178,7 +176,7 @@ func reduceSearchResultDataWithGroupBy(
 	}
 
 	if err := reduce.WriteGroupByFieldValues(ret.Results, acceptedRows, subSearchResultData, groupByFieldIDs); err != nil {
-		return ret, merr.WrapErrServiceInternal("failed to construct group by field data builder", err.Error())
+		return ret, merr.Wrap(err, "failed to construct group by field data builder")
 	}
 
 	if !metric.PositivelyRelated(metricType) {
@@ -269,13 +267,13 @@ func runSingleFieldGroupByHotLoop(
 		}
 
 		if realTopK != -1 && realTopK != j {
-			log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
+			log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(merr.WrapErrServiceInternalMsg("the length (topk) between all result of query is different")))
 		}
 		realTopK = j
 		ret.Results.Topks = append(ret.Results.Topks, realTopK)
 
 		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+			return nil, merr.WrapErrParameterInvalidMsg("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
 
@@ -392,13 +390,13 @@ func runMultiFieldGroupByHotLoop(
 		acceptedRows = append(acceptedRows, perNqAccepted...)
 
 		if realTopK != -1 && realTopK != j {
-			log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
+			log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(merr.WrapErrServiceInternalMsg("the length (topk) between all result of query is different")))
 		}
 		realTopK = j
 		ret.Results.Topks = append(ret.Results.Topks, realTopK)
 
 		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+			return nil, merr.WrapErrParameterInvalidMsg("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
 
@@ -569,7 +567,7 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 	}
 
 	if err := reduce.WriteGroupByFieldValues(ret.Results, acceptedRows, subSearchResultData, groupByFieldIDs); err != nil {
-		return ret, merr.WrapErrServiceInternal("failed to write group by field values", err.Error())
+		return ret, merr.Wrap(err, "failed to write group by field values")
 	}
 	ret.Results.TopK = topK // realTopK is the topK of the nq-th query
 	if !metric.PositivelyRelated(metricType) {
@@ -736,15 +734,15 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 				cursors[subSearchIdx]++
 			}
 			if realTopK != -1 && realTopK != j {
-				log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
-				// return nil, errors.New("the length (topk) between all result of query is different")
+				log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(merr.WrapErrParameterInvalidMsg("the length (topk) between all result of query is different")))
+				// return nil, merr.WrapErrParameterInvalidMsg("the length (topk) between all result of query is different")
 			}
 			realTopK = j
 			ret.Results.Topks = append(ret.Results.Topks, realTopK)
 
 			// limit search result to avoid oom
 			if retSize > maxOutputSize {
-				return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+				return nil, merr.WrapErrParameterInvalidMsg("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 			}
 		}
 		ret.Results.TopK = realTopK // realTopK is the topK of the nq-th query
@@ -783,7 +781,7 @@ func setupIdListForSearchResult(searchResult *milvuspb.SearchResults, pkType sch
 			},
 		}
 	default:
-		return errors.New("unsupported pk type")
+		return merr.WrapErrServiceInternalMsg("unsupported pk type")
 	}
 	return nil
 }
@@ -856,14 +854,16 @@ func decodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 
 func checkSearchResultData(data *schemapb.SearchResultData, nq int64, topk int64, pkHitNum int) error {
 	if data.NumQueries != nq {
-		return fmt.Errorf("search result's nq(%d) mis-match with %d", data.NumQueries, nq)
+		// The result shape comes from querynode/segcore, never from the request:
+		// a mismatch is an internal protocol violation, not user input.
+		return merr.WrapErrServiceInternalMsg("search result's nq(%d) mis-match with %d", data.NumQueries, nq)
 	}
 	if data.TopK != topk {
-		return fmt.Errorf("search result's topk(%d) mis-match with %d", data.TopK, topk)
+		return merr.WrapErrServiceInternalMsg("search result's topk(%d) mis-match with %d", data.TopK, topk)
 	}
 
 	if len(data.Scores) != pkHitNum {
-		return fmt.Errorf("search result's score length invalid, score length=%d, expectedLength=%d",
+		return merr.WrapErrServiceInternalMsg("search result's score length invalid, score length=%d, expectedLength=%d",
 			len(data.Scores), pkHitNum)
 	}
 	return nil

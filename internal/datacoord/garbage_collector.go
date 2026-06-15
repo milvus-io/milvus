@@ -1067,13 +1067,13 @@ func (gc *garbageCollector) isExpire(dropts Timestamp) bool {
 // Returns segmentID or error if path doesn't match.
 func parseV3SegmentID(rootPath, filePath string) (int64, error) {
 	if !strings.HasPrefix(filePath, rootPath) {
-		return 0, fmt.Errorf("path %q does not contain rootPath %q", filePath, rootPath)
+		return 0, merr.WrapErrServiceInternalMsg("path %q does not contain rootPath %q", filePath, rootPath)
 	}
 	p := strings.TrimPrefix(filePath[len(rootPath):], "/")
 	parts := strings.Split(p, "/")
 	// Minimum: insert_log/coll/part/seg/something
 	if len(parts) < 5 || parts[0] != common.SegmentInsertLogPath {
-		return 0, fmt.Errorf("not a V3 insert_log path: %s", filePath)
+		return 0, merr.WrapErrServiceInternalMsg("not a V3 insert_log path: %s", filePath)
 	}
 	return strconv.ParseInt(parts[3], 10, 64)
 }
