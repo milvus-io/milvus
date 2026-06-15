@@ -1,23 +1,24 @@
+# fmt: off
 import random
-import uuid
+
+import numpy as np
+import pandas as pd
+import pytest
+from base.client_base import TestcaseBase
+from common import common_func as cf
+from common.common_type import CaseLabel, CheckTasks
+from common.mock_tei_server import MockTEIServer, get_docker_host, get_local_ip
+from faker import Faker
 from pymilvus import (
-    FieldSchema,
+    AnnSearchRequest,
     CollectionSchema,
     DataType,
+    FieldSchema,
     Function,
     FunctionType,
-    AnnSearchRequest,
     WeightedRanker,
 )
-from common.common_type import CaseLabel, CheckTasks
-from common import common_func as cf
 from utils.util_log import test_log as log
-from base.client_base import TestcaseBase
-import numpy as np
-import pytest
-import pandas as pd
-from faker import Faker
-from common.mock_tei_server import MockTEIServer, get_local_ip, get_docker_host
 
 fake_zh = Faker("zh_CN")
 fake_jp = Faker("ja_JP")
@@ -1619,6 +1620,10 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
 
     # ==================== drop_collection_function positive tests ====================
 
+    @pytest.mark.xfail(
+        reason="Milvus issue #50424: dropping TextEmbedding function incorrectly removes output vector field",
+        strict=True,
+    )
     def test_drop_collection_function_verify_crud(self, tei_endpoint):
         """
         target: test CRUD behavior changes after dropping function
@@ -1726,6 +1731,10 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
         res, _ = collection_w.query(expr="id >= 0", output_fields=["id"])
         assert len(res) == 4  # 6 - 2
 
+    @pytest.mark.xfail(
+        reason="Milvus issue #50424: dropping TextEmbedding function incorrectly removes output vector field",
+        strict=True,
+    )
     def test_drop_collection_function_one_of_multiple(self, tei_endpoint):
         """
         target: test drop one function when multiple text embedding functions exist
@@ -1851,6 +1860,10 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
         res, _ = collection_w.query(expr="id >= 0", output_fields=["id"])
         assert len(res) == 3
 
+    @pytest.mark.xfail(
+        reason="Milvus issue #50424: dropping TextEmbedding function incorrectly removes output vector field",
+        strict=True,
+    )
     def test_drop_collection_function_then_add_again(self, tei_endpoint):
         """
         target: test can re-add function after dropping
