@@ -41,6 +41,7 @@ const (
 	WALChannelTermLabelName               = "term"
 	WALNameLabelName                      = "wal_name"
 	WALTxnTypeLabelName                   = "txn_type"
+	WALVChannelLabelName                  = "vchannel"
 	StatusLabelName                       = statusLabelName
 	StreamingNodeLabelName                = "streaming_node"
 	NodeIDLabelName                       = nodeIDLabelName
@@ -480,6 +481,44 @@ var (
 		Help: "Is recovery storage on persisting",
 	}, WALChannelLabelName, WALChannelTermLabelName)
 
+	// vchannel already encodes its pchannel, so these per-vchannel idempotency
+	// window metrics intentionally carry only node_id + vchannel (no redundant
+	// pchannel label). The interceptor deletes a vchannel's series on Close.
+	WALIdempotencyWindowEntries = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "idempotency_window_entries",
+		Help: "Current retained idempotency key entries in idempotency window",
+	}, WALVChannelLabelName)
+
+	WALIdempotencyWindowInflight = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "idempotency_window_inflight",
+		Help: "Current inflight idempotency key entries in idempotency window",
+	}, WALVChannelLabelName)
+
+	WALIdempotencyDuplicateTotal = newWALCounterVec(prometheus.CounterOpts{
+		Name: "idempotency_duplicate_total",
+		Help: "Total duplicate idempotent write hits",
+	}, WALVChannelLabelName)
+
+	WALIdempotencyEvictionTotal = newWALCounterVec(prometheus.CounterOpts{
+		Name: "idempotency_eviction_total",
+		Help: "Total idempotency key entries evicted from idempotency windows",
+	}, WALVChannelLabelName)
+
+	WALIdempotencySnapshotTotal = newWALCounterVec(prometheus.CounterOpts{
+		Name: "idempotency_snapshot_total",
+		Help: "Total idempotency write commit store snapshot persist attempts",
+	}, WALChannelLabelName, WALChannelTermLabelName, StatusLabelName)
+
+	WALIdempotencySnapshotCheckpointLag = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "idempotency_snapshot_checkpoint_lag_seconds",
+		Help: "Physical time lag between main recovery checkpoint and idempotency write commit checkpoint",
+	}, WALChannelLabelName, WALChannelTermLabelName)
+
+	WALIdempotencyReaderDedupDropTotal = newWALCounterVec(prometheus.CounterOpts{
+		Name: "idempotency_reader_physical_dedup_drop_total",
+		Help: "Total physically duplicated non-timetick messages dropped by reader reorder buffer",
+	}, WALChannelLabelName, WALScannerModelLabelName)
+
 	WALDelegatorEmptyTimeTickFilteredTotal = newWALCounterVec(prometheus.CounterOpts{
 		Name: "delegator_empty_time_tick_filtered_total",
 		Help: "Total of empty time tick filtered",
@@ -681,6 +720,13 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALRecoveryPersistedTimeTick)
 	registry.MustRegister(WALRecoveryInconsistentEventTotal)
 	registry.MustRegister(WALRecoveryIsOnPersisting)
+	registry.MustRegister(WALIdempotencyWindowEntries)
+	registry.MustRegister(WALIdempotencyWindowInflight)
+	registry.MustRegister(WALIdempotencyDuplicateTotal)
+	registry.MustRegister(WALIdempotencyEvictionTotal)
+	registry.MustRegister(WALIdempotencySnapshotTotal)
+	registry.MustRegister(WALIdempotencySnapshotCheckpointLag)
+	registry.MustRegister(WALIdempotencyReaderDedupDropTotal)
 	registry.MustRegister(WALDelegatorEmptyTimeTickFilteredTotal)
 	registry.MustRegister(WALDelegatorTsafeTimeTickUnfilteredTotal)
 	registry.MustRegister(WALFlusherEmptyTimeTickFilteredTotal)

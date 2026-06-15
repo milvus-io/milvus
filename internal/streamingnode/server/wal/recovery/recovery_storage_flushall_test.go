@@ -56,7 +56,7 @@ func TestFlushAllOnControlChannel(t *testing.T) {
 	}
 
 	newTestRS := func() *recoveryStorageImpl {
-		return &recoveryStorageImpl{
+		rs := &recoveryStorageImpl{
 			cfg:              newConfig(),
 			currentClusterID: "test1",
 			channel:          types.PChannelInfo{Name: pchannel},
@@ -71,6 +71,8 @@ func TestFlushAllOnControlChannel(t *testing.T) {
 			vchannels: make(map[string]*vchannelRecoveryInfo),
 			metrics:   newRecoveryStorageMetrics(types.PChannelInfo{Name: pchannel}),
 		}
+		attachTestWindowManager(rs)
+		return rs
 	}
 
 	t.Run("FlushAllOnControlChannel", func(t *testing.T) {

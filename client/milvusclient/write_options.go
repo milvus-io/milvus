@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/row"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -54,6 +55,11 @@ type columnBasedDataOption struct {
 	columns       []column.Column
 	partialUpdate bool
 
+	// idempotencyKey is optional. It is only used by Insert when the target
+	// collection enables idempotent writes. Delete and Upsert ignore it because
+	// those operations are already idempotent.
+	idempotencyKey string
+
 	// deferredErr captures construction-time errors from builder helpers (e.g. WithStructArrayColumn)
 	// so they surface on InsertRequest/UpsertRequest rather than panicking in the chain.
 	deferredErr error
@@ -62,6 +68,20 @@ type columnBasedDataOption struct {
 	// field name. Entries with REPLACE (or nil) are treated as no-ops and are
 	// not serialized onto the wire.
 	partialOps map[string]*schemapb.FieldPartialUpdateOp
+}
+
+// errIdempotencyKeyUnsupportedForDML is a sentinel marking the "idempotency key
+// is only valid for Insert" rejection. Upsert matches it precisely so it does
+// not swallow other ErrParameterInvalid errors that should trigger a schema retry.
+var errIdempotencyKeyUnsupportedForDML = errors.New("idempotency key is only supported for Insert")
+
+func unsupportedDMLIdempotencyKeyError(operation string) error {
+	// Keep ErrParameterInvalid for server/caller classification, but also mark it
+	// with the sentinel so the Upsert path can match exactly via errors.Is.
+	return errors.Mark(
+		merr.WrapErrParameterInvalidMsg("idempotency key is only supported for Insert, not %s", operation),
+		errIdempotencyKeyUnsupportedForDML,
+	)
 }
 
 func (opt *columnBasedDataOption) WriteBackPKs(_ *entity.Schema, _ column.Column) error {
@@ -379,6 +399,11 @@ func (opt *columnBasedDataOption) WithPartition(partitionName string) *columnBas
 	return opt
 }
 
+func (opt *columnBasedDataOption) WithIdempotencyKey(idempotencyKey string) *columnBasedDataOption {
+	opt.idempotencyKey = idempotencyKey
+	return opt
+}
+
 func (opt *columnBasedDataOption) WithPartialUpdate(partialUpdate bool) *columnBasedDataOption {
 	opt.partialUpdate = partialUpdate
 	return opt
@@ -449,18 +474,25 @@ func (opt *columnBasedDataOption) InsertRequest(coll *entity.Collection) (*milvu
 	if err != nil {
 		return nil, err
 	}
-	return &milvuspb.InsertRequest{
+	req := &milvuspb.InsertRequest{
 		CollectionName:  opt.collName,
 		PartitionName:   opt.partitionName,
 		FieldsData:      fieldsData,
 		NumRows:         uint32(rowNum),
 		SchemaTimestamp: coll.UpdateTimestamp,
-	}, nil
+	}
+	if opt.idempotencyKey != "" {
+		req.IdempotencyKey = &opt.idempotencyKey
+	}
+	return req, nil
 }
 
 func (opt *columnBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb.UpsertRequest, error) {
 	if opt.deferredErr != nil {
 		return nil, opt.deferredErr
+	}
+	if opt.idempotencyKey != "" {
+		return nil, unsupportedDMLIdempotencyKeyError("Upsert")
 	}
 	fieldsData, rowNum, err := opt.processInsertColumns(coll.Schema, opt.columns...)
 	if err != nil {
@@ -519,15 +551,22 @@ func (opt *rowBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb
 	if err != nil {
 		return nil, err
 	}
-	return &milvuspb.InsertRequest{
+	req := &milvuspb.InsertRequest{
 		CollectionName: opt.collName,
 		PartitionName:  opt.partitionName,
 		FieldsData:     fieldsData,
 		NumRows:        uint32(rowNum),
-	}, nil
+	}
+	if opt.idempotencyKey != "" {
+		req.IdempotencyKey = &opt.idempotencyKey
+	}
+	return req, nil
 }
 
 func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb.UpsertRequest, error) {
+	if opt.idempotencyKey != "" {
+		return nil, unsupportedDMLIdempotencyKeyError("Upsert")
+	}
 	columns, err := row.AnyToColumns(opt.rows, opt.keepAutoIDPk, coll.Schema)
 	if err != nil {
 		return nil, err
@@ -576,6 +615,11 @@ func (opt *rowBasedDataOption) WriteBackPKs(sch *entity.Schema, pks column.Colum
 
 func (opt *rowBasedDataOption) WithKeepAutoIDPk(keepPk bool) *rowBasedDataOption {
 	opt.keepAutoIDPk = keepPk
+	return opt
+}
+
+func (opt *rowBasedDataOption) WithIdempotencyKey(idempotencyKey string) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithIdempotencyKey(idempotencyKey)
 	return opt
 }
 

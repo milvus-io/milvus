@@ -34,7 +34,7 @@ func genInsertMsgsByPartition(ctx context.Context,
 	rowOffsets []int,
 	channelName string,
 	insertMsg *msgstream.InsertMsg,
-) ([]msgstream.TsMsg, error) {
+) ([]msgstream.TsMsg, [][]int, error) {
 	threshold := Params.PulsarCfg.MaxMessageSize.GetAsInt()
 
 	// create empty insert message
@@ -69,19 +69,23 @@ func genInsertMsgsByPartition(ctx context.Context,
 	idxComputer := typeutil.NewFieldDataIdxComputer(fieldsData)
 
 	repackedMsgs := make([]msgstream.TsMsg, 0)
+	repackedRowOffsets := make([][]int, 0)
 	requestSize := 0
 	msg := createInsertMsg(segmentID, channelName)
+	msgRowOffsets := make([]int, 0)
 	for _, offset := range rowOffsets {
 		fieldIdxs := idxComputer.Compute(int64(offset))
 		curRowMessageSize, err := typeutil.EstimateEntitySize(fieldsData, offset, fieldIdxs...)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		// if insertMsg's size is greater than the threshold, split into multiple insertMsgs
 		if requestSize+curRowMessageSize >= threshold && msg.NumRows > 0 {
 			repackedMsgs = append(repackedMsgs, msg)
+			repackedRowOffsets = append(repackedRowOffsets, msgRowOffsets)
 			msg = createInsertMsg(segmentID, channelName)
+			msgRowOffsets = make([]int, 0)
 			requestSize = 0
 		}
 
@@ -90,11 +94,13 @@ func genInsertMsgsByPartition(ctx context.Context,
 		msg.Timestamps = append(msg.Timestamps, insertMsg.Timestamps[offset])
 		msg.RowIDs = append(msg.RowIDs, insertMsg.RowIDs[offset])
 		msg.NumRows++
+		msgRowOffsets = append(msgRowOffsets, offset)
 		requestSize += curRowMessageSize
 	}
 	if msg.NumRows > 0 {
 		repackedMsgs = append(repackedMsgs, msg)
+		repackedRowOffsets = append(repackedRowOffsets, msgRowOffsets)
 	}
 
-	return repackedMsgs, nil
+	return repackedMsgs, repackedRowOffsets, nil
 }

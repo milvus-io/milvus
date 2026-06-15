@@ -393,7 +393,8 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 		return
 	}
 	// otherwise add message into reorder buffer directly.
-	if err := s.reorderBuffer.Push(msg); err != nil {
+	pushResult, err := s.reorderBuffer.Push(msg)
+	if err != nil {
 		if errors.Is(err, utility.ErrTimeTickVoilation) {
 			s.metrics.ObserveTimeTickViolation(isTailing, msg.MessageType())
 		}
@@ -401,6 +402,17 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 			log.FieldMessage(msg),
 			zap.Bool("tailing", isTailing),
 			zap.Error(err))
+	} else if pushResult.Dropped {
+		switch pushResult.DropReason {
+		case utility.ReOrderByTimeTickBufferDropReasonDuplicateTimeTick:
+			s.metrics.ObservePhysicalDedupDrop(isTailing)
+			s.logger.Warn("dropped duplicated non-timetick message from reorder buffer",
+				zap.String("vchannel", msg.VChannel()),
+				zap.String("msgID", msg.MessageID().String()),
+				zap.Uint64("timeTick", msg.TimeTick()),
+				zap.Bool("tailing", isTailing),
+				zap.String("dropReason", string(pushResult.DropReason)))
+		}
 	}
 	// Observe the filtered message.
 	s.metrics.UpdateTimeTickBufSize(s.reorderBuffer.Bytes())
