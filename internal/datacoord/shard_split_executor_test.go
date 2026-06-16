@@ -26,13 +26,16 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
@@ -94,6 +97,11 @@ func newSplitExecutorManager(t *testing.T, m *meta, task *datapb.SplitShardTask,
 	}
 	manager, err := newShardSplitManager(context.Background(), m, catalog, alloc, wal, vchannelAllocator, planner)
 	assert.NoError(t, err)
+	// a permissive routing committer so the fence/adoption commits succeed;
+	// tests that assert on the commit override it with their own mock.
+	router := broker.NewMockBroker(t)
+	router.EXPECT().CommitShardSplitRouting(mock.Anything, mock.Anything).Return(nil).Maybe()
+	manager.setRoutingCommitter(router)
 	return manager, catalog
 }
 
@@ -205,8 +213,9 @@ func TestAdvanceFencing(t *testing.T) {
 			}).Times(2)
 
 		manager, catalog := newSplitExecutorManager(t, m, fencingTask(), wal, nil, &fakeSplitPlanner{})
-		// two persists: the fenced flag first, then the state transition.
-		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Times(2)
+		// three persists: the fenced flag, the target start positions, then the
+		// state transition after the routing commit.
+		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Times(3)
 
 		manager.advanceTasks()
 		task := manager.mustGetTask(100)
@@ -234,7 +243,7 @@ func TestAdvanceFencing(t *testing.T) {
 		}), mock.Anything).Return(&types.AppendResult{MessageID: rmq.NewRmqID(3), TimeTick: 2100, LastConfirmedMessageID: rmq.NewRmqID(9)}, nil).Times(2)
 
 		manager, catalog := newSplitExecutorManager(t, m, fencingTask(), wal, nil, &fakeSplitPlanner{})
-		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Times(2)
+		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Times(3)
 		manager.advanceTasks()
 		task := manager.mustGetTask(100)
 		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, task.GetState())
@@ -251,7 +260,8 @@ func TestAdvanceFencing(t *testing.T) {
 		}), mock.Anything).Return(&types.AppendResult{MessageID: rmq.NewRmqID(3), TimeTick: 2100, LastConfirmedMessageID: rmq.NewRmqID(9)}, nil).Times(2)
 
 		manager, catalog := newSplitExecutorManager(t, m, task, wal, nil, &fakeSplitPlanner{})
-		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Once()
+		// already fenced: persist the start positions, then the state transition.
+		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Times(2)
 
 		manager.advanceTasks()
 		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, manager.mustGetTask(100).GetState())
@@ -321,11 +331,72 @@ func TestAdvanceFencing(t *testing.T) {
 			return msg.MessageType() == message.MessageTypeCreateVChannel
 		}), mock.Anything).Return(&types.AppendResult{MessageID: rmq.NewRmqID(3), TimeTick: 2100, LastConfirmedMessageID: rmq.NewRmqID(9)}, nil).Times(2)
 		manager, catalog := newSplitExecutorManager(t, m, fencingTask(), wal, nil, &fakeSplitPlanner{})
-		// the fenced-flag persist succeeds, the final state-transition persist fails.
-		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Once()
+		// the fenced-flag and start-position persists succeed, the final
+		// state-transition persist fails.
+		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Times(2)
 		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(errors.New("save failed")).Once()
 		manager.advanceTasks()
 		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskFencing, manager.mustGetTask(100).GetState())
+	})
+}
+
+func TestAdvanceAdopting(t *testing.T) {
+	paramtable.Init()
+
+	adoptingTask := func() *datapb.SplitShardTask {
+		task := fencingTask()
+		task.State = datapb.SplitShardTaskState_SplitShardTaskAdopting
+		task.Fenced = true
+		return task
+	}
+
+	t.Run("adoption flip completes the task", func(t *testing.T) {
+		m := newSplitTestMeta(true, "v0", map[int64]int64{10: 80, 11: 40})
+		wal := mock_streaming.NewMockWALAccesser(t)
+		manager, catalog := newSplitExecutorManager(t, m, adoptingTask(), wal, nil, &fakeSplitPlanner{})
+		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Once()
+		// the adoption commit drops the source and makes the targets Normal.
+		router := broker.NewMockBroker(t)
+		router.EXPECT().CommitShardSplitRouting(mock.Anything, mock.MatchedBy(func(req *rootcoordpb.CommitShardSplitRoutingRequest) bool {
+			states := make(map[string]etcdpb.ShardState, len(req.GetVirtualChannelNames()))
+			for i, vch := range req.GetVirtualChannelNames() {
+				states[vch] = req.GetShardInfos()[i].GetState()
+			}
+			return req.GetRoutingMode() == etcdpb.RoutingMode_RoutingModeRange &&
+				states["v0"] == etcdpb.ShardState_ShardDropped &&
+				states["v1"] == etcdpb.ShardState_ShardNormal &&
+				states["v2"] == etcdpb.ShardState_ShardNormal
+		})).Return(nil).Once()
+		manager.setRoutingCommitter(router)
+
+		manager.advanceTasks()
+		task := manager.mustGetTask(100)
+		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskDone, task.GetState())
+		assert.NotZero(t, task.GetEndTime())
+	})
+
+	t.Run("commit error stays in adopting", func(t *testing.T) {
+		m := newSplitTestMeta(true, "v0", map[int64]int64{10: 80})
+		wal := mock_streaming.NewMockWALAccesser(t)
+		manager, _ := newSplitExecutorManager(t, m, adoptingTask(), wal, nil, &fakeSplitPlanner{})
+		router := broker.NewMockBroker(t)
+		router.EXPECT().CommitShardSplitRouting(mock.Anything, mock.Anything).Return(errors.New("commit failed")).Once()
+		manager.setRoutingCommitter(router)
+
+		manager.advanceTasks()
+		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, manager.mustGetTask(100).GetState())
+	})
+
+	t.Run("collection dropped still completes the task", func(t *testing.T) {
+		m := newSplitTestMeta(true, "v0", map[int64]int64{10: 80})
+		task := adoptingTask()
+		task.CollectionId = 999 // not in meta
+		wal := mock_streaming.NewMockWALAccesser(t)
+		manager, catalog := newSplitExecutorManager(t, m, task, wal, nil, &fakeSplitPlanner{})
+		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Once()
+		// no routing commit is issued when the collection is gone.
+		manager.advanceTasks()
+		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskDone, manager.mustGetTask(100).GetState())
 	})
 }
 

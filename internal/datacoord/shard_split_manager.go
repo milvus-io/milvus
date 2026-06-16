@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -48,6 +49,13 @@ type compactionPreempter interface {
 	preemptTasksByChannel(channel string)
 }
 
+// routingCommitter commits a shard-split routing change into the collection
+// meta via rootcoord (the write-switch routing commit and the adoption flip);
+// implemented by the datacoord broker. The call is idempotent by shard state.
+type routingCommitter interface {
+	CommitShardSplitRouting(ctx context.Context, req *rootcoordpb.CommitShardSplitRoutingRequest) error
+}
+
 // shardSplitManager detects the shards that need a split and drives the
 // persisted split task FSM. Every threshold it relies on is a refreshable
 // configuration under `dataCoord.shardSplit`.
@@ -64,8 +72,15 @@ type shardSplitManager struct {
 	planner           splitPlanner
 	preempter         compactionPreempter // set after the compaction inspector is built.
 	importMeta        ImportMeta          // set during the server initialization; the redistribution drain check consults it.
+	router            routingCommitter    // set during the server initialization; commits the routing change at fence and adoption.
 
 	tasks *typeutil.ConcurrentMap[int64, *datapb.SplitShardTask] // task id -> task
+}
+
+// setRoutingCommitter wires the routing committer (the datacoord broker) in; it
+// is called once during the server initialization.
+func (m *shardSplitManager) setRoutingCommitter(router routingCommitter) {
+	m.router = router
 }
 
 // setCompactionPreempter wires the compaction inspector in; it is called

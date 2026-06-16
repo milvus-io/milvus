@@ -716,6 +716,7 @@ func (s *Server) initShardSplitManager() error {
 		return err
 	}
 	manager.setImportMeta(s.importMeta)
+	manager.setRoutingCommitter(s.broker)
 	s.shardSplitManager = manager
 	return nil
 }

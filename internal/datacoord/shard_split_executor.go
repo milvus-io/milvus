@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"slices"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -27,7 +28,10 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -52,13 +56,46 @@ func (m *shardSplitManager) advanceTask(task *datapb.SplitShardTask) {
 	case datapb.SplitShardTaskState_SplitShardTaskRedistributing:
 		m.advanceRedistributing(task)
 	case datapb.SplitShardTaskState_SplitShardTaskAdopting:
-		// The adoption flip — the target shards become Normal, the source
-		// shard becomes Dropped and the routing version is bumped in the
-		// collection meta, all in one transaction — belongs to the
-		// authoritative routing table milestone. TODO: issue #50463.
-		// On the flip to Done, call m.recordTerminalMetrics(task) to record
-		// the outcome counter and the split duration.
+		m.advanceAdopting(task)
 	}
+}
+
+// advanceAdopting performs the adoption flip and completes the task: the target
+// shards become Normal (visible to querycoord, which then watches them and
+// releases the source) and the source shard becomes Dropped, in one routing
+// commit. The commit is idempotent by shard state, so a crash before the task
+// reaches Done is resumed by re-committing the same states.
+func (m *shardSplitManager) advanceAdopting(task *datapb.SplitShardTask) {
+	logger := m.taskLogger(task)
+	collection := m.meta.GetCollection(task.GetCollectionId())
+	if collection == nil {
+		// The collection was dropped after the fence; there is nothing left to
+		// route. Complete the task so the source-shard freeze is lifted.
+		if err := m.updateTask(task, func(task *datapb.SplitShardTask) {
+			task.State = datapb.SplitShardTaskState_SplitShardTaskDone
+			task.EndTime = uint64(time.Now().Unix())
+		}); err != nil {
+			logger.Warn("persist the done split task failed", zap.Error(err))
+			return
+		}
+		m.recordTerminalMetrics(m.mustGetTask(task.GetTaskId()))
+		return
+	}
+
+	if err := m.commitRouting(task, collection, etcdpb.ShardState_ShardDropped, etcdpb.ShardState_ShardNormal); err != nil {
+		logger.Warn("commit the adoption routing failed", zap.Error(err))
+		return
+	}
+
+	if err := m.updateTask(task, func(task *datapb.SplitShardTask) {
+		task.State = datapb.SplitShardTaskState_SplitShardTaskDone
+		task.EndTime = uint64(time.Now().Unix())
+	}); err != nil {
+		logger.Warn("persist the adopted split task failed", zap.Error(err))
+		return
+	}
+	m.recordTerminalMetrics(m.mustGetTask(task.GetTaskId()))
+	logger.Info("split routing adopted, task done")
 }
 
 // advancePreparing allocates the target vchannels and plans the split point.
@@ -187,13 +224,9 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 		return
 	}
 
-	// TODO: register the target vchannels into the collection meta vchannel
-	// list and reconcile the partitions created during the window
-	// (authoritative routing table milestone, issue #50463).
-
+	// Persist the consume start position of each target before the routing
+	// commit, so a crash after the commit still has them for the child delegators.
 	if err := m.updateTask(task, func(task *datapb.SplitShardTask) {
-		// persist the consume start position of each target so the child
-		// delegators can be spawned from it; keep the first one on a retry.
 		for _, target := range task.GetTargets() {
 			if target.GetStartPosition() != "" {
 				continue
@@ -202,12 +235,29 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 				target.StartPosition = pos
 			}
 		}
+	}); err != nil {
+		logger.Warn("persist the target start positions failed", zap.Error(err))
+		return
+	}
+	task = m.mustGetTask(task.GetTaskId())
+
+	// Routing commit: register the target vchannels into the collection meta and
+	// switch routing. The source shard becomes Splitting (fenced, unroutable for
+	// new writes) and the targets become Creating (write-routable, read-invisible
+	// to querycoord until adoption). Idempotent by shard state, so a retry — and a
+	// crash before the state advances below — is safe.
+	if err := m.commitRouting(task, collection, etcdpb.ShardState_ShardSplitting, etcdpb.ShardState_ShardCreating); err != nil {
+		logger.Warn("commit the split routing failed", zap.Error(err))
+		return
+	}
+
+	if err := m.updateTask(task, func(task *datapb.SplitShardTask) {
 		task.State = datapb.SplitShardTaskState_SplitShardTaskRedistributing
 	}); err != nil {
 		logger.Warn("persist the fenced split task failed", zap.Error(err))
 		return
 	}
-	logger.Info("target vchannels created, advance to redistributing")
+	logger.Info("target vchannels created and routing committed, advance to redistributing")
 }
 
 // advanceRedistributing relabels one batch of the source shard's segments to
@@ -325,6 +375,65 @@ func (m *shardSplitManager) taskLogger(task *datapb.SplitShardTask) *log.MLogger
 		zap.Int64("collectionID", task.GetCollectionId()),
 		zap.String("sourceVChannel", task.GetSourceVchannel()),
 		zap.String("state", task.GetState().String()))
+}
+
+// commitRouting commits the split's routing change into the collection meta via
+// rootcoord: the source shard moves to sourceState and every target shard to
+// targetState (carrying its key range), and the collection switches to range
+// routing. The full post-split topology is sent; rootcoord applies it
+// idempotently by shard state, so a retry is safe.
+//
+// It supports the single-source-shard collection the planner targets. A
+// collection that already has shards other than the source and the targets is
+// not yet handled here — their current ranges are not visible to datacoord
+// (the DescribeCollection routing exposure lands with the proxy lookup, #50463);
+// such a shard is kept Normal with no range as a safe placeholder.
+func (m *shardSplitManager) commitRouting(task *datapb.SplitShardTask, collection *collectionInfo, sourceState, targetState etcdpb.ShardState) error {
+	targets := task.GetTargets()
+	targetByVChannel := make(map[string]*datapb.SplitShardTaskTarget, len(targets))
+	for _, target := range targets {
+		targetByVChannel[target.GetVchannel()] = target
+	}
+
+	// the full new vchannel list = the collection's current vchannels plus any
+	// target not already present (a target is already present on a retry after a
+	// prior commit, e.g. the adoption commit after the write-switch commit).
+	vchannels := make([]string, len(collection.VChannelNames))
+	copy(vchannels, collection.VChannelNames)
+	for _, target := range targets {
+		if !slices.Contains(vchannels, target.GetVchannel()) {
+			vchannels = append(vchannels, target.GetVchannel())
+		}
+	}
+
+	pchannels := make([]string, len(vchannels))
+	shardInfos := make([]*etcdpb.CollectionShardInfo, len(vchannels))
+	for i, vchannel := range vchannels {
+		pchannels[i] = funcutil.ToPhysicalChannel(vchannel)
+		switch {
+		case vchannel == task.GetSourceVchannel():
+			shardInfos[i] = &etcdpb.CollectionShardInfo{State: sourceState}
+		case targetByVChannel[vchannel] != nil:
+			target := targetByVChannel[vchannel]
+			shardInfos[i] = &etcdpb.CollectionShardInfo{
+				RoutingKeyLower: target.GetRoutingKeyLower(),
+				RoutingKeyUpper: target.GetRoutingKeyUpper(),
+				State:           targetState,
+			}
+		default:
+			shardInfos[i] = &etcdpb.CollectionShardInfo{State: etcdpb.ShardState_ShardNormal}
+		}
+	}
+
+	return m.router.CommitShardSplitRouting(m.ctx, &rootcoordpb.CommitShardSplitRoutingRequest{
+		DbName:               collection.DatabaseName,
+		CollectionName:       collection.Schema.GetName(),
+		CollectionId:         task.GetCollectionId(),
+		VirtualChannelNames:  vchannels,
+		PhysicalChannelNames: pchannels,
+		ShardInfos:           shardInfos,
+		RoutingMode:          etcdpb.RoutingMode_RoutingModeRange,
+	})
 }
 
 // toMessageSplitTargets converts the persisted targets to the message form.
