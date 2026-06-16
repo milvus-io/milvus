@@ -56,6 +56,12 @@ func TestCheckErrTriple(t *testing.T) {
 		CheckErrCode(t, err, merr.ErrParameterInvalid)
 	})
 
+	t.Run("optional_message_substring", func(t *testing.T) {
+		// The optional expMsg pins the specific error on top of the triple.
+		err := roundTrip(merr.WrapErrParameterInvalidMsg("dim out of range"))
+		CheckErrTriple(t, err, merr.ErrParameterInvalid, true, false, "dim out of range")
+	})
+
 	t.Run("system_error_non_retriable", func(t *testing.T) {
 		// ErrCollectionNotFound is SystemError by default (no proxy stamping here).
 		err := roundTrip(merr.WrapErrCollectionNotFound("c1"))

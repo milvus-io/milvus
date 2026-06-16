@@ -93,7 +93,13 @@ func CheckErrCode(t *testing.T, actualErr error, expErr error) {
 // All three are read from the returned error itself via the merr accessors;
 // the wire keys (Status.ExtraInfo["is_input_error"], Status.Retriable) are an
 // implementation detail the client reconstructs in merr.Error.
-func CheckErrTriple(t *testing.T, actualErr error, expErr error, expInput bool, expRetriable bool) {
+//
+// The optional expMsg arguments, when given, are additionally asserted as
+// substrings of the actual error message. Pin them to keep the per-error
+// specificity the code alone cannot give: the code (e.g. 1100) classifies the
+// error, but many distinct errors share one code, so the message is what
+// confirms it is the specific error the test intended to trigger.
+func CheckErrTriple(t *testing.T, actualErr error, expErr error, expInput bool, expRetriable bool, expMsg ...string) {
 	if expErr == nil {
 		require.NoError(t, actualErr, trace())
 		return
@@ -112,6 +118,12 @@ func CheckErrTriple(t *testing.T, actualErr error, expErr error, expInput bool, 
 	require.Equalf(t, expRetriable, gotRetriable,
 		"retriable mismatch: expected %v, got %v; actual error: %v; %s",
 		expRetriable, gotRetriable, actualErr, trace())
+
+	for _, m := range expMsg {
+		require.ErrorContainsf(t, actualErr, m,
+			"error message mismatch: expected to contain %q; actual error: %v; %s",
+			m, actualErr, trace())
+	}
 }
 
 func IsTSafeStalledError(err error) bool {
