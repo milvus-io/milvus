@@ -266,7 +266,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         )
 
         #  search again without specify anns_field
-        error = {"err_code": 999, "err_msg": "multiple anns_fields exist, please specify a anns_field in search_params"}
+        error = {"err_code": ct.ANY_CODE, "err_msg": "multiple anns_fields exist, please specify a anns_field in search_params"}
         search_res, _ = self.search(
             client,
             collection_name,
@@ -289,7 +289,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         collection_name = self.collection_name
 
         # search with empty vectors
-        error = {"err_code": 999, "err_msg": "Unexpected error, message=<list index out of range>"}
+        error = {"err_code": ct.ANY_CODE, "err_msg": "Unexpected error, message=<list index out of range>"}
         search_res, _ = self.search(
             client,
             collection_name,
@@ -498,8 +498,8 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         search_params = {}
         invalid_output_fields = [["%"], [""], ["-"]]
         for field in invalid_output_fields:
-            error1 = {ct.err_code: 999, ct.err_msg: f"parse output field name failed: {field[0]}"}
-            error2 = {ct.err_code: 999, ct.err_msg: f"`output_fields` value {field} is illegal"}
+            error1 = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"parse output field name failed: {field[0]}"}
+            error2 = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"`output_fields` value {field} is illegal"}
             error = error2 if field == [""] else error1
             self.search(client, collection_name, vectors_to_search,
                         anns_field=self.float_vector_field_name,
@@ -536,7 +536,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         vectors_to_search = cf.gen_vectors(default_nq, self.float_vector_dim)
         search_params = {"metric_type": self.float_vector_metric, "params": {"nprobe": 100}}
 
-        error = {"err_code": 999, "err_msg": f"topk [{ct.max_limit + 1}] is invalid, it should be in range " \
+        error = {"err_code": ct.ANY_CODE, "err_msg": f"topk [{ct.max_limit + 1}] is invalid, it should be in range " \
                                              f"[1, {ct.max_limit}], but got {ct.max_limit + 1}"}
         # search with more than max limit
         search_res, _ = self.search(
@@ -563,7 +563,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         vectors_to_search = cf.gen_vectors(ct.max_nq + 1, dim=128, vector_data_type=DataType.SPARSE_FLOAT_VECTOR)
         search_params = {"metric_type": self.sparse_vector_metric}
 
-        error = {"err_code": 999,
+        error = {"err_code": ct.ANY_CODE,
                  "err_msg": f"nq [{ct.max_nq + 1}] is invalid, nq (number of search vector per search request) should be in range " \
                             f"[1, {ct.max_nq}], but got {ct.max_nq + 1}"}
         # search with more than max nq
@@ -667,7 +667,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         client.close()
 
         # search with client closed
-        error = {"err_code": 999, "err_msg": "should create connection first"}
+        error = {"err_code": ct.ANY_CODE, "err_msg": "should create connection first"}
         search_res, _ = self.search(
             client,
             collection_name,
@@ -693,7 +693,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         search_params = {"metric_type": self.sparse_vector_metric, "params": {"nprobe": 100}}
 
         # search with mismatched metric type
-        error = {"err_code": 999, "err_msg": "metric type not match: invalid parameter[expected=COSINE][actual=IP]"}
+        error = {"err_code": ct.ANY_CODE, "err_msg": "metric type not match: invalid parameter[expected=COSINE][actual=IP]"}
         search_res, _ = self.search(
             client,
             collection_name,
@@ -720,7 +720,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         search_params = {"metric_type": self.float_vector_metric, "params": {"nprobe": 100}}
 
         # search with invalid partition name
-        error = {"err_code": 999, "err_msg": f"partition name {partition_name} not found"}
+        error = {"err_code": ct.ANY_CODE, "err_msg": f"partition name {partition_name} not found"}
         search_res, _ = self.search(
             client,
             collection_name,
@@ -955,7 +955,7 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
         # release collection
         self.release_collection(client, collection_name)
         # search after release
-        error = {"err_code": 999, "err_msg": "collection not loaded"}
+        error = {"err_code": ct.ANY_CODE, "err_msg": "collection not loaded"}
         vectors_to_search = cf.gen_vectors(default_nq, ct.default_dim)
         search_params = {}
         search_res, _ = self.search(
@@ -1533,7 +1533,7 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                                params=cf.get_index_params_params(index_type=index))
         if vector_dtype == DataType.INT8_VECTOR and index != 'HNSW':
             # INT8_Vector only supports HNSW index for now
-            error = {"err_code": 999, "err_msg": f"data type Int8Vector can't build with this index {index}"}
+            error = {"err_code": ct.ANY_CODE, "err_msg": f"data type Int8Vector can't build with this index {index}"}
             self.create_index(client, collection_name, index_params=index_params,
                               check_task=CheckTasks.err_res, check_items=error)
         else:
@@ -2040,7 +2040,7 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
         search_params = {}
         search_vectors = cf.gen_vectors(1, dim=dim)
         search_exp = "json_field1['count'] < json_field2['count']"
-        error = {ct.err_code: 999, ct.err_msg: "two column comparison with JSON type is not supported"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "two column comparison with JSON type is not supported"}
         self.search(client, collection_name, search_vectors,
                     anns_field=ct.default_float_vec_field_name,
                     search_params=search_params,

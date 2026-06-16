@@ -488,7 +488,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     search_params=default_search_params, limit=default_limit,
                     filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999, "err_msg": err_msg})
+                    check_items={"err_code": ct.ANY_CODE, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_dim(self):
@@ -520,7 +520,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         if invalid_field_name in [None, ""]:
             pytest.skip("None is legal")
         client = self._client(alias=self.shared_alias)
-        error = {"err_code": 999, "err_msg": f"failed to create query plan: failed to get field schema by name"}
+        error = {"err_code": ct.ANY_CODE, "err_msg": f"failed to create query plan: failed to get field schema by name"}
         self.search(client, self.collection_name,
                     data=vectors[:default_nq], anns_field=invalid_field_name,
                     search_params=default_search_params, limit=default_limit,
@@ -623,7 +623,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         expected: raise exception and report the error
         """
         client = self._client(alias=self.shared_alias)
-        error = {"err_code": 999, "err_msg": "failed to create query plan: cannot parse expression"}
+        error = {"err_code": ct.ANY_CODE, "err_msg": "failed to create query plan: cannot parse expression"}
         if invalid_search_expr == 1:
             error = {"err_code": 1, "err_msg": "bad argument type for built-in operation"}
         self.search(client, self.collection_name,
@@ -650,7 +650,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     search_params=default_search_params, limit=default_limit,
                     filter=invalid_search_expr,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999,
+                    check_items={"err_code": ct.ANY_CODE,
                                  "err_msg": "failed to create query plan: cannot parse expression: %s"
                                             % invalid_search_expr})
 
@@ -692,7 +692,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     filter=v2_invalid_search_exp,
                     partition_names=invalid_partitions,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999,
+                    check_items={"err_code": ct.ANY_CODE,
                                  "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -711,7 +711,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     filter=v2_invalid_search_exp,
                     partition_names=invalid_partitions,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999, "err_msg": err_msg})
+                    check_items={"err_code": ct.ANY_CODE, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("invalid_output_fields", [[None], [1, 2], ct.default_int64_field_name])
@@ -729,7 +729,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     filter=v2_invalid_search_exp,
                     output_fields=invalid_output_fields,
                     check_task=CheckTasks.err_res,
-                    check_items={ct.err_code: 999,
+                    check_items={ct.err_code: ct.ANY_CODE,
                                  ct.err_msg: err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -749,7 +749,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     filter=v2_invalid_search_exp,
                     output_fields=non_existing_output_fields,
                     check_task=CheckTasks.err_res,
-                    check_items={ct.err_code: 999,
+                    check_items={ct.err_code: ct.ANY_CODE,
                                  ct.err_msg: err_msg})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -875,7 +875,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     search_params=range_search_params, limit=default_limit,
                     filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999, "err_msg": "type must be number"})
+                    check_items={"err_code": ct.ANY_CODE, "err_msg": "type must be number"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expr", [
@@ -900,7 +900,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     search_params=default_search_params, limit=default_limit,
                     filter=expr,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999, "err_msg": "by zero"})
+                    check_items={"err_code": ct.ANY_CODE, "err_msg": "by zero"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expr", [
@@ -918,7 +918,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         self.query(client, self.collection_name,
                    filter=expr,
                    check_task=CheckTasks.err_res,
-                   check_items={"err_code": 999, "err_msg": "by zero"})
+                   check_items={"err_code": ct.ANY_CODE, "err_msg": "by zero"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expr,expr_params", [
@@ -940,7 +940,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     search_params=default_search_params, limit=default_limit,
                     filter=expr, filter_params=expr_params,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999, "err_msg": "by zero"})
+                    check_items={"err_code": ct.ANY_CODE, "err_msg": "by zero"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expr", [
@@ -983,7 +983,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     search_params=range_search_params, limit=default_limit,
                     filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999, "err_msg": "type must be number"})
+                    check_items={"err_code": ct.ANY_CODE, "err_msg": "type must be number"})
 
 
 class TestSearchInvalidIndependent(TestMilvusClientV2Base):
@@ -1105,7 +1105,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                             search_params=search_params, limit=default_limit,
                             filter=v2_invalid_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 999,
+                            check_items={"err_code": ct.ANY_CODE,
                                          "err_msg": "fail to search on QueryNode"})
 
     @pytest.mark.skip("not support now")
@@ -1186,7 +1186,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     search_params=default_search_params, limit=nb,
                     filter=expression,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999,
+                    check_items={"err_code": ct.ANY_CODE,
                                  "err_msg": "failed to create query plan: "
                                             "cannot parse expression: %s" % expression})
 
@@ -1915,7 +1915,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     search_params=search_params, limit=default_limit,
                     filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999,
+                    check_items={"err_code": ct.ANY_CODE,
                                  "err_msg": "parse ignore growing field failed"})
 
     @pytest.mark.tags(CaseLabel.L1)

@@ -129,7 +129,7 @@ class TestMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         partition_names = [cf.gen_unique_str(partition_prefix), cf.gen_unique_str(partition_prefix)]
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 999, ct.err_msg: f"`partition_name` value {partition_names} is illegal"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"`partition_name` value {partition_names} is illegal"}
         self.create_partition(client, collection_name, partition_names,
                               check_task=CheckTasks.err_res, check_items=error)
 
@@ -452,7 +452,7 @@ class TestMilvusClientReleasePartitionInvalid(TestMilvusClientV2Base):
         client = self._client()
         partition_name = cf.gen_unique_str(partition_prefix)
         # 2. create partition
-        error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {collection_name}. the first character of a "
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"Invalid collection name: {collection_name}. the first character of a "
                                                f"collection name must be an underscore or letter: invalid parameter"}
         self.release_partitions(client, collection_name, partition_name,
                                 check_task=CheckTasks.err_res, check_items=error)
@@ -468,7 +468,7 @@ class TestMilvusClientReleasePartitionInvalid(TestMilvusClientV2Base):
         collection_name = "a".join("a" for i in range(256))
         partition_name = cf.gen_unique_str(partition_prefix)
         # 2. create partition
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: f"Invalid collection name: {collection_name}. the length of a collection name "
                              f"must be less than 255 characters: invalid parameter"}
         self.release_partitions(client, collection_name, partition_name,
@@ -485,7 +485,7 @@ class TestMilvusClientReleasePartitionInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str(partition_prefix)
         # 2. create partition
-        error = {ct.err_code: 999, ct.err_msg: f"collection not found[database=default]"
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"collection not found[database=default]"
                                                f"[collection={collection_name}]"}
         self.release_partitions(client, collection_name, partition_name,
                                 check_task=CheckTasks.err_res, check_items=error)
@@ -538,7 +538,7 @@ class TestMilvusClientReleasePartitionInvalid(TestMilvusClientV2Base):
         partition_names = []
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 999, ct.err_msg: f"invalid parameter[expected=any partition][actual=empty partition list"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"invalid parameter[expected=any partition][actual=empty partition list"}
         self.release_partitions(client, collection_name, partition_names,
                                 check_task=CheckTasks.err_res, check_items=error)
 
@@ -555,7 +555,7 @@ class TestMilvusClientReleasePartitionInvalid(TestMilvusClientV2Base):
         partition_names = ["_default", not_exist_partition]
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 999, ct.err_msg: f"partition not found[partition={not_exist_partition}]"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"partition not found[partition={not_exist_partition}]"}
         self.release_partitions(client, collection_name, partition_names,
                                 check_task=CheckTasks.err_res, check_items=error)
 
@@ -1324,9 +1324,9 @@ class TestPartitionParams(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
         if partition_name is not None:
-            error = {ct.err_code: 999, ct.err_msg: f"Invalid partition name: {partition_name.strip()}"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"Invalid partition name: {partition_name.strip()}"}
         else:
-            error = {ct.err_code: 999, ct.err_msg: f"`partition_name` value {partition_name} is illegal"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"`partition_name` value {partition_name} is illegal"}
         self.create_partition(client, collection_name, partition_name,
                               check_task=CheckTasks.err_res, check_items=error)
 
@@ -1819,7 +1819,7 @@ class TestPartitionOperations(TestMilvusClientV2Base):
         err_msg = f"partition number ({ct.max_partition_num}) exceeds max configuration ({ct.max_partition_num})"
         self.create_partition(client, collection_name, p_name,
                               check_task=CheckTasks.err_res,
-                              check_items={ct.err_code: 999, ct.err_msg: err_msg})
+                              check_items={ct.err_code: ct.ANY_CODE, ct.err_msg: err_msg})
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_partition_drop_default_partition(self, default_schema):

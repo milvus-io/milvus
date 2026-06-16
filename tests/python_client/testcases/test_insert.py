@@ -74,7 +74,7 @@ class TestInsertParams(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        error = {ct.err_code: 999, ct.err_msg: "The fields don't match with schema fields"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "The fields don't match with schema fields"}
         collection_w.insert(
             data=data, check_task=CheckTasks.err_res, check_items=error)
 
@@ -88,7 +88,7 @@ class TestInsertParams(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        error = {ct.err_code: 999, ct.err_msg: "The data doesn't match with schema fields"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "The data doesn't match with schema fields"}
         collection_w.insert(
             data=data, check_task=CheckTasks.err_res, check_items=error)
 
@@ -104,7 +104,7 @@ class TestInsertParams(TestcaseBase):
         columns = [ct.default_int64_field_name,
                    ct.default_float_vec_field_name]
         df = pd.DataFrame(columns=columns)
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: "The fields don't match with schema fields"}
         collection_w.insert(
             data=df, check_task=CheckTasks.err_res, check_items=error)
@@ -120,7 +120,7 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name, dim=32)
         df = cf.gen_default_dataframe_data(10)
         df.rename(columns={ct.default_int64_field_name: ' '}, inplace=True)
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: "The name of field doesn't match, expected: int64"}
         collection_w.insert(
             data=df, check_task=CheckTasks.err_res, check_items=error)
@@ -138,7 +138,7 @@ class TestInsertParams(TestcaseBase):
         df = cf.gen_default_dataframe_data(10)
         df.rename(
             columns={ct.default_int64_field_name: invalid_field_name}, inplace=True)
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: f"The name of field doesn't match, expected: int64, got {invalid_field_name}"}
         collection_w.insert(
             data=df, check_task=CheckTasks.err_res, check_items=error)
@@ -216,7 +216,7 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         dim = 129
         df = cf.gen_default_dataframe_data(nb=20, dim=dim)
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: f'Collection field dim is {ct.default_dim}, but entities field dim is {dim}'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
@@ -234,7 +234,7 @@ class TestInsertParams(TestcaseBase):
         df = cf.gen_default_dataframe_data(nb)
         new_float_value = pd.Series(data=[float(i) for i in range(nb)], dtype="float64")
         df[df.columns[1]] = new_float_value
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: "The data type of field float doesn't match, expected: FLOAT, got DOUBLE"}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
@@ -254,7 +254,7 @@ class TestInsertParams(TestcaseBase):
             if fields.dtype == DataType.VARCHAR:
                 field_data = field_data[:-1]
             data.append(field_data)
-        error = {ct.err_code: 999, ct.err_msg: "Field data size misaligned for field [varchar] "}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Field data size misaligned for field [varchar] "}
         collection_w.insert(
             data=data, check_task=CheckTasks.err_res, check_items=error)
 
@@ -274,7 +274,7 @@ class TestInsertParams(TestcaseBase):
             if fields.dtype == DataType.FLOAT_VECTOR:
                 field_data = field_data[:-1]
             data.append(field_data)
-        error = {ct.err_code: 999, ct.err_msg: 'Field data size misaligned for field [float_vector] '}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: 'Field data size misaligned for field [float_vector] '}
         collection_w.insert(
             data=data, check_task=CheckTasks.err_res, check_items=error)
 
@@ -293,7 +293,7 @@ class TestInsertParams(TestcaseBase):
             field_data = cf.gen_data_by_collection_field(fields, nb=nb)
             data.append(field_data)
         data.append([1 for _ in range(nb)])
-        error = {ct.err_code: 999, ct.err_msg: "The data doesn't match with schema fields"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "The data doesn't match with schema fields"}
         collection_w.insert(
             data=data, check_task=CheckTasks.err_res, check_items=error)
 
@@ -308,7 +308,7 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         df = cf.gen_default_dataframe_data(ct.default_nb)
         df.drop(ct.default_float_vec_field_name, axis=1, inplace=True)
-        error = {ct.err_code: 999, ct.err_msg: "The fields don't match with schema fields"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "The fields don't match with schema fields"}
         collection_w.insert(
             data=df, check_task=CheckTasks.err_res, check_items=error)
 
@@ -329,7 +329,7 @@ class TestInsertParams(TestcaseBase):
         tmp = data[0]
         data[0] = data[1]
         data[1] = tmp
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: "The Input data type is inconsistent with defined schema"}
         collection_w.insert(
             data=data, check_task=CheckTasks.err_res, check_items=error)
@@ -369,7 +369,7 @@ class TestInsertOperation(TestcaseBase):
             field_data = cf.gen_data_by_collection_field(field, nb=nb)
             if field.dtype != DataType.FLOAT_VECTOR:
                 data.append(field_data)
-        error = {ct.err_code: 999, ct.err_msg: f"The data doesn't match with schema fields, "
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"The data doesn't match with schema fields, "
                                                f"expect {len(fields)} list, got {len(data)}"}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
@@ -703,7 +703,7 @@ class TestInsertInvalid(TestcaseBase):
         int_values = [i for i in range(0, ct.default_nb)]
         string_values = ["abc" for i in range(ct.default_nb)]
         data = (int_values, vectors, string_values, default_value)
-        error = {ct.err_code: 999, ct.err_msg: "The type of data should be List, pd.DataFrame or Dict"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "The type of data should be List, pd.DataFrame or Dict"}
         collection_w.upsert(data, check_task=CheckTasks.err_res, check_items=error)
 
 class TestUpsertValid(TestcaseBase):
@@ -790,9 +790,9 @@ class TestUpsertInvalid(TestcaseBase):
         collection_w.create_partition(p_name)
         cf.insert_data(collection_w)
         data = cf.gen_default_dataframe_data(nb=100)
-        error = {ct.err_code: 999, ct.err_msg: "Invalid partition name"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Invalid partition name"}
         if partition_name == "n-ame":
-            error = {ct.err_code: 999, ct.err_msg: f"partition not found[partition={partition_name}]"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"partition not found[partition={partition_name}]"}
         collection_w.upsert(data=data, partition_name=partition_name,
                             check_task=CheckTasks.err_res, check_items=error)
 
@@ -827,7 +827,7 @@ class TestUpsertInvalid(TestcaseBase):
         collection_w.create_partition("partition_2")
         cf.insert_data(collection_w)
         data = cf.gen_default_dataframe_data(nb=1000)
-        error = {ct.err_code: 999, ct.err_msg: "['partition_1', 'partition_2'] has type <class 'list'>, "
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "['partition_1', 'partition_2'] has type <class 'list'>, "
                                                "but expected one of: (<class 'bytes'>, <class 'str'>)"}
         collection_w.upsert(data=data, partition_name=["partition_1", "partition_2"],
                             check_task=CheckTasks.err_res, check_items=error)
@@ -848,7 +848,7 @@ class TestUpsertInvalid(TestcaseBase):
         int_values = [i for i in range(0, ct.default_nb)]
         string_values = ["abc" for i in range(ct.default_nb)]
         data = (int_values, default_value, string_values, vectors)
-        error = {ct.err_code: 999, ct.err_msg: "The type of data should be List, pd.DataFrame or Dict"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "The type of data should be List, pd.DataFrame or Dict"}
         collection_w.upsert(data, check_task=CheckTasks.err_res, check_items=error)
 
 

@@ -69,7 +69,7 @@ class TestUtilityParams(TestcaseBase):
         self._connect()
         c_name = get_invalid_type_collection_name
         self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res,
-                                         check_items={ct.err_code: 999,
+                                         check_items={ct.err_code: ct.ANY_CODE,
                                                       ct.err_msg: f"`collection_name` value {c_name} is illegal"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -81,9 +81,9 @@ class TestUtilityParams(TestcaseBase):
         """
         self._connect()
         c_name = get_invalid_value_collection_name
-        error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {c_name}"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"Invalid collection name: {c_name}"}
         if c_name in [None, ""]:
-            error = {ct.err_code: 999, ct.err_msg: f"`collection_name` value {c_name} is illegal"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"`collection_name` value {c_name} is illegal"}
         self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -97,7 +97,7 @@ class TestUtilityParams(TestcaseBase):
         c_name = get_invalid_type_collection_name
         p_name = cf.gen_unique_str(prefix)
         self.utility_wrap.has_partition(c_name, p_name, check_task=CheckTasks.err_res,
-                                        check_items={ct.err_code: 999,
+                                        check_items={ct.err_code: ct.ANY_CODE,
                                                      ct.err_msg: f"`collection_name` value {c_name} is illegal"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -110,9 +110,9 @@ class TestUtilityParams(TestcaseBase):
         self._connect()
         c_name = get_invalid_value_collection_name
         p_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {c_name}"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"Invalid collection name: {c_name}"}
         if c_name in [None, ""]:
-            error = {ct.err_code: 999, ct.err_msg: f"`collection_name` value {c_name} is illegal"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"`collection_name` value {c_name} is illegal"}
         self.utility_wrap.has_partition(c_name, p_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -127,7 +127,7 @@ class TestUtilityParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         p_name = get_invalid_type_collection_name
         ut.has_partition(c_name, p_name, check_task=CheckTasks.err_res,
-                         check_items={ct.err_code: 999,
+                         check_items={ct.err_code: ct.ANY_CODE,
                                       ct.err_msg: f"`partition_name` value {p_name} is illegal"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -145,11 +145,11 @@ class TestUtilityParams(TestcaseBase):
             pytest.skip("partition name 12name is legal")
         if p_name == "n-ame":
             pytest.skip("https://github.com/milvus-io/milvus/issues/39432")
-        error = {ct.err_code: 999, ct.err_msg: f"Invalid partition name: {p_name}"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"Invalid partition name: {p_name}"}
         if p_name in [None]:
-            error = {ct.err_code: 999, ct.err_msg: f"`partition_name` value {p_name} is illegal"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"`partition_name` value {p_name} is illegal"}
         elif p_name in [" ", ""]:
-            error = {ct.err_code: 999, ct.err_msg: "Invalid partition name: . Partition name should not be empty."}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Invalid partition name: . Partition name should not be empty."}
         ut.has_partition(c_name, p_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -157,7 +157,7 @@ class TestUtilityParams(TestcaseBase):
         self._connect()
         c_name = get_invalid_type_collection_name
         self.utility_wrap.drop_collection(c_name, check_task=CheckTasks.err_res,
-                                          check_items={ct.err_code: 999,
+                                          check_items={ct.err_code: ct.ANY_CODE,
                                                        ct.err_msg: f"`collection_name` value {c_name} is illegal"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -165,7 +165,7 @@ class TestUtilityParams(TestcaseBase):
         self._connect()
         c_name = get_invalid_value_collection_name
         if c_name in [None, ""]:
-            error = {ct.err_code: 999, ct.err_msg: f"`collection_name` value {c_name} is illegal"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"`collection_name` value {c_name} is illegal"}
             self.utility_wrap.drop_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
         else:
             self.utility_wrap.drop_collection(c_name)
@@ -193,9 +193,9 @@ class TestUtilityParams(TestcaseBase):
         expected: raise exception
         """
         self._connect()
-        error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {invalid_name}"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"Invalid collection name: {invalid_name}"}
         if invalid_name in [None, ""]:
-            error = {ct.err_code: 999, ct.err_msg: "collection name should not be empty"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "collection name should not be empty"}
         self.utility_wrap.index_building_progress(collection_name=invalid_name,
                                                   check_task=CheckTasks.err_res, check_items=error)
 
@@ -210,7 +210,7 @@ class TestUtilityParams(TestcaseBase):
         """
         self._connect()
         collection_w = self.init_collection_wrap()
-        error = {ct.err_code: 999, ct.err_msg: "index not found"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "index not found"}
         self.utility_wrap.index_building_progress(collection_name=collection_w.name, index_name=invalid_index_name,
                                                   check_task=CheckTasks.err_res, check_items=error)
 
@@ -292,9 +292,9 @@ class TestUtilityParams(TestcaseBase):
         collection_w = self.init_collection_general(prefix, nb=10)[0]
         partition_names = [partition_name]
         collection_w.load()
-        err_msg = {ct.err_code: 999, ct.err_msg: "partition not found"}
+        err_msg = {ct.err_code: ct.ANY_CODE, ct.err_msg: "partition not found"}
         if partition_name is None:
-            err_msg = {ct.err_code: 999, ct.err_msg: "is illegal"}
+            err_msg = {ct.err_code: ct.ANY_CODE, ct.err_msg: "is illegal"}
         self.utility_wrap.loading_progress(collection_w.name, partition_names,
                                            check_task=CheckTasks.err_res, check_items=err_msg)
 
@@ -442,7 +442,7 @@ class TestUtilityParams(TestcaseBase):
         new_collection_name = cf.gen_unique_str(prefix)
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
                                             check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 999,
+                                            check_items={"err_code": ct.ANY_CODE,
                                                          "err_msg": "`collection_name` value {} is illegal".format(
                                                              old_collection_name)})
 
@@ -459,7 +459,7 @@ class TestUtilityParams(TestcaseBase):
         new_collection_name = cf.gen_unique_str(prefix)
         error = {"err_code": 4, "err_msg": "collection not found"}
         if old_collection_name in [None, ""]:
-            error = {"err_code": 999, "err_msg": "is illegal"}
+            error = {"err_code": ct.ANY_CODE, "err_msg": "is illegal"}
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
                                             check_task=CheckTasks.err_res,
                                             check_items=error)
@@ -494,7 +494,7 @@ class TestUtilityParams(TestcaseBase):
         new_collection_name = get_invalid_value_collection_name
         error = {"err_code": 1100, "err_msg": "Invalid collection name"}
         if new_collection_name in [None, ""]:
-            error = {"err_code": 999, "err_msg": f"`collection_name` value {new_collection_name} is illegal"}
+            error = {"err_code": ct.ANY_CODE, "err_msg": f"`collection_name` value {new_collection_name} is illegal"}
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
                                             check_task=CheckTasks.err_res, check_items=error)
     
@@ -743,7 +743,7 @@ class TestUtilityBase(TestcaseBase):
         cw = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(nb)
         cw.insert(data=data)
-        error = {ct.err_code: 999, ct.err_msg: f"index not found[collection={c_name}]"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"index not found[collection={c_name}]"}
         self.utility_wrap.index_building_progress(c_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -914,7 +914,7 @@ class TestUtilityBase(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, insert_data=True, nb=100)[0]
         collection_w.release()
-        error = {ct.err_code: 999, ct.err_msg: "collection not loaded"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "collection not loaded"}
         self.utility_wrap.loading_progress(collection_w.name,
                                            check_task=CheckTasks.err_res, check_items=error)
 
@@ -1641,7 +1641,7 @@ class TestUtilityAdvanced(TestcaseBase):
         # load balance
         self.utility_wrap.load_balance(collection_w.name, src_node_id, dst_node_ids, sealed_segment_ids,
                                        check_task=CheckTasks.err_res,
-                                       check_items={ct.err_code: 999, ct.err_msg: "not found in source node"})
+                                       check_items={ct.err_code: ct.ANY_CODE, ct.err_msg: "not found in source node"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_balance_with_all_sealed_segment_id_not_exist(self):

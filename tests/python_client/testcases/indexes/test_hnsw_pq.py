@@ -116,7 +116,7 @@ class TestHnswPQBuildParams(TestMilvusClientV2Base):
         if vector_data_type not in HNSW_PQ.supported_vector_types:
             self.create_index(client, collection_name, index_params,
                               check_task=CheckTasks.err_res,
-                              check_items={"err_code": 999,
+                              check_items={"err_code": ct.ANY_CODE,
                                            "err_msg": f"can't build with this index HNSW_PQ: invalid parameter"})
 
         else:

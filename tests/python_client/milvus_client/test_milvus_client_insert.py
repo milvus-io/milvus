@@ -66,7 +66,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         self.close(client)
 
         data = cf.gen_default_list_data(10)
-        error = {ct.err_code: 999, ct.err_msg: 'should create connection first'}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: 'should create connection first'}
         self.insert(client, collection_name, data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -83,7 +83,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         # 2. insert
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nb)]
         data = [[i for i in range(default_nb)], vectors]
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: "The Input data type is inconsistent with defined schema, please check it."}
         self.insert(client, collection_name, data,
                     check_task=CheckTasks.err_res, check_items=error)
@@ -167,7 +167,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: "wrong type of argument 'data',expected 'Dict' or list of 'Dict', got 'str'"}
         self.insert(client, collection_name, data,
                     check_task=CheckTasks.err_res, check_items=error)
@@ -398,7 +398,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
              default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
 
         # 3. Verify error on insert
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: "The Input data type is inconsistent with defined schema, {binary_vector} field should be a binary_vector, but got a {<class 'list'>} instead."}
         self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
@@ -429,7 +429,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
 
         # 3. Verify error on insert with non-existent partition
-        error = {ct.err_code: 999, ct.err_msg: f"partition not found[partition={partition_name}]"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"partition not found[partition={partition_name}]"}
         self.insert(client, collection_name, data=rows, partition_name=partition_name, check_task=CheckTasks.err_res,
                     check_items=error)
 
@@ -579,7 +579,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
             for field_name, field_value in rows[dirty_i].items():
                 # Get the actual value type
                 value_type = type(field_value)
-                error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+                error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "The Input data type is inconsistent with defined schema"}
 
                 # Inject type errors based on value type (only for simple scalar types)
                 if value_type in (int, bool, float):
@@ -623,7 +623,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(nb)]
 
         # 3. Verify error on insert
-        error = {ct.err_code: 999, ct.err_msg: "message larger than max"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "message larger than max"}
         self.insert(client, collection_name, data=rows,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -658,7 +658,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
                  default_string_field_name: default_value, default_vector_field_name: vectors[0]}]
 
         # 5. Verify error on upsert
-        error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "The Input data type is inconsistent with defined schema"}
         self.upsert(client, collection_name, data=data,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -684,13 +684,13 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
 
         # 3. Test None value in vector field
         rows[0][default_vector_field_name][0] = None
-        error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "The Input data type is inconsistent with defined schema"}
         self.insert(client, collection_name, data=rows,
                     check_task=CheckTasks.err_res, check_items=error)
 
         # 4. Test float('nan') in vector field
         rows[0][default_vector_field_name][0] = float('nan')
-        error = {ct.err_code: 999, ct.err_msg: "value 'NaN' is not a number or infinity"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "value 'NaN' is not a number or infinity"}
         self.insert(client, collection_name, data=rows,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -1214,7 +1214,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(10)]
-        error = {ct.err_code: 999, ct.err_msg: 'should create connection first'}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: 'should create connection first'}
         self.insert(client, collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.skip(reason="Covered by test_milvus_client_insert_partition ")
@@ -1334,7 +1334,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
             {"vector": list(cf.gen_vectors(1, ct.default_dim)[0]), "small_limit": "limit_1___________", "big_limit": "1"},
             {"vector": list(cf.gen_vectors(1, ct.default_dim)[0]), "small_limit": "limit_2___________", "big_limit": "2"}
         ]
-        error = {ct.err_code: 999, ct.err_msg: "length of varchar field small_limit exceeds max length"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "length of varchar field small_limit exceeds max length"}
         self.insert(client, collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
@@ -1785,7 +1785,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         
         # Try to insert with primary key included (should fail)
         df = cf.gen_default_dataframe_data(nb=100, auto_id=auto_id)
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict', got 'DataFrame'"}
         self.insert(client, collection_name, df, check_task=CheckTasks.err_res, check_items=error)
 
@@ -2691,7 +2691,7 @@ class TestMilvusClientInsertArray(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
         rows[1][ct.default_int32_array_field_name] = [str(i) for i in range(arr_len)]
         err_msg = "The Input data type is inconsistent with defined schema"
-        error = {ct.err_code: 999, ct.err_msg: err_msg}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: err_msg}
         self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
         # 4. Test 2: Upsert float values to a string array
@@ -2727,7 +2727,7 @@ class TestMilvusClientInsertArray(TestMilvusClientV2Base):
 
         # 5. Verify error on insert
         err_msg = "The Input data type is inconsistent with defined schema"
-        error = {ct.err_code: 999, ct.err_msg: err_msg}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: err_msg}
         self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
         self.drop_collection(client, collection_name)

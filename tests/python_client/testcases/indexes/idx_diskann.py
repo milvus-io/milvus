@@ -81,14 +81,14 @@ class DISKANN:
         # search_list_size
         # Type: Integer Range: [1, int_max]
         # Default value: 100
-        {"description": "Minimum Boundary Test", "params": {"search_list_size": 1}, "expected": {"err_code": 999, "err_msg": "search_list_size(1) should be larger than k(10)"}},
+        {"description": "Minimum Boundary Test", "params": {"search_list_size": 1}, "expected": {"err_code": ct.ANY_CODE, "err_msg": "search_list_size(1) should be larger than k(10)"}},
         {"description": "Large Value Test", "params": {"search_list_size": 1000}, "expected": success},
         {"description": "Default value Test", "params": {"search_list_size": 100}, "expected": success},
-        {"description": "Out of Range Test - Negative", "params": {"search_list_size": -1}, "expected": {"err_code": 999, "err_msg": "param 'search_list_size' (-1) should be in range [1, 2147483647]"}},
+        {"description": "Out of Range Test - Negative", "params": {"search_list_size": -1}, "expected": {"err_code": ct.ANY_CODE, "err_msg": "param 'search_list_size' (-1) should be in range [1, 2147483647]"}},
         {"description": "String Type Test", "params": {"search_list_size": "100"}, "expected": success},
-        {"description": "Float Type Test", "params": {"search_list_size": 100.0}, "expected": {"err_code": 999, "err_msg": "Type conflict in json: param 'search_list_size' (100.0) should be integer"}},
-        {"description": "Boolean Type Test", "params": {"search_list_size": True}, "expected": {"err_code": 999, "err_msg": "Type conflict in json: param 'search_list_size' (true) should be integer"}},
-        {"description": "None Type Test", "params": {"search_list_size": None}, "expected": {"err_code": 999, "err_msg": "Type conflict in json: param 'search_list_size' (null) should be integer"}},
+        {"description": "Float Type Test", "params": {"search_list_size": 100.0}, "expected": {"err_code": ct.ANY_CODE, "err_msg": "Type conflict in json: param 'search_list_size' (100.0) should be integer"}},
+        {"description": "Boolean Type Test", "params": {"search_list_size": True}, "expected": {"err_code": ct.ANY_CODE, "err_msg": "Type conflict in json: param 'search_list_size' (true) should be integer"}},
+        {"description": "None Type Test", "params": {"search_list_size": None}, "expected": {"err_code": ct.ANY_CODE, "err_msg": "Type conflict in json: param 'search_list_size' (null) should be integer"}},
         # mix params
         {"description": "mix params", "params": {"search_list_size": 100, "beam_width_ratio": 0.5}, "expected": success},
         {"description": "mix params", "params": {}, "expected": success},

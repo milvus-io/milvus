@@ -886,7 +886,7 @@ class TestSearchPaginationIndependent(TestMilvusClientV2Base):
                                params=cf.get_index_params_params(index_type=index))
         if vector_dtype == DataType.INT8_VECTOR and index != 'HNSW':
             # INT8_Vector only supports HNSW index for now
-            error = {"err_code": 999, "err_msg": f"data type Int8Vector can't build with this index {index}"}
+            error = {"err_code": ct.ANY_CODE, "err_msg": f"data type Int8Vector can't build with this index {index}"}
             self.create_index(client, collection_name, index_params=index_params,
                               check_task=CheckTasks.err_res, check_items=error)
         else:

@@ -137,7 +137,7 @@ class TestIndexParams(TestcaseBase):
             default_field_name,
             index_params,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 999, ct.err_msg: ""},
+            check_items={ct.err_code: ct.ANY_CODE, ct.err_msg: ""},
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -355,7 +355,7 @@ class TestIndexOperation(TestcaseBase):
         collection_w.collection.create_index(default_field_name, index_params, index_name=index_name)
 
         # create index with the same index name and different index params
-        error = {ct.err_code: 999, ct.err_msg: "at most one distinct index is allowed per field"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "at most one distinct index is allowed per field"}
         self.index_wrap.init_index(
             collection_w.collection,
             default_field_name,
@@ -389,7 +389,7 @@ class TestIndexOperation(TestcaseBase):
         vec_index_name = "my_index"
 
         # create same index name on different vector fields
-        error = {ct.err_code: 999, ct.err_msg: "at most one distinct index is allowed per field"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "at most one distinct index is allowed per field"}
         collection_w.create_index(vec_field.name, vec_index, index_name=vec_index_name)
         collection_w.create_index(
             vec_field2.name, vec_index, index_name=vec_index_name, check_task=CheckTasks.err_res, check_items=error
@@ -562,7 +562,7 @@ class TestNewIndexBase(TestcaseBase):
             ct.default_float_vec_field_name,
             ct.default_index,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 999, ct.err_msg: "should create connection first"},
+            check_items={ct.err_code: ct.ANY_CODE, ct.err_msg: "should create connection first"},
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -642,7 +642,7 @@ class TestNewIndexBase(TestcaseBase):
             index_name="b",
             check_task=CheckTasks.err_res,
             check_items={
-                ct.err_code: 999,
+                ct.err_code: ct.ANY_CODE,
                 ct.err_msg: "CreateIndex failed: creating multiple indexes on same field is not supported",
             },
         )
@@ -853,7 +853,7 @@ class TestNewIndexBase(TestcaseBase):
         collection_w.drop_index(
             index_name=ct.default_index_name,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 999, ct.err_msg: "should create connection first."},
+            check_items={ct.err_code: ct.ANY_CODE, ct.err_msg: "should create connection first."},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1114,7 +1114,7 @@ class TestNewIndexBinary(TestcaseBase):
             binary_index_params,
             index_name=binary_field_name,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 999, ct.err_msg: "binary vector index does not support metric type: L2"},
+            check_items={ct.err_code: ct.ANY_CODE, ct.err_msg: "binary vector index does not support metric type: L2"},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1131,7 +1131,7 @@ class TestNewIndexBinary(TestcaseBase):
         if metric_type in ["JACCARD", "HAMMING"]:
             collection_w.create_index(default_binary_vec_field_name, binary_index_params)
         else:
-            error = {ct.err_code: 999, ct.err_msg: f"binary vector index does not support metric type: {metric_type}"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"binary vector index does not support metric type: {metric_type}"}
             collection_w.create_index(
                 default_binary_vec_field_name, binary_index_params, check_task=CheckTasks.err_res, check_items=error
             )
@@ -1230,7 +1230,7 @@ class TestIndexInvalid(TestcaseBase):
         expected: succeed
         """
         collection_w = self.init_collection_wrap()
-        error = {ct.err_code: 999, ct.err_msg: f"Invalid index name: {invalid_index_name}"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"Invalid index name: {invalid_index_name}"}
         collection_w.create_index(
             ct.default_float_vec_field_name,
             default_index_params,
@@ -1538,7 +1538,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.insert(data=data)
         params = {"index_type": index, "metric_type": "IP", "params": {"drop_ratio_build": ratio}}
         error = {
-            ct.err_code: 999,
+            ct.err_code: ct.ANY_CODE,
             ct.err_msg: f"Out of range in json: param 'drop_ratio_build' ({ratio * 1.0}) should be in range [0.000000, 1.000000)",
         }
         index, _ = self.index_wrap.init_index(
@@ -2309,7 +2309,7 @@ class TestScaNNIndex(TestcaseBase):
         collection_w = self.init_collection_general(prefix, is_index=False)[0]
         index_params = {"index_type": "SCANN", "metric_type": "L2", "params": {"nlist": nlist}}
         error = {
-            ct.err_code: 999,
+            ct.err_code: ct.ANY_CODE,
             ct.err_msg: f"Out of range in json: param 'nlist' ({nlist}) should be in range [1, 65536]",
         }
         collection_w.create_index(default_field_name, index_params, check_task=CheckTasks.err_res, check_items=error)

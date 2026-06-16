@@ -431,7 +431,7 @@ class TestSparseSearchIndependent(TestMilvusClientV2Base):
                     f"distances not sorted descending for IP with ratio={dim_max_score_ratio}"
 
         # search with invalid dim_max_score_ratio values
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: "should be in range [0.500000, 1.300000]"}
         for invalid_ratio in [0.49, 1.4]:
             _params.update({"dim_max_score_ratio": invalid_ratio})

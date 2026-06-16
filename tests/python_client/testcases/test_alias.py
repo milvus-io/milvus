@@ -426,7 +426,7 @@ class TestAliasOperationInvalid(TestcaseBase):
                                                      check_items={exp_name: alias_name,
                                                                   exp_schema: schema})
 
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: f"cannot drop the collection via alias = {alias_name}"}
         collection_alias.drop(check_task=CheckTasks.err_res, check_items=error)
 
@@ -482,7 +482,7 @@ class TestAliasOperationInvalid(TestcaseBase):
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
         alias_name = cf.gen_unique_str(prefix)
         self.utility_wrap.create_alias(collection_w.name, alias_name)
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: f"cannot rename collection to an existing alias: {alias_name}"}
         self.utility_wrap.rename_collection(collection_w.name, alias_name,
                                             check_task=CheckTasks.err_res, check_items=error)

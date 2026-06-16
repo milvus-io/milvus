@@ -82,7 +82,7 @@ class TestResourceGroupParams(TestcaseBase):
                                                   check_items=source_rg_info)
 
         # try to drop my rg
-        error = {ct.err_code: 999, ct.err_msg: "resource group's limits node num is not 0"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "resource group's limits node num is not 0"}
         self.utility_wrap.drop_resource_group(name=m_rg_name, check_task=ct.CheckTasks.err_res,
                                               check_items=error)
 
@@ -99,7 +99,7 @@ class TestResourceGroupParams(TestcaseBase):
         self.utility_wrap.drop_resource_group(name=m_rg_name)
         rgs, _ = self.utility_wrap.list_resource_groups()
         assert len(rgs) == rgs_count
-        error = {ct.err_code: 999, ct.err_msg: f"resource group not found[rg={m_rg_name}]"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"resource group not found[rg={m_rg_name}]"}
         self.utility_wrap.describe_resource_group(name=m_rg_name,
                                                   check_task=ct.CheckTasks.err_res,
                                                   check_items=error)
@@ -112,9 +112,9 @@ class TestResourceGroupParams(TestcaseBase):
         verify: fail with error msg
         """
         self._connect()
-        error = {ct.err_code: 999, ct.err_msg: "Invalid resource group name"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Invalid resource group name"}
         if rg_name is None or rg_name == "":
-            error = {ct.err_code: 999, ct.err_msg: "is illegal"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "is illegal"}
             self.init_resource_group(rg_name, check_task=ct.CheckTasks.err_res, check_items=error)
         else:
             self.init_resource_group(rg_name, check_task=ct.CheckTasks.err_res, check_items=error)
@@ -134,7 +134,7 @@ class TestResourceGroupParams(TestcaseBase):
                                                   check_task=ct.CheckTasks.check_rg_property,
                                                   check_items={"name": rg_name})
         rg_name = cf.gen_str_by_length(name_max_length + 1)
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: "Invalid resource group name"}
         self.init_resource_group(name=rg_name,
                                  check_task=ct.CheckTasks.err_res,
@@ -179,7 +179,7 @@ class TestResourceGroupParams(TestcaseBase):
         # drop the rg
         self.utility_wrap.drop_resource_group(name=rg_name)
         assert len(self.utility_wrap.list_resource_groups()[0]) == rgs_count - 1
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: f"resource group not found[rg={rg_name}]"}
         self.utility_wrap.describe_resource_group(name=rg_name,
                                                   check_task=ct.CheckTasks.err_res,
@@ -212,7 +212,7 @@ class TestResourceGroupParams(TestcaseBase):
 
         rgs = self.utility_wrap.list_resource_groups()[0]
         assert len(rgs) == max_rg_num
-        error = {ct.err_code: 999, ct.err_msg: 'resource group num reach limit'}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: 'resource group num reach limit'}
         self.init_resource_group(name=cf.gen_unique_str('rg'),
                                  check_task=CheckTasks.err_res,
                                  check_items=error)
@@ -292,9 +292,9 @@ class TestResourceGroupParams(TestcaseBase):
         verify: fail with error msg
         """
         self._connect()
-        error = {ct.err_code: 999, ct.err_msg: f"resource group not found[rg={rg_name}]"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"resource group not found[rg={rg_name}]"}
         if rg_name is None or rg_name == "":
-            error = {ct.err_code: 999, ct.err_msg: f"`resource_group_name` value {rg_name} is illegal"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"`resource_group_name` value {rg_name} is illegal"}
         self.utility_wrap.describe_resource_group(name=rg_name,
                                                   check_task=ct.CheckTasks.err_res,
                                                   check_items=error)
@@ -380,7 +380,7 @@ class TestTransferNode(TestcaseBase):
                                                   check_items=rg1_info)
 
         # drop rgB
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: f"resource group's limits node num is not 0: invalid parameter"
                              f"[expected=not empty resource group][actual={rg2_name}]"}
         self.utility_wrap.drop_resource_group(name=rg2_name,
@@ -461,7 +461,7 @@ class TestTransferNode(TestcaseBase):
                                                   check_items=rg1_info)
 
         # drop rgB
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: f"resource group's limits node num is not 0: invalid parameter"
                              f"[expected=not empty resource group][actual={rg2_name}]"}
         self.utility_wrap.drop_resource_group(name=rg2_name,
@@ -757,16 +757,16 @@ class TestTransferNode(TestcaseBase):
         self.init_resource_group(rg_name)
 
         # transfer replicas
-        error = {ct.err_code: 999, ct.err_msg: f"resource group node not enough"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"resource group node not enough"}
         if num_node in [0, -1]:
-            error = {ct.err_code: 999, ct.err_msg: f"invalid parameter[expected=NumNode > 0]"
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"invalid parameter[expected=NumNode > 0]"
                                                    f"[actual=invalid NumNode {num_node}]"}
         if type(num_node) is not int:
             if isinstance(num_node, str):
-                error = {ct.err_code: 999, ct.err_msg: f"Unexpected error, message=<'str' object cannot be interpreted "
+                error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"Unexpected error, message=<'str' object cannot be interpreted "
                                                        f"as an integer>"}
             else:
-                error = {ct.err_code: 999, ct.err_msg: f"Unexpected error, message=<'float' object cannot be "
+                error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"Unexpected error, message=<'float' object cannot be "
                                                        f"interpreted as an integer>"}
         self.utility_wrap.transfer_node(source=ct.default_resource_group_name,
                                         target=rg_name,
@@ -791,19 +791,19 @@ class TestTransferNode(TestcaseBase):
         self.init_resource_group(rg_name)
 
         # transfer replicas
-        error = {ct.err_code: 999, ct.err_msg: f"failed to transfer replica between resource group, err=nodes not enough"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"failed to transfer replica between resource group, err=nodes not enough"}
         if type(num_replica) is not int:
             if isinstance(num_replica, str):
-                error = {ct.err_code: 999, ct.err_msg: f"Unexpected error, message=<'str' object cannot be interpreted "
+                error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"Unexpected error, message=<'str' object cannot be interpreted "
                                                        f"as an integer>"}
             elif isinstance(num_replica, float):
-                error = {ct.err_code: 999, ct.err_msg: f"Unexpected error, message=<'float' object cannot be "
+                error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"Unexpected error, message=<'float' object cannot be "
                                                        f"interpreted as an integer>"}
         if num_replica in [0, -1]:
-            error = {ct.err_code: 999, ct.err_msg: f"invalid parameter[expected=NumReplica > 0]"
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"invalid parameter[expected=NumReplica > 0]"
                                                    f"[actual=invalid NumReplica {num_replica}]"}
         if num_replica == 99:
-            error = {ct.err_code: 999, ct.err_msg: f"NumReplica not greater than the number of replica"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"NumReplica not greater than the number of replica"}
 
         self.utility_wrap.transfer_replica(source=ct.default_resource_group_name,
                                            target=rg_name,
@@ -845,7 +845,7 @@ class TestTransferNode(TestcaseBase):
                                         target=rg_name,
                                         num_node=config_nodes)
         # 5. load the collection with default rg
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: 'failed to spawn replica for collection: resource group node not enough'}
         collection_w.load(check_task=CheckTasks.err_res, check_items=error)
 
@@ -947,13 +947,13 @@ class TestTransferNode(TestcaseBase):
         self.init_resource_group(rgB_name)
 
         # load with different replicas
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: 'resource group num can only be 0, 1 or same as replica number'}
         collection_w.load(replica_number=replicas,
                           _resource_groups=[rgA_name, rgB_name],
                           check_task=CheckTasks.err_res, check_items=error)
 
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: "resource group num can only be 0, 1 or same as replica number"}
         collection_w.load(replica_number=replicas,
                           _resource_groups=[ct.default_resource_group_name, rgB_name],
@@ -969,10 +969,10 @@ class TestTransferNode(TestcaseBase):
         """
         collection_w = self.init_collection_wrap()
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: "failed to spawn replica for collection: resource group not found"}
         if rg_names == "不合法":
-            error = {ct.err_code: 999,
+            error = {ct.err_code: ct.ANY_CODE,
                      ct.err_msg: "resource group num can only be 0, 1 or same as replica number"}
         collection_w.load(_resource_groups=rg_names,
                           check_task=CheckTasks.err_res, check_items=error)
@@ -1012,7 +1012,7 @@ class TestTransferNode(TestcaseBase):
                                         target=rg_name,
                                         num_node=config_nodes)
         # 5. load the collection with default rg
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: 'failed to spawn replica for collection: resource group node not enough'}
         partition_w.load(check_task=CheckTasks.err_res, check_items=error)
 
@@ -1117,13 +1117,13 @@ class TestTransferNode(TestcaseBase):
         self.init_resource_group(rgB_name)
 
         # load with different replicas
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: 'resource group num can only be 0, 1 or same as replica number'}
         partition_w.load(replica_number=replicas,
                          _resource_groups=[rgA_name, rgB_name],
                          check_task=CheckTasks.err_res, check_items=error)
 
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: "resource group num can only be 0, 1 or same as replica number"}
         partition_w.load(replica_number=replicas,
                          _resource_groups=[ct.default_resource_group_name, rgB_name],
@@ -1147,10 +1147,10 @@ class TestTransferNode(TestcaseBase):
         error = {ct.err_code: 1,
                  ct.err_msg: 'failed to spawn replica for collection: resource group not found'}
         if rg_names == "不合法":
-            error = {ct.err_code: 999,
+            error = {ct.err_code: ct.ANY_CODE,
                      ct.err_msg: "resource group num can only be 0, 1 or same as replica number"}
         if rg_names == [ct.default_resource_group_name, None]:
-            error = {ct.err_code: 999,
+            error = {ct.err_code: ct.ANY_CODE,
                      ct.err_msg: "Unexpected error, message=<bad argument type for built-in operation>"}
         partition_w.load(_resource_groups=rg_names,
                          check_task=CheckTasks.err_res, check_items=error)
@@ -1294,7 +1294,7 @@ class TestResourceGroupMultiNodes(TestcaseBase):
                                                   check_items=rg_info)
 
         # load 5 replicas in rgA and verify error msg
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: 'failed to spawn replica for collection: resource group node not enough'}
         collection_w.load(replica_number=num_nodes_to_rg+1,
                           _resource_groups=[rg_name],
@@ -1456,7 +1456,7 @@ class TestResourceGroupMultiNodes(TestcaseBase):
                                         num_node=num_nodes_rgB)
         # load 3 replicas in rgA and rgB
         replica_number = 3
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: 'resource group num can only be 0, 1 or same as replica number'}
         collection_w.load(replica_number=replica_number,
                           _resource_groups=[rgA_name, rgB_name],
@@ -1949,7 +1949,7 @@ class TestResourceGroupMultiNodes(TestcaseBase):
 
         # transfer replica to a non_existing rg
         rg_name = "non_existing"
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: f"the target resource group[{rg_name}] doesn't exist: resource group not found[rg={rg_name}]"}
         self.utility_wrap.transfer_replica(source=ct.default_resource_group_name,
                                            target=rg_name,
@@ -1959,7 +1959,7 @@ class TestResourceGroupMultiNodes(TestcaseBase):
                                            check_items=error)
 
         # transfer replica from a non_existing rg
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: f"the source resource group[{rg_name}] doesn't exist: resource group not found[rg={rg_name}]"}
         self.utility_wrap.transfer_replica(source=rg_name,
                                            target=ct.default_resource_group_name,

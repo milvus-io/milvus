@@ -280,16 +280,16 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         assert len(res1.get("properties", {})) >= 1
         # 1. alter collection properties after load
         self.load_collection(client, collection_name)
-        error = {ct.err_code: 999, ct.err_msg: "can not alter mmap properties if collection loaded"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "can not alter mmap properties if collection loaded"}
         self.alter_collection_properties(
             client, collection_name, properties={"mmap.enabled": True}, check_task=CheckTasks.err_res, check_items=error
         )
-        error = {ct.err_code: 999, ct.err_msg: "can not delete mmap properties if collection loaded"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "can not delete mmap properties if collection loaded"}
         self.drop_collection_properties(
             client, collection_name, property_keys=["mmap.enabled"], check_task=CheckTasks.err_res, check_items=error
         )
         # TODO
-        error = {ct.err_code: 999, ct.err_msg: "cannot delete key dynamicfield.enabled"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "cannot delete key dynamicfield.enabled"}
         self.drop_collection_properties(
             client,
             collection_name,
@@ -528,7 +528,7 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
                 }
                 for i in range(100)
             ]
-        error = {ct.err_code: 999, ct.err_msg: "more fieldData has pass in"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "more fieldData has pass in"}
         self.insert(client, collection_name, rows_with_pk, check_task=CheckTasks.err_res, check_items=error)
 
         rows_without_pk = cf.gen_row_data_by_schema(nb=100, schema=schema)
@@ -696,7 +696,7 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
         self.alter_collection_field(
             client, collection_name, field_name=array_field_name, field_params={"max_capacity": 20}
         )
-        error = {ct.err_code: 999, ct.err_msg: "can not modify the maxlength for non-string types"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "can not modify the maxlength for non-string types"}
         self.alter_collection_field(
             client,
             collection_name,
@@ -705,7 +705,7 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
-        error = {ct.err_code: 999, ct.err_msg: "element_type does not allow update in collection field param"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "element_type does not allow update in collection field param"}
         self.alter_collection_field(
             client,
             collection_name,
@@ -736,10 +736,10 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
         if add_field:
             fields_to_verify.append(new_field_name)
         for alter_field in fields_to_verify:
-            error = {ct.err_code: 999, ct.err_msg: f"length of varchar field {alter_field} exceeds max length"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"length of varchar field {alter_field} exceeds max length"}
             if alter_field == array_field_name:
                 error = {
-                    ct.err_code: 999,
+                    ct.err_code: ct.ANY_CODE,
                     ct.err_msg: f'length of Array array field "{array_field_name}" exceeds max length',
                 }
             rows = [
@@ -777,7 +777,7 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
 
         # 2. alter collection field after load
         self.load_collection(client, collection_name)
-        error = {ct.err_code: 999, ct.err_msg: "can not alter collection field properties if collection loaded"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "can not alter collection field properties if collection loaded"}
         self.alter_collection_field(
             client,
             collection_name,
@@ -828,7 +828,7 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dimension=dim, schema=schema)
 
         # try to alert nullable vector field to non-nullable field
-        error = {ct.err_code: 999, ct.err_msg: "nullable does not allow update in collection field param"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "nullable does not allow update in collection field param"}
         self.alter_collection_field(
             client,
             collection_name,

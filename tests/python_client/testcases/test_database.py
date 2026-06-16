@@ -106,7 +106,7 @@ class TestDatabaseParams(TestcaseBase):
         self._connect()
         error = {ct.err_code: 802, ct.err_msg: "invalid database name[database=%s]" % db_name}
         if db_name is None:
-            error = {ct.err_code: 999, ct.err_msg: f"`db_name` value {db_name} is illegal"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"`db_name` value {db_name} is illegal"}
         self.database_wrap.create_database(db_name=db_name, check_task=CheckTasks.err_res,
                                            check_items=error)
 
@@ -145,7 +145,7 @@ class TestDatabaseParams(TestcaseBase):
         # drop db
         error = {ct.err_code: 802, ct.err_msg: "invalid database name[database=%s]" % db_name}
         if db_name is None:
-            error = {ct.err_code: 999, ct.err_msg: f"`db_name` value {db_name} is illegal"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"`db_name` value {db_name} is illegal"}
         self.database_wrap.drop_database(db_name=invalid_name, check_task=CheckTasks.err_res, check_items=error)
         # created db is existing
         self.database_wrap.create_database(db_name, check_task=CheckTasks.err_res,

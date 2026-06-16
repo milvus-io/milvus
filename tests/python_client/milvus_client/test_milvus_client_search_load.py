@@ -97,7 +97,7 @@ class TestSearchLoadIndependent(TestMilvusClientV2Base):
                         anns_field=field_name, search_params=default_search_params, limit=limit,
                         partition_names=partition_names,
                         check_task=CheckTasks.err_res,
-                        check_items={ct.err_code: 999,
+                        check_items={ct.err_code: ct.ANY_CODE,
                                      ct.err_msg: 'failed to search: collection not loaded',
                                      "enable_milvus_client_api": True})
         elif expected == NOT_FOUND_999:
@@ -107,7 +107,7 @@ class TestSearchLoadIndependent(TestMilvusClientV2Base):
                         anns_field=field_name, search_params=default_search_params, limit=limit,
                         partition_names=partition_names,
                         check_task=CheckTasks.err_res,
-                        check_items={ct.err_code: 999,
+                        check_items={ct.err_code: ct.ANY_CODE,
                                      ct.err_msg: f'partition name {p2_name} not found',
                                      "enable_milvus_client_api": True})
         elif isinstance(expected, str) and expected == "not_loaded_65535":

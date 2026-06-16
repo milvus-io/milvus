@@ -470,7 +470,7 @@ class TestGroupSearch(TestMilvusClientV2Base):
         search_vectors = cf.gen_vectors(1, dim=self.binary_vector_dim, vector_data_type=DataType.BINARY_VECTOR)
         search_params = {"metric_type": self.binary_vector_metric}
         limit = 1
-        error = {ct.err_code: 999, ct.err_msg: "not support search_group_by operation based on binary vector"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "not support search_group_by operation based on binary vector"}
         self.search(
             client,
             self.collection_name,
@@ -574,9 +574,9 @@ class TestGroupSearch(TestMilvusClientV2Base):
         search_vectors = cf.gen_vectors(1, dim=self.float_vector_dim, vector_data_type=DataType.FLOAT_VECTOR)
         search_params = {"metric_type": self.float_vector_metric}
         limit = 1
-        error = {ct.err_code: 999, ct.err_msg: f"unsupported data type {grpby_unsupported_field} for group by operator"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"unsupported data type {grpby_unsupported_field} for group by operator"}
         if grpby_unsupported_field == ct.default_float_vec_field_name:
-            error = {ct.err_code: 999, ct.err_msg: "unsupported data type VECTOR_FLOAT for group by operator"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "unsupported data type VECTOR_FLOAT for group by operator"}
         self.search(
             client,
             self.collection_name,
@@ -770,7 +770,7 @@ class TestGroupSearch(TestMilvusClientV2Base):
         )
         exceed_max_group_size = max_group_size + 1
         error = {
-            ct.err_code: 999,
+            ct.err_code: ct.ANY_CODE,
             ct.err_msg: f"input group size:{exceed_max_group_size} exceeds configured max group size:{max_group_size}",
         }
         self.search(
@@ -802,7 +802,7 @@ class TestGroupSearch(TestMilvusClientV2Base):
             output_fields=[group_by_field],
         )
         below_min_group_size = min_group_size - 1
-        error = {ct.err_code: 999, ct.err_msg: f"input group size:{below_min_group_size} is negative"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"input group size:{below_min_group_size} is negative"}
         self.search(
             client,
             self.collection_name,
@@ -819,7 +819,7 @@ class TestGroupSearch(TestMilvusClientV2Base):
         )
 
         below_min_group_size = min_group_size - 10
-        error = {ct.err_code: 999, ct.err_msg: f"input group size:{below_min_group_size} is negative"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"input group size:{below_min_group_size} is negative"}
         self.search(
             client,
             self.collection_name,

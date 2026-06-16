@@ -30,12 +30,12 @@ class HNSW:
         {
             "description": "Out of Range Test - Negative",
             "params": {"M": -1},
-            "expected": {"err_code": 999, "err_msg": "param 'M' (-1) should be in range [2, 2048]"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "param 'M' (-1) should be in range [2, 2048]"}
         },
         {
             "description": "Out of Range Test - Too Large",
             "params": {"M": 2049},
-            "expected": {"err_code": 999, "err_msg": "param 'M' (2049) should be in range [2, 2048]"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "param 'M' (2049) should be in range [2, 2048]"}
         },
         {
             "description": "String Type Test will ignore the wrong type",
@@ -45,12 +45,12 @@ class HNSW:
         {
             "description": "Float Type Test",
             "params": {"M": 16.0},
-            "expected": {"err_code": 999, "err_msg": "wrong data type in json"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "wrong data type in json"}
         },
         {
             "description": "Boolean Type Test",
             "params": {"M": True},
-            "expected": {"err_code": 999, "err_msg": "invalid integer value, key: 'M', value: 'True': invalid parameter"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "invalid integer value, key: 'M', value: 'True': invalid parameter"}
         },
         {
             "description": "None Type Test, use default value",
@@ -60,7 +60,7 @@ class HNSW:
         {
             "description": "List Type Test",
             "params": {"M": [16]},
-            "expected": {"err_code": 999, "err_msg": "invalid integer value, key: 'M', value: '[16]': invalid parameter"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "invalid integer value, key: 'M', value: '[16]': invalid parameter"}
         },
         # efConstruction params test
         {
@@ -76,7 +76,7 @@ class HNSW:
         {
             "description": "Out of Range Test - Negative",
             "params": {"efConstruction": -1},
-            "expected": {"err_code": 999, "err_msg": "param 'efConstruction' (-1) should be in range [1, 2147483647]"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "param 'efConstruction' (-1) should be in range [1, 2147483647]"}
         },
         {
             "description": "String Type Test will ignore the wrong type",
@@ -86,12 +86,12 @@ class HNSW:
         {
             "description": "Float Type Test",
             "params": {"efConstruction": 100.0},
-            "expected": {"err_code": 999, "err_msg": "wrong data type in json"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "wrong data type in json"}
         },
         {
             "description": "Boolean Type Test",
             "params": {"efConstruction": True},
-            "expected": {"err_code": 999, "err_msg": "invalid integer value, key: 'efConstruction', value: 'True': invalid parameter"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "invalid integer value, key: 'efConstruction', value: 'True': invalid parameter"}
         },
         {
             "description": "None Type Test, use default value",
@@ -101,7 +101,7 @@ class HNSW:
         {
             "description": "List Type Test",
             "params": {"efConstruction": [100]},
-            "expected": {"err_code": 999, "err_msg": "invalid integer value, key: 'efConstruction', value: '[100]': invalid parameter"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "invalid integer value, key: 'efConstruction', value: '[100]': invalid parameter"}
         },
         # combination params test
         {
@@ -126,7 +126,7 @@ class HNSW:
         {
             "description": "Minimum Boundary Test",
             "params": {"ef": 1},
-            "expected": {"err_code": 999, "err_msg": "ef(1) should be larger than k(10)"}   # assume default limit=10
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "ef(1) should be larger than k(10)"}   # assume default limit=10
         },
         {
             "description": "Large Value Test",
@@ -136,7 +136,7 @@ class HNSW:
         {
             "description": "Out of Range Test - Negative",
             "params": {"ef": -1},
-            "expected": {"err_code": 999, "err_msg": "param 'ef' (-1) should be in range [1, 2147483647]"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "param 'ef' (-1) should be in range [1, 2147483647]"}
         },
         {
             "description": "String Type Test, not check data type",
@@ -146,22 +146,22 @@ class HNSW:
         {
             "description": "Float Type Test",
             "params": {"ef": 32.0},
-            "expected": {"err_code": 999, "err_msg": "Type conflict in json: param 'ef' (32.0) should be integer"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "Type conflict in json: param 'ef' (32.0) should be integer"}
         },
         {
             "description": "Boolean Type Test",
             "params": {"ef": True},
-            "expected": {"err_code": 999, "err_msg": "Type conflict in json: param 'ef' (true) should be integer"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "Type conflict in json: param 'ef' (true) should be integer"}
         },
         {
             "description": "None Type Test",
             "params": {"ef": None},
-            "expected": {"err_code": 999, "err_msg": "Type conflict in json: param 'ef' (null) should be integer"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "Type conflict in json: param 'ef' (null) should be integer"}
         },
         {
             "description": "List Type Test",
             "params": {"ef": [32]},
-            "expected": {"err_code": 999, "err_msg": "param 'ef' ([32]) should be integer"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "param 'ef' ([32]) should be integer"}
         },
         # combination params test
         {

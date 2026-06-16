@@ -68,7 +68,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
         # 2. insert
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nb)]
         data = [[i for i in range(default_nb)], vectors]
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: "The Input data type is inconsistent with defined schema, please check it."}
         self.upsert(client, collection_name, data,
                     check_task=CheckTasks.err_res, check_items=error)
@@ -193,7 +193,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
             for field_name, field_value in rows[dirty_i].items():
                 # Get the actual value type
                 value_type = type(field_value)
-                error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+                error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "The Input data type is inconsistent with defined schema"}
 
                 # Inject type errors based on value type (only for simple scalar types)
                 if value_type in (int, bool, float):
@@ -237,7 +237,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
 
         # 3. Verify error on upsert
-        error = {ct.err_code: 999, ct.err_msg: "Insert missed an field `vector` to collection without set nullable==true or set default_value"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Insert missed an field `vector` to collection without set nullable==true or set default_value"}
         self.upsert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
         self.drop_collection(client, collection_name)
@@ -518,7 +518,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
             row[default_primary_key_field_name] = str(i)
 
         # 4. Verify error on upsert (type mismatch)
-        error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "The Input data type is inconsistent with defined schema"}
         self.upsert(client, collection_name, data=upsert_rows, check_task=CheckTasks.err_res, check_items=error)
 
         self.drop_collection(client, collection_name)
@@ -558,7 +558,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
             "text": "hello world",
             "text_sparse_emb": cf.gen_sparse_vectors(1, dim=128),
         } for i in range(10)]
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: "Attempt to insert an unexpected function output field `text_sparse_emb` to collection"}
         self.upsert(client, collection_name, new_rows,
                     check_task=CheckTasks.err_res, check_items=error)
@@ -658,7 +658,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
                  default_string_field_name: default_value, default_float_field_name: np.float32(1.0)}]
 
         # 5. Verify error on upsert (type check takes precedence over default value)
-        error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "The Input data type is inconsistent with defined schema"}
         self.upsert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
         self.drop_collection(client, collection_name)

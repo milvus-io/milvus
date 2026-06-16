@@ -1443,7 +1443,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
                                                "output_fields": expected_output_fields})[0]
         output_fields = self.all_fields
         # verify the error message when output sparse vector field
-        err_msg = {"err_code": 999,
+        err_msg = {"err_code": ct.ANY_CODE,
                    "err_msg": "not allowed to retrieve raw data of field sparse_vector1"}
         self.hybrid_search(client, self.collection_name, reqs=req_list,
                            ranker=WeightedRanker(0.5, 0.5),
@@ -1795,9 +1795,9 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
             })
             req_list.append(req)
 
-        err_msg = {"err_code": 999, "err_msg": "rank param weight should be in range [0, 1]"}
+        err_msg = {"err_code": ct.ANY_CODE, "err_msg": "rank param weight should be in range [0, 1]"}
         if ranker_param == [0.2, 0.4, 0.8]:
-            err_msg = {"err_code": 999,
+            err_msg = {"err_code": ct.ANY_CODE,
                        "err_msg": "the length of weights param mismatch with ann search requests: "
                                   "invalid parameter[expected=2][actual=3]"}
 

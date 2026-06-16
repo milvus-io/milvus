@@ -80,20 +80,20 @@ class TestQueryParams(TestcaseBase):
         """
         collection_w, entities = self.init_collection_general(prefix, insert_data=True, nb=10)[0:2]
         term_expr = f'{default_int_field_name} in {entities[:default_pos]}'
-        error = {ct.err_code: 999, ct.err_msg: "cannot parse expression: int64 in"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "cannot parse expression: int64 in"}
         collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
         # check missing the template variable
         expr = "int64 in {value_0}"
         expr_params = {"value_1": [0, 1]}
-        error = {ct.err_code: 999, ct.err_msg: "the value of expression template variable name {value_0} is not found"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "the value of expression template variable name {value_0} is not found"}
         collection_w.query(expr=expr, expr_params=expr_params,
                            check_task=CheckTasks.err_res, check_items=error)
 
         # check the template variable type dismatch
         expr = "int64 in {value_0}"
         expr_params = {"value_0": 1}
-        error = {ct.err_code: 999, ct.err_msg: "the value of term expression template variable {value_0} is not array"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "the value of term expression template variable {value_0} is not array"}
         collection_w.query(expr=expr, expr_params=expr_params,
                            check_task=CheckTasks.err_res, check_items=error)
 

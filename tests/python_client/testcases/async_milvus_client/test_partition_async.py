@@ -162,7 +162,7 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         await async_client.create_collection(collection_name, default_dim)
         # 2. create partition
-        error = {ct.err_code: 999, ct.err_msg: f"`partition_name` value {partition_names} is illegal"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"`partition_name` value {partition_names} is illegal"}
         await async_client.create_partition(collection_name, partition_names,
                                             check_task=CheckTasks.err_res, check_items=error)
         # 3. drop action
@@ -440,7 +440,7 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         collection_name = "a".join("a" for i in range(256))
         partition_name = cf.gen_unique_str(partition_prefix)
         # 1. release partitions
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: f"Invalid collection name: {collection_name}. the length of a collection name "
                              f"must be less than 255 characters: invalid parameter"}
         await async_client.release_partitions(collection_name, partition_name,
@@ -459,7 +459,7 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str("collection_not_exist")
         partition_name = cf.gen_unique_str(partition_prefix)
         # 1. release partitions
-        error = {ct.err_code: 999, ct.err_msg: f"collection not found[database=default]"
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"collection not found[database=default]"
                                                f"[collection={collection_name}]"}
         await async_client.release_partitions(collection_name, partition_name,
                                               check_task=CheckTasks.err_res, check_items=error)
@@ -521,7 +521,7 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         await async_client.create_collection(collection_name, default_dim)
         # 2. release partition
-        error = {ct.err_code: 999, ct.err_msg: f"invalid parameter[expected=any partition][actual=empty partition list"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"invalid parameter[expected=any partition][actual=empty partition list"}
         await async_client.release_partitions(collection_name, partition_names,
                                               check_task=CheckTasks.err_res, check_items=error)
         # 3. drop action
@@ -543,7 +543,7 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         await async_client.create_collection(collection_name, default_dim)
         # 2. release partitions
-        error = {ct.err_code: 999, ct.err_msg: f"partition not found[partition={not_exist_partition}]"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"partition not found[partition={not_exist_partition}]"}
         await async_client.release_partitions(collection_name, partition_names,
                                               check_task=CheckTasks.err_res, check_items=error)
 

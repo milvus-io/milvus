@@ -15,64 +15,64 @@ class NGRAM:
         {
             "description": "min_gram value only specified",
             "params": {"min_gram": 2},
-            "expected": {"err_code": 999, "err_msg": "Ngram index must specify both min_gram and max_gram"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "Ngram index must specify both min_gram and max_gram"}
         },
         {
             "description": "min_gram - negative value",
             "params": {"min_gram": -1},
-            "expected": {"err_code": 999, "err_msg": "Ngram index must specify both min_gram and max_gram"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "Ngram index must specify both min_gram and max_gram"}
         },
         {
             "description": "min_gram - zero value",
             "params": {"min_gram": 0},
-            "expected": {"err_code": 999, "err_msg": "Ngram index must specify both min_gram and max_gram"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "Ngram index must specify both min_gram and max_gram"}
         },
         {
             "description": "Invalid min_gram - string type",
             "params": {"min_gram": "2"},
-            "expected": {"err_code": 999, "err_msg": "Ngram index must specify both min_gram and max_gram"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "Ngram index must specify both min_gram and max_gram"}
         },
         {
             "description": "Invalid min_gram - float type",
             "params": {"min_gram": 2.5},
-            "expected": {"err_code": 999, "err_msg": "Ngram index must specify both min_gram and max_gram"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "Ngram index must specify both min_gram and max_gram"}
         },
         {
             "description": "Invalid min_gram - None value",
             "params": {"min_gram": None},
-            "expected": {"err_code": 999, "err_msg": "Ngram index must specify both min_gram and max_gram"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "Ngram index must specify both min_gram and max_gram"}
         },
         
         # max_gram parameter tests
         {
             "description": "max_gram value only specified",
             "params": {"max_gram": 5},
-            "expected": {"err_code": 999, "err_msg": "Ngram index must specify both min_gram and max_gram"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "Ngram index must specify both min_gram and max_gram"}
         },
         {
             "description": "max_gram - negative value",
             "params": {"max_gram": -1},
-            "expected": {"err_code": 999, "err_msg": "Ngram index must specify both min_gram and max_gram"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "Ngram index must specify both min_gram and max_gram"}
         },
         {
             "description": "max_gram - zero value",
             "params": {"max_gram": 0},
-            "expected": {"err_code": 999, "err_msg": "Ngram index must specify both min_gram and max_gram"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "Ngram index must specify both min_gram and max_gram"}
         },
         {
             "description": "max_gram - string type",
             "params": {"max_gram": "3"},
-            "expected": {"err_code": 999, "err_msg": "Ngram index must specify both min_gram and max_gram"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "Ngram index must specify both min_gram and max_gram"}
         },
         {
             "description": "max_gram - float type",
             "params": {"max_gram": 2.5},
-            "expected": {"err_code": 999, "err_msg": "Ngram index must specify both min_gram and max_gram"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "Ngram index must specify both min_gram and max_gram"}
         },
         {
             "description": "max_gram - None value",
             "params": {"max_gram": None},
-            "expected": {"err_code": 999, "err_msg": "Ngram index must specify both min_gram and max_gram"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "Ngram index must specify both min_gram and max_gram"}
         },
         
         # min_gram and max_gram combination tests
@@ -115,7 +115,7 @@ class NGRAM:
         {
             "description": "Invalid min_gram - float type (both specified)",
             "params": {"min_gram": 2.5, "max_gram": 3},
-            "expected": {"err_code": 999, "err_msg": "min_gram for Ngram index must be an integer, got: 2.5"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "min_gram for Ngram index must be an integer, got: 2.5"}
         },
         {
             "description": "Invalid max_gram - string type (both specified)",
@@ -125,7 +125,7 @@ class NGRAM:
         {
             "description": "Both parameters missing",
             "params": {},
-            "expected": {"err_code": 999, "err_msg": "Ngram index must specify both min_gram and max_gram"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "Ngram index must specify both min_gram and max_gram"}
         },
         
         # JSON field special parameter tests
@@ -168,7 +168,7 @@ class NGRAM:
         #         "json_path": "json_field['body']",
         #         "json_cast_type": "double"
         #     },
-        #     "expected": {"err_code": 999, "err_msg": "json_cast_type must be varchar for NGRAM index"}
+        #     "expected": {"err_code": ct.ANY_CODE, "err_msg": "json_cast_type must be varchar for NGRAM index"}
         # },
         {
             "description": "JSON field missing json_cast_type",
@@ -177,7 +177,7 @@ class NGRAM:
                 "max_gram": 3,
                 "json_path": "json_field['body']"
             },
-            "expected": {"err_code": 999, "err_msg": "JSON field with ngram index must specify json_cast_type"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "JSON field with ngram index must specify json_cast_type"}
         },
         {
             "description": "JSON field missing json_path",

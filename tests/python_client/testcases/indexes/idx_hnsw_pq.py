@@ -408,7 +408,7 @@ class HNSW_PQ:
         {
             "description": "Invalid PQ m (not divisor of dimension)",
             "params": {"M": 16,"efConstruction": 200,"m": 7, "nbits": 8, "refine": True, "refine_type": "FP32"},
-            "expected": {"err_code": 999, "err_msg": "The dimension of the vector (dim) should be a multiple of the number of subquantizers (m)."}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "The dimension of the vector (dim) should be a multiple of the number of subquantizers (m)."}
         },
 
     ]

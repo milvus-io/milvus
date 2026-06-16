@@ -29,12 +29,12 @@ class IVF_RABITQ:
         {
             "description": "Out of Range Test - Negative",
             "params": {"nlist": -1},
-            "expected": {"err_code": 999, "err_msg": "param 'nlist' (-1) should be in range [1, 65536]"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "param 'nlist' (-1) should be in range [1, 65536]"}
         },
         {
             "description": "Out of Range Test - Too Large",
             "params": {"nlist": 65537},
-            "expected": {"err_code": 999, "err_msg": "param 'nlist' (65537) should be in range [1, 65536]"}
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "param 'nlist' (65537) should be in range [1, 65536]"}
         },
         {
             "description": "String Type Test will ignore the wrong type",
@@ -44,13 +44,13 @@ class IVF_RABITQ:
         {
             "description": "Float Type Test",
             "params": {"nlist": 128.0},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "wrong data type in json"}
         },
         {
             "description": "Boolean Type Test",
             "params": {"nlist": True},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "invalid integer value, key: 'nlist', value: 'True': invalid parameter"}
         },
         {
@@ -61,7 +61,7 @@ class IVF_RABITQ:
         {
             "description": "List Type Test",
             "params": {"nlist": [128]},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "invalid integer value, key: 'nlist', value: '[128]': invalid parameter"}
         },
         
@@ -81,7 +81,7 @@ class IVF_RABITQ:
         {
             "description": "Refine Type Test",
             "params": {"refine_type": "PQ"},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "invalid refine type : PQ, optional types are [sq6, sq8, fp16, bf16, fp32, flat]"}
         },
         {
@@ -112,13 +112,13 @@ class IVF_RABITQ:
         {
             "description": "Invalid Refine Type Test",
             "params": {"refine": 'true', "refine_type": "INVALID"},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "invalid refine type : INVALID, optional types are [sq6, sq8, fp16, bf16, fp32, flat]"}
         },
         {
             "description": "Integer Type Test",
             "params": {"refine": 1},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "Type conflict in json: param 'refine' (\"1\") should be a boolean"}
         },
         {
@@ -134,19 +134,19 @@ class IVF_RABITQ:
         {
             "description": "Mixed Case String Test",
             "params": {"refine": True, "refine_type": "Sq8.0"},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "invalid refine type : Sq8.0, optional types are [sq6, sq8, fp16, bf16, fp32, flat]"}
         },
         {
             "description": "Whitespace String Test",
             "params": {"refine_type": " SQ8 "},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "invalid refine type :  SQ8 , optional types are [sq6, sq8, fp16, bf16, fp32, flat]"}
         },
         {
             "description": "Integer Type Test",
             "params": {"refine": True, "refine_type": 8},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "invalid refine type : 8, optional types are [sq6, sq8, fp16, bf16, fp32, flat]"}
         },
         {
@@ -199,13 +199,13 @@ class IVF_RABITQ:
         {
             "description": "Exceed nprobe Test",
             "params": {"nprobe": 65537},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "should be in range [1, 65536]"}
         },
         {
             "description": "Negative Value Test",
             "params": {"nprobe": -1},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "Out of range in json: param 'nprobe' (-1) should be in range [1, 65536]"}
         },
         {
@@ -216,19 +216,19 @@ class IVF_RABITQ:
         {
             "description": "Float Type Test",
             "params": {"nprobe": 32.0},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "Type conflict in json: param 'nprobe' (32.0) should be integer"}
         },
         {
             "description": "Boolean Type Test",
             "params": {"nprobe": True},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "Type conflict in json: param 'nprobe' (true) should be integer"}
         },
         {
             "description": "None Type Test",
             "params": {"nprobe": None},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "Type conflict in json: param 'nprobe' (null) should be integer"}
         },
 
@@ -251,13 +251,13 @@ class IVF_RABITQ:
         {
             "description": "Out of Range Test",
             "params": {"rbq_bits_query": 9},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "Out of range in json: param 'rbq_bits_query' (9) should be in range [0, 8]"}
         },
         {
             "description": "Negative Value Test",
             "params": {"rbq_bits_query": -1},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "Out of range in json: param 'rbq_bits_query' (-1) should be in range [0, 8]"}
         },
         {
@@ -268,19 +268,19 @@ class IVF_RABITQ:
         {
             "description": "Float Type Test",
             "params": {"rbq_bits_query": 6.0},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "Type conflict in json: param 'rbq_bits_query' (6.0) should be integer"}
         },
         {
             "description": "Boolean Type Test",
             "params": {"rbq_bits_query": True},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "Type conflict in json: param 'rbq_bits_query' (true) should be integer"}
         },
         {
             "description": "None Type Test",
             "params": {"rbq_bits_query": None},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "Type conflict in json: param 'rbq_bits_query' (null) should be integer"}
         },
 
@@ -303,13 +303,13 @@ class IVF_RABITQ:
         {
             "description": "Less Than One Test",
             "params": {"refine_k": 0.5},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "Out of range in json: param 'refine_k' (0.5) should be in range [1.000000, 340282346638528859811704183484516925440.000000]"}
         },
         {
             "description": "Negative Value Test",
             "params": {"refine_k": -1.0},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "Out of range in json: param 'refine_k' (-1.0) should be in range [1.000000, 340282346638528859811704183484516925440.000000]"}
         },
         {
@@ -325,13 +325,13 @@ class IVF_RABITQ:
         {
             "description": "Boolean Type Test",
             "params": {"refine_k": True},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "Type conflict in json: param 'refine_k' (true) should be a number"}
         },
         {
             "description": "None Type Test",
             "params": {"refine_k": None},
-            "expected": {"err_code": 999,
+            "expected": {"err_code": ct.ANY_CODE,
                          "err_msg": "Type conflict in json: param 'refine_k' (null) should be a number"}
         },
 

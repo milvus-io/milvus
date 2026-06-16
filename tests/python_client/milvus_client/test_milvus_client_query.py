@@ -658,7 +658,7 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         expected: raise parse error for ignore_growing field
         """
         client = self._client()
-        error = {ct.err_code: 999, ct.err_msg: "parse ignore growing field failed"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "parse ignore growing field failed"}
         self.query(
             client,
             INVALID_SHARED_COLLECTION,
@@ -1221,7 +1221,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
 
         # 3. query
         error = {
-            ct.err_code: 999,
+            ct.err_code: ct.ANY_CODE,
             ct.err_msg: "the sample factor should be between 0 and 1 and not too close to 0 or 1",
         }
         self.query(client, collection_name, filter=expr, check_task=CheckTasks.err_res, check_items=error)

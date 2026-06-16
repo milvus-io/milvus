@@ -2344,7 +2344,7 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
             default_primary_key_field_name: i,
             "text_sparse_emb": cf.gen_sparse_vectors(1, dim=128),
         } for i in range(10)]
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: "Attempt to insert an unexpected function output field `text_sparse_emb` to collection"}
         self.upsert(client, collection_name, new_rows,
                     partial_update=True,

@@ -105,7 +105,7 @@ class TestSearchIteratorShared(TestMilvusClientV2Base):
                              anns_field=ct.default_float_vec_field_name,
                              ids=ids_to_search,
                              check_task=CheckTasks.err_res,
-                             check_items={"err_code": 999,
+                             check_items={"err_code": ct.ANY_CODE,
                                           "err_msg": "object of type 'NoneType' has no len()"})
 
         self.search_iterator(client, self.collection_name,
@@ -115,7 +115,7 @@ class TestSearchIteratorShared(TestMilvusClientV2Base):
                              anns_field=ct.default_float_vec_field_name,
                              ids=ids_to_search,
                              check_task=CheckTasks.err_res,
-                             check_items={"err_code": 999,
+                             check_items={"err_code": ct.ANY_CODE,
                                           "err_msg": "Either ids or data must be provided, not both"})
 
     @pytest.mark.tags(CaseLabel.L2)

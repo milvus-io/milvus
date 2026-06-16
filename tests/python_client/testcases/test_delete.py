@@ -108,7 +108,7 @@ class TestDeleteParams(TestcaseBase):
         """
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        error = {ct.err_code: 999, ct.err_msg: "Illegal str variables: {'filter': None}, expect non-empty str"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Illegal str variables: {'filter': None}, expect non-empty str"}
         collection_w.delete(expr=None, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -121,7 +121,7 @@ class TestDeleteParams(TestcaseBase):
         """
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        error = {ct.err_code: 999, ct.err_msg: "Illegal str variables: {'filter': %s}, expect non-empty str"
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Illegal str variables: {'filter': %s}, expect non-empty str"
                                                % str(expr)}
         collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -617,7 +617,7 @@ class TestDeleteOperation(TestcaseBase):
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
 
         # raise exception
-        error = {ct.err_code: 999,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: f"Failed to get partition id: partition not found[partition={ct.default_tag}]"}
         collection_w.delete(tmp_expr, partition_name=ct.default_tag,
                             check_task=CheckTasks.err_res, check_items=error)

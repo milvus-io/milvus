@@ -232,7 +232,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         # Create schema and try to add non-primary field with auto_id=True - this should raise exception
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         # Test that creating a non-primary field with auto_id=True raises exception
-        error = {ct.err_code: 999, ct.err_msg: "auto_id can only be specified on the primary key field"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "auto_id can only be specified on the primary key field"}
         self.add_field(
             schema,
             ct.default_int64_field_name,
@@ -338,7 +338,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         client = self._client()
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         # Try to add a field with invalid dtype
-        error = {ct.err_code: 999, ct.err_msg: "Field dtype must be of DataType"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Field dtype must be of DataType"}
         # The add_field method should raise an error for invalid dtype
         self.add_field(schema, field_name="test", datatype=dtype, check_task=CheckTasks.err_res, check_items=error)
 
@@ -646,7 +646,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         """
         client = self._client()
         # Test at schema creation level - create schema with invalid primary_field parameter
-        error = {ct.err_code: 999, ct.err_msg: "Param primary_field must be int or str type"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Param primary_field must be int or str type"}
         # This should fail when creating schema with invalid primary_field type
         self.create_schema(
             client,
@@ -667,7 +667,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         client = self._client()
         # Create schema and attempt to add a field with invalid is_primary value
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        error = {ct.err_code: 999, ct.err_msg: "Param is_primary must be bool type"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Param is_primary must be bool type"}
         # Attempt to add a field with invalid is_primary value, expect error
         self.add_field(
             schema, "id", DataType.INT64, is_primary=is_primary, check_task=CheckTasks.err_res, check_items=error
@@ -756,7 +756,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         schema_1.add_field("field2", DataType.INT64, is_primary=True, auto_id=False)  # Second primary key
         schema_1.add_field("vector_field", DataType.FLOAT_VECTOR, dim=32)
         # Try to create collection with multiple primary keys
-        error = {ct.err_code: 999, ct.err_msg: "Expected only one primary key field"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Expected only one primary key field"}
         self.create_collection(
             client, collection_name, schema=schema_1, check_task=CheckTasks.err_res, check_items=error
         )
@@ -766,7 +766,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         schema_2.add_field("field2", DataType.INT64)  # Second primary key
         schema_2.add_field("vector_field", DataType.FLOAT_VECTOR, dim=32)
         # Try to create collection with multiple primary keys
-        error = {ct.err_code: 999, ct.err_msg: "Expected only one primary key field"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Expected only one primary key field"}
         self.create_collection(
             client, collection_name, schema=schema_2, check_task=CheckTasks.err_res, check_items=error
         )
@@ -786,7 +786,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         if error_type == "range":
             error = {ct.err_code: 1, ct.err_msg: f"maximum shards's number should be limited to {ct.max_shards_num}"}
         else:  # error_type == "type"
-            error = {ct.err_code: 999, ct.err_msg: "invalid num_shards type"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "invalid num_shards type"}
         # Try to create collection with invalid shards_num (should fail)
         self.create_collection(
             client,
@@ -1119,7 +1119,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         )
 
         # not support search on null vector with is null or is not null filter
-        error = {ct.err_code: 999, ct.err_msg: "IsNull/IsNotNull operations are not supported on vector fields"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "IsNull/IsNotNull operations are not supported on vector fields"}
         self.search(
             client,
             collection_name,
@@ -2806,7 +2806,7 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
         self.drop_collection(client, collection_name)
-        error = {ct.err_code: 999, ct.err_msg: "collection not found"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "collection not found"}
         self.load_collection(client, collection_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2960,7 +2960,7 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         index_params.add_index(field_name="vector", index_type="HNSW", metric_type="L2")
         self.create_index(client, collection_name, index_params)
         # 4. Attempt to load with invalid replica_number
-        error = {ct.err_code: 999, ct.err_msg: f"`replica_number` value {invalid_num_replica} is illegal"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"`replica_number` value {invalid_num_replica} is illegal"}
         self.load_collection(
             client,
             collection_name,
@@ -3101,7 +3101,7 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client_temp, collection_name, default_dim)
         self.close(client_temp)
-        error = {ct.err_code: 999, ct.err_msg: "should create connection first"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "should create connection first"}
         self.release_collection(client_temp, collection_name, check_task=CheckTasks.err_res, check_items=error)
 
 
@@ -4479,7 +4479,7 @@ class TestMilvusClientListCollection(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client_temp, collection_name, default_dim)
         self.close(client_temp)
-        error = {ct.err_code: 999, ct.err_msg: "should create connection first"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "should create connection first"}
         self.list_collections(client_temp, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -4646,7 +4646,7 @@ class TestMilvusClientUsingDatabaseInvalid(TestMilvusClientV2Base):
         """
         client = self._client()
         # db_name = cf.gen_unique_str("nonexisted")
-        error = {ct.err_code: 999, ct.err_msg: f"database not found[database={db_name}]"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"database not found[database={db_name}]"}
         self.using_database(client, db_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -6190,7 +6190,7 @@ class TestMilvusClientCollectionMmap(TestMilvusClientV2Base):
         # Load collection
         self.load_collection(client, collection_name)
         # Try to alter mmap after loading - should raise exception
-        error = {ct.err_code: 999, ct.err_msg: "can not alter mmap properties if collection loaded"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "can not alter mmap properties if collection loaded"}
         self.alter_collection_properties(
             client, collection_name, properties={"mmap.enabled": True}, check_task=CheckTasks.err_res, check_items=error
         )
