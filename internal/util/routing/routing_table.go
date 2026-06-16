@@ -25,11 +25,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// CompatVersion is the routing-table version produced by DeriveCompat.
-// It identifies the legacy hash-based routing scheme so that downstream
-// consumers can detect when a shard split has changed the routing.
-const CompatVersion int64 = 1
-
 // Mode describes the algorithm used by a RoutingTable to map a raw hash
 // value to a shard bucket.
 type Mode int32
@@ -47,10 +42,6 @@ const (
 // RoutingTable maps primary keys to vchannel names.
 // Use DeriveCompat to create a table that mirrors the legacy behaviour.
 type RoutingTable struct {
-	// Version identifies the routing epoch. Increment when the mapping changes
-	// (e.g. after a shard split) so that streaming nodes can detect stale routes.
-	Version int64
-
 	// Mode is the algorithm used to translate a raw hash to a bucket index.
 	Mode Mode
 
@@ -67,7 +58,6 @@ func DeriveCompat(channelNames []string) *RoutingTable {
 	ch := make([]string, len(channelNames))
 	copy(ch, channelNames)
 	return &RoutingTable{
-		Version:  CompatVersion,
 		Mode:     ModeHash,
 		channels: ch,
 	}
@@ -112,33 +102,6 @@ func (t *RoutingTable) RouteInsert(pks *schemapb.IDs) (map[string][]int, []uint3
 		out[name] = append(out[name], offset)
 	}
 	return out, hashValues
-}
-
-// RoutingDecision is the outcome of comparing a request's routing version
-// against the shard's current routing version.
-type RoutingDecision int
-
-const (
-	// RoutingProcess: handle normally.
-	RoutingProcess RoutingDecision = iota
-	// RoutingProcessAndReplyLatest: handle, and tell the proxy a newer version exists.
-	RoutingProcessAndReplyLatest
-	// RoutingStale: the request targets an out-of-date shard; forward/reject (P0 stub, unreachable).
-	RoutingStale
-)
-
-// CompareRoutingVersion implements the streamingnode-side version-compare skeleton.
-// In P0 callers pass msgVersion == currentVersion == CompatVersion and
-// shardNormal == true, so the result is always RoutingProcess.
-func CompareRoutingVersion(msgVersion, currentVersion int64, shardNormal bool) RoutingDecision {
-	switch {
-	case msgVersion >= currentVersion:
-		return RoutingProcess
-	case shardNormal:
-		return RoutingProcessAndReplyLatest
-	default:
-		return RoutingStale
-	}
 }
 
 // HashPKs maps each primary key in pks to a shard index (0-based position in

@@ -73,10 +73,6 @@ type RangeShard struct {
 // ModeRange routing of namespace collections after a shard split. Lookup is
 // O(log #shards).
 type RangeRoutingTable struct {
-	// Version identifies the routing epoch; it advances on every routing change
-	// (e.g. a shard split) so streaming nodes can detect a stale route.
-	Version int64
-
 	// uppers[i] is the exclusive upper bound of shard i. The lower bound of shard
 	// i is uppers[i-1] (and nil for i == 0). uppers is strictly increasing and
 	// its last element is nil (+inf), so the shards partition the whole key space
@@ -91,7 +87,7 @@ type RangeRoutingTable struct {
 // the last upper unbounded (nil). It returns an error if the shards leave a gap,
 // overlap, or do not cover the space, so a malformed routing meta is rejected
 // rather than silently mis-routing.
-func DeriveRange(version int64, shards []RangeShard) (*RangeRoutingTable, error) {
+func DeriveRange(shards []RangeShard) (*RangeRoutingTable, error) {
 	if len(shards) == 0 {
 		return nil, errors.New("range routing table needs at least one shard")
 	}
@@ -139,7 +135,7 @@ func DeriveRange(version int64, shards []RangeShard) (*RangeRoutingTable, error)
 		uppers[i] = shard.Upper
 		channels[i] = shard.Vchannel
 	}
-	return &RangeRoutingTable{Version: version, uppers: uppers, channels: channels}, nil
+	return &RangeRoutingTable{uppers: uppers, channels: channels}, nil
 }
 
 // NumShards returns the number of shards in the table.

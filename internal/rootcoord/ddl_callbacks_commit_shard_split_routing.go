@@ -60,15 +60,24 @@ func (c *Core) broadcastCommitShardSplitRouting(ctx context.Context, req *rootco
 		return err
 	}
 
-	// The routing version only moves forward. A retry that carries the version
-	// already committed is an idempotent no-op; a strictly older one is a stale
-	// request and is rejected so routing never goes backwards.
-	if req.GetRoutingVersion() == coll.RoutingVersion {
-		return errIgnoredAlterCollection
+	// Idempotent by shard state: if the collection already carries exactly the
+	// requested vchannels each at the requested lifecycle state, the routing is
+	// already committed and this is a no-op. Otherwise the whole topology is
+	// (re)applied atomically below. There is no version counter — the source
+	// fence plus per-shard state drive the write switch, so a routing change is
+	// identified by the states it sets, not by a monotonic epoch.
+	committed := len(coll.VirtualChannelNames) == len(vchannels)
+	if committed {
+		for i, vchannel := range vchannels {
+			info, ok := coll.ShardInfos[vchannel]
+			if !ok || info.State != req.GetShardInfos()[i].GetState() {
+				committed = false
+				break
+			}
+		}
 	}
-	if req.GetRoutingVersion() < coll.RoutingVersion {
-		return merr.WrapErrParameterInvalidMsg("commit shard split routing failed, routing version %d is not newer than the current %d",
-			req.GetRoutingVersion(), coll.RoutingVersion)
+	if committed {
+		return errIgnoredAlterCollection
 	}
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
@@ -87,7 +96,6 @@ func (c *Core) broadcastCommitShardSplitRouting(ctx context.Context, req *rootco
 		VirtualChannelNames:  vchannels,
 		PhysicalChannelNames: req.GetPhysicalChannelNames(),
 		ShardInfos:           req.GetShardInfos(),
-		RoutingVersion:       req.GetRoutingVersion(),
 		RoutingMode:          req.GetRoutingMode(),
 	}
 

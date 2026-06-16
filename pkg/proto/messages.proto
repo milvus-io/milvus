@@ -168,9 +168,6 @@ message InsertMessageHeader {
     repeated PartitionSegmentAssignment partitions = 2;
     // optional so consumers can distinguish omitted (legacy producer) from explicit value.
     optional int32 schema_version                  = 3;
-    // routing table version the producer used when routing this message;
-    // optional so consumers distinguish omitted (legacy producer, value 0) from explicit.
-    optional int64 routing_version                 = 4;
 }
 
 // PartitionSegmentAssignment is the segment assignment of a partition.
@@ -383,8 +380,7 @@ message AlterCollectionMessageUpdates {
     repeated string virtual_channel_names      = 9;
     repeated string physical_channel_names     = 10;
     repeated etcd.CollectionShardInfo shard_infos = 11;
-    int64 routing_version                      = 12; // monotonically increasing routing epoch.
-    etcd.RoutingMode routing_mode              = 13; // hash for legacy, range after a split.
+    etcd.RoutingMode routing_mode              = 12; // hash for legacy, range after a split.
 }
 
 // AlterLoadConfigOfAlterCollection is the body of alter load config of alter collection message.

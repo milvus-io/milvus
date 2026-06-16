@@ -10,7 +10,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -107,7 +106,6 @@ func repackInsertDataForStreamingService(
 		return nil, err
 	}
 
-	routingVersion := routing.CompatVersion
 	for channel, rowOffsets := range channel2RowOffsets {
 		// segment id is assigned at streaming node.
 		msgs, err := genInsertMsgsByPartition(ctx, 0, partitionID, partitionName, rowOffsets, channel, insertMsg)
@@ -127,8 +125,7 @@ func repackInsertDataForStreamingService(
 							BinarySize:  0, // TODO: current not used, message estimate size is used.
 						},
 					},
-					SchemaVersion:  &schemaVersion,
-					RoutingVersion: &routingVersion,
+					SchemaVersion: &schemaVersion,
 				}).
 				WithBody(insertRequest).
 				WithCipher(ez).
@@ -193,7 +190,6 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 			mlog.Err(err))
 		return nil, err
 	}
-	routingVersion := routing.CompatVersion
 	for channel, rowOffsets := range channel2RowOffsets {
 		partition2RowOffsets := make(map[string][]int)
 		for _, idx := range rowOffsets {
@@ -222,8 +218,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 								BinarySize:  0, // TODO: current not used, message estimate size is used.
 							},
 						},
-						SchemaVersion:  &schemaVersion,
-						RoutingVersion: &routingVersion,
+						SchemaVersion: &schemaVersion,
 					}).
 					WithBody(insertRequest).
 					WithCipher(ez).

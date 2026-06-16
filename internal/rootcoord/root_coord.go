@@ -1424,11 +1424,11 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 }
 
 // CommitShardSplitRouting commits a shard-split routing change into the
-// collection meta as a DDL: it grows the vchannel list with the split targets,
-// sets every shard's routing key range and lifecycle state, and bumps
-// routing_version, all atomically. Called by datacoord at the routing-commit and
-// at the adoption flip of a split. The call is idempotent: a retry carrying the
-// already-committed routing version is a no-op.
+// collection meta as a DDL: it grows the vchannel list with the split targets
+// and sets every shard's routing key range and lifecycle state, all atomically.
+// Called by datacoord at the routing-commit and at the adoption flip of a split.
+// The call is idempotent by shard state: a retry whose shard states already
+// match the meta is a no-op.
 func (c *Core) CommitShardSplitRouting(ctx context.Context, in *rootcoordpb.CommitShardSplitRoutingRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -1441,7 +1441,6 @@ func (c *Core) CommitShardSplitRouting(ctx context.Context, in *rootcoordpb.Comm
 		zap.String("dbName", in.GetDbName()),
 		zap.String("collectionName", in.GetCollectionName()),
 		zap.Int64("collectionID", in.GetCollectionId()),
-		zap.Int64("routingVersion", in.GetRoutingVersion()),
 	)
 	log.Info("received request to commit shard split routing")
 

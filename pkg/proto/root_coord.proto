@@ -337,8 +337,9 @@ message ShowCollectionIDsResponse {
 
 // CommitShardSplitRoutingRequest carries the full post-split routing state of a
 // collection. datacoord computes it from the split task; rootcoord validates
-// (routing_version strictly increases; physical/shard arrays parallel the
-// vchannel list) and applies it atomically as a DDL under the collection lock.
+// (physical/shard arrays parallel the vchannel list) and applies it atomically
+// as a DDL under the collection lock. The commit is idempotent by shard state:
+// a retry whose shard states already match the meta is a no-op.
 message CommitShardSplitRoutingRequest {
   common.MsgBase base = 1;
   string db_name = 2;
@@ -349,8 +350,7 @@ message CommitShardSplitRoutingRequest {
   repeated string virtual_channel_names = 5;
   repeated string physical_channel_names = 6;
   repeated etcd.CollectionShardInfo shard_infos = 7;
-  int64 routing_version = 8;
-  etcd.RoutingMode routing_mode = 9;
+  etcd.RoutingMode routing_mode = 8;
 }
 
 message CreatePartitionResponse {

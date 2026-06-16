@@ -27,9 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 // buildMinimalInsertMsg creates a minimal InsertMsg with a single int64 PK row
@@ -75,9 +73,9 @@ func buildMutationResult(pk int64) *milvuspb.MutationResult {
 	}
 }
 
-// TestRepackInsert_SetsRoutingVersion verifies that repackInsertDataForStreamingService
-// stamps routing.CompatVersion on the produced message header.
-func TestRepackInsert_SetsRoutingVersion(t *testing.T) {
+// TestRepackInsert_ForStreamingService verifies that
+// repackInsertDataForStreamingService produces one insert message per channel.
+func TestRepackInsert_ForStreamingService(t *testing.T) {
 	oldCache := globalMetaCache
 	cache := NewMockCache(t)
 	cache.On("GetPartitionID", mock.Anything, "db", "coll", "_default").Return(int64(200), nil)
@@ -97,14 +95,11 @@ func TestRepackInsert_SetsRoutingVersion(t *testing.T) {
 	)
 	assert.NoError(t, err)
 	assert.Len(t, msgs, 1)
-
-	got := message.MustAsMutableInsertMessageV1(msgs[0]).Header().GetRoutingVersion()
-	assert.Equal(t, routing.CompatVersion, got)
 }
 
-// TestRepackInsertWithPartitionKey_SetsRoutingVersion verifies that
-// repackInsertDataWithPartitionKeyForStreamingService also stamps routing.CompatVersion.
-func TestRepackInsertWithPartitionKey_SetsRoutingVersion(t *testing.T) {
+// TestRepackInsertWithPartitionKey_ForStreamingService verifies that
+// repackInsertDataWithPartitionKeyForStreamingService produces insert messages.
+func TestRepackInsertWithPartitionKey_ForStreamingService(t *testing.T) {
 	oldCache := globalMetaCache
 	cache := NewMockCache(t)
 	// partition key mode resolves default partitions via GetPartitions, then
@@ -141,9 +136,4 @@ func TestRepackInsertWithPartitionKey_SetsRoutingVersion(t *testing.T) {
 	)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, msgs)
-
-	for _, m := range msgs {
-		got := message.MustAsMutableInsertMessageV1(m).Header().GetRoutingVersion()
-		assert.Equal(t, routing.CompatVersion, got)
-	}
 }

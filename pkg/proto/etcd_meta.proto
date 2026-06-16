@@ -85,10 +85,8 @@ message CollectionInfo {
   int64 db_id = 15;
   uint64 UpdateTimestamp = 16;
   repeated CollectionShardInfo shard_infos = 17; // same length with virtual_channel_names, order one by one.
-  // routing_version increases monotonically on every routing change (shard split/merge).
-  // 0 for legacy collections that never split.
-  int64 routing_version = 18;
   // routing_mode decides how a routing key maps to a shard, RoutingModeHash for legacy collections.
+  // Routing changes are driven by per-shard state + fence, not a version counter.
   RoutingMode routing_mode = 19;
 }
 
