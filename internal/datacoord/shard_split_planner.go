@@ -220,11 +220,16 @@ func (p *rangeSplitPlanner) PlanTargets(ctx context.Context, collection *collect
 	}
 	splitKey := weights[index].key
 
-	// The source shard's current range comes from its authoritative shard
-	// meta. Until that read path lands the source is treated as owning the
-	// whole key space, which is exactly correct for a collection's first
-	// split. TODO(#13): read the source shard's [lower, upper).
+	// The source shard's current key range comes from its authoritative shard
+	// meta (read from DescribeCollection). The two targets split that range at
+	// splitKey, so they exactly cover what the source owned — correct whether
+	// the source is the whole space (a first split) or a sub-range (a later
+	// split of a multi-shard collection).
 	source := routingKeyRange{lower: nil, upper: nil}
+	if info, ok := collection.ShardInfos[sourceVChannel]; ok {
+		source.lower = info.GetRoutingKeyLower()
+		source.upper = info.GetRoutingKeyUpper()
+	}
 	return []*datapb.SplitShardTaskTarget{
 		{Vchannel: targetVChannels[0], RoutingKeyLower: source.lower, RoutingKeyUpper: splitKey},
 		{Vchannel: targetVChannels[1], RoutingKeyLower: splitKey, RoutingKeyUpper: source.upper},

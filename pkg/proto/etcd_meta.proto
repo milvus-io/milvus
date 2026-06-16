@@ -49,20 +49,6 @@ enum AliasState {
   AliasDropped = 3;
 }
 
-// ShardState is the lifecycle state of a shard during shard split.
-enum ShardState {
-  ShardNormal = 0;    // serving reads and writes, the default for compatibility.
-  ShardCreating = 1;  // split target: created but not yet adopted, invisible to querycoord.
-  ShardSplitting = 2; // split source: fenced at T_switch, rejecting new writes.
-  ShardDropped = 3;   // split source: released after all targets are adopted.
-}
-
-// RoutingMode is the algorithm mapping a routing key to a shard.
-enum RoutingMode {
-  RoutingModeHash = 0;  // hash(key) % shardNum, the default, bit-for-bit compatible with legacy collections.
-  RoutingModeRange = 1; // binary search over the shards' byte-comparable key ranges.
-}
-
 message CollectionInfo {
   int64 ID = 1;
   schema.CollectionSchema schema = 2;
@@ -84,20 +70,10 @@ message CollectionInfo {
   repeated common.KeyValuePair properties = 14;
   int64 db_id = 15;
   uint64 UpdateTimestamp = 16;
-  repeated CollectionShardInfo shard_infos = 17; // same length with virtual_channel_names, order one by one.
+  repeated schema.CollectionShardInfo shard_infos = 17; // same length with virtual_channel_names, order one by one.
   // routing_mode decides how a routing key maps to a shard, RoutingModeHash for legacy collections.
   // Routing changes are driven by per-shard state + fence, not a version counter.
-  RoutingMode routing_mode = 19;
-}
-
-message CollectionShardInfo {
-  uint64 last_truncate_time_tick = 1; // the last truncate time tick of the shard, if the shard is not truncated, the value is 0.
-  // The routing key range [routing_key_lower, routing_key_upper) owned by the shard.
-  // Keys are byte-comparable (byte order = logical order), an empty value means unbounded.
-  // Only meaningful when the collection's routing_mode is RoutingModeRange.
-  bytes routing_key_lower = 2;
-  bytes routing_key_upper = 3;
-  ShardState state = 4; // the default ShardNormal keeps legacy shards serving.
+  schema.RoutingMode routing_mode = 19;
 }
 
 message PartitionInfo {

@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -33,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -358,14 +358,14 @@ func TestAdvanceAdopting(t *testing.T) {
 		// the adoption commit drops the source and makes the targets Normal.
 		router := broker.NewMockBroker(t)
 		router.EXPECT().CommitShardSplitRouting(mock.Anything, mock.MatchedBy(func(req *rootcoordpb.CommitShardSplitRoutingRequest) bool {
-			states := make(map[string]etcdpb.ShardState, len(req.GetVirtualChannelNames()))
+			states := make(map[string]schemapb.ShardState, len(req.GetVirtualChannelNames()))
 			for i, vch := range req.GetVirtualChannelNames() {
 				states[vch] = req.GetShardInfos()[i].GetState()
 			}
-			return req.GetRoutingMode() == etcdpb.RoutingMode_RoutingModeRange &&
-				states["v0"] == etcdpb.ShardState_ShardDropped &&
-				states["v1"] == etcdpb.ShardState_ShardNormal &&
-				states["v2"] == etcdpb.ShardState_ShardNormal
+			return req.GetRoutingMode() == schemapb.RoutingMode_RoutingModeRange &&
+				states["v0"] == schemapb.ShardState_ShardDropped &&
+				states["v1"] == schemapb.ShardState_ShardNormal &&
+				states["v2"] == schemapb.ShardState_ShardNormal
 		})).Return(nil).Once()
 		manager.setRoutingCommitter(router)
 
@@ -398,6 +398,54 @@ func TestAdvanceAdopting(t *testing.T) {
 		manager.advanceTasks()
 		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskDone, manager.mustGetTask(100).GetState())
 	})
+}
+
+func TestCommitRoutingMultiShard(t *testing.T) {
+	paramtable.Init()
+	m := newSplitTestMeta(true, "v0", map[int64]int64{10: 80})
+	wal := mock_streaming.NewMockWALAccesser(t)
+	manager, _ := newSplitExecutorManager(t, m, fencingTask(), wal, nil, &fakeSplitPlanner{})
+
+	var captured *rootcoordpb.CommitShardSplitRoutingRequest
+	router := broker.NewMockBroker(t)
+	router.EXPECT().CommitShardSplitRouting(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *rootcoordpb.CommitShardSplitRoutingRequest) error {
+			captured = req
+			return nil
+		}).Once()
+	manager.setRoutingCommitter(router)
+
+	// a multi-shard collection: source v0 owns [nil, 0x80), an unrelated shard
+	// v3 owns [0x80, nil) and must be carried through the split unchanged.
+	collection := &collectionInfo{
+		ID:            1,
+		DatabaseName:  "db",
+		Schema:        &schemapb.CollectionSchema{Name: "col"},
+		VChannelNames: []string{"v0", "v3"},
+		ShardInfos: map[string]*schemapb.CollectionShardInfo{
+			"v0": {RoutingKeyUpper: []byte{0x80}, State: schemapb.ShardState_ShardNormal},
+			"v3": {RoutingKeyLower: []byte{0x80}, State: schemapb.ShardState_ShardNormal},
+		},
+	}
+	err := manager.commitRouting(fencingTask(), collection,
+		schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating)
+	assert.NoError(t, err)
+
+	got := make(map[string]*schemapb.CollectionShardInfo, len(captured.GetVirtualChannelNames()))
+	for i, vch := range captured.GetVirtualChannelNames() {
+		got[vch] = captured.GetShardInfos()[i]
+	}
+	assert.ElementsMatch(t, []string{"v0", "v3", "v1", "v2"}, captured.GetVirtualChannelNames())
+	assert.Equal(t, schemapb.RoutingMode_RoutingModeRange, captured.GetRoutingMode())
+	// the source is fenced.
+	assert.Equal(t, schemapb.ShardState_ShardSplitting, got["v0"].GetState())
+	// the unrelated shard v3 keeps its range and state.
+	assert.Equal(t, schemapb.ShardState_ShardNormal, got["v3"].GetState())
+	assert.Equal(t, []byte{0x80}, got["v3"].GetRoutingKeyLower())
+	// the targets are Creating with their split ranges.
+	assert.Equal(t, schemapb.ShardState_ShardCreating, got["v1"].GetState())
+	assert.Equal(t, []byte{0x80}, got["v1"].GetRoutingKeyUpper())
+	assert.Equal(t, []byte{0x80}, got["v2"].GetRoutingKeyLower())
 }
 
 func TestAdvanceRedistributing(t *testing.T) {

@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -64,27 +63,27 @@ func TestDDLCallbacksCommitShardSplitRouting(t *testing.T) {
 	collID := coll.CollectionID
 	t1, t2 := source+"_split1", source+"_split2"
 
-	buildReq := func(sourceState, targetState pb.ShardState) *rootcoordpb.CommitShardSplitRoutingRequest {
+	buildReq := func(sourceState, targetState schemapb.ShardState) *rootcoordpb.CommitShardSplitRoutingRequest {
 		return &rootcoordpb.CommitShardSplitRoutingRequest{
 			DbName:               dbName,
 			CollectionName:       collectionName,
 			CollectionId:         collID,
 			VirtualChannelNames:  []string{source, t1, t2},
 			PhysicalChannelNames: []string{funcutil.ToPhysicalChannel(source), funcutil.ToPhysicalChannel(t1), funcutil.ToPhysicalChannel(t2)},
-			ShardInfos: []*pb.CollectionShardInfo{
+			ShardInfos: []*schemapb.CollectionShardInfo{
 				{State: sourceState},
 				{RoutingKeyUpper: []byte{0x80}, State: targetState},
 				{RoutingKeyLower: []byte{0x80}, State: targetState},
 			},
-			RoutingMode: pb.RoutingMode_RoutingModeRange,
+			RoutingMode: schemapb.RoutingMode_RoutingModeRange,
 		}
 	}
 
-	assertStates := func(sourceState, targetState pb.ShardState) {
+	assertStates := func(sourceState, targetState schemapb.ShardState) {
 		coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 		require.NoError(t, err)
 		require.ElementsMatch(t, []string{source, t1, t2}, coll.VirtualChannelNames)
-		require.Equal(t, pb.RoutingMode_RoutingModeRange, coll.RoutingMode)
+		require.Equal(t, schemapb.RoutingMode_RoutingModeRange, coll.RoutingMode)
 		require.Equal(t, sourceState, coll.ShardInfos[source].State)
 		require.Equal(t, targetState, coll.ShardInfos[t1].State)
 		require.Equal(t, targetState, coll.ShardInfos[t2].State)
@@ -93,26 +92,26 @@ func TestDDLCallbacksCommitShardSplitRouting(t *testing.T) {
 	}
 
 	// write-switch commit: source Splitting, two range targets Creating.
-	resp, err = core.CommitShardSplitRouting(ctx, buildReq(pb.ShardState_ShardSplitting, pb.ShardState_ShardCreating))
+	resp, err = core.CommitShardSplitRouting(ctx, buildReq(schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating))
 	require.NoError(t, merr.CheckRPCCall(resp, err))
-	assertStates(pb.ShardState_ShardSplitting, pb.ShardState_ShardCreating)
+	assertStates(schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating)
 
 	// idempotent: re-committing the same states is a no-op success.
-	resp, err = core.CommitShardSplitRouting(ctx, buildReq(pb.ShardState_ShardSplitting, pb.ShardState_ShardCreating))
+	resp, err = core.CommitShardSplitRouting(ctx, buildReq(schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating))
 	require.NoError(t, merr.CheckRPCCall(resp, err))
-	assertStates(pb.ShardState_ShardSplitting, pb.ShardState_ShardCreating)
+	assertStates(schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating)
 
 	// adoption commit: source Dropped, targets Normal.
-	resp, err = core.CommitShardSplitRouting(ctx, buildReq(pb.ShardState_ShardDropped, pb.ShardState_ShardNormal))
+	resp, err = core.CommitShardSplitRouting(ctx, buildReq(schemapb.ShardState_ShardDropped, schemapb.ShardState_ShardNormal))
 	require.NoError(t, merr.CheckRPCCall(resp, err))
-	assertStates(pb.ShardState_ShardDropped, pb.ShardState_ShardNormal)
+	assertStates(schemapb.ShardState_ShardDropped, schemapb.ShardState_ShardNormal)
 
 	// empty collection name is rejected.
 	resp, err = core.CommitShardSplitRouting(ctx, &rootcoordpb.CommitShardSplitRoutingRequest{DbName: dbName, CollectionId: collID})
 	require.Error(t, merr.CheckRPCCall(resp, err))
 
 	// channel and shard-info arrays must be parallel.
-	bad := buildReq(pb.ShardState_ShardSplitting, pb.ShardState_ShardCreating)
+	bad := buildReq(schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating)
 	bad.ShardInfos = bad.ShardInfos[:2]
 	resp, err = core.CommitShardSplitRouting(ctx, bad)
 	require.Error(t, merr.CheckRPCCall(resp, err))
@@ -124,8 +123,8 @@ func TestDDLCallbacksCommitShardSplitRouting(t *testing.T) {
 		CollectionId:         424242,
 		VirtualChannelNames:  []string{"v0"},
 		PhysicalChannelNames: []string{"p0"},
-		ShardInfos:           []*pb.CollectionShardInfo{{State: pb.ShardState_ShardNormal}},
-		RoutingMode:          pb.RoutingMode_RoutingModeRange,
+		ShardInfos:           []*schemapb.CollectionShardInfo{{State: schemapb.ShardState_ShardNormal}},
+		RoutingMode:          schemapb.RoutingMode_RoutingModeRange,
 	})
 	require.Error(t, merr.CheckRPCCall(resp, err))
 }
@@ -149,7 +148,7 @@ func TestCommitShardSplitRoutingValidation(t *testing.T) {
 		CollectionName:       "c",
 		VirtualChannelNames:  []string{"v0", "v1"},
 		PhysicalChannelNames: []string{"p0"},
-		ShardInfos:           []*pb.CollectionShardInfo{{}, {}},
+		ShardInfos:           []*schemapb.CollectionShardInfo{{}, {}},
 	})
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 }

@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -17,7 +18,7 @@ func newRoutingCollection() *Collection {
 		VirtualChannelNames:  []string{"v0", "v1"},
 		PhysicalChannelNames: []string{"p0", "p1"},
 		ShardsNum:            2,
-		RoutingMode:          pb.RoutingMode_RoutingModeRange,
+		RoutingMode:          schemapb.RoutingMode_RoutingModeRange,
 		ShardInfos: map[string]*ShardInfo{
 			"v0": {
 				PChannelName:         "p0",
@@ -25,7 +26,7 @@ func newRoutingCollection() *Collection {
 				LastTruncateTimeTick: 7,
 				RoutingKeyLower:      nil,
 				RoutingKeyUpper:      []byte{0x80},
-				State:                pb.ShardState_ShardSplitting,
+				State:                schemapb.ShardState_ShardSplitting,
 			},
 			"v1": {
 				PChannelName:         "p1",
@@ -33,7 +34,7 @@ func newRoutingCollection() *Collection {
 				LastTruncateTimeTick: 0,
 				RoutingKeyLower:      []byte{0x80},
 				RoutingKeyUpper:      nil,
-				State:                pb.ShardState_ShardCreating,
+				State:                schemapb.ShardState_ShardCreating,
 			},
 		},
 	}
@@ -43,12 +44,12 @@ func TestCollectionRoutingFieldsMarshalRoundTrip(t *testing.T) {
 	coll := newRoutingCollection()
 
 	collPb := MarshalCollectionModel(coll)
-	assert.Equal(t, pb.RoutingMode_RoutingModeRange, collPb.RoutingMode)
+	assert.Equal(t, schemapb.RoutingMode_RoutingModeRange, collPb.RoutingMode)
 	assert.Len(t, collPb.ShardInfos, 2)
 	assert.Equal(t, []byte{0x80}, collPb.ShardInfos[0].RoutingKeyUpper)
-	assert.Equal(t, pb.ShardState_ShardSplitting, collPb.ShardInfos[0].State)
+	assert.Equal(t, schemapb.ShardState_ShardSplitting, collPb.ShardInfos[0].State)
 	assert.Equal(t, []byte{0x80}, collPb.ShardInfos[1].RoutingKeyLower)
-	assert.Equal(t, pb.ShardState_ShardCreating, collPb.ShardInfos[1].State)
+	assert.Equal(t, schemapb.ShardState_ShardCreating, collPb.ShardInfos[1].State)
 	assert.Equal(t, uint64(7), collPb.ShardInfos[0].LastTruncateTimeTick)
 
 	restored := UnmarshalCollectionModel(collPb)
@@ -68,9 +69,9 @@ func TestCollectionRoutingFieldsLegacyDefaults(t *testing.T) {
 		PhysicalChannelNames: []string{"p0"},
 	}
 	restored := UnmarshalCollectionModel(legacy)
-	assert.Equal(t, pb.RoutingMode_RoutingModeHash, restored.RoutingMode)
+	assert.Equal(t, schemapb.RoutingMode_RoutingModeHash, restored.RoutingMode)
 	shard := restored.ShardInfos["v0"]
-	assert.Equal(t, pb.ShardState_ShardNormal, shard.State)
+	assert.Equal(t, schemapb.ShardState_ShardNormal, shard.State)
 	assert.Nil(t, shard.RoutingKeyLower)
 	assert.Nil(t, shard.RoutingKeyUpper)
 }
@@ -87,9 +88,9 @@ func TestCollectionRoutingFieldsClone(t *testing.T) {
 	// Clone must deep-copy the routing key bytes: mutating the
 	// original must not leak into the clone.
 	coll.ShardInfos["v0"].RoutingKeyUpper[0] = 0xff
-	coll.ShardInfos["v0"].State = pb.ShardState_ShardDropped
+	coll.ShardInfos["v0"].State = schemapb.ShardState_ShardDropped
 	assert.Equal(t, []byte{0x80}, clone.ShardInfos["v0"].RoutingKeyUpper)
-	assert.Equal(t, pb.ShardState_ShardSplitting, clone.ShardInfos["v0"].State)
+	assert.Equal(t, schemapb.ShardState_ShardSplitting, clone.ShardInfos["v0"].State)
 }
 
 func TestApplyUpdatesShardSplitRouting(t *testing.T) {
@@ -100,9 +101,9 @@ func TestApplyUpdatesShardSplitRouting(t *testing.T) {
 		Name:                 "col",
 		VirtualChannelNames:  []string{"v0"},
 		PhysicalChannelNames: []string{"p0"},
-		RoutingMode:          pb.RoutingMode_RoutingModeHash,
+		RoutingMode:          schemapb.RoutingMode_RoutingModeHash,
 		ShardInfos: map[string]*ShardInfo{
-			"v0": {VChannelName: "v0", PChannelName: "p0", State: pb.ShardState_ShardNormal},
+			"v0": {VChannelName: "v0", PChannelName: "p0", State: schemapb.ShardState_ShardNormal},
 		},
 	}
 
@@ -114,11 +115,11 @@ func TestApplyUpdatesShardSplitRouting(t *testing.T) {
 		Updates: &message.AlterCollectionMessageUpdates{
 			VirtualChannelNames:  []string{"v0", "v1", "v2"},
 			PhysicalChannelNames: []string{"p0", "p1", "p2"},
-			RoutingMode:          pb.RoutingMode_RoutingModeRange,
-			ShardInfos: []*pb.CollectionShardInfo{
-				{State: pb.ShardState_ShardSplitting},
-				{RoutingKeyUpper: []byte{0x80}, State: pb.ShardState_ShardCreating, LastTruncateTimeTick: 9},
-				{RoutingKeyLower: []byte{0x80}, State: pb.ShardState_ShardCreating},
+			RoutingMode:          schemapb.RoutingMode_RoutingModeRange,
+			ShardInfos: []*schemapb.CollectionShardInfo{
+				{State: schemapb.ShardState_ShardSplitting},
+				{RoutingKeyUpper: []byte{0x80}, State: schemapb.ShardState_ShardCreating, LastTruncateTimeTick: 9},
+				{RoutingKeyLower: []byte{0x80}, State: schemapb.ShardState_ShardCreating},
 			},
 		},
 	}
@@ -128,14 +129,14 @@ func TestApplyUpdatesShardSplitRouting(t *testing.T) {
 	// the whole routing topology is replaced atomically.
 	assert.Equal(t, []string{"v0", "v1", "v2"}, coll.VirtualChannelNames)
 	assert.Equal(t, []string{"p0", "p1", "p2"}, coll.PhysicalChannelNames)
-	assert.Equal(t, pb.RoutingMode_RoutingModeRange, coll.RoutingMode)
+	assert.Equal(t, schemapb.RoutingMode_RoutingModeRange, coll.RoutingMode)
 	assert.Len(t, coll.ShardInfos, 3)
 	// the source shard is now Splitting; the targets carry their ranges.
-	assert.Equal(t, pb.ShardState_ShardSplitting, coll.ShardInfos["v0"].State)
+	assert.Equal(t, schemapb.ShardState_ShardSplitting, coll.ShardInfos["v0"].State)
 	assert.Equal(t, "p1", coll.ShardInfos["v1"].PChannelName)
 	assert.Equal(t, "v1", coll.ShardInfos["v1"].VChannelName)
 	assert.Equal(t, []byte{0x80}, coll.ShardInfos["v1"].RoutingKeyUpper)
 	assert.Equal(t, uint64(9), coll.ShardInfos["v1"].LastTruncateTimeTick)
 	assert.Equal(t, []byte{0x80}, coll.ShardInfos["v2"].RoutingKeyLower)
-	assert.Equal(t, pb.ShardState_ShardCreating, coll.ShardInfos["v2"].State)
+	assert.Equal(t, schemapb.ShardState_ShardCreating, coll.ShardInfos["v2"].State)
 }
