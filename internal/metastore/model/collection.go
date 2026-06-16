@@ -246,6 +246,32 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 			if v := updates.Schema.GetExternalSpec(); v != "" {
 				c.ExternalSpec = v
 			}
+		case message.FieldMaskCollectionShardSplitRouting:
+			// A shard split commits the whole new routing topology atomically:
+			// the grown vchannel list, every shard's key range and lifecycle
+			// state, the routing mode and the bumped routing version. The
+			// channel and shard-info arrays are parallel, so the ShardInfos map
+			// is rebuilt from them in lockstep.
+			c.VirtualChannelNames = updates.VirtualChannelNames
+			c.PhysicalChannelNames = updates.PhysicalChannelNames
+			c.RoutingVersion = updates.RoutingVersion
+			c.RoutingMode = updates.RoutingMode
+			shardInfos := make(map[string]*ShardInfo, len(updates.VirtualChannelNames))
+			for i, vchannel := range updates.VirtualChannelNames {
+				info := &ShardInfo{VChannelName: vchannel}
+				if i < len(updates.PhysicalChannelNames) {
+					info.PChannelName = updates.PhysicalChannelNames[i]
+				}
+				if i < len(updates.ShardInfos) {
+					si := updates.ShardInfos[i]
+					info.LastTruncateTimeTick = si.GetLastTruncateTimeTick()
+					info.RoutingKeyLower = si.GetRoutingKeyLower()
+					info.RoutingKeyUpper = si.GetRoutingKeyUpper()
+					info.State = si.GetState()
+				}
+				shardInfos[vchannel] = info
+			}
+			c.ShardInfos = shardInfos
 		}
 	}
 }
