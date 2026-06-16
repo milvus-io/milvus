@@ -17,6 +17,7 @@
 #pragma once
 
 #include <algorithm>
+#include <bit>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -71,6 +72,46 @@ PinIndex(milvus::OpContext* op_ctx,
                                      is_array);
     } else {
         return segment->PinIndex(op_ctx, field_meta.get_id());
+    }
+}
+
+// Mask null rows out of a filter result: wherever valid_data marks a row null
+// (false), clear both the result bit and the validity bit. No-op when
+// valid_data is null (a non-nullable column carries no validity array). This
+// is the shared validity-masking primitive used by SegmentExpr::ApplyValidData
+// and by the per-kernel sequential masking sites.
+//
+// Packs 64 rows into a word (the fixed-trip inner loop vectorizes) and then
+// walks only the null bits via std::countr_zero. An all-valid block has no null
+// bits set, so the common no-null case costs nothing. Bit-identical to the
+// straightforward `if (!valid_data[i]) res[i] = valid_res[i] = false;` loop.
+//
+// SEQUENTIAL only: row i maps to position i. The scattered / by-offsets case
+// (valid_data[offsets[i]]) is a gather and must keep its own per-row loop.
+inline void
+ApplyValidMask(const bool* valid_data,
+               TargetBitmapView res,
+               TargetBitmapView valid_res,
+               const int size) {
+    if (valid_data == nullptr) {
+        return;
+    }
+    int i = 0;
+    for (; i + 64 <= size; i += 64) {
+        uint64_t m = 0;
+        for (int k = 0; k < 64; ++k) {
+            m |= uint64_t(valid_data[i + k] != 0) << k;
+        }
+        for (uint64_t nulls = ~m; nulls != 0; nulls &= nulls - 1) {
+            const int k = std::countr_zero(nulls);
+            res[i + k] = false;
+            valid_res[i + k] = false;
+        }
+    }
+    for (; i < size; i++) {
+        if (!valid_data[i]) {
+            res[i] = valid_res[i] = false;
+        }
     }
 }
 
@@ -364,13 +405,7 @@ class SegmentExpr : public Expr {
                    TargetBitmapView res,
                    TargetBitmapView valid_res,
                    const int size) {
-        if (valid_data != nullptr) {
-            for (int i = 0; i < size; i++) {
-                if (!valid_data[i]) {
-                    res[i] = valid_res[i] = false;
-                }
-            }
-        }
+        ApplyValidMask(valid_data, res, valid_res, size);
     }
 
     int64_t
