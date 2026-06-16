@@ -1288,7 +1288,7 @@ class TestSearchByPkIndependent(TestMilvusClientV2Base):
 
         # search again with error for some ids in partition_1 was released
         error = {
-            ct.err_code: 100,
+            ct.err_code: 1100,
             ct.err_msg: f"some of the provided primary key IDs do not exist: missing IDs = [1 4 7]",
         }
         self.search(

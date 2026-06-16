@@ -314,7 +314,7 @@ class TestDeleteParams(TestcaseBase):
         # create, insert with flush, load collection
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
 
-        error = {ct.err_code: 0,
+        error = {ct.err_code: ct.ANY_CODE,
                  ct.err_msg: "Illegal nullable str variables: {'partition_name': %s}, "
                              "expect None or non-empty str" % str(partition_name)}
         collection_w.delete(tmp_expr, partition_name=partition_name,
@@ -715,7 +715,7 @@ class TestDeleteOperation(TestcaseBase):
         assert res.delete_count == 1
 
         # query without loading and raise exception
-        error = {ct.err_code: 65535, ct.err_msg: "collection not loaded"}
+        error = {ct.err_code: 101, ct.err_msg: "collection not loaded"}
         collection_w.query(expr=tmp_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)

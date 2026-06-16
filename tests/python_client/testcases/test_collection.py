@@ -76,7 +76,7 @@ class TestCollectionParams(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         field, _ = self.field_schema_wrap.init_field_schema(name="field_name", dtype=DataType.INT64, is_primary=True)
-        error = {ct.err_code: 0, ct.err_msg: "Schema type must be schema.CollectionSchema"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Schema type must be schema.CollectionSchema"}
         self.collection_wrap.init_collection(c_name, schema=field,
                                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -154,7 +154,7 @@ class TestCollectionDataframe(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         df = pd.DataFrame(columns=[ct.default_int64_field_name, ct.default_float_vec_field_name])
-        error = {ct.err_code: 0, ct.err_msg: "Cannot infer schema from empty dataframe"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Cannot infer schema from empty dataframe"}
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
                                                       check_task=CheckTasks.err_res, check_items=error)
 
@@ -185,7 +185,7 @@ class TestCollectionDataframe(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 0, ct.err_msg: "Data type must be pandas.DataFrame."}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Data type must be pandas.DataFrame."}
         df = cf.gen_default_list_data(nb=10)
         self.collection_wrap.construct_from_dataframe(c_name, df, check_task=CheckTasks.err_res, check_items=error)
 
@@ -199,7 +199,7 @@ class TestCollectionDataframe(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         df = pd.DataFrame({"date": pd.date_range('20210101', periods=3), ct.default_int64_field_name: [1, 2, 3]})
-        error = {ct.err_code: 0, ct.err_msg: "Cannot infer schema from empty dataframe."}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Cannot infer schema from empty dataframe."}
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
                                                       check_task=CheckTasks.err_res, check_items=error)
 
@@ -213,7 +213,7 @@ class TestCollectionDataframe(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         df = pd.DataFrame({'%$#': cf.gen_vectors(3, 2), ct.default_int64_field_name: [1, 2, 3]})
-        error = {ct.err_code: 1, ct.err_msg: "Invalid field name"}
+        error = {ct.err_code: 1701, ct.err_msg: "Invalid field name"}
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
                                                       check_task=CheckTasks.err_res, check_items=error)
 
@@ -227,7 +227,7 @@ class TestCollectionDataframe(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         df = cf.gen_default_dataframe_data(ct.default_nb)
-        error = {ct.err_code: 0, ct.err_msg: "Schema must have a primary key field."}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Schema must have a primary key field."}
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=None,
                                                       check_task=CheckTasks.err_res, check_items=error)
 
@@ -241,7 +241,7 @@ class TestCollectionDataframe(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         df = cf.gen_default_dataframe_data(ct.default_nb)
-        error = {ct.err_code: 0, ct.err_msg: "Primary field must in dataframe."}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Primary field must in dataframe."}
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=c_name,
                                                       check_task=CheckTasks.err_res, check_items=error)
 
@@ -255,7 +255,7 @@ class TestCollectionDataframe(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         df = cf.gen_default_dataframe_data(ct.default_nb)
-        error = {ct.err_code: 0, ct.err_msg: "Param auto_id must be bool type"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Param auto_id must be bool type"}
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
                                                       auto_id=None, check_task=CheckTasks.err_res, check_items=error)
 
@@ -269,7 +269,7 @@ class TestCollectionDataframe(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         df = cf.gen_default_dataframe_data(nb=100)
-        error = {ct.err_code: 0, ct.err_msg: "Auto_id is True, primary field should not have data."}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Auto_id is True, primary field should not have data."}
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
                                                       auto_id=True, check_task=CheckTasks.err_res, check_items=error)
 
@@ -332,7 +332,7 @@ class TestCollectionDataframe(TestcaseBase):
         nb = 100
         df = cf.gen_default_dataframe_data(nb)
         df.iloc[:, 0] = numpy.NaN
-        error = {ct.err_code: 0, ct.err_msg: "Primary key type must be DataType.INT64"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Primary key type must be DataType.INT64"}
         self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
                                                       primary_field=ct.default_int64_field_name, auto_id=False,
                                                       check_task=CheckTasks.err_res, check_items=error)

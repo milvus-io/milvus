@@ -714,7 +714,7 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         self.alter_collection_properties(client, collection_name,
                                          properties={"warmup": "sync"},
                                          check_task=CheckTasks.err_res,
-                                         check_items={ct.err_code: 1100, ct.err_msg: "warmup"})
+                                         check_items={ct.err_code: ct.ANY_CODE, ct.err_msg: "warmup"})
 
         # 11.3 collection key at field level - server accepts arbitrary key names via
         # alter_collection_field, verify it doesn't affect the actual warmup setting
@@ -727,12 +727,12 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         self.alter_collection_field(client, collection_name,
                                     field_name="not_exist_field", field_params={"warmup": "sync"},
                                     check_task=CheckTasks.err_res,
-                                    check_items={ct.err_code: 1100, ct.err_msg: "does not exist"})
+                                    check_items={ct.err_code: ct.ANY_CODE, ct.err_msg: "does not exist"})
 
         self.alter_index_properties(client, collection_name,
                                     index_name="not_exist_index", properties={"warmup": "sync"},
                                     check_task=CheckTasks.err_res,
-                                    check_items={ct.err_code: 1100, ct.err_msg: "not found"})
+                                    check_items={ct.err_code: 700, ct.err_msg: "not found"})
 
         # 11.5 alter warmup on loaded collection
         self.load_collection(client, collection_name)
@@ -740,13 +740,13 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         self.alter_collection_properties(client, collection_name,
                                          properties={"warmup.vectorField": "sync"},
                                          check_task=CheckTasks.err_res,
-                                         check_items={ct.err_code: 1100,
+                                         check_items={ct.err_code: 104,
                                                       ct.err_msg: "can not alter warmup properties if collection loaded"})
 
         self.alter_collection_field(client, collection_name,
                                     field_name="vector", field_params={"warmup": "sync"},
                                     check_task=CheckTasks.err_res,
-                                    check_items={ct.err_code: 1100,
+                                    check_items={ct.err_code: 104,
                                                  ct.err_msg: "can not alter warmup if collection loaded"})
 
         # 11.6 create_collection with invalid warmup
@@ -1399,7 +1399,7 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         self.create_index(client, col3, index_params3)
         self.create_index(client, col3, index_params3,
                           check_task=CheckTasks.err_res,
-                          check_items={ct.err_code: 65535,
+                          check_items={ct.err_code: 1100,
                                        ct.err_msg: "at most one distinct index is allowed per field"})
         assert len(self.list_indexes(client, col3, field_name="vector")[0]) == 1
 

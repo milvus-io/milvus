@@ -1226,7 +1226,7 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
 
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={ct.err_code: 65535,
+                               check_items={ct.err_code: 1100,
                                              ct.err_msg: "VARCHAR"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1254,7 +1254,7 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
 
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={ct.err_code: 65535,
+                               check_items={ct.err_code: 1100,
                                              ct.err_msg: "BinaryVector"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1282,7 +1282,7 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
 
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={ct.err_code: 65535,
+                               check_items={ct.err_code: 1100,
                                              ct.err_msg: "does not match expected dim"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1477,7 +1477,7 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
 
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={ct.err_code: 65535,
+                               check_items={ct.err_code: 1100,
                                              ct.err_msg: "num_hashes"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1506,7 +1506,7 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
 
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={ct.err_code: 65535,
+                               check_items={ct.err_code: 1100,
                                              ct.err_msg: "shingle_size"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1538,7 +1538,7 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
 
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={ct.err_code: 65535,
+                               check_items={ct.err_code: 1100,
                                              ct.err_msg: "unknown hash function"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1571,7 +1571,7 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
 
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={ct.err_code: 65535,
+                               check_items={ct.err_code: 1100,
                                              ct.err_msg: "unknown token_level"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1604,7 +1604,7 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
 
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={ct.err_code: 65535,
+                               check_items={ct.err_code: 1100,
                                              ct.err_msg: "seed"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -4396,7 +4396,7 @@ class TestMilvusClientMinHashNullable(TestMilvusClientV2Base):
 
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={ct.err_code: 65535,
+                               check_items={ct.err_code: 1100,
                                             ct.err_msg: "nullable"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -4497,7 +4497,7 @@ class TestMilvusClientMinHashNullable(TestMilvusClientV2Base):
 
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={ct.err_code: 65535,
+                               check_items={ct.err_code: 1100,
                                             ct.err_msg: "input"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -4526,7 +4526,7 @@ class TestMilvusClientMinHashNullable(TestMilvusClientV2Base):
 
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={ct.err_code: 65535,
+                               check_items={ct.err_code: 1100,
                                             ct.err_msg: "output"})
 
 class TestMilvusClientMinHashSearchIterator(TestMilvusClientV2Base):
@@ -4927,7 +4927,7 @@ class TestMilvusClientMinHashGroupBy(TestMilvusClientV2Base):
                     output_fields=[default_primary_key_field_name, "category"],
                     group_by_field="category",
                     check_task=CheckTasks.err_res,
-                    check_items={ct.err_code: 65535,
+                    check_items={ct.err_code: 1100,
                                  ct.err_msg: "not support search_group_by operation based on binary vector"})
 
 class TestMilvusClientMinHashDescribeIndex(TestMilvusClientV2Base):
@@ -5180,7 +5180,7 @@ class TestMilvusClientMinHashNegativeExtended(TestMilvusClientV2Base):
                     search_params={"metric_type": "HAMMING", "params": {}},
                     limit=5,
                     check_task=CheckTasks.err_res,
-                    check_items={ct.err_code: 65535,
+                    check_items={ct.err_code: 1100,
                                  ct.err_msg: "metric type"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -5327,7 +5327,7 @@ class TestMilvusClientMinHashEdgeCases(TestMilvusClientV2Base):
                     },
                     limit=10,
                     check_task=CheckTasks.err_res,
-                    check_items={ct.err_code: 65535,
+                    check_items={ct.err_code: 2000,
                                  ct.err_msg: "not support range search"})
 
     @pytest.mark.tags(CaseLabel.L2)

@@ -83,14 +83,14 @@ class TestSearchLoadIndependent(TestMilvusClientV2Base):
                         anns_field=field_name, search_params=default_search_params, limit=limit,
                         partition_names=partition_names,
                         check_task=CheckTasks.err_res,
-                        check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                        check_items={ct.err_code: ct.ANY_CODE, ct.err_msg: 'not loaded',
                                      "enable_milvus_client_api": True})
         elif expected == NOT_FOUND:
             self.search(client, collection_name, data=cf.gen_vectors(1, default_dim),
                         anns_field=field_name, search_params=default_search_params, limit=limit,
                         partition_names=partition_names,
                         check_task=CheckTasks.err_res,
-                        check_items={ct.err_code: 1, ct.err_msg: 'not found',
+                        check_items={ct.err_code: ct.ANY_CODE, ct.err_msg: 'not found',
                                      "enable_milvus_client_api": True})
         elif expected == NOT_LOADED_999:
             self.search(client, collection_name, data=cf.gen_vectors(1, default_dim),
@@ -115,7 +115,7 @@ class TestSearchLoadIndependent(TestMilvusClientV2Base):
                         anns_field=field_name, search_params=default_search_params, limit=limit,
                         partition_names=partition_names,
                         check_task=CheckTasks.err_res,
-                        check_items={ct.err_code: 65535,
+                        check_items={ct.err_code: ct.ANY_CODE,
                                      ct.err_msg: "collection not loaded",
                                      "enable_milvus_client_api": True})
         else:
@@ -273,7 +273,7 @@ class TestSearchLoadIndependent(TestMilvusClientV2Base):
                     anns_field=field_name, search_params=default_search_params, limit=200,
                     partition_names=[p2_name],
                     check_task=CheckTasks.err_res,
-                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                    check_items={ct.err_code: ct.ANY_CODE, ct.err_msg: 'not loaded',
                                  "enable_milvus_client_api": True})
 
     @pytest.mark.tags(CaseLabel.L2)

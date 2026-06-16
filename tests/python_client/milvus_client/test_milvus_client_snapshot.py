@@ -222,7 +222,7 @@ class TestMilvusClientSnapshotCreateInvalid(TestMilvusClientSnapshotBase):
         self.create_snapshot(client, snapshot_name, collection_name)
 
         # Try to create another snapshot with same name
-        error = {ct.err_code: 1, ct.err_msg: "already exists"}
+        error = {ct.err_code: 1100, ct.err_msg: "already exists"}
         self.create_snapshot(client, snapshot_name, collection_name, check_task=CheckTasks.err_res, check_items=error)
 
         # Cleanup
@@ -483,7 +483,7 @@ class TestMilvusClientSnapshotListDescribe(TestMilvusClientSnapshotBase):
         self.create_collection(client, collection_name, default_dim)
         snapshot_name = cf.gen_unique_str("non_existent")
 
-        error = {ct.err_code: 1, ct.err_msg: "not found"}
+        error = {ct.err_code: 2600, ct.err_msg: "not found"}
         self.describe_snapshot(client, snapshot_name, collection_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -613,7 +613,7 @@ class TestMilvusClientSnapshotRestoreInvalid(TestMilvusClientSnapshotBase):
         snapshot_name = cf.gen_unique_str("non_existent")
         target_collection_name = cf.gen_unique_str(prefix + "_target")
 
-        error = {ct.err_code: 1, ct.err_msg: "not found"}
+        error = {ct.err_code: 2600, ct.err_msg: "not found"}
         self.restore_snapshot(
             client,
             snapshot_name,
@@ -642,7 +642,7 @@ class TestMilvusClientSnapshotRestoreInvalid(TestMilvusClientSnapshotBase):
         # Create target collection (should cause conflict)
         self.create_collection(client, target_collection_name, default_dim)
 
-        error = {ct.err_code: 65535, ct.err_msg: "duplicate collection"}
+        error = {ct.err_code: 1100, ct.err_msg: "duplicate collection"}
         self.restore_snapshot(
             client,
             snapshot_name,
@@ -669,7 +669,7 @@ class TestMilvusClientSnapshotRestoreState(TestMilvusClientSnapshotBase):
         client = self._client()
         invalid_job_id = 999999999
 
-        error = {ct.err_code: 1, ct.err_msg: "not found"}
+        error = {ct.err_code: 2101, ct.err_msg: "not found"}
         self.get_restore_snapshot_state(client, invalid_job_id, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1743,7 +1743,7 @@ class TestMilvusClientSnapshotNegative(TestMilvusClientSnapshotBase):
         self.drop_snapshot(client, snapshot_name, collection_name)
 
         # Try to restore - should fail
-        error = {ct.err_code: 1, ct.err_msg: "not found"}
+        error = {ct.err_code: 2600, ct.err_msg: "not found"}
         self.restore_snapshot(
             client,
             snapshot_name,
@@ -3815,7 +3815,7 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientSnapshotBase):
         self.create_collection(client, existing_collection, default_dim)
 
         # 3. Restore to existing collection - should fail
-        error = {ct.err_code: 65535, ct.err_msg: "duplicate collection"}
+        error = {ct.err_code: 1100, ct.err_msg: "duplicate collection"}
         self.restore_snapshot(
             client,
             snapshot_name,
@@ -5270,7 +5270,7 @@ class TestMilvusClientSnapshotCreateParams(TestMilvusClientSnapshotBase):
 
         self.create_collection(client, collection_name, default_dim)
 
-        error = {ct.err_code: 1, ct.err_msg: "compaction_protection_seconds"}
+        error = {ct.err_code: 1100, ct.err_msg: "compaction_protection_seconds"}
         self.create_snapshot(
             client,
             snapshot_name,
@@ -5468,7 +5468,7 @@ class TestMilvusClientSnapshotPin(TestMilvusClientSnapshotBase):
         client = self._client()
         collection_name, snapshot_name = self._prepare(client)
 
-        error = {ct.err_code: 1, ct.err_msg: "ttl_seconds"}
+        error = {ct.err_code: 1100, ct.err_msg: "ttl_seconds"}
         self.pin_snapshot_data(
             client,
             snapshot_name,
@@ -5492,7 +5492,7 @@ class TestMilvusClientSnapshotPin(TestMilvusClientSnapshotBase):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
 
-        error = {ct.err_code: 1, ct.err_msg: "not found"}
+        error = {ct.err_code: 2600, ct.err_msg: "not found"}
         self.pin_snapshot_data(
             client,
             cf.gen_unique_str("ghost"),

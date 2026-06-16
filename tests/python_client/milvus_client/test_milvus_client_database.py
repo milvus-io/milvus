@@ -83,7 +83,7 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         client = self._client()
         # 1. create database
         db_name = "default"
-        error = {ct.err_code: 65535, ct.err_msg: f"database already exist: {db_name}"}
+        error = {ct.err_code: 1100, ct.err_msg: f"database already exist: {db_name}"}
         self.create_database(client, db_name, default_dim,
                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -100,7 +100,7 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         self.create_database(client, db_name)
         dbs = self.list_databases(client)[0]
         assert db_name in dbs
-        error = {ct.err_code: 65535, ct.err_msg: f"database already exist: {db_name}"}
+        error = {ct.err_code: 1100, ct.err_msg: f"database already exist: {db_name}"}
         self.create_database(client, db_name, default_dim,
                                check_task=CheckTasks.err_res, check_items=error)
         self.drop_database(client, db_name)
@@ -190,7 +190,7 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         collections = self.list_collections(client)[0]
         assert collection_name in collections
         # 3. drop database
-        error = {ct.err_code: 65535, ct.err_msg: f"{db_name} not empty, must drop all collections before drop database"}
+        error = {ct.err_code: 1100, ct.err_msg: f"{db_name} not empty, must drop all collections before drop database"}
         self.drop_database(client, db_name,
                            check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
@@ -314,7 +314,7 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         self.create_database(client, db_name)
         dbs = self.list_databases(client)[0]
         assert db_name in dbs
-        error = {ct.err_code: 65535, ct.err_msg: f"alter database with empty properties and delete keys, "
+        error = {ct.err_code: 1100, ct.err_msg: f"alter database with empty properties and delete keys, "
                                                  f"expected to set either properties or delete keys"}
         self.drop_database_properties(client, db_name, property_keys=properties,
                                       check_task=CheckTasks.err_res,

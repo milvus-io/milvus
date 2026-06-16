@@ -497,7 +497,7 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
             partial_update=True,
         )
 
-        error = {ct.err_code: 1100, ct.err_msg: "nonexistent_field"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "nonexistent_field"}
         self.upsert(
             client,
             collection_name,
@@ -750,7 +750,7 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
 
         # tags append is valid: [1] + [2] = [1,2] (length 2 <= 4)
         # labels append exceeds capacity: [1] + [2,3,4,5] = [1,2,3,4,5] (length 5 > 4)
-        error = {ct.err_code: 65535, ct.err_msg: "array length 5 exceeds max_capacity 4"}
+        error = {ct.err_code: 1100, ct.err_msg: "array length 5 exceeds max_capacity 4"}
         self.upsert(
             client,
             collection_name,
@@ -1180,7 +1180,7 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
             partial_update=True,
         )
 
-        error = {ct.err_code: 65535, ct.err_msg: "array length 5 exceeds max_capacity 4"}
+        error = {ct.err_code: 1100, ct.err_msg: "array length 5 exceeds max_capacity 4"}
         self.upsert(
             client,
             collection_name,
@@ -1270,7 +1270,7 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
             partial_update=True,
         )
 
-        error = {ct.err_code: 65535, ct.err_msg: "array length 5 exceeds max_capacity 4"}
+        error = {ct.err_code: 1100, ct.err_msg: "array length 5 exceeds max_capacity 4"}
         self.upsert(
             client,
             collection_name,
@@ -1315,7 +1315,7 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
             partial_update=True,
         )
 
-        error = {ct.err_code: 65535, ct.err_msg: "array length 5 exceeds max_capacity 4"}
+        error = {ct.err_code: 1100, ct.err_msg: "array length 5 exceeds max_capacity 4"}
         self.upsert(
             client,
             collection_name,

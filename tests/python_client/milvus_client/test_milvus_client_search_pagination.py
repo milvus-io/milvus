@@ -764,7 +764,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
         collection_name = self.collection_name
         vectors_to_search = cf.gen_vectors(default_nq, self.float_vector_dim)
         search_params = {"offset": offset}
-        error = {"err_code": 1, "err_msg": f"offset [{offset}] is invalid, it should be in range [1, 16384]"}
+        error = {"err_code": 1100, "err_msg": f"offset [{offset}] is invalid, it should be in range [1, 16384]"}
         self.search(
             client,
             collection_name,

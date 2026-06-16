@@ -501,7 +501,7 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         # 3. search
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 65535,
+        error = {ct.err_code: 1100,
                  ct.err_msg: f"partition name {partition_name} not found"}
         self.search_iterator(client, collection_name, vectors_to_search,
                              partition_names=[partition_name],

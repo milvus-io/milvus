@@ -80,7 +80,7 @@ class TestHighLevelApi(TestMilvusClientV2Base):
         # 2. create collection with same params
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 3. create collection with same name and different params
-        error = {ct.err_code: 1, ct.err_msg: f"create duplicate collection with different parameters, "
+        error = {ct.err_code: 1100, ct.err_msg: f"create duplicate collection with different parameters, "
                                              f"collection: {collection_name}"}
         self.create_collection(client, collection_name, default_dim + 1, consistency_level="Strong",
                                check_task=CheckTasks.err_res, check_items=error)
@@ -96,7 +96,7 @@ class TestHighLevelApi(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        error = {ct.err_code: 65535,
+        error = {ct.err_code: 1100,
                  ct.err_msg: "float vector index does not support metric type: invalid: invalid parameter"}
         self.create_collection(client, collection_name, default_dim, metric_type="invalid",
                                check_task=CheckTasks.err_res, check_items=error)

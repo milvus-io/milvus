@@ -923,7 +923,7 @@ class TestGroupSearch(TestMilvusClientV2Base):
         client = self._client()
         search_vectors = cf.gen_vectors(1, dim=self.float_vector_dim, vector_data_type=DataType.FLOAT_VECTOR)
         search_params = {"metric_type": self.float_vector_metric}
-        error = {ct.err_code: 65535, ct.err_msg: "cannot parse identifier"}
+        error = {ct.err_code: 2201, ct.err_msg: "cannot parse identifier"}
         self.search(
             client,
             self.collection_name,

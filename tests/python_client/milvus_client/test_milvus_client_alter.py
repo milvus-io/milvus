@@ -125,7 +125,7 @@ class TestMilvusClientAlterIndex(TestMilvusClientV2Base):
         for p in properties.items():
             if p[0] not in ["mmap.enabled"]:
                 log.debug(f"try to alter index property: {p[0]}")
-                error = {ct.err_code: 1, ct.err_msg: f"{p[0]} is not a configable index property"}
+                error = {ct.err_code: 1100, ct.err_msg: f"{p[0]} is not a configable index property"}
                 new_value = p[1] + 1 if isinstance(p[1], numbers.Number) else "new_value"
                 self.alter_index_properties(
                     client,
@@ -152,7 +152,7 @@ class TestMilvusClientAlterIndex(TestMilvusClientV2Base):
         assert res1.get("mmap.enabled", None) is None
         unsupported_values = [None, [], "", 20, "  ", 0.01, "new_value"]
         for value in unsupported_values:
-            error = {ct.err_code: 1, ct.err_msg: "invalid mmap.enabled value"}
+            error = {ct.err_code: 1100, ct.err_msg: "invalid mmap.enabled value"}
             self.alter_index_properties(client, collection_name, idx_names[0],
                                         properties={"mmap.enabled": value},
                                         check_task=CheckTasks.err_res, check_items=error)

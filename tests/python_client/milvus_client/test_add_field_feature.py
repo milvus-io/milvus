@@ -1488,7 +1488,7 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         # 1. create collection
         dim, field_name = 8, default_new_field_name
         error = {
-            ct.err_code: 1100,
+            ct.err_code: 1101,
             ct.err_msg: f"type param(max_length) should be specified for "
             f"the field({field_name}) of collection {collection_name}",
         }

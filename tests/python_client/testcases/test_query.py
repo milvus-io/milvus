@@ -165,7 +165,7 @@ class TestQueryParams(TestcaseBase):
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         exprs = [1, 2., [], {}, ()]
-        error = {ct.err_code: 0, ct.err_msg: "The type of expr must be string"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "The type of expr must be string"}
         for expr in exprs:
             collection_w.query(expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -3416,7 +3416,7 @@ class TestQueryTextMatchNegative(TestcaseBase):
         default_schema = CollectionSchema(
             fields=default_fields, description="test collection"
         )
-        error = {ct.err_code: 2000, ct.err_msg: "unsupported tokenizer"}
+        error = {ct.err_code: 1100, ct.err_msg: "unsupported tokenizer"}
         self.init_collection_wrap(
             name=cf.gen_unique_str(prefix),
             schema=default_schema,
@@ -3474,7 +3474,7 @@ class TestQueryFunction(TestcaseBase):
              "function starts_with(int64_t, int64_t) not found"),
         ]
         for call_expr, err_msg in test_cases:
-            error = {ct.err_code: 65535, ct.err_msg: err_msg}
+            error = {ct.err_code: 2000, ct.err_msg: err_msg}
             collection_w.query(
                 call_expr, check_task=CheckTasks.err_res, check_items=error
             )

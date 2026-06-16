@@ -1057,7 +1057,7 @@ class TestMilvusClientTimestamptzInvalid(TestMilvusClientV2Base):
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field(default_timestamp_field_name, DataType.TIMESTAMPTZ, nullable=True, default_value="timestamp")
 
-        error = {ct.err_code: 65536, ct.err_msg: "invalid timestamp string: 'timestamp'. Does not match any known format"}
+        error = {ct.err_code: 1100, ct.err_msg: "invalid timestamp string: 'timestamp'. Does not match any known format"}
         self.create_collection(client, collection_name, default_dim, schema=schema, 
                                consistency_level="Strong",
                                check_task=CheckTasks.err_res, check_items=error)
@@ -1068,7 +1068,7 @@ class TestMilvusClientTimestamptzInvalid(TestMilvusClientV2Base):
         new_schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         new_schema.add_field(default_timestamp_field_name, DataType.TIMESTAMPTZ, nullable=True, default_value=10)
 
-        error = {ct.err_code: 65536, ct.err_msg: "type (Timestamptz) of field (timestamp) is not equal to the type(DataType_Int64) of default_value: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: "type (Timestamptz) of field (timestamp) is not equal to the type(DataType_Int64) of default_value: invalid parameter"}
         self.create_collection(client, collection_name, default_dim, schema=new_schema, 
                                consistency_level="Strong",
                                check_task=CheckTasks.err_res, check_items=error)

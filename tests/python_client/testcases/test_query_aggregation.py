@@ -1107,7 +1107,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         client = self._client()
 
         # Try SUM on VarChar field
-        error = {ct.err_code: 65535, ct.err_msg: "aggregation operator sum does not support data type VarChar"}
+        error = {ct.err_code: 1100, ct.err_msg: "aggregation operator sum does not support data type VarChar"}
         self.query(
             client,
             self.collection_name,
@@ -1160,7 +1160,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         client = self._client()
 
         # Test case 1: Unknown aggregation function
-        error = {ct.err_code: 1, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.query(
             client,
             self.collection_name,

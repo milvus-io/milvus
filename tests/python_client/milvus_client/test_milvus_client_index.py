@@ -1011,7 +1011,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
             json_path_err_msg = "mismatched input '/'"
         else:
             json_path_err_msg = f"cannot parse identifier: {invalid_json_path}"
-        error = {ct.err_code: 65535, ct.err_msg: json_path_err_msg}
+        error = {ct.err_code: 2201, ct.err_msg: json_path_err_msg}
         self.create_index(client, collection_name, index_params,
                           check_task=CheckTasks.err_res, check_items=error)
 
@@ -1034,7 +1034,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name=json_field_name, index_type=supported_double_scalar_index,
                                params={"json_cast_type": "double", "json_path": f"{json_field_name}['a']"})
-        error = {ct.err_code: 65535, ct.err_msg: f"cannot create index on non-exist field: {json_field_name}"}
+        error = {ct.err_code: 1100, ct.err_msg: f"cannot create index on non-exist field: {json_field_name}"}
         self.create_collection(client, collection_name, schema=schema, index_params=index_params,
                                check_task=CheckTasks.err_res, check_items=error)
 
@@ -1112,7 +1112,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
                                index_type=supported_varchar_scalar_index,
                                params={"json_cast_type": "varchar", "json_path": f"{json_field_name}['a']"})
         # 5. create index
-        error = {ct.err_code: 65535, ct.err_msg: "CreateIndex failed: creating multiple "
+        error = {ct.err_code: 1100, ct.err_msg: "CreateIndex failed: creating multiple "
                                                  "indexes on same field is not supported"}
         self.create_index(client, collection_name, index_params,
                           check_task=CheckTasks.err_res, check_items=error)

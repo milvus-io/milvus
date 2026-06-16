@@ -3305,7 +3305,7 @@ class TestMilvusClientGeometryNegative(TestMilvusClientV2Base):
         ]
 
         error = {
-            ct.err_code: 1001,
+            ct.err_code: 1100,
             ct.err_msg: "syntax error",
         }  # We expect some error related to invalid geometry
         self.insert(
@@ -3440,7 +3440,7 @@ class TestMilvusClientGeometryNegative(TestMilvusClientV2Base):
         filter_expr = f"{invalid_spatial_func}(geo, '{query_polygon}')"
 
         error = {
-            ct.err_code: 65535,
+            ct.err_code: 2000,
             ct.err_msg: "not found",
         }  # We expect error for invalid spatial function
         self.query(

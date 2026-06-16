@@ -182,7 +182,7 @@ class TestUtilityParams(TestcaseBase):
         using = "empty"
         ut = ApiUtilityWrapper()
         ex, _ = ut.list_collections(using=using, check_task=CheckTasks.err_res,
-                                    check_items={ct.err_code: 0, ct.err_msg: "should create connect"})
+                                    check_items={ct.err_code: ct.ANY_CODE, ct.err_msg: "should create connect"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("invalid_name", ct.invalid_resource_names)
@@ -260,7 +260,7 @@ class TestUtilityParams(TestcaseBase):
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name)
         self.collection_wrap.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         self.collection_wrap.load()
-        error = {ct.err_code: 1, ct.err_msg: "Invalid collection name: {}".format(invalid_c_name)}
+        error = {ct.err_code: 1100, ct.err_msg: "Invalid collection name: {}".format(invalid_c_name)}
         self.utility_wrap.loading_progress(invalid_c_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -308,7 +308,7 @@ class TestUtilityParams(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, nb=10)[0]
         collection_w.load()
-        err_msg = {ct.err_code: 15, ct.err_msg: f"partition not found"}
+        err_msg = {ct.err_code: 200, ct.err_msg: f"partition not found"}
         self.utility_wrap.loading_progress(collection_w.name, partition_names,
                                            check_task=CheckTasks.err_res, check_items=err_msg)
 
@@ -457,7 +457,7 @@ class TestUtilityParams(TestcaseBase):
         collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix)
         old_collection_name = get_invalid_value_collection_name
         new_collection_name = cf.gen_unique_str(prefix)
-        error = {"err_code": 4, "err_msg": "collection not found"}
+        error = {"err_code": 100, "err_msg": "collection not found"}
         if old_collection_name in [None, ""]:
             error = {"err_code": ct.ANY_CODE, "err_msg": "is illegal"}
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
@@ -561,7 +561,7 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.create_alias(old_collection_name, alias)
         self.utility_wrap.rename_collection(alias, new_collection_name,
                                             check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 1,
+                                            check_items={"err_code": 1100,
                                                          "err_msg": "unsupported use an alias to "
                                                                     "rename collection, alias:{}".format(alias)})
 
@@ -715,7 +715,7 @@ class TestUtilityBase(TestcaseBase):
         self.utility_wrap.index_building_progress(
             c_name,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 4, ct.err_msg: "collection not found"})
+            check_items={ct.err_code: 100, ct.err_msg: "collection not found"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_process_collection_empty(self):
@@ -804,7 +804,7 @@ class TestUtilityBase(TestcaseBase):
         self.utility_wrap.wait_for_index_building_complete(
             c_name,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 4, ct.err_msg: "collection not found"})
+            check_items={ct.err_code: 100, ct.err_msg: "collection not found"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_wait_index_collection_empty(self):
@@ -1563,7 +1563,7 @@ class TestUtilityAdvanced(TestcaseBase):
         # load balance
         self.utility_wrap.load_balance(collection_w.name, invalid_src_node_id, dst_node_ids, sealed_segment_ids,
                                        check_task=CheckTasks.err_res,
-                                       check_items={ct.err_code: 1, ct.err_msg: "source node not found in any replica"})
+                                       check_items={ct.err_code: 901, ct.err_msg: "source node not found in any replica"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_balance_with_all_dst_node_not_exist(self):
@@ -1601,7 +1601,7 @@ class TestUtilityAdvanced(TestcaseBase):
         # load balance
         self.utility_wrap.load_balance(collection_w.name, src_node_id, dst_node_ids, sealed_segment_ids,
                                        check_task=CheckTasks.err_res,
-                                       check_items={ct.err_code: 1, ct.err_msg: "destination node not found in the same replica"})
+                                       check_items={ct.err_code: 901, ct.err_msg: "destination node not found in the same replica"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_balance_with_one_sealed_segment_id_not_exist(self):
@@ -1679,7 +1679,7 @@ class TestUtilityAdvanced(TestcaseBase):
         # load balance
         self.utility_wrap.load_balance(collection_w.name, src_node_id, dst_node_ids, sealed_segment_ids,
                                        check_task=CheckTasks.err_res,
-                                       check_items={ct.err_code: 1, ct.err_msg: "not found in source node"})
+                                       check_items={ct.err_code: 600, ct.err_msg: "not found in source node"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_balance_in_one_group(self):

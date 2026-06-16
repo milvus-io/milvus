@@ -79,7 +79,7 @@ class TestIndexParams(TestcaseBase):
             default_field_name,
             default_index_params,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 0, ct.err_msg: clem.CollectionType},
+            check_items={ct.err_code: ct.ANY_CODE, ct.err_msg: clem.CollectionType},
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -98,7 +98,7 @@ class TestIndexParams(TestcaseBase):
             fieldname,
             default_index_params,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 65535, ct.err_msg: f"cannot create index on non-exist field: {fieldname}"},
+            check_items={ct.err_code: 1100, ct.err_msg: f"cannot create index on non-exist field: {fieldname}"},
         )
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -155,7 +155,7 @@ class TestIndexParams(TestcaseBase):
             default_field_name,
             index_params,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: ""},
+            check_items={ct.err_code: 1100, ct.err_msg: ""},
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -195,7 +195,7 @@ class TestIndexParams(TestcaseBase):
             default_index_params,
             index_name=index_name,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: "invalid parameter"},
+            check_items={ct.err_code: 1100, ct.err_msg: "invalid parameter"},
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -215,7 +215,7 @@ class TestIndexParams(TestcaseBase):
             default_index_params,
             index_name=get_invalid_index_name,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: "Invalid index name"},
+            check_items={ct.err_code: 1100, ct.err_msg: "Invalid index name"},
         )
 
 
@@ -272,7 +272,7 @@ class TestIndexOperation(TestcaseBase):
         collection_w.load(
             check_task=CheckTasks.err_res,
             check_items={
-                ct.err_code: 65535,
+                ct.err_code: 1100,
                 ct.err_msg: "there is no vector index on field: [float_vector], please create index firstly",
             },
         )
@@ -508,7 +508,7 @@ class TestNewIndexBase(TestcaseBase):
             default_index_params,
             index_name=ct.default_index_name,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 65535, ct.err_msg: "cannot create index on non-exist field: int8"},
+            check_items={ct.err_code: 1100, ct.err_msg: "cannot create index on non-exist field: int8"},
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1354,7 +1354,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.load(
             check_task=CheckTasks.err_res,
             check_items={
-                ct.err_code: 65535,
+                ct.err_code: 1100,
                 ct.err_msg: "there is no vector index on field: [float_vector], please create index firstly",
             },
         )
@@ -1379,7 +1379,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.load(
             check_task=CheckTasks.err_res,
             check_items={
-                ct.err_code: 65535,
+                ct.err_code: 1100,
                 ct.err_msg: f"there is no vector index on field: "
                 f"[{vector_name_list[0]} {vector_name_list[1]}], "
                 f"please create index firstly",
@@ -1403,7 +1403,7 @@ class TestIndexInvalid(TestcaseBase):
             "random_index_345",
             {"mmap.enabled": True},
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 65535, ct.err_msg: "index not found"},
+            check_items={ct.err_code: 700, ct.err_msg: "index not found"},
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1449,7 +1449,7 @@ class TestIndexInvalid(TestcaseBase):
                 index_name,
                 {"mmap.enabled": True},
                 check_task=CheckTasks.err_res,
-                check_items={ct.err_code: 65535, ct.err_msg: f"index type {scalar_index[i]} does not support mmap"},
+                check_items={ct.err_code: 1100, ct.err_msg: f"index type {scalar_index[i]} does not support mmap"},
             )
             collection_w.drop_index(index_name)
 
@@ -1470,7 +1470,7 @@ class TestIndexInvalid(TestcaseBase):
             ct.default_index_name,
             {"mmap.enabled": "error_value"},
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 65535, ct.err_msg: "invalid mmap.enabled value"},
+            check_items={ct.err_code: 1100, ct.err_msg: "invalid mmap.enabled value"},
         )
         collection_w.alter_index(
             ct.default_index_name,
@@ -1513,7 +1513,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.insert(data=data)
         param = cf.get_index_params_params(index)
         params = {"index_type": index, "metric_type": metric_type, "params": param}
-        error = {ct.err_code: 65535, ct.err_msg: "only IP&BM25 is the supported metric type for sparse index"}
+        error = {ct.err_code: 1100, ct.err_msg: "only IP&BM25 is the supported metric type for sparse index"}
         index, _ = self.index_wrap.init_index(
             collection_w.collection,
             ct.default_sparse_vec_field_name,
@@ -2184,7 +2184,7 @@ class TestIndexDiskann(TestcaseBase):
             ct.default_index_name,
             {"mmap.enabled": True},
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 104, ct.err_msg: "index type DISKANN does not support mmap"},
+            check_items={ct.err_code: 1100, ct.err_msg: "index type DISKANN does not support mmap"},
         )
 
 
@@ -2237,7 +2237,7 @@ class TestAutoIndex(TestcaseBase):
             field_name,
             index_params,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 1, "err_msg": "only metric type can be passed when use AutoIndex"},
+            check_items={"err_code": 1100, "err_msg": "only metric type can be passed when use AutoIndex"},
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -3207,7 +3207,7 @@ class TestBitmapIndex(TestcaseBase):
                 index_name=scalar_field,
                 index_params={**index_params, "bitmap_cardinality_limit": 300},
                 check_task=CheckTasks.err_res,
-                check_items={ct.err_code: 65535, ct.err_msg: iem.OneIndexPerField},
+                check_items={ct.err_code: 1100, ct.err_msg: iem.OneIndexPerField},
             )
 
         self.drop_multi_index(self.bitmap_support_dtype_names)

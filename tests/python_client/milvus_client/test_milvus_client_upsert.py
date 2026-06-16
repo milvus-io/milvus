@@ -152,7 +152,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
-        error = {ct.err_code: 1, ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict'"}
+        error = {ct.err_code: -1, ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict'"}
         self.upsert(client, collection_name, data,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -254,7 +254,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
-        error = {ct.err_code: 1, ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict'"}
+        error = {ct.err_code: -1, ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict'"}
         self.upsert(client, collection_name, data="",
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -337,7 +337,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
         rows = [
             {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, dim))[0]),
              default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 65535, ct.err_msg: f"dim"}
+        error = {ct.err_code: 1100, ct.err_msg: f"dim"}
         self.upsert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -409,9 +409,9 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}"}
+        error = {ct.err_code: 1100, ct.err_msg: f"Invalid partition name: {partition_name}"}
         if partition_name == " ":
-            error = {ct.err_code: 1, ct.err_msg: f"Invalid partition name: . Partition name should not be empty."}
+            error = {ct.err_code: 1100, ct.err_msg: f"Invalid partition name: . Partition name should not be empty."}
         self.upsert(client, collection_name, data=rows, partition_name=partition_name,
                     check_task=CheckTasks.err_res, check_items=error)
 

@@ -337,7 +337,7 @@ class TestMilvusClientAliasValid(TestMilvusClientV2Base):
                                 "pk_name": default_primary_key_field_name})
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name, check_task=CheckTasks.err_res,
-                             check_items={ct.err_code: 65535,
+                             check_items={ct.err_code: 1100,
                                           ct.err_msg: "cannot drop the collection via alias = collection_alias"})
         self.drop_alias(client, alias)
 
@@ -628,7 +628,7 @@ class TestMilvusClientAliasOperation(TestMilvusClientV2Base):
         assert self.has_collection(client, collection_name)[0]
 
         # 4. verify drop_collection fails with alias
-        error = {ct.err_code: 1,
+        error = {ct.err_code: 1100,
                  ct.err_msg: f"cannot drop the collection via alias = {alias_name}"}
         self.drop_collection(client, alias_name,
                              check_task=CheckTasks.err_res,
@@ -776,7 +776,7 @@ class TestMilvusClientAliasOperationInvalid(TestMilvusClientV2Base):
         self.create_alias(client, collection_name1, alias_name)
 
         # 4. try to create same alias for collection2
-        error = {ct.err_code: 1,
+        error = {ct.err_code: 1602,
                  ct.err_msg: f"{alias_name} is alias to another collection: {collection_name1}"}
         self.create_alias(client, collection_name2, alias_name,
                           check_task=CheckTasks.err_res,

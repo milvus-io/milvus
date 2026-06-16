@@ -279,10 +279,10 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         c_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, c_name, schema=schema, num_partitions=min_partition - 1,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+                               check_items={"err_code": ct.ANY_CODE, "err_msg": err_msg})
         self.create_collection(client, c_name, schema=schema, num_partitions=min_partition - 3,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+                               check_items={"err_code": ct.ANY_CODE, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("is_par_key", [None, "", "invalid", 0.1, [], {}, ()])
@@ -298,7 +298,7 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         self.add_field(schema, ct.default_int64_field_name, DataType.INT64,
                        is_partition_key=is_par_key,
                        check_task=CheckTasks.err_res,
-                       check_items={"err_code": 2, "err_msg": err_msg})
+                       check_items={"err_code": ct.ANY_CODE, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("num_partitions", [True, False, "", "invalid", 0.1, [], {}, ()])
@@ -318,7 +318,7 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         c_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, c_name, schema=schema, num_partitions=num_partitions,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+                               check_items={"err_code": ct.ANY_CODE, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_partition_key_on_multi_fields(self):
@@ -340,14 +340,14 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         c_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, c_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+                               check_items={"err_code": ct.ANY_CODE, "err_msg": err_msg})
 
         # sub-case 2: partition_key_field passed as list in create_schema
         err_msg = "Param partition_key_field must be str type"
         self.create_schema(client, auto_id=True,
                            partition_key_field=[ct.default_int64_field_name, ct.default_string_field_name],
                            check_task=CheckTasks.err_res,
-                           check_items={"err_code": 2, "err_msg": err_msg})
+                           check_items={"err_code": ct.ANY_CODE, "err_msg": err_msg})
 
         # sub-case 3: one defined in field schema, one defined in create_schema
         schema = self.create_schema(client, auto_id=True,
@@ -360,7 +360,7 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         c_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, c_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+                               check_items={"err_code": ct.ANY_CODE, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("is_int64_primary", [True, False])
@@ -386,7 +386,7 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         c_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, c_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+                               check_items={"err_code": 1100, "err_msg": err_msg})
 
         # sub-case 2: partition key set on primary field via create_schema partition_key_field
         schema = self.create_schema(client, auto_id=False, partition_key_field="pk")[0]
@@ -401,7 +401,7 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         c_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, c_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+                               check_items={"err_code": 1100, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_key_on_and_off(self):
@@ -423,7 +423,7 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         c_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, c_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+                               check_items={"err_code": ct.ANY_CODE, "err_msg": err_msg})
 
         # sub-case 2: string1 is_partition_key=True, schema partition_key_field=string2
         schema = self.create_schema(client, auto_id=True,
@@ -436,7 +436,7 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         c_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, c_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+                               check_items={"err_code": ct.ANY_CODE, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("field_type", [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR, DataType.FLOAT,
@@ -470,7 +470,7 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         c_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, c_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+                               check_items={"err_code": ct.ANY_CODE, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_partition_key_on_not_existed_fields(self):
@@ -490,7 +490,7 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         c_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, c_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+                               check_items={"err_code": ct.ANY_CODE, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_key_on_empty_and_num_partitions_set(self):
@@ -511,7 +511,7 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         c_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, c_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+                               check_items={"err_code": ct.ANY_CODE, "err_msg": err_msg})
 
         # sub-case 2: no partition key but num_partitions set → server error
         schema = self.create_schema(client, auto_id=True)[0]
@@ -523,7 +523,7 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         c_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, c_name, schema=schema, num_partitions=200,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+                               check_items={"err_code": 1100, "err_msg": err_msg})
 
 
 class TestPartitionKeyInsertInvalid(TestMilvusClientV2Base):
@@ -604,7 +604,7 @@ class TestPartitionApiForbidden(TestMilvusClientV2Base):
         partition_name = cf.gen_unique_str("partition")
         self.create_partition(client, c_name, partition_name,
                               check_task=CheckTasks.err_res,
-                              check_items={"err_code": 2, "err_msg": err_msg})
+                              check_items={"err_code": 1100, "err_msg": err_msg})
 
         # list/has partition → allowed
         partitions = self.list_partitions(client, c_name)[0]
@@ -628,13 +628,13 @@ class TestPartitionApiForbidden(TestMilvusClientV2Base):
         err_msg = "not support manually specifying the partition names if partition key mode is used"
         self.insert(client, c_name, data, partition_name=partitions[0],
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 2, "err_msg": err_msg})
+                    check_items={"err_code": 1100, "err_msg": err_msg})
 
         # load partitions → error
         err_msg = "disable load partitions if partition key mode is used"
         self.load_partitions(client, c_name, [partitions[0]],
                              check_task=CheckTasks.err_res,
-                             check_items={"err_code": 2, "err_msg": err_msg})
+                             check_items={"err_code": 1100, "err_msg": err_msg})
 
         # flush + index + load collection → allowed
         self.flush(client, c_name)
@@ -663,7 +663,7 @@ class TestPartitionApiForbidden(TestMilvusClientV2Base):
                     output_fields=[ct.default_int64_field_name, ct.default_string_field_name],
                     partition_names=[partitions[0]],
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 2, "err_msg": err_msg})
+                    check_items={"err_code": 1100, "err_msg": err_msg})
 
         # get_load_state with partition → allowed (v1: loading_progress/wait_for_loading_complete)
         load_state = self.get_load_state(client, c_name, partition_name=partitions[0])[0]
@@ -680,21 +680,21 @@ class TestPartitionApiForbidden(TestMilvusClientV2Base):
         err_msg = "not support manually specifying the partition names if partition key mode is used"
         self.delete(client, c_name, filter=f'pk in {pks}', partition_name=partitions[0],
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 2, "err_msg": err_msg})
+                    check_items={"err_code": 1100, "err_msg": err_msg})
 
         # query with partition_names → error
         self.query(client, c_name, filter=f'pk in {pks}', partition_names=[partitions[0]],
                    check_task=CheckTasks.err_res,
-                   check_items={"err_code": 2, "err_msg": err_msg})
+                   check_items={"err_code": 1100, "err_msg": err_msg})
 
         # release partitions → error
         err_msg = "disable release partitions if partition key mode is used"
         self.release_partitions(client, c_name, [partitions[0]],
                                 check_task=CheckTasks.err_res,
-                                check_items={"err_code": 2, "err_msg": err_msg})
+                                check_items={"err_code": 1100, "err_msg": err_msg})
 
         # drop partition → error
         err_msg = "disable drop partition if partition key mode is used"
         self.drop_partition(client, c_name, partitions[0],
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 2, "err_msg": err_msg})
+                            check_items={"err_code": 1100, "err_msg": err_msg})

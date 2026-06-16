@@ -113,7 +113,7 @@ class TestMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}"}
+        error = {ct.err_code: 1100, ct.err_msg: f"Invalid partition name: {partition_name}"}
         self.create_partition(client, collection_name, partition_name,
                               check_task=CheckTasks.err_res, check_items=error)
 
@@ -389,7 +389,7 @@ class TestMilvusClientDropPartitionInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}."}
+        error = {ct.err_code: 1100, ct.err_msg: f"Invalid partition name: {partition_name}."}
         self.drop_partition(client, collection_name, partition_name,
                             check_task=CheckTasks.err_res, check_items=error)
 
@@ -880,7 +880,7 @@ class TestMilvusClientHasPartitionInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}"}
+        error = {ct.err_code: 1100, ct.err_msg: f"Invalid partition name: {partition_name}"}
         self.has_partition(client, collection_name, partition_name,
                            check_task=CheckTasks.err_res, check_items=error)
 
@@ -910,7 +910,7 @@ class TestMilvusClientHasPartitionInvalid(TestMilvusClientV2Base):
         partition_name = "a".join("a" for i in range(256))
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}. "
+        error = {ct.err_code: 1100, ct.err_msg: f"Invalid partition name: {partition_name}. "
                                                  f"The length of a partition name must be less than 255 characters"}
         self.has_partition(client, collection_name, partition_name,
                            check_task=CheckTasks.err_res, check_items=error)
@@ -982,7 +982,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 1100, ct.err_msg: f"collection not found[database=default]"
+        error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default]"
                                                 f"[collection={collection_name}]"}
         self.load_partitions(client, collection_name, partition_name,
                              check_task=CheckTasks.err_res, check_items=error)
@@ -1015,7 +1015,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. load partition
-        error = {ct.err_code: 1100, ct.err_msg: f"partition not found[partition={name}]"}
+        error = {ct.err_code: 200, ct.err_msg: f"partition not found[partition={name}]"}
         self.load_partitions(client, collection_name, name,
                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -1032,7 +1032,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. load partition
-        error = {ct.err_code: 1100, ct.err_msg: f"partition not found[partition={partition_name}]"}
+        error = {ct.err_code: 200, ct.err_msg: f"partition not found[partition={partition_name}]"}
         self.load_partitions(client, collection_name, partition_name,
                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -1049,7 +1049,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. load partition
-        error = {ct.err_code: 1100, ct.err_msg: f"partition not found[partition={partition_name}]"}
+        error = {ct.err_code: 200, ct.err_msg: f"partition not found[partition={partition_name}]"}
         self.load_partitions(client, collection_name, partition_name,
                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -1186,7 +1186,7 @@ class TestMilvusClientLoadPartitionValid(TestMilvusClientV2Base):
         # Handle special case for BIN_IVF_FLAT with structure metrics
         if binary_index_type == "BIN_IVF_FLAT" and metric_type in ct.structure_metrics:
             # This combination should raise an error, so create with default instead
-            error = {ct.err_code: 65535,
+            error = {ct.err_code: 1100,
                      ct.err_msg: f"metric type {metric_type} not found or not supported, supported: [HAMMING JACCARD]"}
             index_params.add_index(field_name=ct.default_binary_vec_field_name, 
                                  index_type=binary_index_type, metric_type=metric_type, params={"nlist": 128})
@@ -1254,7 +1254,7 @@ class TestPartitionParams(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 1, ct.err_msg: "Partition name should not be empty"}
+        error = {ct.err_code: 1100, ct.err_msg: "Partition name should not be empty"}
         self.create_partition(client, collection_name, partition_name,
                               check_task=CheckTasks.err_res, check_items=error)
 
@@ -1286,7 +1286,7 @@ class TestPartitionParams(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
         partition_name = cf.gen_str_by_length(256)
-        error = {ct.err_code: 65535,
+        error = {ct.err_code: 1100,
                  ct.err_msg: f"Invalid partition name: {partition_name}. "
                              f"The length of a partition name must be less "
                              f"than 255 characters."}
@@ -1456,7 +1456,7 @@ class TestPartitionParams(TestMilvusClientV2Base):
         index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="FLAT", metric_type="COSINE")
         self.create_index(client, collection_name, index_params)
         # load with non-number replicas
-        error = {ct.err_code: 0, ct.err_msg: f"`replica_number` value {replicas} is illegal"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"`replica_number` value {replicas} is illegal"}
         self.load_partitions(client, collection_name, [partition_name],
                              replica_number=replicas,
                              check_task=CheckTasks.err_res, check_items=error)
@@ -1518,7 +1518,7 @@ class TestPartitionParams(TestMilvusClientV2Base):
         index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="FLAT", metric_type="COSINE")
         self.create_index(client, collection_name, index_params)
         # load with 3 replicas
-        error = {ct.err_code: 65535,
+        error = {ct.err_code: 12,
                  ct.err_msg: "service resource insufficient"}
         self.load_partitions(client, collection_name, [partition_name],
                              replica_number=3,
@@ -1626,7 +1626,7 @@ class TestPartitionParams(TestMilvusClientV2Base):
         self.release_partitions(client, collection_name, [partition_name1])
         self.release_partitions(client, collection_name, [partition_name2])
         # search after release — should fail
-        error = {ct.err_code: 65535, ct.err_msg: "collection not loaded"}
+        error = {ct.err_code: 101, ct.err_msg: "collection not loaded"}
         self.search(client, collection_name, data=search_vectors,
                     anns_field=ct.default_float_vec_field_name,
                     search_params={"nprobe": 32}, limit=1,
@@ -1742,7 +1742,7 @@ class TestPartitionOperations(TestMilvusClientV2Base):
         partition_name = cf.gen_unique_str(prefix)
         self.create_partition(client, collection_name, partition_name,
                               check_task=CheckTasks.err_res,
-                              check_items={ct.err_code: 4, ct.err_msg: "collection not found"})
+                              check_items={ct.err_code: 100, ct.err_msg: "collection not found"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_partition_same_name_in_diff_collections(self, default_schema):
@@ -1839,7 +1839,7 @@ class TestPartitionOperations(TestMilvusClientV2Base):
         # drop _default partition should fail
         self.drop_partition(client, collection_name, ct.default_partition_name,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: "default partition cannot be deleted"})
+                            check_items={ct.err_code: 1100, ct.err_msg: "default partition cannot be deleted"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_drop_partition_twice(self, default_schema):
@@ -2050,7 +2050,7 @@ class TestPartitionOperations(TestMilvusClientV2Base):
         # release the partition and check err response
         self.release_partitions(client, collection_name, [partition_name],
                                 check_task=CheckTasks.err_res,
-                                check_items={ct.err_code: 4, ct.err_msg: "collection not found"})
+                                check_items={ct.err_code: 100, ct.err_msg: "collection not found"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_release_after_collection_released(self, default_schema):
@@ -2106,7 +2106,7 @@ class TestPartitionOperations(TestMilvusClientV2Base):
         self.search(client, collection_name, search_vectors, limit=1,
                     partition_names=[partition_name],
                     check_task=CheckTasks.err_res,
-                    check_items={ct.err_code: 0, ct.err_msg: "not loaded"})
+                    check_items={ct.err_code: 101, ct.err_msg: "not loaded"})
 
         # release partition
         self.release_partitions(client, collection_name, [partition_name])
@@ -2243,7 +2243,7 @@ class TestPartitionOperations(TestMilvusClientV2Base):
         data = cf.gen_default_rows_data(nb=10, dim=dim, with_json=False)
         self.insert(client, collection_name, data, partition_name=partition_name,
                     check_task=CheckTasks.err_res,
-                    check_items={ct.err_code: 65535,
+                    check_items={ct.err_code: 1100,
                                  ct.err_msg: f"float data should divide the dim({ct.default_dim})"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2367,7 +2367,7 @@ class TestPartitionOperations(TestMilvusClientV2Base):
             row[ct.default_float_vec_field_name] = [float(i) for i in range(ct.default_dim - 1)]
         self.upsert(client, collection_name, upsert_data, partition_name=partition_name,
                      check_task=CheckTasks.err_res,
-                     check_items={ct.err_code: 65535,
+                     check_items={ct.err_code: 1100,
                                   ct.err_msg: f"float data should divide the dim({ct.default_dim})"})
 
     @pytest.mark.tags(CaseLabel.L2)

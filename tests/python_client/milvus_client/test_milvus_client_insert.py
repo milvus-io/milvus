@@ -249,7 +249,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         rows = [
             {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim + 1))[0]),
              default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 65536, ct.err_msg: f"of float data should divide the dim({default_dim})"}
+        error = {ct.err_code: 1100, ct.err_msg: f"of float data should divide the dim({default_dim})"}
         self.insert(client, collection_name, data=rows,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -280,7 +280,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
              default_float_field_name: i * 1.0, default_string_field_name: str(i),
              default_binary_vec_field_name: binary_vectors[i]} for i in range(default_nb)]
 
-        error = {ct.err_code: 65536,
+        error = {ct.err_code: 1100,
                  ct.err_msg: f"of field data(binary_vector) is not equal to schema dim ({default_dim})"}
         self.insert(client, collection_name, data=rows,
                     check_task=CheckTasks.err_res, check_items=error)
@@ -323,9 +323,9 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}."}
+        error = {ct.err_code: 1100, ct.err_msg: f"Invalid partition name: {partition_name}."}
         if partition_name == " ":
-            error = {ct.err_code: 1, ct.err_msg: f"Invalid partition name: . Partition name should not be empty."}
+            error = {ct.err_code: 1100, ct.err_msg: f"Invalid partition name: . Partition name should not be empty."}
         self.insert(client, collection_name, data=rows, partition_name=partition_name,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -701,7 +701,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
 
         # 6. Test float('inf') in vector field
         rows[0][default_vector_field_name][0] = float('inf')
-        error = {ct.err_code: 65535, ct.err_msg: "value '+Inf' is not a number or infinity"}
+        error = {ct.err_code: 1100, ct.err_msg: "value '+Inf' is not a number or infinity"}
         self.insert(client, collection_name, data=rows,
                     check_task=CheckTasks.err_res, check_items=error)
 

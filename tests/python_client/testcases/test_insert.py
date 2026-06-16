@@ -683,7 +683,7 @@ class TestInsertInvalid(TestcaseBase):
         collection_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=collection_name)
         df = cf.gen_default_list_data(ct.default_nb)
-        error = {ct.err_code: 15, 'err_msg': "partition not found"}
+        error = {ct.err_code: 200, 'err_msg': "partition not found"}
         mutation_res, _ = collection_w.insert(data=df, partition_name="p", check_task=CheckTasks.err_res,
                                               check_items=error)
 

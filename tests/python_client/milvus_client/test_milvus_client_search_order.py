@@ -918,7 +918,7 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
         error = {
-            ct.err_code: 65536,
+            ct.err_code: 1100,
             ct.err_msg: "order_by field 'nonexistent_field' does not exist in collection schema",
         }
         self.search(
@@ -945,7 +945,7 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
         error = {
-            ct.err_code: 65536,
+            ct.err_code: 1100,
             ct.err_msg: (
                 "order_by field 'embeddings' has unsortable type FloatVector; supported types: "
                 "bool, int8/16/32/64, float, double, string, varchar; for JSON fields use path "
@@ -976,7 +976,7 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
         error = {
-            ct.err_code: 65536,
+            ct.err_code: 1100,
             ct.err_msg: "invalid order direction 'invalid' for field 'price', expected 'asc' or 'desc'",
         }
         self.search(
@@ -1085,7 +1085,7 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
         collection_name = INVALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 1, ct.err_msg: "order_by is not supported when using search iterator"}
+        error = {ct.err_code: 1100, ct.err_msg: "order_by is not supported when using search iterator"}
         self.search_iterator(
             client,
             collection_name,
@@ -1110,7 +1110,7 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
         error = {
-            ct.err_code: 65535,
+            ct.err_code: 1100,
             ct.err_msg: (
                 "order_by field 'json_field' has unsortable type JSON; supported types: "
                 "bool, int8/16/32/64, float, double, string, varchar; for JSON fields use "
@@ -1168,7 +1168,7 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
         error = {
-            ct.err_code: 65535,
+            ct.err_code: 1100,
             ct.err_msg: "order_by field 'json_field[invalid:asc' does not exist in collection schema",
         }
         self.search(
