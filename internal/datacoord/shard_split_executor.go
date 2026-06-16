@@ -123,6 +123,17 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 		return
 	}
 
+	// TODO(#50463): hold the Broadcaster's ExclusiveCollectionName resource key
+	// across the fence -> create -> routing-commit section (design §6.1, approach
+	// "fence-as-lock-holding-broadcast" + creates as plain appends under the held
+	// lock) so no collection DDL (AlterCollection/CreatePartition) can change the
+	// schema or partition snapshot that the CreateVChannel messages embed. This
+	// is deferred to the authoritative routing table because (1) the lock's
+	// release point is the routing-commit that #50463 delivers, (2) crash-safe
+	// recovery needs the lock-holding broadcast id persisted on the task — a
+	// re-broadcast would otherwise self-deadlock on the orphaned resource lock,
+	// and (3) the protected write window is not live until routing exists. Until
+	// then the fence and create below use plain appends.
 	if !task.GetFenced() {
 		// A single SplitShard message fences the source vchannel: the source
 		// streamingnode auto-flushes the growing segments and embeds their ids.
