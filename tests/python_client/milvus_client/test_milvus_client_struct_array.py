@@ -4725,7 +4725,20 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             max_capacity=100,
             nullable=True,
         )
-        res, check = self.create_collection(client, collection_name, schema=schema)
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="clips[embedding]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
+        )
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
 
         data = [
