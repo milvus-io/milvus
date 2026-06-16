@@ -1387,37 +1387,7 @@ ChunkedSegmentSealedImpl::ApplyFieldValidData(
         return;
     }
 
-    auto data_type = schema_->operator[](field_id).get_data_type();
-    if (ChunkedColumnInterface::IsPrimitiveDataType(data_type)) {
-        auto pw = column->Span(op_ctx, chunk_id);
-        auto span = pw.get();
-        const bool* valid_data = span.valid_data();
-        if (valid_data == nullptr) {
-            return;
-        }
-        valid_data += offset;
-        for (int64_t i = 0; i < size; ++i) {
-            if (!valid_data[i]) {
-                valid_result[i] = false;
-            }
-        }
-        return;
-    }
-
-    auto row_offset = column->GetNumRowsUntilChunk(chunk_id) + offset;
-    std::vector<int64_t> offsets(size);
-    for (int64_t i = 0; i < size; ++i) {
-        offsets[i] = row_offset + i;
-    }
-    column->BulkIsValid(
-        op_ctx,
-        [&valid_result](bool is_valid, size_t i) {
-            if (!is_valid) {
-                valid_result[i] = false;
-            }
-        },
-        offsets.data(),
-        size);
+    column->ApplyValidDataInChunk(op_ctx, chunk_id, offset, size, valid_result);
 }
 
 void
