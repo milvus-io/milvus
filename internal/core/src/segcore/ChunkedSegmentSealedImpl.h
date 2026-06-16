@@ -1376,6 +1376,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     RecordDefaultFieldsFilled(const std::vector<FieldId>& field_ids);
 
+    void
+    PublishAppliedLoadInfo(SegmentLoadInfo& segment_load_info,
+                           const LoadDiff& diff);
+
     // Atomically records that a text index has been created for `field_id` in
     // the published segment_load_info_. Uses a CAS loop so it is safe whether
     // or not the caller holds reopen_mutex_ (tests call CreateTextIndex

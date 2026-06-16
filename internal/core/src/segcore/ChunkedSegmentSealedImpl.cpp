@@ -3355,6 +3355,19 @@ ChunkedSegmentSealedImpl::RecordDefaultFieldsFilled(
 }
 
 void
+ChunkedSegmentSealedImpl::PublishAppliedLoadInfo(SegmentLoadInfo& load_info,
+                                                 const LoadDiff& diff) {
+    for (auto field_id : diff.fields_to_fill_default) {
+        load_info.SetFieldFilledWithDefault(field_id);
+    }
+
+    auto published = std::make_shared<const SegmentLoadInfo>(load_info);
+    std::atomic_store(&segment_load_info_, published);
+    use_take_for_output_.store(published->GetUseTakeForOutput(),
+                               std::memory_order_relaxed);
+}
+
+void
 ChunkedSegmentSealedImpl::RecordTextIndexCreated(FieldId field_id) {
     auto current = std::atomic_load(&segment_load_info_);
     std::shared_ptr<const SegmentLoadInfo> next;
@@ -4766,14 +4779,7 @@ ChunkedSegmentSealedImpl::Reopen(milvus::OpContext* op_ctx, SchemaPtr sch) {
 
     ApplySchemaForReopen(sch);
     ApplyLoadDiff(op_ctx, new_local, diff);
-    for (auto field_id : diff.fields_to_fill_default) {
-        new_local.SetFieldFilledWithDefault(field_id);
-    }
-
-    auto published = std::make_shared<const SegmentLoadInfo>(new_local);
-    std::atomic_store(&segment_load_info_, published);
-    use_take_for_output_.store(published->GetUseTakeForOutput(),
-                               std::memory_order_relaxed);
+    PublishAppliedLoadInfo(new_local, diff);
 
     LOG_INFO("Schema-only reopen segment {} done", id_);
 }
@@ -4828,14 +4834,7 @@ ChunkedSegmentSealedImpl::Reopen(
 
     ApplySchemaForReopen(target_schema);
     ApplyLoadDiff(op_ctx, new_local, diff);
-    for (auto field_id : diff.fields_to_fill_default) {
-        new_local.SetFieldFilledWithDefault(field_id);
-    }
-
-    auto published = std::make_shared<const SegmentLoadInfo>(new_local);
-    std::atomic_store(&segment_load_info_, published);
-    use_take_for_output_.store(published->GetUseTakeForOutput(),
-                               std::memory_order_relaxed);
+    PublishAppliedLoadInfo(new_local, diff);
 
     LOG_INFO("Reopen segment {} done", id_);
 }
