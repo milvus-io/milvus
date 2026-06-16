@@ -18,7 +18,6 @@ package external
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"path"
 	"strconv"
@@ -32,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -82,7 +82,7 @@ func (t *RefreshExternalCollectionTask) addMilvusTableL0DeltalogsToManifest(
 				}
 				logID := binlog.GetLogID()
 				if logID == 0 {
-					return "", fmt.Errorf("milvus-table source deltalog %s has no allocated log ID", sourcePath)
+					return "", merr.WrapErrServiceInternalMsg("milvus-table source deltalog %s has no allocated log ID", sourcePath)
 				}
 				if err := ensureContext(ctx); err != nil {
 					return "", err
@@ -158,7 +158,7 @@ func (t *RefreshExternalCollectionTask) getMilvusTableSourceManifestDeltalogs(
 	extfs := t.milvusTableExternalSpecContext()
 	deltalogs, err := packed.GetDeltaLogsFromManifestWithExtfs(manifestPath, t.req.GetStorageConfig(), extfs)
 	if err != nil {
-		return nil, fmt.Errorf("read milvus-table source manifest deltalogs %s: %w", manifestPath, err)
+		return nil, merr.WrapErrServiceInternalErr(err, "read milvus-table source manifest deltalogs %s", manifestPath)
 	}
 	if err := validateMilvusTableStorageV3Deltalogs(deltalogs); err != nil {
 		return nil, err
@@ -222,7 +222,7 @@ func parseMilvusTableDeltalogIDFromPath(logPath string) (int64, error) {
 	logName := path.Base(strings.TrimRight(logPath, "/"))
 	logID, err := strconv.ParseInt(logName, 10, 64)
 	if err != nil || logID <= 0 {
-		return 0, fmt.Errorf("milvus-table deltalog path %s must end with a positive numeric log ID", logPath)
+		return 0, merr.WrapErrServiceInternalMsg("milvus-table deltalog path %s must end with a positive numeric log ID", logPath)
 	}
 	return logID, nil
 }
@@ -344,7 +344,7 @@ func (t *RefreshExternalCollectionTask) getMilvusTableSourcePKField() (*schemapb
 	sourceSchema := metadata.GetCollection().GetSchema()
 	sourcePKField, err := typeutil.GetPrimaryFieldSchema(sourceSchema)
 	if err != nil {
-		return nil, fmt.Errorf("milvus-table source schema primary key: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "milvus-table source schema primary key")
 	}
 	switch sourcePKField.GetDataType() {
 	case schemapb.DataType_Int64, schemapb.DataType_VarChar:
@@ -357,7 +357,7 @@ func (t *RefreshExternalCollectionTask) getMilvusTableSourcePKField() (*schemapb
 		t.milvusTableSourcePKFieldMu.Unlock()
 		return sourcePKField, nil
 	default:
-		return nil, fmt.Errorf("milvus-table source primary key type %s is unsupported", sourcePKField.GetDataType())
+		return nil, merr.WrapErrServiceInternalMsg("milvus-table source primary key type %s is unsupported", sourcePKField.GetDataType())
 	}
 }
 
@@ -427,7 +427,7 @@ func (t *RefreshExternalCollectionTask) loadMilvusTableFragmentSourcePKOffsets(
 	sourcePKOffsets map[string][]milvusTableSourcePKOffset,
 ) error {
 	if fragment.FilePath == "" {
-		return fmt.Errorf("milvus-table fragment has empty source manifest path")
+		return merr.WrapErrServiceInternalMsg("milvus-table fragment has empty source manifest path")
 	}
 	sourceSchema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
@@ -444,7 +444,7 @@ func (t *RefreshExternalCollectionTask) loadMilvusTableFragmentSourcePKOffsets(
 		t.milvusTableExternalSpecContext(),
 	)
 	if err != nil {
-		return fmt.Errorf("read milvus-table source primary key column %s: %w", fragment.FilePath, err)
+		return merr.WrapErrServiceInternalErr(err, "read milvus-table source primary key column %s", fragment.FilePath)
 	}
 	defer reader.Close()
 
@@ -458,7 +458,7 @@ func (t *RefreshExternalCollectionTask) loadMilvusTableFragmentSourcePKOffsets(
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("read milvus-table source primary key batch %s: %w", fragment.FilePath, err)
+			return merr.WrapErrServiceInternalErr(err, "read milvus-table source primary key batch %s", fragment.FilePath)
 		}
 		if err := appendMilvusTableSourcePKOffsetsFromRecord(
 			record,
@@ -493,7 +493,7 @@ func appendMilvusTableSourcePKOffsetsFromRecord(
 	tsColumn := record.Column(common.TimeStampField)
 	tsArray, ok := tsColumn.(*array.Int64)
 	if !ok {
-		return fmt.Errorf("milvus-table source timestamp column has unexpected type %T", tsColumn)
+		return merr.WrapErrServiceInternalMsg("milvus-table source timestamp column has unexpected type %T", tsColumn)
 	}
 	for i := 0; i < record.Len(); i++ {
 		sourceOffset := batchSourceOffset + int64(i)
@@ -527,11 +527,11 @@ func (t *RefreshExternalCollectionTask) loadMilvusTableSourceDeltalogDeletes(
 	deletedSourcePKKeys := make(map[string]struct{})
 	for _, ref := range refs {
 		if ref.logID == 0 {
-			return nil, nil, fmt.Errorf("milvus-table source deltalog %s has no allocated log ID", ref.sourcePath)
+			return nil, nil, merr.WrapErrServiceInternalMsg("milvus-table source deltalog %s has no allocated log ID", ref.sourcePath)
 		}
 		reader, err := t.newMilvusTableSourceDeltalogReader(ctx, ref, sourcePKType)
 		if err != nil {
-			return nil, nil, fmt.Errorf("read milvus-table source deltalog %s: %w", ref.sourcePath, err)
+			return nil, nil, merr.WrapErrServiceInternalErr(err, "read milvus-table source deltalog %s", ref.sourcePath)
 		}
 
 		deletes := milvusTableSourceDeltalogDeletes{ref: ref}
@@ -546,7 +546,7 @@ func (t *RefreshExternalCollectionTask) loadMilvusTableSourceDeltalogDeletes(
 			}
 			if err != nil {
 				_ = reader.Close()
-				return nil, nil, fmt.Errorf("read milvus-table source deltalog %s: %w", ref.sourcePath, err)
+				return nil, nil, merr.WrapErrServiceInternalErr(err, "read milvus-table source deltalog %s", ref.sourcePath)
 			}
 			if err := appendMilvusTableSourceDeleteEventsFromRecord(
 				record,
@@ -604,7 +604,7 @@ func (t *RefreshExternalCollectionTask) readMilvusTableSourceFiles(ctx context.C
 		}
 		data, err := packed.ReadFileWithExternalSpec(t.req.GetStorageConfig(), filePath, extfs)
 		if err != nil {
-			return nil, fmt.Errorf("read milvus-table source file %s: %w", filePath, err)
+			return nil, merr.WrapErrServiceInternalErr(err, "read milvus-table source file %s", filePath)
 		}
 		files = append(files, data)
 	}
@@ -623,7 +623,7 @@ func appendMilvusTableSourceDeleteEventsFromRecord(
 	tsColumn := record.Column(common.TimeStampField)
 	tsArray, ok := tsColumn.(*array.Int64)
 	if !ok {
-		return fmt.Errorf("milvus-table deltalog timestamp column has unexpected type %T", tsColumn)
+		return merr.WrapErrServiceInternalMsg("milvus-table deltalog timestamp column has unexpected type %T", tsColumn)
 	}
 	for i := 0; i < record.Len(); i++ {
 		key, err := milvusTablePrimaryKeyMapKey(sourcePKType, pkColumn, i)
@@ -676,7 +676,7 @@ func (t *RefreshExternalCollectionTask) writeMilvusTableVirtualPKDeltalog(
 		storage.WithStorageConfig(t.req.GetStorageConfig()),
 	)
 	if err != nil {
-		return packed.DeltaLogEntry{}, false, fmt.Errorf("create milvus-table target deltalog %s: %w", targetPath, err)
+		return packed.DeltaLogEntry{}, false, merr.WrapErrServiceInternalErr(err, "create milvus-table target deltalog %s", targetPath)
 	}
 	writerClosed := false
 	defer func() {
@@ -685,11 +685,11 @@ func (t *RefreshExternalCollectionTask) writeMilvusTableVirtualPKDeltalog(
 		}
 	}()
 	if err := writer.Write(record); err != nil {
-		return packed.DeltaLogEntry{}, false, fmt.Errorf("write milvus-table target deltalog %s: %w", targetPath, err)
+		return packed.DeltaLogEntry{}, false, merr.WrapErrServiceInternalErr(err, "write milvus-table target deltalog %s", targetPath)
 	}
 	if err := writer.Close(); err != nil {
 		writerClosed = true
-		return packed.DeltaLogEntry{}, false, fmt.Errorf("write milvus-table target deltalog %s: %w", targetPath, err)
+		return packed.DeltaLogEntry{}, false, merr.WrapErrServiceInternalErr(err, "write milvus-table target deltalog %s", targetPath)
 	}
 	writerClosed = true
 	return packed.DeltaLogEntry{
@@ -732,16 +732,16 @@ func milvusTablePrimaryKeyMapKey(pkType schemapb.DataType, pkColumn arrow.Array,
 	case schemapb.DataType_Int64:
 		int64Array, ok := pkColumn.(*array.Int64)
 		if !ok {
-			return "", fmt.Errorf("milvus-table int64 primary key column has unexpected type %T", pkColumn)
+			return "", merr.WrapErrServiceInternalMsg("milvus-table int64 primary key column has unexpected type %T", pkColumn)
 		}
 		return "i:" + strconv.FormatInt(int64Array.Value(index), 10), nil
 	case schemapb.DataType_VarChar:
 		stringArray, ok := pkColumn.(*array.String)
 		if !ok {
-			return "", fmt.Errorf("milvus-table varchar primary key column has unexpected type %T", pkColumn)
+			return "", merr.WrapErrServiceInternalMsg("milvus-table varchar primary key column has unexpected type %T", pkColumn)
 		}
 		return "s:" + stringArray.Value(index), nil
 	default:
-		return "", fmt.Errorf("milvus-table source primary key type %s is unsupported", pkType)
+		return "", merr.WrapErrServiceInternalMsg("milvus-table source primary key type %s is unsupported", pkType)
 	}
 }

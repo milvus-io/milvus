@@ -943,18 +943,18 @@ func validateMilvusTableRefreshSchema(job *datapb.ExternalCollectionRefreshJob, 
 		},
 	)
 	if err != nil {
-		return fmt.Errorf("read milvus-table snapshot metadata for schema validation: %w", err)
+		return merr.WrapErrServiceInternalErr(err, "read milvus-table snapshot metadata for schema validation")
 	}
 	sourceSchema := metadata.GetCollection().GetSchema()
 	if sourceSchema == nil {
-		return fmt.Errorf("%w: missing collection schema", errMilvusTableRefreshSchemaInvalid)
+		return merr.Wrap(errMilvusTableRefreshSchemaInvalid, "missing collection schema")
 	}
 	if typeutil.IsExternalCollection(sourceSchema) {
-		return fmt.Errorf("%w: source snapshot is an external collection", errMilvusTableRefreshSchemaInvalid)
+		return merr.Wrap(errMilvusTableRefreshSchemaInvalid, "source snapshot is an external collection")
 	}
 	if err := typeutil.ValidateMilvusTableSchemaIdentity(targetSchema, sourceSchema, true); err != nil {
-		return fmt.Errorf("%w: source schema does not match target collection schema: %v",
-			errMilvusTableRefreshSchemaInvalid, err)
+		return merr.Wrap(errMilvusTableRefreshSchemaInvalid,
+			"source schema does not match target collection schema: "+err.Error())
 	}
 	return nil
 }

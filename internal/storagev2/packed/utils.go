@@ -16,7 +16,6 @@ package packed
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -239,7 +238,7 @@ func FetchFragmentsFromExternalSourceWithRange(
 		for i, fi := range fileInfos {
 			rowCounts[i] = fi.NumRows
 			if rowCounts[i] <= 0 {
-				return nil, fmt.Errorf("milvus-table source manifest %s has non-positive row count %d", fi.FilePath, rowCounts[i])
+				return nil, merr.WrapErrServiceInternalMsg("milvus-table source manifest %s has non-positive row count %d", fi.FilePath, rowCounts[i])
 			}
 		}
 	} else {

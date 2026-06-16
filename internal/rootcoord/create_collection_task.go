@@ -501,20 +501,20 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 		},
 	)
 	if err != nil {
-		return fmt.Errorf("read milvus-table snapshot metadata for schema alignment: %w", err)
+		return merr.WrapErrServiceInternalErr(err, "read milvus-table snapshot metadata for schema alignment")
 	}
 	sourceSchema := metadata.GetCollection().GetSchema()
 	if sourceSchema == nil {
-		return fmt.Errorf("milvus-table snapshot metadata missing collection schema")
+		return merr.WrapErrServiceInternalMsg("milvus-table snapshot metadata missing collection schema")
 	}
 	if typeutil.IsExternalCollection(sourceSchema) {
 		// Avoid external-table chaining. A chained source would require refresh
 		// and read paths to chase another collection's external source/storage
 		// contract, which is not part of the milvus-table snapshot contract.
-		return fmt.Errorf("milvus-table external collection cannot use an external collection snapshot as source")
+		return merr.WrapErrServiceInternalMsg("milvus-table external collection cannot use an external collection snapshot as source")
 	}
 	if err := typeutil.ValidateMilvusTableSchemaIdentity(schema, sourceSchema, false); err != nil {
-		return fmt.Errorf("milvus-table target schema must match source snapshot schema: %w", err)
+		return merr.WrapErrServiceInternalErr(err, "milvus-table target schema must match source snapshot schema")
 	}
 
 	sourceFields := milvusTableSourceFieldsByName(sourceSchema)
@@ -535,12 +535,12 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 		}
 		sourceField := sourceFields[field.GetExternalField()]
 		if sourceField == nil {
-			return fmt.Errorf("milvus-table target field %q maps to missing source field %q", field.GetName(), field.GetExternalField())
+			return merr.WrapErrServiceInternalMsg("milvus-table target field %q maps to missing source field %q", field.GetName(), field.GetExternalField())
 		}
 		field.FieldID = sourceField.GetFieldID()
 	}
 	if err := assignFunctionIDsFromFieldNames(schema); err != nil {
-		return fmt.Errorf("align milvus-table function field IDs: %w", err)
+		return merr.WrapErrServiceInternalErr(err, "align milvus-table function field IDs")
 	}
 	t.preserveFieldID = true
 	t.Req.Properties = upsertCreateCollectionProperty(t.Req.GetProperties(), util.PreserveFieldIdsKey, "true")

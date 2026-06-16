@@ -215,27 +215,27 @@ func CreateMilvusTableManifestFromSegmentManifests(
 	extfs ExternalSpecContext,
 ) (string, error) {
 	if len(fragments) == 0 {
-		return "", fmt.Errorf("fragments cannot be empty")
+		return "", merr.WrapErrServiceInternalMsg("fragments cannot be empty")
 	}
 	if len(fragments) != 1 {
-		return "", fmt.Errorf("milvus-table requires exactly one source fragment per target segment, got %d", len(fragments))
+		return "", merr.WrapErrServiceInternalMsg("milvus-table requires exactly one source fragment per target segment, got %d", len(fragments))
 	}
 	if len(columns) == 0 {
-		return "", fmt.Errorf("columns cannot be empty")
+		return "", merr.WrapErrServiceInternalMsg("columns cannot be empty")
 	}
 	for _, fragment := range fragments {
 		if fragment.RowCount <= 0 {
-			return "", fmt.Errorf("milvus-table source fragment %s has non-positive row count %d", fragment.FilePath, fragment.RowCount)
+			return "", merr.WrapErrServiceInternalMsg("milvus-table source fragment %s has non-positive row count %d", fragment.FilePath, fragment.RowCount)
 		}
 	}
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to create properties: %w", err)
+		return "", merr.WrapErrServiceInternalErr(err, "failed to create properties")
 	}
 	defer C.loon_properties_free(cProperties)
 	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
-		return "", fmt.Errorf("inject extfs: %w", err)
+		return "", merr.WrapErrServiceInternalErr(err, "inject extfs")
 	}
 
 	cBasePath := C.CString(basePath)
@@ -300,7 +300,7 @@ func CreateMilvusTableManifestFromSegmentManifests(
 		return "", err
 	}
 	if outManifestPath == nil {
-		return "", fmt.Errorf("loon_milvus_table_create_manifest_from_segment_manifests returned nil manifest path")
+		return "", merr.WrapErrServiceInternalMsg("loon_milvus_table_create_manifest_from_segment_manifests returned nil manifest path")
 	}
 	manifestPath := C.GoString(outManifestPath)
 	C.loon_free_cstr(outManifestPath)
@@ -573,7 +573,7 @@ func readColumnGroupsFromManifest(
 	cgroups := &manifest.column_groups
 	manifestDeltalogs, err := deltaLogsFromManifest(manifest)
 	if err != nil {
-		return nil, fmt.Errorf("read delta logs from manifest %s: %w", manifestPath, err)
+		return nil, merr.WrapErrServiceInternalErr(err, "read delta logs from manifest %s", manifestPath)
 	}
 	if cgroups.column_group_array == nil && cgroups.num_of_column_groups > 0 {
 		return nil, merr.WrapErrServiceInternalMsg("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
@@ -639,7 +639,7 @@ func readColumnGroupsFromManifest(
 					rowCountText := columnGroupFileProperty(file, milvusTableSourceRowCountProperty)
 					rowCount, err := strconv.ParseInt(rowCountText, 10, 64)
 					if err != nil || rowCount <= 0 {
-						return nil, fmt.Errorf("invalid milvus-table source row count %q for %s", rowCountText, sourceManifestPath)
+						return nil, merr.WrapErrServiceInternalMsg("invalid milvus-table source row count %q for %s", rowCountText, sourceManifestPath)
 					}
 					group.Fragments = append(group.Fragments, Fragment{
 						FragmentID: int64(len(group.Fragments)),
@@ -677,7 +677,7 @@ func deltaLogsFromManifest(manifest *C.LoonManifest) ([]*datapb.FieldBinlog, err
 		return nil, nil
 	}
 	if manifest.delta_logs.delta_log_paths == nil || manifest.delta_logs.delta_log_num_entries == nil {
-		return nil, fmt.Errorf("manifest has %d delta logs but missing delta log paths or entry counts", numDeltaLogs)
+		return nil, merr.WrapErrServiceInternalMsg("manifest has %d delta logs but missing delta log paths or entry counts", numDeltaLogs)
 	}
 	cPaths := unsafe.Slice(manifest.delta_logs.delta_log_paths, numDeltaLogs)
 	cNumEntries := unsafe.Slice(manifest.delta_logs.delta_log_num_entries, numDeltaLogs)

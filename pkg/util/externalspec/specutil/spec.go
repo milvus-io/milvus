@@ -21,10 +21,11 @@ package specutil
 
 import (
 	"encoding/json"
-	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // File formats supported by external collections. Mirror of LOON_FORMAT_*
@@ -171,7 +172,7 @@ func ParseExternalSpec(specStr string) (*ExternalSpec, error) {
 
 	var spec ExternalSpec
 	if err := json.Unmarshal([]byte(specStr), &spec); err != nil {
-		return nil, fmt.Errorf("invalid external spec JSON: %s", err.Error())
+		return nil, merr.WrapErrParameterInvalidErr(err, "invalid external spec JSON")
 	}
 
 	if spec.Format == "" {
@@ -179,17 +180,17 @@ func ParseExternalSpec(specStr string) (*ExternalSpec, error) {
 	}
 
 	if !supportedFormats[spec.Format] {
-		return nil, fmt.Errorf("unsupported format %q, supported formats: %s",
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported format %q, supported formats: %s",
 			spec.Format, strings.Join(sortedKeys(supportedFormats), ", "))
 	}
 
 	for key, val := range spec.Extfs {
 		if !allowedExtfsKeys[key] {
-			return nil, fmt.Errorf("extfs key %q is not allowed; allowed keys: %s",
+			return nil, merr.WrapErrParameterInvalidMsg("extfs key %q is not allowed; allowed keys: %s",
 				key, strings.Join(sortedKeys(allowedExtfsKeys), ", "))
 		}
 		if booleanExtfsKeys[key] && val != "true" && val != "false" {
-			return nil, fmt.Errorf("extfs key %q must be \"true\" or \"false\", got %q", key, val)
+			return nil, merr.WrapErrParameterInvalidMsg("extfs key %q must be \"true\" or \"false\", got %q", key, val)
 		}
 	}
 

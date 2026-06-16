@@ -35,7 +35,6 @@ CStatus NewPackedReaderWithProperties(char** paths,
 import "C"
 
 import (
-	"fmt"
 	"io"
 	"unsafe"
 
@@ -65,28 +64,28 @@ func NewPackedReaderWithExtfs(
 	var cFilesystemPath *C.char
 	if extfs.Source != "" {
 		if storageConfig == nil {
-			return nil, fmt.Errorf("storageConfig is required for external packed reader")
+			return nil, merr.WrapErrServiceInternalMsg("storageConfig is required for external packed reader")
 		}
 		properties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create properties: %w", err)
+			return nil, merr.WrapErrServiceInternalErr(err, "failed to create properties")
 		}
 		cProperties = properties
 		defer C.loon_properties_free(cProperties)
 		if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
-			return nil, fmt.Errorf("inject extfs: %w", err)
+			return nil, merr.WrapErrServiceInternalErr(err, "inject extfs")
 		}
 		var filesystemPath string
 		normalizedPaths := make([]string, 0, len(filePaths))
 		for _, filePath := range filePaths {
 			currentFilesystemPath, normalizedPath, err := normalizeExternalPathForFilesystem(filePath, cProperties, extfs)
 			if err != nil {
-				return nil, fmt.Errorf("normalize external packed file path %s: %w", filePath, err)
+				return nil, merr.WrapErrServiceInternalErr(err, "normalize external packed file path %s", filePath)
 			}
 			if filesystemPath == "" {
 				filesystemPath = currentFilesystemPath
 			} else if currentFilesystemPath != filesystemPath {
-				return nil, fmt.Errorf("external packed reader requires paths from one filesystem, got %s and %s", filesystemPath, currentFilesystemPath)
+				return nil, merr.WrapErrServiceInternalMsg("external packed reader requires paths from one filesystem, got %s and %s", filesystemPath, currentFilesystemPath)
 			}
 			normalizedPaths = append(normalizedPaths, normalizedPath)
 		}

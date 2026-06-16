@@ -187,7 +187,7 @@ func GetDeltaLogsFromManifestWithExtfs(
 	}
 	defer C.loon_properties_free(cProperties)
 	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
-		return nil, fmt.Errorf("inject extfs: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "inject extfs")
 	}
 
 	cBasePath := C.CString(basePath)
@@ -216,7 +216,7 @@ func GetDeltaLogsFromManifestWithExtfs(
 	// (prepending basePath/_delta/ and normalizing). The returned paths are
 	// already absolute and can be used directly.
 	if cManifest.delta_logs.delta_log_paths == nil || cManifest.delta_logs.delta_log_num_entries == nil {
-		return nil, fmt.Errorf("manifest %s has malformed delta log metadata", manifestPath)
+		return nil, merr.WrapErrServiceInternalMsg("manifest %s has malformed delta log metadata", manifestPath)
 	}
 	cPaths := unsafe.Slice(cManifest.delta_logs.delta_log_paths, numDeltaLogs)
 	cNumEntries := unsafe.Slice(cManifest.delta_logs.delta_log_num_entries, numDeltaLogs)

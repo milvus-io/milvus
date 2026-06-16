@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // S3 snapshot storage path constants.
@@ -241,22 +242,22 @@ func GetSegmentManifestPath(manifestDir string, segmentID int64) string {
 func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (string, error) {
 	// Validate input parameters
 	if snapshot == nil {
-		return "", fmt.Errorf("snapshot cannot be nil")
+		return "", merr.WrapErrServiceInternalMsg("snapshot cannot be nil")
 	}
 	if snapshot.SnapshotInfo == nil {
-		return "", fmt.Errorf("snapshot info cannot be nil")
+		return "", merr.WrapErrServiceInternalMsg("snapshot info cannot be nil")
 	}
 	collectionID := snapshot.SnapshotInfo.GetCollectionId()
 	if collectionID <= 0 {
-		return "", fmt.Errorf("invalid collection ID: %d", collectionID)
+		return "", merr.WrapErrServiceInternalMsg("invalid collection ID: %d", collectionID)
 	}
 	if snapshot.Collection == nil {
-		return "", fmt.Errorf("collection description cannot be nil")
+		return "", merr.WrapErrServiceInternalMsg("collection description cannot be nil")
 	}
 
 	snapshotID := snapshot.SnapshotInfo.GetId()
 	if snapshotID <= 0 {
-		return "", fmt.Errorf("invalid snapshot ID: %d", snapshotID)
+		return "", merr.WrapErrServiceInternalMsg("invalid snapshot ID: %d", snapshotID)
 	}
 	manifestDir, metadataPath := GetSnapshotPaths(w.chunkManager.RootPath(), collectionID, snapshotID)
 
@@ -266,7 +267,7 @@ func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (stri
 	for _, segment := range snapshot.Segments {
 		manifestPath := GetSegmentManifestPath(manifestDir, segment.GetSegmentId())
 		if err := w.writeSegmentManifest(ctx, manifestPath, segment); err != nil {
-			return "", fmt.Errorf("failed to write manifest for segment %d: %w", segment.GetSegmentId(), err)
+			return "", merr.WrapErrServiceInternalErr(err, "failed to write manifest for segment %d", segment.GetSegmentId())
 		}
 		manifestPaths = append(manifestPaths, manifestPath)
 	}
@@ -290,7 +291,7 @@ func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (stri
 	// Step 3: Write metadata file with all manifest paths
 	// This file is the entry point for reading the snapshot
 	if err := w.writeMetadataFile(ctx, metadataPath, snapshot, manifestPaths, storagev2Manifests); err != nil {
-		return "", fmt.Errorf("failed to write metadata file: %w", err)
+		return "", merr.WrapErrServiceInternalErr(err, "failed to write metadata file")
 	}
 
 	mlog.Info(ctx, "Successfully wrote metadata file",
@@ -356,7 +357,7 @@ func (w *SnapshotWriter) writeMetadataFile(ctx context.Context, metadataPath str
 	}
 	jsonData, err := opts.Marshal(metadata)
 	if err != nil {
-		return fmt.Errorf("failed to marshal metadata to JSON: %w", err)
+		return merr.WrapErrServiceInternalErr(err, "failed to marshal metadata to JSON")
 	}
 
 	// Write to object storage
@@ -385,13 +386,13 @@ func (w *SnapshotWriter) writeMetadataFile(ctx context.Context, metadataPath str
 func (w *SnapshotWriter) Drop(ctx context.Context, metadataFilePath string) error {
 	// Validate input parameter
 	if metadataFilePath == "" {
-		return fmt.Errorf("metadata file path cannot be empty")
+		return merr.WrapErrServiceInternalMsg("metadata file path cannot be empty")
 	}
 
 	// Step 1: Read metadata file to discover manifest file paths
 	metadata, err := w.readMetadataFile(ctx, metadataFilePath)
 	if err != nil {
-		return fmt.Errorf("failed to read metadata file: %w", err)
+		return merr.WrapErrServiceInternalErr(err, "failed to read metadata file")
 	}
 
 	snapshotID := metadata.GetSnapshotInfo().GetId()
@@ -400,7 +401,7 @@ func (w *SnapshotWriter) Drop(ctx context.Context, metadataFilePath string) erro
 	manifestList := metadata.GetManifestList()
 	if len(manifestList) > 0 {
 		if err := w.chunkManager.MultiRemove(ctx, manifestList); err != nil {
-			return fmt.Errorf("failed to remove manifest files: %w", err)
+			return merr.WrapErrServiceInternalErr(err, "failed to remove manifest files")
 		}
 		mlog.Info(ctx, "Successfully removed manifest files",
 			mlog.Int("count", len(manifestList)),
@@ -409,7 +410,7 @@ func (w *SnapshotWriter) Drop(ctx context.Context, metadataFilePath string) erro
 
 	// Step 3: Remove the metadata file (entry point)
 	if err := w.chunkManager.Remove(ctx, metadataFilePath); err != nil {
-		return fmt.Errorf("failed to remove metadata file: %w", err)
+		return merr.WrapErrServiceInternalErr(err, "failed to remove metadata file")
 	}
 	mlog.Info(ctx, "Successfully removed metadata file",
 		mlog.String("metadataFilePath", metadataFilePath))
@@ -425,7 +426,7 @@ func (w *SnapshotWriter) readMetadataFile(ctx context.Context, filePath string) 
 	// Read raw JSON content from object storage
 	data, err := w.chunkManager.Read(ctx, filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read metadata file: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to read metadata file")
 	}
 
 	return snapshotio.ParseSnapshotMetadata(data)
@@ -488,13 +489,13 @@ func NewSnapshotReader(cm storage.ChunkManager) *SnapshotReader {
 func (r *SnapshotReader) ReadSnapshot(ctx context.Context, metadataFilePath string, includeSegments bool) (*SnapshotData, error) {
 	// Validate input
 	if metadataFilePath == "" {
-		return nil, fmt.Errorf("metadata file path cannot be empty")
+		return nil, merr.WrapErrServiceInternalMsg("metadata file path cannot be empty")
 	}
 
 	// Step 1: Read metadata file (always required)
 	metadata, err := r.readMetadataFile(ctx, metadataFilePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read metadata file: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to read metadata file")
 	}
 
 	// Step 2: Optionally read segment details from manifest files
@@ -504,7 +505,7 @@ func (r *SnapshotReader) ReadSnapshot(ctx context.Context, metadataFilePath stri
 		for _, manifestPath := range metadata.GetManifestList() {
 			segments, err := r.readManifestFile(ctx, manifestPath, int(metadata.GetFormatVersion()))
 			if err != nil {
-				return nil, fmt.Errorf("failed to read manifest file %s: %w", manifestPath, err)
+				return nil, merr.WrapErrServiceInternalErr(err, "failed to read manifest file %s", manifestPath)
 			}
 			allSegments = append(allSegments, segments...)
 		}
@@ -543,7 +544,7 @@ func (r *SnapshotReader) readMetadataFile(ctx context.Context, filePath string) 
 	// Read raw JSON content from object storage
 	data, err := r.chunkManager.Read(ctx, filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read metadata file: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to read metadata file")
 	}
 
 	return snapshotio.ParseSnapshotMetadataWithVersionCheck(data)
@@ -565,7 +566,7 @@ func (r *SnapshotReader) readManifestFile(ctx context.Context, filePath string, 
 	// Read raw Avro content from object storage
 	data, err := r.chunkManager.Read(ctx, filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read manifest file: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to read manifest file")
 	}
 
 	segment, err := snapshotio.ParseSegmentManifest(data, formatVersion)
@@ -597,7 +598,7 @@ func (r *SnapshotReader) readManifestFile(ctx context.Context, filePath string, 
 func (r *SnapshotReader) ListSnapshots(ctx context.Context, collectionID int64) ([]*datapb.SnapshotInfo, error) {
 	// Validate input parameters
 	if collectionID <= 0 {
-		return nil, fmt.Errorf("invalid collection ID: %d", collectionID)
+		return nil, merr.WrapErrServiceInternalMsg("invalid collection ID: %d", collectionID)
 	}
 
 	// Construct metadata directory path
@@ -607,7 +608,7 @@ func (r *SnapshotReader) ListSnapshots(ctx context.Context, collectionID int64) 
 	// List all files in the metadata directory
 	files, _, err := storage.ListAllChunkWithPrefix(ctx, r.chunkManager, metadataDir, false)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list metadata files: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to list metadata files")
 	}
 
 	// Read each metadata file and extract SnapshotInfo

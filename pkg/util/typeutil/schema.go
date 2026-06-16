@@ -2806,13 +2806,13 @@ func isExternalSystemOrVirtualField(name string) bool {
 // target schema.
 func ValidateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema, requireFieldID bool) error {
 	if target == nil {
-		return fmt.Errorf("target schema is nil")
+		return merr.WrapErrParameterInvalidMsg("target schema is nil")
 	}
 	if source == nil {
-		return fmt.Errorf("source snapshot schema is nil")
+		return merr.WrapErrParameterInvalidMsg("source snapshot schema is nil")
 	}
 	if target.GetEnableDynamicField() != source.GetEnableDynamicField() {
-		return fmt.Errorf("dynamic field setting mismatch: target=%v source=%v",
+		return merr.WrapErrParameterInvalidMsg("dynamic field setting mismatch: target=%v source=%v",
 			target.GetEnableDynamicField(), source.GetEnableDynamicField())
 	}
 
@@ -2822,32 +2822,32 @@ func ValidateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema
 	targetFieldCount := milvusTableMappableUserFieldCount(target)
 	requiredSourceFieldCount := milvusTableMappableUserFieldCount(source)
 	if targetFieldCount < requiredSourceFieldCount || targetFieldCount > len(allSourceFields) {
-		return fmt.Errorf("user field count mismatch: target=%d source=%d", targetFieldCount, requiredSourceFieldCount)
+		return merr.WrapErrParameterInvalidMsg("user field count mismatch: target=%d source=%d", targetFieldCount, requiredSourceFieldCount)
 	}
 	targetUsesVirtualPK := milvusTableUsesVirtualPrimaryKey(target)
 	mappedSourceFields := make(map[string]string, len(targetFields))
 	for targetName, targetField := range targetFields {
 		sourceName := targetField.GetExternalField()
 		if sourceName == "" {
-			return fmt.Errorf("target field %q must set external_field mapping to a source snapshot field", targetName)
+			return merr.WrapErrParameterInvalidMsg("target field %q must set external_field mapping to a source snapshot field", targetName)
 		}
 		sourceField, ok := allSourceFields[sourceName]
 		if !ok {
-			return fmt.Errorf("target field %q maps to source field %q, but source snapshot schema has no such field",
+			return merr.WrapErrParameterInvalidMsg("target field %q maps to source field %q, but source snapshot schema has no such field",
 				targetName, sourceName)
 		}
 		if owner, ok := mappedSourceFields[sourceName]; ok {
-			return fmt.Errorf("source snapshot field %q is mapped by multiple target fields: %q and %q",
+			return merr.WrapErrParameterInvalidMsg("source snapshot field %q is mapped by multiple target fields: %q and %q",
 				sourceName, owner, targetName)
 		}
 		mappedSourceFields[sourceName] = targetName
 		if err := validateMilvusTableFieldIdentity(targetField, sourceField, requireFieldID, targetUsesVirtualPK, IsFunctionOutputField(source, sourceField)); err != nil {
-			return fmt.Errorf("field %q mapped to source field %q: %w", targetName, sourceName, err)
+			return merr.WrapErrParameterInvalidErr(err, "field %q mapped to source field %q", targetName, sourceName)
 		}
 	}
 	for sourceName := range requiredSourceFields {
 		if _, ok := mappedSourceFields[sourceName]; !ok {
-			return fmt.Errorf("source snapshot field %q is not mapped by target schema", sourceName)
+			return merr.WrapErrParameterInvalidMsg("source snapshot field %q is not mapped by target schema", sourceName)
 		}
 	}
 	return nil
@@ -3068,13 +3068,13 @@ func milvusTableUsesVirtualPrimaryKey(schema *schemapb.CollectionSchema) bool {
 
 func validateMilvusTableFieldIdentity(target, source *schemapb.FieldSchema, requireFieldID bool, targetUsesVirtualPK bool, sourceFunctionOutputAsDataField bool) error {
 	if requireFieldID && target.GetFieldID() != source.GetFieldID() {
-		return fmt.Errorf("field_id mismatch: target=%d source=%d", target.GetFieldID(), source.GetFieldID())
+		return merr.WrapErrParameterInvalidMsg("field_id mismatch: target=%d source=%d", target.GetFieldID(), source.GetFieldID())
 	}
 	sourcePKAsDataField := targetUsesVirtualPK && source.GetIsPrimaryKey() && !target.GetIsPrimaryKey()
 	targetComparable := comparableMilvusTableField(target, requireFieldID, sourcePKAsDataField, false)
 	sourceComparable := comparableMilvusTableField(source, requireFieldID, sourcePKAsDataField, sourceFunctionOutputAsDataField)
 	if !proto.Equal(targetComparable, sourceComparable) {
-		return fmt.Errorf("definition mismatch between target and source snapshot schema")
+		return merr.WrapErrParameterInvalidMsg("definition mismatch between target and source snapshot schema")
 	}
 	return nil
 }

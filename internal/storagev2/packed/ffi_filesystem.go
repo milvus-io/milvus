@@ -23,7 +23,6 @@ package packed
 import "C"
 
 import (
-	"fmt"
 	"net/url"
 	"strings"
 	"unsafe"
@@ -104,16 +103,16 @@ func ReadFileWithExternalSpec(
 ) ([]byte, error) {
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create properties: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to create properties")
 	}
 	defer C.loon_properties_free(cProperties)
 	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
-		return nil, fmt.Errorf("inject extfs: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "inject extfs")
 	}
 
 	filesystemPath, normalizedFilePath, err := normalizeExternalPathForFilesystem(filePath, cProperties, extfs)
 	if err != nil {
-		return nil, fmt.Errorf("normalize external file path: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "normalize external file path")
 	}
 	cPath := C.CString(normalizedFilePath)
 	defer C.free(unsafe.Pointer(cPath))
@@ -124,7 +123,7 @@ func ReadFileWithExternalSpec(
 	defer C.free(unsafe.Pointer(cFilesystemPath))
 	result := C.loon_filesystem_get(cProperties, cFilesystemPath, C.uint32_t(len(filesystemPath)), &fsHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, fmt.Errorf("failed to get filesystem: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to get filesystem")
 	}
 	defer C.loon_filesystem_destroy(fsHandle)
 
@@ -132,7 +131,7 @@ func ReadFileWithExternalSpec(
 	var outSize C.uint64_t
 	result = C.loon_filesystem_read_file_all(fsHandle, cPath, pathLen, &outData, &outSize)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, fmt.Errorf("read file %s via filesystem %s: %w", normalizedFilePath, filesystemPath, err)
+		return nil, merr.WrapErrServiceInternalErr(err, "read file %s via filesystem %s", normalizedFilePath, filesystemPath)
 	}
 	if outData == nil || outSize == 0 {
 		return nil, nil

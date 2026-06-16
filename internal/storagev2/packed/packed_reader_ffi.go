@@ -342,11 +342,11 @@ func resolveFFIReaderFragments(
 	}
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create properties: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to create properties")
 	}
 	defer C.loon_properties_free(cProperties)
 	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
-		return nil, fmt.Errorf("inject extfs: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "inject extfs")
 	}
 
 	resolvedFragments := make([]Fragment, len(fragments))
@@ -435,7 +435,7 @@ func GetManifestHandleWithExtfs(
 	}
 	defer C.loon_properties_free(cProperties)
 	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
-		return cManifestHandle, fmt.Errorf("inject extfs: %w", err)
+		return cManifestHandle, merr.WrapErrServiceInternalErr(err, "inject extfs")
 	}
 	cBasePath := C.CString(basePath)
 	defer C.free(unsafe.Pointer(cBasePath))

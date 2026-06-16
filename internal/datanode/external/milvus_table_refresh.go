@@ -18,7 +18,6 @@ package external
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // prepareMilvusTableDeltalogFragments returns the fragments that should be used
@@ -139,7 +139,7 @@ func deltalogIdentitySet(fragments []packed.Fragment) (map[string]struct{}, erro
 func targetOwnedDeltalogIdentitySet(manifestPath string, fragments []packed.Fragment) (map[string]struct{}, error) {
 	basePath, _, err := packed.UnmarshalManifestPath(manifestPath)
 	if err != nil {
-		return nil, fmt.Errorf("parse milvus-table manifest path %q: %w", manifestPath, err)
+		return nil, merr.WrapErrServiceInternalErr(err, "parse milvus-table manifest path %q", manifestPath)
 	}
 	targetDeltaPrefix := strings.TrimRight(basePath, "/") + "/_delta/"
 	result := make(map[string]struct{})
@@ -178,7 +178,7 @@ func deltalogIdentity(binlog *datapb.Binlog) (string, error) {
 	}
 	logID, err := parseMilvusTableDeltalogIDFromPath(logPath)
 	if err != nil {
-		return "", fmt.Errorf("resolve milvus-table deltalog identity from %q: %w", logPath, err)
+		return "", merr.WrapErrServiceInternalErr(err, "resolve milvus-table deltalog identity from %q", logPath)
 	}
 	return strconv.FormatInt(logID, 10), nil
 }

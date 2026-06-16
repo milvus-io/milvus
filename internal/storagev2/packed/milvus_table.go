@@ -16,7 +16,6 @@ package packed
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/url"
 	"path"
 	"sort"
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const milvusTableExploreManifestFile = "milvus-table-explore.json"
@@ -68,7 +68,7 @@ func ValidateMilvusTableStorageV3DeltalogPath(sourcePath string) error {
 	if IsMilvusTableStorageV3DeltalogPath(sourcePath) {
 		return nil
 	}
-	return fmt.Errorf("milvus-table only supports StorageV3 source deltalogs under _delta, got %s", sourcePath)
+	return merr.WrapErrServiceInternalMsg("milvus-table only supports StorageV3 source deltalogs under _delta, got %s", sourcePath)
 }
 
 // ValidateMilvusTableSourceDeltalogPath accepts the two deltalog shapes a
@@ -78,7 +78,7 @@ func ValidateMilvusTableSourceDeltalogPath(sourcePath string) error {
 	if IsMilvusTableStorageV3DeltalogPath(sourcePath) || IsMilvusTableLegacyL0DeltalogPath(sourcePath) {
 		return nil
 	}
-	return fmt.Errorf("milvus-table only supports StorageV3 source deltalogs under _delta or legacy L0 deltalogs under delta_log, got %s", sourcePath)
+	return merr.WrapErrServiceInternalMsg("milvus-table only supports StorageV3 source deltalogs under _delta or legacy L0 deltalogs under delta_log, got %s", sourcePath)
 }
 
 // resolveMilvusTableSnapshotMetadataPath validates the milvus-table external
@@ -90,7 +90,7 @@ func resolveMilvusTableSnapshotMetadataPath(externalSource, externalSpec string)
 	if strings.HasSuffix(strings.ToLower(externalSource), ".json") {
 		return externalSource, nil
 	}
-	return "", fmt.Errorf("milvus-table requires external_source to be a snapshot metadata JSON path")
+	return "", merr.WrapErrServiceInternalMsg("milvus-table requires external_source to be a snapshot metadata JSON path")
 }
 
 // buildMilvusTableFileInfosFromSnapshotMetadata converts snapshot metadata into
@@ -103,7 +103,7 @@ func buildMilvusTableFileInfosFromSnapshotMetadata(
 ) ([]FileInfo, error) {
 	metadata, err := snapshotio.ParseSnapshotMetadataWithVersionCheck(metadataBytes)
 	if err != nil {
-		return nil, fmt.Errorf("parse milvus snapshot metadata: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "parse milvus snapshot metadata")
 	}
 	manifestList := metadata.GetStoragev2ManifestList()
 	if len(manifestList) == 0 {
@@ -116,7 +116,7 @@ func buildMilvusTableFileInfosFromSnapshotMetadata(
 	}
 
 	if getSegmentDescription == nil {
-		return nil, fmt.Errorf("milvus-table requires source segment manifests to read source segment row counts")
+		return nil, merr.WrapErrServiceInternalMsg("milvus-table requires source segment manifests to read source segment row counts")
 	}
 
 	sourceSegments := make(map[int64]*datapb.SegmentDescription)
@@ -124,10 +124,10 @@ func buildMilvusTableFileInfosFromSnapshotMetadata(
 	for _, manifestPath := range metadata.GetManifestList() {
 		segment, err := getSegmentDescription(manifestPath, metadata.GetFormatVersion())
 		if err != nil {
-			return nil, fmt.Errorf("read source segment manifest %s: %w", manifestPath, err)
+			return nil, merr.WrapErrServiceInternalErr(err, "read source segment manifest %s", manifestPath)
 		}
 		if segment == nil {
-			return nil, fmt.Errorf("read source segment manifest %s: empty segment", manifestPath)
+			return nil, merr.WrapErrServiceInternalMsg("read source segment manifest %s: empty segment", manifestPath)
 		}
 		if segment.GetSegmentLevel() == datapb.SegmentLevel_L0 {
 			l0Deltalogs = append(l0Deltalogs, segment.GetDeltalogs()...)
@@ -139,19 +139,19 @@ func buildMilvusTableFileInfosFromSnapshotMetadata(
 	fileInfos := make([]FileInfo, 0, len(manifestList))
 	for _, manifest := range manifestList {
 		if manifest.GetManifest() == "" {
-			return nil, fmt.Errorf("milvus-table snapshot segment %d has empty storagev2 manifest", manifest.GetSegmentId())
+			return nil, merr.WrapErrServiceInternalMsg("milvus-table snapshot segment %d has empty storagev2 manifest", manifest.GetSegmentId())
 		}
 		manifestPath, err := resolveManifestPath(manifest.GetManifest())
 		if err != nil {
-			return nil, fmt.Errorf("resolve source segment manifest %s: %w", manifest.GetManifest(), err)
+			return nil, merr.WrapErrServiceInternalErr(err, "resolve source segment manifest %s", manifest.GetManifest())
 		}
 		sourceSegment, ok := sourceSegments[manifest.GetSegmentId()]
 		if !ok {
-			return nil, fmt.Errorf("milvus-table snapshot segment %d has storagev2 manifest but no source segment manifest", manifest.GetSegmentId())
+			return nil, merr.WrapErrServiceInternalMsg("milvus-table snapshot segment %d has storagev2 manifest but no source segment manifest", manifest.GetSegmentId())
 		}
 		rowCount := sourceSegment.GetNumOfRows()
 		if rowCount <= 0 {
-			return nil, fmt.Errorf("source segment %d has non-positive row count %d", manifest.GetSegmentId(), rowCount)
+			return nil, merr.WrapErrServiceInternalMsg("source segment %d has non-positive row count %d", manifest.GetSegmentId(), rowCount)
 		}
 		info := FileInfo{
 			FilePath:        manifestPath,
@@ -234,11 +234,11 @@ func ReadMilvusTableSnapshotMetadata(
 		milvusTableReadFileExtfs(externalSource, extfs),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("read milvus snapshot metadata: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "read milvus snapshot metadata")
 	}
 	metadata, err := snapshotio.ParseSnapshotMetadataWithVersionCheck(metadataBytes)
 	if err != nil {
-		return nil, fmt.Errorf("parse milvus snapshot metadata: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "parse milvus snapshot metadata")
 	}
 	return metadata, nil
 }
@@ -289,10 +289,10 @@ func readMilvusTableExploreManifest(manifestPath string, storageConfig *indexpb.
 	}
 	var manifest milvusTableExploreManifest
 	if err := json.Unmarshal(data, &manifest); err != nil {
-		return nil, fmt.Errorf("parse milvus-table explore manifest: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "parse milvus-table explore manifest")
 	}
 	if manifest.Format != externalspec.FormatMilvusTable {
-		return nil, fmt.Errorf("unexpected milvus-table explore manifest format %q", manifest.Format)
+		return nil, merr.WrapErrServiceInternalMsg("unexpected milvus-table explore manifest format %q", manifest.Format)
 	}
 	return manifest.Files, nil
 }
@@ -310,7 +310,7 @@ func readMilvusSnapshotSegmentManifest(
 	}
 	segment, err := snapshotio.ParseSegmentManifest(data, int(formatVersion))
 	if err != nil {
-		return nil, fmt.Errorf("parse source segment manifest %s: %w", manifestPath, err)
+		return nil, merr.WrapErrServiceInternalErr(err, "parse source segment manifest %s", manifestPath)
 	}
 	return segment, nil
 }

@@ -27,7 +27,6 @@ import "C"
 
 import (
 	"context"
-	"fmt"
 	"net/url"
 	"path"
 	"sort"
@@ -196,7 +195,7 @@ func resolveExternalSourceRelativePath(sourcePath string, properties *C.LoonProp
 	prefix := ExtfsPrefixForCollection(extfs.CollectionID)
 	bucketName := loonPropertyString(properties, prefix+"bucket_name")
 	if bucketName == "" {
-		return "", fmt.Errorf("resolve external source relative path: missing bucket_name for %s", extfs.Source)
+		return "", merr.WrapErrServiceInternalMsg("resolve external source relative path: missing bucket_name for %s", extfs.Source)
 	}
 	address := loonPropertyString(properties, prefix+"address")
 	addressHost, err := propertyAddressHost(address)
@@ -283,15 +282,15 @@ func ExploreFilesReturnManifestPath(
 		}
 		metadataBytes, err := ReadFileWithExternalSpec(storageConfig, metadataPath, extfs)
 		if err != nil {
-			return nil, "", fmt.Errorf("read milvus snapshot metadata: %w", err)
+			return nil, "", merr.WrapErrServiceInternalErr(err, "read milvus snapshot metadata")
 		}
 		cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 		if err != nil {
-			return nil, "", fmt.Errorf("failed to create properties: %w", err)
+			return nil, "", merr.WrapErrServiceInternalErr(err, "failed to create properties")
 		}
 		defer C.loon_properties_free(cProperties)
 		if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
-			return nil, "", fmt.Errorf("inject extfs: %w", err)
+			return nil, "", merr.WrapErrServiceInternalErr(err, "inject extfs")
 		}
 		resolveSourcePath := func(sourcePath string) (string, error) {
 			return resolveExternalSourceRelativePath(sourcePath, cProperties, extfs)

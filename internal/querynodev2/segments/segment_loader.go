@@ -375,7 +375,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 							mlog.Int64("segmentID", loadInfo.GetSegmentID()))
 					}
 					if !segment.PkCandidateExist() {
-						return errors.New("milvus-table real-PK segment missing bloom filter stats")
+						return merr.WrapErrServiceInternalMsg("milvus-table real-PK segment missing bloom filter stats")
 					}
 				} else {
 					candidate = pkoracle.NewExternalSegmentCandidate(
@@ -685,7 +685,7 @@ func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, colle
 		return nil, err
 	}
 	if isMilvusTableRealPK && !bfs.PkCandidateExist() {
-		return nil, errors.New("milvus-table real-PK segment missing bloom filter stats")
+		return nil, merr.WrapErrServiceInternalMsg("milvus-table real-PK segment missing bloom filter stats")
 	}
 
 	return bfs, nil
@@ -788,7 +788,7 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 			return err
 		}
 		if isMilvusTableRealPK && !bfs.PkCandidateExist() {
-			return errors.New("milvus-table real-PK segment missing bloom filter stats")
+			return merr.WrapErrServiceInternalMsg("milvus-table real-PK segment missing bloom filter stats")
 		}
 		return nil
 	}
@@ -1567,7 +1567,7 @@ func milvusTableDeltalogPaths(deltaLogs []*datapb.FieldBinlog) []string {
 func validateMilvusTableRealPKDeltalogPaths(manifestPath string, deltaPaths []string) error {
 	basePath, _, err := packed.UnmarshalManifestPath(manifestPath)
 	if err != nil {
-		return fmt.Errorf("parse milvus-table manifest path: %w", err)
+		return merr.WrapErrServiceInternalErr(err, "parse milvus-table manifest path")
 	}
 	targetDeltaPrefix := strings.TrimRight(basePath, "/") + "/_delta/"
 	for _, deltaPath := range deltaPaths {
@@ -1575,7 +1575,7 @@ func validateMilvusTableRealPKDeltalogPaths(manifestPath string, deltaPaths []st
 			continue
 		}
 		if strings.HasPrefix(deltaPath, targetDeltaPrefix) {
-			return fmt.Errorf("milvus-table real-PK manifest must not contain target-owned deltalog %s", deltaPath)
+			return merr.WrapErrServiceInternalMsg("milvus-table real-PK manifest must not contain target-owned deltalog %s", deltaPath)
 		}
 		if err := packed.ValidateMilvusTableSourceDeltalogPath(deltaPath); err != nil {
 			return err

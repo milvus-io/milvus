@@ -19,7 +19,6 @@
 package snapshotio
 
 import (
-	"fmt"
 	"strings"
 	"sync"
 
@@ -30,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const (
@@ -104,7 +104,7 @@ func ManifestSchemaByVersion(version int) (avro.Schema, error) {
 	case 4:
 		return ManifestSchemaV4()
 	default:
-		return nil, fmt.Errorf("unsupported manifest schema version: %d", version)
+		return nil, merr.WrapErrServiceInternalMsg("unsupported manifest schema version: %d", version)
 	}
 }
 
@@ -114,7 +114,7 @@ func ValidateFormatVersion(version int) error {
 		return nil
 	}
 	if version > SnapshotFormatVersion {
-		return fmt.Errorf("snapshot format version %d is too new, current supported version: %d (please upgrade Milvus)",
+		return merr.WrapErrServiceInternalMsg("snapshot format version %d is too new, current supported version: %d (please upgrade Milvus)",
 			version, SnapshotFormatVersion)
 	}
 	return nil
@@ -127,7 +127,7 @@ func ParseSnapshotMetadata(data []byte) (*datapb.SnapshotMetadata, error) {
 		DiscardUnknown: true,
 	}
 	if err := opts.Unmarshal(data, metadata); err != nil {
-		return nil, fmt.Errorf("failed to parse metadata JSON: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to parse metadata JSON")
 	}
 	return metadata, nil
 }
@@ -139,7 +139,7 @@ func ParseSnapshotMetadataWithVersionCheck(data []byte) (*datapb.SnapshotMetadat
 		return nil, err
 	}
 	if err := ValidateFormatVersion(int(metadata.GetFormatVersion())); err != nil {
-		return nil, fmt.Errorf("incompatible snapshot format: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "incompatible snapshot format")
 	}
 	return metadata, nil
 }
@@ -254,11 +254,11 @@ type AvroJSONKeyIndexEntry struct {
 func MarshalSegmentManifest(segment *datapb.SegmentDescription) ([]byte, error) {
 	avroSchema, err := ManifestSchema()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get manifest schema: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to get manifest schema")
 	}
 	data, err := avro.Marshal(avroSchema, SegmentToManifestEntry(segment))
 	if err != nil {
-		return nil, fmt.Errorf("failed to serialize entry to avro: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to serialize entry to avro")
 	}
 	return data, nil
 }
@@ -267,11 +267,11 @@ func MarshalSegmentManifest(segment *datapb.SegmentDescription) ([]byte, error) 
 func ParseSegmentManifest(data []byte, formatVersion int) (*datapb.SegmentDescription, error) {
 	avroSchema, err := ManifestSchemaByVersion(formatVersion)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get manifest schema for version %d: %w", formatVersion, err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to get manifest schema for version %d", formatVersion)
 	}
 	var record ManifestEntry
 	if err := avro.Unmarshal(avroSchema, data, &record); err != nil {
-		return nil, fmt.Errorf("failed to parse avro data: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to parse avro data")
 	}
 	return ManifestEntryToSegment(record), nil
 }
