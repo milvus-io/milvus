@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -117,6 +118,26 @@ func (m *shardSplitManager) hasActiveImportOnVChannel(vchannel string) bool {
 	return false
 }
 
+// clusterReplicating reports whether replication/CDC is currently enabled on the
+// cluster. A shard split must not start while replicating: the split's control
+// messages are not yet part of the replication stream, so a replica would miss
+// the topology change (D6). The check is best-effort with a short timeout — the
+// streamingnode fence is the backstop — so a transient balancer lookup failure
+// never wedges the detection loop (it errs toward allowing the trigger).
+func (m *shardSplitManager) clusterReplicating() bool {
+	ctx, cancel := context.WithTimeout(m.ctx, time.Second)
+	defer cancel()
+	b, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return false
+	}
+	assignment, err := b.GetLatestChannelAssignment()
+	if err != nil || assignment == nil {
+		return false
+	}
+	return isReplicatingCluster(assignment.ReplicateConfiguration)
+}
+
 // shardStats is the aggregated statistics of one shard (vchannel).
 type shardStats struct {
 	vchannel       string
@@ -197,8 +218,14 @@ func (m *shardSplitManager) detectOnce() {
 	if !params.ShardSplitEnable.GetAsBool() {
 		return
 	}
-	// TODO: reject the trigger when replication/CDC is enabled on the
-	// cluster (D6); the fence path on the streamingnode is the backstop.
+	if m.clusterReplicating() {
+		// D6: a shard split's control messages (SplitShard/CreateVChannel) are not
+		// yet part of the replication stream, so a replica would miss the topology
+		// change. Suppress the trigger while the cluster is replicating; the
+		// streamingnode fence is the backstop if a split somehow starts anyway.
+		logger.RatedWarn(60, "shard split trigger suppressed while replication/CDC is enabled")
+		return
+	}
 	maxConcurrent := params.ShardSplitMaxConcurrentTasks.GetAsInt()
 	active := m.activeTaskCount()
 	if active >= maxConcurrent {
