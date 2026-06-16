@@ -71,7 +71,7 @@ func TestNamespaceEncoder(t *testing.T) {
 // v0 = [-inf, 0x40), v1 = [0x40, 0x80), v2 = [0x80, +inf).
 func threeShards(t *testing.T) *RangeRoutingTable {
 	t.Helper()
-	table, err := DeriveRange(7, []RangeShard{
+	table, err := DeriveRange([]RangeShard{
 		{Lower: nil, Upper: []byte{0x40}, Vchannel: "v0"},
 		{Lower: []byte{0x40}, Upper: []byte{0x80}, Vchannel: "v1"},
 		{Lower: []byte{0x80}, Upper: nil, Vchannel: "v2"},
@@ -82,7 +82,6 @@ func threeShards(t *testing.T) *RangeRoutingTable {
 
 func TestDeriveRangeAndLookup(t *testing.T) {
 	table := threeShards(t)
-	assert.Equal(t, int64(7), table.Version)
 	assert.Equal(t, 3, table.NumShards())
 
 	cases := []struct {
@@ -106,7 +105,7 @@ func TestDeriveRangeAndLookup(t *testing.T) {
 
 func TestDeriveRangeSortsInput(t *testing.T) {
 	// shards given out of order are sorted by lower bound before use.
-	table, err := DeriveRange(1, []RangeShard{
+	table, err := DeriveRange([]RangeShard{
 		{Lower: []byte{0x80}, Upper: nil, Vchannel: "v2"},
 		{Lower: nil, Upper: []byte{0x40}, Vchannel: "v0"},
 		{Lower: []byte{0x40}, Upper: []byte{0x80}, Vchannel: "v1"},
@@ -119,7 +118,7 @@ func TestDeriveRangeSortsInput(t *testing.T) {
 
 func TestDeriveRangeSingleShard(t *testing.T) {
 	// a single shard owns the whole space.
-	table, err := DeriveRange(1, []RangeShard{{Lower: nil, Upper: nil, Vchannel: "v0"}})
+	table, err := DeriveRange([]RangeShard{{Lower: nil, Upper: nil, Vchannel: "v0"}})
 	assert.NoError(t, err)
 	assert.Equal(t, "v0", table.Lookup([]byte{0x00}))
 	assert.Equal(t, "v0", table.Lookup([]byte{0xff, 0xff}))
@@ -160,7 +159,7 @@ func TestDeriveRangeErrors(t *testing.T) {
 		}},
 	}
 	for _, c := range cases {
-		_, err := DeriveRange(1, c.shards)
+		_, err := DeriveRange(c.shards)
 		assert.Errorf(t, err, "case %s should fail", c.name)
 	}
 }
@@ -169,7 +168,7 @@ func TestLookupNamespace(t *testing.T) {
 	// split the namespace key space at the encoded key of "m": namespaces whose
 	// encoded key sorts below it go left (v0), the rest go right (v1).
 	splitKey := EncodeNamespace("m")
-	table, err := DeriveRange(2, []RangeShard{
+	table, err := DeriveRange([]RangeShard{
 		{Lower: nil, Upper: splitKey, Vchannel: "v0"},
 		{Lower: splitKey, Upper: nil, Vchannel: "v1"},
 	})

@@ -65,7 +65,6 @@ func TestLookupBucket(t *testing.T) {
 	assert.Equal(t, "by-dev-rootcoord-dml_a", tbl.LookupBucket(0))
 	assert.Equal(t, "by-dev-rootcoord-dml_b", tbl.LookupBucket(5)) // 5 % 4 == 1
 	assert.Equal(t, 4, tbl.NumShards())
-	assert.Equal(t, int64(CompatVersion), tbl.Version)
 }
 
 func TestLookupBucket_Empty(t *testing.T) {
@@ -84,7 +83,6 @@ func TestHashPKs_UnsupportedType(t *testing.T) {
 func TestDeriveCompat_Fields(t *testing.T) {
 	ch := channels(3)
 	tbl := DeriveCompat(ch)
-	assert.Equal(t, int64(CompatVersion), tbl.Version)
 	assert.Equal(t, ModeHash, tbl.Mode)
 	assert.Equal(t, 3, tbl.NumShards())
 }
@@ -148,11 +146,4 @@ func TestRouteInsert_EmptyChannels(t *testing.T) {
 	m, h := tbl.RouteInsert(intIDs([]int64{1, 2}))
 	assert.Nil(t, m)
 	assert.Empty(t, h)
-}
-
-func TestCompareRoutingVersion(t *testing.T) {
-	assert.Equal(t, RoutingProcess, CompareRoutingVersion(1, 1, true))               // equal -> process
-	assert.Equal(t, RoutingProcess, CompareRoutingVersion(2, 1, true))               // proxy newer -> process
-	assert.Equal(t, RoutingProcessAndReplyLatest, CompareRoutingVersion(1, 2, true)) // proxy older, shard NORMAL
-	assert.Equal(t, RoutingStale, CompareRoutingVersion(1, 2, false))                // proxy older, shard not NORMAL
 }

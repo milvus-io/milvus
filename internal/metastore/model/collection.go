@@ -55,7 +55,6 @@ type Collection struct {
 	UpdateTimestamp      uint64
 	SchemaVersion        int32
 	ShardInfos           map[string]*ShardInfo
-	RoutingVersion       int64          // increases monotonically on every routing change (shard split/merge), 0 for legacy collections.
 	RoutingMode          pb.RoutingMode // how a routing key maps to a shard, RoutingModeHash for legacy collections.
 	FileResourceIds      []int64
 	ExternalSource       string
@@ -105,7 +104,6 @@ func (c *Collection) ShallowClone() *Collection {
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           c.ShardInfos,
-		RoutingVersion:       c.RoutingVersion,
 		RoutingMode:          c.RoutingMode,
 		FileResourceIds:      c.FileResourceIds,
 		ExternalSource:       c.ExternalSource,
@@ -151,7 +149,6 @@ func (c *Collection) Clone() *Collection {
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           shardInfos,
-		RoutingVersion:       c.RoutingVersion,
 		RoutingMode:          c.RoutingMode,
 		FileResourceIds:      slices.Clone(c.FileResourceIds),
 		ExternalSource:       c.ExternalSource,
@@ -249,12 +246,10 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 		case message.FieldMaskCollectionShardSplitRouting:
 			// A shard split commits the whole new routing topology atomically:
 			// the grown vchannel list, every shard's key range and lifecycle
-			// state, the routing mode and the bumped routing version. The
-			// channel and shard-info arrays are parallel, so the ShardInfos map
-			// is rebuilt from them in lockstep.
+			// state, and the routing mode. The channel and shard-info arrays are
+			// parallel, so the ShardInfos map is rebuilt from them in lockstep.
 			c.VirtualChannelNames = updates.VirtualChannelNames
 			c.PhysicalChannelNames = updates.PhysicalChannelNames
-			c.RoutingVersion = updates.RoutingVersion
 			c.RoutingMode = updates.RoutingMode
 			shardInfos := make(map[string]*ShardInfo, len(updates.VirtualChannelNames))
 			for i, vchannel := range updates.VirtualChannelNames {
@@ -333,7 +328,6 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		UpdateTimestamp:      coll.UpdateTimestamp,
 		SchemaVersion:        coll.Schema.Version,
 		ShardInfos:           shardInfos,
-		RoutingVersion:       coll.RoutingVersion,
 		RoutingMode:          coll.RoutingMode,
 		FileResourceIds:      coll.Schema.GetFileResourceIds(),
 		ExternalSource:       coll.Schema.ExternalSource,
@@ -434,7 +428,6 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		Properties:           coll.Properties,
 		UpdateTimestamp:      coll.UpdateTimestamp,
 		ShardInfos:           shardInfos,
-		RoutingVersion:       coll.RoutingVersion,
 		RoutingMode:          coll.RoutingMode,
 	}
 
