@@ -22,8 +22,23 @@ func TestRegisterMessageIDUnmarshaler(t *testing.T) {
 	assert.Nil(t, id)
 	assert.Error(t, err)
 
+	// An unregistered wal_name (a client can put any int32 on the wire for a
+	// proto enum) must return an error instead of panicking, so it cannot crash
+	// the process. 101 is not a registered WAL. MustUnmarshalMessageID keeps the
+	// panic contract.
+	id, err = message.UnmarshalMessageID(&commonpb.MessageID{WALName: commonpb.WALName(101), Id: "123"})
+	assert.Nil(t, id)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, message.ErrInvalidMessageID)
+	assert.Contains(t, err.Error(), "101")
+
+	id, err = message.UnmarshalMessageID(nil)
+	assert.Nil(t, id)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, message.ErrInvalidMessageID)
+
 	assert.Panics(t, func() {
-		message.UnmarshalMessageID(&commonpb.MessageID{WALName: commonpb.WALName(101), Id: "123"})
+		message.MustUnmarshalMessageID(&commonpb.MessageID{WALName: commonpb.WALName(101), Id: "123"})
 	})
 
 	assert.Panics(t, func() {

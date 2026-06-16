@@ -3483,9 +3483,10 @@ type queryNodeConfig struct {
 	DeleteBufferBlockSize  ParamItem `refreshable:"false"`
 
 	// delta forward
-	LevelZeroForwardPolicy      ParamItem `refreshable:"true"`
-	StreamingDeltaForwardPolicy ParamItem `refreshable:"true"`
-	ForwardBatchSize            ParamItem `refreshable:"true"`
+	LevelZeroForwardPolicy             ParamItem `refreshable:"true"`
+	StreamingDeltaForwardPolicy        ParamItem `refreshable:"true"`
+	ForwardBatchSize                   ParamItem `refreshable:"true"`
+	DelegatorPostLoadConcurrencyFactor ParamItem `refreshable:"true"`
 
 	// loader
 	IoPoolSize                  ParamItem `refreshable:"false"`
@@ -4571,6 +4572,23 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.ForwardBatchSize.Init(base.mgr)
+
+	p.DelegatorPostLoadConcurrencyFactor = ParamItem{
+		Key:          "queryNode.delegatorPostLoadConcurrencyFactor",
+		Version:      "2.6.16",
+		Doc:          "delegator post-load concurrency factor after worker LoadSegments returns. Concurrency is hardware.GetCPUNum * factor",
+		DefaultValue: "1",
+		Formatter: func(v string) string {
+			factor := getAsInt(v)
+			if factor < 1 {
+				factor = 1
+			}
+			concurrency := hardware.GetCPUNum() * factor
+			return strconv.FormatInt(int64(concurrency), 10)
+		},
+		Export: true,
+	}
+	p.DelegatorPostLoadConcurrencyFactor.Init(base.mgr)
 
 	p.IoPoolSize = ParamItem{
 		Key:          "queryNode.ioPoolSize",

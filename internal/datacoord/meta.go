@@ -336,7 +336,7 @@ func (m *meta) reloadFromKV(ctx context.Context, collectionIDs []int64) error {
 		// for 2.2.2 issue https://github.com/milvus-io/milvus/issues/22181
 		pos.ChannelName = vChannel
 		m.channelCPs.checkpoints[vChannel] = pos
-		if pos.Timestamp != math.MaxUint64 {
+		if !funcutil.IsDroppedChannelCheckpoint(pos) {
 			// Should not be set as metric since it's a tombstone value.
 			ts, _ := tsoutil.ParseTS(pos.Timestamp)
 			metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
@@ -1252,6 +1252,35 @@ func UpdateImportedRows(segmentID int64, rows int64) UpdateOperator {
 	}
 }
 
+// ResetImportingSegmentRows clears NumOfRows and MaxRowNum on each given
+// segment that is still in the Importing state. Used to discard partial
+// progress reported by a failed import attempt before the task is rescheduled,
+// so segments the retried attempt skips do not keep stale row counts that
+// would break sort compaction.
+func ResetImportingSegmentRows(segmentIDs ...int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		anyReset := false
+		for _, segmentID := range segmentIDs {
+			segment := modPack.Get(segmentID)
+			if segment == nil {
+				log.Ctx(context.TODO()).Warn("meta update: reset importing segment rows failed - segment not found",
+					zap.Int64("segmentID", segmentID))
+				continue
+			}
+			if segment.GetState() != commonpb.SegmentState_Importing {
+				log.Ctx(context.TODO()).Warn("meta update: reset importing segment rows skipped - segment not in Importing state",
+					zap.Int64("segmentID", segmentID),
+					zap.String("state", segment.GetState().String()))
+				continue
+			}
+			segment.NumOfRows = 0
+			segment.MaxRowNum = 0
+			anyReset = true
+		}
+		return anyReset
+	}
+}
+
 func UpdateIsImporting(segmentID int64, isImporting bool) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
@@ -2106,15 +2135,17 @@ func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos
 	return nil
 }
 
-// MarkChannelCheckpointDropped set channel checkpoint to MaxUint64 preventing future update
-// and remove the metrics for channel checkpoint lag.
+// MarkChannelCheckpointDropped writes the dropped-channel sentinel
+// (funcutil.DroppedChannelCheckpointTimestamp) so no later
+// UpdateChannelCheckpoint can overwrite it, and removes the channel-checkpoint
+// lag metric.
 func (m *meta) MarkChannelCheckpointDropped(ctx context.Context, channel string) error {
 	m.channelCPs.Lock()
 	defer m.channelCPs.Unlock()
 
 	cp := &msgpb.MsgPosition{
 		ChannelName: channel,
-		Timestamp:   math.MaxUint64,
+		Timestamp:   funcutil.DroppedChannelCheckpointTimestamp,
 	}
 
 	err := m.catalog.SaveChannelCheckpoints(ctx, []*msgpb.MsgPosition{cp})
