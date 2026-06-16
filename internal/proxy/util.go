@@ -2624,6 +2624,43 @@ func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, dbName string, 
 	return partitionNames, nil
 }
 
+// shardFencedRetryAttempts bounds how many times a write retries after a ShardFenced
+// rejection. A shard split fences the source shard for a brief window before the
+// post-split routing is committed and visible via DescribeCollection; a handful of
+// attempts with backoff covers that window without blocking the write indefinitely.
+const shardFencedRetryAttempts uint = 5
+
+// resolveRangeRoutingChannels returns the channel set the write path should route a
+// namespace request over. For a hash-routed collection it returns channelNames
+// unchanged (the legacy per-row hash routing applies). For a range-routed collection
+// it returns the single vchannel that owns the request's namespace: because every row
+// of one request shares one namespace, the whole request lands on one shard, and the
+// existing hash routing over a one-element channel set sends every row there.
+//
+// It returns a (retriable) System error when range routing is required but the routing
+// table is unavailable or the namespace resolves to no shard, so the write is rejected
+// and retried after a cache refresh rather than silently mis-routed.
+//
+// The proxy never converts a collection from hash to range routing: a namespace
+// collection is created with a single shard that owns the whole key space and is
+// range-routed from the start (the create-collection path forbids a user-specified
+// shard count for namespace collections), and a shard split only refines existing
+// ranges. So routing_mode is authoritative as read from DescribeCollection — there is
+// no hash→range transition for this function to handle.
+func resolveRangeRoutingChannels(info *collectionInfo, namespace string, channelNames []string) ([]string, error) {
+	if info == nil || info.routingMode != schemapb.RoutingMode_RoutingModeRange {
+		return channelNames, nil
+	}
+	if info.rangeRoutingTable == nil {
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("range routing table unavailable for collection %d", info.collID))
+	}
+	vchannel := info.rangeRoutingTable.LookupNamespace(namespace)
+	if vchannel == "" {
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("namespace %q resolved to no shard in collection %d", namespace, info.collID))
+	}
+	return []string{vchannel}, nil
+}
+
 func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) (map[string][]int, error) {
 	if paramtable.Get().ProxyCfg.EnableRoutingTable.GetAsBool() {
 		offsets, hashValues := routing.DeriveCompat(channelNames).RouteInsert(pks)

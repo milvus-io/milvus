@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -26,25 +27,44 @@ func (ut *upsertTask) Execute(ctx context.Context) error {
 		ez = hookutil.GetEzByCollProperties(ut.schema.GetProperties(), ut.collectionID).AsMessageConfig()
 	}
 
-	insertMsgs, err := ut.packInsertMessage(ctx, ez)
-	if err != nil {
-		log.Warn(ctx, "pack insert message failed", mlog.Err(err))
-		return err
-	}
-	deleteMsgs, err := ut.packDeleteMessage(ctx, ez)
-	if err != nil {
-		log.Warn(ctx, "pack delete message failed", mlog.Err(err))
-		return err
-	}
+	// Pack and append in a bounded loop. For a range-routed (namespace) collection the
+	// insert and delete both target the single shard owning the request's namespace; if
+	// that shard was fenced by a concurrent shard split the streamingnode rejects the
+	// append with ShardFenced. The proxy drops its stale routing cache and re-packs
+	// against the post-split topology. Because the request lands wholly on one shard, a
+	// rejected append wrote nothing, so the retry cannot double-write.
+	var resp streaming.AppendResponses
+	appendErr := retry.Handle(ctx, func() (bool, error) {
+		insertMsgs, err := ut.packInsertMessage(ctx, ez)
+		if err != nil {
+			log.Warn(ctx, "pack insert message failed", mlog.Err(err))
+			return false, err
+		}
+		deleteMsgs, err := ut.packDeleteMessage(ctx, ez)
+		if err != nil {
+			log.Warn(ctx, "pack delete message failed", mlog.Err(err))
+			return false, err
+		}
 
-	messages := append(insertMsgs, deleteMsgs...)
-	resp := streaming.WAL().AppendMessages(ctx, messages...)
-	if err := resp.UnwrapFirstError(); err != nil {
-		log.Warn(ctx, "append messages to wal failed", mlog.Err(err))
-		if status.AsStreamingError(err).IsSchemaVersionMismatch() {
+		messages := append(insertMsgs, deleteMsgs...)
+		resp = streaming.WAL().AppendMessages(ctx, messages...)
+		if err := resp.UnwrapFirstError(); err != nil {
+			if status.AsStreamingError(err).IsShardFenced() {
+				// The target shard was fenced by a shard split; drop the stale routing
+				// cache so the next attempt routes against the post-split topology.
+				globalMetaCache.RemoveCollection(ctx, ut.req.GetDbName(), ut.req.GetCollectionName(), 0)
+				return true, err
+			}
+			return false, err
+		}
+		return false, nil
+	}, retry.Attempts(shardFencedRetryAttempts))
+	if appendErr != nil {
+		log.Warn(ctx, "append messages to wal failed", mlog.Err(appendErr))
+		if status.AsStreamingError(appendErr).IsSchemaVersionMismatch() {
 			return merr.ErrCollectionSchemaMismatch
 		}
-		return err
+		return appendErr
 	}
 	// Update result.Timestamp for session consistency.
 	ut.result.Timestamp = resp.MaxTimeTick()
@@ -70,6 +90,21 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 	if err != nil {
 		log.Warn(ctx, "get vChannels failed when insertExecute",
 			mlog.Err(err))
+		ut.result.Status = merr.Status(err)
+		return nil, err
+	}
+
+	// For a range-routed (namespace) collection, narrow the channel set to the single
+	// shard owning this request's namespace; the request then lands wholly on that shard.
+	collInfo, err := globalMetaCache.GetCollectionInfo(ctx, ut.req.GetDbName(), collectionName, collID)
+	if err != nil {
+		log.Warn(ctx, "get collection info failed when insertExecute", mlog.Err(err))
+		ut.result.Status = merr.Status(err)
+		return nil, err
+	}
+	channelNames, err = resolveRangeRoutingChannels(collInfo, ut.req.GetNamespace(), channelNames)
+	if err != nil {
+		log.Warn(ctx, "resolve range routing channel failed when insertExecute", mlog.Err(err))
 		ut.result.Status = merr.Status(err)
 		return nil, err
 	}
@@ -111,6 +146,20 @@ func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherC
 	vChannels, err := ut.chMgr.getVChannels(collID)
 	if err != nil {
 		log.Warn(ctx, "get vChannels failed when deleteExecute", mlog.Err(err))
+		ut.result.Status = merr.Status(err)
+		return nil, err
+	}
+	// For a range-routed (namespace) collection, narrow the channel set to the single
+	// shard owning this request's namespace; the delete then lands wholly on that shard.
+	collInfo, err := globalMetaCache.GetCollectionInfo(ctx, ut.req.GetDbName(), ut.upsertMsg.DeleteMsg.CollectionName, collID)
+	if err != nil {
+		log.Warn(ctx, "get collection info failed when deleteExecute", mlog.Err(err))
+		ut.result.Status = merr.Status(err)
+		return nil, err
+	}
+	vChannels, err = resolveRangeRoutingChannels(collInfo, ut.req.GetNamespace(), vChannels)
+	if err != nil {
+		log.Warn(ctx, "resolve range routing channel failed when deleteExecute", mlog.Err(err))
 		ut.result.Status = merr.Status(err)
 		return nil, err
 	}

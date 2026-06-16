@@ -34,6 +34,7 @@ import (
 	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -120,6 +121,16 @@ type collectionInfo struct {
 	shardsNum             int32
 	aliases               []string
 	properties            []*commonpb.KeyValuePair
+	// routingMode is how a routing key maps to a shard. RoutingModeHash (the
+	// default) preserves the legacy hash-modulo-shardNum behaviour; RoutingModeRange
+	// routes a namespace collection by the byte-comparable range its namespace falls
+	// in after a shard split.
+	routingMode schemapb.RoutingMode
+	// rangeRoutingTable is the derived range routing table, non-nil only when
+	// routingMode == RoutingModeRange and the shard ranges form a valid partition of
+	// the key space. It is built once at cache update time so the write path does no
+	// per-request derivation.
+	rangeRoutingTable *routing.RangeRoutingTable
 }
 
 const aliasCacheNegativeTTL = 30 * time.Second
@@ -464,6 +475,38 @@ func (m *MetaCache) getCollection(database, collectionName string, collectionID 
 	return nil, false
 }
 
+// buildRangeRoutingTable derives a range routing table from the per-shard routing
+// info that DescribeCollection returns parallel to virtual_channel_names. It returns
+// (nil, nil) when the collection is not range-routed, so a hash-routed collection
+// pays no cost. A non-nil error means the routing meta is malformed (gap, overlap, or
+// incomplete coverage of the key space); the caller keeps the table nil and the write
+// path rejects range routing rather than risk mis-routing.
+func buildRangeRoutingTable(routingMode schemapb.RoutingMode, vChannels []string, shardInfos []*schemapb.CollectionShardInfo) (*routing.RangeRoutingTable, error) {
+	if routingMode != schemapb.RoutingMode_RoutingModeRange {
+		return nil, nil
+	}
+	if len(shardInfos) != len(vChannels) {
+		return nil, errors.Errorf("range routing shard info count %d mismatches vchannel count %d", len(shardInfos), len(vChannels))
+	}
+	// Only shards that currently accept writes participate in routing: ShardNormal
+	// (serving) and ShardCreating (a split target, already created and writable). The
+	// fenced split source (ShardSplitting) and the released source (ShardDropped) are
+	// excluded — their key range is owned by the targets, so excluding them keeps the
+	// included shards a gap-free, non-overlapping cover of the whole key space.
+	shards := make([]routing.RangeShard, 0, len(vChannels))
+	for i, vchannel := range vChannels {
+		switch shardInfos[i].GetState() {
+		case schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardCreating:
+			shards = append(shards, routing.RangeShard{
+				Lower:    shardInfos[i].GetRoutingKeyLower(),
+				Upper:    shardInfos[i].GetRoutingKeyUpper(),
+				Vchannel: vchannel,
+			})
+		}
+	}
+	return routing.DeriveRange(shards)
+}
+
 func (m *MetaCache) update(ctx context.Context, database, collectionName string, collectionID UniqueID) (*collectionInfo, error) {
 	if collInfo, ok := m.getCollection(database, collectionName, collectionID); ok {
 		return collInfo, nil
@@ -491,6 +534,18 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 
 	schemaInfo := newSchemaInfo(collection.Schema)
 
+	// Derive the range routing table once here, so the write path does no per-request
+	// derivation. A malformed routing meta logs and leaves the table nil; the range
+	// routing lookup then rejects the write instead of silently mis-routing.
+	rangeRoutingTable, err := buildRangeRoutingTable(collection.GetRoutingMode(), collection.GetVirtualChannelNames(), collection.GetShardInfos())
+	if err != nil {
+		log.Ctx(ctx).Warn("build range routing table failed, fall back to no range routing",
+			zap.String("collectionName", collectionName),
+			zap.Int64("collectionID", collection.GetCollectionID()),
+			zap.Error(err))
+		rangeRoutingTable = nil
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	curVersion := m.collectionCacheVersion[collection.GetCollectionID()]
@@ -516,6 +571,8 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			shardsNum:             collection.ShardsNum,
 			aliases:               collection.Aliases,
 			properties:            collection.Properties,
+			routingMode:           collection.GetRoutingMode(),
+			rangeRoutingTable:     rangeRoutingTable,
 		}, nil
 	}
 	_, dbOk := m.collInfo[database]
@@ -548,6 +605,8 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		shardsNum:             collection.ShardsNum,
 		aliases:               collection.Aliases,
 		properties:            collection.Properties,
+		routingMode:           collection.GetRoutingMode(),
+		rangeRoutingTable:     rangeRoutingTable,
 	}
 
 	mlog.Info(ctx, "meta update success", mlog.String("database", database), mlog.String("collectionName", collectionName),

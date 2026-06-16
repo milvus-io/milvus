@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -47,38 +48,65 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	mlog.Debug(ctx, "send insert request to virtual channels",
-		mlog.String("partition", it.insertMsg.GetPartitionName()),
-		mlog.FieldCollectionID(collID),
-		mlog.Strings("virtual_channels", channelNames),
-		mlog.FieldTaskID(it.ID()),
-		mlog.Bool("is_parition_key", it.partitionKeys != nil),
-		mlog.Duration("get cache duration", getCacheDur))
-
 	var ez *message.CipherConfig
 	if hookutil.IsClusterEncryptionEnabled() {
 		ez = hookutil.GetEzByCollProperties(it.schema.GetProperties(), it.collectionID).AsMessageConfig()
 	}
 
-	// start to repack insert data
-	var msgs []message.MutableMessage
-	if it.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion)
-	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion)
-	}
-	if err != nil {
-		mlog.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
-		it.result.Status = merr.Status(err)
-		return err
-	}
-	resp := streaming.WAL().AppendMessages(ctx, msgs...)
-	if err := resp.UnwrapFirstError(); err != nil {
-		mlog.Warn(ctx, "append messages to wal failed", mlog.Err(err))
-		if status.AsStreamingError(err).IsSchemaVersionMismatch() {
+	// Resolve routing, repack and append in a bounded loop. For a range-routed
+	// (namespace) collection the channel set is narrowed to the single shard owning the
+	// request's namespace; if that shard was fenced by a concurrent shard split the
+	// streamingnode rejects the append with ShardFenced. The proxy then drops its stale
+	// routing cache and retries, so the split is transparent to the client. Because a
+	// range request lands wholly on one shard, a rejected append wrote nothing, so the
+	// retry cannot double-write.
+	var resp streaming.AppendResponses
+	appendErr := retry.Handle(ctx, func() (bool, error) {
+		collInfo, err := globalMetaCache.GetCollectionInfo(ctx, it.insertMsg.GetDbName(), collectionName, collID)
+		if err != nil {
+			return false, err
+		}
+		channelNames, err := resolveRangeRoutingChannels(collInfo, it.insertMsg.GetNamespace(), channelNames)
+		if err != nil {
+			return false, err
+		}
+
+		mlog.Debug(ctx, "send insert request to virtual channels",
+			mlog.String("partition", it.insertMsg.GetPartitionName()),
+			mlog.FieldCollectionID(collID),
+			mlog.Strings("virtual_channels", channelNames),
+			mlog.FieldTaskID(it.ID()),
+			mlog.Bool("is_parition_key", it.partitionKeys != nil),
+			mlog.Duration("get cache duration", getCacheDur))
+
+		// start to repack insert data
+		var msgs []message.MutableMessage
+		if it.partitionKeys == nil {
+			msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion)
+		} else {
+			msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion)
+		}
+		if err != nil {
+			return false, err
+		}
+		resp = streaming.WAL().AppendMessages(ctx, msgs...)
+		if err := resp.UnwrapFirstError(); err != nil {
+			if status.AsStreamingError(err).IsShardFenced() {
+				// The target shard was fenced by a shard split; drop the stale routing
+				// cache so the next attempt routes against the post-split topology.
+				globalMetaCache.RemoveCollection(ctx, it.insertMsg.GetDbName(), collectionName, 0)
+				return true, err
+			}
+			return false, err
+		}
+		return false, nil
+	}, retry.Attempts(shardFencedRetryAttempts))
+	if appendErr != nil {
+		mlog.Warn(ctx, "append messages to wal failed", mlog.Err(appendErr))
+		if status.AsStreamingError(appendErr).IsSchemaVersionMismatch() {
 			it.result.Status = merr.Status(merr.ErrCollectionSchemaMismatch)
 		} else {
-			it.result.Status = merr.Status(err)
+			it.result.Status = merr.Status(appendErr)
 		}
 	}
 	// Update result.Timestamp for session consistency.

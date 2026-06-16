@@ -409,6 +409,12 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	if err != nil {
 		return ErrWithLog(log, "Failed to get vchannels from collection", err)
 	}
+	// For a range-routed (namespace) collection, narrow the channel set to the single
+	// shard owning this request's namespace; the delete then lands wholly on that shard.
+	channelNames, err = resolveRangeRoutingChannels(colInfo, dr.req.GetNamespace(), channelNames)
+	if err != nil {
+		return ErrWithLog(log, "Failed to resolve range routing channel", err)
+	}
 	dr.vChannels = channelNames
 
 	dr.result = &milvuspb.MutationResult{
