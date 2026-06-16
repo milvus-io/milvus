@@ -61,9 +61,10 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
         TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
-        auto left_data_barrier = segment_chunk_reader_.segment_->num_chunk_data(
-            expr_->left_field_id_);
-        auto right_data_barrier =
+        auto left_raw_data_chunk_count =
+            segment_chunk_reader_.segment_->num_chunk_data(
+                expr_->left_field_id_);
+        auto right_raw_data_chunk_count =
             segment_chunk_reader_.segment_->num_chunk_data(
                 expr_->right_field_id_);
 
@@ -72,13 +73,13 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
         for (auto i = 0; i < real_batch_size; ++i) {
             auto offset = (*input)[i];
             auto get_chunk_id_and_offset =
-                [&](const FieldId field,
-                    const int64_t data_barrier) -> std::pair<int64_t, int64_t> {
+                [&](const FieldId field, const int64_t raw_data_chunk_count)
+                -> std::pair<int64_t, int64_t> {
                 if (segment_chunk_reader_.segment_->type() ==
                     SegmentType::Growing) {
                     return {offset / size_per_chunk, offset % size_per_chunk};
                 } else if (segment_chunk_reader_.segment_->is_chunked() &&
-                           data_barrier > 0) {
+                           raw_data_chunk_count > 0) {
                     return segment_chunk_reader_.segment_->get_chunk_by_offset(
                         field, offset);
                 } else {
@@ -87,21 +88,19 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             };
 
             auto [left_chunk_id, left_chunk_offset] =
-                get_chunk_id_and_offset(left_field_, left_data_barrier);
-            auto [right_chunk_id, right_chunk_offset] =
-                get_chunk_id_and_offset(right_field_, right_data_barrier);
+                get_chunk_id_and_offset(left_field_, left_raw_data_chunk_count);
+            auto [right_chunk_id, right_chunk_offset] = get_chunk_id_and_offset(
+                right_field_, right_raw_data_chunk_count);
             auto left = segment_chunk_reader_.GetChunkDataAccessor(
                 expr_->left_data_type_,
                 expr_->left_field_id_,
                 left_chunk_id,
-                left_data_barrier,
-                pinned_index_left_);
+                LeftPinnedIndexForRawLookup());
             auto right = segment_chunk_reader_.GetChunkDataAccessor(
                 expr_->right_data_type_,
                 expr_->right_field_id_,
                 right_chunk_id,
-                right_data_barrier,
-                pinned_index_right_);
+                RightPinnedIndexForRawLookup());
             auto left_opt = left(left_chunk_offset);
             auto right_opt = right(right_chunk_offset);
             if (!left_opt.has_value() || !right_opt.has_value()) {
@@ -136,13 +135,13 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             expr_->left_field_id_,
             left_current_chunk_id_,
             left_current_chunk_pos_,
-            pinned_index_left_);
+            LeftPinnedIndexForRawLookup());
         auto right = segment_chunk_reader_.GetMultipleChunkDataAccessor(
             expr_->right_data_type_,
             expr_->right_field_id_,
             right_current_chunk_id_,
             right_current_chunk_pos_,
-            pinned_index_right_);
+            RightPinnedIndexForRawLookup());
         for (int i = 0; i < real_batch_size; ++i) {
             auto left_value = left(), right_value = right();
             if (!left_value.has_value() || !right_value.has_value()) {
@@ -168,12 +167,6 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
         valid_res.set();
 
-        auto left_data_barrier = segment_chunk_reader_.segment_->num_chunk_data(
-            expr_->left_field_id_);
-        auto right_data_barrier =
-            segment_chunk_reader_.segment_->num_chunk_data(
-                expr_->right_field_id_);
-
         int64_t processed_rows = 0;
         for (int64_t chunk_id = current_chunk_id_; chunk_id < num_chunk_;
              ++chunk_id) {
@@ -186,14 +179,12 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
                 expr_->left_data_type_,
                 expr_->left_field_id_,
                 chunk_id,
-                left_data_barrier,
-                pinned_index_left_);
+                LeftPinnedIndexForRawLookup());
             auto right = segment_chunk_reader_.GetChunkDataAccessor(
                 expr_->right_data_type_,
                 expr_->right_field_id_,
                 chunk_id,
-                right_data_barrier,
-                pinned_index_right_);
+                RightPinnedIndexForRawLookup());
 
             for (int i = chunk_id == current_chunk_id_ ? current_chunk_pos_ : 0;
                  i < chunk_size;

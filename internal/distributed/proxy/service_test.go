@@ -563,6 +563,12 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("AlterRole", func(t *testing.T) {
+		mockProxy.EXPECT().AlterRole(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.AlterRole(ctx, nil)
+		assert.NoError(t, err)
+	})
+
 	t.Run("DropRole", func(t *testing.T) {
 		mockProxy.EXPECT().DropRole(mock.Anything, mock.Anything).Return(nil, nil)
 		_, err := server.DropRole(ctx, nil)

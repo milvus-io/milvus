@@ -1053,6 +1053,10 @@ func (s *Server) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest
 	return s.proxy.CreateRole(ctx, req)
 }
 
+func (s *Server) AlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+	return s.proxy.AlterRole(ctx, req)
+}
+
 func (s *Server) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
 	return s.proxy.DropRole(ctx, req)
 }

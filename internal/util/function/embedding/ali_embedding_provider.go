@@ -38,9 +38,9 @@ type AliEmbeddingProvider struct {
 	embedDimParam int64
 	outputType    string
 
-	maxBatch   int
-	timeoutSec int64
-	extraInfo  *models.ModelExtraInfo
+	maxBatch  int
+	timeoutMs int64
+	extraInfo *models.ModelExtraInfo
 }
 
 func createAliEmbeddingClient(apiKey string, url string) (*ali.AliDashScopeEmbedding, error) {
@@ -90,6 +90,8 @@ func NewAliDashScopeEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functio
 		maxBatch = 6
 	}
 
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
+
 	provider := AliEmbeddingProvider{
 		client:        c,
 		fieldDim:      fieldDim,
@@ -98,7 +100,7 @@ func NewAliDashScopeEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functio
 		// TextEmbedding only supports dense embedding
 		outputType: "dense",
 		maxBatch:   maxBatch,
-		timeoutSec: 30,
+		timeoutMs:  timeoutMs,
 		extraInfo:  extraInfo,
 	}
 	return &provider, nil
@@ -126,7 +128,7 @@ func (provider *AliEmbeddingProvider) CallEmbedding(ctx context.Context, texts [
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), textType, provider.outputType, provider.timeoutSec)
+		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), textType, provider.outputType, provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}

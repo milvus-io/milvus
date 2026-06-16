@@ -93,7 +93,7 @@ func (s *HighlighterSuite) TestLexicalHighlighter_AsSearchPipelineOperator() {
 // ============== SemanticHighlighter Tests ==============
 
 func (s *HighlighterSuite) TestSemanticHighlighter_RequiredFieldIDs_SchemaFieldsOnly() {
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -136,7 +136,7 @@ func (s *HighlighterSuite) TestSemanticHighlighter_RequiredFieldIDs_SchemaFields
 }
 
 func (s *HighlighterSuite) TestSemanticHighlighter_RequiredFieldIDs_WithDynamicFields() {
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -182,7 +182,7 @@ func (s *HighlighterSuite) TestSemanticHighlighter_RequiredFieldIDs_WithDynamicF
 }
 
 func (s *HighlighterSuite) TestSemanticHighlighter_RequiredFieldIDs_DoesNotMutateFieldIDs() {
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -243,7 +243,7 @@ func (s *HighlighterSuite) TestSemanticHighlighter_RequiredFieldIDs_DoesNotMutat
 }
 
 func (s *HighlighterSuite) TestSemanticHighlighter_DynamicFieldNames_Empty() {
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -282,7 +282,7 @@ func (s *HighlighterSuite) TestSemanticHighlighter_DynamicFieldNames_Empty() {
 }
 
 func (s *HighlighterSuite) TestSemanticHighlighter_DynamicFieldNames_WithDynamicFields() {
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -323,7 +323,7 @@ func (s *HighlighterSuite) TestSemanticHighlighter_DynamicFieldNames_WithDynamic
 }
 
 func (s *HighlighterSuite) TestSemanticHighlighter_AsSearchPipelineOperator() {
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -389,7 +389,7 @@ func (s *HighlighterSuite) TestHighlighterInterface_LexicalHighlighter() {
 }
 
 func (s *HighlighterSuite) TestHighlighterInterface_SemanticHighlighter() {
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()

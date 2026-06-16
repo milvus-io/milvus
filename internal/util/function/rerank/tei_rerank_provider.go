@@ -32,8 +32,9 @@ import (
 
 type teiProvider struct {
 	baseProvider
-	client *tei.TEIClient
-	params map[string]any
+	client    *tei.TEIClient
+	params    map[string]any
+	timeoutMs int64
 }
 
 func newTeiProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials) (ModelProvider, error) {
@@ -76,16 +77,19 @@ func newTeiProvider(params []*commonpb.KeyValuePair, conf map[string]string, cre
 		return nil, err
 	}
 
+	timeoutMs := models.ResolveTimeoutMs(params)
+
 	provider := teiProvider{
 		baseProvider: baseProvider{batchSize: maxBatch},
 		client:       client,
 		params:       truncateParams,
+		timeoutMs:    timeoutMs,
 	}
 	return &provider, nil
 }
 
 func (provider *teiProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	rerankResp, err := provider.client.Rerank(query, docs, provider.params, 30)
+	rerankResp, err := provider.client.Rerank(query, docs, provider.params, provider.timeoutMs)
 	if err != nil {
 		return nil, err
 	}

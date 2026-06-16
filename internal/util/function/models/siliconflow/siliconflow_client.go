@@ -45,14 +45,14 @@ func (c *SiliconflowClient) headers() map[string]string {
 	}
 }
 
-func (c *SiliconflowClient) Embedding(url string, modelName string, texts []string, encodingFormat string, dim int, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *SiliconflowClient) Embedding(url string, modelName string, texts []string, encodingFormat string, dim int, timeoutMs int64) (*EmbeddingResponse, error) {
 	embClient := newSiliconflowEmbedding(c.apiKey, url)
-	return embClient.embedding(modelName, texts, encodingFormat, dim, c.headers(), timeoutSec)
+	return embClient.embedding(modelName, texts, encodingFormat, dim, c.headers(), timeoutMs)
 }
 
-func (c *SiliconflowClient) Rerank(url string, modelName string, query string, texts []string, params map[string]any, timeoutSec int64) (*RerankResponse, error) {
+func (c *SiliconflowClient) Rerank(url string, modelName string, query string, texts []string, params map[string]any, timeoutMs int64) (*RerankResponse, error) {
 	rerankClient := newSiliconflowRerank(c.apiKey, url)
-	return rerankClient.rerank(modelName, query, texts, c.headers(), params, timeoutSec)
+	return rerankClient.rerank(modelName, query, texts, c.headers(), params, timeoutMs)
 }
 
 type EmbeddingRequest struct {
@@ -106,7 +106,7 @@ func newSiliconflowEmbedding(apiKey string, url string) *siliconflowEmbedding {
 	}
 }
 
-func (c *siliconflowEmbedding) embedding(modelName string, texts []string, encodingFormat string, dim int, headers map[string]string, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *siliconflowEmbedding) embedding(modelName string, texts []string, encodingFormat string, dim int, headers map[string]string, timeoutMs int64) (*EmbeddingResponse, error) {
 	var r EmbeddingRequest
 	r.Model = modelName
 	r.Input = texts
@@ -115,7 +115,7 @@ func (c *siliconflowEmbedding) embedding(modelName string, texts []string, encod
 		r.Dimensions = dim
 	}
 
-	res, err := models.PostRequest[EmbeddingResponse](r, c.url, headers, timeoutSec)
+	res, err := models.PostRequest[EmbeddingResponse](r, c.url, headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +195,7 @@ func newSiliconflowRerank(apiKey string, url string) *siliconflowRerank {
 	}
 }
 
-func (c *siliconflowRerank) rerank(modelName string, query string, texts []string, headers map[string]string, params map[string]any, timeoutSec int64) (*RerankResponse, error) {
+func (c *siliconflowRerank) rerank(modelName string, query string, texts []string, headers map[string]string, params map[string]any, timeoutMs int64) (*RerankResponse, error) {
 	requestBody := map[string]interface{}{
 		"model":     modelName,
 		"query":     query,
@@ -204,7 +204,7 @@ func (c *siliconflowRerank) rerank(modelName string, query string, texts []strin
 	for k, v := range params {
 		requestBody[k] = v
 	}
-	res, err := models.PostRequest[RerankResponse](requestBody, c.url, headers, timeoutSec)
+	res, err := models.PostRequest[RerankResponse](requestBody, c.url, headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}

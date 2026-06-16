@@ -906,6 +906,7 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			NumOfRows:      work.rowCount,
 			ManifestPath:   manifestPaths[i],
 			StorageVersion: storage.StorageV3,
+			Level:          datapb.SegmentLevel_L1,
 			// Fake binlog so downstream treats external segments like normal
 			// StorageV3 segments. MemorySize is pre-computed from Take sampling
 			// so QueryNode skips the external-specific sampling path.

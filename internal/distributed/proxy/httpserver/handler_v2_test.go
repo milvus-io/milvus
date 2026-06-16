@@ -2449,6 +2449,12 @@ func TestMethodGet(t *testing.T) {
 			{Role: &milvuspb.RoleEntity{Name: util.RoleAdmin}},
 		},
 	}, nil).Once()
+	mp.EXPECT().SelectRole(mock.Anything, mock.Anything).Return(&milvuspb.SelectRoleResponse{
+		Status: &StatusSuccess,
+		Results: []*milvuspb.RoleResult{
+			{Role: &milvuspb.RoleEntity{Name: util.RoleAdmin, Description: "admin role"}},
+		},
+	}, nil).Once()
 	mp.EXPECT().SelectGrant(mock.Anything, mock.Anything).Return(&milvuspb.SelectGrantResponse{
 		Status: &StatusSuccess,
 		Entities: []*milvuspb.GrantEntity{
@@ -2609,6 +2615,51 @@ var commonSuccessStatus = &commonpb.Status{
 var commonErrorStatus = &commonpb.Status{
 	ErrorCode: commonpb.ErrorCode_CollectionNameNotFound, // 28
 	Reason:    "",
+}
+
+func TestRoleDescriptionV2(t *testing.T) {
+	paramtable.Init()
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().CreateRole(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
+		assert.Equal(t, "test_role", req.GetEntity().GetName())
+		assert.Equal(t, "role description", req.GetEntity().GetDescription())
+		return commonSuccessStatus, nil
+	}).Once()
+	mp.EXPECT().AlterRole(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+		assert.Equal(t, "test_role", req.GetRoleName())
+		assert.Equal(t, "updated description", req.GetDescription())
+		return commonSuccessStatus, nil
+	}).Once()
+	mp.EXPECT().SelectRole(mock.Anything, mock.Anything).Return(&milvuspb.SelectRoleResponse{
+		Status: &StatusSuccess,
+		Results: []*milvuspb.RoleResult{
+			{Role: &milvuspb.RoleEntity{Name: "test_role", Description: "updated description"}},
+		},
+	}, nil).Once()
+	mp.EXPECT().SelectGrant(mock.Anything, mock.Anything).Return(&milvuspb.SelectGrantResponse{
+		Status: &StatusSuccess,
+	}, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+
+	post := func(path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(body)))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+		return w
+	}
+
+	w := post(versionalV2(RoleCategory, CreateAction), `{"roleName": "test_role", "description": "role description"}`)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	w = post(versionalV2(RoleCategory, AlterAction), `{"roleName": "test_role", "description": "updated description"}`)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	w = post(versionalV2(RoleCategory, DescribeAction), `{"roleName": "test_role"}`)
+	assert.Equal(t, http.StatusOK, w.Code)
+	returnBody := map[string]any{}
+	assert.Nil(t, json.Unmarshal(w.Body.Bytes(), &returnBody))
+	assert.EqualValues(t, 0, returnBody[HTTPReturnCode])
+	assert.Equal(t, "updated description", returnBody[HTTPReturnDescription])
 }
 
 func TestMethodDelete(t *testing.T) {

@@ -19,6 +19,8 @@ package rootcoord
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
@@ -51,9 +53,41 @@ func (c *Core) broadcastCreateRole(ctx context.Context, in *milvuspb.CreateRoleR
 	return err
 }
 
+func (c *Core) broadcastAlterRole(ctx context.Context, in *milvuspb.AlterRoleRequest) error {
+	broadcaster, err := startBroadcastWithRBACLock(ctx)
+	if err != nil {
+		return err
+	}
+	defer broadcaster.Close()
+
+	if err := c.meta.CheckIfAlterRole(ctx, in); err != nil {
+		return merr.Wrap(err, "failed to check if alter role")
+	}
+
+	msg := message.NewAlterRoleMessageBuilderV2().
+		WithHeader(&message.AlterRoleMessageHeader{
+			RoleEntity: &milvuspb.RoleEntity{
+				Name:        in.GetRoleName(),
+				Description: in.GetDescription(),
+			},
+		}).
+		WithBody(&message.AlterRoleMessageBody{}).
+		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		MustBuildBroadcast()
+	_, err = broadcaster.Broadcast(ctx, msg)
+	return err
+}
+
 // alterRoleV2AckCallback is the ack callback function for the AlterRoleMessageV2 message.
 func (c *DDLCallback) alterRoleV2AckCallback(ctx context.Context, result message.BroadcastResultAlterRoleMessageV2) error {
-	return c.meta.CreateRole(ctx, util.DefaultTenant, result.Message.Header().RoleEntity)
+	role := result.Message.Header().RoleEntity
+	if _, err := c.meta.SelectRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: role.GetName()}, false); err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return c.meta.CreateRole(ctx, util.DefaultTenant, role)
+		}
+		return err
+	}
+	return c.meta.AlterRole(ctx, util.DefaultTenant, role)
 }
 
 func (c *Core) broadcastDropRole(ctx context.Context, in *milvuspb.DropRoleRequest) error {

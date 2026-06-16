@@ -36,6 +36,7 @@ type cohereProvider struct {
 	url          string
 	modelName    string
 	params       map[string]any
+	timeoutMs    int64
 }
 
 func newCohereProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (ModelProvider, error) {
@@ -75,18 +76,21 @@ func newCohereProvider(params []*commonpb.KeyValuePair, conf map[string]string, 
 	if modelName == "" {
 		return nil, merr.WrapErrParameterMissingMsg("cohere rerank model name is required")
 	}
+	timeoutMs := models.ResolveTimeoutMs(params)
+
 	provider := cohereProvider{
 		baseProvider: baseProvider{batchSize: maxBatch},
 		cohereClient: cohereClient,
 		url:          url,
 		modelName:    modelName,
 		params:       nil,
+		timeoutMs:    timeoutMs,
 	}
 	return &provider, nil
 }
 
 func (provider *cohereProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	rerankResp, err := provider.cohereClient.Rerank(provider.url, provider.modelName, query, docs, nil, 30)
+	rerankResp, err := provider.cohereClient.Rerank(provider.url, provider.modelName, query, docs, nil, provider.timeoutMs)
 	if err != nil {
 		return nil, err
 	}

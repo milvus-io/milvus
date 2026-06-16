@@ -38,9 +38,9 @@ type SiliconflowEmbeddingProvider struct {
 	modelName     string
 	embedDimParam int64
 
-	maxBatch   int
-	timeoutSec int64
-	extraInfo  *models.ModelExtraInfo
+	maxBatch  int
+	timeoutMs int64
+	extraInfo *models.ModelExtraInfo
 }
 
 func NewSiliconflowEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (*SiliconflowEmbeddingProvider, error) {
@@ -77,6 +77,8 @@ func NewSiliconflowEmbeddingProvider(fieldSchema *schemapb.FieldSchema, function
 		url = "https://api.siliconflow.cn/v1/embeddings"
 	}
 
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
+
 	provider := SiliconflowEmbeddingProvider{
 		client:        c,
 		url:           url,
@@ -84,7 +86,7 @@ func NewSiliconflowEmbeddingProvider(fieldSchema *schemapb.FieldSchema, function
 		modelName:     modelName,
 		embedDimParam: dim,
 		maxBatch:      32,
-		timeoutSec:    30,
+		timeoutMs:     timeoutMs,
 		extraInfo:     extraInfo,
 	}
 	return &provider, nil
@@ -106,7 +108,7 @@ func (provider *SiliconflowEmbeddingProvider) CallEmbedding(ctx context.Context,
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], "float", int(provider.embedDimParam), provider.timeoutSec)
+		resp, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], "float", int(provider.embedDimParam), provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}

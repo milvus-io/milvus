@@ -2213,6 +2213,13 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 			if property.GetKey() != common.CollectionDescription {
 				continue
 			}
+			// Only validate the description when it is actually changed. A
+			// pre-existing collection may resend its (possibly oversized)
+			// description unchanged while altering other properties (e.g. TTL);
+			// re-validating an unchanged value would reject legitimate alters.
+			if property.GetValue() == collSchema.GetDescription() {
+				continue
+			}
 			if err := validateCollectionDescription(property.GetValue()); err != nil {
 				return err
 			}

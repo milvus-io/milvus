@@ -100,7 +100,7 @@ func (c *AliDashScopeEmbedding) Check() error {
 	return nil
 }
 
-func (c *AliDashScopeEmbedding) Embedding(modelName string, texts []string, dim int, textType string, outputType string, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *AliDashScopeEmbedding) Embedding(modelName string, texts []string, dim int, textType string, outputType string, timeoutMs int64) (*EmbeddingResponse, error) {
 	var r EmbeddingRequest
 	r.Model = modelName
 	r.Input = Input{texts}
@@ -112,7 +112,7 @@ func (c *AliDashScopeEmbedding) Embedding(modelName string, texts []string, dim 
 		"Content-Type":  "application/json",
 		"Authorization": fmt.Sprintf("Bearer %s", c.apiKey),
 	}
-	res, err := models.PostRequest[EmbeddingResponse](r, c.url, headers, timeoutSec)
+	res, err := models.PostRequest[EmbeddingResponse](r, c.url, headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +159,7 @@ func NewAliDashScopeRerank(apiKey string) *AliDashScopeRerank {
 	}
 }
 
-func (c *AliDashScopeRerank) Rerank(url string, modelName string, query string, texts []string, params map[string]any, timeoutSec int64) (*RerankResponse, error) {
+func (c *AliDashScopeRerank) Rerank(url string, modelName string, query string, texts []string, params map[string]any, timeoutMs int64) (*RerankResponse, error) {
 	var r RerankRequest
 	r.Model = modelName
 	r.Inputs = Inputs{query, texts}
@@ -168,7 +168,7 @@ func (c *AliDashScopeRerank) Rerank(url string, modelName string, query string, 
 		"Content-Type":  "application/json",
 		"Authorization": fmt.Sprintf("Bearer %s", c.apiKey),
 	}
-	res, err := models.PostRequest[RerankResponse](r, url, headers, timeoutSec)
+	res, err := models.PostRequest[RerankResponse](r, url, headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}

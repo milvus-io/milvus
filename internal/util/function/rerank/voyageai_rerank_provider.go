@@ -36,6 +36,7 @@ type voyageaiProvider struct {
 	url            string
 	modelName      string
 	params         map[string]any
+	timeoutMs      int64
 }
 
 func newVoyageaiProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (ModelProvider, error) {
@@ -73,18 +74,21 @@ func newVoyageaiProvider(params []*commonpb.KeyValuePair, conf map[string]string
 	if modelName == "" {
 		return nil, merr.WrapErrParameterMissingMsg("voyageai rerank model name is required")
 	}
+	timeoutMs := models.ResolveTimeoutMs(params)
+
 	provider := voyageaiProvider{
 		baseProvider:   baseProvider{batchSize: maxBatch},
 		voyageaiClient: voyageaiClient,
 		url:            url,
 		modelName:      modelName,
 		params:         modelParams,
+		timeoutMs:      timeoutMs,
 	}
 	return &provider, nil
 }
 
 func (provider *voyageaiProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	rerankResp, err := provider.voyageaiClient.Rerank(provider.url, provider.modelName, query, docs, nil, 30)
+	rerankResp, err := provider.voyageaiClient.Rerank(provider.url, provider.modelName, query, docs, nil, provider.timeoutMs)
 	if err != nil {
 		return nil, err
 	}

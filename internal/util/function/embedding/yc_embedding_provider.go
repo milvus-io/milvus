@@ -52,9 +52,9 @@ type YCEmbeddingProvider struct {
 	apiKey    string
 	modelName string
 
-	maxBatch   int
-	timeoutSec int64
-	extraInfo  *models.ModelExtraInfo
+	maxBatch  int
+	timeoutMs int64
+	extraInfo *models.ModelExtraInfo
 }
 
 func NewYCEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (*YCEmbeddingProvider, error) {
@@ -90,14 +90,16 @@ func NewYCEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *s
 		url = defaultYCTextEmbeddingURL
 	}
 
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
+
 	provider := YCEmbeddingProvider{
-		fieldDim:   fieldDim,
-		url:        url,
-		apiKey:     apiKey,
-		modelName:  modelName,
-		maxBatch:   128,
-		timeoutSec: 30,
-		extraInfo:  extraInfo,
+		fieldDim:  fieldDim,
+		url:       url,
+		apiKey:    apiKey,
+		modelName: modelName,
+		maxBatch:  128,
+		timeoutMs: timeoutMs,
+		extraInfo: extraInfo,
 	}
 	return &provider, nil
 }
@@ -136,7 +138,7 @@ func (provider *YCEmbeddingProvider) CallEmbedding(ctx context.Context, texts []
 			req.Texts = nil
 		}
 
-		resp, err := models.PostRequest[YCEmbeddingResponse](req, provider.url, provider.headers(), provider.timeoutSec)
+		resp, err := models.PostRequest[YCEmbeddingResponse](req, provider.url, provider.headers(), provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}
