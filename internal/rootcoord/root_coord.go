@@ -35,6 +35,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -1222,6 +1223,22 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	resp.DbId = collInfo.DBID
 	resp.UpdateTimestamp = collInfo.UpdateTimestamp
 	resp.UpdateTimestampStr = strconv.FormatUint(collInfo.UpdateTimestamp, 10)
+
+	// Routing facts, parallel to virtual_channel_names so consumers (the proxy
+	// router, datacoord) read the topology and the schema in one response.
+	resp.RoutingMode = collInfo.RoutingMode
+	shardInfos := make([]*schemapb.CollectionShardInfo, len(collInfo.VirtualChannelNames))
+	for i, vchannel := range collInfo.VirtualChannelNames {
+		info := &schemapb.CollectionShardInfo{}
+		if shard, ok := collInfo.ShardInfos[vchannel]; ok {
+			info.LastTruncateTimeTick = shard.LastTruncateTimeTick
+			info.RoutingKeyLower = shard.RoutingKeyLower
+			info.RoutingKeyUpper = shard.RoutingKeyUpper
+			info.State = shard.State
+		}
+		shardInfos[i] = info
+	}
+	resp.ShardInfos = shardInfos
 	return resp
 }
 

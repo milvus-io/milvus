@@ -24,11 +24,11 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -82,7 +82,7 @@ func (m *shardSplitManager) advanceAdopting(task *datapb.SplitShardTask) {
 		return
 	}
 
-	if err := m.commitRouting(task, collection, etcdpb.ShardState_ShardDropped, etcdpb.ShardState_ShardNormal); err != nil {
+	if err := m.commitRouting(task, collection, schemapb.ShardState_ShardDropped, schemapb.ShardState_ShardNormal); err != nil {
 		logger.Warn("commit the adoption routing failed", zap.Error(err))
 		return
 	}
@@ -246,7 +246,7 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 	// new writes) and the targets become Creating (write-routable, read-invisible
 	// to querycoord until adoption). Idempotent by shard state, so a retry — and a
 	// crash before the state advances below — is safe.
-	if err := m.commitRouting(task, collection, etcdpb.ShardState_ShardSplitting, etcdpb.ShardState_ShardCreating); err != nil {
+	if err := m.commitRouting(task, collection, schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating); err != nil {
 		logger.Warn("commit the split routing failed", zap.Error(err))
 		return
 	}
@@ -383,12 +383,12 @@ func (m *shardSplitManager) taskLogger(task *datapb.SplitShardTask) *log.MLogger
 // routing. The full post-split topology is sent; rootcoord applies it
 // idempotently by shard state, so a retry is safe.
 //
-// It supports the single-source-shard collection the planner targets. A
-// collection that already has shards other than the source and the targets is
-// not yet handled here — their current ranges are not visible to datacoord
-// (the DescribeCollection routing exposure lands with the proxy lookup, #50463);
-// such a shard is kept Normal with no range as a safe placeholder.
-func (m *shardSplitManager) commitRouting(task *datapb.SplitShardTask, collection *collectionInfo, sourceState, targetState etcdpb.ShardState) error {
+// The full topology is built from the collection's current shard infos (read
+// from DescribeCollection): the source and the two targets get their new state
+// and ranges, and every other pre-existing shard is carried through with its
+// current range and state — so splitting one shard of a multi-shard collection
+// leaves the rest untouched.
+func (m *shardSplitManager) commitRouting(task *datapb.SplitShardTask, collection *collectionInfo, sourceState, targetState schemapb.ShardState) error {
 	targets := task.GetTargets()
 	targetByVChannel := make(map[string]*datapb.SplitShardTaskTarget, len(targets))
 	for _, target := range targets {
@@ -407,21 +407,33 @@ func (m *shardSplitManager) commitRouting(task *datapb.SplitShardTask, collectio
 	}
 
 	pchannels := make([]string, len(vchannels))
-	shardInfos := make([]*etcdpb.CollectionShardInfo, len(vchannels))
+	shardInfos := make([]*schemapb.CollectionShardInfo, len(vchannels))
 	for i, vchannel := range vchannels {
 		pchannels[i] = funcutil.ToPhysicalChannel(vchannel)
 		switch {
 		case vchannel == task.GetSourceVchannel():
-			shardInfos[i] = &etcdpb.CollectionShardInfo{State: sourceState}
+			shardInfos[i] = &schemapb.CollectionShardInfo{State: sourceState}
 		case targetByVChannel[vchannel] != nil:
 			target := targetByVChannel[vchannel]
-			shardInfos[i] = &etcdpb.CollectionShardInfo{
+			shardInfos[i] = &schemapb.CollectionShardInfo{
 				RoutingKeyLower: target.GetRoutingKeyLower(),
 				RoutingKeyUpper: target.GetRoutingKeyUpper(),
 				State:           targetState,
 			}
 		default:
-			shardInfos[i] = &etcdpb.CollectionShardInfo{State: etcdpb.ShardState_ShardNormal}
+			// a pre-existing shard that is neither the source nor a target:
+			// carry its current range and state through unchanged so a split of
+			// a multi-shard collection keeps the other shards' routing intact.
+			if info, ok := collection.ShardInfos[vchannel]; ok {
+				shardInfos[i] = &schemapb.CollectionShardInfo{
+					LastTruncateTimeTick: info.GetLastTruncateTimeTick(),
+					RoutingKeyLower:      info.GetRoutingKeyLower(),
+					RoutingKeyUpper:      info.GetRoutingKeyUpper(),
+					State:                info.GetState(),
+				}
+			} else {
+				shardInfos[i] = &schemapb.CollectionShardInfo{State: schemapb.ShardState_ShardNormal}
+			}
 		}
 	}
 
@@ -432,7 +444,7 @@ func (m *shardSplitManager) commitRouting(task *datapb.SplitShardTask, collectio
 		VirtualChannelNames:  vchannels,
 		PhysicalChannelNames: pchannels,
 		ShardInfos:           shardInfos,
-		RoutingMode:          etcdpb.RoutingMode_RoutingModeRange,
+		RoutingMode:          schemapb.RoutingMode_RoutingModeRange,
 	})
 }
 

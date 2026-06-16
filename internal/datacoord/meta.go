@@ -171,6 +171,27 @@ type collectionInfo struct {
 	DatabaseName   string
 	DatabaseID     int64
 	VChannelNames  []string
+	// RoutingMode and ShardInfos carry the collection's authoritative routing
+	// topology, read from DescribeCollection. ShardInfos is keyed by vchannel.
+	// They are needed by the shard split planner (the source shard's real key
+	// range) and the routing commit (the other shards' ranges).
+	RoutingMode schemapb.RoutingMode
+	ShardInfos  map[string]*schemapb.CollectionShardInfo
+}
+
+// buildShardInfoMap zips the parallel vchannel and shard-info arrays of a
+// DescribeCollection response into a map keyed by vchannel.
+func buildShardInfoMap(vchannels []string, shardInfos []*schemapb.CollectionShardInfo) map[string]*schemapb.CollectionShardInfo {
+	if len(shardInfos) == 0 {
+		return nil
+	}
+	out := make(map[string]*schemapb.CollectionShardInfo, len(vchannels))
+	for i, vchannel := range vchannels {
+		if i < len(shardInfos) {
+			out[vchannel] = shardInfos[i]
+		}
+	}
+	return out
 }
 
 const (
@@ -465,6 +486,8 @@ func (m *meta) reloadCollectionsFromRootcoord(ctx context.Context, broker broker
 				DatabaseName:   descResp.GetDbName(),
 				DatabaseID:     descResp.GetDbId(),
 				VChannelNames:  descResp.GetVirtualChannelNames(),
+				RoutingMode:    descResp.GetRoutingMode(),
+				ShardInfos:     buildShardInfoMap(descResp.GetVirtualChannelNames(), descResp.GetShardInfos()),
 			}
 			m.AddCollection(collection)
 		}
@@ -522,6 +545,8 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 		DatabaseName:   coll.DatabaseName,
 		DatabaseID:     coll.DatabaseID,
 		VChannelNames:  coll.VChannelNames,
+		RoutingMode:    coll.RoutingMode,
+		ShardInfos:     coll.ShardInfos,
 	}
 
 	return cloneColl

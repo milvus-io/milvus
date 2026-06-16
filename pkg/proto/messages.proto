@@ -7,7 +7,6 @@ option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/messagespb";
 import "common.proto";
 import "schema.proto";
 import "data_coord.proto"; // for SegmentLevel, but it's a basic type should not be in datacoord.proto.
-import "etcd_meta.proto"; // for CollectionShardInfo / RoutingMode in the shard-split routing commit.
 import "index_coord.proto";
 import "internal.proto";
 import "milvus.proto";
@@ -379,8 +378,8 @@ message AlterCollectionMessageUpdates {
     // the split targets), and shard_infos is parallel to virtual_channel_names.
     repeated string virtual_channel_names      = 9;
     repeated string physical_channel_names     = 10;
-    repeated etcd.CollectionShardInfo shard_infos = 11;
-    etcd.RoutingMode routing_mode              = 12; // hash for legacy, range after a split.
+    repeated schema.CollectionShardInfo shard_infos = 11;
+    schema.RoutingMode routing_mode            = 12; // hash for legacy, range after a split.
 }
 
 // AlterLoadConfigOfAlterCollection is the body of alter load config of alter collection message.

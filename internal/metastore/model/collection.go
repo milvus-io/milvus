@@ -55,7 +55,7 @@ type Collection struct {
 	UpdateTimestamp      uint64
 	SchemaVersion        int32
 	ShardInfos           map[string]*ShardInfo
-	RoutingMode          pb.RoutingMode // how a routing key maps to a shard, RoutingModeHash for legacy collections.
+	RoutingMode          schemapb.RoutingMode // how a routing key maps to a shard, RoutingModeHash for legacy collections.
 	FileResourceIds      []int64
 	ExternalSource       string
 	ExternalSpec         string
@@ -70,7 +70,7 @@ type ShardInfo struct {
 	// collection's RoutingMode is RoutingModeRange.
 	RoutingKeyLower []byte
 	RoutingKeyUpper []byte
-	State           pb.ShardState // the lifecycle state during shard split, ShardNormal by default.
+	State           schemapb.ShardState // the lifecycle state during shard split, ShardNormal by default.
 }
 
 func (c *Collection) Available() bool {
@@ -399,17 +399,17 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		collSchema.StructArrayFields = structArrayFields
 	}
 
-	shardInfos := make([]*pb.CollectionShardInfo, len(coll.ShardInfos))
+	shardInfos := make([]*schemapb.CollectionShardInfo, len(coll.ShardInfos))
 	for idx, channelName := range coll.VirtualChannelNames {
 		if shard, ok := coll.ShardInfos[channelName]; ok {
-			shardInfos[idx] = &pb.CollectionShardInfo{
+			shardInfos[idx] = &schemapb.CollectionShardInfo{
 				LastTruncateTimeTick: shard.LastTruncateTimeTick,
 				RoutingKeyLower:      shard.RoutingKeyLower,
 				RoutingKeyUpper:      shard.RoutingKeyUpper,
 				State:                shard.State,
 			}
 		} else {
-			shardInfos[idx] = &pb.CollectionShardInfo{
+			shardInfos[idx] = &schemapb.CollectionShardInfo{
 				LastTruncateTimeTick: 0,
 			}
 		}
