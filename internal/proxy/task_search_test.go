@@ -354,6 +354,26 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		assert.Equal(t, []int64{9, 8, 7, 6, 5, 4, 3, 2, 1, 0}, qt.result.Results.Ids.GetIntId().Data)
 	})
 
+	t.Run("Test search function chain limit rerank", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		collName := "test_collection_function_chain_rerank" + funcutil.GenRandomStr()
+		_, fieldNameId := createCollWithFields(t, collName, qc)
+		qt := getSearchTask(t, collName)
+		qt.request.FunctionChains = []*schemapb.FunctionChain{l2LimitFunctionChain(3)}
+		err = qt.PreExecute(ctx)
+		assert.NoError(t, err)
+
+		assert.NotNil(t, qt.resultBuf)
+		qt.resultBuf.Insert(genTestSearchResultData(1, 10, schemapb.DataType_Float, testFloatField, fieldNameId[testFloatField], false))
+		err := qt.PostExecute(context.TODO())
+		assert.NoError(t, err)
+		assert.Equal(t, []int64{3}, qt.result.Results.Topks)
+		assert.Equal(t, int64(3), qt.result.Results.TopK)
+		assert.Len(t, qt.result.Results.Scores, 3)
+		assert.Len(t, qt.result.Results.Ids.GetIntId().Data, 3)
+	})
+
 	getHybridSearchTaskWithRerank := func(t *testing.T, collName string, funcInput string, data [][]string) *searchTask {
 		subReqs := []*milvuspb.SubSearchRequest{}
 		for _, item := range data {
@@ -5430,6 +5450,141 @@ func TestSearchTask_InitSearchRequestWithStructArrayFields(t *testing.T) {
 	}
 }
 
+func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	schema := &schemapb.CollectionSchema{
+		Name: "test_function_chain_rerank_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "ts", DataType: schemapb.DataType_Int64},
+			{FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
+		},
+	}
+	schemaInfo := newSchemaInfo(schema)
+
+	newRequest := func() *milvuspb.SearchRequest {
+		return &milvuspb.SearchRequest{
+			CollectionName: "test_function_chain_rerank_collection",
+			SearchParams: []*commonpb.KeyValuePair{
+				{Key: AnnsFieldKey, Value: "vec"},
+				{Key: TopKKey, Value: "10"},
+				{Key: common.MetricTypeKey, Value: metric.L2},
+				{Key: ParamsKey, Value: `{"nprobe": 10}`},
+			},
+			SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: nil},
+		}
+	}
+	newFunctionChainRequest := func() *milvuspb.SearchRequest {
+		request := newRequest()
+		request.FunctionChains = []*schemapb.FunctionChain{
+			l2FunctionChain(mapOp("score1", "expr", columnArg("ts")), mapOp("$score", "expr", columnArg("score1"), columnArg("$score"))),
+		}
+		return request
+	}
+	newTask := func(request *milvuspb.SearchRequest) *searchTask {
+		translatedOutputFields, _, _, _, _, err := translateOutputFields(request.GetOutputFields(), schemaInfo, true)
+		require.NoError(t, err)
+		outputFieldIDs, err := getOutputFieldIDs(schemaInfo, translatedOutputFields)
+		require.NoError(t, err)
+
+		return &searchTask{
+			ctx:            ctx,
+			collectionName: request.GetCollectionName(),
+			SearchRequest: &internalpb.SearchRequest{
+				CollectionID:     1,
+				PartitionIDs:     []int64{1},
+				Dsl:              "",
+				PlaceholderGroup: nil,
+				DslType:          commonpb.DslType_BoolExprV1,
+				OutputFieldsId:   outputFieldIDs,
+			},
+			request:                request,
+			schema:                 schemaInfo,
+			translatedOutputFields: translatedOutputFields,
+			tr:                     timerecord.NewTimeRecorder("test"),
+			queryInfos:             []*planpb.QueryInfo{{}},
+		}
+	}
+
+	t.Run("ordinary search initializes function chain rerank meta", func(t *testing.T) {
+		task := newTask(newFunctionChainRequest())
+
+		require.NoError(t, task.initSearchRequest(ctx))
+		meta, ok := task.rerankMeta.(*functionChainRerankMeta)
+		require.True(t, ok)
+		assert.Equal(t, []string{"ts"}, meta.GetInputFieldNames())
+		assert.Equal(t, []int64{101}, meta.GetInputFieldIDs())
+	})
+
+	t.Run("ordinary search with function chains keeps default search type", func(t *testing.T) {
+		task := newTask(newFunctionChainRequest())
+
+		require.NoError(t, task.initSearchRequest(ctx))
+		assert.Equal(t, internalpb.SearchType_DEFAULT, task.SearchType)
+	})
+
+	t.Run("ordinary search rejects order by with function chains", func(t *testing.T) {
+		request := newFunctionChainRequest()
+		request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: OrderByFieldsKey, Value: "ts:asc"})
+		task := newTask(request)
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "order_by and function rerank cannot be used together")
+	})
+
+	t.Run("ordinary search no requery fetches function chain inputs in search plan", func(t *testing.T) {
+		task := newTask(newFunctionChainRequest())
+
+		require.NoError(t, task.initSearchRequest(ctx))
+		assert.False(t, task.needRequery)
+
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
+		assert.ElementsMatch(t, []int64{100, 101}, plan.OutputFieldIds)
+	})
+
+	t.Run("ordinary search requery path still fetches function chain inputs in search plan", func(t *testing.T) {
+		request := newFunctionChainRequest()
+		request.OutputFields = []string{"vec"}
+		task := newTask(request)
+
+		require.NoError(t, task.initSearchRequest(ctx))
+		assert.True(t, task.needRequery)
+
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
+		assert.Equal(t, []int64{101}, plan.OutputFieldIds)
+	})
+
+	t.Run("ordinary search keeps function score rerank meta", func(t *testing.T) {
+		request := newRequest()
+		request.FunctionScore = &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "decay",
+					Type:             schemapb.FunctionType_Rerank,
+					InputFieldNames:  []string{"ts"},
+					OutputFieldNames: []string{},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "reranker", Value: "decay"},
+						{Key: "origin", Value: "100"},
+						{Key: "scale", Value: "10"},
+					},
+				},
+			},
+		}
+		task := newTask(request)
+
+		require.NoError(t, task.initSearchRequest(ctx))
+		meta, ok := task.rerankMeta.(*funcScoreRerankMeta)
+		require.True(t, ok)
+		assert.Equal(t, []string{"ts"}, meta.GetInputFieldNames())
+		assert.Equal(t, []int64{101}, meta.GetInputFieldIDs())
+	})
+}
+
 func TestSearchTask_AddHighlightTask(t *testing.T) {
 	paramtable.Init()
 
@@ -5738,7 +5893,7 @@ func TestSearchTask_OrderByValidation(t *testing.T) {
 
 		err := qt.initSearchRequest(ctx)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "order_by and function_score cannot be used together")
+		assert.Contains(t, err.Error(), "order_by and function rerank cannot be used together")
 	})
 
 	t.Run("regular search with invalid order_by direction should fail", func(t *testing.T) {

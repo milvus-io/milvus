@@ -394,6 +394,7 @@ type SearchReqV2 struct {
 	ConsistencyLevel  string                 `json:"consistencyLevel"`
 	ExprParams        map[string]interface{} `json:"exprParams"`
 	FunctionScore     FunctionScore          `json:"functionScore"`
+	FunctionChains    []FunctionChainReq     `json:"functionChains"`
 	SearchAggregation *SearchAggregationReq  `json:"searchAggregation"`
 	// not use Params any more, just for compatibility
 	Params map[string]float64 `json:"params"`
@@ -464,6 +465,7 @@ type HybridSearchReq struct {
 	OutputFields      []string              `json:"outputFields"`
 	ConsistencyLevel  string                `json:"consistencyLevel"`
 	FunctionScore     FunctionScore         `json:"functionScore"`
+	FunctionChains    []FunctionChainReq    `json:"functionChains"`
 	SearchAggregation *SearchAggregationReq `json:"searchAggregation"`
 }
 
@@ -823,6 +825,31 @@ func hasTypeParam(typeParams []*commonpb.KeyValuePair, key string) bool {
 type FunctionScore struct {
 	Functions []FunctionSchema       `json:"functions"`
 	Params    map[string]interface{} `json:"params"`
+}
+
+type FunctionChainReq struct {
+	Name  string               `json:"name"`
+	Stage string               `json:"stage"`
+	Ops   []FunctionChainOpReq `json:"ops"`
+}
+
+type FunctionChainOpReq struct {
+	Op      string                 `json:"op"`
+	Expr    *FunctionChainExprReq  `json:"expr"`
+	Inputs  []string               `json:"inputs"`
+	Outputs []string               `json:"outputs"`
+	Params  map[string]interface{} `json:"params"`
+}
+
+type FunctionChainExprReq struct {
+	Name   string                    `json:"name"`
+	Args   []FunctionChainExprArgReq `json:"args"`
+	Params map[string]interface{}    `json:"params"`
+}
+
+type FunctionChainExprArgReq struct {
+	Column  *string     `json:"column"`
+	Literal interface{} `json:"literal"`
 }
 
 type FunctionSchema struct {

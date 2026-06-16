@@ -495,6 +495,9 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.legacyGroupByWire = errGroupByField == nil && errGroupByFields != nil && t.request.GetSearchAggregation() == nil
 
 	var err error
+	if err := validateFunctionChainSearchRequest(t.request, true); err != nil {
+		return err
+	}
 	if t.request.FunctionScore != nil {
 		t.rerankMeta = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
 	} else {
@@ -832,13 +835,22 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 
 	t.SearchType = searchType
 
-	if t.request.FunctionScore != nil {
+	if err := validateFunctionChainSearchRequest(t.request, false); err != nil {
+		return err
+	}
+	if len(t.request.GetFunctionChains()) > 0 {
+		meta, err := newFunctionChainRerankMeta(t.request.GetFunctionChains(), t.schema)
+		if err != nil {
+			return err
+		}
+		t.rerankMeta = meta
+	} else if t.request.FunctionScore != nil {
 		t.rerankMeta = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
 	}
 
-	// order_by and function_score cannot be used together
+	// order_by and function rerank cannot be used together
 	if len(t.orderByFields) > 0 && t.rerankMeta != nil {
-		return merr.WrapErrParameterInvalidMsg("order_by and function_score cannot be used together: they specify conflicting sort criteria")
+		return merr.WrapErrParameterInvalidMsg("order_by and function rerank cannot be used together: they specify conflicting sort criteria")
 	}
 
 	analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV(AnalyzerKey, t.request.GetSearchParams())
@@ -1092,8 +1104,8 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 
 	hasFilter := dsl != "" || len(exprTemplateValues) > 0
 	searchType := internalpb.SearchType_DEFAULT
-	// if function score is not nil, set searchType to DEFAULT, optimizations will be disabled in queryhook
-	if t.request.GetFunctionScore() == nil {
+	// if function rerank is set, keep searchType DEFAULT; optimizations will be disabled in queryhook
+	if !hasFunctionRerank(t.request) {
 		searchType = searchInfo.DetermineSearchType(hasFilter)
 	}
 

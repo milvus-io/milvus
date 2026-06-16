@@ -1729,6 +1729,12 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			return nil, err
 		}
 	}
+	if len(httpReq.FunctionChains) != 0 {
+		if req.FunctionChains, err = genFunctionChains(httpReq.FunctionChains); err != nil {
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(merr.ErrParameterInvalid), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
+	}
 
 	if hasIDs {
 		// Search by primary keys
@@ -1895,6 +1901,11 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 
 	if httpReq.SearchAggregation != nil {
 		err := merr.WrapErrParameterInvalidMsg("searchAggregation is not supported for hybrid search")
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+	if len(httpReq.FunctionChains) != 0 {
+		err := merr.WrapErrParameterInvalidMsg("functionChains is not supported for hybrid search yet")
 		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
