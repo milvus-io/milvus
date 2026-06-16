@@ -23,6 +23,7 @@
 #include "common/EasyAssert.h"
 #include "common/File.h"
 #include "common/JsonCastType.h"
+#include "common/OpContext.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
 #include "knowhere/index/index_factory.h"
@@ -30,10 +31,6 @@
 #include "common/Types.h"
 #include "index/Meta.h"
 #include "index/IndexStats.h"
-
-namespace milvus {
-struct OpContext;
-}
 
 namespace milvus::index {
 

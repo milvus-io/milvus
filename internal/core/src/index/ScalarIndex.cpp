@@ -242,10 +242,18 @@ ScalarIndex<T>::LoadUnified(const Config& config, milvus::OpContext* op_ctx) {
     auto collection_id =
         GetValueFromConfig<int64_t>(config, COLLECTION_ID).value_or(0);
 
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
     auto cancellation_token =
         op_ctx ? op_ctx->cancellation_token : folly::CancellationToken();
-    auto reader = storage::IndexEntryReader::Open(
-        input, file_size, collection_id, milvus::HIGH, cancellation_token);
+    auto reader =
+        storage::IndexEntryReader::Open(input,
+                                        file_size,
+                                        collection_id,
+                                        milvus::PriorityForLoad(load_priority),
+                                        cancellation_token);
     AssertInfo(reader != nullptr, "failed to create IndexEntryReader");
 
     LoadEntries(*reader, config);
