@@ -122,40 +122,46 @@ func (o *SortOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, 
 
 		// Sort indices based on values, with tie-breaking by ID ascending.
 		// Nulls always sort to the end regardless of sort direction.
-		sort.SliceStable(indices, func(i, j int) bool {
-			vi := indices[i]
-			vj := indices[j]
+		less, useTypedLess := makeArrayRowLess(sortChunk, tbChunk, o.desc)
+		if useTypedLess {
+			sort.SliceStable(indices, func(i, j int) bool {
+				return less(indices[i], indices[j])
+			})
+		} else {
+			sort.SliceStable(indices, func(i, j int) bool {
+				vi := indices[i]
+				vj := indices[j]
 
-			iNull := sortChunk.IsNull(vi)
-			jNull := sortChunk.IsNull(vj)
-			if iNull && jNull {
-				// Both null — use tie-break if available
+				iNull := sortChunk.IsNull(vi)
+				jNull := sortChunk.IsNull(vj)
+				if iNull && jNull {
+					// Both null — use tie-break if available
+					if tbChunk != nil {
+						return compareArrayValues(tbChunk, vi, vj) < 0
+					}
+					return false
+				}
+				if iNull {
+					return false // null always goes after non-null
+				}
+				if jNull {
+					return true // non-null always goes before null
+				}
+
+				cmp := compareArrayValues(sortChunk, vi, vj)
+				if cmp != 0 {
+					if o.desc {
+						return cmp > 0
+					}
+					return cmp < 0
+				}
+				// Tie-break: sort by tie-break column ascending
 				if tbChunk != nil {
 					return compareArrayValues(tbChunk, vi, vj) < 0
 				}
 				return false
-			}
-			if iNull {
-				return false // null always goes after non-null
-			}
-			if jNull {
-				return true // non-null always goes before null
-			}
-
-			cmp := compareArrayValues(sortChunk, vi, vj)
-			if cmp != 0 {
-				if o.desc {
-					return cmp > 0
-				}
-				return cmp < 0
-			}
-			// Tie-break: sort by tie-break column ascending
-			if tbChunk != nil {
-				return compareArrayValues(tbChunk, vi, vj) < 0
-			}
-			return false
-		})
-
+			})
+		}
 		newChunkSizes[chunkIdx] = int64(chunkLen)
 
 		// Reorder each column
@@ -184,6 +190,27 @@ func (o *SortOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, 
 	}
 
 	return builder.Build(), nil
+}
+
+type rowLessFunc func(i, j int) bool
+
+func makeArrayRowLess(sortArr arrow.Array, tieArr arrow.Array, desc bool) (rowLessFunc, bool) {
+	if !desc {
+		return nil, false
+	}
+	if scoreArr, ok := sortArr.(*array.Float32); ok && scoreArr.NullN() == 0 {
+		if idArr, ok := tieArr.(*array.Int64); ok && idArr.NullN() == 0 {
+			return func(i, j int) bool {
+				si := scoreArr.Value(i)
+				sj := scoreArr.Value(j)
+				if si != sj {
+					return si > sj
+				}
+				return idArr.Value(i) < idArr.Value(j)
+			}, true
+		}
+	}
+	return nil, false
 }
 
 // isComparableType checks if an Arrow data type is comparable for sorting.

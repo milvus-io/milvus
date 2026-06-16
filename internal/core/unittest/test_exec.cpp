@@ -17,7 +17,9 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <queue>
 #include <string>
+#include <utility>
 #include <unordered_map>
 #include <vector>
 
@@ -33,6 +35,7 @@
 #include "common/protobuf_utils.h"
 #include "exec/QueryContext.h"
 #include "exec/Task.h"
+#include "exec/operator/RescoresNode.h"
 #include "exec/expression/ConjunctExpr.h"
 #include "exec/expression/Expr.h"
 #include "exec/expression/function/FunctionFactory.h"
@@ -43,6 +46,7 @@
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
+#include "rescores/Scorer.h"
 #include "query/PlanNode.h"
 #include "query/Utils.h"
 #include "segcore/SegcoreConfig.h"
@@ -129,6 +133,158 @@ INSTANTIATE_TEST_SUITE_P(TaskTestSuite,
                          TaskTest,
                          ::testing::Values(DataType::VECTOR_FLOAT,
                                            DataType::VECTOR_SPARSE_U32_F32));
+
+namespace {
+
+bool
+PlanTreeContainsRescoresNode(
+    const std::shared_ptr<milvus::plan::PlanNode>& root) {
+    std::queue<std::shared_ptr<milvus::plan::PlanNode>> queue;
+    if (root != nullptr) {
+        queue.push(root);
+    }
+
+    while (!queue.empty()) {
+        auto node = queue.front();
+        queue.pop();
+        if (std::dynamic_pointer_cast<milvus::plan::RescoresNode>(node) !=
+            nullptr) {
+            return true;
+        }
+        for (const auto& source : node->sources()) {
+            queue.push(source);
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
+TEST(PlanProtoTest, ScorersDoNotInsertRescoresNode) {
+    using namespace milvus;
+    using namespace milvus::query;
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    proto::plan::PlanNode plan_node;
+    auto anns = plan_node.mutable_vector_anns();
+    anns->set_vector_type(proto::plan::VectorType::FloatVector);
+    anns->set_field_id(vec_fid.get());
+    anns->set_placeholder_tag("$0");
+    auto query_info = anns->mutable_query_info();
+    query_info->set_topk(10);
+    query_info->set_metric_type(knowhere::metric::L2);
+    query_info->set_search_params(R"({"nprobe": 10})");
+
+    auto scorer = plan_node.add_scorers();
+    scorer->set_weight(2.0F);
+    scorer->set_type(proto::plan::FunctionType::FunctionTypeWeight);
+    plan_node.mutable_score_option()->set_boost_mode(
+        proto::plan::BoostMode::BoostModeMultiply);
+    plan_node.mutable_score_option()->set_function_mode(
+        proto::plan::FunctionMode::FunctionModeSum);
+
+    auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+    ASSERT_NE(plan, nullptr);
+    ASSERT_NE(plan->plan_node_, nullptr);
+    ASSERT_NE(plan->plan_node_->plannodes_, nullptr);
+    EXPECT_FALSE(PlanTreeContainsRescoresNode(plan->plan_node_->plannodes_));
+}
+
+TEST(RescoresNodeTest, ReturnsNullBeforeNoMoreInputAndPassesThroughNullInput) {
+    proto::plan::ScoreOption option;
+    option.set_boost_mode(proto::plan::BoostModeMultiply);
+    option.set_function_mode(proto::plan::FunctionModeSum);
+    std::vector<std::shared_ptr<rescores::Scorer>> scorers;
+    auto logical_node = std::make_shared<plan::RescoresNode>(
+        "rescore", scorers, option, std::vector<plan::PlanNodePtr>{});
+    auto query_context =
+        std::make_shared<QueryContext>("rescore-test",
+                                       nullptr,
+                                       0,
+                                       MAX_TIMESTAMP,
+                                       0,
+                                       0,
+                                       query::PlanOptions{false},
+                                       std::make_shared<QueryConfig>());
+    auto task = Task::Create("rescore-test-task",
+                             plan::PlanFragment(logical_node),
+                             0,
+                             query_context);
+    DriverContext driver_context(task, 0, 0, 0, 0);
+    PhyRescoresNode node(0, &driver_context, logical_node);
+
+    EXPECT_TRUE(node.NeedInput());
+    EXPECT_EQ(node.GetOutput(), nullptr);
+
+    node.NoMoreInput();
+    EXPECT_EQ(node.GetOutput(), nullptr);
+    EXPECT_TRUE(node.IsFinished());
+    EXPECT_FALSE(node.NeedInput());
+}
+
+TEST(RescoresNodeTest, AppliesBoostAndSortsSearchResult) {
+    proto::plan::ScoreOption option;
+    option.set_boost_mode(proto::plan::BoostModeMultiply);
+    option.set_function_mode(proto::plan::FunctionModeSum);
+    std::vector<std::shared_ptr<rescores::Scorer>> scorers{
+        std::make_shared<rescores::WeightScorer>(nullptr, 10.0F),
+    };
+    auto logical_node = std::make_shared<plan::RescoresNode>(
+        "rescore", scorers, option, std::vector<plan::PlanNodePtr>{});
+
+    SearchResult search_result;
+    search_result.total_nq_ = 1;
+    search_result.unity_topK_ = 4;
+    search_result.total_data_cnt_ = 4;
+    search_result.distances_ = {0.4F, 0.1F, 0.3F, 0.2F};
+    search_result.seg_offsets_ = {4, -1, 3, 2};
+
+    SearchInfo search_info;
+    search_info.topk_ = 4;
+    search_info.metric_type_ = knowhere::metric::IP;
+
+    auto query_context =
+        std::make_shared<QueryContext>("rescore-test",
+                                       nullptr,
+                                       4,
+                                       MAX_TIMESTAMP,
+                                       0,
+                                       0,
+                                       query::PlanOptions{false},
+                                       std::make_shared<QueryConfig>());
+    OpContext op_context;
+    query_context->set_op_context(&op_context);
+    query_context->set_search_info(search_info);
+    query_context->set_search_result(std::move(search_result));
+
+    auto task = Task::Create("rescore-test-task",
+                             plan::PlanFragment(logical_node),
+                             0,
+                             query_context);
+    DriverContext driver_context(task, 0, 0, 0, 0);
+    PhyRescoresNode node(0, &driver_context, logical_node);
+    auto input = std::make_shared<RowVector>(std::vector<VectorPtr>{});
+    auto expected_input = input;
+    node.AddInput(input);
+    node.NoMoreInput();
+
+    auto output = node.GetOutput();
+    EXPECT_EQ(output, expected_input);
+    EXPECT_TRUE(node.IsFinished());
+
+    auto rescored = query_context->get_search_result();
+    EXPECT_EQ(rescored.seg_offsets_, (std::vector<int64_t>{4, 3, 2, -1}));
+    ASSERT_EQ(rescored.distances_.size(), 4);
+    EXPECT_FLOAT_EQ(rescored.distances_[0], 4.0F);
+    EXPECT_FLOAT_EQ(rescored.distances_[1], 3.0F);
+    EXPECT_FLOAT_EQ(rescored.distances_[2], 2.0F);
+    EXPECT_FLOAT_EQ(rescored.distances_[3], 0.1F);
+}
 
 TEST_P(TaskTest, RegisterFunction) {
     milvus::exec::expression::FunctionFactory& factory =

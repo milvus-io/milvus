@@ -21,6 +21,7 @@ package expr_test
 import (
 	"testing"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/suite"
 
@@ -169,6 +170,60 @@ func (s *DecayExprIntegrationTestSuite) TestIntegration_ChainWithDecay() {
 
 	// Should have 3 results per chunk
 	s.Equal([]int64{3, 3}, result.ChunkSizes())
+}
+
+func (s *DecayExprIntegrationTestSuite) TestIntegration_NullDecayFactorTreatedAsZero() {
+	fieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: "distance",
+		FieldId:   100,
+		ValidData: []bool{true, false},
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: []int64{100, 0},
+					},
+				},
+			},
+		},
+	}
+	resultData := &schemapb.SearchResultData{
+		NumQueries: 1,
+		TopK:       2,
+		Topks:      []int64{2},
+		Scores:     []float32{1.0, 0.8},
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: []int64{1, 2},
+				},
+			},
+		},
+		FieldsData: []*schemapb.FieldData{fieldData},
+	}
+	df, err := chain.FromSearchResultData(resultData, s.pool, []string{"distance"})
+	s.Require().NoError(err)
+	defer df.Release()
+
+	decayExpr, err := expr.NewDecayExpr(expr.GaussFunction, 100, 50, 0, 0.5)
+	s.Require().NoError(err)
+	combineExpr, err := expr.NewScoreCombineExpr(expr.ModeMultiply, nil, expr.WithNullPolicy(expr.ScoreCombineNullAsZero))
+	s.Require().NoError(err)
+
+	result, err := chain.NewFuncChainWithAllocator(s.pool).
+		SetStage(types.StageL2Rerank).
+		Map(decayExpr, []string{"distance"}, []string{"_decay_score"}).
+		Map(combineExpr, []string{types.ScoreFieldName, "_decay_score"}, []string{types.ScoreFieldName}).
+		Execute(df)
+	s.Require().NoError(err)
+	defer result.Release()
+
+	scores := result.Column(types.ScoreFieldName).Chunk(0).(*array.Float32)
+	s.False(scores.IsNull(0))
+	s.InDelta(1.0, scores.Value(0), 0.001)
+	s.False(scores.IsNull(1))
+	s.InDelta(0.0, scores.Value(1), 0.001)
 }
 
 func (s *DecayExprIntegrationTestSuite) TestIntegration_ParseFromJSON() {

@@ -47,7 +47,7 @@ function_score_merge(const float& a,
 
 #define MAGIC_BITS (0x3FFL << 52)
 
-double
+inline double
 hash_to_double(const uint64_t& h) {
     auto double_bytes = (MAGIC_BITS | (h & 0xFFFFFFFFFFFFF));
     double result;

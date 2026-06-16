@@ -509,7 +509,7 @@ func buildDecayChain(fc *FuncChain, collSchema *schemapb.CollectionSchema, funcS
 		[]string{inputField},
 		[]string{decayScoreCol})
 
-	combineExpr, err := expr.NewScoreCombineExpr(expr.ModeMultiply, nil)
+	combineExpr, err := expr.NewScoreCombineExpr(expr.ModeMultiply, nil, expr.WithNullPolicy(expr.ScoreCombineNullAsZero))
 	if err != nil {
 		return merr.WrapErrParameterInvalidMsg("rerank_builder: %v", err)
 	}

@@ -662,21 +662,6 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
     }
 
-    // if has score function, run filter and scorer at last
-    if (plan_node_proto.scorers_size() > 0) {
-        std::vector<std::shared_ptr<rescores::Scorer>> scorers;
-        for (const auto& function : plan_node_proto.scorers()) {
-            scorers.push_back(ParseScorer(function));
-        }
-
-        plannode = std::make_shared<milvus::plan::RescoresNode>(
-            milvus::plan::GetNextPlanNodeId(),
-            std::move(scorers),
-            plan_node_proto.score_option(),
-            sources);
-        sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
-    }
-
     plan_node->plannodes_ = plannode;
 
     PlanOptionsFromProto(plan_node_proto.plan_options(),
