@@ -168,10 +168,6 @@ set(LINK_TARGETS
     ${CONAN_TARGETS}
     )
 
-if(USE_OPENDAL)
-    set(LINK_TARGETS ${LINK_TARGETS} opendal)
-endif()
-
 if(ENABLE_AZURE_FS)
     set(AZURE_BUILD_DIR ON)
     # Arrow already includes Azure SDK when built with_azure=True
