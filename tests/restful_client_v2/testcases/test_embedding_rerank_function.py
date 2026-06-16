@@ -1364,6 +1364,8 @@ class TestModelRerankFunction(TestBase):
                         "provider": "tei",
                         "queries": query_texts,
                         "endpoint": tei_reranker_endpoint,
+                        "truncate": True,
+                        "truncation_direction": "Right",
                     },
                 }
             ]
