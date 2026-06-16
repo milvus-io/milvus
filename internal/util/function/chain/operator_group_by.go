@@ -172,11 +172,11 @@ func (o *GroupByOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFram
 	// Validate columns exist
 	groupCol := input.Column(o.groupByField)
 	if groupCol == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("group_by_op: column %q not found", o.groupByField))
+		return nil, merr.WrapErrServiceInternalMsg("group_by_op: column %q not found", o.groupByField)
 	}
 	scoreCol := input.Column(types.ScoreFieldName)
 	if scoreCol == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("group_by_op: column %q not found", types.ScoreFieldName))
+		return nil, merr.WrapErrServiceInternalMsg("group_by_op: column %q not found", types.ScoreFieldName)
 	}
 
 	numChunks := input.NumChunks()
@@ -218,7 +218,7 @@ func (o *GroupByOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFram
 			dataChunk := col.Chunk(chunkIdx)
 			reordered, err := dispatchPickByIndices(ctx.Pool(), dataChunk, result.indices)
 			if err != nil {
-				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("group_by_op: reorder column %s: %v", colName, err))
+				return nil, merr.WrapErrServiceInternalMsg("group_by_op: reorder column %s: %v", colName, err)
 			}
 			collector.Set(colName, chunkIdx, reordered)
 		}
@@ -259,13 +259,13 @@ func (o *GroupByOp) processChunk(ctx *types.FuncContext, input *DataFrame, chunk
 	scoreCol := input.Column(types.ScoreFieldName)
 	idCol := input.Column(types.IDFieldName)
 	if idCol == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("group_by_op: column %q not found", types.IDFieldName))
+		return nil, merr.WrapErrServiceInternalMsg("group_by_op: column %q not found", types.IDFieldName)
 	}
 
 	groupChunk := groupCol.Chunk(chunkIdx)
 	scoreChunk, ok := scoreCol.Chunk(chunkIdx).(*array.Float32)
 	if !ok {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("group_by_op: score column chunk %d is not Float32", chunkIdx))
+		return nil, merr.WrapErrServiceInternalMsg("group_by_op: score column chunk %d is not Float32", chunkIdx)
 	}
 	idChunk := idCol.Chunk(chunkIdx)
 	chunkLen := groupChunk.Len()
@@ -457,12 +457,12 @@ func (o *GroupByOp) computeGroupScore(g *group) {
 func NewGroupByOpFromRepr(repr *OperatorRepr) (Operator, error) {
 	field, ok := repr.Params["field"].(string)
 	if !ok || field == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("group_by_op: field is required")
+		return nil, merr.WrapErrParameterMissingMsg("group_by_op: field is required")
 	}
 
 	groupSize, err := getInt64Param(repr.Params, "group_size")
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("group_by_op: %v", err))
+		return nil, merr.Wrap(err, "group_by_op")
 	}
 	if groupSize <= 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("group_by_op: group_size must be positive")
@@ -470,7 +470,7 @@ func NewGroupByOpFromRepr(repr *OperatorRepr) (Operator, error) {
 
 	limit, err := getInt64Param(repr.Params, "limit")
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("group_by_op: %v", err))
+		return nil, merr.Wrap(err, "group_by_op")
 	}
 	if limit <= 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("group_by_op: limit must be positive")
@@ -480,7 +480,7 @@ func NewGroupByOpFromRepr(repr *OperatorRepr) (Operator, error) {
 	if _, ok := repr.Params["offset"]; ok {
 		offset, err = getInt64Param(repr.Params, "offset")
 		if err != nil {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("group_by_op: %v", err))
+			return nil, merr.Wrap(err, "group_by_op")
 		}
 		if offset < 0 {
 			return nil, merr.WrapErrParameterInvalidMsg("group_by_op: offset must be non-negative")
@@ -491,7 +491,7 @@ func NewGroupByOpFromRepr(repr *OperatorRepr) (Operator, error) {
 	if scorerStr, ok := repr.Params["scorer"].(string); ok {
 		scorer = GroupScorer(scorerStr)
 		if err := ValidateGroupScorer(scorer); err != nil {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("group_by_op: %v", err))
+			return nil, merr.Wrap(err, "group_by_op")
 		}
 	}
 
@@ -502,7 +502,7 @@ func NewGroupByOpFromRepr(repr *OperatorRepr) (Operator, error) {
 func getInt64Param(params map[string]interface{}, key string) (int64, error) {
 	val, ok := params[key]
 	if !ok {
-		return 0, merr.WrapErrParameterInvalidMsg("%s is required", key)
+		return 0, merr.WrapErrParameterMissingMsg("%s is required", key)
 	}
 	switch v := val.(type) {
 	case int64:

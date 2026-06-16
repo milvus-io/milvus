@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
@@ -161,6 +162,90 @@ func TestRbacCredential(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestRbacCredentialAlterCredentialMergesPartialUpdates(t *testing.T) {
+	mt := generateMetaTable(t)
+
+	ptr := func(s string) *string {
+		return &s
+	}
+
+	username := "user" + funcutil.RandomString(10)
+	err := mt.AlterCredential(context.TODO(), buildAlterUserMessage(&internalpb.CredentialInfo{
+		Username:          username,
+		EncryptedPassword: "old-password",
+		Description:       ptr("initial description"),
+	}, 1))
+	require.NoError(t, err)
+
+	err = mt.AlterCredential(context.TODO(), buildAlterUserMessage(&internalpb.CredentialInfo{
+		Username:          username,
+		EncryptedPassword: "new-password",
+	}, 2))
+	require.NoError(t, err)
+	cred, err := mt.GetCredential(context.TODO(), username)
+	require.NoError(t, err)
+	assert.Equal(t, "new-password", cred.GetEncryptedPassword())
+	assert.Equal(t, "initial description", cred.GetDescription())
+
+	err = mt.AlterCredential(context.TODO(), buildAlterUserMessage(&internalpb.CredentialInfo{
+		Username:    username,
+		Description: ptr("updated description"),
+	}, 3))
+	require.NoError(t, err)
+	cred, err = mt.GetCredential(context.TODO(), username)
+	require.NoError(t, err)
+	assert.Equal(t, "new-password", cred.GetEncryptedPassword())
+	assert.Equal(t, "updated description", cred.GetDescription())
+
+	err = mt.AlterCredential(context.TODO(), buildAlterUserMessage(&internalpb.CredentialInfo{
+		Username:    username,
+		Description: ptr(""),
+	}, 4))
+	require.NoError(t, err)
+	cred, err = mt.GetCredential(context.TODO(), username)
+	require.NoError(t, err)
+	assert.Equal(t, "new-password", cred.GetEncryptedPassword())
+	assert.Equal(t, "", cred.GetDescription())
+}
+
+func TestRbacCredentialRejectsInconsistentPasswordUpdate(t *testing.T) {
+	mt := generateMetaTable(t)
+
+	username := "user" + funcutil.RandomString(10)
+	err := mt.AlterCredential(context.TODO(), buildAlterUserMessage(&internalpb.CredentialInfo{
+		Username:          username,
+		EncryptedPassword: "old-password",
+	}, 1))
+	require.NoError(t, err)
+
+	err = mt.CheckIfUpdateCredential(context.TODO(), &internalpb.CredentialInfo{
+		Username:          username,
+		EncryptedPassword: "new-password",
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "must include both encrypted and sha256 password")
+
+	err = mt.CheckIfUpdateCredential(context.TODO(), &internalpb.CredentialInfo{
+		Username:       username,
+		Sha256Password: "sha256",
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "must include both encrypted and sha256 password")
+
+	description := "description-only update"
+	err = mt.CheckIfUpdateCredential(context.TODO(), &internalpb.CredentialInfo{
+		Username:    username,
+		Description: &description,
+	})
+	require.NoError(t, err)
+
+	err = mt.CheckIfUpdateCredential(context.TODO(), &internalpb.CredentialInfo{
+		Username: username,
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "credential update must change password or description")
+}
+
 func TestRbacCreateRole(t *testing.T) {
 	mt := generateMetaTable(t)
 
@@ -208,6 +293,239 @@ func TestRbacCreateRole(t *testing.T) {
 		err := mockMt.CheckIfCreateRole(context.TODO(), &milvuspb.CreateRoleRequest{Entity: &milvuspb.RoleEntity{Name: "role1"}})
 		assert.Error(t, err)
 	}
+}
+
+func TestRbacAlterRoleDescription(t *testing.T) {
+	mt := generateMetaTable(t)
+
+	roleName := "role" + funcutil.RandomString(10)
+	err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{
+		Name:        roleName,
+		Description: "old description",
+	})
+	require.NoError(t, err)
+
+	err = mt.AlterRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{
+		Name:        roleName,
+		Description: "new description",
+	})
+	require.NoError(t, err)
+
+	roles, err := mt.SelectRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: roleName}, false)
+	require.NoError(t, err)
+	require.Len(t, roles, 1)
+	assert.Equal(t, "new description", roles[0].GetRole().GetDescription())
+
+	err = mt.AlterRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{
+		Name:        "role_not_exist",
+		Description: "ignored",
+	})
+	require.ErrorIs(t, err, errRoleNotExists)
+
+	err = mt.AlterRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{
+		Name:        util.RoleAdmin,
+		Description: "ignored",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+
+	err = mt.CheckIfAlterRole(context.TODO(), &milvuspb.AlterRoleRequest{
+		RoleName:    util.RolePublic,
+		Description: "ignored",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+}
+
+func TestRbacAlterRoleDescriptionErrors(t *testing.T) {
+	ctx := context.TODO()
+
+	t.Run("check empty role name", func(t *testing.T) {
+		mockCata := mocks.NewRootCoordCatalog(t)
+		mockMt := &MetaTable{catalog: mockCata}
+
+		err := mockMt.CheckIfAlterRole(ctx, &milvuspb.AlterRoleRequest{
+			RoleName:    "",
+			Description: "description",
+		})
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("check list role error", func(t *testing.T) {
+		targetErr := errors.New("mock list role error")
+		roleName := "role_check_list_error"
+		mockCata := mocks.NewRootCoordCatalog(t)
+		mockCata.EXPECT().ListRole(
+			mock.Anything,
+			util.DefaultTenant,
+			mock.MatchedBy(func(entity *milvuspb.RoleEntity) bool {
+				return entity.GetName() == roleName
+			}),
+			false,
+		).Return(nil, targetErr)
+		mockMt := &MetaTable{catalog: mockCata}
+
+		err := mockMt.CheckIfAlterRole(ctx, &milvuspb.AlterRoleRequest{
+			RoleName:    roleName,
+			Description: "description",
+		})
+		assert.ErrorIs(t, err, targetErr)
+	})
+
+	t.Run("alter empty role name", func(t *testing.T) {
+		mockCata := mocks.NewRootCoordCatalog(t)
+		mockMt := &MetaTable{catalog: mockCata}
+
+		err := mockMt.AlterRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{
+			Name:        "",
+			Description: "description",
+		})
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("alter list role error", func(t *testing.T) {
+		targetErr := errors.New("mock list role error")
+		roleName := "role_alter_list_error"
+		mockCata := mocks.NewRootCoordCatalog(t)
+		mockCata.EXPECT().ListRole(
+			mock.Anything,
+			util.DefaultTenant,
+			mock.MatchedBy(func(entity *milvuspb.RoleEntity) bool {
+				return entity.GetName() == roleName
+			}),
+			false,
+		).Return(nil, targetErr)
+		mockMt := &MetaTable{catalog: mockCata}
+
+		err := mockMt.AlterRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "description",
+		})
+		assert.ErrorIs(t, err, targetErr)
+	})
+
+	t.Run("alter catalog error", func(t *testing.T) {
+		targetErr := errors.New("mock alter role error")
+		roleName := "role_alter_catalog_error"
+		mockCata := mocks.NewRootCoordCatalog(t)
+		mockCata.EXPECT().ListRole(
+			mock.Anything,
+			util.DefaultTenant,
+			mock.MatchedBy(func(entity *milvuspb.RoleEntity) bool {
+				return entity.GetName() == roleName
+			}),
+			false,
+		).Return([]*milvuspb.RoleResult{{Role: &milvuspb.RoleEntity{Name: roleName}}}, nil)
+		mockCata.EXPECT().AlterRole(
+			mock.Anything,
+			util.DefaultTenant,
+			mock.MatchedBy(func(entity *milvuspb.RoleEntity) bool {
+				return entity.GetName() == roleName && entity.GetDescription() == "description"
+			}),
+		).Return(targetErr)
+		mockMt := &MetaTable{catalog: mockCata}
+
+		err := mockMt.AlterRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "description",
+		})
+		assert.ErrorIs(t, err, targetErr)
+	})
+}
+
+func TestRbacCreateRoleToleratesMalformedStoredRoleValue(t *testing.T) {
+	ctx := context.TODO()
+	mt := generateMetaTable(t)
+	catalog := mt.catalog.(*rootcoord.Catalog)
+
+	require.NoError(t, catalog.CreateRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: "existing_role"}))
+	require.NoError(t, catalog.Txn.Save(ctx, rootcoord.RolePrefix+"/malformed_role", "{"))
+
+	err := mt.CheckIfCreateRole(ctx, &milvuspb.CreateRoleRequest{
+		Entity: &milvuspb.RoleEntity{Name: "new_role"},
+	})
+	require.NoError(t, err)
+}
+
+func TestRbacRoleDescriptionLengthLimit(t *testing.T) {
+	mt := generateMetaTable(t)
+
+	paramtable.Get().Save(Params.ProxyCfg.MaxRoleDescriptionLength.Key, "4")
+	defer paramtable.Get().Reset(Params.ProxyCfg.MaxRoleDescriptionLength.Key)
+
+	err := mt.CheckIfCreateRole(context.TODO(), &milvuspb.CreateRoleRequest{
+		Entity: &milvuspb.RoleEntity{
+			Name:        "role_desc_limit_create",
+			Description: "12345",
+		},
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+	err = mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role_desc_limit_alter"})
+	require.NoError(t, err)
+	err = mt.CheckIfAlterRole(context.TODO(), &milvuspb.AlterRoleRequest{
+		RoleName:    "role_desc_limit_alter",
+		Description: "12345",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+	err = mt.CheckIfRBACRestorable(context.TODO(), &milvuspb.RestoreRBACMetaRequest{
+		RBACMeta: &milvuspb.RBACMeta{
+			Roles: []*milvuspb.RoleEntity{
+				{
+					Name:        "role_desc_limit_restore",
+					Description: "12345",
+				},
+			},
+		},
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
+func TestRbacRoleDescriptionApplyPathSkipsLengthLimit(t *testing.T) {
+	t.Run("create role apply path", func(t *testing.T) {
+		mt := generateMetaTable(t)
+		roleName := "role_desc_apply_create"
+
+		paramtable.Get().Save(Params.ProxyCfg.MaxRoleDescriptionLength.Key, "4")
+		defer paramtable.Get().Reset(Params.ProxyCfg.MaxRoleDescriptionLength.Key)
+
+		err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "12345",
+		})
+		require.NoError(t, err)
+
+		roles, err := mt.SelectRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: roleName}, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Equal(t, "12345", roles[0].GetRole().GetDescription())
+	})
+
+	t.Run("alter role apply path", func(t *testing.T) {
+		mt := generateMetaTable(t)
+		roleName := "role_desc_apply_alter"
+
+		err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: roleName})
+		require.NoError(t, err)
+
+		paramtable.Get().Save(Params.ProxyCfg.MaxRoleDescriptionLength.Key, "4")
+		defer paramtable.Get().Reset(Params.ProxyCfg.MaxRoleDescriptionLength.Key)
+
+		err = mt.AlterRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "12345",
+		})
+		require.NoError(t, err)
+
+		roles, err := mt.SelectRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: roleName}, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Equal(t, "12345", roles[0].GetRole().GetDescription())
+	})
 }
 
 func TestRbacDropRole(t *testing.T) {
@@ -2787,4 +3105,53 @@ func TestMetaTable_TruncateCollection(t *testing.T) {
 	require.False(t, ok)
 	require.Equal(t, 1, len(coll.ShardInfos))
 	require.Equal(t, uint64(1000), coll.ShardInfos["vchannel1"].LastTruncateTimeTick)
+}
+
+func TestMetaTableReloadNormalizesMaxFieldIDProperty(t *testing.T) {
+	channel.ResetStaticPChannelStatsManager()
+
+	kv, _ := kvfactory.GetEtcdAndPath()
+	path := funcutil.RandomString(10) + "/meta"
+	catalogKV := etcdkv.NewEtcdKV(kv, path)
+	catalog := rootcoord.NewCatalog(catalogKV)
+
+	allocator := mocktso.NewAllocator(t)
+	allocator.EXPECT().GenerateTSO(mock.Anything).Return(1000, nil)
+
+	meta, err := NewMetaTable(context.Background(), catalog, allocator)
+	require.NoError(t, err)
+
+	err = meta.AddCollection(context.Background(), &model.Collection{
+		CollectionID:         1,
+		DBID:                 util.DefaultDBID,
+		DBName:               util.DefaultDBName,
+		Name:                 "test_reload_max_field_id",
+		PhysicalChannelNames: []string{"pchannel1"},
+		VirtualChannelNames:  []string{"vchannel1"},
+		State:                pb.CollectionState_CollectionCreated,
+		Fields: []*model.Field{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+			{FieldID: 105, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
+		Properties: common.NewKeyValuePairs(map[string]string{
+			common.CollectionReplicaNumber: "1",
+		}),
+		ShardInfos: map[string]*model.ShardInfo{
+			"vchannel1": {
+				VChannelName:         "vchannel1",
+				PChannelName:         "pchannel1",
+				LastTruncateTimeTick: 0,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	channel.ResetStaticPChannelStatsManager()
+	meta, err = NewMetaTable(context.Background(), catalog, allocator)
+	require.NoError(t, err)
+
+	coll, err := meta.GetCollectionByID(context.Background(), util.DefaultDBName, 1, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	props := common.CloneKeyValuePairs(coll.Properties).ToMap()
+	require.Equal(t, "105", props[common.MaxFieldIDKey])
 }

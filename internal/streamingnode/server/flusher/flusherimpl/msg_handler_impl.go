@@ -50,14 +50,6 @@ func (impl *msgHandlerImpl) HandleCreateSegment(ctx context.Context, createSegme
 	}
 	logger := log.With(log.FieldMessage(createSegmentMsg))
 
-	// For TEXT collections, skip creating local metacache entry.
-	// Insert data is flushed by QueryNode's GrowingFlushManager, not StreamNode.
-	// This avoids useless empty SyncTasks and manifest path conflicts.
-	if impl.wbMgr.HasTextFields(vchannel) {
-		logger.Info("skip CreateNewGrowingSegment for TEXT collection, managed by QueryNode")
-		return nil
-	}
-
 	if err := impl.wbMgr.CreateNewGrowingSegment(ctx, vchannel, h.PartitionId, h.SegmentId, h.SchemaVersion); err != nil {
 		logger.Warn("fail to create new growing segment")
 		return err
@@ -101,7 +93,7 @@ func (impl *msgHandlerImpl) createNewGrowingSegment(ctx context.Context, vchanne
 		}
 		logger.Info("alloc growing segment at datacoord", zap.Int32("schemaVersion", h.SchemaVersion))
 		return nil
-	}, retry.AttemptAlways())
+	}, retry.AttemptAlways(), retry.RetryErr(func(error) bool { return true }))
 }
 
 func (impl *msgHandlerImpl) HandleFlush(flushMsg message.ImmutableFlushMessageV2) error {

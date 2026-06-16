@@ -2,9 +2,9 @@ package broadcaster
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // newBroadcastTaskFromProto creates a new broadcast task from the proto.
@@ -252,7 +253,7 @@ func (b *broadcastTask) MarkIgnore() error {
 	msg := message.NewBroadcastMutableMessageBeforeAppend(b.task.Message.Payload, copiedProps)
 	alterMsg, err := message.AsMutableAlterReplicateConfigMessageV2(msg)
 	if err != nil {
-		return errors.Wrap(err, "failed to parse message as AlterReplicateConfigMessage")
+		return merr.Wrap(err, "failed to parse message as AlterReplicateConfigMessage")
 	}
 
 	// Get current header and set ignore to true
@@ -402,9 +403,9 @@ func (b *broadcastTask) copyAndSetAckedCheckpoints(msgs ...message.ImmutableMess
 	task := proto.Clone(b.task).(*streamingpb.BroadcastTask)
 	for _, msg := range msgs {
 		vchannel := msg.VChannel()
-		idx, err := findIdxOfVChannel(vchannel, b.header().VChannels)
-		if err != nil {
-			panic(err)
+		idx := findIdxOfVChannel(vchannel, b.header().VChannels)
+		if idx < 0 {
+			panic(fmt.Sprintf("broadcast task invariant violated: vchannel %s not in task's own VChannels list", vchannel))
 		}
 		if len(task.AckedVchannelBitmap) == 0 {
 			task.AckedVchannelBitmap = make([]byte, len(b.header().VChannels))
@@ -433,14 +434,17 @@ func (b *broadcastTask) copyAndSetAckedCheckpoints(msgs ...message.ImmutableMess
 	return
 }
 
-// findIdxOfVChannel finds the index of the vchannel in the broadcast task.
-func findIdxOfVChannel(vchannel string, vchannels []string) (int, error) {
+// findIdxOfVChannel finds the index of the vchannel in the broadcast task's
+// VChannels list, returning -1 if not present. By construction the vchannel
+// must be present (it came from the task's own messages); callers panic on
+// -1 because that signals a task-invariant violation.
+func findIdxOfVChannel(vchannel string, vchannels []string) int {
 	for i, channelName := range vchannels {
 		if channelName == vchannel {
-			return i, nil
+			return i
 		}
 	}
-	return -1, errors.Errorf("unreachable: vchannel is %s not found in the broadcast task", vchannel)
+	return -1
 }
 
 // FastAck trigger a fast ack operation when the broadcast operation is done.

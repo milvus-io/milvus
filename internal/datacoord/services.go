@@ -137,7 +137,7 @@ func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, flu
 		for _, channel := range coll.VChannelNames {
 			sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, channel, toFlushSegments)
 			if err != nil {
-				return nil, errors.Wrapf(err, "failed to flush collection %d", collectionID)
+				return nil, merr.Wrapf(err, "failed to flush collection %d", collectionID)
 			}
 			for _, sealedSegmentID := range sealedSegmentIDs {
 				sealedSegmentsIDDict[sealedSegmentID] = true
@@ -647,6 +647,10 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			log.Warn("failed to get segment, the segment not healthy", zap.Error(err))
 			return merr.Status(err), nil
 		}
+		if err := s.validateTextSegmentStorage(req); err != nil {
+			log.Warn("invalid TEXT segment storage format", zap.Error(err))
+			return merr.Status(err), nil
+		}
 
 		// Set storage version
 		operators = append(operators, SetStorageVersion(req.GetSegmentID(), req.GetStorageVersion()))
@@ -687,13 +691,12 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
 	)
 
-	// Update segment info in memory and meta.
+	// Update segment info in memory and meta. Stale updates (segment already
+	// flushed / outdated time tick) are swallowed inside UpdateSegmentsInfo as
+	// benign no-ops, so any error here is a real failure.
 	if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
-		if !errors.Is(err, ErrIgnoredSegmentMetaOperation) {
-			log.Error("save binlog and checkpoints failed", zap.Error(err))
-			return merr.Status(err), nil
-		}
-		log.Info("save binlog and checkpoints failed with ignorable error", zap.Error(err))
+		log.Error("save binlog and checkpoints failed", zap.Error(err))
+		return merr.Status(err), nil
 	}
 
 	s.meta.SetLastWrittenTime(req.GetSegmentID())
@@ -737,6 +740,27 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	}
 
 	return merr.Success(), nil
+}
+
+func (s *Server) validateTextSegmentStorage(req *datapb.SaveBinlogPathsRequest) error {
+	if req.GetSegLevel() == datapb.SegmentLevel_L0 || req.GetDropped() {
+		return nil
+	}
+	if !s.meta.collectionHasTextFields(req.GetCollectionID()) {
+		return nil
+	}
+	if req.GetStorageVersion() < storage.StorageV3 {
+		return merr.WrapErrParameterInvalidMsg(
+			"TEXT segment %d must be saved with StorageV3 manifest, got storage version %d",
+			req.GetSegmentID(),
+			req.GetStorageVersion())
+	}
+	if req.GetManifestPath() == "" {
+		return merr.WrapErrParameterInvalidMsg(
+			"TEXT segment %d requires non-empty StorageV3 manifest path",
+			req.GetSegmentID())
+	}
+	return nil
 }
 
 // DropVirtualChannel notifies vchannel dropped
@@ -917,16 +941,28 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 			continue
 		}
 
-		field2Binlog := make(map[UniqueID][]*datapb.Binlog)
+		field2Binlog := make(map[UniqueID]*datapb.FieldBinlog)
 		for _, field := range binlogs {
-			field2Binlog[field.GetFieldID()] = append(field2Binlog[field.GetFieldID()], field.GetBinlogs()...)
+			fieldBinlog, ok := field2Binlog[field.GetFieldID()]
+			if !ok {
+				fieldBinlog = &datapb.FieldBinlog{
+					FieldID:     field.GetFieldID(),
+					ChildFields: field.GetChildFields(),
+					Format:      field.GetFormat(),
+				}
+				field2Binlog[field.GetFieldID()] = fieldBinlog
+			} else {
+				if len(fieldBinlog.ChildFields) == 0 {
+					fieldBinlog.ChildFields = field.GetChildFields()
+				}
+				if fieldBinlog.Format == "" {
+					fieldBinlog.Format = field.GetFormat()
+				}
+			}
+			fieldBinlog.Binlogs = append(fieldBinlog.Binlogs, field.GetBinlogs()...)
 		}
 
-		for f, paths := range field2Binlog {
-			fieldBinlogs := &datapb.FieldBinlog{
-				FieldID: f,
-				Binlogs: paths,
-			}
+		for _, fieldBinlogs := range field2Binlog {
 			segment2Binlogs[id] = append(segment2Binlogs[id], fieldBinlogs)
 		}
 
@@ -1255,7 +1291,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		msg := "failed to get metrics"
 		log.Warn(msg, zap.Error(err))
 		return &milvuspb.GetMetricsResponse{
-			Status: merr.Status(errors.Wrap(err, msg)),
+			Status: merr.Status(merr.Wrap(err, msg)),
 		}, nil
 	}
 
@@ -1487,12 +1523,16 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 
 	for _, channel := range channels {
 		cp := s.meta.GetChannelCheckpoint(channel.GetName())
-		if cp == nil || cp.GetTimestamp() < req.GetFlushTs() {
+		cpTs := uint64(0)
+		if cp != nil {
+			cpTs = cp.GetTimestamp()
+		}
+		if cp == nil || cpTs < req.GetFlushTs() {
 			resp.Flushed = false
 
 			log.RatedInfo(10, "GetFlushState failed, channel unflushed", zap.String("channel", channel.GetName()),
-				zap.Time("CP", tsoutil.PhysicalTime(cp.GetTimestamp())),
-				zap.Duration("lag", tsoutil.PhysicalTime(req.GetFlushTs()).Sub(tsoutil.PhysicalTime(cp.GetTimestamp()))))
+				zap.Time("CP", tsoutil.PhysicalTime(cpTs)),
+				zap.Duration("lag", tsoutil.PhysicalTime(req.GetFlushTs()).Sub(tsoutil.PhysicalTime(cpTs))))
 			return resp, nil
 		}
 	}
@@ -1586,7 +1626,7 @@ OUTER:
 						break OUTER
 					}
 				} else {
-					resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("FlushAllTss or FlushAllTs is required"))
+					resp.Status = merr.Status(merr.WrapErrParameterMissingMsg("FlushAllTss or FlushAllTs is required"))
 					return resp, nil
 				}
 			}
@@ -1884,12 +1924,12 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	jobID := in.GetJobID()
 	if jobID == 0 {
 		if s.allocator == nil {
-			resp.Status = merr.Status(merr.WrapErrImportFailed("allocator not initialized"))
+			resp.Status = merr.Status(merr.WrapErrServiceUnavailable("allocator not initialized"))
 			return resp, nil
 		}
 		jobID, _, err = s.allocator.AllocN(1)
 		if err != nil {
-			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("failed to allocate job ID: %v", err)))
+			resp.Status = merr.Status(merr.Wrap(err, "failed to allocate job ID"))
 			return resp, nil
 		}
 	}
@@ -1909,7 +1949,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	)
 	if err != nil {
 		log.Warn("failed to broadcast import message", zap.Error(err))
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("failed to broadcast import: %v", err)))
+		resp.Status = merr.Status(merr.Wrap(err, "failed to broadcast import"))
 		return resp, nil
 	}
 
@@ -1959,7 +1999,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	// Allocate file ids.
 	idStart, _, err := s.allocator.AllocN(int64(len(files)) + 1)
 	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("alloc id failed: %v", err)))
+		resp.Status = merr.Status(merr.Wrap(err, "alloc id failed"))
 		return resp, nil
 	}
 	files = lo.Map(files, func(importFile *internalpb.ImportFile, i int) *internalpb.ImportFile {
@@ -1972,7 +2012,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 		return resp, nil
 	}
 	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("get collection failed: %v", err)))
+		resp.Status = merr.Status(merr.Wrap(err, "get collection failed"))
 		return resp, nil
 	}
 	if importCollectionInfo == nil {
@@ -2007,7 +2047,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	}
 	err = s.importMeta.AddJob(ctx, job)
 	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("add import job failed: %v", err)))
+		resp.Status = merr.Status(merr.Wrap(err, "add import job failed"))
 		return resp, nil
 	}
 
@@ -2034,13 +2074,13 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	}
 	jobID, err := strconv.ParseInt(in.GetJobID(), 10, 64)
 	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("parse job id failed: %v", err)))
+		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("parse job id failed: %v", err))
 		return resp, nil
 	}
 
 	job := s.importMeta.GetJob(ctx, jobID)
 	if job == nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("import job does not exist, jobID=%d", jobID)))
+		resp.Status = merr.Status(merr.WrapErrImportSysFailedMsg("import job does not exist, jobID=%d", jobID))
 		return resp, nil
 	}
 	progress, state, importedRows, totalRows, reason := GetJobProgress(ctx, jobID, s.importMeta, s.meta)
@@ -2440,14 +2480,14 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 
 	// Validate parameters
 	if req.GetName() == "" {
-		err := merr.WrapErrParameterInvalidMsg("snapshot name is required")
+		err := merr.WrapErrParameterMissingMsg("snapshot name is required")
 		log.Warn("invalid request", zap.Error(err))
 		return &datapb.RestoreSnapshotResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 	if req.GetTargetCollectionName() == "" {
-		err := merr.WrapErrParameterInvalidMsg("target collection name is required")
+		err := merr.WrapErrParameterMissingMsg("target collection name is required")
 		log.Warn("invalid request", zap.Error(err))
 		return &datapb.RestoreSnapshotResponse{
 			Status: merr.Status(err),
@@ -2844,6 +2884,11 @@ func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *dat
 // (Control-channel-only broadcast is dropped by the flusher's IsControlChannel guard
 // before reaching the CommitImport case, so it cannot drive per-vchannel commits.)
 func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob) error {
+	vchannels := job.GetVchannels()
+	if len(vchannels) == 0 {
+		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID())
+	}
+
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
 	if err != nil {
 		return err
@@ -2856,7 +2901,7 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 			JobId:        job.GetJobID(),
 		}).
 		WithBody(&messagespb.CommitImportMessageBody{}).
-		WithBroadcast(job.GetVchannels()).
+		WithBroadcast(vchannels).
 		MustBuildBroadcast()
 
 	_, err = broadcaster.Broadcast(ctx, msg)
@@ -2866,6 +2911,11 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 // broadcastRollbackImportMessage broadcasts a RollbackImport WAL message for the given import job.
 // Targets the job's data vchannels, matching the CommitImport routing.
 func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJob) error {
+	vchannels := job.GetVchannels()
+	if len(vchannels) == 0 {
+		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID())
+	}
+
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
 	if err != nil {
 		return err
@@ -2878,7 +2928,7 @@ func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJ
 			JobId:        job.GetJobID(),
 		}).
 		WithBody(&messagespb.RollbackImportMessageBody{}).
-		WithBroadcast(job.GetVchannels()).
+		WithBroadcast(vchannels).
 		MustBuildBroadcast()
 
 	_, err = broadcaster.Broadcast(ctx, msg)
@@ -2898,7 +2948,7 @@ func (s *Server) validateAndExecuteImportAction(
 	}
 	job := s.importMeta.GetJob(ctx, jobID)
 	if job == nil {
-		return merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("job %d not found", jobID))), nil
+		return merr.Status(merr.WrapErrImportSysFailedMsg("job %d not found", jobID)), nil
 	}
 	if st := validateState(job); st != nil {
 		return st, nil
@@ -2986,12 +3036,16 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	// calling GetTaskBy inside the callback would attempt to re-acquire m.mu (read lock) → deadlock.
 	segIDs := s.getImportSegmentIDsByVchannel(ctx, jobID, vchannel)
 
+	commitTs := req.GetCommitTimestamp()
 	err := s.importMeta.HandleCommitVchannel(ctx, jobID, vchannel, func() error {
 		// Only access s.meta (segment meta) here, NOT s.importMeta.
-		// Batch all segment updates into a single UpdateSegmentsInfo call (one etcd write).
-		ops := make([]UpdateOperator, 0, len(segIDs))
+		// Set CommitTimestamp and clear isImporting in a single call per segment.
+		ops := make([]UpdateOperator, 0, len(segIDs)*2)
 		for _, segID := range segIDs {
-			ops = append(ops, UpdateIsImporting(segID, false))
+			ops = append(ops,
+				UpdateCommitTimestamp(segID, commitTs),
+				UpdateIsImporting(segID, false),
+			)
 		}
 		if len(ops) == 0 {
 			return nil

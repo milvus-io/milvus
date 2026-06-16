@@ -16,15 +16,14 @@ package embedding
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -120,7 +119,7 @@ func RunTextEmbedding(
 		return err
 	}
 	if err := exec.ProcessBulkInsert(ctx, data); err != nil {
-		return fmt.Errorf("text embedding: %w", err)
+		return merr.Wrap(err, "text embedding")
 	}
 	return nil
 }
@@ -135,7 +134,7 @@ func runOne(
 ) error {
 	runner, err := function.NewFunctionRunner(schema, fn)
 	if err != nil {
-		return fmt.Errorf("%s runner: %w", fn.GetType(), err)
+		return merr.Wrapf(err, "%s runner", fn.GetType())
 	}
 	if runner == nil {
 		return nil
@@ -148,7 +147,7 @@ func runOne(
 	}
 	outputs, err := runner.BatchRun(inputs...)
 	if err != nil {
-		return fmt.Errorf("%s execution: %w", fn.GetType(), err)
+		return merr.Wrapf(err, "%s execution", fn.GetType())
 	}
 	return assignFn(schema, fn, runner, outputs, data)
 }
@@ -161,7 +160,7 @@ func assignBM25Output(
 	data *storage.InsertData,
 ) error {
 	if len(outputs) != len(fn.GetOutputFieldIds()) {
-		return fmt.Errorf("BM25 runner output count mismatch: got %d, expected %d",
+		return merr.WrapErrServiceInternalMsg("BM25 runner output count mismatch: got %d, expected %d",
 			len(outputs), len(fn.GetOutputFieldIds()))
 	}
 	for i, outID := range fn.GetOutputFieldIds() {
@@ -170,31 +169,31 @@ func assignBM25Output(
 		case schemapb.DataType_FloatVector:
 			fd, ok := outputs[i].(*storage.FloatVectorFieldData)
 			if !ok {
-				return fmt.Errorf("BM25 output %d: want *FloatVectorFieldData, got %T", outID, outputs[i])
+				return merr.WrapErrServiceInternalMsg("BM25 output %d: want *FloatVectorFieldData, got %T", outID, outputs[i])
 			}
 			data.Data[outID] = fd
 		case schemapb.DataType_BFloat16Vector:
 			fd, ok := outputs[i].(*storage.BFloat16VectorFieldData)
 			if !ok {
-				return fmt.Errorf("BM25 output %d: want *BFloat16VectorFieldData, got %T", outID, outputs[i])
+				return merr.WrapErrServiceInternalMsg("BM25 output %d: want *BFloat16VectorFieldData, got %T", outID, outputs[i])
 			}
 			data.Data[outID] = fd
 		case schemapb.DataType_Float16Vector:
 			fd, ok := outputs[i].(*storage.Float16VectorFieldData)
 			if !ok {
-				return fmt.Errorf("BM25 output %d: want *Float16VectorFieldData, got %T", outID, outputs[i])
+				return merr.WrapErrServiceInternalMsg("BM25 output %d: want *Float16VectorFieldData, got %T", outID, outputs[i])
 			}
 			data.Data[outID] = fd
 		case schemapb.DataType_BinaryVector:
 			fd, ok := outputs[i].(*storage.BinaryVectorFieldData)
 			if !ok {
-				return fmt.Errorf("BM25 output %d: want *BinaryVectorFieldData, got %T", outID, outputs[i])
+				return merr.WrapErrServiceInternalMsg("BM25 output %d: want *BinaryVectorFieldData, got %T", outID, outputs[i])
 			}
 			data.Data[outID] = fd
 		case schemapb.DataType_SparseFloatVector:
 			sparse, ok := outputs[i].(*schemapb.SparseFloatArray)
 			if !ok {
-				return fmt.Errorf("BM25 output %d: want *SparseFloatArray, got %T", outID, outputs[i])
+				return merr.WrapErrServiceInternalMsg("BM25 output %d: want *SparseFloatArray, got %T", outID, outputs[i])
 			}
 			data.Data[outID] = &storage.SparseFloatVectorFieldData{
 				SparseFloatArray: schemapb.SparseFloatArray{
@@ -202,7 +201,7 @@ func assignBM25Output(
 				},
 			}
 		default:
-			return fmt.Errorf("unsupported BM25 output type %s for field %d",
+			return merr.WrapErrParameterInvalidMsg("unsupported BM25 output type %s for field %d",
 				outField.GetDataType(), outID)
 		}
 	}
@@ -217,23 +216,23 @@ func assignMinHashOutput(
 	data *storage.InsertData,
 ) error {
 	if len(outputs) == 0 {
-		return errors.New("MinHash runner returned empty output")
+		return merr.WrapErrServiceInternalMsg("MinHash runner returned empty output")
 	}
 	fd, ok := outputs[0].(*schemapb.FieldData)
 	if !ok {
-		return fmt.Errorf("MinHash output 0: want *FieldData, got %T", outputs[0])
+		return merr.WrapErrServiceInternalMsg("MinHash output 0: want *FieldData, got %T", outputs[0])
 	}
 	vec := fd.GetVectors()
 	if vec == nil {
-		return errors.New("MinHash output is not a vector field")
+		return merr.WrapErrServiceInternalMsg("MinHash output is not a vector field")
 	}
 	binVec := vec.GetBinaryVector()
 	if binVec == nil {
-		return errors.New("MinHash output is not a binary vector")
+		return merr.WrapErrServiceInternalMsg("MinHash output is not a binary vector")
 	}
 	outFields := runner.GetOutputFields()
 	if len(outFields) == 0 {
-		return errors.New("MinHash runner has no output fields")
+		return merr.WrapErrServiceInternalMsg("MinHash runner has no output fields")
 	}
 	data.Data[outFields[0].GetFieldID()] = &storage.BinaryVectorFieldData{
 		Data: binVec, Dim: int(vec.GetDim()),

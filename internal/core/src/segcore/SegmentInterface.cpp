@@ -70,7 +70,7 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
     segcore::CheckCancellation(op_ctx, get_segment_id(), "FillPrimaryKeys");
     // Use a per-call OpContext for storage_usage; sharing op_ctx across
     // segments would make each segment's search_storage_cost_ accumulate
-    // every prior segment's bytes, inflating GetTotalStorageCost().
+    // every prior segment's bytes.
     milvus::OpContext local_ctx;
     if (op_ctx != nullptr) {
         local_ctx.cancellation_token = op_ctx->cancellation_token;
@@ -730,9 +730,9 @@ SegmentInternalInterface::GetTextIndex(milvus::OpContext* op_ctx,
     std::shared_lock lock(mutex_);
     auto iter = text_indexes_.find(field_id);
     if (iter == text_indexes_.end()) {
-        throw SegcoreError(
-            milvus::ErrorCode::TextIndexNotFound,
-            fmt::format("text index not found for field {}", field_id.get()));
+        ThrowInfo(milvus::ErrorCode::TextIndexNotFound,
+                  "text index not found for field {}",
+                  field_id.get());
     }
 
     auto make_pin = [&](auto&& alt) -> PinWrapper<index::TextMatchIndex*> {
@@ -756,11 +756,9 @@ SegmentInternalInterface::GetTextIndex(milvus::OpContext* op_ctx,
             auto index = ca->get_cell_of(0);
             return PinWrapper<index::TextMatchIndex*>(std::move(ca), index);
         } else {
-            throw SegcoreError(
-                milvus::ErrorCode::UnexpectedError,
-                fmt::format(
-                    "text index of segment is not supported for field {}",
-                    field_id.get()));
+            ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                      "text index of segment is not supported for field {}",
+                      field_id.get());
         }
     };
 
@@ -787,9 +785,11 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
 
     auto result = CreateEmptyScalarDataArray(count, field_meta);
     if (field_meta.default_value().has_value()) {
-        auto res = result->mutable_valid_data()->mutable_data();
-        for (int64_t i = 0; i < count; ++i) {
-            res[i] = true;
+        if (field_meta.is_nullable()) {
+            auto res = result->mutable_valid_data()->mutable_data();
+            for (int64_t i = 0; i < count; ++i) {
+                res[i] = true;
+            }
         }
         switch (field_meta.get_data_type()) {
             case DataType::BOOL: {
@@ -899,11 +899,12 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
             }
         }
         return result;
-    };
-    for (int64_t i = 0; i < count; ++i) {
-        auto res = result->mutable_valid_data()->mutable_data();
-        res[i] = false;
     }
+    // Without a default value the column can only read as all-null;
+    // CreateEmptyScalarDataArray already sized valid_data to all-false.
+    AssertInfo(field_meta.is_nullable(),
+               "Non-nullable scalar field without default value should not "
+               "reach here");
     return result;
 }
 

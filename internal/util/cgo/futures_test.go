@@ -72,7 +72,7 @@ func TestFutureWithSuccessCase(t *testing.T) {
 	runtime.GC()
 
 	_, err = future.BlockAndLeakyGet()
-	assert.ErrorIs(t, err, ErrConsumed)
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
 }
 
 func TestFutureWithCaseNoInterrupt(t *testing.T) {
@@ -128,7 +128,11 @@ func TestFutures(t *testing.T) {
 	future.BlockUntilReady() // test block until ready too.
 	result, err := future.BlockAndLeakyGet()
 	assert.Error(t, err)
-	assert.ErrorIs(t, err, merr.ErrSegcoreUnsupported)
+	// A std::runtime_error surfaces as C++ UnexpectedError(2001), the generic
+	// catch-all. It must map to the generic ErrSegcore (retriable at the
+	// scheduler), NOT ErrSegcoreUnsupported (whose merr-code 2001 only coincides;
+	// the real C++ Unsupported is 2003).
+	assert.ErrorIs(t, err, merr.ErrSegcore)
 	assert.Nil(t, result)
 	// The inner function sleep 1 seconds, so the future cost must be greater than 0.5 seconds.
 	assert.Greater(t, time.Since(start).Seconds(), 0.5)
@@ -161,7 +165,10 @@ func TestFutures(t *testing.T) {
 	future.BlockUntilReady() // test block until ready too.
 	result, err = future.BlockAndLeakyGet()
 	assert.Error(t, err)
-	assert.ErrorIs(t, err, merr.ErrSegcorePretendFinished)
+	// C++ NotImplemented(2002) is a real failure, not a pretend-finished signal
+	// (only ClusterSkip 2033 is). It maps to the generic ErrSegcore; the merr-code
+	// 2002 of ErrSegcorePretendFinished only coincides with the C++ value.
+	assert.ErrorIs(t, err, merr.ErrSegcore)
 	assert.Nil(t, result)
 	// The inner function sleep 1 seconds, so the future cost must be greater than 0.5 seconds.
 	assert.Greater(t, time.Since(start).Seconds(), 0.5)

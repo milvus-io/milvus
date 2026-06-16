@@ -20,7 +20,6 @@ package embedding
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/tei"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -41,9 +41,9 @@ type TeiEmbeddingProvider struct {
 	truncate            bool
 	truncationDirection string
 
-	maxBatch   int
-	timeoutSec int64
-	extraInfo  *models.ModelExtraInfo
+	maxBatch  int
+	timeoutMs int64
+	extraInfo *models.ModelExtraInfo
 }
 
 func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (*TeiEmbeddingProvider, error) {
@@ -68,15 +68,15 @@ func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *
 			searchPrompt = param.Value
 		case models.MaxClientBatchSizeParamKey:
 			if maxBatch, err = strconv.Atoi(param.Value); err != nil {
-				return nil, fmt.Errorf("[%s param's value: %s] is not a valid number", models.MaxClientBatchSizeParamKey, param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("[%s param's value: %s] is not a valid number", models.MaxClientBatchSizeParamKey, param.Value)
 			}
 		case models.TruncationDirectionParamKey:
 			if truncationDirection = param.Value; truncationDirection != "Left" && truncationDirection != "Right" {
-				return nil, fmt.Errorf("[%s param's value: %s] is not invalid, only supports [Left/Right]", models.TruncationDirectionParamKey, param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("[%s param's value: %s] is not invalid, only supports [Left/Right]", models.TruncationDirectionParamKey, param.Value)
 			}
 		case models.TruncateParamKey:
 			if truncate, err = strconv.ParseBool(param.Value); err != nil {
-				return nil, fmt.Errorf("[%s param's value: %s] is invalid, only supports: [true/false]", models.TruncateParamKey, param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("[%s param's value: %s] is invalid, only supports: [true/false]", models.TruncateParamKey, param.Value)
 			}
 		default:
 		}
@@ -91,6 +91,8 @@ func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *
 		return nil, err
 	}
 
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
+
 	provider := TeiEmbeddingProvider{
 		client:   c,
 		fieldDim: fieldDim,
@@ -100,7 +102,7 @@ func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *
 		truncationDirection: truncationDirection,
 		maxBatch:            maxBatch,
 		truncate:            truncate,
-		timeoutSec:          30,
+		timeoutMs:           timeoutMs,
 		extraInfo:           extraInfo,
 	}
 	return &provider, nil
@@ -129,16 +131,16 @@ func (provider *TeiEmbeddingProvider) CallEmbedding(ctx context.Context, texts [
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(texts[i:end], provider.truncate, provider.truncationDirection, prompt, provider.timeoutSec)
+		resp, err := provider.client.Embedding(texts[i:end], provider.truncate, provider.truncationDirection, prompt, provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}
 		if end-i != len(*resp) {
-			return nil, fmt.Errorf("get embedding failed, the number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(*resp))
+			return nil, merr.WrapErrFunctionFailedMsg("get embedding failed, the number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(*resp))
 		}
 		for _, item := range *resp {
 			if len(item) != int(provider.fieldDim) {
-				return nil, fmt.Errorf("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+				return nil, merr.WrapErrFunctionFailedMsg("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 					provider.fieldDim, len(item))
 			}
 			data = append(data, item)

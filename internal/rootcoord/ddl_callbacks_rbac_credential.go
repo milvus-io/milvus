@@ -20,13 +20,12 @@ import (
 	"context"
 	"strings"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -40,7 +39,7 @@ func (c *Core) broadcastAlterUserForCreateCredential(ctx context.Context, credIn
 	defer broadcaster.Close()
 
 	if err := c.meta.CheckIfAddCredential(ctx, credInfo); err != nil {
-		return errors.Wrap(err, "failed to check if add credential")
+		return merr.Wrap(err, "failed to check if add credential")
 	}
 
 	msg := message.NewAlterUserMessageBuilderV2().
@@ -66,7 +65,7 @@ func (c *Core) broadcastAlterUserForUpdateCredential(ctx context.Context, credIn
 	defer broadcaster.Close()
 
 	if err := c.meta.CheckIfUpdateCredential(ctx, credInfo); err != nil {
-		return errors.Wrap(err, "failed to check if update credential")
+		return merr.Wrap(err, "failed to check if update credential")
 	}
 
 	msg := message.NewAlterUserMessageBuilderV2().
@@ -86,11 +85,13 @@ func (c *Core) broadcastAlterUserForUpdateCredential(ctx context.Context, credIn
 func (c *DDLCallback) alterUserV2AckCallback(ctx context.Context, result message.BroadcastResultAlterUserMessageV2) error {
 	// insert to db
 	if err := c.meta.AlterCredential(ctx, result); err != nil {
-		return errors.Wrap(err, "failed to alter credential")
+		return merr.Wrap(err, "failed to alter credential")
 	}
 	// update proxy's local cache
-	if err := c.UpdateCredCache(ctx, result.Message.MustBody().CredentialInfo); err != nil {
-		return errors.Wrap(err, "failed to update cred cache")
+	if result.Message.MustBody().CredentialInfo.GetSha256Password() != "" {
+		if err := c.UpdateCredCache(ctx, result.Message.MustBody().CredentialInfo); err != nil {
+			return merr.Wrap(err, "failed to update cred cache")
+		}
 	}
 	return nil
 }
@@ -105,7 +106,7 @@ func (c *Core) broadcastDropUserForDeleteCredential(ctx context.Context, in *mil
 	defer broadcaster.Close()
 
 	if err := c.meta.CheckIfDeleteCredential(ctx, in); err != nil {
-		return errors.Wrap(err, "failed to check if delete credential")
+		return merr.Wrap(err, "failed to check if delete credential")
 	}
 
 	msg := message.NewDropUserMessageBuilderV2().
@@ -122,16 +123,16 @@ func (c *Core) broadcastDropUserForDeleteCredential(ctx context.Context, in *mil
 // dropUserV2AckCallback is the ack callback function for the DeleteCredential message
 func (c *DDLCallback) dropUserV2AckCallback(ctx context.Context, result message.BroadcastResultDropUserMessageV2) error {
 	if err := c.meta.DeleteCredential(ctx, result); err != nil {
-		return errors.Wrap(err, "failed to delete credential")
+		return merr.Wrap(err, "failed to delete credential")
 	}
 	if err := c.ExpireCredCache(ctx, result.Message.Header().UserName); err != nil {
-		return errors.Wrap(err, "failed to expire cred cache")
+		return merr.Wrap(err, "failed to expire cred cache")
 	}
 	if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 		OpType: int32(typeutil.CacheDeleteUser),
 		OpKey:  result.Message.Header().UserName,
 	}); err != nil {
-		return errors.Wrap(err, "failed to refresh policy info cache")
+		return merr.Wrap(err, "failed to refresh policy info cache")
 	}
 	return nil
 }

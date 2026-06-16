@@ -107,21 +107,10 @@ TEST(test_chunked_column, test_nullable_build_valid_row_ids) {
     // Call BuildValidRowIds to populate valid row tracking
     column.BuildValidRowIds(nullptr);
 
-    // Verify GetNumValidRowsUntilChunk()
-    // Expected cumulative valid counts: [0, 3, 3, 7]
-    auto& num_valid_rows = column.GetNumValidRowsUntilChunk();
-    ASSERT_EQ(num_valid_rows.size(), num_chunks + 1);
-    EXPECT_EQ(num_valid_rows[0], 0);
-    EXPECT_EQ(num_valid_rows[1], 3);  // chunk 0 has 3 valid
-    EXPECT_EQ(num_valid_rows[2], 3);  // chunk 1 has 0 valid
-    EXPECT_EQ(num_valid_rows[3], 7);  // chunk 2 has 4 valid
-
-    // Verify GetValidCountPerChunk()
-    auto& valid_counts = column.GetValidCountPerChunk();
-    ASSERT_EQ(valid_counts.size(), num_chunks);
-    EXPECT_EQ(valid_counts[0], 3);
-    EXPECT_EQ(valid_counts[1], 0);
-    EXPECT_EQ(valid_counts[2], 4);
+    // Verify GetValidCountInChunk()
+    EXPECT_EQ(column.GetValidCountInChunk(0), 3);
+    EXPECT_EQ(column.GetValidCountInChunk(1), 0);
+    EXPECT_EQ(column.GetValidCountInChunk(2), 4);
 
     // Verify GetValidData() matches the patterns
     auto& valid_data = column.GetValidData();
@@ -138,9 +127,8 @@ TEST(test_chunked_column, test_nullable_build_valid_row_ids) {
     }
 }
 
-TEST(test_chunked_column, test_nullable_get_num_valid_rows_non_nullable) {
-    // For non-nullable columns, GetNumValidRowsUntilChunk() should
-    // fall back to GetNumRowsUntilChunk()
+TEST(test_chunked_column, test_nullable_get_valid_count_non_nullable) {
+    // For non-nullable columns, valid count should equal chunk row count.
     std::vector<int64_t> num_rows_per_chunk = {10, 20, 30};
     auto num_chunks = num_rows_per_chunk.size();
     std::vector<std::unique_ptr<Chunk>> chunks;
@@ -161,13 +149,8 @@ TEST(test_chunked_column, test_nullable_get_num_valid_rows_non_nullable) {
             std::move(translator), nullptr);
     ChunkedColumn column(std::move(slot), field_meta);
 
-    // For non-nullable, GetNumValidRowsUntilChunk should equal
-    // GetNumRowsUntilChunk
-    auto& valid_rows = column.GetNumValidRowsUntilChunk();
-    auto& total_rows = column.GetNumRowsUntilChunk();
-    ASSERT_EQ(valid_rows.size(), total_rows.size());
-    for (size_t i = 0; i < valid_rows.size(); i++) {
-        EXPECT_EQ(valid_rows[i], total_rows[i]);
+    for (size_t i = 0; i < num_chunks; i++) {
+        EXPECT_EQ(column.GetValidCountInChunk(i), num_rows_per_chunk[i]);
     }
 }
 
@@ -217,19 +200,9 @@ TEST(test_chunked_column, test_nullable_all_valid) {
 
     column.BuildValidRowIds(nullptr);
 
-    // When all rows are valid, num_valid_rows_until_chunk should equal
-    // num_rows_until_chunk
-    auto& num_valid_rows = column.GetNumValidRowsUntilChunk();
-    auto& num_rows = column.GetNumRowsUntilChunk();
-    ASSERT_EQ(num_valid_rows.size(), num_rows.size());
-    for (size_t i = 0; i < num_valid_rows.size(); i++) {
-        EXPECT_EQ(num_valid_rows[i], num_rows[i]);
-    }
-
     // All valid counts should equal row counts
-    auto& valid_counts = column.GetValidCountPerChunk();
-    EXPECT_EQ(valid_counts[0], 4);
-    EXPECT_EQ(valid_counts[1], 6);
+    EXPECT_EQ(column.GetValidCountInChunk(0), 4);
+    EXPECT_EQ(column.GetValidCountInChunk(1), 6);
 }
 
 TEST(test_chunked_column, test_nullable_all_null) {
@@ -272,16 +245,8 @@ TEST(test_chunked_column, test_nullable_all_null) {
 
     column.BuildValidRowIds(nullptr);
 
-    auto& num_valid_rows = column.GetNumValidRowsUntilChunk();
-    ASSERT_EQ(num_valid_rows.size(), num_chunks + 1);
-    // All cumulative valid counts should be 0
-    for (size_t i = 0; i <= num_chunks; i++) {
-        EXPECT_EQ(num_valid_rows[i], 0);
-    }
-
-    auto& valid_counts = column.GetValidCountPerChunk();
     for (size_t i = 0; i < num_chunks; i++) {
-        EXPECT_EQ(valid_counts[i], 0);
+        EXPECT_EQ(column.GetValidCountInChunk(i), 0);
     }
 }
 

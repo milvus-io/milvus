@@ -186,7 +186,7 @@ const maxBackfillResultBytes int64 = 64 * 1024 * 1024 // 64MiB
 // reject s3a://<other-bucket>/... paths early.
 func (s *Server) loadBackfillResult(ctx context.Context, rawPath string) (*BackfillResult, error) {
 	if rawPath == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("result_path is required")
+		return nil, merr.WrapErrParameterMissingMsg("result_path is required")
 	}
 	bucket := bucketFromChunkManager(s.meta.chunkManager)
 	key, err := normalizeObjectKey(rawPath, bucket)

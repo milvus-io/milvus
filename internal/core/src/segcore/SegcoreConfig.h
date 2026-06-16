@@ -73,6 +73,26 @@ class SegcoreConfig {
     }
 
     void
+    set_storage_v3_enabled(bool storage_v3_enabled) {
+        this->storage_v3_enabled_ = storage_v3_enabled;
+    }
+
+    bool
+    get_storage_v3_enabled() const {
+        return storage_v3_enabled_;
+    }
+
+    void
+    set_enable_growing_source_flush(bool enable_growing_source_flush) {
+        this->enable_growing_source_flush_ = enable_growing_source_flush;
+    }
+
+    bool
+    get_enable_growing_source_flush() const {
+        return enable_growing_source_flush_;
+    }
+
+    void
     set_sub_dim(int64_t sub_dim) {
         sub_dim_ = sub_dim;
     }
@@ -204,7 +224,9 @@ class SegcoreConfig {
             knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC,
             knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR,
     };
+    inline static bool storage_v3_enabled_ = false;
     inline static bool enable_interim_segment_index_ = false;
+    inline static bool enable_growing_source_flush_ = false;
     inline static int64_t chunk_rows_ = 32 * 1024;
     inline static int64_t nlist_ = 100;
     inline static int64_t nprobe_ = 4;

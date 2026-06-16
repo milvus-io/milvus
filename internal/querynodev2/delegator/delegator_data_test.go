@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
@@ -103,6 +105,12 @@ type DelegatorDataSuite struct {
 	delegator    *shardDelegator
 	rootPath     string
 	chunkManager storage.ChunkManager
+}
+
+func (s *DelegatorDataSuite) getIDFOracleForTest() *idfOracle {
+	oracle, ok := s.delegator.getIDFOracle().(*idfOracle)
+	s.Require().True(ok)
+	return oracle
 }
 
 func (s *DelegatorDataSuite) SetupSuite() {
@@ -184,9 +192,44 @@ func (s *DelegatorDataSuite) genNormalCollection() {
 	})
 }
 
+func (s *DelegatorDataSuite) genTextCollection() {
+	s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		Name: "TestTextCollection",
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:         "id",
+				FieldID:      100,
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				Name:     "text",
+				FieldID:  101,
+				DataType: schemapb.DataType_Text,
+			},
+			{
+				Name:     "vector",
+				FieldID:  102,
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "128",
+					},
+				},
+			},
+		},
+	}, nil, &querypb.LoadMetaInfo{
+		LoadType:      querypb.LoadType_LoadCollection,
+		PartitionIDs:  []int64{1001},
+		SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0),
+	})
+}
+
 func (s *DelegatorDataSuite) genCollectionWithFunction() {
 	s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
-		Name: "TestCollection",
+		Name:    "TestCollection",
+		Version: 1,
 		Fields: []*schemapb.FieldSchema{
 			{
 				Name:         "id",
@@ -221,9 +264,15 @@ func (s *DelegatorDataSuite) genCollectionWithFunction() {
 	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 	s.NoError(err)
 	s.delegator = delegator.(*shardDelegator)
+	s.allocFunctionRunnersForTest()
 }
 
 func (s *DelegatorDataSuite) SetupTest() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
+	s.T().Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
+	})
+
 	s.workerManager = &cluster.MockManager{}
 	s.manager = segments.NewManager()
 	s.loader = &segments.MockLoader{}
@@ -241,6 +290,27 @@ func (s *DelegatorDataSuite) SetupTest() {
 	sd, ok := delegator.(*shardDelegator)
 	s.Require().True(ok)
 	s.delegator = sd
+}
+
+func (s *DelegatorDataSuite) enableGrowingSourceFlush() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "true")
+	s.T().Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
+	})
+}
+
+func (s *DelegatorDataSuite) TearDownTest() {
+	function.ReleaseFunctionRunners(s.collectionID, s.vchannelName)
+}
+
+func (s *DelegatorDataSuite) allocFunctionRunnersForTest() {
+	function.ReleaseFunctionRunners(s.collectionID, s.vchannelName)
+	errCh := function.AllocFunctionRunners(s.collectionID, s.vchannelName, s.delegator.collection.Schema())
+	if errCh != nil {
+		s.Require().NoError(<-errCh)
+	}
 }
 
 func (s *DelegatorDataSuite) TestProcessInsert() {
@@ -336,6 +406,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 			ms.EXPECT().Partition().Return(info.GetPartitionID())
 			ms.EXPECT().Indexes().Return(nil)
 			ms.EXPECT().RowNum().Return(info.GetNumOfRows())
+			ms.EXPECT().LoadInfo().Return(info)
 			ms.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			ms.EXPECT().MayPkExist(mock.Anything).RunAndReturn(func(lc *storage.LocationsCache) bool {
 				return lc.GetPk().EQ(storage.NewInt64PrimaryKey(10))
@@ -575,6 +646,8 @@ func (s *DelegatorDataSuite) TestLoadGrowingWithBM25() {
 	mockSegment.EXPECT().ID().Return(int64(111))
 	// Note: Type() is no longer called since pkOracle was removed
 	// Candidate is now stored directly in SegmentEntry
+	mockSegment.EXPECT().RowNum().Return(int64(0)).Maybe()
+	mockSegment.EXPECT().LoadInfo().Return(&querypb.SegmentLoadInfo{SegmentID: 111}).Maybe()
 	mockSegment.EXPECT().GetBM25Stats().Return(map[int64]*storage.BM25Stats{})
 
 	err := s.delegator.LoadGrowing(context.Background(), []*querypb.SegmentLoadInfo{{SegmentID: 1}}, 1)
@@ -642,6 +715,175 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 			},
 		}, segmentEntryCoreFields(sealed[0].Segments))
 	})
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25Stats() {
+	s.genCollectionWithFunction()
+
+	remotePath := "bm25stats/reopen/segment_100/field_101/0"
+	stats := storage.NewBM25Stats()
+	for i := uint32(1); i < 4; i++ {
+		stats.Append(map[uint32]float32{i: 1})
+	}
+	data, err := stats.Serialize()
+	s.Require().NoError(err)
+
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(&bytesFileReader{bytes.NewReader(data)}, nil)
+	s.loader.EXPECT().GetChunkManager().Return(cm)
+
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err = s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				Bm25Logs:      bm25LogsForField(101, remotePath),
+			},
+		},
+	})
+
+	s.NoError(err)
+	loadedStats := s.getIDFOracleForTest()
+	fieldStats, err := loadedStats.current.GetStats(101)
+	s.NoError(err)
+	s.Equal(int64(0), fieldStats.NumRow())
+	segStats, ok := loadedStats.sealed.Get(100)
+	s.True(ok)
+	s.True(segStats.HasField(101))
+
+	sealed, _ := s.delegator.GetSegmentInfo(false)
+	s.Empty(sealed)
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsMergesReadableSegment() {
+	s.genCollectionWithFunction()
+	s.delegator.distribution.AddDistributions(SegmentEntry{
+		NodeID:      1,
+		SegmentID:   100,
+		PartitionID: 500,
+		Version:     1,
+		Level:       datapb.SegmentLevel_L1,
+	})
+	s.delegator.distribution.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         1,
+		SealedInTarget:        []int64{100},
+		SealedSegmentRowCount: map[int64]int64{100: 3},
+	}, []int64{500})
+	s.True(s.delegator.distribution.IsReadableSealedSegment(100))
+
+	remotePath := "bm25stats/reopen-readable/segment_100/field_101/0"
+	stats := storage.NewBM25Stats()
+	for i := uint32(1); i < 4; i++ {
+		stats.Append(map[uint32]float32{i: 1})
+	}
+	data, err := stats.Serialize()
+	s.Require().NoError(err)
+
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(&bytesFileReader{bytes.NewReader(data)}, nil)
+	s.loader.EXPECT().GetChunkManager().Return(cm)
+
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err = s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				Bm25Logs:      bm25LogsForField(101, remotePath),
+			},
+		},
+	})
+
+	s.NoError(err)
+	loadedStats := s.getIDFOracleForTest()
+	fieldStats, err := loadedStats.current.GetStats(101)
+	s.NoError(err)
+	s.Equal(int64(3), fieldStats.NumRow())
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsRequiresOracleForRetry() {
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				Bm25Logs:      bm25LogsForField(101, "bm25stats/reopen/segment_100/field_101/0"),
+			},
+		},
+	})
+
+	s.Error(err)
+	s.ErrorIs(err, merr.ErrServiceInternal)
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenWithoutBM25StatsNoop() {
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+			},
+		},
+	})
+
+	s.NoError(err)
+	sealed, _ := s.delegator.GetSegmentInfo(false)
+	s.Empty(sealed)
 }
 
 func (s *DelegatorDataSuite) TestLoadSegments() {
@@ -1055,7 +1297,7 @@ func (s *DelegatorDataSuite) TestPostLoadLimiter() {
 
 func (s *DelegatorDataSuite) waitTargetVersion(targetVersion int64) {
 	for {
-		if s.delegator.idfOracle.TargetVersion() >= targetVersion {
+		if s.getIDFOracleForTest().TargetVersion() >= targetVersion {
 			return
 		}
 		time.Sleep(time.Millisecond * 100)
@@ -1130,11 +1372,11 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		sealedSegs := []int64{1, 2, 3, 4}
 		for _, segID := range sealedSegs {
 			// every segment stats only has one token, avgdl = 1
-			registerSealedStats(s.delegator.idfOracle.(*idfOracle), segID, uint32(segID), uint32(segID)+1)
+			registerSealedStats(s.getIDFOracleForTest(), segID, uint32(segID), uint32(segID)+1)
 		}
 		snapshot := genSnapShot([]int64{1, 2, 3, 4}, []int64{}, 100)
 
-		s.delegator.idfOracle.SetNext(snapshot)
+		s.getIDFOracleForTest().SetNext(snapshot)
 		s.waitTargetVersion(snapshot.targetVersion)
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
@@ -1153,7 +1395,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			SerializedExprPlan: plan,
 			FieldId:            101,
 		}
-		avgdl, err := s.delegator.buildBM25IDF(req)
+		avgdl, err := s.delegator.buildBM25IDF(context.Background(), req)
 		s.NoError(err)
 		s.Equal(float64(1), avgdl)
 
@@ -1183,7 +1425,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          101,
 		}
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(context.Background(), req)
 		s.Error(err)
 	})
 
@@ -1196,7 +1438,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			FieldId:          103, // invalid field id
 		}
 
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(context.Background(), req)
 		s.Error(err)
 	})
 
@@ -1204,9 +1446,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
 
-		oldRunner := s.delegator.functionRunners
 		mockRunner := function.NewMockFunctionRunner(s.T())
-		s.delegator.functionRunners = map[int64]function.FunctionRunner{101: mockRunner}
 		mockRunner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{
 			{
 				FieldID:  101,
@@ -1215,15 +1455,16 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			},
 		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return(nil, errors.New("mock err"))
-		defer func() {
-			s.delegator.functionRunners = oldRunner
-		}()
+		patch := mockey.Mock(function.RunWithRunner).To(func(ctx context.Context, collectionID int64, schemaVersion int32, outputFieldID int64, run func(schemapb.FunctionType, function.FunctionRunner) error) (bool, error) {
+			return true, run(schemapb.FunctionType_BM25, mockRunner)
+		}).Build()
+		defer patch.UnPatch()
 
 		req := &internalpb.SearchRequest{
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          101,
 		}
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(context.Background(), req)
 		s.Error(err)
 	})
 
@@ -1231,9 +1472,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
 
-		oldRunner := s.delegator.functionRunners
 		mockRunner := function.NewMockFunctionRunner(s.T())
-		s.delegator.functionRunners = map[int64]function.FunctionRunner{101: mockRunner}
 		mockRunner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{
 			{
 				FieldID:  101,
@@ -1242,15 +1481,16 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			},
 		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return([]interface{}{1}, nil)
-		defer func() {
-			s.delegator.functionRunners = oldRunner
-		}()
+		patch := mockey.Mock(function.RunWithRunner).To(func(ctx context.Context, collectionID int64, schemaVersion int32, outputFieldID int64, run func(schemapb.FunctionType, function.FunctionRunner) error) (bool, error) {
+			return true, run(schemapb.FunctionType_BM25, mockRunner)
+		}).Build()
+		defer patch.UnPatch()
 
 		req := &internalpb.SearchRequest{
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          101,
 		}
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(context.Background(), req)
 		s.Error(err)
 	})
 
@@ -1258,9 +1498,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
 
-		oldRunner := s.delegator.functionRunners
 		mockRunner := function.NewMockFunctionRunner(s.T())
-		s.delegator.functionRunners = map[int64]function.FunctionRunner{103: mockRunner}
 		mockRunner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{
 			{
 				FieldID:  101,
@@ -1269,15 +1507,16 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			},
 		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return([]interface{}{&schemapb.SparseFloatArray{Contents: [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{1: 1})}}}, nil)
-		defer func() {
-			s.delegator.functionRunners = oldRunner
-		}()
+		patch := mockey.Mock(function.RunWithRunner).To(func(ctx context.Context, collectionID int64, schemaVersion int32, outputFieldID int64, run func(schemapb.FunctionType, function.FunctionRunner) error) (bool, error) {
+			return true, run(schemapb.FunctionType_BM25, mockRunner)
+		}).Build()
+		defer patch.UnPatch()
 
 		req := &internalpb.SearchRequest{
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          103, // invalid field
 		}
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(context.Background(), req)
 		s.Error(err)
 		log.Info("test", zap.Error(err))
 	})
@@ -1287,11 +1526,11 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		sealedSegs := []int64{1, 2, 3, 4}
 		for _, segID := range sealedSegs {
 			// every segment stats only has one token, avgdl = 1
-			registerSealedStats(s.delegator.idfOracle.(*idfOracle), segID, uint32(segID), uint32(segID)+1)
+			registerSealedStats(s.getIDFOracleForTest(), segID, uint32(segID), uint32(segID)+1)
 		}
 		snapshot := genSnapShot([]int64{1, 2, 3, 4}, []int64{}, 100)
 
-		s.delegator.idfOracle.SetNext(snapshot)
+		s.getIDFOracleForTest().SetNext(snapshot)
 		s.waitTargetVersion(snapshot.targetVersion)
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
@@ -1300,7 +1539,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          101,
 		}
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(context.Background(), req)
 		s.Error(err)
 	})
 }
@@ -1317,6 +1556,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 			ms.EXPECT().Collection().Return(info.GetCollectionID())
 			ms.EXPECT().Indexes().Return(nil)
 			ms.EXPECT().RowNum().Return(info.GetNumOfRows())
+			ms.EXPECT().LoadInfo().Return(info)
 			ms.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			ms.EXPECT().MayPkExist(mock.Anything).Call.Return(func(pk storage.PrimaryKey) bool {
 				return pk.EQ(storage.NewInt64PrimaryKey(10))
@@ -1451,6 +1691,289 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	req.Base.TargetID = 1
 	err = s.delegator.ReleaseSegments(ctx, req, false)
 	s.NoError(err)
+}
+
+func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterPreparedHandoff() {
+	ctx := context.Background()
+	s.workerManager = &cluster.MockManager{}
+	s.manager = segments.NewManager()
+	s.loader = &segments.MockLoader{}
+	s.genTextCollection()
+	s.enableGrowingSourceFlush()
+
+	delegator, err := NewShardDelegator(
+		ctx,
+		s.collectionID,
+		s.replicaID,
+		s.vchannelName,
+		s.version,
+		s.workerManager,
+		s.manager,
+		s.loader,
+		10000,
+		nil,
+		s.chunkManager,
+		NewChannelQueryView(nil, nil, nil, initialTargetVersion),
+		nil)
+	s.Require().NoError(err)
+	sd := delegator.(*shardDelegator)
+	defer sd.Close()
+
+	const (
+		segmentID    = int64(1001)
+		partitionID  = int64(500)
+		targetOffset = int64(10)
+	)
+
+	segment := segments.NewMockSegment(s.T())
+	segment.EXPECT().ID().Return(segmentID).Maybe()
+	segment.EXPECT().Version().Return(int64(1)).Maybe()
+	segment.EXPECT().Shard().Return(s.channel).Maybe()
+	segment.EXPECT().Collection().Return(s.collectionID).Maybe()
+	segment.EXPECT().Partition().Return(partitionID).Maybe()
+	segment.EXPECT().Type().Return(segments.SegmentTypeGrowing).Maybe()
+	segment.EXPECT().Level().Return(datapb.SegmentLevel_Legacy).Maybe()
+	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
+	segment.EXPECT().InsertCount().Return(targetOffset).Once()
+	segment.EXPECT().Unpin().Maybe()
+
+	s.manager.Segment.Put(ctx, segments.SegmentTypeGrowing, segment)
+	sd.distribution.AddGrowing(SegmentEntry{
+		NodeID:      paramtable.GetNodeID(),
+		SegmentID:   segmentID,
+		PartitionID: partitionID,
+		Version:     1,
+	})
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, paramtable.GetNodeID()).Return(worker, nil).Once()
+
+	err = sd.growingSourceProvider.PrepareGrowingSourceReleaseHandoff(ctx, 10000, []syncmgr.GrowingSourceReleaseHandoffSegment{
+		{
+			SegmentID:    segmentID,
+			TargetOffset: targetOffset,
+		},
+	})
+	s.Require().NoError(err)
+
+	err = sd.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		NodeID:       paramtable.GetNodeID(),
+		CollectionID: s.collectionID,
+		SegmentIDs:   []int64{segmentID},
+		Scope:        querypb.DataScope_Streaming,
+		Shard:        s.vchannelName,
+	}, false)
+	s.Require().NoError(err)
+}
+
+func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterFencePreparedHandoff() {
+	ctx := context.Background()
+	s.workerManager = &cluster.MockManager{}
+	s.manager = segments.NewManager()
+	s.loader = &segments.MockLoader{}
+	s.genTextCollection()
+	s.enableGrowingSourceFlush()
+
+	delegator, err := NewShardDelegator(
+		ctx,
+		s.collectionID,
+		s.replicaID,
+		s.vchannelName,
+		s.version,
+		s.workerManager,
+		s.manager,
+		s.loader,
+		10000,
+		nil,
+		s.chunkManager,
+		NewChannelQueryView(nil, nil, nil, initialTargetVersion),
+		nil)
+	s.Require().NoError(err)
+	sd := delegator.(*shardDelegator)
+	defer sd.Close()
+
+	const segmentID = int64(1001)
+	sd.distribution.AddGrowing(SegmentEntry{
+		NodeID:      paramtable.GetNodeID(),
+		SegmentID:   segmentID,
+		PartitionID: 500,
+		Version:     1,
+	})
+
+	err = sd.growingSourceProvider.PrepareGrowingSourceReleaseHandoff(ctx, 10000, []syncmgr.GrowingSourceReleaseHandoffSegment{
+		{SegmentID: segmentID},
+	})
+	s.Require().NoError(err)
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, paramtable.GetNodeID()).Return(worker, nil).Once()
+
+	err = sd.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		NodeID:       paramtable.GetNodeID(),
+		CollectionID: s.collectionID,
+		SegmentIDs:   []int64{segmentID},
+		Scope:        querypb.DataScope_Streaming,
+		Shard:        s.vchannelName,
+		Checkpoint:   &msgpb.MsgPosition{Timestamp: 10000},
+	}, false)
+	s.Require().NoError(err)
+}
+
+func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterNoRetainPreparedHandoff() {
+	ctx := context.Background()
+	s.workerManager = &cluster.MockManager{}
+	s.manager = segments.NewManager()
+	s.loader = &segments.MockLoader{}
+	s.genTextCollection()
+	s.enableGrowingSourceFlush()
+
+	delegator, err := NewShardDelegator(
+		ctx,
+		s.collectionID,
+		s.replicaID,
+		s.vchannelName,
+		s.version,
+		s.workerManager,
+		s.manager,
+		s.loader,
+		10000,
+		nil,
+		s.chunkManager,
+		NewChannelQueryView(nil, nil, nil, initialTargetVersion),
+		nil)
+	s.Require().NoError(err)
+	sd := delegator.(*shardDelegator)
+	defer sd.Close()
+
+	const segmentID = int64(1001)
+	sd.distribution.AddGrowing(SegmentEntry{
+		NodeID:      paramtable.GetNodeID(),
+		SegmentID:   segmentID,
+		PartitionID: 500,
+		Version:     1,
+	})
+
+	err = sd.growingSourceProvider.PrepareGrowingSourceReleaseHandoff(ctx, 10000, []syncmgr.GrowingSourceReleaseHandoffSegment{
+		{SegmentID: segmentID},
+	})
+	s.Require().NoError(err)
+
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, paramtable.GetNodeID()).Return(worker, nil).Once()
+
+	err = sd.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		NodeID:       paramtable.GetNodeID(),
+		CollectionID: s.collectionID,
+		SegmentIDs:   []int64{segmentID},
+		Scope:        querypb.DataScope_Streaming,
+		Shard:        s.vchannelName,
+		Checkpoint:   &msgpb.MsgPosition{Timestamp: 10000},
+	}, false)
+	s.Require().NoError(err)
+}
+
+func (s *DelegatorDataSuite) TestReleaseGrowingSourceWithoutPreparedHandoff() {
+	ctx := context.Background()
+	s.workerManager = &cluster.MockManager{}
+	s.manager = segments.NewManager()
+	s.loader = &segments.MockLoader{}
+	s.genTextCollection()
+	s.enableGrowingSourceFlush()
+
+	delegator, err := NewShardDelegator(
+		ctx,
+		s.collectionID,
+		s.replicaID,
+		s.vchannelName,
+		s.version,
+		s.workerManager,
+		s.manager,
+		s.loader,
+		10000,
+		nil,
+		s.chunkManager,
+		NewChannelQueryView(nil, nil, nil, initialTargetVersion),
+		nil)
+	s.Require().NoError(err)
+	sd := delegator.(*shardDelegator)
+	defer sd.Close()
+
+	const segmentID = int64(1001)
+	sd.distribution.AddGrowing(SegmentEntry{
+		NodeID:      paramtable.GetNodeID(),
+		SegmentID:   segmentID,
+		PartitionID: 500,
+		Version:     1,
+	})
+
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, paramtable.GetNodeID()).Return(worker, nil).Once()
+
+	err = sd.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		NodeID:       paramtable.GetNodeID(),
+		CollectionID: s.collectionID,
+		SegmentIDs:   []int64{segmentID},
+		Scope:        querypb.DataScope_Streaming,
+		Shard:        s.vchannelName,
+		Checkpoint:   &msgpb.MsgPosition{Timestamp: 10000},
+	}, false)
+	s.Require().NoError(err)
+}
+
+func (s *DelegatorDataSuite) TestReleaseGrowingSourceDroppedChannelWithoutPreparedHandoff() {
+	ctx := context.Background()
+	s.workerManager = &cluster.MockManager{}
+	s.manager = segments.NewManager()
+	s.loader = &segments.MockLoader{}
+	s.genTextCollection()
+	s.enableGrowingSourceFlush()
+
+	delegator, err := NewShardDelegator(
+		ctx,
+		s.collectionID,
+		s.replicaID,
+		s.vchannelName,
+		s.version,
+		s.workerManager,
+		s.manager,
+		s.loader,
+		10000,
+		nil,
+		s.chunkManager,
+		NewChannelQueryView(nil, nil, nil, initialTargetVersion),
+		nil)
+	s.Require().NoError(err)
+	sd := delegator.(*shardDelegator)
+	defer sd.Close()
+
+	const segmentID = int64(1001)
+	sd.distribution.AddGrowing(SegmentEntry{
+		NodeID:      paramtable.GetNodeID(),
+		SegmentID:   segmentID,
+		PartitionID: 500,
+		Version:     1,
+	})
+
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, paramtable.GetNodeID()).Return(worker, nil).Once()
+
+	err = sd.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		NodeID:       paramtable.GetNodeID(),
+		CollectionID: s.collectionID,
+		SegmentIDs:   []int64{segmentID},
+		Scope:        querypb.DataScope_Streaming,
+		Shard:        s.vchannelName,
+		Checkpoint:   &msgpb.MsgPosition{Timestamp: typeutil.MaxTimestamp},
+	}, false)
+	s.Require().NoError(err)
 }
 
 func (s *DelegatorDataSuite) TestLoadPartitionStats() {
@@ -1765,18 +2288,6 @@ func (s *DelegatorDataSuite) TestDelegatorData_ExcludeSegments() {
 	s.delegator.TryCleanExcludedSegments(4)
 	s.True(s.delegator.VerifyExcludedSegments(1, 1))
 	s.True(s.delegator.VerifyExcludedSegments(1, 5))
-}
-
-func (s *DelegatorDataSuite) TestProcessManualFlush_NilManager() {
-	// When growingFlushManager is nil (non-TEXT collection), should return immediately without panic
-	s.Nil(s.delegator.growingFlushManager)
-	s.delegator.ProcessManualFlush(context.Background(), 1000)
-}
-
-func (s *DelegatorDataSuite) TestProcessManualFlush_NilTracker() {
-	// When checkpointTracker is nil, should return immediately without panic
-	s.delegator.checkpointTracker = nil
-	s.delegator.ProcessManualFlush(context.Background(), 1000)
 }
 
 func TestSegmentEffectiveTs(t *testing.T) {

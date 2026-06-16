@@ -306,7 +306,7 @@ func (m *externalCollectionRefreshManager) cleanupExploreTempForJob(jobID int64)
 func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error {
 	tasks := m.refreshMeta.GetTasksByJobID(job.GetJobId())
 	if len(tasks) == 0 {
-		return fmt.Errorf("job %d has no tasks to apply", job.GetJobId())
+		return merr.WrapErrServiceInternalMsg("job %d has no tasks to apply", job.GetJobId())
 	}
 
 	keptSet := make(map[int64]struct{})
@@ -315,11 +315,11 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 	updatedSegments := make([]*datapb.SegmentInfo, 0)
 	for _, task := range tasks {
 		if task.GetState() != indexpb.JobState_JobStateFinished {
-			return fmt.Errorf("job %d has non-finished task %d in state %s",
+			return merr.WrapErrServiceInternalMsg("job %d has non-finished task %d in state %s",
 				job.GetJobId(), task.GetTaskId(), task.GetState().String())
 		}
 		if !task.GetResultReady() {
-			return fmt.Errorf("job %d has finished task %d without persisted refresh result; please retry refresh",
+			return merr.WrapErrServiceInternalMsg("job %d has finished task %d without persisted refresh result; please retry refresh",
 				job.GetJobId(), task.GetTaskId())
 		}
 		for _, segmentID := range task.GetKeptSegments() {
@@ -334,7 +334,7 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 				continue
 			}
 			if _, ok := updatedSet[segment.GetID()]; ok {
-				return fmt.Errorf("job %d has duplicate updated segment %d from task %d",
+				return merr.WrapErrServiceInternalMsg("job %d has duplicate updated segment %d from task %d",
 					job.GetJobId(), segment.GetID(), task.GetTaskId())
 			}
 			updatedSet[segment.GetID()] = struct{}{}
@@ -714,7 +714,7 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 		if errors.Is(err, packed.ErrLoonTransient) {
 			return nil, newNonRetriableJobError("explore external files failed: %v", err)
 		}
-		return nil, fmt.Errorf("failed to explore external files: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to explore external files")
 	}
 	if len(allFiles) == 0 {
 		return nil, newNonRetriableJobError("no files found in external source: %s", job.GetExternalSource())
@@ -829,7 +829,7 @@ func normalizeRefreshJobProgress(job *datapb.ExternalCollectionRefreshJob, state
 func (m *externalCollectionRefreshManager) GetJobProgress(ctx context.Context, jobID int64) (*datapb.ExternalCollectionRefreshJob, error) {
 	job := m.refreshMeta.GetJob(jobID)
 	if job == nil {
-		return nil, fmt.Errorf("job %d not found", jobID)
+		return nil, merr.WrapErrParameterInvalidMsg("refresh job %d not found", jobID)
 	}
 
 	// Aggregate state and progress from tasks
@@ -877,17 +877,17 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 	// when both present.
 	if job.GetExternalSource() != "" {
 		if err := externalspec.ValidateSourceAndSpec(job.GetExternalSource(), job.GetExternalSpec()); err != nil {
-			return nil, "", fmt.Errorf("external source/spec failed revalidation: %w", err)
+			return nil, "", merr.Wrap(err, "external source/spec failed revalidation")
 		}
 	}
 	spec, err := externalspec.ParseExternalSpec(job.GetExternalSpec())
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to parse external spec: %w", err)
+		return nil, "", merr.Wrap(err, "failed to parse external spec")
 	}
 
 	collInfo := m.mt.GetCollection(job.GetCollectionId())
 	if collInfo == nil {
-		return nil, "", fmt.Errorf("collection %d not found", job.GetCollectionId())
+		return nil, "", merr.WrapErrCollectionNotFound(job.GetCollectionId())
 	}
 
 	columns := packed.GetColumnNamesFromSchema(collInfo.Schema)
@@ -908,7 +908,7 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 		extfs,
 	)
 	if err != nil {
-		return nil, "", fmt.Errorf("ExploreFilesReturnManifestPath failed: %w", err)
+		return nil, "", merr.WrapErrServiceInternalErr(err, "failed to explore files returning manifest path")
 	}
 
 	// Convert to proto type

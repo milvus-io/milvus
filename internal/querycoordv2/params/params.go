@@ -30,6 +30,9 @@ import (
 
 var Params *paramtable.ComponentParam = paramtable.Get()
 
+// ErrFailedAllocateID is an identity sentinel returned by the test-only
+// ErrorIDAllocator; keep it a plain errors.New (not merr) so errors.Is
+// matches by identity instead of by merr error code.
 var ErrFailedAllocateID = errors.New("failed to allocate ID")
 
 // GenerateEtcdConfig returns a etcd config with a random root path,

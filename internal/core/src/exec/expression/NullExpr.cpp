@@ -99,6 +99,10 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecVisitorImpl<ArrayView>(input);
             break;
         }
+        case DataType::VECTOR_ARRAY: {
+            result = ExecVisitorImpl<VectorArray>(input);
+            break;
+        }
         case DataType::GEOMETRY: {
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()
@@ -115,6 +119,15 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
                       "unsupported data type: {}",
                       expr_->column_.data_type_);
     }
+}
+
+void
+PhyNullExpr::DetermineExecPath() {
+    if (expr_->column_.data_type_ == DataType::VECTOR_ARRAY) {
+        exec_path_ = ExprExecPath::RawData;
+        return;
+    }
+    SegmentExpr::DetermineExecPath();
 }
 
 template <typename T>

@@ -85,6 +85,7 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	}
 
 	SyncPreferFieldDataWhenIndexHasRawData(ctx, paramtable.Get())
+	SyncEnableGrowingSourceFlush(ctx, paramtable.Get())
 
 	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
 	C.SegcoreSetKnowhereSearchThreadPoolNum(cKnowhereThreadPoolSize)
@@ -234,5 +235,18 @@ func SyncPreferFieldDataWhenIndexHasRawData(ctx context.Context, params *paramta
 	if v {
 		log.Ctx(ctx).Info("preferFieldDataWhenIndexHasRawData=true: sealed retrieve will read field data instead of index raw data; " +
 			"both will stay resident in memory, increasing the memory footprint for fields whose index also holds raw data")
+	}
+}
+
+// SyncEnableGrowingSourceFlush pushes the effective growing-source flush switch
+// into segcore so growing segments only retain raw chunks when the Go flush path
+// may later persist them through StorageV3 FlushGrowingSegmentData.
+func SyncEnableGrowingSourceFlush(ctx context.Context, params *paramtable.ComponentParam) {
+	storageV3Enabled := params.CommonCfg.UseLoonFFI.GetAsBool()
+	v := storageV3Enabled && params.CommonCfg.EnableGrowingSourceFlush.GetAsBool()
+	C.SegcoreSetStorageV3Enabled(C.bool(storageV3Enabled))
+	C.SegcoreSetEnableGrowingSourceFlush(C.bool(v))
+	if v {
+		log.Ctx(ctx).Info("enableGrowingSourceFlush=true: growing segments retain raw field chunks for StorageV3 growing-source flush")
 	}
 }

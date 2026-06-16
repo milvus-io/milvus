@@ -18,6 +18,7 @@
 
 #include "cachinglayer/Manager.h"
 #include "common/EasyAssert.h"
+#include "common/FastMem.h"
 #include "config/ConfigKnowhere.h"
 #include "glog/logging.h"
 #include "log/Log.h"
@@ -47,6 +48,20 @@ SegcoreSetEnableInterminSegmentIndex(const bool value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
     config.set_enable_interim_segment_index(value);
+}
+
+extern "C" void
+SegcoreSetStorageV3Enabled(const bool value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_storage_v3_enabled(value);
+}
+
+extern "C" void
+SegcoreSetEnableGrowingSourceFlush(const bool value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_enable_growing_source_flush(value);
 }
 
 extern "C" void
@@ -184,7 +199,7 @@ SegcoreSetSimdType(const char* value) {
     auto real_type = milvus::config::KnowhereSetSimdType(value);
     char* ret = reinterpret_cast<char*>(malloc(real_type.length() + 1));
     AssertInfo(ret != nullptr, "memmory allocation for ret failed!");
-    memcpy(ret, real_type.c_str(), real_type.length());
+    milvus::fastmem::FastMemcpy(ret, real_type.c_str(), real_type.length());
     ret[real_type.length()] = 0;
     return ret;
 }

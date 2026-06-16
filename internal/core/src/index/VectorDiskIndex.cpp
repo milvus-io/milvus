@@ -28,6 +28,7 @@
 #include <string>
 
 #include "common/Consts.h"
+#include "common/FastMem.h"
 #include "common/OffsetMapping.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
@@ -319,13 +320,14 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
             GetValueFromConfig<std::vector<std::string>>(config, "index_files");
         AssertInfo(index_files.has_value(),
                    "index file paths is empty when load disk ann index data");
-        // If index is loaded with stream, we don't need to cache index to disk
-        if (!index_.LoadIndexWithStream()) {
-            auto load_priority =
-                GetValueFromConfig<milvus::proto::common::LoadPriority>(
-                    config, milvus::LOAD_PRIORITY)
-                    .value_or(milvus::proto::common::LoadPriority::HIGH);
-            file_manager_->CacheIndexToDisk(index_files.value(), load_priority);
+        auto load_priority =
+            GetValueFromConfig<milvus::proto::common::LoadPriority>(
+                config, milvus::LOAD_PRIORITY)
+                .value_or(milvus::proto::common::LoadPriority::HIGH);
+        auto cache_files = GetCacheFilesForDiskIndexLoad(
+            index_files.value(), index_.LoadIndexWithStream());
+        if (!cache_files.empty()) {
+            file_manager_->CacheIndexToDisk(cache_files, load_priority);
         }
         read_file_span->End();
     }
@@ -379,7 +381,8 @@ template <typename T>
 IndexStatsPtr
 VectorDiskAnnIndex<T>::Upload(const Config& config) {
     BinarySet ret;
-    if (!IsAllNullNullable(offset_mapping_) && !IsEmptyEmbListIndex()) {
+    const auto& offset_mapping = GetOffsetMapping();
+    if (!IsAllNullNullable(offset_mapping) && !IsEmptyEmbListIndex()) {
         auto stat = index_.Serialize(ret);
         if (stat != knowhere::Status::success) {
             ThrowInfo(ErrorCode::UnexpectedError,
@@ -549,11 +552,12 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
     build_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
 
+    const auto& offset_mapping = GetOffsetMapping();
     if (HasValidData() && GetValidCount() == 0 &&
-        offset_mapping_.GetTotalCount() > 0) {
+        offset_mapping.GetTotalCount() > 0) {
         auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
         WriteDiskValidData(
-            local_chunk_manager, valid_data_path, offset_mapping_);
+            local_chunk_manager, valid_data_path, offset_mapping);
         file_manager_->AddFile(valid_data_path);
         auto dim = GetValueFromConfig<int64_t>(build_config, DIM_KEY);
         if (dim.has_value()) {
@@ -658,7 +662,7 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     if (HasValidData()) {
         auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
         WriteDiskValidData(
-            local_chunk_manager, valid_data_path, offset_mapping_);
+            local_chunk_manager, valid_data_path, offset_mapping);
         file_manager_->AddFile(valid_data_path);
     }
 
@@ -683,7 +687,8 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
 
     knowhere::Json search_config = PrepareSearchParams(search_info);
 
-    if (IsAllNullNullable(offset_mapping_) || IsEmptyEmbListIndex()) {
+    const auto& offset_mapping = GetOffsetMapping();
+    if (IsAllNullNullable(offset_mapping) || IsEmptyEmbListIndex()) {
         auto offsets =
             dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
         auto num_queries = dataset->GetRows();
@@ -769,8 +774,14 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
     search_result.distances_.resize(total_num);
     search_result.total_nq_ = num_queries;
     search_result.unity_topK_ = topk;
-    std::copy_n(ids, total_num, search_result.seg_offsets_.data());
-    std::copy_n(distances, total_num, search_result.distances_.data());
+    milvus::fastmem::FastMemcpy(
+        search_result.seg_offsets_.data(),
+        ids,
+        total_num * sizeof(*search_result.seg_offsets_.data()));
+    milvus::fastmem::FastMemcpy(
+        search_result.distances_.data(),
+        distances,
+        total_num * sizeof(*search_result.distances_.data()));
 }
 
 template <typename T>
@@ -787,7 +798,8 @@ VectorDiskAnnIndex<T>::VectorIterators(const DatasetPtr dataset,
         return iterators;
     };
 
-    if (IsAllNullNullable(offset_mapping_) || IsEmptyEmbListIndex()) {
+    const auto& offset_mapping = GetOffsetMapping();
+    if (IsAllNullNullable(offset_mapping) || IsEmptyEmbListIndex()) {
         auto offsets =
             dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
         auto num_queries = dataset->GetRows();
@@ -812,7 +824,8 @@ VectorDiskAnnIndex<T>::VectorIterators(const DatasetPtr dataset,
 template <typename T>
 const bool
 VectorDiskAnnIndex<T>::HasRawData() const {
-    if (IsAllNullNullable(offset_mapping_) || IsEmptyEmbListIndex()) {
+    const auto& offset_mapping = GetOffsetMapping();
+    if (IsAllNullNullable(offset_mapping) || IsEmptyEmbListIndex()) {
         return true;
     }
     return index_.HasRawData(GetMetricType());
@@ -821,7 +834,8 @@ VectorDiskAnnIndex<T>::HasRawData() const {
 template <typename T>
 bool
 VectorDiskAnnIndex<T>::IsIndexRefineEnabled() const {
-    if (IsAllNullNullable(offset_mapping_) || IsEmptyEmbListIndex()) {
+    const auto& offset_mapping = GetOffsetMapping();
+    if (IsAllNullNullable(offset_mapping) || IsEmptyEmbListIndex()) {
         return false;
     }
     return index_.IsIndexRefineEnabled();

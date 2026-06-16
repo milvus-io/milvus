@@ -63,7 +63,7 @@ func (node *Proxy) CreateSnapshot(ctx context.Context, req *milvuspb.CreateSnaps
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, failMetricLabel(err), req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn("CreateSnapshot failed to WaitToFinish",
 			zap.Error(err))
 		return merr.Status(err), nil
@@ -103,7 +103,7 @@ func (node *Proxy) DropSnapshot(ctx context.Context, req *milvuspb.DropSnapshotR
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, failMetricLabel(err), req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn("DropSnapshot failed to WaitToFinish",
 			zap.Error(err))
 		return merr.Status(err), nil
@@ -145,7 +145,7 @@ func (node *Proxy) DescribeSnapshot(ctx context.Context, req *milvuspb.DescribeS
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, failMetricLabel(err), req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn("DescribeSnapshot failed to WaitToFinish",
 			zap.Error(err))
 		return &milvuspb.DescribeSnapshotResponse{
@@ -188,7 +188,7 @@ func (node *Proxy) ListSnapshots(ctx context.Context, req *milvuspb.ListSnapshot
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, failMetricLabel(err), req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn("ListSnapshots failed to WaitToFinish",
 			zap.Error(err))
 		return &milvuspb.ListSnapshotsResponse{
@@ -230,7 +230,7 @@ func (node *Proxy) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSna
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, failMetricLabel(err), req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn("RestoreSnapshot failed to WaitToFinish",
 			zap.Error(err))
 		return &milvuspb.RestoreSnapshotResponse{Status: merr.Status(err)}, nil
@@ -272,7 +272,7 @@ func (node *Proxy) GetRestoreSnapshotState(ctx context.Context, req *milvuspb.Ge
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, "", "").Inc()
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, failMetricLabel(err), "", "").Inc()
 		log.Warn("GetRestoreSnapshotState failed to WaitToFinish",
 			zap.Error(err))
 		return &milvuspb.GetRestoreSnapshotStateResponse{
@@ -316,7 +316,7 @@ func (node *Proxy) ListRestoreSnapshotJobs(ctx context.Context, req *milvuspb.Li
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, failMetricLabel(err), req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn("ListRestoreSnapshotJobs failed to WaitToFinish",
 			zap.Error(err))
 		return &milvuspb.ListRestoreSnapshotJobsResponse{
@@ -361,7 +361,7 @@ func (node *Proxy) PinSnapshotData(ctx context.Context, req *milvuspb.PinSnapsho
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, failMetricLabel(err), req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn("PinSnapshotData failed to WaitToFinish",
 			zap.Error(err))
 		return &milvuspb.PinSnapshotDataResponse{
@@ -402,7 +402,7 @@ func (node *Proxy) UnpinSnapshotData(ctx context.Context, req *milvuspb.UnpinSna
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, "", "").Inc()
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, failMetricLabel(err), "", "").Inc()
 		log.Warn("UnpinSnapshotData failed to WaitToFinish",
 			zap.Error(err))
 		return merr.Status(err), nil

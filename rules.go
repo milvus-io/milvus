@@ -407,3 +407,73 @@ func badlock(m dsl.Matcher) {
 	m.Match(`$mu.Lock(); defer $mu.RUnlock()`).Report(`maybe $mu.RLock() was intended?`)
 	m.Match(`$mu.RLock(); defer $mu.Unlock()`).Report(`maybe $mu.Lock() was intended?`)
 }
+
+// Raw error constructors (fmt.Errorf / errors.New / errors.Errorf) must not be
+// returned directly from a function body. An error that reaches the gRPC
+// boundary has to carry a merr code, so originate it through the merr framework
+// (merr.WrapErr*Msg / merr.WrapErr*Err) and add context with merr.Wrap/Wrapf.
+//
+// Scope: this catches the direct-return form, the form that lets a raw error
+// escape to the boundary. Sentinels are expected to be package-level
+// (var Err... = errors.New(...)) — ValueSpec nodes that the statement patterns
+// below never match — so they are exempt automatically; function-local
+// sentinels should be lifted to package level rather than kept inline.
+// Assignment-then-return escapes (e := errors.New(); return e) cannot be
+// expressed as a ruleguard pattern and are backstopped at the gRPC boundary by
+// merr.Status. Test files, the cmd/ and tests/ trees, codegen and the walimpls
+// harness run outside the request path and are exempt.
+func rawmerrerror(m dsl.Matcher) {
+	// fmt.Errorf resolves unambiguously to the stdlib, so the literal selector matches.
+	m.Match(
+		`return fmt.Errorf($*_)`,
+		`return $*_, fmt.Errorf($*_)`,
+		`return fmt.Errorf($*_), $*_`,
+	).
+		Where(!m.File().Name.Matches(`_test\.go$`) &&
+			!m.File().Name.Matches(`test_streaming\.go$`) &&
+			!m.File().PkgPath.Matches(`/milvus/cmd/`) &&
+			!m.File().PkgPath.Matches(`/milvus/tests/`) &&
+			!m.File().PkgPath.Matches(`codegen`) &&
+			!m.File().PkgPath.Matches(`walimplstest`) &&
+			!m.File().PkgPath.Matches(`/mocks/`)).
+		Report(`raw error returned from function body; originate through the merr framework (merr.WrapErr*/merr.Wrap) instead of fmt.Errorf/errors.New/errors.Errorf`)
+
+	// errors.New/Newf/Errorf: the repo uses github.com/cockroachdb/errors, not the
+	// stdlib, so a literal `errors.New` selector — which ruleguard type-resolves to
+	// the stdlib package — never matches. Match by the function name instead, limited
+	// to the raw constructors; errors.Wrap/Wrapf/Is/As/Cause are intentionally allowed.
+	m.Match(
+		`return errors.$fn($*_)`,
+		`return $*_, errors.$fn($*_)`,
+		`return errors.$fn($*_), $*_`,
+	).
+		Where(m["fn"].Text.Matches(`^(New|Newf|Errorf)$`) &&
+			!m.File().Name.Matches(`_test\.go$`) &&
+			!m.File().Name.Matches(`test_streaming\.go$`) &&
+			!m.File().PkgPath.Matches(`/milvus/cmd/`) &&
+			!m.File().PkgPath.Matches(`/milvus/tests/`) &&
+			!m.File().PkgPath.Matches(`codegen`) &&
+			!m.File().PkgPath.Matches(`walimplstest`) &&
+			!m.File().PkgPath.Matches(`/mocks/`)).
+		Report(`raw error returned from function body; originate through the merr framework (merr.WrapErr*/merr.Wrap) instead of fmt.Errorf/errors.New/errors.Errorf`)
+}
+
+// merrsentinel forbids parking merr-typed errors in variables that look like
+// sentinels. milvusError.Is compares error codes only, so errors.Is against a
+// merr-typed "sentinel" silently matches ANY error sharing the code — a guard
+// like errors.Is(err, ErrIgnoredFoo) then treats unrelated internal failures
+// as the special case (real incident: stale-meta / already-loaded guards
+// acknowledged etcd write failures as success). Identity sentinels must stay
+// plain errors.New; merr errors must be created at the return site.
+func merrsentinel(m dsl.Matcher) {
+	m.Match(
+		`var $x = merr.$f($*_)`,
+		`var $x = merr.$v`,
+	).
+		Where(!m.File().Name.Matches(`_test\.go$`) &&
+			!m.File().PkgPath.Matches(`/milvus/cmd/`) &&
+			!m.File().PkgPath.Matches(`/milvus/tests/`) &&
+			!m.File().PkgPath.Matches(`/mocks/`) &&
+			!m.File().PkgPath.Matches(`util/merr`)).
+		Report(`don't store a merr error in a sentinel-like variable: errors.Is on merr compares codes, not identity, so any same-code error would match. Use errors.New for identity sentinels, or create the merr error at the return site`)
+}

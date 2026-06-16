@@ -20,6 +20,7 @@
 #include <iterator>
 #include "pb/plan.pb.h"
 #include "common/EasyAssert.h"
+#include "common/FastMem.h"
 
 extern "C" {
 #include "Murmur3.h"
@@ -50,7 +51,7 @@ double
 hash_to_double(const uint64_t& h) {
     auto double_bytes = (MAGIC_BITS | (h & 0xFFFFFFFFFFFFF));
     double result;
-    memcpy(&result, &double_bytes, sizeof(result));
+    milvus::fastmem::FastMemcpy(&result, &double_bytes, sizeof(result));
     return result - 1.0;
 }
 }  // namespace milvus::rescores

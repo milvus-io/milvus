@@ -274,7 +274,7 @@ func (broker *CoordinatorBroker) GetSegmentInfo(ctx context.Context, ids ...Uniq
 
 		if len(resp.Infos) == 0 {
 			log.Warn("No such segment in DataCoord")
-			return nil, errors.New("no such segment in DataCoord")
+			return nil, merr.WrapErrSegmentNotFound(ids[0], "no such segment in DataCoord")
 		}
 
 		err = binlog.DecompressMultiBinLogs(resp.GetInfos())
@@ -357,6 +357,7 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 				NumRows:                   info.GetNumRows(),
 				CurrentIndexVersion:       info.GetCurrentIndexVersion(),
 				CurrentScalarIndexVersion: info.GetCurrentScalarIndexVersion(),
+				IndexStorePathVersion:     info.GetIndexStorePathVersion(),
 			})
 		}
 	}

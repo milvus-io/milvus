@@ -18,7 +18,6 @@ package componentutil
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -53,10 +52,11 @@ func WaitForComponentStates[T interface {
 			}
 		}
 		if !meet {
-			return fmt.Errorf(
-				"WaitForComponentStates, not meet, %s current state: %s",
+			return merr.WrapErrServiceNotReady(
 				serviceName,
-				resp.State.StateCode.String())
+				0,
+				resp.State.StateCode.String(),
+				"WaitForComponentStates, not meet")
 		}
 		log.Info("WaitForComponentStates success", zap.String("current state", resp.State.StateCode.String()))
 		return nil

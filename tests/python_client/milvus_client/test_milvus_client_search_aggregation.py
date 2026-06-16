@@ -1154,7 +1154,7 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
         """
         target: clarify search_aggregation metric/order compatibility with dynamic fields.
         method: aggregate by a static scalar field, compute sum(dynamic_price), and order by that metric alias.
-        expected: request is rejected because dynamic metric sources have no resolved scalar type.
+        expected: request is rejected because JSON / dynamic metric fields are not yet supported with search_aggregation.
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -1162,7 +1162,7 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
             client, collection_name
         )
 
-        error = {ct.err_code: 999, ct.err_msg: "aggregation operator sum does not support data type None"}
+        error = {ct.err_code: 999, ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation"}
         self.search(
             client,
             collection_name,
@@ -1182,6 +1182,10 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(
+        reason="search_aggregation top_hits.sort does not support dynamic fields yet",
+        strict=True,
+    )
     def test_search_aggregation_top_hits_sort_by_dynamic_field(self):
         """
         target: verify top_hits.sort can use a dynamic scalar field.
@@ -1295,7 +1299,10 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
             client, collection_name
         )
 
-        metric_error = {ct.err_code: 999, ct.err_msg: "aggregation operator sum does not support data type JSON"}
+        metric_error = {
+            ct.err_code: 999,
+            ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation",
+        }
         self.search(
             client,
             collection_name,

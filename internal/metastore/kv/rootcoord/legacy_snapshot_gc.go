@@ -2,7 +2,6 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -22,7 +21,7 @@ const (
 )
 
 // errBatchFull is a sentinel error to stop WalkWithPrefix after collecting enough keys.
-var errBatchFull = fmt.Errorf("legacy GC batch full")
+var errBatchFull = errors.New("legacy GC batch full")
 
 var legacyGCOnce sync.Once
 

@@ -16,7 +16,9 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
+#include "common/FastMem.h"
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -33,6 +35,46 @@ namespace milvus::index {
 inline bool
 IsValidDataBinary(const std::string& name) {
     return name == VALID_DATA_COUNT_KEY || name == VALID_DATA_KEY;
+}
+
+inline std::string
+GetIndexFileName(const std::string& file) {
+    auto pos = file.find_last_of("/\\");
+    if (pos == std::string::npos) {
+        return file;
+    }
+    return file.substr(pos + 1);
+}
+
+inline bool
+IsValidDataDiskFileSlice(const std::string& file) {
+    const auto file_name = GetIndexFileName(file);
+    const std::string prefix = std::string(VALID_DATA_KEY) + "_";
+    if (file_name.size() <= prefix.size() ||
+        file_name.compare(0, prefix.size(), prefix) != 0) {
+        return false;
+    }
+    return std::all_of(file_name.begin() + prefix.size(),
+                       file_name.end(),
+                       [](char c) { return c >= '0' && c <= '9'; });
+}
+
+inline std::vector<std::string>
+FilterValidDataDiskFileSlices(const std::vector<std::string>& files) {
+    std::vector<std::string> valid_data_files;
+    for (const auto& file : files) {
+        if (IsValidDataDiskFileSlice(file)) {
+            valid_data_files.emplace_back(file);
+        }
+    }
+    return valid_data_files;
+}
+
+inline std::vector<std::string>
+GetCacheFilesForDiskIndexLoad(const std::vector<std::string>& index_files,
+                              bool load_index_with_stream) {
+    return load_index_with_stream ? FilterValidDataDiskFileSlices(index_files)
+                                  : index_files;
 }
 
 inline bool
@@ -115,13 +157,14 @@ AppendValidDataToBinarySet(const OffsetMapping& offset_mapping,
     auto count = static_cast<size_t>(offset_mapping.GetTotalCount());
     auto wire_count = ToValidDataCount(count);
     std::shared_ptr<uint8_t[]> count_buf(new uint8_t[sizeof(uint64_t)]);
-    std::memcpy(count_buf.get(), &wire_count, sizeof(uint64_t));
+    milvus::fastmem::FastMemcpy(count_buf.get(), &wire_count, sizeof(uint64_t));
     binary_set.Append(VALID_DATA_COUNT_KEY, count_buf, sizeof(uint64_t));
 
     auto packed_data = PackValidDataBitmap(offset_mapping);
     std::shared_ptr<uint8_t[]> data(new uint8_t[packed_data.size()]);
     if (!packed_data.empty()) {
-        std::memcpy(data.get(), packed_data.data(), packed_data.size());
+        milvus::fastmem::FastMemcpy(
+            data.get(), packed_data.data(), packed_data.size());
     }
     binary_set.Append(VALID_DATA_KEY, data, packed_data.size());
 }
@@ -141,7 +184,8 @@ LoadValidDataFromBinarySet(const BinarySet& binary_set,
     AssertInfo(count_ptr != nullptr && count_ptr->size == sizeof(uint64_t),
                "nullable vector index valid_data count file is invalid");
     uint64_t wire_count = 0;
-    std::memcpy(&wire_count, count_ptr->data.get(), sizeof(uint64_t));
+    milvus::fastmem::FastMemcpy(
+        &wire_count, count_ptr->data.get(), sizeof(uint64_t));
     auto count = FromValidDataCount(wire_count);
 
     auto data_ptr = binary_set.GetByName(VALID_DATA_KEY);

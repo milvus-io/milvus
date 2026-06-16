@@ -78,7 +78,13 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 	}
 
 	if nodeMsg.schema != nil {
-		dNode.delegator.UpdateSchema(context.Background(), nodeMsg.schema, nodeMsg.schemaVersion)
+		if err := dNode.delegator.UpdateSchema(context.Background(), nodeMsg.schema, nodeMsg.schemaVersion); err != nil {
+			log.Warn("failed to update schema in delete node",
+				zap.Int64("collectionID", dNode.collectionID),
+				zap.String("channel", dNode.channel),
+				zap.Uint64("schemaVersion", nodeMsg.schemaVersion),
+				zap.Error(err))
+		}
 	}
 
 	// update tSafe

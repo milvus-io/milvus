@@ -17,12 +17,9 @@
 package compactor
 
 import (
-	"fmt"
-
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
-	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -79,7 +76,7 @@ func NewRecordMaterializer(schema *schemapb.CollectionSchema, functions []*schem
 		}
 		if runner == nil {
 			materializer.Close()
-			return nil, errors.Newf("failed to set up function runner for %s", functionSchema.GetName())
+			return nil, merr.WrapErrFunctionFailedMsg("failed to set up function runner for %s", functionSchema.GetName())
 		}
 		functionMaterializer, err := newFunctionMaterializer(schema, runner, outputIndexes, true)
 		if err != nil {
@@ -243,7 +240,7 @@ func (r *selectedRecord) Column(fieldID storage.FieldID) arrow.Array {
 	defer selected.Release()
 	col := selected.Column(fieldID)
 	if col == nil {
-		r.err = errors.Newf("selected record field %d not found", fieldID)
+		r.err = merr.WrapErrServiceInternalMsg("selected record field %d not found", fieldID)
 		return nil
 	}
 	col.Retain()
@@ -325,51 +322,112 @@ type bm25FunctionMaterializer struct {
 	ownRunner            bool
 }
 
-var _ FunctionMaterializer = (*bm25FunctionMaterializer)(nil)
+type minHashFunctionMaterializer struct {
+	runner               function.FunctionRunner
+	inputFieldIDs        []int64
+	outputFieldIDs       []int64
+	missingOutputIndexes []int
+	outputFields         map[int64]*schemapb.FieldSchema
+	ownRunner            bool
+}
+
+var (
+	_ FunctionMaterializer = (*bm25FunctionMaterializer)(nil)
+	_ FunctionMaterializer = (*minHashFunctionMaterializer)(nil)
+)
 
 func newFunctionMaterializer(schema *schemapb.CollectionSchema, runner function.FunctionRunner, missingOutputIndexes []int, ownRunner bool) (FunctionMaterializer, error) {
 	functionSchema := runner.GetSchema()
 	switch functionSchema.GetType() {
 	case schemapb.FunctionType_BM25:
 		return newBM25FunctionMaterializer(schema, runner, missingOutputIndexes, ownRunner)
+	case schemapb.FunctionType_MinHash:
+		return newMinHashFunctionMaterializer(schema, runner, missingOutputIndexes, ownRunner)
 	default:
-		return nil, errors.Newf("unsupported function type %s", functionSchema.GetType().String())
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported function type %s", functionSchema.GetType().String())
 	}
 }
 
-func newBM25FunctionMaterializer(schema *schemapb.CollectionSchema, runner function.FunctionRunner, missingOutputIndexes []int, ownRunner bool) (*bm25FunctionMaterializer, error) {
+func newMinHashFunctionMaterializer(schema *schemapb.CollectionSchema, runner function.FunctionRunner, missingOutputIndexes []int, ownRunner bool) (*minHashFunctionMaterializer, error) {
 	functionSchema := runner.GetSchema()
 	inputFields := runner.GetInputFields()
 	if len(inputFields) == 0 {
-		return nil, errors.New("bm25 function should have input fields")
+		return nil, merr.WrapErrFunctionFailedMsg("minhash function should have input fields")
 	}
 	inputFieldIDs := make([]int64, 0, len(inputFields))
 	for _, inputField := range inputFields {
 		if inputField == nil || typeutil.GetField(schema, inputField.GetFieldID()) == nil {
-			return nil, errors.New("input field not found in schema")
+			return nil, merr.WrapErrFunctionFailedMsg("input field not found in schema")
 		}
 		if inputField.GetDataType() != schemapb.DataType_VarChar && inputField.GetDataType() != schemapb.DataType_Text {
-			return nil, errors.New("input field data type must be varchar or text for bm25 function materialization")
+			return nil, merr.WrapErrFunctionFailedMsg("input field data type must be varchar or text for minhash function materialization")
 		}
 		inputFieldIDs = append(inputFieldIDs, inputField.GetFieldID())
 	}
 
 	outputFieldIDs := functionSchema.GetOutputFieldIds()
 	if len(outputFieldIDs) == 0 {
-		return nil, errors.New("bm25 function should have output fields")
+		return nil, merr.WrapErrFunctionFailedMsg("minhash function should have output fields")
 	}
 
 	outputFields := make(map[int64]*schemapb.FieldSchema, len(outputFieldIDs))
 	for _, outputFieldID := range outputFieldIDs {
 		outputField := typeutil.GetField(schema, outputFieldID)
 		if outputField == nil {
-			return nil, errors.New("output field not found in schema")
+			return nil, merr.WrapErrFunctionFailedMsg("output field not found in schema")
 		}
-		if outputField.GetDataType() != schemapb.DataType_SparseFloatVector {
-			return nil, errors.New("output field data type must be sparse float vector for bm25 function materialization")
+		if outputField.GetDataType() != schemapb.DataType_BinaryVector {
+			return nil, merr.WrapErrFunctionFailedMsg("output field data type must be binary vector for minhash function materialization")
 		}
 		if outputField.GetNullable() {
-			return nil, errors.Newf("function output field cannot be nullable: function %s, field %s", functionSchema.GetName(), outputField.GetName())
+			return nil, merr.WrapErrFunctionFailedMsg("function output field cannot be nullable: function %s, field %s", functionSchema.GetName(), outputField.GetName())
+		}
+		outputFields[outputFieldID] = outputField
+	}
+
+	return &minHashFunctionMaterializer{
+		runner:               runner,
+		inputFieldIDs:        inputFieldIDs,
+		outputFieldIDs:       outputFieldIDs,
+		missingOutputIndexes: missingOutputIndexes,
+		outputFields:         outputFields,
+		ownRunner:            ownRunner,
+	}, nil
+}
+
+func newBM25FunctionMaterializer(schema *schemapb.CollectionSchema, runner function.FunctionRunner, missingOutputIndexes []int, ownRunner bool) (*bm25FunctionMaterializer, error) {
+	functionSchema := runner.GetSchema()
+	inputFields := runner.GetInputFields()
+	if len(inputFields) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("bm25 function should have input fields")
+	}
+	inputFieldIDs := make([]int64, 0, len(inputFields))
+	for _, inputField := range inputFields {
+		if inputField == nil || typeutil.GetField(schema, inputField.GetFieldID()) == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("input field not found in schema")
+		}
+		if inputField.GetDataType() != schemapb.DataType_VarChar && inputField.GetDataType() != schemapb.DataType_Text {
+			return nil, merr.WrapErrParameterInvalidMsg("input field data type must be varchar or text for bm25 function materialization")
+		}
+		inputFieldIDs = append(inputFieldIDs, inputField.GetFieldID())
+	}
+
+	outputFieldIDs := functionSchema.GetOutputFieldIds()
+	if len(outputFieldIDs) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("bm25 function should have output fields")
+	}
+
+	outputFields := make(map[int64]*schemapb.FieldSchema, len(outputFieldIDs))
+	for _, outputFieldID := range outputFieldIDs {
+		outputField := typeutil.GetField(schema, outputFieldID)
+		if outputField == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("output field not found in schema")
+		}
+		if outputField.GetDataType() != schemapb.DataType_SparseFloatVector {
+			return nil, merr.WrapErrParameterInvalidMsg("output field data type must be sparse float vector for bm25 function materialization")
+		}
+		if outputField.GetNullable() {
+			return nil, merr.WrapErrParameterInvalidMsg("function output field cannot be nullable: function %s, field %s", functionSchema.GetName(), outputField.GetName())
 		}
 		outputFields[outputFieldID] = outputField
 	}
@@ -398,7 +456,7 @@ func (m *bm25FunctionMaterializer) Materialize(rec storage.Record) (map[int64]ar
 		return nil, err
 	}
 	if len(outputs) != len(m.outputFieldIDs) {
-		return nil, errors.Newf("bm25 function materialization expects %d outputs, got %d", len(m.outputFieldIDs), len(outputs))
+		return nil, merr.WrapErrFunctionFailedMsg("bm25 function materialization expects %d outputs, got %d", len(m.outputFieldIDs), len(outputs))
 	}
 
 	result := make(map[int64]arrow.Array, len(m.missingOutputIndexes))
@@ -407,7 +465,7 @@ func (m *bm25FunctionMaterializer) Materialize(rec storage.Record) (map[int64]ar
 		outputSparseArray, ok := outputs[outputIndex].(*schemapb.SparseFloatArray)
 		if !ok {
 			releaseArrowArrays(result)
-			return nil, errors.Newf("unexpected output type from BM25 function runner, expected SparseFloatArray, got %T", outputs[outputIndex])
+			return nil, merr.WrapErrFunctionFailedMsg("unexpected output type from BM25 function runner, expected SparseFloatArray, got %T", outputs[outputIndex])
 		}
 		arr, err := buildSparseFloatVectorArrowArray(m.outputFields[outputFieldID], outputSparseArray, rec.Len())
 		if err != nil {
@@ -420,6 +478,60 @@ func (m *bm25FunctionMaterializer) Materialize(rec storage.Record) (map[int64]ar
 }
 
 func (m *bm25FunctionMaterializer) Close() {
+	if m.ownRunner && m.runner != nil {
+		m.runner.Close()
+	}
+}
+
+func (m *minHashFunctionMaterializer) Materialize(rec storage.Record) (map[int64]arrow.Array, error) {
+	inputs := make([]any, 0, len(m.inputFieldIDs))
+	for _, inputFieldID := range m.inputFieldIDs {
+		input, err := stringInputsFromRecord(rec, inputFieldID)
+		if err != nil {
+			return nil, err
+		}
+		inputs = append(inputs, input)
+	}
+	outputs, err := m.runner.BatchRun(inputs...)
+	if err != nil {
+		return nil, err
+	}
+	if len(outputs) != len(m.outputFieldIDs) {
+		return nil, merr.WrapErrFunctionFailedMsg("minhash function materialization expects %d outputs, got %d", len(m.outputFieldIDs), len(outputs))
+	}
+
+	result := make(map[int64]arrow.Array, len(m.missingOutputIndexes))
+	for _, outputIndex := range m.missingOutputIndexes {
+		outputFieldID := m.outputFieldIDs[outputIndex]
+		outputFieldData, ok := outputs[outputIndex].(*schemapb.FieldData)
+		if !ok {
+			releaseArrowArrays(result)
+			return nil, merr.WrapErrFunctionFailedMsg("unexpected output type from MinHash function runner, expected FieldData, got %T", outputs[outputIndex])
+		}
+		vectorField := outputFieldData.GetVectors()
+		if vectorField == nil || vectorField.GetBinaryVector() == nil {
+			releaseArrowArrays(result)
+			return nil, merr.WrapErrFunctionFailedMsg("unexpected output from MinHash function runner, expected binary vector field data")
+		}
+		fieldData := &storage.BinaryVectorFieldData{
+			Data: vectorField.GetBinaryVector(),
+			Dim:  int(vectorField.GetDim()),
+		}
+		if fieldData.RowNum() != rec.Len() {
+			releaseArrowArrays(result)
+			return nil, merr.WrapErrFunctionFailedMsg("minhash function output row count mismatch, expected %d, got %d", rec.Len(), fieldData.RowNum())
+		}
+		arr, err := buildArrowArrayFromFieldData(m.outputFields[outputFieldID], fieldData, rec.Len())
+		if err != nil {
+			releaseArrowArrays(result)
+			return nil, err
+		}
+		result[outputFieldID] = arr
+	}
+	return result, nil
+}
+
+func (m *minHashFunctionMaterializer) Close() {
 	if m.ownRunner && m.runner != nil {
 		m.runner.Close()
 	}
@@ -462,7 +574,7 @@ func missingNonMaterializedSchemaFields(schema *schemapb.CollectionSchema, exist
 func stringInputsFromRecord(rec storage.Record, fieldID int64) ([]string, error) {
 	col := rec.Column(fieldID)
 	if col == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("input field %d not found in record", fieldID))
+		return nil, merr.WrapErrFunctionFailedMsg("input field %d not found in record", fieldID)
 	}
 	inputs := make([]string, rec.Len())
 	switch values := col.(type) {
@@ -473,16 +585,31 @@ func stringInputsFromRecord(rec storage.Record, fieldID int64) ([]string, error)
 			}
 		}
 	case *array.Binary:
-		return nil, merr.WrapErrServiceInternal("cannot materialize bm25 from text binary values without lob decoding")
+		return nil, merr.WrapErrFunctionFailedMsg("cannot materialize bm25 from text binary values without lob decoding")
 	default:
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("input field %d data type must be varchar or text for bm25 function materialization, got %T", fieldID, col))
+		return nil, merr.WrapErrFunctionFailedMsg("input field %d data type must be varchar or text for bm25 function materialization, got %T", fieldID, col)
 	}
 	return inputs, nil
 }
 
 func buildSparseFloatVectorArrowArray(field *schemapb.FieldSchema, outputSparseArray *schemapb.SparseFloatArray, rowCount int) (arrow.Array, error) {
 	if len(outputSparseArray.GetContents()) != rowCount {
-		return nil, errors.Newf("bm25 function output row count mismatch, expected %d, got %d", rowCount, len(outputSparseArray.GetContents()))
+		return nil, merr.WrapErrFunctionFailedMsg("bm25 function output row count mismatch, expected %d, got %d", rowCount, len(outputSparseArray.GetContents()))
+	}
+
+	fieldData := &storage.SparseFloatVectorFieldData{
+		SparseFloatArray: schemapb.SparseFloatArray{
+			Contents: outputSparseArray.GetContents(),
+			Dim:      outputSparseArray.GetDim(),
+		},
+	}
+
+	return buildArrowArrayFromFieldData(field, fieldData, rowCount)
+}
+
+func buildArrowArrayFromFieldData(field *schemapb.FieldSchema, fieldData storage.FieldData, rowCount int) (arrow.Array, error) {
+	if fieldData.RowNum() != rowCount {
+		return nil, merr.WrapErrFunctionFailedMsg("function output row count mismatch for field %d, expected %d, got %d", field.GetFieldID(), rowCount, fieldData.RowNum())
 	}
 
 	outputSchema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
@@ -493,12 +620,6 @@ func buildSparseFloatVectorArrowArray(field *schemapb.FieldSchema, outputSparseA
 	builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
 	defer builder.Release()
 
-	fieldData := &storage.SparseFloatVectorFieldData{
-		SparseFloatArray: schemapb.SparseFloatArray{
-			Contents: outputSparseArray.GetContents(),
-			Dim:      outputSparseArray.GetDim(),
-		},
-	}
 	insertData := &storage.InsertData{Data: map[int64]storage.FieldData{
 		field.GetFieldID(): fieldData,
 	}}

@@ -25,13 +25,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/vertexai"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -49,7 +48,7 @@ func getVertexAIJsonKey() ([]byte, error) {
 
 	jsonKeyPath := os.Getenv(models.VertexServiceAccountJSONEnv)
 	if jsonKeyPath == "" {
-		return nil, errors.New("VetexAI credentials file path is empty")
+		return nil, merr.WrapErrParameterInvalidMsg("VetexAI credentials file path is empty")
 	}
 	if vtxKey.filePath == jsonKeyPath {
 		return vtxKey.jsonKey, nil
@@ -57,7 +56,7 @@ func getVertexAIJsonKey() ([]byte, error) {
 
 	jsonKey, err := os.ReadFile(jsonKeyPath) //nolint:gosec // path is from trusted environment variable
 	if err != nil {
-		return nil, fmt.Errorf("Vertexai: read credentials file failed, %v", err) //nolint:staticcheck // starts with proper noun
+		return nil, merr.Wrap(err, "Vertexai: read credentials file failed") //nolint:staticcheck // starts with proper noun
 	}
 
 	vtxKey.jsonKey = jsonKey
@@ -83,9 +82,9 @@ type VertexAIEmbeddingProvider struct {
 	isGemini  bool
 	geminiURL string
 
-	maxBatch   int
-	timeoutSec int64
-	extraInfo  *models.ModelExtraInfo
+	maxBatch  int
+	timeoutMs int64
+	extraInfo *models.ModelExtraInfo
 }
 
 func isGeminiModel(modelName string) bool {
@@ -205,6 +204,8 @@ func NewVertexAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 		client = c
 	}
 
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
+
 	provider := VertexAIEmbeddingProvider{
 		fieldDim:      fieldDim,
 		client:        client,
@@ -214,7 +215,7 @@ func NewVertexAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 		isGemini:      gemini,
 		geminiURL:     geminiURL,
 		maxBatch:      maxBatch,
-		timeoutSec:    30,
+		timeoutMs:     timeoutMs,
 		extraInfo:     extraInfo,
 	}
 	return &provider, nil
@@ -282,16 +283,16 @@ func (provider *VertexAIEmbeddingProvider) callVertexAIEmbedding(texts []string,
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], provider.embedDimParam, taskType, provider.timeoutSec)
+		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], provider.embedDimParam, taskType, provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}
 		if end-i != len(resp.Predictions) {
-			return nil, fmt.Errorf("get embedding failed, the number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Predictions))
+			return nil, merr.WrapErrFunctionFailedMsg("get embedding failed, the number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Predictions))
 		}
 		for _, item := range resp.Predictions {
 			if len(item.Embeddings.Values) != int(provider.fieldDim) {
-				return nil, fmt.Errorf("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+				return nil, merr.WrapErrFunctionFailedMsg("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 					provider.fieldDim, len(item.Embeddings.Values))
 			}
 			data = append(data, item.Embeddings.Values)
@@ -306,12 +307,12 @@ func (provider *VertexAIEmbeddingProvider) callGeminiEmbedding(texts []string, m
 	taskType := provider.getTaskType(mode)
 	data := make([][]float32, 0, len(texts))
 	for _, text := range texts {
-		resp, err := provider.client.GeminiEmbedding(provider.geminiURL, text, provider.embedDimParam, taskType, provider.timeoutSec)
+		resp, err := provider.client.GeminiEmbedding(provider.geminiURL, text, provider.embedDimParam, taskType, provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}
 		if len(resp.Embedding.Values) != int(provider.fieldDim) {
-			return nil, fmt.Errorf("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+			return nil, merr.WrapErrFunctionFailedMsg("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 				provider.fieldDim, len(resp.Embedding.Values))
 		}
 		data = append(data, resp.Embedding.Values)

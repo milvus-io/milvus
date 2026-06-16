@@ -41,12 +41,14 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -105,8 +107,9 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_MaxJobsExceededReturnsE
 	err := server.validateImportRequest(ctx, files, options)
 
 	s.Error(err)
-	// ValidateMaxImportJobExceed returns WrapErrImportFailed, not ErrServiceQuotaExceeded
-	s.True(errors.Is(err, merr.ErrImportFailed))
+	// Job-count backpressure is a server-side condition -> ErrImportSysFailed
+	// (must not be bucketed as fail_input).
+	s.True(errors.Is(err, merr.ErrImportSysFailed))
 	s.Contains(err.Error(), "The number of jobs has reached the limit")
 }
 
@@ -183,8 +186,59 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterRetur
 	err := server.validateImportRequest(ctx, files, options)
 
 	s.Error(err)
-	s.True(errors.Is(err, merr.ErrImportFailed))
+	s.True(errors.Is(err, merr.ErrOperationNotSupported))
 	s.Contains(err.Error(), "replicating cluster")
+}
+
+func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterEnabledRequiresManualCommit() {
+	ctx := context.Background()
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ImportInReplicatingCluster.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ImportInReplicatingCluster.Key)
+
+	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+		return 1
+	}).Build()
+	defer mockCount.UnPatch()
+
+	mockBalancer := &mockBalancerImpl{}
+	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
+		return mockBalancer, nil
+	}).Build()
+	defer mockBalance.UnPatch()
+
+	mockAssignment := mockey.Mock((*mockBalancerImpl).GetLatestChannelAssignment).To(
+		func(_ *mockBalancerImpl) (*channel.WatchChannelAssignmentsCallbackParam, error) {
+			return &channel.WatchChannelAssignmentsCallbackParam{
+				ReplicateConfiguration: &commonpb.ReplicateConfiguration{
+					Clusters: []*commonpb.MilvusCluster{
+						{ClusterId: "cluster1"},
+						{ClusterId: "cluster2"},
+					},
+				},
+			}, nil
+		}).Build()
+	defer mockAssignment.UnPatch()
+
+	server := &Server{
+		importMeta: &importMeta{},
+	}
+	files := []*msgpb.ImportFile{
+		{Id: 1, Paths: []string{"/test/file1.json"}},
+	}
+
+	err := server.validateImportRequest(ctx, files, []*commonpb.KeyValuePair{
+		{Key: "timeout", Value: "300s"},
+	})
+	s.Error(err)
+	s.True(errors.Is(err, merr.ErrOperationNotSupported))
+	s.Contains(err.Error(), "auto_commit=true")
+
+	err = server.validateImportRequest(ctx, files, []*commonpb.KeyValuePair{
+		{Key: "timeout", Value: "300s"},
+		{Key: importutilv2.AutoCommitKey, Value: "false"},
+	})
+	s.NoError(err)
 }
 
 func (s *ImportCallbacksSuite) TestValidateImportRequest_SuccessWithValidInput() {
@@ -1091,4 +1145,30 @@ func TestBroadcastCommitImportMessage_TargetsDataVchannels(t *testing.T) {
 // matching the CommitImport routing.
 func TestBroadcastRollbackImportMessage_TargetsDataVchannels(t *testing.T) {
 	testBroadcastTargetsDataVchannels(t, (*Server).broadcastRollbackImportMessage)
+}
+
+func testBroadcastRequiresVchannels(t *testing.T, broadcastFn func(*Server, context.Context, ImportJob) error) {
+	ctx := context.Background()
+	server := &Server{}
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        7,
+			CollectionID: 7,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+
+	err := broadcastFn(server, ctx, job)
+	assert.Error(t, err)
+	// Missing vchannels is internal broadcast state -> ErrImportSysFailed.
+	assert.True(t, errors.Is(err, merr.ErrImportSysFailed))
+	assert.Contains(t, err.Error(), "job 7 has no vchannels")
+}
+
+func TestBroadcastCommitImportMessage_RequiresVchannels(t *testing.T) {
+	testBroadcastRequiresVchannels(t, (*Server).broadcastCommitImportMessage)
+}
+
+func TestBroadcastRollbackImportMessage_RequiresVchannels(t *testing.T) {
+	testBroadcastRequiresVchannels(t, (*Server).broadcastRollbackImportMessage)
 }

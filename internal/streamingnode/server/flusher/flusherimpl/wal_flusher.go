@@ -317,9 +317,10 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 			return errors.Wrap(err, "failed to get MixCoordClient for HandleCommitVchannel")
 		}
 		resp, err := mixCoord.HandleCommitVchannel(impl.notifier.Context(), &datapb.HandleCommitVchannelRequest{
-			Base:     commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
-			JobId:    jobID,
-			Vchannel: vchannel,
+			Base:            commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
+			JobId:           jobID,
+			Vchannel:        vchannel,
+			CommitTimestamp: msg.TimeTick(),
 		})
 		if err := merr.CheckRPCCall(resp, err); err != nil {
 			impl.logger.Panic("HandleCommitVchannel RPC failed, panicking to retry from WAL",

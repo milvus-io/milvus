@@ -582,7 +582,7 @@ class TestMilvusClientExternalTableSchema(ExternalTableTestBase):
         self.create_collection(client, collection_name=coll, schema=schema)
         info = self.describe_collection(client, coll)[0]
         by_name = {f["name"]: f for f in info["fields"]}
-        for field in ("id", "v"):
+        for field in ("id", "v", "vec"):
             assert by_name[field].get("nullable") is True, (
                 f"user field '{field}' should be force-nullable, got {by_name[field]}"
             )

@@ -571,6 +571,7 @@ func TestExpr_TextMatch(t *testing.T) {
 
 	exprStrs := []string{
 		`text_match(VarCharField, "query")`,
+		`text_match(TextField, "query")`,
 	}
 	for _, exprStr := range exprStrs {
 		assertInvalidExpr(t, helper, exprStr)
@@ -864,6 +865,7 @@ func TestExpr_PhraseMatch(t *testing.T) {
 
 	exprStrs := []string{
 		`phrase_match(VarCharField, "phrase")`,
+		`phrase_match(TextField, "phrase")`,
 		`phrase_match(StringField, "phrase")`,
 		`phrase_match(StringField, "phrase", 1)`,
 		`phrase_match(VarCharField, "phrase", 11223)`,
@@ -907,7 +909,6 @@ func TestExpr_TextField(t *testing.T) {
 
 	invalidExprs := []string{
 		`TextField == "query"`,
-		`text_match(TextField, "query")`,
 	}
 
 	for _, exprStr := range invalidExprs {
@@ -948,6 +949,72 @@ func TestExpr_IsNull(t *testing.T) {
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
+	}
+}
+
+func TestExpr_StructArrayParentIsNull(t *testing.T) {
+	schema := newTestSchema(true)
+	schema.StructArrayFields[0].Nullable = true
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	expr, err := ParseExpr(helper, `struct_array is null`, nil)
+	require.NoError(t, err)
+	nullExpr := expr.GetNullExpr()
+	require.NotNil(t, nullExpr)
+	assert.Equal(t, planpb.NullExpr_IsNull, nullExpr.GetOp())
+	assert.Equal(t, int64(133), nullExpr.GetColumnInfo().GetFieldId())
+	assert.Equal(t, schemapb.DataType_Array, nullExpr.GetColumnInfo().GetDataType())
+	assert.Equal(t, schemapb.DataType_VarChar, nullExpr.GetColumnInfo().GetElementType())
+	assert.True(t, nullExpr.GetColumnInfo().GetNullable())
+
+	expr, err = ParseExpr(helper, `struct_array is not null`, nil)
+	require.NoError(t, err)
+	nullExpr = expr.GetNullExpr()
+	require.NotNil(t, nullExpr)
+	assert.Equal(t, planpb.NullExpr_IsNotNull, nullExpr.GetOp())
+	assert.Equal(t, int64(133), nullExpr.GetColumnInfo().GetFieldId())
+	assert.Equal(t, schemapb.DataType_Array, nullExpr.GetColumnInfo().GetDataType())
+	assert.True(t, nullExpr.GetColumnInfo().GetNullable())
+}
+
+func TestExpr_VectorArrayOnlyStructParentIsNull(t *testing.T) {
+	schema := newTestSchema(false)
+	schema.StructArrayFields = append(schema.StructArrayFields, &schemapb.StructArrayFieldSchema{
+		FieldID:  10000,
+		Name:     "vector_struct",
+		Nullable: true,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:     10001,
+				Name:        "vector_struct[embeddings]",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "4"},
+				},
+			},
+		},
+	})
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	for _, testcase := range []struct {
+		expr string
+		op   planpb.NullExpr_NullOp
+	}{
+		{expr: `vector_struct is null`, op: planpb.NullExpr_IsNull},
+		{expr: `vector_struct is not null`, op: planpb.NullExpr_IsNotNull},
+	} {
+		expr, err := ParseExpr(helper, testcase.expr, nil)
+		require.NoError(t, err, testcase.expr)
+		nullExpr := expr.GetNullExpr()
+		require.NotNil(t, nullExpr, testcase.expr)
+		assert.Equal(t, testcase.op, nullExpr.GetOp(), testcase.expr)
+		assert.Equal(t, int64(10001), nullExpr.GetColumnInfo().GetFieldId(), testcase.expr)
+		assert.Equal(t, schemapb.DataType_ArrayOfVector, nullExpr.GetColumnInfo().GetDataType(), testcase.expr)
+		assert.Equal(t, schemapb.DataType_FloatVector, nullExpr.GetColumnInfo().GetElementType(), testcase.expr)
+		assert.True(t, nullExpr.GetColumnInfo().GetNullable(), testcase.expr)
 	}
 }
 

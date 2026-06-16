@@ -647,11 +647,14 @@ func TestEmbedEtcd(te *testing.T) {
 		defer watchKv.Close()
 		defer watchKv.RemoveWithPrefix(context.TODO(), "")
 
-		ch := watchKv.Watch(context.TODO(), "x")
+		watchCtx, cancel := context.WithCancel(context.TODO())
+		defer cancel()
+
+		ch := watchKv.Watch(watchCtx, "x")
 		resp := <-ch
 		assert.True(t, resp.Created)
 
-		ch = watchKv.WatchWithPrefix(context.TODO(), "x")
+		ch = watchKv.WatchWithPrefix(watchCtx, "x")
 		resp = <-ch
 		assert.True(t, resp.Created)
 	})
@@ -679,8 +682,12 @@ func TestEmbedEtcd(te *testing.T) {
 			err = metaKv.SaveBytes(context.TODO(), test.inKey, test.fistValue)
 			require.NoError(t, err)
 
-			_, _, revision, _ := metaKv.LoadBytesWithRevision(context.TODO(), test.inKey)
-			ch := metaKv.WatchWithRevision(context.TODO(), test.inKey, revision+1)
+			_, _, revision, err := metaKv.LoadBytesWithRevision(context.TODO(), test.inKey)
+			require.NoError(t, err)
+
+			watchCtx, cancel := context.WithCancel(context.TODO())
+			defer cancel()
+			ch := metaKv.WatchWithRevision(watchCtx, test.inKey, revision+1)
 
 			err = metaKv.SaveBytes(context.TODO(), test.inKey, test.secondValue)
 			require.NoError(t, err)
@@ -689,6 +696,7 @@ func TestEmbedEtcd(te *testing.T) {
 			assert.Equal(t, 1, len(resp.Events))
 			assert.Equal(t, test.secondValue, resp.Events[0].Kv.Value)
 			assert.Equal(t, revision+1, resp.Header.Revision)
+			cancel()
 		}
 
 		success, err := metaKv.CompareVersionAndSwapBytes(context.TODO(), "a/b/c", 0, []byte("1"))

@@ -1489,6 +1489,51 @@ func Test_arrayOfVector_nonEmbListMetric_indexCompat(t *testing.T) {
 		err := cit.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 	})
+
+	t.Run("ArrayOfVector with float element should reject MaxSimHamming", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "HNSW_SQ"},
+					{Key: common.MetricTypeKey, Value: metric.MaxSimHamming},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:     101,
+				Name:        "vec_field",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "array of vector with float element type does not support metric type")
+	})
+
+	t.Run("ArrayOfVector with binary element should accept MaxSimHamming", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "HNSW"},
+					{Key: common.MetricTypeKey, Value: metric.MaxSimHamming},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:     101,
+				Name:        "vec_field",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_BinaryVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+	})
 }
 
 func Test_ngram_parseIndexParams(t *testing.T) {

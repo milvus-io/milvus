@@ -323,12 +323,10 @@ class TestSearchArrayShared(TestMilvusClientV2Base):
         vectors = cf.gen_vectors(default_nq, default_dim)
         expression = f"{expr_prefix}({ct.default_string_array_field_name}, '1000')"
         error = {ct.err_code: 1100,
-                 ct.err_msg: f"cannot parse expression: {expression}, "
-                             f"error: ContainsAll operation element must be an array"}
+                 ct.err_msg: "ContainsAll operation element must be an array"}
         if expr_prefix in ["array_contains_any", "ARRAY_CONTAINS_ANY"]:
             error = {ct.err_code: 1100,
-                     ct.err_msg: f"cannot parse expression: {expression}, "
-                                 f"error: ContainsAny operation element must be an array"}
+                     ct.err_msg: "ContainsAny operation element must be an array"}
         self.search(client, self.collection_name,
                     data=vectors[:default_nq],
                     anns_field=default_search_field,

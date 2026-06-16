@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <string.h>
+#include "common/FastMem.h"
 #include <algorithm>
 #include <cstddef>
 #include <exception>
@@ -258,7 +259,8 @@ VectorFieldIndexing::GetDataFromIndex(const int64_t* seg_offsets,
             reinterpret_cast<milvus::proto::schema::SparseFloatArray*>(output));
     } else {
         auto vector = index_->GetVector(ids_ds);
-        std::memcpy(output, vector.data(), count * element_size);
+        milvus::fastmem::FastMemcpy(
+            output, vector.data(), count * element_size);
     }
 }
 
@@ -450,9 +452,10 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
                 auto src =
                     chunk_data +
                     (copy_start - chunk_id * size_per_chunk) * vec_length;
-                std::memcpy(data_buf.get() + actual_copy_count * vec_length,
-                            src,
-                            copy_count * vec_length);
+                milvus::fastmem::FastMemcpy(
+                    data_buf.get() + actual_copy_count * vec_length,
+                    src,
+                    copy_count * vec_length);
                 actual_copy_count += copy_count;
             }
             data_ptr = data_buf.get();

@@ -28,7 +28,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
@@ -663,7 +662,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 			row, ok := v.Value.(map[typeutil.UniqueID]interface{})
 			if !ok {
 				log.Warn("convert interface to map wrong")
-				return errors.New("unexpected error")
+				return merr.WrapErrServiceInternalMsg("unexpected error")
 			}
 			expireTs := int64(-1)
 			if hasTTLField {
@@ -976,7 +975,7 @@ func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(pkIter *storage
 		// rowValue := vIter.GetData().(*iterators.InsertRow).GetValue()
 		row, ok := (*v).Value.(map[typeutil.UniqueID]interface{})
 		if !ok {
-			return nil, 0, errors.New("unexpected error")
+			return nil, 0, merr.WrapErrServiceInternalMsg("unexpected error")
 		}
 
 		expireTs := int64(-1)

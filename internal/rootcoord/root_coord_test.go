@@ -173,11 +173,13 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 		return vchannels, nil
 	}).Maybe()
 	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilSchemaDropReady(mock.Anything).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, callback balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
 	}).Maybe()
 	b.EXPECT().Close().Return().Maybe()
+	balance.ResetBalancer()
 	balance.Register(b)
 	channel.ResetStaticPChannelStatsManager()
 	channel.RecoverPChannelStatsManager([]string{})
@@ -411,7 +413,9 @@ func TestRootCoord_DescribeAlias(t *testing.T) {
 		ctx := context.Background()
 		resp, err := c.DescribeAlias(ctx, &milvuspb.DescribeAliasRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		// ParameterMissing (1101) projects to the legacy IllegalArgument like
+		// every parameter-class error, so old SDKs don't see UnexpectedError.
+		assert.Equal(t, commonpb.ErrorCode_IllegalArgument, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, int32(1101), resp.GetStatus().GetCode())
 	})
 
@@ -1778,7 +1782,7 @@ func TestCore_getMetastorePrivilegeName(t *testing.T) {
 
 	meta.EXPECT().IsCustomPrivilegeGroup(mock.Anything, "unknown").Return(false, nil)
 	_, err = c.getMetastorePrivilegeName(context.Background(), "unknown")
-	assert.Equal(t, err.Error(), "not found the privilege name [unknown] from metastore")
+	assert.ErrorContains(t, err, "not found the privilege name [unknown] from metastore")
 }
 
 func TestCore_expandPrivilegeGroup(t *testing.T) {

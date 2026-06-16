@@ -84,7 +84,7 @@ func (s *Server) ActivateChecker(ctx context.Context, req *querypb.ActivateCheck
 	}
 	if err := s.checkerController.Activate(utils.CheckerType(req.CheckerID)); err != nil {
 		log.Warn("failed to activate checker", zap.Error(err))
-		return merr.Status(merr.WrapErrServiceInternal(err.Error())), nil
+		return merr.Status(merr.WrapErrParameterInvalidMsg("invalid checker type %d: %v", req.CheckerID, err)), nil
 	}
 	return merr.Success(), nil
 }
@@ -98,7 +98,7 @@ func (s *Server) DeactivateChecker(ctx context.Context, req *querypb.DeactivateC
 	}
 	if err := s.checkerController.Deactivate(utils.CheckerType(req.CheckerID)); err != nil {
 		log.Warn("failed to deactivate checker", zap.Error(err))
-		return merr.Status(merr.WrapErrServiceInternal(err.Error())), nil
+		return merr.Status(merr.WrapErrParameterInvalidMsg("invalid checker type %d: %v", req.CheckerID, err)), nil
 	}
 	return merr.Success(), nil
 }
@@ -112,7 +112,7 @@ func (s *Server) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRe
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn(errMsg, zap.Error(err))
 		return &querypb.ListQueryNodeResponse{
-			Status: merr.Status(errors.Wrap(err, errMsg)),
+			Status: merr.Status(merr.Wrapf(err, "%s", errMsg)),
 		}, nil
 	}
 
@@ -159,7 +159,7 @@ func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQ
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn(errMsg, zap.Error(err))
 		return &querypb.GetQueryNodeDistributionResponse{
-			Status: merr.Status(errors.Wrap(err, errMsg)),
+			Status: merr.Status(merr.Wrapf(err, "%s", errMsg)),
 		}, nil
 	}
 
@@ -349,7 +349,7 @@ func (s *Server) ResumeNode(ctx context.Context, req *querypb.ResumeNodeRequest)
 	errMsg := "failed to resume query node"
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn(errMsg, zap.Error(err))
-		return merr.Status(errors.Wrap(err, errMsg)), nil
+		return merr.Status(merr.Wrapf(err, "%s", errMsg)), nil
 	}
 
 	info := s.nodeMgr.Get(req.GetNodeID())
@@ -383,7 +383,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to load balance"
 		log.Warn(msg, zap.Error(err))
-		return merr.Status(errors.Wrap(err, msg)), nil
+		return merr.Status(merr.Wrapf(err, "%s", msg)), nil
 	}
 
 	// check whether srcNode is healthy
@@ -442,7 +442,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 		if err != nil {
 			msg := "failed to balance segments"
 			log.Warn(msg, zap.Error(err))
-			return merr.Status(errors.Wrap(err, msg)), nil
+			return merr.Status(merr.Wrapf(err, "%s", msg)), nil
 		}
 	}
 	return merr.Success(), nil
@@ -462,7 +462,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to load balance"
 		log.Warn(msg, zap.Error(err))
-		return merr.Status(errors.Wrap(err, msg)), nil
+		return merr.Status(merr.Wrapf(err, "%s", msg)), nil
 	}
 
 	// check whether srcNode is healthy
@@ -516,7 +516,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 		if err != nil {
 			msg := "failed to balance channels"
 			log.Warn(msg, zap.Error(err))
-			return merr.Status(errors.Wrap(err, msg)), nil
+			return merr.Status(merr.Wrapf(err, "%s", msg)), nil
 		}
 	}
 	return merr.Success(), nil
@@ -553,7 +553,7 @@ func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearRe
 					Role:   typeutil.QueryNodeRole,
 					NodeID: nodeID,
 				}
-				return errors.Wrapf(err, "ClearReadTaskQueue failed, queryNodeID = %d", nodeID)
+				return merr.Wrapf(err, "ClearReadTaskQueue failed, queryNodeID = %d", nodeID)
 			}
 
 			if len(nodeResp.GetResults()) > 0 {
@@ -570,7 +570,7 @@ func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearRe
 				}
 			}
 			if !merr.Ok(nodeResp.GetStatus()) {
-				return errors.Wrapf(merr.Error(nodeResp.GetStatus()), "ClearReadTaskQueue failed, queryNodeID = %d", nodeID)
+				return merr.Wrapf(merr.Error(nodeResp.GetStatus()), "ClearReadTaskQueue failed, queryNodeID = %d", nodeID)
 			}
 			return nil
 		})

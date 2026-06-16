@@ -30,6 +30,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// BinlogSaver is a minimal interface for saving binlog paths to DataCoord.
+// This avoids depending on the full broker.Broker interface.
+type BinlogSaver interface {
+	SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error
+}
+
 // ResourceUsage is used to estimate the resource usage of a sealed segment.
 type ResourceUsage struct {
 	MemorySize         uint64
@@ -150,9 +156,22 @@ type FlushConfig struct {
 	// LOB base paths for each TEXT field (same order as TextFieldIDs)
 	// Format: {partition_path}/lobs/{field_id}
 	TextLobPaths []string
+	// BM25 output sparse vector field IDs whose stats should be collected for
+	// the flushed offset range.
+	BM25FieldIDs []int64
+	// BM25 stats log IDs, in the same order as BM25FieldIDs.
+	BM25StatsLogIDs []int64
+	// WriteMergedBM25Stats writes a compound BM25 stats file in the same
+	// manifest transaction. It should be true only for the final flush.
+	WriteMergedBM25Stats bool
 	// ReadVersion is the manifest version to read from.
 	// Must be set to the last version acknowledged by DataCoord (via SaveBinlogPaths).
+	// Use ManifestEarliest for the first flush so retries never append to latest.
 	ReadVersion int64
+	// WriterFormat is passed as writer.format. For incremental growing flushes,
+	// it may be resolved from the acknowledged manifest to keep appends
+	// compatible with existing column groups.
+	WriterFormat string
 }
 
 // FlushResult contains the result of flushing segment data.
@@ -164,5 +183,6 @@ type FlushResult struct {
 	// via packed.UnmarshalManifestPath when needed.
 	ManifestPath string
 	// Number of rows flushed
-	NumRows int64
+	NumRows   int64
+	BM25Stats map[int64]*storage.BM25Stats
 }

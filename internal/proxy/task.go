@@ -205,6 +205,13 @@ type dmlTask interface {
 
 type BaseInsertTask = msgstream.InsertMsg
 
+func validateTextStorageV3Enabled(schema *schemapb.CollectionSchema) error {
+	if err := typeutil.ValidateTextRequiresStorageV3(schema, Params.CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
+		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
+	}
+	return nil
+}
+
 type createCollectionTask struct {
 	baseTask
 	Condition
@@ -261,11 +268,11 @@ func (t *createCollectionTask) validatePartitionKey(ctx context.Context) error {
 	for i, field := range t.schema.Fields {
 		if field.GetIsPartitionKey() {
 			if idx != -1 {
-				return fmt.Errorf("there are more than one partition key, field name = %s, %s", t.schema.Fields[idx].Name, field.Name)
+				return merr.WrapErrParameterInvalidMsg("there are more than one partition key, field name = %s, %s", t.schema.Fields[idx].Name, field.Name)
 			}
 
 			if field.GetIsPrimaryKey() {
-				return errors.New("the partition key field must not be primary field")
+				return merr.WrapErrParameterInvalidMsg("the partition key field must not be primary field")
 			}
 
 			if field.GetNullable() {
@@ -274,11 +281,11 @@ func (t *createCollectionTask) validatePartitionKey(ctx context.Context) error {
 
 			// The type of the partition key field can only be int64 and varchar
 			if field.DataType != schemapb.DataType_Int64 && field.DataType != schemapb.DataType_VarChar {
-				return errors.New("the data type of partition key should be Int64 or VarChar")
+				return merr.WrapErrParameterInvalidMsg("the data type of partition key should be Int64 or VarChar")
 			}
 
 			if t.GetNumPartitions() < 0 {
-				return errors.New("the specified partitions should be greater than 0 if partition key is used")
+				return merr.WrapErrParameterInvalidMsg("the specified partitions should be greater than 0 if partition key is used")
 			}
 
 			maxPartitionNum := Params.RootCoordCfg.MaxPartitionNum.GetAsInt64()
@@ -312,13 +319,13 @@ func (t *createCollectionTask) validatePartitionKey(ctx context.Context) error {
 
 	mustPartitionKey := Params.ProxyCfg.MustUsePartitionKey.GetAsBool()
 	if mustPartitionKey && idx == -1 {
-		return merr.WrapErrParameterInvalidMsg("partition key must be set when creating the collection" +
+		return merr.WrapErrParameterMissingMsg("partition key must be set when creating the collection" +
 			" because the mustUsePartitionKey config is true")
 	}
 
 	if idx == -1 {
 		if t.GetNumPartitions() != 0 {
-			return errors.New("num_partitions should only be specified with partition key field enabled")
+			return merr.WrapErrParameterInvalidMsg("num_partitions should only be specified with partition key field enabled")
 		}
 	} else {
 		log.Ctx(ctx).Info("create collection with partition key mode",
@@ -450,25 +457,28 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	if err := typeutil.NormalizeAndValidateExternalCollectionSchema(t.schema); err != nil {
 		return err
 	}
+	if err := validateTextStorageV3Enabled(t.schema); err != nil {
+		return err
+	}
 
 	// External collections must be single-shard: the refresh mechanism assigns all
 	// segments to VChannelNames[0], so multiple shards would leave segments orphaned.
 	if isExternalCollection && t.ShardsNum > 1 {
-		return fmt.Errorf("external collection does not support multiple shards, got ShardsNum=%d", t.ShardsNum)
+		return merr.WrapErrParameterInvalidMsg("external collection does not support multiple shards, got ShardsNum=%d", t.ShardsNum)
 	}
 
 	if t.ShardsNum > Params.ProxyCfg.MaxShardNum.GetAsInt32() {
-		return fmt.Errorf("maximum shards's number should be limited to %d", Params.ProxyCfg.MaxShardNum.GetAsInt())
+		return merr.WrapErrParameterInvalidMsg("maximum shards's number should be limited to %d", Params.ProxyCfg.MaxShardNum.GetAsInt())
 	}
 
 	totalFieldsNum := typeutil.GetTotalFieldsNum(t.schema)
 	if totalFieldsNum > Params.ProxyCfg.MaxFieldNum.GetAsInt() {
-		return fmt.Errorf("maximum field's number should be limited to %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
+		return merr.WrapErrParameterInvalidMsg("maximum field's number should be limited to %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
 	}
 
 	vectorFields := len(typeutil.GetVectorFieldSchemas(t.schema))
 	if vectorFields > Params.ProxyCfg.MaxVectorFieldNum.GetAsInt() {
-		return fmt.Errorf("maximum vector field's number should be limited to %d", Params.ProxyCfg.MaxVectorFieldNum.GetAsInt())
+		return merr.WrapErrParameterInvalidMsg("maximum vector field's number should be limited to %d", Params.ProxyCfg.MaxVectorFieldNum.GetAsInt())
 	}
 
 	if vectorFields == 0 {
@@ -477,6 +487,9 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	// validate collection name
 	if err := validateCollectionName(t.schema.Name); err != nil {
+		return err
+	}
+	if err := validateCollectionDescription(t.schema.GetDescription()); err != nil {
 		return err
 	}
 
@@ -581,7 +594,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	// This allows different structs to have fields with the same name
 	err = transformStructFieldNames(t.schema)
 	if err != nil {
-		return fmt.Errorf("failed to transform struct field names: %v", err)
+		return merr.WrapErrParameterInvalidMsg("failed to transform struct field names: %v", err)
 	}
 
 	// validate whether field names duplicates (after transformation)
@@ -685,7 +698,7 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 	// User-added fields must be nullable so that old segments without this field can return
 	// NULL rather than causing a schema inconsistency at query time.
 	if !t.fieldSchema.GetNullable() {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("added field must be nullable, please check it, field name = %s", t.fieldSchema.GetName()))
+		return merr.WrapErrParameterInvalidMsg("added field must be nullable, please check it, field name = %s", t.fieldSchema.GetName())
 	}
 	if err := ValidateField(t.fieldSchema, t.oldSchema); err != nil {
 		return err
@@ -813,7 +826,7 @@ func validateAddStructFieldRequest(schema *schemapb.CollectionSchema, structFiel
 
 	totalFieldsNum := typeutil.GetTotalFieldsNum(schema) + len(structFieldSchema.GetFields()) + 1
 	if totalFieldsNum > Params.ProxyCfg.MaxFieldNum.GetAsInt() {
-		return fmt.Errorf("maximum field's number should be limited to %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
+		return merr.WrapErrParameterInvalidMsg("maximum field's number should be limited to %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
 	}
 
 	vectorFields := len(typeutil.GetVectorFieldSchemas(schema))
@@ -823,7 +836,7 @@ func validateAddStructFieldRequest(schema *schemapb.CollectionSchema, structFiel
 		}
 	}
 	if vectorFields > Params.ProxyCfg.MaxVectorFieldNum.GetAsInt() {
-		return fmt.Errorf("maximum vector field's number should be limited to %d", Params.ProxyCfg.MaxVectorFieldNum.GetAsInt())
+		return merr.WrapErrParameterInvalidMsg("maximum vector field's number should be limited to %d", Params.ProxyCfg.MaxVectorFieldNum.GetAsInt())
 	}
 
 	return nil
@@ -919,11 +932,10 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 		fieldList.Insert(structArrayField.GetName())
 	}
 	if typeutil.GetTotalFieldsNum(schema) >= Params.ProxyCfg.MaxFieldNum.GetAsInt() {
-		msg := fmt.Sprintf("The number of fields has reached the maximum value %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
-		return merr.WrapErrParameterInvalidMsg(msg)
+		return merr.WrapErrParameterInvalidMsg("The number of fields has reached the maximum value %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
 	}
 	if fieldList.Contain(newFieldSchema.GetName()) {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("duplicated field name %s", newFieldSchema.GetName()))
+		return merr.WrapErrParameterInvalidMsg("duplicated field name %s", newFieldSchema.GetName())
 	}
 
 	// --- new field property constraints ---
@@ -944,14 +956,19 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 			return merr.WrapErrParameterInvalidMsg("%s", err.Error())
 		}
 	}
+	schemaWithNewField := proto.Clone(schema).(*schemapb.CollectionSchema)
+	schemaWithNewField.Fields = append(schemaWithNewField.GetFields(), proto.Clone(newFieldSchema).(*schemapb.FieldSchema))
+	if err := validateTextStorageV3Enabled(schemaWithNewField); err != nil {
+		return err
+	}
 	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName, common.VirtualPKFieldName}, newFieldSchema.GetName()) {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add system field, field name = %s", newFieldSchema.GetName()))
+		return merr.WrapErrParameterInvalidMsg("not support to add system field, field name = %s", newFieldSchema.GetName())
 	}
 	if newFieldSchema.GetIsPrimaryKey() {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add pk field, field name = %s", newFieldSchema.GetName()))
+		return merr.WrapErrParameterInvalidMsg("not support to add pk field, field name = %s", newFieldSchema.GetName())
 	}
 	if newFieldSchema.GetAutoID() {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("only primary field can speficy AutoID with true, field name = %s", newFieldSchema.GetName()))
+		return merr.WrapErrParameterInvalidMsg("only primary field can speficy AutoID with true, field name = %s", newFieldSchema.GetName())
 	}
 	if newFieldSchema.GetIsPartitionKey() {
 		return merr.WrapErrParameterInvalidMsg("not support to add partition key field, field name  = %s", newFieldSchema.GetName())
@@ -964,14 +981,14 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 		}
 		for _, f := range schema.GetFields() {
 			if f.GetIsClusteringKey() {
-				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("already has another clustering key field, field name: %s", newFieldSchema.GetName()))
+				return merr.WrapErrParameterInvalidMsg("already has another clustering key field, field name: %s", newFieldSchema.GetName())
 			}
 		}
 	}
 	if typeutil.IsVectorType(newFieldSchema.DataType) {
 		vectorFields := len(typeutil.GetVectorFieldSchemas(schema))
 		if vectorFields >= Params.ProxyCfg.MaxVectorFieldNum.GetAsInt() {
-			return fmt.Errorf("maximum vector field's number should be limited to %d", Params.ProxyCfg.MaxVectorFieldNum.GetAsInt())
+			return merr.WrapErrParameterInvalidMsg("maximum vector field's number should be limited to %d", Params.ProxyCfg.MaxVectorFieldNum.GetAsInt())
 		}
 	}
 
@@ -990,7 +1007,7 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 			newFieldSchema.DataType == schemapb.DataType_BinaryVector ||
 			newFieldSchema.DataType == schemapb.DataType_Int8Vector {
 			if len(newFieldSchema.TypeParams) == 0 {
-				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("vector field must have dimension specified, field name = %s", newFieldSchema.GetName()))
+				return merr.WrapErrParameterInvalidMsg("vector field must have dimension specified, field name = %s", newFieldSchema.GetName())
 			}
 		}
 	}
@@ -1057,10 +1074,19 @@ func (t *alterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 	if action == nil {
 		return merr.WrapErrParameterInvalidMsg("action is nil in alter schema task")
 	}
-	addRequest := action.GetAddRequest()
-	if addRequest == nil {
-		return merr.WrapErrParameterInvalidMsg("add_request is nil, only add operation is supported for now")
+
+	switch action.GetOp().(type) {
+	case *milvuspb.AlterCollectionSchemaRequest_Action_AddRequest:
+		return t.preExecuteAdd(ctx)
+	case *milvuspb.AlterCollectionSchemaRequest_Action_DropRequest:
+		return t.preExecuteDrop(ctx)
+	default:
+		return merr.WrapErrParameterInvalidMsg("unknown action type in alter collection schema request")
 	}
+}
+
+func (t *alterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
+	addRequest := t.GetAction().GetAddRequest()
 
 	fieldInfos := addRequest.GetFieldInfos()
 	funcSchemas := addRequest.GetFuncSchema()
@@ -1069,13 +1095,16 @@ func (t *alterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 	// RootCoord enforces the same constraint (ddl_callbacks_alter_collection_schema.go);
 	// validate early at Proxy to give clearer error messages.
 	if len(funcSchemas) != 1 || funcSchemas[0] == nil {
+		// Count constraint (covers both zero and >1), not a pure missing param,
+		// so keep this as an invalid-parameter error.
 		return merr.WrapErrParameterInvalidMsg("For now, exactly one function schema is required in alter schema task")
 	}
-	if funcSchemas[0].GetType() != schemapb.FunctionType_BM25 {
-		return merr.WrapErrParameterInvalidMsg("For now, only BM25 function is supported in alter schema task")
+	functionType := funcSchemas[0].GetType()
+	if functionType != schemapb.FunctionType_BM25 && functionType != schemapb.FunctionType_MinHash {
+		return merr.WrapErrParameterInvalidMsg("For now, only BM25 and MinHash functions are supported in alter schema task")
 	}
 	if len(fieldInfos) == 0 {
-		return merr.WrapErrParameterInvalidMsg("fieldInfos is empty, function output fields are required")
+		return merr.WrapErrParameterMissingMsg("fieldInfos is empty, function output fields are required")
 	}
 
 	if len(fieldInfos) != 1 {
@@ -1127,24 +1156,217 @@ func (t *alterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *alterCollectionSchemaTask) Execute(ctx context.Context) error {
-	action := t.GetAction()
-	if action != nil {
-		addRequest := action.GetAddRequest()
-		if addRequest != nil {
-			for _, fieldInfo := range addRequest.GetFieldInfos() {
-				if fieldInfo != nil && fieldInfo.GetFieldSchema() != nil {
-					fieldInfo.GetFieldSchema().IsFunctionOutput = true
+func (t *alterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
+	dropReq := t.GetAction().GetDropRequest()
+
+	switch id := dropReq.GetIdentifier().(type) {
+	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FunctionName:
+		return validateDropFunction(t.oldSchema, id.FunctionName)
+
+	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId:
+		for _, f := range t.oldSchema.Fields {
+			if f.FieldID == id.FieldId {
+				return validateDropField(t.oldSchema, f.Name)
+			}
+		}
+		// Struct array field and its sub-fields share the FieldID namespace but
+		// live outside schema.Fields. Route struct-level drops to the normal
+		// by-name path; sub-field drops are not supported in this change.
+		for _, sf := range t.oldSchema.StructArrayFields {
+			if sf.FieldID == id.FieldId {
+				return validateDropField(t.oldSchema, sf.Name)
+			}
+			for _, sub := range sf.Fields {
+				if sub.FieldID == id.FieldId {
+					return merr.WrapErrParameterInvalidMsg(
+						"cannot drop sub-field of struct array field: %s.%s", sf.Name, sub.Name)
 				}
 			}
 		}
+		return merr.WrapErrParameterInvalidMsg("field not found with id: %d", id.FieldId)
+
+	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName:
+		return validateDropField(t.oldSchema, id.FieldName)
+
+	default:
+		return merr.WrapErrParameterMissingMsg("drop request must specify field_name, field_id, or function_name")
 	}
+}
+
+func (t *alterCollectionSchemaTask) Execute(ctx context.Context) error {
+	// For AddRequest, mark all new fields as function output before sending to RootCoord.
+	// DropRequest needs no extra processing here; RootCoord handles it entirely.
+	if addRequest := t.GetAction().GetAddRequest(); addRequest != nil {
+		for _, fieldInfo := range addRequest.GetFieldInfos() {
+			if fieldInfo != nil && fieldInfo.GetFieldSchema() != nil {
+				fieldInfo.GetFieldSchema().IsFunctionOutput = true
+			}
+		}
+	}
+
 	var err error
 	t.AlterCollectionSchemaResponse, err = t.mixCoord.AlterCollectionSchema(ctx, t.AlterCollectionSchemaRequest)
 	return merr.CheckRPCCall(t.GetAlterStatus(), err)
 }
 
 func (t *alterCollectionSchemaTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+// validateDropField validates that a field can be safely dropped from the schema.
+func validateDropField(schema *schemapb.CollectionSchema, fieldName string) error {
+	if fieldName == "" {
+		return merr.WrapErrParameterInvalidMsg("field name is empty")
+	}
+
+	// Struct array fields share the name namespace with top-level fields but
+	// live in schema.StructArrayFields. Dropping the whole struct is allowed;
+	// dropping a single sub-field is not (no symmetric add-sub-field support).
+	for _, sf := range schema.StructArrayFields {
+		if sf.Name == fieldName {
+			return validateDropStructArrayField(schema, sf)
+		}
+		for _, sub := range sf.Fields {
+			if sub.Name == fieldName {
+				return merr.WrapErrParameterInvalidMsg(
+					"cannot drop sub-field of struct array field: %s.%s", sf.Name, fieldName)
+			}
+		}
+	}
+
+	// Find the target field in top-level Fields.
+	var targetField *schemapb.FieldSchema
+	for _, field := range schema.Fields {
+		if field.Name == fieldName {
+			targetField = field
+			break
+		}
+	}
+	if targetField == nil {
+		return merr.WrapErrParameterInvalidMsg("field not found: %s", fieldName)
+	}
+
+	// Check: cannot drop system fields
+	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName}, fieldName) {
+		return merr.WrapErrParameterInvalidMsg("cannot drop system field: %s", fieldName)
+	}
+
+	// Check: cannot drop primary key field
+	if targetField.IsPrimaryKey {
+		return merr.WrapErrParameterInvalidMsg("cannot drop primary key field: %s", fieldName)
+	}
+
+	// Check: cannot drop partition key field
+	if targetField.IsPartitionKey {
+		return merr.WrapErrParameterInvalidMsg("cannot drop partition key field: %s", fieldName)
+	}
+
+	// Check: cannot drop clustering key field
+	if targetField.GetIsClusteringKey() {
+		return merr.WrapErrParameterInvalidMsg("cannot drop clustering key field: %s", fieldName)
+	}
+
+	// Check: cannot drop dynamic field; use AlterCollection to disable dynamic schema instead.
+	if targetField.IsDynamic {
+		return merr.WrapErrParameterInvalidMsg("cannot drop dynamic field: %s, use AlterCollection to disable dynamic schema instead", fieldName)
+	}
+
+	// Check: cannot drop the last vector field. GetVectorFieldSchemas counts
+	// vectors in both top-level Fields and StructArrayField sub-fields.
+	if typeutil.IsVectorType(targetField.DataType) {
+		if len(typeutil.GetVectorFieldSchemas(schema)) <= 1 {
+			return merr.WrapErrParameterInvalidMsg("cannot drop the last vector field: %s", fieldName)
+		}
+	}
+
+	// Check: field must not be referenced by any function
+	for _, fn := range schema.Functions {
+		for _, inputName := range fn.InputFieldNames {
+			if inputName == fieldName {
+				return merr.WrapErrParameterInvalidMsg("field is referenced by function %s as input, drop function first", fn.Name)
+			}
+		}
+		for _, outputName := range fn.OutputFieldNames {
+			if outputName == fieldName {
+				return merr.WrapErrParameterInvalidMsg("field is referenced by function %s as output, drop function first", fn.Name)
+			}
+		}
+	}
+
+	return nil
+}
+
+func validateDropStructArrayField(schema *schemapb.CollectionSchema, sf *schemapb.StructArrayFieldSchema) error {
+	removedVectors := 0
+	for _, sub := range sf.GetFields() {
+		if sub.GetIsPrimaryKey() {
+			return merr.WrapErrParameterInvalidMsg("cannot drop struct array field %s: sub-field %s is primary key", sf.GetName(), sub.GetName())
+		}
+		if sub.GetIsPartitionKey() {
+			return merr.WrapErrParameterInvalidMsg("cannot drop struct array field %s: sub-field %s is partition key", sf.GetName(), sub.GetName())
+		}
+		if sub.GetIsClusteringKey() {
+			return merr.WrapErrParameterInvalidMsg("cannot drop struct array field %s: sub-field %s is clustering key", sf.GetName(), sub.GetName())
+		}
+		if sub.GetIsDynamic() {
+			return merr.WrapErrParameterInvalidMsg("cannot drop struct array field %s: sub-field %s is dynamic", sf.GetName(), sub.GetName())
+		}
+		for _, fn := range schema.GetFunctions() {
+			for _, inputName := range fn.GetInputFieldNames() {
+				if inputName == sub.GetName() {
+					return merr.WrapErrParameterInvalidMsg("cannot drop struct array field %s: sub-field %s is referenced by function %s as input", sf.GetName(), sub.GetName(), fn.GetName())
+				}
+			}
+			for _, outputName := range fn.GetOutputFieldNames() {
+				if outputName == sub.GetName() {
+					return merr.WrapErrParameterInvalidMsg("cannot drop struct array field %s: sub-field %s is referenced by function %s as output", sf.GetName(), sub.GetName(), fn.GetName())
+				}
+			}
+		}
+		if typeutil.IsVectorType(sub.GetDataType()) {
+			removedVectors++
+		}
+	}
+	if removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) {
+		return merr.WrapErrParameterInvalidMsg(
+			"cannot drop struct array field %s: it would leave no vector field in the collection",
+			sf.GetName())
+	}
+	return nil
+}
+
+// validateDropFunction checks that the function exists, and that the cascade
+// removal of its output fields would not leave the collection without any
+// vector field. Without this check, a user told to "drop function first" by
+// validateDropField could end up with an unsearchable collection.
+func validateDropFunction(schema *schemapb.CollectionSchema, functionName string) error {
+	if functionName == "" {
+		return merr.WrapErrParameterInvalidMsg("function name is empty")
+	}
+
+	var targetFunc *schemapb.FunctionSchema
+	for _, fn := range schema.Functions {
+		if fn.Name == functionName {
+			targetFunc = fn
+			break
+		}
+	}
+	if targetFunc == nil {
+		return merr.WrapErrParameterInvalidMsg("function not found: %s", functionName)
+	}
+
+	// Cascade removes the function's output fields; refuse if it removes all vectors.
+	removedVectors := 0
+	for _, name := range targetFunc.OutputFieldNames {
+		if f := typeutil.GetFieldByName(schema, name); f != nil && typeutil.IsVectorType(f.DataType) {
+			removedVectors++
+		}
+	}
+	if removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) {
+		return merr.WrapErrParameterInvalidMsg(
+			"cannot drop function %s: it would leave no vector field in the collection",
+			functionName)
+	}
 	return nil
 }
 
@@ -1558,7 +1780,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	}
 
 	if err := restoreStructFieldNames(t.result.Schema); err != nil {
-		return fmt.Errorf("failed to restore struct field names: %v", err)
+		return merr.WrapErrParameterInvalidMsg("failed to restore struct field names: %v", err)
 	}
 
 	return nil
@@ -1666,16 +1888,19 @@ func (t *showCollectionsTask) Execute(ctx context.Context) error {
 		}
 
 		if resp == nil {
-			return errors.New("failed to show collections")
+			return merr.WrapErrServiceInternalMsg("failed to show collections")
 		}
 
 		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			// update collectionID to collection name, and return new error info to sdk
-			newErrorReason := resp.GetStatus().GetReason()
+			// while preserving the downstream typed code (rebuild via merr.Error).
+			status := resp.GetStatus()
+			newErrorReason := status.GetReason()
 			for _, collectionID := range collectionIDs {
 				newErrorReason = ReplaceID2Name(newErrorReason, collectionID, IDs2Names[collectionID])
 			}
-			return errors.New(newErrorReason)
+			status.Reason = newErrorReason
+			return merr.Error(status)
 		}
 
 		t.result = &milvuspb.ShowCollectionsResponse{
@@ -1830,7 +2055,7 @@ func checkVectorIndexExist(ctx context.Context, dbName, collectionName string, c
 		IndexName:    "",
 	})
 	if err = merr.CheckRPCCall(indexResponse, err); err != nil && !errors.Is(err, merr.ErrIndexNotFound) {
-		return "", merr.WrapErrServiceInternal("describe index failed", err.Error())
+		return "", merr.Wrap(err, "describe index failed")
 	}
 	for _, index := range indexResponse.IndexInfos {
 		for _, field := range collSchema.Fields {
@@ -1981,6 +2206,22 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 				if hasWarmup {
 					return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter warmup properties if collection loaded")
 				}
+			}
+		}
+
+		for _, property := range t.Properties {
+			if property.GetKey() != common.CollectionDescription {
+				continue
+			}
+			// Only validate the description when it is actually changed. A
+			// pre-existing collection may resend its (possibly oversized)
+			// description unchanged while altering other properties (e.g. TTL);
+			// re-validating an unchanged value would reject legitimate alters.
+			if property.GetValue() == collSchema.GetDescription() {
+				continue
+			}
+			if err := validateCollectionDescription(property.GetValue()); err != nil {
+				return err
 			}
 		}
 
@@ -2321,8 +2562,9 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			if err != nil {
 				return merr.WrapErrParameterInvalidMsg("the value for %s of field %s must be an integer", common.MaxCapacityKey, fieldName)
 			}
-			if maxCapacityPerRow > defaultMaxArrayCapacity || maxCapacityPerRow <= 0 {
-				return merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", defaultMaxArrayCapacity)
+			maxArrayCapacity := Params.ProxyCfg.MaxArrayCapacity.GetAsInt64()
+			if maxCapacityPerRow > maxArrayCapacity || maxCapacityPerRow <= 0 {
+				return merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", maxArrayCapacity)
 			}
 		}
 	}
@@ -2427,7 +2669,7 @@ func (t *createPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if typeutil.HasPartitionKey(collSchema.CollectionSchema) {
-		return errors.New("disable create partition if partition key mode is used")
+		return merr.WrapErrParameterInvalidMsg("disable create partition if partition key mode is used")
 	}
 
 	if err := validatePartitionTag(partitionTag, true); err != nil {
@@ -2526,7 +2768,7 @@ func (t *dropPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if typeutil.HasPartitionKey(collSchema.CollectionSchema) {
-		return errors.New("disable drop partition if partition key mode is used")
+		return merr.WrapErrParameterInvalidMsg("disable drop partition if partition key mode is used")
 	}
 
 	if err := validatePartitionTag(partitionTag, true); err != nil {
@@ -2555,7 +2797,7 @@ func (t *dropPartitionTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 		if loaded {
-			return errors.New("partition cannot be dropped, partition is loaded, please release it first")
+			return merr.WrapErrParameterInvalidMsg("partition cannot be dropped, partition is loaded, please release it first")
 		}
 	}
 
@@ -2765,7 +3007,7 @@ func (t *showPartitionsTask) Execute(ctx context.Context) error {
 			if !ok {
 				log.Ctx(ctx).Debug("Failed to get partition id.", zap.String("partitionName", partitionName),
 					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showPartitions"))
-				return errors.New("failed to show partitions")
+				return merr.WrapErrParameterInvalidMsg("failed to show partitions")
 			}
 			partitionInfo, err := globalMetaCache.GetPartitionInfo(ctx, t.GetDbName(), collectionName, partitionName)
 			if err != nil {
@@ -2883,6 +3125,9 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+	if err := validateTextStorageV3Enabled(collSchema.CollectionSchema); err != nil {
+		return err
+	}
 	// prepare load field list
 	loadFields, err := collSchema.GetLoadFieldIDs(t.GetLoadFields(), t.GetSkipLoadDynamicField())
 	if err != nil {
@@ -2924,7 +3169,7 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 	if len(unindexedVecFields) != 0 {
 		errMsg := fmt.Sprintf("there is no vector index on field: %v, please create index firstly", unindexedVecFields)
 		log.Debug(errMsg)
-		return errors.New(errMsg)
+		return merr.WrapErrParameterInvalidMsg("%s", errMsg)
 	}
 	request := &querypb.LoadCollectionRequest{
 		Base: commonpbutil.UpdateMsgBase(
@@ -2946,7 +3191,7 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		zap.Int32("priority", int32(request.GetPriority())))
 	t.result, err = t.mixCoord.LoadCollection(ctx, request)
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
-		return fmt.Errorf("call query coordinator LoadCollection: %s", err)
+		return merr.Wrap(err, "call query coordinator LoadCollection")
 	}
 	return nil
 }
@@ -3115,7 +3360,7 @@ func (t *loadPartitionsTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if partitionKeyMode {
-		return errors.New("disable load partitions if partition key mode is used")
+		return merr.WrapErrParameterInvalidMsg("disable load partitions if partition key mode is used")
 	}
 
 	return nil
@@ -3139,6 +3384,9 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 	t.collectionID = collID
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
+		return err
+	}
+	if err := validateTextStorageV3Enabled(collSchema.CollectionSchema); err != nil {
 		return err
 	}
 	// prepare load field list
@@ -3181,7 +3429,7 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 	if len(unindexedVecFields) != 0 {
 		errMsg := fmt.Sprintf("there is no vector index on field: %v, please create index firstly", unindexedVecFields)
 		log.Ctx(ctx).Debug(errMsg)
-		return errors.New(errMsg)
+		return merr.WrapErrParameterInvalidMsg("%s", errMsg)
 	}
 
 	for _, partitionName := range t.PartitionNames {
@@ -3192,7 +3440,7 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 		partitionIDs = append(partitionIDs, partitionID)
 	}
 	if len(partitionIDs) == 0 {
-		return errors.New("failed to load partition, due to no partition specified")
+		return merr.WrapErrParameterInvalidMsg("failed to load partition, due to no partition specified")
 	}
 	request := &querypb.LoadPartitionsRequest{
 		Base: commonpbutil.UpdateMsgBase(
@@ -3289,7 +3537,7 @@ func (t *releasePartitionsTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if partitionKeyMode {
-		return errors.New("disable release partitions if partition key mode is used")
+		return merr.WrapErrParameterInvalidMsg("disable release partitions if partition key mode is used")
 	}
 
 	return nil
@@ -3909,14 +4157,14 @@ func (t *RunAnalyzerTask) PreExecute(ctx context.Context) error {
 
 	collID, err := globalMetaCache.GetCollectionID(ctx, t.dbName, t.GetCollectionName())
 	if err != nil { // err is not nil if collection not exists
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+		return err
 	}
 
 	t.collectionID = collID
 
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, t.dbName, t.GetCollectionName())
 	if err != nil { // err is not nil if collection not exists
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+		return err
 	}
 
 	fieldId, ok := schema.MapFieldID(t.GetFieldName())
@@ -4061,7 +4309,7 @@ func isIgnoreGrowing(params []*commonpb.KeyValuePair) (bool, error) {
 		if kv.GetKey() == IgnoreGrowingKey {
 			ignoreGrowing, err := strconv.ParseBool(kv.GetValue())
 			if err != nil {
-				return false, errors.New("parse ignore growing field failed")
+				return false, merr.WrapErrParameterInvalidMsg("parse ignore growing field failed")
 			}
 			return ignoreGrowing, nil
 		}

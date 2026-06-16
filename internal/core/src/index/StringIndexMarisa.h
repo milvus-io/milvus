@@ -32,6 +32,15 @@ class StringIndexMarisa : public StringIndex {
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
+    ~StringIndexMarisa() {
+        if (str_ids_mmap_data_ != nullptr && str_ids_mmap_data_ != MAP_FAILED) {
+            munmap(str_ids_mmap_data_, str_ids_mmap_size_);
+        }
+        if (csr_mmap_data_ != nullptr && csr_mmap_data_ != MAP_FAILED) {
+            munmap(csr_mmap_data_, csr_mmap_size_);
+        }
+    }
+
     int64_t
     Size() override;
 
@@ -49,7 +58,7 @@ class StringIndexMarisa : public StringIndex {
 
     int64_t
     Count() override {
-        return str_ids_.size();
+        return str_ids_size_;
     }
 
     ScalarIndexType
@@ -151,8 +160,29 @@ class StringIndexMarisa : public StringIndex {
  private:
     Config config_;
     marisa::Trie trie_;
-    std::vector<int64_t> str_ids_;  // used to retrieve.
-    std::map<size_t, std::vector<size_t>> str_ids_to_offsets_;
+
+    // str_ids: maps offset → trie key id.
+    // Build/memory-load paths use the vector; mmap-load points into mmap'd file.
+    std::vector<int64_t> str_ids_;          // memory mode owner
+    const int64_t* str_ids_ptr_ = nullptr;  // read accessor (vec or mmap)
+    size_t str_ids_size_ = 0;
+    char* str_ids_mmap_data_ = nullptr;  // mmap region
+    int64_t str_ids_mmap_size_ = 0;
+    std::unique_ptr<MmapFileRAII> str_ids_mmap_raii_;  // file cleanup
+
+    // CSR (Compressed Sparse Row) format for str_id → offsets mapping.
+    // csr_index_[key_id] .. csr_index_[key_id+1] = range in csr_offsets_.
+    // Values are row indices within a single segment. uint32_t is safe
+    // because Milvus segments never approach 2^32 rows; fill_offsets and
+    // LoadEntries assert the bound on the build / load paths.
+    std::vector<uint32_t> csr_index_;    // size = num_keys + 1 (memory mode)
+    std::vector<uint32_t> csr_offsets_;  // size = total_num_rows (memory mode)
+    const uint32_t* csr_index_ptr_ = nullptr;    // read accessor (vec or mmap)
+    const uint32_t* csr_offsets_ptr_ = nullptr;  // read accessor (vec or mmap)
+    size_t csr_num_keys_ = 0;
+    char* csr_mmap_data_ = nullptr;  // mmap region for csr_index + csr_offsets
+    int64_t csr_mmap_size_ = 0;
+    std::unique_ptr<MmapFileRAII> csr_mmap_raii_;  // file cleanup
     bool built_ = false;
     int64_t total_size_ = 0;  // Cached total size to avoid runtime calculation
 };

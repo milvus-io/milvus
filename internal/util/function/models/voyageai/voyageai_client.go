@@ -21,9 +21,8 @@ import (
 	"maps"
 	"sort"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type VoyageAIClient struct {
@@ -32,7 +31,7 @@ type VoyageAIClient struct {
 
 func NewVoyageAIClient(apiKey string) (*VoyageAIClient, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("missing credentials config or configure the %s environment variable in the Milvus service", models.VoyageAIAKEnvStr)
+		return nil, merr.WrapErrParameterInvalidMsg("missing credentials config or configure the %s environment variable in the Milvus service", models.VoyageAIAKEnvStr)
 	}
 	return &VoyageAIClient{
 		apiKey: apiKey,
@@ -46,14 +45,14 @@ func (c *VoyageAIClient) headers() map[string]string {
 	}
 }
 
-func (c *VoyageAIClient) Embedding(url string, modelName string, texts []string, dim int, textType string, outputType string, truncation bool, timeoutSec int64) (any, error) {
+func (c *VoyageAIClient) Embedding(url string, modelName string, texts []string, dim int, textType string, outputType string, truncation bool, timeoutMs int64) (any, error) {
 	embClient := newVoyageAIEmbedding(c.apiKey, url)
-	return embClient.embedding(modelName, texts, dim, textType, outputType, truncation, c.headers(), timeoutSec)
+	return embClient.embedding(modelName, texts, dim, textType, outputType, truncation, c.headers(), timeoutMs)
 }
 
-func (c *VoyageAIClient) Rerank(url string, modelName string, query string, texts []string, params map[string]any, timeoutSec int64) (*RerankResponse, error) {
+func (c *VoyageAIClient) Rerank(url string, modelName string, query string, texts []string, params map[string]any, timeoutMs int64) (*RerankResponse, error) {
 	rerankClient := newVoyageAIRerank(c.apiKey, url)
-	return rerankClient.rerank(modelName, query, texts, c.headers(), params, timeoutSec)
+	return rerankClient.rerank(modelName, query, texts, c.headers(), params, timeoutMs)
 }
 
 type EmbeddingRequest struct {
@@ -114,18 +113,18 @@ func newVoyageAIEmbedding(apiKey string, url string) *voyageAIEmbedding {
 
 func (c *voyageAIEmbedding) Check() error {
 	if c.apiKey == "" {
-		return errors.New("api key is empty")
+		return merr.WrapErrParameterInvalidMsg("api key is empty")
 	}
 
 	if c.url == "" {
-		return errors.New("url is empty")
+		return merr.WrapErrParameterInvalidMsg("url is empty")
 	}
 	return nil
 }
 
-func (c *voyageAIEmbedding) embedding(modelName string, texts []string, dim int, textType string, outputType string, truncation bool, headers map[string]string, timeoutSec int64) (any, error) {
+func (c *voyageAIEmbedding) embedding(modelName string, texts []string, dim int, textType string, outputType string, truncation bool, headers map[string]string, timeoutMs int64) (any, error) {
 	if outputType != "float" && outputType != "int8" {
-		return nil, fmt.Errorf("Voyageai: unsupported output type: [%s], only support float and int8", outputType) //nolint:staticcheck // starts with proper noun
+		return nil, merr.WrapErrParameterInvalidMsg("Voyageai: unsupported output type: [%s], only support float and int8", outputType) //nolint:staticcheck // starts with proper noun
 	}
 	r := EmbeddingRequest{
 		Model:       modelName,
@@ -139,7 +138,7 @@ func (c *voyageAIEmbedding) embedding(modelName string, texts []string, dim int,
 	}
 
 	if outputType == "float" {
-		res, err := models.PostRequest[EmbeddingResponse[float32]](r, c.url, headers, timeoutSec)
+		res, err := models.PostRequest[EmbeddingResponse[float32]](r, c.url, headers, timeoutMs)
 		if err != nil {
 			return nil, err
 		}
@@ -148,7 +147,7 @@ func (c *voyageAIEmbedding) embedding(modelName string, texts []string, dim int,
 		})
 		return res, nil
 	} else {
-		res, err := models.PostRequest[EmbeddingResponse[int8]](r, c.url, headers, timeoutSec)
+		res, err := models.PostRequest[EmbeddingResponse[int8]](r, c.url, headers, timeoutMs)
 		if err != nil {
 			return nil, err
 		}
@@ -203,7 +202,7 @@ func newVoyageAIRerank(apiKey string, url string) *voyageAIRerank {
 	}
 }
 
-func (c *voyageAIRerank) rerank(modelName string, query string, texts []string, headers map[string]string, params map[string]any, timeoutSec int64) (*RerankResponse, error) {
+func (c *voyageAIRerank) rerank(modelName string, query string, texts []string, headers map[string]string, params map[string]any, timeoutMs int64) (*RerankResponse, error) {
 	r := map[string]any{
 		"model":     modelName,
 		"query":     query,
@@ -212,7 +211,7 @@ func (c *voyageAIRerank) rerank(modelName string, query string, texts []string, 
 	if params != nil {
 		maps.Copy(r, params)
 	}
-	res, err := models.PostRequest[RerankResponse](r, c.url, headers, timeoutSec)
+	res, err := models.PostRequest[RerankResponse](r, c.url, headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}

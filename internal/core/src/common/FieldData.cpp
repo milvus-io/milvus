@@ -15,12 +15,15 @@
 // limitations under the License.
 
 #include "common/FieldData.h"
+#include "common/FastMem.h"
 
 #include <simdjson.h>
 #include <string.h>
+#include <algorithm>
 #include <cstdint>
 #include <iosfwd>
 #include <optional>
+#include <type_traits>
 
 #include "arrow/api.h"
 #include "arrow/array/array_base.h"
@@ -54,9 +57,15 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(const void* source,
     if (length_ + element_count > get_num_rows()) {
         resize_field_data(length_ + element_count);
     }
-    std::copy_n(static_cast<const Type*>(source),
-                element_count * dim_,
-                data_.data() + length_ * dim_);
+    auto source_data = static_cast<const Type*>(source);
+    auto target_data = data_.data() + length_ * dim_;
+    auto count = element_count * dim_;
+    if constexpr (std::is_trivially_copyable_v<Type>) {
+        milvus::fastmem::FastMemcpy(
+            target_data, source_data, count * sizeof(Type));
+    } else {
+        std::copy_n(source_data, count, target_data);
+    }
     length_ += element_count;
 }
 
@@ -78,9 +87,15 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
     if (length_ + element_count > get_num_rows()) {
         resize_field_data(length_ + element_count);
     }
-    std::copy_n(static_cast<const Type*>(field_data),
-                element_count * dim_,
-                data_.data() + length_ * dim_);
+    auto source_data = static_cast<const Type*>(field_data);
+    auto target_data = data_.data() + length_ * dim_;
+    auto count = element_count * dim_;
+    if constexpr (std::is_trivially_copyable_v<Type>) {
+        milvus::fastmem::FastMemcpy(
+            target_data, source_data, count * sizeof(Type));
+    } else {
+        std::copy_n(source_data, count, target_data);
+    }
 
     // Note: if 'nullable == true` and valid_data is nullptr
     // means null_count == 0, will fill it with 0xFF
@@ -297,17 +312,23 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                 std::dynamic_pointer_cast<arrow::BinaryArray>(array);
             AssertInfo(geometry_array != nullptr,
                        "null geometry arrow binary array");
-            std::vector<uint8_t> values(element_count);
-            for (size_t index = 0; index < element_count; ++index) {
-                values[index] = *geometry_array->GetValue(index, 0);
+            if constexpr (std::is_same_v<Type, std::string>) {
+                std::vector<std::string> values(element_count);
+                for (size_t index = 0; index < element_count; ++index) {
+                    auto sv = geometry_array->GetView(index);
+                    values[index].assign(sv.data(), sv.size());
+                }
+                if (nullable_) {
+                    return FillFieldData(values.data(),
+                                         array->null_bitmap_data(),
+                                         element_count,
+                                         array->offset());
+                }
+                return FillFieldData(values.data(), element_count);
             }
-            if (nullable_) {
-                return FillFieldData(values.data(),
-                                     array->null_bitmap_data(),
-                                     element_count,
-                                     array->offset());
-            }
-            return FillFieldData(values.data(), element_count);
+            ThrowInfo(DataTypeInvalid,
+                      "GEOMETRY arrow data must be filled into string-backed "
+                      "FieldData");
         }
         case DataType::ARRAY: {
             auto array_array =
@@ -443,7 +464,8 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                             const uint8_t* binary_data =
                                 binary_array->GetValue(start_offset + i);
                             uint8_t* dest = data_ptr.get() + i * bytes_per_vec;
-                            std::memcpy(dest, binary_data, bytes_per_vec);
+                            milvus::fastmem::FastMemcpy(
+                                dest, binary_data, bytes_per_vec);
                         }
 
                         values.emplace_back(
@@ -716,9 +738,15 @@ FieldDataVectorImpl<Type, is_type_entire_row>::FillFieldData(
                        valid_count);
 
     if (valid_count > 0) {
-        std::copy_n(static_cast<const Type*>(field_data),
-                    valid_count * this->dim_,
-                    this->data_.data() + this->valid_count_ * this->dim_);
+        auto source_data = static_cast<const Type*>(field_data);
+        auto target_data = this->data_.data() + this->valid_count_ * this->dim_;
+        auto count = valid_count * this->dim_;
+        if constexpr (std::is_trivially_copyable_v<Type>) {
+            milvus::fastmem::FastMemcpy(
+                target_data, source_data, count * sizeof(Type));
+        } else {
+            std::copy_n(source_data, count, target_data);
+        }
         this->valid_count_ += valid_count;
     }
 

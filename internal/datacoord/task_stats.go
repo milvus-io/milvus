@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -299,11 +298,17 @@ func (st *statsTask) handleEmptySegment(ctx context.Context) error {
 // Prepare the stats request
 func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo) (*workerpb.CreateStatsRequest, error) {
 	collInfo, err := st.handler.GetCollection(ctx, segment.GetCollectionID())
-	if err != nil || collInfo == nil {
-		return nil, fmt.Errorf("failed to get collection info: %w", err)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to get collection info")
+	}
+	// GetCollection can return (nil, nil) on a cache miss; merr.Wrap(nil) would
+	// be nil and silently submit a malformed request, so guard collInfo
+	// separately with a typed not-found.
+	if collInfo == nil {
+		return nil, merr.WrapErrCollectionNotFound(segment.GetCollectionID())
 	}
 	if collInfo.Schema == nil || len(collInfo.Schema.GetFields()) == 0 {
-		return nil, fmt.Errorf("collection schema is nil or has no fields, collectionID: %d", segment.GetCollectionID())
+		return nil, merr.WrapErrServiceInternalMsg("collection schema is nil or has no fields, collectionID: %d", segment.GetCollectionID())
 	}
 
 	// Calculate binlog allocation
@@ -314,7 +319,7 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 	// Allocate IDs
 	start, end, err := st.allocator.AllocN(binlogNum + int64(len(collInfo.Schema.GetFunctions())) + 1)
 	if err != nil {
-		return nil, fmt.Errorf("failed to allocate log IDs: %w", err)
+		return nil, merr.Wrap(err, "failed to allocate log IDs")
 	}
 
 	// Create the request

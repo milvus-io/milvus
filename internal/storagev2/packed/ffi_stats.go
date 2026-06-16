@@ -23,10 +23,10 @@ package packed
 import "C"
 
 import (
-	"fmt"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // ManifestStat represents a stat entry from the manifest.
@@ -104,7 +104,7 @@ func GetManifestStats(
 ) (map[string]ManifestStat, error) {
 	cManifest, err := GetManifestHandle(manifestPath, storageConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get manifest: %w", err)
+		return nil, merr.Wrap(err, "failed to get manifest")
 	}
 	defer C.loon_manifest_destroy(cManifest)
 

@@ -20,13 +20,13 @@ package embedding
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/ali"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -38,14 +38,14 @@ type AliEmbeddingProvider struct {
 	embedDimParam int64
 	outputType    string
 
-	maxBatch   int
-	timeoutSec int64
-	extraInfo  *models.ModelExtraInfo
+	maxBatch  int
+	timeoutMs int64
+	extraInfo *models.ModelExtraInfo
 }
 
 func createAliEmbeddingClient(apiKey string, url string) (*ali.AliDashScopeEmbedding, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("missing credentials config or configure the %s environment variable in the Milvus service", models.DashscopeAKEnvStr)
+		return nil, merr.WrapErrParameterInvalidMsg("missing credentials config or configure the %s environment variable in the Milvus service", models.DashscopeAKEnvStr)
 	}
 
 	if url == "" {
@@ -90,6 +90,8 @@ func NewAliDashScopeEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functio
 		maxBatch = 6
 	}
 
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
+
 	provider := AliEmbeddingProvider{
 		client:        c,
 		fieldDim:      fieldDim,
@@ -98,7 +100,7 @@ func NewAliDashScopeEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functio
 		// TextEmbedding only supports dense embedding
 		outputType: "dense",
 		maxBatch:   maxBatch,
-		timeoutSec: 30,
+		timeoutMs:  timeoutMs,
 		extraInfo:  extraInfo,
 	}
 	return &provider, nil
@@ -126,16 +128,16 @@ func (provider *AliEmbeddingProvider) CallEmbedding(ctx context.Context, texts [
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), textType, provider.outputType, provider.timeoutSec)
+		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), textType, provider.outputType, provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}
 		if end-i != len(resp.Output.Embeddings) {
-			return nil, fmt.Errorf("get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Output.Embeddings))
+			return nil, merr.WrapErrFunctionFailedMsg("get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Output.Embeddings))
 		}
 		for _, item := range resp.Output.Embeddings {
 			if len(item.Embedding) != int(provider.fieldDim) {
-				return nil, fmt.Errorf("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+				return nil, merr.WrapErrFunctionFailedMsg("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 					provider.fieldDim, len(item.Embedding))
 			}
 			data = append(data, item.Embedding)

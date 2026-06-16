@@ -55,7 +55,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 
 	// no partition to be released, return success directly.
 	if len(partitionIDsSet) == previousLength {
-		return false, job.ErrIgnoredAlterLoadConfig
+		return false, nil
 	}
 
 	var msg message.BroadcastMutableMessage
@@ -87,6 +87,10 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 		}
 		if msg, err = job.GenerateAlterLoadConfigMessage(ctx, alterLoadConfigReq); err != nil {
 			return false, err
+		}
+		if msg == nil {
+			// load config unchanged, nothing to broadcast.
+			return false, nil
 		}
 		collectionReleased = false
 	}

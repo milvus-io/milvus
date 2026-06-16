@@ -17,8 +17,6 @@
 package pipeline
 
 import (
-	"fmt"
-
 	"github.com/cockroachdb/errors"
 )
 
@@ -29,5 +27,5 @@ var (
 )
 
 func WrapErrRegDispather(err error) error {
-	return fmt.Errorf("%w :%s", ErrRegisterDispather, err)
+	return errors.Mark(err, ErrRegisterDispather)
 }

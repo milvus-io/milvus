@@ -28,7 +28,6 @@ package packed
 import "C"
 
 import (
-	"fmt"
 	"strings"
 	"unsafe"
 
@@ -39,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -80,7 +80,7 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 // only job is to write data files. Close returns the resulting column
 // groups, which the caller passes to packed.CommitManifestUpdates to
 // register them with a manifest version.
-func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*FFIPackedWriter, error) {
+func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, extraProperties ...map[string]string) (*FFIPackedWriter, error) {
 	cBasePath := C.CString(basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 
@@ -93,15 +93,19 @@ func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []st
 		storageConfig = CreateStorageConfig()
 	}
 
-	pattern := strings.Join(lo.Map(columnGroups, func(columnGroup storagecommon.ColumnGroup, _ int) string {
-		return strings.Join(lo.Map(columnGroup.Columns, func(index int, _ int) string {
-			return schema.Field(index).Name
-		}), "|")
-	}), ",")
+	pattern, err := SchemaBasedPattern(schema, columnGroups)
+	if err != nil {
+		return nil, err
+	}
 
 	extra := map[string]string{
 		PropertyWriterPolicy:             "schema_based",
 		PropertyWriterSchemaBasedPattern: pattern,
+	}
+	for _, properties := range extraProperties {
+		for key, value := range properties {
+			extra[key] = value
+		}
 	}
 
 	// Configure CMEK encryption if plugin context is provided
@@ -156,6 +160,17 @@ func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []st
 		cWriterHandle: writerHandle,
 		cProperties:   cProperties,
 	}, nil
+}
+
+func SchemaBasedPattern(schema *arrow.Schema, columnGroups []storagecommon.ColumnGroup) (string, error) {
+	if schema == nil {
+		return "", merr.WrapErrParameterInvalidMsg("arrow schema is required")
+	}
+	return strings.Join(lo.Map(columnGroups, func(columnGroup storagecommon.ColumnGroup, _ int) string {
+		return strings.Join(lo.Map(columnGroup.Columns, func(index int, _ int) string {
+			return schema.Field(index).Name
+		}), "|")
+	}), ","), nil
 }
 
 // AsNewColumnGroups marks this writer so that the column groups returned
@@ -233,13 +248,13 @@ func (f *ColumnGroups) applyTo(handle C.LoonTransactionHandle) error {
 		slice := unsafe.Slice(f.cColumnGroups.column_group_array, num)
 		for i := range slice {
 			if err := HandleLoonFFIResult(C.loon_transaction_add_column_group(handle, &slice[i])); err != nil {
-				return fmt.Errorf("commit manifest add_column_group: %w", err)
+				return merr.Wrap(err, "commit manifest add_column_group")
 			}
 		}
 		return nil
 	}
 	if err := HandleLoonFFIResult(C.loon_transaction_append_files(handle, f.cColumnGroups)); err != nil {
-		return fmt.Errorf("commit manifest append_files: %w", err)
+		return merr.Wrap(err, "commit manifest append_files")
 	}
 	return nil
 }
@@ -255,7 +270,7 @@ func (f *ColumnGroups) applyTo(handle C.LoonTransactionHandle) error {
 // Close or Write calls fail.
 func (pw *FFIPackedWriter) Close() (WriterOutput, error) {
 	if pw.closed {
-		return nil, fmt.Errorf("FFIPackedWriter already closed")
+		return nil, merr.WrapErrServiceInternalMsg("FFIPackedWriter already closed")
 	}
 	pw.closed = true
 	defer func() {

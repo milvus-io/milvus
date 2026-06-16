@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -376,23 +377,24 @@ func parseFieldPartialUpdateOp(op string) (schemapb.FieldPartialUpdateOp_OpType,
 }
 
 type SearchReqV2 struct {
-	DbName           string                 `json:"dbName"`
-	CollectionName   string                 `json:"collectionName" binding:"required"`
-	Data             []interface{}          `json:"data"`
-	Ids              []interface{}          `json:"ids"`
-	AnnsField        string                 `json:"annsField"`
-	PartitionNames   []string               `json:"partitionNames"`
-	Filter           string                 `json:"filter"`
-	GroupByField     string                 `json:"groupingField"`
-	GroupSize        int32                  `json:"groupSize"`
-	StrictGroupSize  bool                   `json:"strictGroupSize"`
-	Limit            int32                  `json:"limit"`
-	Offset           int32                  `json:"offset"`
-	OutputFields     []string               `json:"outputFields"`
-	SearchParams     map[string]interface{} `json:"searchParams"`
-	ConsistencyLevel string                 `json:"consistencyLevel"`
-	ExprParams       map[string]interface{} `json:"exprParams"`
-	FunctionScore    FunctionScore          `json:"functionScore"`
+	DbName            string                 `json:"dbName"`
+	CollectionName    string                 `json:"collectionName" binding:"required"`
+	Data              []interface{}          `json:"data"`
+	Ids               []interface{}          `json:"ids"`
+	AnnsField         string                 `json:"annsField"`
+	PartitionNames    []string               `json:"partitionNames"`
+	Filter            string                 `json:"filter"`
+	GroupByField      string                 `json:"groupingField"`
+	GroupSize         int32                  `json:"groupSize"`
+	StrictGroupSize   bool                   `json:"strictGroupSize"`
+	Limit             int32                  `json:"limit"`
+	Offset            int32                  `json:"offset"`
+	OutputFields      []string               `json:"outputFields"`
+	SearchParams      map[string]interface{} `json:"searchParams"`
+	ConsistencyLevel  string                 `json:"consistencyLevel"`
+	ExprParams        map[string]interface{} `json:"exprParams"`
+	FunctionScore     FunctionScore          `json:"functionScore"`
+	SearchAggregation *SearchAggregationReq  `json:"searchAggregation"`
 	// not use Params any more, just for compatibility
 	Params map[string]float64 `json:"params"`
 }
@@ -400,37 +402,69 @@ type SearchReqV2 struct {
 func (req *SearchReqV2) GetDbName() string         { return req.DbName }
 func (req *SearchReqV2) GetCollectionName() string { return req.CollectionName }
 
+type SearchAggregationReq struct {
+	Fields         []string                        `json:"fields"`
+	Size           int64                           `json:"size"`
+	SearchSize     int64                           `json:"searchSize"`
+	Metrics        map[string]MetricAggregationReq `json:"metrics"`
+	Order          []AggregationOrderReq           `json:"order"`
+	TopHits        *TopHitsReq                     `json:"topHits"`
+	SubAggregation *SearchAggregationReq           `json:"subAggregation"`
+}
+
+type MetricAggregationReq struct {
+	Op        string `json:"op"`
+	FieldName string `json:"fieldName"`
+}
+
+type AggregationOrderReq struct {
+	Key       string `json:"key"`
+	Direction string `json:"direction"`
+}
+
+type TopHitsReq struct {
+	Size int64                `json:"size"`
+	Sort []AggregationSortReq `json:"sort"`
+}
+
+type AggregationSortReq struct {
+	FieldName string `json:"fieldName"`
+	Direction string `json:"direction"`
+}
+
 type Rand struct {
 	Strategy string                 `json:"strategy"`
 	Params   map[string]interface{} `json:"params"`
 }
 
 type SubSearchReq struct {
-	Data         []interface{}          `json:"data" binding:"required"`
-	AnnsField    string                 `json:"annsField"`
-	Filter       string                 `json:"filter"`
-	GroupByField string                 `json:"groupingField"`
-	MetricType   string                 `json:"metricType"`
-	Limit        int32                  `json:"limit"`
-	Offset       int32                  `json:"offset"`
-	SearchParams map[string]interface{} `json:"params"`
-	ExprParams   map[string]interface{} `json:"exprParams"`
+	Data              []interface{}          `json:"data" binding:"required"`
+	AnnsField         string                 `json:"annsField"`
+	Filter            string                 `json:"filter"`
+	GroupByField      string                 `json:"groupingField"`
+	MetricType        string                 `json:"metricType"`
+	Limit             int32                  `json:"limit"`
+	Offset            int32                  `json:"offset"`
+	SearchParams      map[string]interface{} `json:"params"`
+	ExprParams        map[string]interface{} `json:"exprParams"`
+	SearchAggregation *SearchAggregationReq  `json:"searchAggregation"`
 }
 
 type HybridSearchReq struct {
-	DbName           string         `json:"dbName"`
-	CollectionName   string         `json:"collectionName" binding:"required"`
-	PartitionNames   []string       `json:"partitionNames"`
-	Search           []SubSearchReq `json:"search"`
-	Rerank           Rand           `json:"rerank"`
-	Limit            int32          `json:"limit"`
-	Offset           int32          `json:"offset"`
-	GroupByField     string         `json:"groupingField"`
-	GroupSize        int32          `json:"groupSize"`
-	StrictGroupSize  bool           `json:"strictGroupSize"`
-	OutputFields     []string       `json:"outputFields"`
-	ConsistencyLevel string         `json:"consistencyLevel"`
-	FunctionScore    FunctionScore  `json:"functionScore"`
+	DbName            string                `json:"dbName"`
+	CollectionName    string                `json:"collectionName" binding:"required"`
+	PartitionNames    []string              `json:"partitionNames"`
+	Search            []SubSearchReq        `json:"search"`
+	Rerank            Rand                  `json:"rerank"`
+	Limit             int32                 `json:"limit"`
+	Offset            int32                 `json:"offset"`
+	GroupByField      string                `json:"groupingField"`
+	GroupSize         int32                 `json:"groupSize"`
+	StrictGroupSize   bool                  `json:"strictGroupSize"`
+	OutputFields      []string              `json:"outputFields"`
+	ConsistencyLevel  string                `json:"consistencyLevel"`
+	FunctionScore     FunctionScore         `json:"functionScore"`
+	SearchAggregation *SearchAggregationReq `json:"searchAggregation"`
 }
 
 func (req *HybridSearchReq) GetDbName() string         { return req.DbName }
@@ -485,14 +519,16 @@ type TimestampGetter interface {
 	GetTimestamp() uint64
 }
 type PasswordReq struct {
-	UserName string `json:"userName" binding:"required"`
-	Password string `json:"password" binding:"required"`
+	UserName    string  `json:"userName" binding:"required"`
+	Password    string  `json:"password" binding:"required"`
+	Description *string `json:"description"`
 }
 
 type NewPasswordReq struct {
-	UserName    string `json:"userName" binding:"required"`
-	Password    string `json:"password" binding:"required"`
-	NewPassword string `json:"newPassword" binding:"required"`
+	UserName    string  `json:"userName" binding:"required"`
+	Password    string  `json:"password"`
+	NewPassword string  `json:"newPassword"`
+	Description *string `json:"description"`
 }
 
 type UserRoleReq struct {
@@ -501,14 +537,19 @@ type UserRoleReq struct {
 }
 
 type RoleReq struct {
-	DbName   string `json:"dbName"`
-	RoleName string `json:"roleName" binding:"required"`
+	DbName      string `json:"dbName"`
+	RoleName    string `json:"roleName" binding:"required"`
+	Description string `json:"description"`
 }
 
 func (req *RoleReq) GetDbName() string { return req.DbName }
 
 func (req *RoleReq) GetRoleName() string {
 	return req.RoleName
+}
+
+func (req *RoleReq) GetDescription() string {
+	return req.Description
 }
 
 type PrivilegeGroupReq struct {
@@ -609,6 +650,7 @@ func (req *DropIndexPropertiesReq) GetIndexName() string {
 
 type FieldSchema struct {
 	FieldName         string                 `json:"fieldName" binding:"required"`
+	Description       string                 `json:"description"`
 	DataType          string                 `json:"dataType" binding:"required"`
 	ElementDataType   string                 `json:"elementDataType"`
 	ExternalField     string                 `json:"externalField"`
@@ -616,6 +658,8 @@ type FieldSchema struct {
 	IsPartitionKey    bool                   `json:"isPartitionKey"`
 	IsClusteringKey   bool                   `json:"isClusteringKey"`
 	ElementTypeParams map[string]interface{} `json:"elementTypeParams"`
+	TypeParams        map[string]interface{} `json:"typeParams"`
+	Fields            []FieldSchema          `json:"fields"`
 	Nullable          bool                   `json:"nullable"`
 	DefaultValue      interface{}            `json:"defaultValue"`
 }
@@ -629,6 +673,7 @@ func (field *FieldSchema) GetProto(ctx context.Context) (*schemapb.FieldSchema, 
 	dataType := schemapb.DataType(fieldDataType)
 	fieldSchema := &schemapb.FieldSchema{
 		Name:            field.FieldName,
+		Description:     field.Description,
 		IsPrimaryKey:    field.IsPrimary,
 		IsPartitionKey:  field.IsPartitionKey,
 		IsClusteringKey: field.IsClusteringKey,
@@ -661,6 +706,39 @@ func (field *FieldSchema) GetProto(ctx context.Context) (*schemapb.FieldSchema, 
 	return fieldSchema, nil
 }
 
+func (field *FieldSchema) IsStructArrayField() bool {
+	if field == nil {
+		return false
+	}
+	return field.DataType == schemapb.DataType_ArrayOfStruct.String() ||
+		field.DataType == schemapb.DataType_Array.String() && field.ElementDataType == schemapb.DataType_Struct.String()
+}
+
+func (field *FieldSchema) GetStructArrayProto(ctx context.Context) (*schemapb.StructArrayFieldSchema, error) {
+	if field == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("StructArray field schema is required")
+	}
+	if !field.IsStructArrayField() {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"StructArray field must use ArrayOfStruct or Array with Struct element, got dataType %s and elementDataType %s",
+			field.DataType, field.ElementDataType)
+	}
+	typeParams := make(map[string]interface{}, len(field.TypeParams)+len(field.ElementTypeParams))
+	for key, param := range field.ElementTypeParams {
+		typeParams[key] = param
+	}
+	for key, param := range field.TypeParams {
+		typeParams[key] = param
+	}
+	return (&StructArrayFieldSchema{
+		FieldName:   field.FieldName,
+		Description: field.Description,
+		Fields:      field.Fields,
+		TypeParams:  typeParams,
+		Nullable:    field.Nullable,
+	}).GetProto(ctx)
+}
+
 // StructArrayFieldSchema describes a struct array field in RESTful v2 API.
 // Each struct array field contains multiple sub-fields; every sub-field must
 // be declared as either Array (scalar element) or ArrayOfVector (vector element).
@@ -669,6 +747,7 @@ type StructArrayFieldSchema struct {
 	Description string                 `json:"description"`
 	Fields      []FieldSchema          `json:"fields" binding:"required"`
 	TypeParams  map[string]interface{} `json:"typeParams"`
+	Nullable    bool                   `json:"nullable"`
 }
 
 // GetProto converts the RESTful StructArrayFieldSchema to its proto counterpart.
@@ -681,6 +760,16 @@ func (sf *StructArrayFieldSchema) GetProto(ctx context.Context) (*schemapb.Struc
 		Name:        sf.FieldName,
 		Description: sf.Description,
 		TypeParams:  []*commonpb.KeyValuePair{},
+		Nullable:    sf.Nullable,
+	}
+	parentTypeParams := make(map[string]string, len(sf.TypeParams))
+	for key, param := range sf.TypeParams {
+		value, err := getElementTypeParams(param)
+		if err != nil {
+			return nil, err
+		}
+		parentTypeParams[key] = value
+		proto.TypeParams = append(proto.TypeParams, &commonpb.KeyValuePair{Key: key, Value: value})
 	}
 	subNames := map[string]struct{}{}
 	for i := range sf.Fields {
@@ -714,16 +803,21 @@ func (sf *StructArrayFieldSchema) GetProto(ctx context.Context) (*schemapb.Struc
 				"duplicated sub-field name %s in struct %s", subProto.Name, sf.FieldName)
 		}
 		subNames[subProto.Name] = struct{}{}
+		if maxCapacity, ok := parentTypeParams[common.MaxCapacityKey]; ok && !hasTypeParam(subProto.TypeParams, common.MaxCapacityKey) {
+			subProto.TypeParams = append(subProto.TypeParams, &commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: maxCapacity})
+		}
 		proto.Fields = append(proto.Fields, subProto)
 	}
-	for key, param := range sf.TypeParams {
-		value, err := getElementTypeParams(param)
-		if err != nil {
-			return nil, err
-		}
-		proto.TypeParams = append(proto.TypeParams, &commonpb.KeyValuePair{Key: key, Value: value})
-	}
 	return proto, nil
+}
+
+func hasTypeParam(typeParams []*commonpb.KeyValuePair, key string) bool {
+	for _, typeParam := range typeParams {
+		if typeParam.GetKey() == key {
+			return true
+		}
+	}
+	return false
 }
 
 type FunctionScore struct {

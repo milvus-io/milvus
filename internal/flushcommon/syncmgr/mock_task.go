@@ -147,6 +147,51 @@ func (_c *MockTask_HandleError_Call) RunAndReturn(run func(error)) *MockTask_Han
 	return _c
 }
 
+// IsDrop provides a mock function with no fields
+func (_m *MockTask) IsDrop() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsDrop")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockTask_IsDrop_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsDrop'
+type MockTask_IsDrop_Call struct {
+	*mock.Call
+}
+
+// IsDrop is a helper method to define mock.On call
+func (_e *MockTask_Expecter) IsDrop() *MockTask_IsDrop_Call {
+	return &MockTask_IsDrop_Call{Call: _e.mock.On("IsDrop")}
+}
+
+func (_c *MockTask_IsDrop_Call) Run(run func()) *MockTask_IsDrop_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockTask_IsDrop_Call) Return(_a0 bool) *MockTask_IsDrop_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockTask_IsDrop_Call) RunAndReturn(run func() bool) *MockTask_IsDrop_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IsFlush provides a mock function with no fields
 func (_m *MockTask) IsFlush() bool {
 	ret := _m.Called()

@@ -56,10 +56,22 @@ scripts/standalone_embed.sh    # embedded standalone (no external deps)
 
 ## Code Conventions
 
-- Error handling: use `merr` package, not fmt.Errorf
+- Error handling: use `merr` package, not fmt.Errorf — see mandatory procedure below
 - Logging: use `pkg/v2/log`, not standard `"log"` or fmt.Println
 - Import order: standard → third-party → github.com/milvus-io (enforced by gci)
 - Config params: paramtable (`pkg/v2/util/paramtable`), config in `configs/milvus.yaml`
+
+### Error handling (mandatory when originating, wrapping, or classifying errors)
+
+Read [error_handling_guide.md](docs/dev/error_handling_guide.md) (decision tree,
+Input-vs-System) and [error_handling_casebook.md](docs/dev/error_handling_casebook.md)
+(the 7 mistake patterns) BEFORE writing the change. Non-negotiable rules:
+
+1. Blame test: is the **request content itself** what forces this branch? → Input factory. A Milvus bug, or an internal/transient failure (not-ready, TOCTOU race), → System factory — even when a correct Milvus does reach it on a valid request (transient errors are System, and must stay retriable). "Looks like validation" is not the test.
+2. Add context to an existing error with `merr.Wrap/Wrapf` ONLY — `WrapErrXxxErr(err, …)` masks the inner code; cause never goes into a format string.
+3. Before marking anything InputError: grep `retry.Do` consumers. Before converting an `errors.New` sentinel to merr: grep `errors.Is` guards.
+4. Pick codes from the existing family ranges in `pkg/util/merr/errors.go` (scan first; see the partition table in [error_sentinel_convention.md](docs/dev/error_sentinel_convention.md)); never hand-pick 20xx segcore codes.
+5. Touched a wire projection, oldCode mapping, or metric label? Run the merr guard tests AND a full `make test-go` — contract changes break packages you didn't touch.
 
 ## PR and Commit Conventions
 

@@ -122,6 +122,9 @@ type searchTask struct {
 
 	// Old SDK sent only singular group_by_field; output must downgrade plural→singular.
 	legacyGroupByWire bool
+
+	hybridSubSearchInfos []hybridSubSearchInfo
+	hybridElementLevel   bool
 }
 
 func (t *searchTask) CanSkipAllocTimestamp() bool {
@@ -164,7 +167,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.collectionName = collectionName
 	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
 	if err != nil { // err is not nil if collection not exists
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+		return err
 	}
 
 	t.DbID = 0 // todo
@@ -173,6 +176,9 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.schema, err = globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn("get collection schema failed", zap.Error(err))
+		return err
+	}
+	if err := validateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
 		return err
 	}
 
@@ -190,7 +196,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
-		return errors.New("not support manually specifying the partition names if partition key mode is used")
+		return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
 	}
 	if t.mustUsePartitionKey && !t.partitionKeyMode {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("must use partition key in the search request " +
@@ -218,14 +224,14 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 	if len(aggs) > 0 {
 		log.Warn("aggregates are not supported in search request", zap.Strings("aggregates", lo.Map(aggs, func(agg agg.AggregateBase, _ int) string { return agg.OriginalName() })))
-		return errors.New("aggregates are not supported in search request")
+		return merr.WrapErrParameterInvalidMsg("aggregates are not supported in search request")
 	}
 	log.Debug("translate output fields",
 		zap.Strings("output fields", t.translatedOutputFields))
 
 	if t.GetIsAdvanced() {
 		if len(t.request.GetSubReqs()) > defaultMaxSearchRequest {
-			return errors.New(fmt.Sprintf("maximum of ann search requests is %d", defaultMaxSearchRequest))
+			return merr.WrapErrParameterInvalidMsg("maximum of ann search requests is %d", defaultMaxSearchRequest)
 		}
 	}
 
@@ -324,7 +330,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime, 0)
 		// preventing overflow, abort
 		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
-			return merr.WrapErrServiceInternal(fmt.Sprintf("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL))
+			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL)
 		}
 	}
 
@@ -390,7 +396,7 @@ func (t *searchTask) checkNq(ctx context.Context) (int64, error) {
 	// Check if nq is valid:
 	// https://milvus.io/docs/limitations.md
 	if err := validateNQLimit(nq); err != nil {
-		return 0, fmt.Errorf("%s [%d] is invalid, %w", NQKey, nq, err)
+		return 0, merr.WrapErrParameterInvalidMsg("%s [%d] is invalid, %v", NQKey, nq, err)
 	}
 	return nq, nil
 }
@@ -472,7 +478,7 @@ func setQueryInfoIfMvEnable(queryInfo *planpb.QueryInfo, t *searchTask, plan *pl
 			}
 			queryInfo.MaterializedViewInvolved = true
 		} else {
-			return errors.New("partition key field data type is not supported in materialized view")
+			return merr.WrapErrParameterInvalidMsg("partition key field data type is not supported in materialized view")
 		}
 	}
 	return nil
@@ -538,6 +544,8 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 
 	t.SubReqs = make([]*internalpb.SubSearchRequest, len(t.request.GetSubReqs()))
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
+	t.hybridSubSearchInfos = make([]hybridSubSearchInfo, len(t.request.GetSubReqs()))
+	t.hybridElementLevel = false
 	queryFieldIDs := []int64{}
 	for index, subReq := range t.request.GetSubReqs() {
 		// For hybrid search, order_by_fields comes from main search params, not sub-search params
@@ -546,26 +554,57 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			return err
 		}
 
-		// Hybrid search supports plain top-K on ArrayOfVector fields, including
-		// EmbList row-level search. This path does not yet use the per-sub-request
-		// placeholder type to distinguish EmbList from element-level search for
-		// advanced features, so reject range search / iterator / group by on
-		// ArrayOfVector here.
+		convertedPlaceholder, placeholderType, err := t.convertPlaceholderIfNeeded(subReq.GetPlaceholderGroup(), queryInfo.GetQueryFieldId())
+		if err != nil {
+			return err
+		}
+		if err := validateElementFilterVectorSearch(plan, t.schema.CollectionSchema, queryInfo.GetQueryFieldId(), placeholderType); err != nil {
+			return err
+		}
+
+		subSearchInfo := classifyHybridSubSearch(t.schema.CollectionSchema, queryInfo.GetQueryFieldId(), placeholderType)
 		annsField := typeutil.GetField(t.schema.CollectionSchema, queryInfo.GetQueryFieldId())
+		collapseConfig, elementScopeProvided, sanitizedSearchParams, err := parseAndRemoveElementScope(queryInfo.GetSearchParams())
+		if err != nil {
+			return err
+		}
+		if elementScopeProvided {
+			if subSearchInfo.Kind != hybridSubSearchStructElement {
+				return merr.WrapErrParameterInvalidMsg("%s is only supported for element-level search on struct array vector sub-fields", elementScopeKey)
+			}
+			if err := validateElementCollapseMetricType(collapseConfig, resolveElementCollapseMetricType(queryInfo.GetMetricType(), annsField)); err != nil {
+				return err
+			}
+			queryInfo.SearchParams = sanitizedSearchParams
+			subSearchInfo.ElementScopeProvided = true
+			subSearchInfo.Collapse = collapseConfig
+		}
+
+		// Hybrid search only supports plain top-K on ArrayOfVector fields. Both
+		// element-level and embedding-list searches reject advanced controls here.
 		if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
-			if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
-				return merr.WrapErrParameterInvalid("", "",
-					"range search is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
-			}
-			if t.rankParams.GetGroupByFieldId() > 0 {
-				return merr.WrapErrParameterInvalid("", "",
-					"group by search is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
-			}
-			if subIsIterator {
-				return merr.WrapErrParameterInvalid("", "",
-					"search iterator is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
+			isStructElementSubSearch := subSearchInfo.Kind == hybridSubSearchStructElement
+			isStructEmbListSubSearch := subSearchInfo.Kind == hybridSubSearchStructEmbList
+			if isStructElementSubSearch || isStructEmbListSubSearch {
+				searchKind := "element-level"
+				if isStructEmbListSubSearch {
+					searchKind = "embedding-list"
+				}
+				if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
+					return merr.WrapErrParameterInvalid("", "",
+						"range search is not supported for vector array ("+searchKind+") fields in hybrid search, fieldName:"+annsField.GetName())
+				}
+				if t.rankParams.GetGroupByFieldId() > 0 || len(t.rankParams.GetGroupByFieldIds()) > 0 {
+					return merr.WrapErrParameterInvalid("", "",
+						"group by search is not supported for vector array ("+searchKind+") fields in hybrid search, fieldName:"+annsField.GetName())
+				}
+				if subIsIterator {
+					return merr.WrapErrParameterInvalid("", "",
+						"search iterator is not supported for vector array ("+searchKind+") fields in hybrid search, fieldName:"+annsField.GetName())
+				}
 			}
 		}
+		t.hybridSubSearchInfos[index] = subSearchInfo
 
 		ignoreGrowing := t.IgnoreGrowing
 		if !ignoreGrowing {
@@ -645,16 +684,22 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		if typeutil.IsFieldSparseFloatVector(t.schema.CollectionSchema, internalSubReq.FieldId) {
 			metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.HybridSearchLabel, strconv.FormatInt(internalSubReq.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(internalSubReq.PlaceholderGroup, int(internalSubReq.GetNq()))))
 		}
-		// Convert placeholder group vector type if needed (e.g., fp32 -> fp16/bf16)
-		internalSubReq.PlaceholderGroup, _, err = t.convertPlaceholderIfNeeded(subReq.GetPlaceholderGroup(), internalSubReq.FieldId)
-		if err != nil {
-			return err
-		}
+		internalSubReq.PlaceholderGroup = convertedPlaceholder
 		t.SubReqs[index] = internalSubReq
 		t.queryInfos[index] = queryInfo
 		log.Debug("proxy init search request",
 			zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 			zap.Stringer("plan", plan)) // may be very large if large term passed.
+	}
+
+	t.hybridElementLevel = inferElementLevelHybrid(t.hybridSubSearchInfos)
+	for index, info := range t.hybridSubSearchInfos {
+		if t.hybridElementLevel && info.ElementScopeProvided {
+			return merr.WrapErrParameterInvalidMsg("%s is not allowed for same-struct element-level hybrid search", elementScopeKey)
+		}
+		if !t.hybridElementLevel && info.Kind == hybridSubSearchStructElement && !info.ElementScopeProvided {
+			t.hybridSubSearchInfos[index].Collapse = defaultElementCollapseConfig()
+		}
 	}
 
 	if embedding.HasNonBM25AndMinHashFunctions(t.schema.Functions, queryFieldIDs) {
@@ -699,7 +744,7 @@ func (t *searchTask) fillResult() {
 func (t *searchTask) getBM25SearchTexts(placeholder []byte) ([]string, error) {
 	pb := &commonpb.PlaceholderGroup{}
 	if err := proto.Unmarshal(placeholder, pb); err != nil {
-		return nil, merr.WrapErrServiceInternal("failed to unmarshal BM25 search placeholder group", err.Error())
+		return nil, merr.WrapErrParameterInvalidMsg("failed to unmarshal BM25 search placeholder group: %v", err)
 	}
 
 	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
@@ -708,7 +753,7 @@ func (t *searchTask) getBM25SearchTexts(placeholder []byte) ([]string, error) {
 
 	holder := pb.Placeholders[0]
 	if holder.Type != commonpb.PlaceholderType_VarChar {
-		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("please provide varchar/text for BM25 Function based search, got %s", holder.Type.String()))
+		return nil, merr.WrapErrParameterInvalidMsg("please provide varchar/text for BM25 Function based search, got %s", holder.Type.String())
 	}
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
@@ -916,6 +961,9 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := validateElementFilterVectorSearch(plan, t.schema.CollectionSchema, t.FieldId, placeholderType); err != nil {
+		return err
+	}
 
 	// For ArrayOfVector fields, the placeholder type decides the search semantics:
 	// - Element-level (plain vector placeholder): behaves like a normal single-vector
@@ -937,7 +985,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 			}
 		} else if t.isIterator && queryInfo.GetSearchIteratorV2Info() == nil {
 			return merr.WrapErrParameterInvalid("", "",
-				"legacy search iterator is not supported for element-level search on embedding list fields; use search iterator v2")
+				"legacy search iterator is not supported for element-level search; use search iterator v2")
 		}
 
 		groupByFieldIDs := queryInfo.GetGroupByFieldIds()
@@ -953,7 +1001,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 			for _, groupByFieldID := range groupByFieldIDs {
 				if pkField == nil || groupByFieldID != pkField.GetFieldID() {
 					return merr.WrapErrParameterInvalid("", "",
-						"only group by primary key is supported for element-level search on embedding list fields")
+						"only group by primary key is supported for element-level search")
 				}
 			}
 		}
@@ -1002,11 +1050,11 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 	if err != nil || len(annsFieldName) == 0 {
 		vecFields := typeutil.GetVectorFieldSchemas(t.schema.CollectionSchema)
 		if len(vecFields) == 0 {
-			return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, errors.New(AnnsFieldKey + " not found in schema")
+			return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, merr.WrapErrParameterInvalidMsg(AnnsFieldKey + " not found in schema")
 		}
 
 		if enableMultipleVectorFields && len(vecFields) > 1 {
-			return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, errors.New("multiple anns_fields exist, please specify a anns_field in search_params")
+			return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, merr.WrapErrParameterInvalidMsg("multiple anns_fields exist, please specify a anns_field in search_params")
 		}
 		annsFieldName = vecFields[0].Name
 	}
@@ -1021,7 +1069,7 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 
 	annField := typeutil.GetFieldByName(t.schema.CollectionSchema, annsFieldName)
 	if searchInfo.planInfo.GetGroupByFieldId() != -1 && annField.GetDataType() == schemapb.DataType_BinaryVector {
-		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, errors.New("not support search_group_by operation based on binary vector column")
+		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, merr.WrapErrParameterInvalidMsg("not support search_group_by operation based on binary vector column")
 	}
 
 	searchInfo.planInfo.QueryFieldId = annField.GetFieldID()
@@ -1130,6 +1178,31 @@ func isEmbeddingListPlaceholderType(pt commonpb.PlaceholderType) bool {
 	default:
 		return false
 	}
+}
+
+func validateElementFilterVectorSearch(plan *planpb.PlanNode, schema *schemapb.CollectionSchema, fieldID int64, placeholderType commonpb.PlaceholderType) error {
+	anns := plan.GetVectorAnns()
+	if anns == nil {
+		return nil
+	}
+	elementFilter := anns.GetPredicates().GetElementFilterExpr()
+	if elementFilter == nil {
+		return nil
+	}
+
+	field := typeutil.GetField(schema, fieldID)
+	parentStructName, isStructSubField := getStructParentFieldName(schema, fieldID)
+	_, isPlainVectorPlaceholderType := placeholderTypeToDataType[placeholderType]
+	if field != nil &&
+		field.GetDataType() == schemapb.DataType_ArrayOfVector &&
+		isStructSubField &&
+		parentStructName == elementFilter.GetStructName() &&
+		isPlainVectorPlaceholderType {
+		return nil
+	}
+
+	return merr.WrapErrParameterInvalidMsg(
+		"element_filter is only supported for element-level search on vector sub-fields of the same struct array; use MATCH_ANY/MATCH_* for row-level vector search")
 }
 
 func (t *searchTask) PostExecute(ctx context.Context) error {
@@ -1367,7 +1440,7 @@ func (t *searchTask) collectSearchResults(ctx context.Context) ([]*internalpb.Se
 	select {
 	case <-t.TraceCtx().Done():
 		log.Ctx(ctx).Warn("search task wait to finish timeout!")
-		return nil, fmt.Errorf("search task wait to finish timeout, msgID=%d", t.ID())
+		return nil, merr.Wrapf(t.TraceCtx().Err(), "search task wait to finish timeout, msgID=%d", t.ID())
 	default:
 		toReduceResults := make([]*internalpb.SearchResults, 0)
 		log.Ctx(ctx).Debug("all searches are finished or canceled")

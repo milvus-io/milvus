@@ -32,21 +32,19 @@ import "C"
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
 	"strconv"
 	"sync"
 	"time"
 	"unsafe"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -317,7 +315,7 @@ func ConvertCacheWarmupPolicy(policy string) (C.CacheWarmupPolicy, error) {
 	case "disable":
 		return C.CacheWarmupPolicy_Disable, nil
 	default:
-		return C.CacheWarmupPolicy_Disable, fmt.Errorf("invalid Tiered Storage cache warmup policy: %s", policy)
+		return C.CacheWarmupPolicy_Disable, merr.WrapErrParameterInvalidMsg("invalid Tiered Storage cache warmup policy: %s", policy)
 	}
 }
 
@@ -360,23 +358,23 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	diskMaxRatio := params.QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()
 
 	if memoryLowWatermarkRatio > memoryHighWatermarkRatio {
-		return errors.New("memoryLowWatermarkRatio should not be greater than memoryHighWatermarkRatio")
+		return merr.WrapErrParameterInvalidMsg("memoryLowWatermarkRatio should not be greater than memoryHighWatermarkRatio")
 	}
 	if memoryHighWatermarkRatio > memoryMaxRatio {
-		return errors.New("memoryHighWatermarkRatio should not be greater than memoryMaxRatio")
+		return merr.WrapErrParameterInvalidMsg("memoryHighWatermarkRatio should not be greater than memoryMaxRatio")
 	}
 	if memoryMaxRatio >= 1 {
-		return errors.New("memoryMaxRatio should not be greater than 1")
+		return merr.WrapErrParameterInvalidMsg("memoryMaxRatio should not be greater than 1")
 	}
 
 	if diskLowWatermarkRatio > diskHighWatermarkRatio {
-		return errors.New("diskLowWatermarkRatio should not be greater than diskHighWatermarkRatio")
+		return merr.WrapErrParameterInvalidMsg("diskLowWatermarkRatio should not be greater than diskHighWatermarkRatio")
 	}
 	if diskHighWatermarkRatio > diskMaxRatio {
-		return errors.New("diskHighWatermarkRatio should not be greater than diskMaxRatio")
+		return merr.WrapErrParameterInvalidMsg("diskHighWatermarkRatio should not be greater than diskMaxRatio")
 	}
 	if diskMaxRatio >= 1 {
-		return errors.New("diskMaxRatio should not be greater than 1")
+		return merr.WrapErrParameterInvalidMsg("diskMaxRatio should not be greater than 1")
 	}
 
 	memoryLowWatermarkBytes := C.int64_t(memoryLowWatermarkRatio * float64(osMemBytes))
@@ -757,18 +755,17 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	if status.error_code == 0 {
 		return nil
 	}
-	errorCode := status.error_code
-	errorName, ok := commonpb.ErrorCode_name[int32(errorCode)]
-	if !ok {
-		errorName = "UnknownError"
-	}
+	errorCode := int32(status.error_code)
 	errorMsg := C.GoString(status.error_msg)
 	defer C.free(unsafe.Pointer(status.error_msg))
 
-	finalMsg := fmt.Sprintf("[%s] %s", errorName, errorMsg)
-	logMsg := fmt.Sprintf("%s, C Runtime Exception: %s\n", extraInfo, finalMsg)
-	log.Warn(logMsg)
-	return errors.New(finalMsg)
+	// SegcoreError classifies the raw C++ code (2000-2099) into the right merr
+	// sentinel + retriability instead of looking it up in the unrelated
+	// commonpb.ErrorCode enum and flattening it to ServiceInternal; the caller
+	// breadcrumb stays in the log.
+	err := merr.SegcoreError(errorCode, errorMsg)
+	log.Warn("C runtime exception", zap.Error(err), zap.String("extra", extraInfo))
+	return err
 }
 
 // tlsMinVersionForStorage converts minio config's TLS min version value

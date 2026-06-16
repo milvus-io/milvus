@@ -308,6 +308,7 @@ type commonConfig struct {
 	Stv2SplitByAvgSize                   ParamItem `refreshable:"true"`
 	Stv2SplitAvgSizeThreshold            ParamItem `refreshable:"true"`
 	UseLoonFFI                           ParamItem `refreshable:"true"`
+	EnableGrowingSourceFlush             ParamItem `refreshable:"false"`
 
 	StoragePathPrefix        ParamItem `refreshable:"false"`
 	StorageZstdConcurrency   ParamItem `refreshable:"false"`
@@ -661,7 +662,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Key:          "common.storageType",
 		Version:      "2.0.0",
 		DefaultValue: "remote",
-		Doc:          "please adjust in embedded Milvus: local, available values are [local, remote, opendal], value minio is deprecated, use remote instead",
+		Doc:          "please adjust in embedded Milvus: local, available values are [local, remote], value minio is deprecated, use remote instead",
 		Export:       true,
 	}
 	p.StorageType.Init(base.mgr)
@@ -1081,6 +1082,15 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Export:       true,
 	}
 	p.UseLoonFFI.Init(base.mgr)
+
+	p.EnableGrowingSourceFlush = ParamItem{
+		Key:          "common.storage.enableGrowingSourceFlush",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc:          "enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path",
+		Export:       true,
+	}
+	p.EnableGrowingSourceFlush.Init(base.mgr)
 
 	p.Stv2SplitSystemColumn = ParamItem{
 		Key:          "common.storage.stv2.splitSystemColumn.enabled",
@@ -2041,7 +2051,9 @@ type proxyConfig struct {
 	HealthCheckTimeout                ParamItem `refreshable:"true"`
 	MsgStreamTimeTickBufSize          ParamItem `refreshable:"true"`
 	MaxNameLength                     ParamItem `refreshable:"true"`
+	MaxCollectionDescriptionLength    ParamItem `refreshable:"true"`
 	MaxUsernameLength                 ParamItem `refreshable:"true"`
+	MaxUserDescriptionLength          ParamItem `refreshable:"true"`
 	MinPasswordLength                 ParamItem `refreshable:"true"`
 	MaxPasswordLength                 ParamItem `refreshable:"true"`
 	MaxFieldNum                       ParamItem `refreshable:"true"`
@@ -2052,6 +2064,7 @@ type proxyConfig struct {
 	GinLogSkipPaths                   ParamItem `refreshable:"false"`
 	MaxUserNum                        ParamItem `refreshable:"true"`
 	MaxRoleNum                        ParamItem `refreshable:"true"`
+	MaxRoleDescriptionLength          ParamItem `refreshable:"true"`
 	NameValidationAllowedChars        ParamItem `refreshable:"true"`
 	RoleNameValidationAllowedChars    ParamItem `refreshable:"true"`
 	MaxTaskNum                        ParamItem `refreshable:"false"`
@@ -2075,6 +2088,7 @@ type proxyConfig struct {
 	ResolveAliasForPrivilege          ParamItem `refreshable:"true"`
 	MaxVarCharLength                  ParamItem `refreshable:"false"`
 	MaxTextLength                     ParamItem `refreshable:"false"`
+	MaxArrayCapacity                  ParamItem `refreshable:"true"`
 	MaxIndexParamsSize                ParamItem `refreshable:"true"`
 	MaxResultEntries                  ParamItem `refreshable:"true"`
 	EnableCachedServiceProvider       ParamItem `refreshable:"true"`
@@ -2139,6 +2153,16 @@ func (p *proxyConfig) init(base *BaseTable) {
 	}
 	p.MaxNameLength.Init(base.mgr)
 
+	p.MaxCollectionDescriptionLength = ParamItem{
+		Key:          "proxy.maxCollectionDescriptionLength",
+		DefaultValue: "1024",
+		Version:      "2.6.0",
+		PanicIfEmpty: true,
+		Doc:          "The maximum byte length of a collection description accepted by CreateCollection and AlterCollection. Existing collection metadata is not revalidated, but restore or replication flows that recreate a collection through CreateCollection must satisfy this limit or raise it first.",
+		Export:       true,
+	}
+	p.MaxCollectionDescriptionLength.Init(base.mgr)
+
 	p.MinPasswordLength = ParamItem{
 		Key:          "proxy.minPasswordLength",
 		DefaultValue: "6",
@@ -2154,6 +2178,14 @@ func (p *proxyConfig) init(base *BaseTable) {
 		PanicIfEmpty: true,
 	}
 	p.MaxUsernameLength.Init(base.mgr)
+
+	p.MaxUserDescriptionLength = ParamItem{
+		Key:          "proxy.maxUserDescriptionLength",
+		DefaultValue: "1024",
+		Version:      "2.6.19",
+		PanicIfEmpty: true,
+	}
+	p.MaxUserDescriptionLength.Init(base.mgr)
 
 	p.MaxPasswordLength = ParamItem{
 		Key:          "proxy.maxPasswordLength",
@@ -2275,6 +2307,16 @@ please adjust in embedded Milvus: false`,
 		PanicIfEmpty: true,
 	}
 	p.MaxRoleNum.Init(base.mgr)
+
+	p.MaxRoleDescriptionLength = ParamItem{
+		Key:          "proxy.maxRoleDescriptionLength",
+		DefaultValue: "1024",
+		Version:      "3.0.0",
+		PanicIfEmpty: true,
+		Doc:          "Maximum role description length in bytes.",
+		Export:       true,
+	}
+	p.MaxRoleDescriptionLength.Init(base.mgr)
 
 	p.NameValidationAllowedChars = ParamItem{
 		Key:          "proxy.nameValidation.allowedChars",
@@ -2552,6 +2594,22 @@ please adjust in embedded Milvus: false`,
 		Doc:          "maximum number of characters for a row of the text field",
 	}
 	p.MaxTextLength.Init(base.mgr)
+
+	p.MaxArrayCapacity = ParamItem{
+		Key:          "proxy.maxArrayCapacity",
+		Version:      "2.6.19",
+		DefaultValue: "4096",
+		PanicIfEmpty: true,
+		Doc:          "maximum number of elements in an array field for a single row",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt64(v) <= 0 {
+				return "4096"
+			}
+			return v
+		},
+	}
+	p.MaxArrayCapacity.Init(base.mgr)
 
 	p.MaxIndexParamsSize = ParamItem{
 		Key:          "proxy.maxIndexParamsSize",
@@ -5047,6 +5105,7 @@ type dataCoordConfig struct {
 	SingleCompactionDeltalogMaxNum    ParamItem `refreshable:"true"`
 
 	StorageVersionCompactionEnabled                   ParamItem `refreshable:"true"`
+	StorageFormatCompactionEnabled                    ParamItem `refreshable:"true"`
 	StorageVersionCompactionRateLimitTokens           ParamItem `refreshable:"true"`
 	StorageVersionCompactionRateLimitInterval         ParamItem `refreshable:"true"`
 	StorageVersionCompactionSessionVersionRequirement ParamItem `refreshable:"true"`
@@ -5127,6 +5186,7 @@ type dataCoordConfig struct {
 	MaxFilesPerImportReq            ParamItem `refreshable:"true"`
 	MaxImportJobNum                 ParamItem `refreshable:"true"`
 	WaitForIndex                    ParamItem `refreshable:"true"`
+	ImportInReplicatingCluster      ParamItem `refreshable:"true"`
 	ImportPreAllocIDExpansionFactor ParamItem `refreshable:"true"`
 	ImportFileNumPerSlot            ParamItem `refreshable:"true"`
 	ImportMemoryLimitPerSlot        ParamItem `refreshable:"true"`
@@ -5675,6 +5735,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       false,
 	}
 	p.StorageVersionCompactionEnabled.Init(base.mgr)
+
+	p.StorageFormatCompactionEnabled = ParamItem{
+		Key:          "dataCoord.compaction.storageFormat.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Enable storage format compaction",
+		Export:       false,
+	}
+	p.StorageFormatCompactionEnabled.Init(base.mgr)
 
 	p.StorageVersionCompactionRateLimitTokens = ParamItem{
 		Key:          "dataCoord.compaction.storageVersion.rateLimitTokens",
@@ -6382,6 +6451,16 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 		Export:       true,
 	}
 	p.WaitForIndex.Init(base.mgr)
+
+	p.ImportInReplicatingCluster = ParamItem{
+		Key:          "dataCoord.import.enableInReplicatingCluster",
+		Version:      "2.7.0",
+		Doc:          "Whether to allow import in a replicating cluster. When enabled, only auto_commit=false imports are accepted.",
+		DefaultValue: "false",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportInReplicatingCluster.Init(base.mgr)
 
 	p.ImportPreAllocIDExpansionFactor = ParamItem{
 		Key:          "dataCoord.import.preAllocateIDExpansionFactor",

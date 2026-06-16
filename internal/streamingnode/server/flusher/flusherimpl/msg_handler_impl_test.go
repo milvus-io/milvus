@@ -103,12 +103,12 @@ func TestFlushMsgHandler_HandleManualFlush(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestFlushMsgHandler_HandleCreateSegment_TextSkip(t *testing.T) {
+func TestFlushMsgHandler_HandleCreateSegment(t *testing.T) {
 	vchannel := "ch-0"
 
 	// Build a CreateSegment message with L0 level so that createNewGrowingSegment
 	// returns nil immediately (L0 skips MixCoordClient allocation).
-	// This lets us test the TEXT skip logic in HandleCreateSegment without
+	// This lets us test the growing-source skip logic in HandleCreateSegment without
 	// requiring the full resource.Resource() server context.
 	msg, err := message.NewCreateSegmentMessageBuilderV2().
 		WithHeader(&message.CreateSegmentMessageHeader{
@@ -130,20 +130,17 @@ func TestFlushMsgHandler_HandleCreateSegment_TextSkip(t *testing.T) {
 	)
 	assert.NoError(t, err)
 
-	t.Run("TEXT collection skips CreateNewGrowingSegment", func(t *testing.T) {
+	t.Run("growing-source collection creates WriteBuffer shell", func(t *testing.T) {
 		wbMgr := writebuffer.NewMockBufferManager(t)
-		wbMgr.EXPECT().HasTextFields(vchannel).Return(true)
-		// CreateNewGrowingSegment should NOT be called — no expectation set.
-		// If called, testify will fail the test.
+		wbMgr.EXPECT().CreateNewGrowingSegment(mock.Anything, vchannel, int64(10), int64(1001), mock.Anything).Return(nil)
 
 		handler := newMsgHandler(wbMgr)
 		err := handler.HandleCreateSegment(context.Background(), im)
 		assert.NoError(t, err)
 	})
 
-	t.Run("non-TEXT collection calls CreateNewGrowingSegment", func(t *testing.T) {
+	t.Run("non-growing-source collection calls CreateNewGrowingSegment", func(t *testing.T) {
 		wbMgr := writebuffer.NewMockBufferManager(t)
-		wbMgr.EXPECT().HasTextFields(vchannel).Return(false)
 		wbMgr.EXPECT().CreateNewGrowingSegment(mock.Anything, vchannel, int64(10), int64(1001), mock.Anything).Return(nil)
 
 		handler := newMsgHandler(wbMgr)

@@ -1,6 +1,7 @@
 package shards
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
@@ -292,6 +294,89 @@ func TestShardManager(t *testing.T) {
 	m.Close()
 }
 
+func TestShardManagerAssignSegmentTextUsesV3CreateSegmentWhenStorageV3Enabled(t *testing.T) {
+	paramtable.Init()
+	resource.InitForTest(t)
+	param := paramtable.Get()
+	param.Save(param.CommonCfg.UseLoonFFI.Key, "true")
+	defer param.Reset(param.CommonCfg.UseLoonFFI.Key)
+
+	channel := types.PChannelInfo{
+		Name: "test_text_channel",
+		Term: 1,
+	}
+	appendCh := make(chan *message.CreateSegmentMessageHeader, 1)
+	w := mock_wal.NewMockWAL(t)
+	w.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+		return make(chan struct{})
+	}).Maybe()
+	w.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, msg message.MutableMessage) (*types.AppendResult, error) {
+			createMsg := message.MustAsMutableCreateSegmentMessageV2(msg)
+			appendCh <- createMsg.Header()
+			return &types.AppendResult{
+				MessageID: rmq.NewRmqID(1),
+				TimeTick:  1000,
+			}, nil
+		}).Once()
+	f := syncutil.NewFuture[wal.WAL]()
+	f.Set(w)
+
+	m := RecoverShardManager(&ShardManagerRecoverParam{
+		ChannelInfo: channel,
+		WAL:         f,
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+			VChannels: map[string]*streamingpb.VChannelMeta{
+				"v_text": {
+					Vchannel: "v_text",
+					State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+					CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+						CollectionId: 10,
+						Partitions: []*streamingpb.PartitionInfoOfVChannel{
+							{PartitionId: 20},
+						},
+						Schemas: []*streamingpb.CollectionSchemaOfVChannel{
+							{
+								Schema: &schemapb.CollectionSchema{
+									Name:    "text_collection",
+									Version: 7,
+									Fields: []*schemapb.FieldSchema{
+										{FieldID: 100, DataType: schemapb.DataType_Int64},
+										{FieldID: 101, DataType: schemapb.DataType_Text},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{},
+			Checkpoint:         &recovery.WALCheckpoint{TimeTick: 100},
+		},
+		TxnManager: &mockedTxnManager{},
+	}).(*shardManagerImpl)
+	defer m.Close()
+
+	_, err := m.AssignSegment(&AssignSegmentRequest{
+		CollectionID: 10,
+		PartitionID:  20,
+		TimeTick:     200,
+		ModifiedMetrics: stats.ModifiedMetrics{
+			Rows:       1,
+			BinarySize: 1,
+		},
+	})
+	assert.ErrorIs(t, err, ErrWaitForNewSegment)
+
+	select {
+	case header := <-appendCh:
+		assert.Equal(t, storage.StorageV3, header.GetStorageVersion())
+		assert.Equal(t, int32(7), header.GetSchemaVersion())
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for create segment message")
+	}
+}
+
 func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	paramtable.Init()
 	resource.InitForTest(t)
@@ -368,6 +453,40 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	})
 	assert.ErrorIs(t, err, ErrCollectionSchemaVersionNotMatch)
 	assert.Equal(t, int32(1), ver)
+
+	textSchema := &schemapb.CollectionSchema{
+		Name:    "test_text_schema_collection",
+		Version: 4,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, DataType: schemapb.DataType_Text},
+		},
+	}
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	createMsgTextSchema := message.NewCreateCollectionMessageBuilderV1().
+		WithVChannel("v_text_schema").
+		WithHeader(&message.CreateCollectionMessageHeader{
+			CollectionId: 104,
+			PartitionIds: []int64{204},
+		}).
+		WithBody(&msgpb.CreateCollectionRequest{
+			CollectionSchema: textSchema,
+		}).
+		MustBuildMutable().
+		WithTimeTick(250).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(rmq.NewRmqID(13))
+	m.CreateCollection(message.MustAsImmutableCreateCollectionMessageV1(createMsgTextSchema))
+
+	ver, err = m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
+		CollectionId:  104,
+		SchemaVersion: proto.Int32(4),
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, int32(4), ver)
+	assert.True(t, m.collections[104].HasTextField())
+	assert.True(t, m.collections[104].UseGrowingSourceFlush())
 
 	// Test 3: Create collection without schema (legacy), then check version
 	createMsgNoSchema := message.NewCreateCollectionMessageBuilderV1().
@@ -704,4 +823,51 @@ func TestCollectionInfoSchemaVersion(t *testing.T) {
 		Schema: &schemapb.CollectionSchema{Name: "x", Version: 3},
 	}
 	assert.Equal(t, int32(3), ci.SchemaVersion())
+}
+
+func TestCollectionInfoUseGrowingSourceFlush(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
+	assert.False(t, (*CollectionInfo)(nil).UseGrowingSourceFlush())
+	ci := &CollectionInfo{}
+	assert.False(t, ci.UseGrowingSourceFlush())
+	ci.Schema = &streamingpb.CollectionSchemaOfVChannel{}
+	assert.False(t, ci.UseGrowingSourceFlush())
+	ci.Schema = &streamingpb.CollectionSchemaOfVChannel{
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, DataType: schemapb.DataType_Int64},
+			},
+		},
+	}
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "true")
+	assert.False(t, ci.UseGrowingSourceFlush())
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	assert.True(t, ci.UseGrowingSourceFlush())
+}
+
+func TestCollectionInfoUseGrowingSourceFlush_TextField(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
+
+	ci := &CollectionInfo{
+		Schema: &streamingpb.CollectionSchemaOfVChannel{
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, DataType: schemapb.DataType_Int64},
+					{FieldID: 101, DataType: schemapb.DataType_Text},
+				},
+			},
+		},
+	}
+	assert.True(t, ci.HasTextField())
+	assert.False(t, ci.UseGrowingSourceFlush())
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	assert.True(t, ci.UseGrowingSourceFlush())
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -78,7 +79,7 @@ func (c *Server) startBroadcastWithCollectionIDLock(ctx context.Context, collect
 		message.NewExclusiveCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()),
 	)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to start broadcast with collection lock")
+		return nil, merr.Wrap(err, "failed to start broadcast with collection lock")
 	}
 	return broadcaster, nil
 }

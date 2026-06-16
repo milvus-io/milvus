@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestSchema(t *testing.T) {
@@ -301,6 +302,60 @@ func TestSchema(t *testing.T) {
 
 		assert.True(t, IsVectorArrayType(schemapb.DataType_ArrayOfVector))
 	})
+}
+
+func TestHasTextField(t *testing.T) {
+	assert.False(t, HasTextField(nil))
+	assert.False(t, HasTextField(&schemapb.CollectionSchema{}))
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, DataType: schemapb.DataType_Text},
+		},
+	}
+	assert.True(t, HasTextField(schema))
+}
+
+func TestValidateTextRequiresStorageV3(t *testing.T) {
+	textSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, DataType: schemapb.DataType_Text},
+		},
+	}
+	ordinarySchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	assert.NoError(t, ValidateTextRequiresStorageV3(nil, false))
+	assert.NoError(t, ValidateTextRequiresStorageV3(ordinarySchema, false))
+	assert.Error(t, ValidateTextRequiresStorageV3(textSchema, false))
+	assert.NoError(t, ValidateTextRequiresStorageV3(textSchema, true))
+}
+
+func TestUseGrowingSourceFlush(t *testing.T) {
+	ordinarySchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64},
+		},
+	}
+	textSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, DataType: schemapb.DataType_Text},
+		},
+	}
+
+	assert.False(t, UseGrowingSourceFlush(ordinarySchema, false, true))
+	assert.False(t, UseGrowingSourceFlush(textSchema, false, true))
+	assert.False(t, UseGrowingSourceFlush(ordinarySchema, true, false))
+	assert.True(t, UseGrowingSourceFlush(ordinarySchema, true, true))
+	assert.True(t, UseGrowingSourceFlush(textSchema, true, false))
+	assert.False(t, UseGrowingSourceFlush(nil, true, false))
+	assert.True(t, UseGrowingSourceFlush(nil, true, true))
 }
 
 func TestSchema_GetVectorFieldSchemas(t *testing.T) {
@@ -649,7 +704,8 @@ func TestSchema_invalid(t *testing.T) {
 		}
 		_, err := CreateSchemaHelper(schema)
 		assert.Error(t, err)
-		assert.EqualError(t, err, "duplicated fieldName: field_int8")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "duplicated fieldName: field_int8")
 	})
 	t.Run("Duplicate field id", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
@@ -675,7 +731,8 @@ func TestSchema_invalid(t *testing.T) {
 		}
 		_, err := CreateSchemaHelper(schema)
 		assert.Error(t, err)
-		assert.EqualError(t, err, "duplicated fieldID: 100")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "duplicated fieldID: 100")
 	})
 	t.Run("Duplicated primary key", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
@@ -701,7 +758,8 @@ func TestSchema_invalid(t *testing.T) {
 		}
 		_, err := CreateSchemaHelper(schema)
 		assert.Error(t, err)
-		assert.EqualError(t, err, "primary key is not unique")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "primary key is not unique")
 	})
 	t.Run("field not exist", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
@@ -723,15 +781,18 @@ func TestSchema_invalid(t *testing.T) {
 
 		_, err = helper.GetPrimaryKeyField()
 		assert.Error(t, err)
-		assert.EqualError(t, err, "failed to get primary key field: no primary in schema")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "failed to get primary key field: no primary in schema")
 
 		_, err = helper.GetFieldFromName("none")
 		assert.Error(t, err)
-		assert.EqualError(t, err, "failed to get field schema by name: fieldName(none) not found")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "failed to get field schema by name: fieldName(none) not found")
 
 		_, err = helper.GetFieldFromID(101)
 		assert.Error(t, err)
-		assert.EqualError(t, err, "fieldID(101) not found")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "fieldID(101) not found")
 	})
 	t.Run("vector dim not exist", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
@@ -5571,10 +5632,12 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 			}
 			err := NormalizeAndValidateExternalCollectionSchema(schema)
 			assert.NoError(t, err, "expected no error for type %s", tc.dt.String())
+			assert.True(t, schema.GetFields()[0].GetNullable(), "base vector field should be nullable")
+			assert.True(t, schema.GetFields()[1].GetNullable(), "field type %s should be nullable", tc.dt.String())
 		}
 	})
 
-	t.Run("user scalar fields forced nullable but vector fields unchanged", func(t *testing.T) {
+	t.Run("user fields forced nullable", func(t *testing.T) {
 		schema := buildSchema()
 		for _, f := range schema.GetFields() {
 			assert.False(t, f.GetNullable())
@@ -5582,7 +5645,7 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.NoError(t, err)
 		assert.True(t, schema.GetFields()[0].GetNullable(), "scalar field should be nullable")
-		assert.False(t, schema.GetFields()[1].GetNullable(), "vector field should remain non-nullable")
+		assert.True(t, schema.GetFields()[1].GetNullable(), "vector field should be nullable")
 	})
 
 	t.Run("virtual pk stays non-nullable", func(t *testing.T) {
@@ -5601,7 +5664,7 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 			case common.VirtualPKFieldName:
 				assert.False(t, f.GetNullable(), "virtual PK should remain non-nullable")
 			case "vec":
-				assert.False(t, f.GetNullable(), "vector field should remain non-nullable")
+				assert.True(t, f.GetNullable(), "vector field should be nullable")
 			default:
 				assert.True(t, f.GetNullable())
 			}

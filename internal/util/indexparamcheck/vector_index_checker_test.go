@@ -6,6 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 )
 
 func TestVecIndexChecker_StaticCheck(t *testing.T) {
@@ -14,6 +16,7 @@ func TestVecIndexChecker_StaticCheck(t *testing.T) {
 	tests := []struct {
 		name     string
 		dataType schemapb.DataType
+		elemType schemapb.DataType
 		params   map[string]string
 		wantErr  bool
 	}{
@@ -70,11 +73,55 @@ func TestVecIndexChecker_StaticCheck(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name:     "ArrayOfVector float accepts MaxSimCosine",
+			dataType: schemapb.DataType_ArrayOfVector,
+			elemType: schemapb.DataType_FloatVector,
+			params: map[string]string{
+				common.IndexTypeKey:  "HNSW",
+				common.MetricTypeKey: metric.MaxSimCosine,
+				HNSWM:                "16",
+				EFConstruction:       "200",
+			},
+			wantErr: false,
+		},
+		{
+			name:     "ArrayOfVector float rejects MaxSimHamming",
+			dataType: schemapb.DataType_ArrayOfVector,
+			elemType: schemapb.DataType_FloatVector,
+			params: map[string]string{
+				common.IndexTypeKey:  "HNSW_SQ",
+				common.MetricTypeKey: metric.MaxSimHamming,
+			},
+			wantErr: true,
+		},
+		{
+			name:     "ArrayOfVector binary accepts MaxSimHamming",
+			dataType: schemapb.DataType_ArrayOfVector,
+			elemType: schemapb.DataType_BinaryVector,
+			params: map[string]string{
+				common.IndexTypeKey:  "HNSW",
+				common.MetricTypeKey: metric.MaxSimHamming,
+				HNSWM:                "16",
+				EFConstruction:       "200",
+			},
+			wantErr: false,
+		},
+		{
+			name:     "ArrayOfVector binary rejects MaxSimCosine",
+			dataType: schemapb.DataType_ArrayOfVector,
+			elemType: schemapb.DataType_BinaryVector,
+			params: map[string]string{
+				common.IndexTypeKey:  "HNSW",
+				common.MetricTypeKey: metric.MaxSimCosine,
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := checker.StaticCheck(tt.dataType, schemapb.DataType_None, tt.params)
+			err := checker.StaticCheck(tt.dataType, tt.elemType, tt.params)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {

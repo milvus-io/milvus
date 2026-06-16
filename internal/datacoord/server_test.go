@@ -1529,7 +1529,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 			CollectionID: 0,
 			Field2BinlogPaths: []*datapb.FieldBinlog{
 				{
-					FieldID: 1,
+					FieldID:     1,
+					ChildFields: []int64{1, 2},
+					Format:      "parquet",
 					Binlogs: []*datapb.Binlog{
 						{
 							LogPath: "/binlog/1",
@@ -1605,6 +1607,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.EqualValues(t, binlogReq.SegmentID, resp.GetBinlogs()[0].GetSegmentID())
 		assert.EqualValues(t, 1, len(resp.GetBinlogs()[0].GetFieldBinlogs()))
 		assert.EqualValues(t, 1, resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetFieldID())
+		assert.ElementsMatch(t, []int64{1, 2}, resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetChildFields())
+		assert.Equal(t, "parquet", resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetFormat())
 		for _, binlog := range resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetBinlogs() {
 			assert.Equal(t, "", binlog.GetLogPath())
 		}

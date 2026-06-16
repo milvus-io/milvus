@@ -18,7 +18,6 @@ package parquet
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -101,7 +100,7 @@ func (r *StructFieldReader) Next(count int64) (any, any, error) {
 	case schemapb.DataType_ArrayOfVector:
 		return r.readArrayOfVectorField(chunked)
 	default:
-		return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type for struct field: %v", r.field.GetDataType()))
+		return nil, nil, merr.WrapErrImportFailedMsg("unsupported data type for struct field: %v", r.field.GetDataType())
 	}
 }
 
@@ -113,7 +112,7 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			val, ok := v.(bool)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected bool for field '%s', got %T at index %d", r.field.GetName(), v, i))
+				return nil, merr.WrapErrImportFailedMsg("expected bool for field '%s', got %T at index %d", r.field.GetName(), v, i)
 			}
 			boolData[i] = val
 		}
@@ -127,7 +126,7 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			val, ok := v.(int8)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected int8 for field '%s', got %T at index %d", r.field.GetName(), v, i))
+				return nil, merr.WrapErrImportFailedMsg("expected int8 for field '%s', got %T at index %d", r.field.GetName(), v, i)
 			}
 			intData[i] = int32(val)
 		}
@@ -141,7 +140,7 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			val, ok := v.(int16)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected int16 for field '%s', got %T at index %d", r.field.GetName(), v, i))
+				return nil, merr.WrapErrImportFailedMsg("expected int16 for field '%s', got %T at index %d", r.field.GetName(), v, i)
 			}
 			intData[i] = int32(val)
 		}
@@ -155,7 +154,7 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			val, ok := v.(int32)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected int32 for field '%s', got %T at index %d", r.field.GetName(), v, i))
+				return nil, merr.WrapErrImportFailedMsg("expected int32 for field '%s', got %T at index %d", r.field.GetName(), v, i)
 			}
 			intData[i] = val
 		}
@@ -169,7 +168,7 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			val, ok := v.(int64)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected int64 for field '%s', got %T at index %d", r.field.GetName(), v, i))
+				return nil, merr.WrapErrImportFailedMsg("expected int64 for field '%s', got %T at index %d", r.field.GetName(), v, i)
 			}
 			intData[i] = val
 		}
@@ -183,7 +182,7 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			val, ok := v.(float32)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected float32 for field '%s', got %T at index %d", r.field.GetName(), v, i))
+				return nil, merr.WrapErrImportFailedMsg("expected float32 for field '%s', got %T at index %d", r.field.GetName(), v, i)
 			}
 			floatData[i] = val
 		}
@@ -197,7 +196,7 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			val, ok := v.(float64)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected float64 for field '%s', got %T at index %d", r.field.GetName(), v, i))
+				return nil, merr.WrapErrImportFailedMsg("expected float64 for field '%s', got %T at index %d", r.field.GetName(), v, i)
 			}
 			floatData[i] = val
 		}
@@ -211,7 +210,7 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			val, ok := v.(string)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected string for field '%s', got %T at index %d", r.field.GetName(), v, i))
+				return nil, merr.WrapErrImportFailedMsg("expected string for field '%s', got %T at index %d", r.field.GetName(), v, i)
 			}
 			strData[i] = val
 		}
@@ -221,7 +220,7 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 			},
 		}, nil
 	default:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported element type for struct field: %v", r.field.GetElementType()))
+		return nil, merr.WrapErrImportFailedMsg("unsupported element type for struct field: %v", r.field.GetElementType())
 	}
 }
 
@@ -325,7 +324,7 @@ func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, er
 						}
 						value := field.Value(int(structIdx))
 						if err := typeutil.VerifyFloat(float64(value)); err != nil {
-							return nil, nil, fmt.Errorf("float32 verification failed: %w", err)
+							return nil, nil, merr.Wrap(err, "float32 verification failed")
 						}
 						combinedData = append(combinedData, value)
 					case *array.Float64:
@@ -334,7 +333,7 @@ func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, er
 						}
 						value := field.Value(int(structIdx))
 						if err := typeutil.VerifyFloat(value); err != nil {
-							return nil, nil, fmt.Errorf("float64 verification failed: %w", err)
+							return nil, nil, merr.Wrap(err, "float64 verification failed")
 						}
 						combinedData = append(combinedData, value)
 					case *array.String:

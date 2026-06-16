@@ -54,6 +54,8 @@ type RootCoordCatalog interface {
 	// CreateRole creates role by the entity for the tenant. Please make sure the tenent and entity.Name aren't empty. Empty entity.Name may end up with deleting all roles
 	// Returns common.IgnorableError if the role already existes
 	CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error
+	// AlterRole updates mutable role metadata by role name.
+	AlterRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error
 	// DropRole removes a role by name
 	DropRole(ctx context.Context, tenant string, roleName string) error
 	// AlterUserRole changes the role of a user for the tenant. Please make sure the userEntity.Name and roleEntity.Name aren't empty before calling this API.
@@ -90,7 +92,6 @@ type RootCoordCatalog interface {
 	// MigrateGrantCollectionName migrates all grants from oldName to newName when a collection is renamed.
 	MigrateGrantCollectionName(ctx context.Context, tenant string, oldDBName string, oldName string, newDBName string, newName string) error
 
-	ListCredentialsWithPasswd(ctx context.Context) (map[string]string, error)
 	BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error)
 	RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error
 

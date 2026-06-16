@@ -635,7 +635,7 @@ func TestCreateIndexWithOtherFieldName(t *testing.T) {
 	// create index in binary field with default name
 	idxBinary := index.NewBinFlatIndex(entity.JACCARD)
 	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultBinaryVecFieldName, idxBinary))
-	common.CheckErr(t, err, false, "CreateIndex failed: at most one distinct index is allowed per field")
+	common.CheckErr(t, err, false, "at most one distinct index is allowed per field")
 }
 
 // create all scalar index on json field -> error
@@ -813,7 +813,7 @@ func TestCreateIndexDup(t *testing.T) {
 	common.CheckIndex(t, _index, expIndex, common.TNewCheckIndexOpt(common.DefaultNb))
 
 	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, idxIvfSq8))
-	common.CheckErr(t, err, false, "CreateIndex failed: at most one distinct index is allowed per field")
+	common.CheckErr(t, err, false, "at most one distinct index is allowed per field")
 }
 
 func TestCreateIndexSparseVectorGeneric(t *testing.T) {
@@ -970,6 +970,48 @@ func TestCreateIndexGeneric(t *testing.T) {
 		common.CheckErr(t, err, true)
 		common.CheckIndex(t, descIdx, index.NewGenericIndex(field.Name, idx.Params()), common.TNewCheckIndexOpt(common.DefaultNb))
 	}
+}
+
+func TestCreateIndexVanillaFaissGeneric(t *testing.T) {
+	t.Parallel()
+
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
+
+	// insert
+	ip := hp.NewInsertParams(schema)
+	prepare.InsertData(ctx, t, mc, ip, hp.TNewDataOption())
+	prepare.FlushData(ctx, t, mc, schema.CollectionName)
+
+	idx := index.NewGenericIndex(common.DefaultFloatVecFieldName, map[string]string{
+		index.IndexTypeKey:  "FAISS",
+		index.MetricTypeKey: "L2",
+		"faiss_index_name":  "IVF64,Flat",
+	})
+	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, idx))
+	common.CheckErr(t, err, true)
+	err = idxTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	descIdx, err := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName))
+	common.CheckErr(t, err, true)
+	common.CheckIndex(t, descIdx, index.NewGenericIndex(common.DefaultFloatVecFieldName, idx.Params()), common.TNewCheckIndexOpt(common.DefaultNb))
+	require.Equal(t, "FAISS", descIdx.Index.Params()[index.IndexTypeKey])
+	require.Equal(t, "IVF64,Flat", descIdx.Index.Params()["faiss_index_name"])
+
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).
+		WithANNSField(common.DefaultFloatVecFieldName).
+		// nprobe=nlist (IVF64) scans all lists so topK results are returned deterministically (#50392)
+		WithSearchParam("nprobe", "64").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
 }
 
 // test create index with not exist index name and not exist field name
@@ -1157,7 +1199,7 @@ func TestIndexMultiVectorDupName(t *testing.T) {
 	common.CheckErr(t, err, true)
 
 	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloat16VecFieldName, idx).WithIndexName("index_1"))
-	common.CheckErr(t, err, false, "CreateIndex failed: at most one distinct index is allowed per field")
+	common.CheckErr(t, err, false, "at most one distinct index is allowed per field")
 
 	// create different index on same field
 	idxRe := index.NewIvfSQ8Index(entity.COSINE, 32)

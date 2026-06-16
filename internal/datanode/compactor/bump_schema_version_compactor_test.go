@@ -167,6 +167,116 @@ func (s *BumpSchemaVersionCompactionTaskSuite) setupTest() {
 	s.task = NewBumpSchemaVersionCompactionTask(context.Background(), cm, plan, compactionParams)
 }
 
+func genTestCollectionMetaWithMinHash() *etcdpb.CollectionMeta {
+	return &etcdpb.CollectionMeta{
+		ID: 1,
+		Schema: &schemapb.CollectionSchema{
+			Name: "schema_bump_minhash_test",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: common.RowIDField, Name: "row_id", DataType: schemapb.DataType_Int64},
+				{FieldID: common.TimeStampField, Name: "Timestamp", DataType: schemapb.DataType_Int64},
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{
+					FieldID:  101,
+					Name:     "text",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "128"},
+					},
+				},
+				{
+					FieldID:  102,
+					Name:     "minhash",
+					DataType: schemapb.DataType_BinaryVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "32"},
+					},
+					IsFunctionOutput: true,
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "minhash_func",
+					Id:               1000,
+					Type:             schemapb.FunctionType_MinHash,
+					InputFieldNames:  []string{"text"},
+					InputFieldIds:    []int64{101},
+					OutputFieldNames: []string{"minhash"},
+					OutputFieldIds:   []int64{102},
+				},
+			},
+		},
+	}
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) setupMinHashTest() {
+	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
+	s.meta = genTestCollectionMetaWithMinHash()
+
+	params, err := compaction.GenerateJSONParams(s.meta.GetSchema())
+	s.Require().NoError(err)
+
+	plan := &datapb.CompactionPlan{
+		PlanID: 999,
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
+			CollectionID:   1,
+			PartitionID:    1,
+			SegmentID:      100,
+			InsertChannel:  "test_channel",
+			StorageVersion: storage.StorageV3,
+			Manifest:       "manifest",
+		}},
+		Type:                   datapb.CompactionType_BumpSchemaVersionCompaction,
+		Schema:                 s.meta.GetSchema(),
+		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
+		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 9530, End: 19530},
+		MaxSize:                64 * 1024 * 1024,
+		JsonParams:             params,
+		TotalRows:              3,
+	}
+
+	cm, err := storage.NewChunkManagerFactoryWithParam(paramtable.Get()).NewPersistentStorageChunkManager(context.Background())
+	s.Require().NoError(err)
+	compactionParams := compaction.GenParams()
+	compactionParams.StorageVersion = storage.StorageV3
+	s.task = NewBumpSchemaVersionCompactionTask(context.Background(), cm, plan, compactionParams)
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) prepareMinHashBumpSchemaVersionCompaction() {
+	segID := int64(100)
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
+	s.initSegBufferForSchemaBump(segID)
+	s.finishBumpSchemaVersionSegment()
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionMaterializesMinHashOutput() {
+	s.setupMinHashTest()
+	s.prepareMinHashBumpSchemaVersionCompaction()
+
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.NotNil(result)
+	s.Equal(datapb.CompactionTaskState_completed, result.GetState())
+	s.Require().Len(result.GetSegments(), 1)
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(3, segment.GetNumOfRows())
+	s.NotEmpty(segment.GetManifest())
+	s.Empty(segment.GetBm25Logs())
+
+	const minHashOutputFieldID = int64(102)
+	found := false
+	for _, fl := range segment.GetInsertLogs() {
+		if fl.GetFieldID() == minHashOutputFieldID {
+			found = true
+			s.Require().Len(fl.GetBinlogs(), 1)
+			s.EqualValues(3, fl.GetBinlogs()[0].GetEntriesNum())
+			s.Greater(fl.GetBinlogs()[0].GetMemorySize(), int64(0))
+		}
+	}
+	s.True(found, "MinHash output field should be materialized into insert logs")
+}
+
 func (s *BumpSchemaVersionCompactionTaskSuite) SetupTest() {
 	// Align with sort_compaction_test fixture: use a per-test temp dir as the local
 	// storage root and disable Loon FFI. Without UseLoonFFI=false, the loon local
@@ -978,7 +1088,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildMergedLogsV3() {
 	}
 	writerResult := &bumpSchemaVersionWriterResult{
 		columnGroups: []storagecommon.ColumnGroup{
-			{GroupID: 102, Fields: []int64{102}},
+			{GroupID: 102, Fields: []int64{102}, Format: "vortex"},
 		},
 	}
 
@@ -989,6 +1099,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildMergedLogsV3() {
 	s.Equal(2, len(mergedInsert))
 	s.Equal(int64(100), mergedInsert[0].GetFieldID())
 	s.Equal(int64(102), mergedInsert[1].GetFieldID())
+	s.Equal("vortex", mergedInsert[1].GetFormat())
 	s.Equal(int64(512), mergedInsert[1].GetBinlogs()[0].GetMemorySize())
 	s.Equal(int64(1000), mergedInsert[1].GetBinlogs()[0].GetEntriesNum())
 	// V3 binlog presence marker must carry a non-zero LogID so buildBinlogKvs validation

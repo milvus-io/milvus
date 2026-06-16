@@ -19,11 +19,17 @@
 package requestutil
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestGetCollectionNameFromRequest(t *testing.T) {
@@ -507,4 +513,58 @@ func TestGetStatusFromResponse(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseMetricLabel(t *testing.T) {
+	// transport / interceptor error -> rejected_system (highest priority)
+	assert.Equal(t, metrics.RejectedSystemLabel,
+		ParseMetricLabel(&commonpb.Status{}, errors.New("transport failed")))
+
+	// success
+	assert.Equal(t, metrics.SuccessLabel,
+		ParseMetricLabel(&commonpb.Status{}, nil))
+
+	// retryable hard failure -> retry (retryability beats classification)
+	assert.Equal(t, metrics.RetryLabel,
+		ParseMetricLabel(merr.Status(merr.ErrServiceRateLimit), nil))
+
+	// hard failure, system error -> fail_system
+	assert.Equal(t, metrics.FailSystemLabel,
+		ParseMetricLabel(merr.Status(merr.ErrSegcore), nil))
+
+	// hard failure, input error -> fail_input
+	inputErr := merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("bad param"))
+	assert.Equal(t, metrics.FailInputLabel,
+		ParseMetricLabel(merr.Status(inputErr), nil))
+
+	// response that itself implements GetStatus
+	assert.Equal(t, metrics.FailInputLabel,
+		ParseMetricLabel(&milvuspb.BoolResponse{Status: merr.Status(inputErr)}, nil))
+
+	// merr input error through the err path (REST v2 handlers abort with merr
+	// directly; no GRPCStatus, so the gRPC switch alone would misbucket it as
+	// rejected_system) -> rejected_user
+	assert.Equal(t, metrics.RejectedUserLabel,
+		ParseMetricLabel(&commonpb.Status{}, merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("bad param"))))
+
+	// merr system error through the err path -> rejected_system
+	assert.Equal(t, metrics.RejectedSystemLabel,
+		ParseMetricLabel(&commonpb.Status{}, merr.WrapErrServiceInternalMsg("boom")))
+
+	// client cancellation through the err path -> cancel, not a system rejection
+	assert.Equal(t, metrics.CancelLabel,
+		ParseMetricLabel(&commonpb.Status{}, context.Canceled))
+	assert.Equal(t, metrics.CancelLabel,
+		ParseMetricLabel(&commonpb.Status{}, errors.Wrap(context.Canceled, "rpc aborted")))
+
+	// REST v2 wrapper shape: the response carries the failed status AND the
+	// wrapper reconstructs err from it. Processed failures must classify by
+	// the status (fail_*), not be misrouted into the rejected_* buckets.
+	restSys := merr.Status(merr.ErrSegcore)
+	assert.Equal(t, metrics.FailSystemLabel, ParseMetricLabel(restSys, merr.Error(restSys)))
+	restInput := merr.Status(merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("bad param")))
+	assert.Equal(t, metrics.FailInputLabel, ParseMetricLabel(restInput, merr.Error(restInput)))
+	// Cancellation surfaced through the response status stays out of fail_system.
+	restCancel := merr.Status(context.Canceled)
+	assert.Equal(t, metrics.CancelLabel, ParseMetricLabel(restCancel, merr.Error(restCancel)))
 }

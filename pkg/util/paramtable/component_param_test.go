@@ -236,6 +236,7 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("MsgStreamTimeTickBufSize: %d", Params.MsgStreamTimeTickBufSize.GetAsInt64())
 
 		t.Logf("MaxNameLength: %d", Params.MaxNameLength.GetAsInt64())
+		assert.Equal(t, 1024, Params.MaxUserDescriptionLength.GetAsInt())
 
 		t.Logf("MaxFieldNum: %d", Params.MaxFieldNum.GetAsInt64())
 
@@ -313,6 +314,13 @@ func TestComponentParam(t *testing.T) {
 		t.Run("test enableRoutingTable", func(t *testing.T) {
 			assert.True(t, Params.EnableRoutingTable.GetAsBool()) // default on
 		})
+		assert.Equal(t, int64(4096), Params.MaxArrayCapacity.GetAsInt64())
+		params.Save("proxy.maxArrayCapacity", "5000")
+		assert.Equal(t, int64(5000), Params.MaxArrayCapacity.GetAsInt64())
+		params.Save("proxy.maxArrayCapacity", "0")
+		assert.Equal(t, int64(4096), Params.MaxArrayCapacity.GetAsInt64())
+		params.Save("proxy.maxArrayCapacity", "-1")
+		assert.Equal(t, int64(4096), Params.MaxArrayCapacity.GetAsInt64())
 	})
 
 	// t.Run("test proxyConfig panic", func(t *testing.T) {
@@ -620,6 +628,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1024, Params.MaxFilesPerImportReq.GetAsInt())
 		assert.Equal(t, 1024, Params.MaxImportJobNum.GetAsInt())
 		assert.Equal(t, true, Params.WaitForIndex.GetAsBool())
+		assert.Equal(t, false, Params.ImportInReplicatingCluster.GetAsBool())
 		assert.Equal(t, 4, Params.ImportFileNumPerSlot.GetAsInt())
 		assert.Equal(t, 160*1024*1024, Params.ImportMemoryLimitPerSlot.GetAsInt())
 
@@ -637,6 +646,7 @@ func TestComponentParam(t *testing.T) {
 		params.Save("dataCoord.compaction.dropTolerance", "100")
 		assert.Equal(t, float64(100), Params.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds())
 		assert.Equal(t, int64(10000), Params.CompactionPreAllocateIDExpansionFactor.GetAsInt64())
+		assert.False(t, Params.StorageFormatCompactionEnabled.GetAsBool())
 
 		params.Save("dataCoord.compaction.clustering.enable", "true")
 		assert.Equal(t, true, Params.ClusteringCompactionEnable.GetAsBool())

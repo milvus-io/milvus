@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/eventlog"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/util/expr"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -331,22 +332,22 @@ func checkExprRootAuth(req *http.Request) error {
 	}
 
 	if !ok || username == "" || password == "" {
-		return fmt.Errorf("authentication required. Use HTTP Basic Auth with root credentials")
+		return merr.WrapErrParameterInvalidMsg("authentication required. Use HTTP Basic Auth with root credentials")
 	}
 
 	// Only root user can access /expr
 	if username != "root" {
 		log.Warn("non-root user attempted to access /expr", zap.String("username", username))
-		return fmt.Errorf("only root user can access /expr endpoint")
+		return merr.WrapErrParameterInvalidMsg("only root user can access /expr endpoint")
 	}
 
 	// Verify root password
 	if passwordVerifyFunc == nil {
-		return fmt.Errorf("password verification not available")
+		return merr.WrapErrServiceInternalMsg("password verification not available")
 	}
 	if !passwordVerifyFunc(context.Background(), username, password) {
 		log.Warn("invalid root password for /expr access")
-		return fmt.Errorf("invalid root password")
+		return merr.WrapErrParameterInvalidMsg("invalid root password")
 	}
 
 	log.Info("root user authenticated for /expr access")

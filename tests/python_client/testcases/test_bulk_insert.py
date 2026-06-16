@@ -404,10 +404,7 @@ class TestBulkInsertNullableVector(TestcaseBaseBulkInsert):
         "file_type",
         [
             BulkFileType.JSON,
-            pytest.param(
-                BulkFileType.CSV,
-                marks=pytest.mark.skip(reason="CSV nullable FloatVector import currently parses empty value as string"),
-            ),
+            BulkFileType.CSV,
             BulkFileType.PARQUET,
         ],
     )
@@ -425,7 +422,6 @@ class TestBulkInsertNullableVector(TestcaseBaseBulkInsert):
 
         null_ids = []
         non_null_ids = []
-        writer_config = {"nullkey": "null"} if file_type == BulkFileType.CSV else None
         with RemoteBulkWriter(
             schema=schema,
             remote_path="bulk_data",
@@ -436,7 +432,6 @@ class TestBulkInsertNullableVector(TestcaseBaseBulkInsert):
                 secret_key="minioadmin",
             ),
             file_type=file_type,
-            config=writer_config,
             chunk_size=2048 if file_type == BulkFileType.PARQUET else 1024 * 1024 * 1024,
         ) as remote_writer:
             for i in range(entities):
@@ -458,8 +453,7 @@ class TestBulkInsertNullableVector(TestcaseBaseBulkInsert):
         if file_type == BulkFileType.PARQUET:
             assert len(files) > 1
         for files_in_batch in files:
-            import_kwargs = {"nullkey": "null"} if file_type == BulkFileType.CSV else {}
-            success, _ = self._import_files(c_name, files_in_batch, **import_kwargs)
+            success, _ = self._import_files(c_name, files_in_batch)
             assert success
         self._assert_nullable_float_vector_data(c_name, entities, null_ids, non_null_ids, dim)
 

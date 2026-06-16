@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <string.h>
+#include "common/FastMem.h"
 #include <fcntl.h>
 #include <unistd.h>
 #include <algorithm>
@@ -152,7 +153,8 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
         auto fill_null_offsets = [&](const uint8_t* data, int64_t size) {
             std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
             null_offset_.resize((size_t)size / sizeof(size_t));
-            memcpy(null_offset_.data(), data, (size_t)size);
+            milvus::fastmem::FastMemcpy(
+                null_offset_.data(), data, (size_t)size);
         };
 
         auto load_priority =
@@ -397,7 +399,7 @@ RTreeIndex<T>::Serialize(const Config& config) {
     BinarySet res_set;
     if (bytes > 0) {
         std::shared_ptr<uint8_t[]> buf(new uint8_t[bytes]);
-        std::memcpy(buf.get(), null_offset_.data(), bytes);
+        milvus::fastmem::FastMemcpy(buf.get(), null_offset_.data(), bytes);
         res_set.Append("index_null_offset", buf, bytes);
     }
     milvus::Disassemble(res_set);
@@ -700,14 +702,19 @@ RTreeIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
     for (const auto& fn : file_names) {
         pairs.emplace_back(fn, path_ + "/" + fn);
     }
-    reader.ReadEntriesToFiles(pairs);
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+    reader.ReadEntriesStreamToFiles(
+        pairs, storage::io::GetPriorityFromLoadPriority(load_priority));
 
     if (has_null) {
         auto null_entry = reader.ReadEntry("index_null_offset");
         null_offset_.resize(null_entry.data.size() / sizeof(size_t));
-        std::memcpy(null_offset_.data(),
-                    null_entry.data.data(),
-                    null_entry.data.size());
+        milvus::fastmem::FastMemcpy(null_offset_.data(),
+                                    null_entry.data.data(),
+                                    null_entry.data.size());
     }
 
     // Determine base path (without extension) from local file names,

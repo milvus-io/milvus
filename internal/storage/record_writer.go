@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -151,15 +152,13 @@ func NewPackedRecordWriter(
 	}
 	writer, err := packed.NewPackedWriter(paths, arrowSchema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(
-			fmt.Sprintf("can not new packed record writer %s", err.Error()))
+		return nil, merr.WrapErrStorage(err, "can not new packed record writer")
 	}
 	columnGroupUncompressed := make(map[typeutil.UniqueID]uint64)
 	columnGroupCompressed := make(map[typeutil.UniqueID]uint64)
 	pathsMap := make(map[typeutil.UniqueID]string)
 	if len(paths) != len(columnGroups) {
-		return nil, merr.WrapErrParameterInvalid(len(paths), len(columnGroups),
-			"paths length is not equal to column groups length for packed record writer")
+		return nil, merr.WrapErrStorageMsg("paths length is not equal to column groups length for packed record writer: paths=%d columnGroups=%d", len(paths), len(columnGroups))
 	}
 	for i, columnGroup := range columnGroups {
 		columnGroupUncompressed[columnGroup.GroupID] = 0
@@ -286,8 +285,10 @@ func NewPackedRecordBatchWriter(
 	columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
+	writerFormat string,
+	schemaBasedFormats []string,
 ) (*packedRecordBatchWriter, error) {
-	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, true)
+	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, true, writerFormat, schemaBasedFormats)
 }
 
 func NewPartialPackedRecordBatchWriter(
@@ -298,8 +299,10 @@ func NewPartialPackedRecordBatchWriter(
 	columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
+	writerFormat string,
+	schemaBasedFormats []string,
 ) (*packedRecordBatchWriter, error) {
-	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false)
+	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false, writerFormat, schemaBasedFormats)
 }
 
 func newPackedRecordBatchWriter(
@@ -311,6 +314,8 @@ func newPackedRecordBatchWriter(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	validatePK bool,
+	writerFormat string,
+	schemaBasedFormats []string,
 ) (*packedRecordBatchWriter, error) {
 	if validatePK {
 		_, err := typeutil.GetPrimaryFieldSchema(schema)
@@ -325,10 +330,20 @@ func newPackedRecordBatchWriter(
 			fmt.Sprintf("can not convert collection schema %s to arrow schema: %s", schema.Name, err.Error()))
 	}
 
-	writer, err := packed.NewFFIPackedWriter(basePath, arrowSchema, columnGroups, storageConfig, storagePluginContext)
+	if len(schemaBasedFormats) > 0 && len(schemaBasedFormats) != len(columnGroups) {
+		return nil, merr.WrapErrParameterInvalid(len(schemaBasedFormats), len(columnGroups),
+			"schema based writer formats size must match column groups size")
+	}
+	extraProperties := map[string]string{}
+	if writerFormat != "" {
+		extraProperties[packed.PropertyWriterFormat] = writerFormat
+	}
+	if len(schemaBasedFormats) > 0 {
+		extraProperties[packed.PropertyWriterSchemaBasedFormats] = strings.Join(schemaBasedFormats, ",")
+	}
+	writer, err := packed.NewFFIPackedWriter(basePath, arrowSchema, columnGroups, storageConfig, storagePluginContext, extraProperties)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(
-			fmt.Sprintf("can not new packed record writer %s", err.Error()))
+		return nil, merr.WrapErrStorage(err, "can not new packed record writer")
 	}
 	columnGroupUncompressed := make(map[typeutil.UniqueID]uint64)
 	columnGroupCompressed := make(map[typeutil.UniqueID]uint64)
@@ -362,8 +377,7 @@ func NewPackedSerializeWriter(bucketName string, paths []string, schema *schemap
 ) (*SerializeWriterImpl[*Value], error) {
 	packedRecordWriter, err := NewPackedRecordWriter(bucketName, paths, schema, bufferSize, multiPartUploadSize, columnGroups, nil, nil)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(
-			fmt.Sprintf("can not new packed record writer %s", err.Error()))
+		return nil, merr.Wrap(err, "can not new packed record writer")
 	}
 	return NewSerializeRecordWriter(packedRecordWriter, func(v []*Value) (Record, error) {
 		return ValueSerializer(v, schema)
@@ -480,6 +494,8 @@ func NewPackedTextBatchWriter(
 	columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
 	textColumnConfigs []packed.TextColumnConfig,
+	writerFormat string,
+	schemaBasedFormats []string,
 ) (*packedTextBatchWriter, error) {
 	// validate PK field exists before proceeding
 	_, err := typeutil.GetPrimaryFieldSchema(schema)
@@ -506,16 +522,28 @@ func NewPackedTextBatchWriter(
 		arrowSchema = overrideTextFieldsToBinary(schema, arrowSchema)
 	}
 
+	if len(schemaBasedFormats) > 0 && len(schemaBasedFormats) != len(columnGroups) {
+		return nil, merr.WrapErrParameterInvalid(len(schemaBasedFormats), len(columnGroups),
+			"schema based writer formats size must match column groups size")
+	}
 	// build segment writer config
+	schemaBasedPattern, err := packed.SchemaBasedPattern(arrowSchema, columnGroups)
+	if err != nil {
+		return nil, merr.WrapErrServiceInternal(
+			fmt.Sprintf("can not build schema based writer pattern %s", err.Error()))
+	}
 	config := &packed.SegmentWriterConfig{
-		SegmentPath: basePath,
-		TextColumns: textColumnConfigs,
+		SegmentPath:        basePath,
+		TextColumns:        textColumnConfigs,
+		ColumnGroups:       columnGroups,
+		WriterFormat:       writerFormat,
+		SchemaBasedPattern: schemaBasedPattern,
+		SchemaBasedFormats: schemaBasedFormats,
 	}
 
 	writer, err := packed.NewFFISegmentWriter(arrowSchema, config, storageConfig)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(
-			fmt.Sprintf("can not new segment writer %s", err.Error()))
+		return nil, merr.WrapErrStorage(err, "can not new segment writer")
 	}
 
 	columnGroupUncompressed := make(map[typeutil.UniqueID]uint64)

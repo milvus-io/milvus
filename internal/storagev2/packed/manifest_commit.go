@@ -19,10 +19,10 @@ package packed
 import "C"
 
 import (
-	"fmt"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // WriterOutput is the data carrier returned by an FFI writer's Close. It
@@ -96,7 +96,7 @@ func CommitManifestUpdates(basePath string, baseVersion int64,
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return "", fmt.Errorf("commit manifest: %w", err)
+		return "", merr.Wrap(err, "commit manifest")
 	}
 	defer C.loon_properties_free(cProperties)
 
@@ -115,7 +115,9 @@ func CommitManifestUpdates(basePath string, baseVersion int64,
 		C.LOON_TRANSACTION_RESOLVE_OVERWRITE,
 		getRetryLimit(), &handle)
 	if err := HandleLoonFFIResult(res); err != nil {
-		return "", fmt.Errorf("commit manifest begin: %w", err)
+		// HandleLoonFFIResult returns a bare ErrLoonTransient chain; give it the
+		// storage wire code like transaction.go does, instead of leaking 65535.
+		return "", merr.WrapErrStorage(err, "commit manifest begin")
 	}
 	defer C.loon_transaction_destroy(handle)
 
@@ -126,7 +128,7 @@ func CommitManifestUpdates(basePath string, baseVersion int64,
 	var commitVersion C.int64_t
 	res = C.loon_transaction_commit(handle, &commitVersion)
 	if err := HandleLoonFFIResult(res); err != nil {
-		return "", fmt.Errorf("commit manifest commit: %w", err)
+		return "", merr.WrapErrStorage(err, "commit manifest commit")
 	}
 	return MarshalManifestPath(basePath, int64(commitVersion)), nil
 }
@@ -145,13 +147,13 @@ func applyManifestUpdates(handle C.LoonTransactionHandle, updates *ManifestUpdat
 		err := HandleLoonFFIResult(C.loon_transaction_add_delta_log(handle, cPath, C.int64_t(entry.NumEntries)))
 		C.free(unsafe.Pointer(cPath))
 		if err != nil {
-			return fmt.Errorf("commit manifest add_delta_log: %w", err)
+			return merr.WrapErrStorage(err, "commit manifest add_delta_log")
 		}
 	}
 
 	for _, entry := range updates.Stats {
 		if err := UpdateTransactionStat(handle, entry.Key, entry.Files, entry.Metadata); err != nil {
-			return fmt.Errorf("commit manifest update_stat: %w", err)
+			return merr.WrapErrStorage(err, "commit manifest update_stat")
 		}
 	}
 	return nil

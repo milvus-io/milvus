@@ -21,6 +21,7 @@
 #include <boost_ext/dynamic_bitset_ext.hpp>
 #include <deque>
 
+#include "bitset/detail/element_wise.h"
 #include "common/Types.h"
 #include "common/EasyAssert.h"
 #include "knowhere/bitsetview.h"
@@ -48,6 +49,42 @@ class BitsetView : public knowhere::BitsetView {
         if (bitset_ptr) {
             *this = BitsetView(*bitset_ptr);
         }
+    }
+
+    // Return whether all bits are set (vacuously true when empty).
+    bool
+    all() const {
+        if (empty()) {
+            return true;
+        }
+        if (has_out_ids()) {
+            for (size_t i = 0; i < size(); ++i) {
+                if (!test(i)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_all(
+            data(), 0, size());
+    }
+
+    // Return whether no bit is set (vacuously true when empty).
+    bool
+    none() const {
+        if (empty()) {
+            return true;
+        }
+        if (has_out_ids()) {
+            for (size_t i = 0; i < size(); ++i) {
+                if (test(i)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_none(
+            data(), 0, size());
     }
 
     BitsetView

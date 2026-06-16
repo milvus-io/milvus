@@ -13,12 +13,15 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/shard/mock_shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
-	"github.com/milvus-io/milvus/internal/util/routing"
+	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -106,6 +109,61 @@ func TestShardInterceptorReportsExplicitZeroSchemaVersionInMismatchError(t *test
 	assert.Error(t, err)
 	assert.ErrorContains(t, err, "input schema version: 0")
 	assert.Nil(t, msgID)
+}
+
+func TestShardInterceptorUpdateFunctionRunnersReleasesWhenFunctionsDropped(t *testing.T) {
+	collectionID := int64(99001)
+	vchannel := "by-dev-rootcoord-dml_0_99001v0"
+	schema := &schemapb.CollectionSchema{
+		Name:    "test",
+		Version: 1,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID:  101,
+				Name:     "text",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "256"},
+				},
+			},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:           "bm25",
+				Type:           schemapb.FunctionType_BM25,
+				InputFieldIds:  []int64{101},
+				OutputFieldIds: []int64{102},
+			},
+		},
+	}
+	errCh := function.AllocFunctionRunners(collectionID, vchannel, schema)
+	if errCh != nil {
+		assert.NoError(t, <-errCh)
+	}
+	defer function.ReleaseFunctionRunners(collectionID, vchannel)
+
+	ok, err := function.RunWithAnalyzer(context.Background(), collectionID, schema.GetVersion(), 101, func(function.Analyzer) error {
+		return nil
+	})
+	assert.NoError(t, err)
+	assert.True(t, ok)
+
+	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
+	impl := &shardInterceptor{shardManager: shardManager}
+
+	noFunctionSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
+	noFunctionSchema.Version = 2
+	noFunctionSchema.Functions = nil
+	impl.updateFunctionRunners(collectionID, vchannel, noFunctionSchema)
+
+	ok, err = function.RunWithAnalyzer(context.Background(), collectionID, schema.GetVersion(), 101, func(function.Analyzer) error {
+		return nil
+	})
+	assert.NoError(t, err)
+	assert.False(t, ok)
 }
 
 func TestShardInterceptorDeleteAppliesBeforeAppend(t *testing.T) {
@@ -500,55 +558,4 @@ func TestShardInterceptor(t *testing.T) {
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.Error(t, err)
 	assert.Nil(t, msgID)
-}
-
-// TestRoutingVersionCompat_Proceeds documents the P0 contract for routing version comparison:
-// - A legacy producer (version 0, field omitted) yields RoutingProcessAndReplyLatest → proceeds.
-// - A current producer (version == CompatVersion) yields RoutingProcess → proceeds.
-// Both are handled by the same switch arm in handleInsertMessage and the message is appended normally.
-func TestRoutingVersionCompat_Proceeds(t *testing.T) {
-	// legacy producer (version 0) and current producer both proceed in P0.
-	assert.Equal(t, routing.RoutingProcessAndReplyLatest, routing.CompareRoutingVersion(0, routing.CompatVersion, true))
-	assert.Equal(t, routing.RoutingProcess, routing.CompareRoutingVersion(routing.CompatVersion, routing.CompatVersion, true))
-}
-
-// TestHandleInsertMessage_RoutingVersionCompatProceeds verifies that an insert message
-// carrying routing_version == CompatVersion is appended normally through the shard interceptor.
-func TestHandleInsertMessage_RoutingVersionCompatProceeds(t *testing.T) {
-	b := NewInterceptorBuilder()
-	shardManager := mock_shards.NewMockShardManager(t)
-	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
-	i := b.Build(&interceptors.InterceptorBuildParam{
-		ShardManager: shardManager,
-	})
-	defer i.Close()
-
-	routingVersion := proto.Int64(routing.CompatVersion)
-	msg := message.NewInsertMessageBuilderV1().
-		WithVChannel("v1").
-		WithHeader(&messagespb.InsertMessageHeader{
-			CollectionId: 1,
-			Partitions: []*messagespb.PartitionSegmentAssignment{
-				{
-					PartitionId: 1,
-					Rows:        1,
-					BinarySize:  100,
-				},
-			},
-			RoutingVersion: routingVersion,
-		}).
-		WithBody(&msgpb.InsertRequest{}).
-		MustBuildMutable().WithTimeTick(1)
-
-	insertHdrMatcher := mock.MatchedBy(func(h *message.InsertMessageHeader) bool {
-		return h != nil && h.GetCollectionId() == int64(1) && h.RoutingVersion != nil && h.GetRoutingVersion() == routing.CompatVersion
-	})
-	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(insertHdrMatcher).Return(int32(0), nil)
-	shardManager.EXPECT().AssignSegment(mock.Anything).Return(&shards.AssignSegmentResult{SegmentID: 1, Acknowledge: atomic.NewInt32(1)}, nil)
-
-	msgID, err := i.DoAppend(context.Background(), msg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-		return rmq.NewRmqID(1), nil
-	})
-	assert.NoError(t, err)
-	assert.NotNil(t, msgID)
 }
