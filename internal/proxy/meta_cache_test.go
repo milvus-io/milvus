@@ -390,6 +390,10 @@ func (c *MockMixCoordClientInterface) CreateRole(ctx context.Context, req *milvu
 	panic("implement me")
 }
 
+func (c *MockMixCoordClientInterface) AlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
 func (c *MockMixCoordClientInterface) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	panic("implement me")
 }
