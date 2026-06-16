@@ -35,6 +35,28 @@ func drainBuildIndexChForTest() {
 	}
 }
 
+func drainBuildIndexOverflowChForTest() {
+	ch := getBuildIndexOverflowChSingleton()
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
+	}
+}
+
+func drainStatsTaskChForTest() {
+	ch := getStatsTaskChSingleton()
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
+	}
+}
+
 func assertBuildIndexEvents(t *testing.T, expected ...UniqueID) {
 	t.Helper()
 	got := make([]UniqueID, 0, len(expected))
@@ -58,12 +80,43 @@ func assertNoBuildIndexEvent(t *testing.T) {
 	}
 }
 
+func assertNoStatsTaskEvent(t *testing.T) {
+	t.Helper()
+	select {
+	case segID := <-getStatsTaskChSingleton():
+		require.Failf(t, "unexpected stats task event", "segmentID=%d", segID)
+	default:
+	}
+}
+
 func TestNotifySegmentIndexBuild(t *testing.T) {
 	drainBuildIndexChForTest()
 	defer drainBuildIndexChForTest()
+	drainBuildIndexOverflowChForTest()
+	defer drainBuildIndexOverflowChForTest()
 
 	notifySegmentIndexBuild(10, 20, 10)
 
 	assertBuildIndexEvents(t, 10, 20, 10)
 	assertNoBuildIndexEvent(t)
+}
+
+func TestNotifySegmentIndexBuildOverflow(t *testing.T) {
+	drainBuildIndexChForTest()
+	defer drainBuildIndexChForTest()
+	drainBuildIndexOverflowChForTest()
+	defer drainBuildIndexOverflowChForTest()
+
+	ch := getBuildIndexChSingleton()
+	for idx := 0; idx < cap(ch); idx++ {
+		ch <- UniqueID(idx)
+	}
+
+	notifySegmentIndexBuild(100)
+
+	select {
+	case <-getBuildIndexOverflowChSingleton():
+	case <-time.After(100 * time.Millisecond):
+		require.Fail(t, "missing build index overflow event")
+	}
 }
