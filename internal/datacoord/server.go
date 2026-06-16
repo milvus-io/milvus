@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -703,11 +704,14 @@ func (s *Server) initCompaction() {
 
 // initShardSplitManager creates the shard split manager. The split tasks
 // are recovered from the catalog, so an in-flight split resumes after a
-// datacoord restart. The range-routing planner is not wired yet: tasks
-// stay in the abortable Preparing state until it lands.
+// datacoord restart. The range-routing planner balances the source shard's
+// namespaces into the two targets using the shared routing-key encoder, so
+// the planner, the proxy router and the streamingnode agree on the split
+// boundary. The whole feature stays gated by dataCoord.shardSplit.enable.
 func (s *Server) initShardSplitManager() error {
+	planner := newRangeSplitPlanner(s.meta, routing.NamespaceEncoder{}, brokerNamespaceResolver(s.broker))
 	manager, err := newShardSplitManager(s.ctx, s.meta, s.meta.catalog, s.allocator,
-		streaming.WAL(), snmanager.StaticStreamingNodeManager, nil)
+		streaming.WAL(), snmanager.StaticStreamingNodeManager, planner)
 	if err != nil {
 		return err
 	}
