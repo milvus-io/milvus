@@ -265,6 +265,7 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
                        const char* disk_path,
                        const int64_t loading_timeout_ms,
                        const int64_t warmup_loading_timeout_ms,
+                       const bool reject_remote_vector_output,
                        const uint32_t prefetch_pool_threads) {
     std::string disk_path_str(disk_path);
     milvus::cachinglayer::Manager::ConfigureTieredStorage(
@@ -291,6 +292,8 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
         std::chrono::milliseconds(loading_timeout_ms),
         std::chrono::milliseconds(warmup_loading_timeout_ms),
         prefetch_pool_threads);
+    milvus::segcore::SegcoreConfig::default_config()
+        .set_reject_remote_vector_output(reject_remote_vector_output);
 }
 
 extern "C" void
@@ -298,6 +301,7 @@ UpdateTieredStorageConfig(
     const int64_t loading_timeout_ms,
     const int64_t warmup_loading_timeout_ms,
     const bool storage_usage_tracking_enabled,
+    const bool reject_remote_vector_output,
     const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
     const CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
     const CacheWarmupPolicy scalarIndexCacheWarmupPolicy,
@@ -310,6 +314,8 @@ UpdateTieredStorageConfig(
          vectorFieldCacheWarmupPolicy,
          scalarIndexCacheWarmupPolicy,
          vectorIndexCacheWarmupPolicy});
+    milvus::segcore::SegcoreConfig::default_config()
+        .set_reject_remote_vector_output(reject_remote_vector_output);
 }
 
 }  // namespace milvus::segcore

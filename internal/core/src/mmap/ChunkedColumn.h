@@ -234,6 +234,17 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
         SemiInlineGet(slot_->PinCells(op_ctx, chunk_ids));
     }
 
+    bool
+    CellsLoaded(const int64_t* offsets, int64_t count) const override {
+        if (count == 0) {
+            return true;
+        }
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        return std::all_of(cids.begin(), cids.end(), [this](cid_t cid) {
+            return slot_->IsCached(cid);
+        });
+    }
+
     PinWrapper<SpanBase>
     Span(milvus::OpContext* op_ctx, int64_t chunk_id) const override {
         ThrowInfo(ErrorCode::Unsupported,

@@ -150,6 +150,14 @@
 namespace milvus::segcore {
 using namespace milvus::cachinglayer;
 
+static void
+CheckVectorOutputCellsLoaded(int64_t segment_id,
+                             FieldId field_id,
+                             const FieldMeta& field_meta,
+                             const ChunkedColumnInterface* column,
+                             const int64_t* offsets,
+                             int64_t count);
+
 static inline void
 set_bit(BitsetType& bitset, FieldId field_id, bool flag = true) {
     auto pos = field_id.get() - START_USER_FIELDID;
@@ -1808,6 +1816,8 @@ ChunkedSegmentSealedImpl::get_vector(milvus::OpContext* op_ctx,
             if (!vec_index->HasValidData()) {
                 auto column = get_column(field_id);
                 if (column != nullptr) {
+                    CheckVectorOutputCellsLoaded(
+                        id_, field_id, field_meta, column.get(), ids, count);
                     return get_raw_data(
                         op_ctx, field_id, field_meta, ids, count);
                 }
@@ -1875,6 +1885,12 @@ ChunkedSegmentSealedImpl::get_emb_list(milvus::OpContext* op_ctx,
         if (!vec_index->HasValidData()) {
             auto column = get_column(field_id);
             if (column != nullptr) {
+                CheckVectorOutputCellsLoaded(id_,
+                                             field_id,
+                                             field_meta,
+                                             column.get(),
+                                             seg_offsets,
+                                             count);
                 return get_raw_data(
                     op_ctx, field_id, field_meta, seg_offsets, count);
             }
@@ -3566,7 +3582,6 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
     AssertInfo(column != nullptr,
                "field {} must exist when getting raw data",
                field_id.get());
-
     int64_t valid_count = count;
     const bool* valid_data = nullptr;
     const int64_t* valid_offsets = seg_offsets;
@@ -3942,6 +3957,17 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
             vector = get_vector(op_ctx, field_id, seg_offsets, count);
         }
     } else {
+        // retrieve data from column data instead of index
+        // we could reject remote vector output if the vector is not loaded in local cache
+        // for performance needs
+        if (SegcoreConfig::default_config().get_reject_remote_vector_output()) {
+            auto column = get_column(field_id);
+            AssertInfo(column != nullptr,
+                       "field {} must exist when getting raw data",
+                       field_id.get());
+            CheckVectorOutputCellsLoaded(
+                id_, field_id, field_meta, column.get(), seg_offsets, count);
+        }
         vector = get_raw_data(op_ctx, field_id, field_meta, seg_offsets, count);
     }
 
@@ -5834,6 +5860,32 @@ ShouldProjectInternalTakeDynamicField(
     }
     auto dynamic_field_id = schema.get_dynamic_field_id();
     return dynamic_field_id.has_value() && dynamic_field_id.value() == field_id;
+}
+
+static void
+CheckVectorOutputCellsLoaded(int64_t segment_id,
+                             FieldId field_id,
+                             const FieldMeta& field_meta,
+                             const ChunkedColumnInterface* column,
+                             const int64_t* offsets,
+                             int64_t count) {
+    if (!SegcoreConfig::default_config().get_reject_remote_vector_output() ||
+        !IsVectorDataType(field_meta.get_data_type()) || count == 0) {
+        return;
+    }
+    if (column == nullptr || !column->CellsLoaded(offsets, count)) {
+        ThrowInfo(
+            FieldNotLoaded,
+            "vector field '{}' not loaded in local cache for "
+            "output, segment id={}, please notice that vector field is by "
+            "default resident in remote storage starting from milvus 3.0 to "
+            "reduce local storage overhead, but performance will be degraded, "
+            "you could manually set vector field warmup policy to 'sync' to "
+            "load the vector data, please refer to "
+            "https://milvus.io/docs/warm-up.md for more details",
+            field_meta.get_name().get(),
+            segment_id);
+    }
 }
 
 ChunkedSegmentSealedImpl::TakeContext
