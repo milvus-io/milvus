@@ -33,7 +33,7 @@ import (
 
 // RerankClient interface for testing
 type RerankClient interface {
-	Rerank(ctx context.Context, query string, texts []string, params map[string]string, timeoutSec int64) ([]float32, error)
+	Rerank(ctx context.Context, query string, texts []string, params map[string]string, timeoutMs int64) ([]float32, error)
 }
 
 // MockZillizClient is a mock implementation of RerankClient for testing
@@ -41,8 +41,8 @@ type MockZillizClient struct {
 	mock.Mock
 }
 
-func (m *MockZillizClient) Rerank(ctx context.Context, query string, texts []string, params map[string]string, timeoutSec int64) ([]float32, error) {
-	args := m.Called(ctx, query, texts, params, timeoutSec)
+func (m *MockZillizClient) Rerank(ctx context.Context, query string, texts []string, params map[string]string, timeoutMs int64) ([]float32, error) {
+	args := m.Called(ctx, query, texts, params, timeoutMs)
 	return args.Get(0).([]float32), args.Error(1)
 }
 
@@ -63,7 +63,7 @@ type testZillzProvider struct {
 }
 
 func (provider *testZillzProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	return provider.client.Rerank(ctx, query, docs, provider.params, 30)
+	return provider.client.Rerank(ctx, query, docs, provider.params, 30000)
 }
 
 func TestZillizRerankProvider(t *testing.T) {
@@ -277,7 +277,7 @@ func (s *ZillizRerankProviderSuite) TestZillzProvider_Rerank_Success() {
 	params := map[string]string{"param1": "value1"}
 	expectedScores := []float32{0.9, 0.7, 0.5}
 
-	mockClient.On("Rerank", ctx, query, docs, params, int64(30)).Return(expectedScores, nil)
+	mockClient.On("Rerank", ctx, query, docs, params, int64(30000)).Return(expectedScores, nil)
 
 	// Create test provider with mock client
 	provider := &testZillzProvider{
@@ -305,7 +305,7 @@ func (s *ZillizRerankProviderSuite) TestZillzProvider_Rerank_Error() {
 	params := map[string]string{"param1": "value1"}
 	expectedError := errors.New("rerank service error")
 
-	mockClient.On("Rerank", ctx, query, docs, params, int64(30)).Return([]float32(nil), expectedError)
+	mockClient.On("Rerank", ctx, query, docs, params, int64(30000)).Return([]float32(nil), expectedError)
 
 	// Create test provider with mock client
 	provider := &testZillzProvider{
@@ -368,7 +368,7 @@ func (s *ZillizRerankProviderSuite) TestZillzProvider_Rerank_WithDifferentParams
 	emptyParams := map[string]string{}
 	expectedScores := []float32{0.8, 0.6}
 
-	mockClient.On("Rerank", ctx, query, docs, emptyParams, int64(30)).Return(expectedScores, nil)
+	mockClient.On("Rerank", ctx, query, docs, emptyParams, int64(30000)).Return(expectedScores, nil)
 
 	// Create test provider with empty params
 	provider := &testZillzProvider{
@@ -396,7 +396,7 @@ func (s *ZillizRerankProviderSuite) TestZillzProvider_Rerank_EmptyDocs() {
 	params := map[string]string{}
 	expectedScores := []float32{}
 
-	mockClient.On("Rerank", ctx, query, docs, params, int64(30)).Return(expectedScores, nil)
+	mockClient.On("Rerank", ctx, query, docs, params, int64(30000)).Return(expectedScores, nil)
 
 	// Create test provider
 	provider := &testZillzProvider{
@@ -477,7 +477,7 @@ func BenchmarkZillzProvider_Rerank(b *testing.B) {
 	expectedScores := []float32{0.9, 0.8, 0.7, 0.6, 0.5}
 
 	// Set up the mock to be called many times
-	mockClient.On("Rerank", ctx, query, docs, params, int64(30)).Return(expectedScores, nil)
+	mockClient.On("Rerank", ctx, query, docs, params, int64(30000)).Return(expectedScores, nil)
 
 	// Create test provider with mock client
 	provider := &testZillzProvider{

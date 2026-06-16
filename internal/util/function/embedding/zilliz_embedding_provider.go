@@ -51,12 +51,16 @@ func NewZillizEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		switch strings.ToLower(param.Key) {
 		case models.ModelDeploymentIDKey:
 			modelDeploymentID = param.Value
+		case models.TimeoutMsParamKey:
+			// consumed by ResolveTimeoutMs; not a model-service param
 		default:
 			modelParams[param.Key] = param.Value
 		}
 	}
 
-	c, err := zilliz.NewZilliClient(modelDeploymentID, extraInfo.ClusterID, extraInfo.DBName, params)
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
+
+	c, err := zilliz.NewZilliClient(modelDeploymentID, extraInfo.ClusterID, extraInfo.DBName, params, timeoutMs)
 	if err != nil {
 		return nil, err
 	}

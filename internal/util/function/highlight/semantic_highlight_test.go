@@ -62,7 +62,7 @@ func (s *SemanticHighlightSuite) TestNewSemanticHighlight_Success() {
 	queriesJSON, _ := json.Marshal(queries)
 	inputFieldsJSON, _ := json.Marshal(inputFields)
 
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -241,7 +241,7 @@ func (s *SemanticHighlightSuite) TestProcessOneQuery_Success() {
 		{0.80},
 	}
 
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -287,7 +287,7 @@ func (s *SemanticHighlightSuite) TestProcessOneQuery_Error() {
 
 	expectedError := errors.New("highlight service error")
 
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -346,7 +346,7 @@ func (s *SemanticHighlightSuite) TestProcess_Success() {
 	}
 
 	callCount := 0
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -398,7 +398,7 @@ func (s *SemanticHighlightSuite) TestProcess_NqMismatch() {
 	queriesJSON, _ := json.Marshal(queries)
 	inputFieldsJSON, _ := json.Marshal(inputFields)
 
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -440,7 +440,7 @@ func (s *SemanticHighlightSuite) TestProcess_ProviderError() {
 
 	expectedError := errors.New("provider error")
 
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -485,7 +485,7 @@ func (s *SemanticHighlightSuite) TestProcess_EmptyData() {
 	queriesJSON, _ := json.Marshal(queries)
 	inputFieldsJSON, _ := json.Marshal(inputFields)
 
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -567,7 +567,7 @@ func (s *SemanticHighlightSuite) TestNewSemanticHighlight_DynamicField() {
 	queriesJSON, _ := json.Marshal(queries)
 	inputFieldsJSON, _ := json.Marshal(inputFields)
 
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -620,7 +620,7 @@ func (s *SemanticHighlightSuite) TestNewSemanticHighlight_MixedFields() {
 	queriesJSON, _ := json.Marshal(queries)
 	inputFieldsJSON, _ := json.Marshal(inputFields)
 
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -700,7 +700,7 @@ func (s *SemanticHighlightSuite) TestGetFieldName() {
 	queriesJSON, _ := json.Marshal(queries)
 	inputFieldsJSON, _ := json.Marshal(inputFields)
 
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -738,7 +738,7 @@ func (s *SemanticHighlightSuite) TestRequiredFieldIDs_NoDynamicFields() {
 	queriesJSON, _ := json.Marshal(queries)
 	inputFieldsJSON, _ := json.Marshal(inputFields)
 
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -775,7 +775,7 @@ func (s *SemanticHighlightSuite) TestProcessOneQuery_EmptyDocuments() {
 	queriesJSON, _ := json.Marshal(queries)
 	inputFieldsJSON, _ := json.Marshal(inputFields)
 
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -814,7 +814,7 @@ func (s *SemanticHighlightSuite) TestProcessOneQuery_SizeMismatch() {
 	queriesJSON, _ := json.Marshal(queries)
 	inputFieldsJSON, _ := json.Marshal(inputFields)
 
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -872,7 +872,7 @@ func (s *SemanticHighlightSuite) TestNewSemanticHighlight_MultipleDynamicFields(
 	queriesJSON, _ := json.Marshal(queries)
 	inputFieldsJSON, _ := json.Marshal(inputFields)
 
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -920,7 +920,7 @@ func (s *SemanticHighlightSuite) TestDynamicFieldID_NoDynamicSchema() {
 	queriesJSON, _ := json.Marshal(queries)
 	inputFieldsJSON, _ := json.Marshal(inputFields)
 
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()

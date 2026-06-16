@@ -231,7 +231,7 @@ func TestTimeoutAndRetry(t *testing.T) {
 		c := NewOpenAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
-		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 1)
+		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 1000)
 		assert.True(t, err != nil)
 		assert.Equal(t, atomic.LoadInt32(&st), int32(0))
 		time.Sleep(2 * time.Second)
@@ -243,7 +243,7 @@ func TestTimeoutAndRetry(t *testing.T) {
 		c := NewAzureOpenAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
-		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 14)
+		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 14000)
 		assert.True(t, err != nil)
 		assert.Equal(t, atomic.LoadInt32(&st), int32(3))
 	}

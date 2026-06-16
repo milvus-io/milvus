@@ -82,9 +82,9 @@ type VertexAIEmbeddingProvider struct {
 	isGemini  bool
 	geminiURL string
 
-	maxBatch   int
-	timeoutSec int64
-	extraInfo  *models.ModelExtraInfo
+	maxBatch  int
+	timeoutMs int64
+	extraInfo *models.ModelExtraInfo
 }
 
 func isGeminiModel(modelName string) bool {
@@ -204,6 +204,8 @@ func NewVertexAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 		client = c
 	}
 
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
+
 	provider := VertexAIEmbeddingProvider{
 		fieldDim:      fieldDim,
 		client:        client,
@@ -213,7 +215,7 @@ func NewVertexAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 		isGemini:      gemini,
 		geminiURL:     geminiURL,
 		maxBatch:      maxBatch,
-		timeoutSec:    30,
+		timeoutMs:     timeoutMs,
 		extraInfo:     extraInfo,
 	}
 	return &provider, nil
@@ -281,7 +283,7 @@ func (provider *VertexAIEmbeddingProvider) callVertexAIEmbedding(texts []string,
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], provider.embedDimParam, taskType, provider.timeoutSec)
+		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], provider.embedDimParam, taskType, provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}
@@ -305,7 +307,7 @@ func (provider *VertexAIEmbeddingProvider) callGeminiEmbedding(texts []string, m
 	taskType := provider.getTaskType(mode)
 	data := make([][]float32, 0, len(texts))
 	for _, text := range texts {
-		resp, err := provider.client.GeminiEmbedding(provider.geminiURL, text, provider.embedDimParam, taskType, provider.timeoutSec)
+		resp, err := provider.client.GeminiEmbedding(provider.geminiURL, text, provider.embedDimParam, taskType, provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}

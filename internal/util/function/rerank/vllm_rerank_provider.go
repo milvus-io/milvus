@@ -34,6 +34,7 @@ type vllmProvider struct {
 	baseProvider
 	client         *vllm.VLLMClient
 	truncateParams map[string]any
+	timeoutMs      int64
 }
 
 func newVllmProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials) (ModelProvider, error) {
@@ -73,16 +74,19 @@ func newVllmProvider(params []*commonpb.KeyValuePair, conf map[string]string, cr
 		return nil, err
 	}
 
+	timeoutMs := models.ResolveTimeoutMs(params)
+
 	provider := vllmProvider{
 		baseProvider:   baseProvider{batchSize: maxBatch},
 		client:         client,
 		truncateParams: truncateParams,
+		timeoutMs:      timeoutMs,
 	}
 	return &provider, nil
 }
 
 func (provider *vllmProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	rerankResp, err := provider.client.Rerank(query, docs, provider.truncateParams, 30)
+	rerankResp, err := provider.client.Rerank(query, docs, provider.truncateParams, provider.timeoutMs)
 	if err != nil {
 		return nil, err
 	}

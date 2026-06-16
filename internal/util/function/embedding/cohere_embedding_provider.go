@@ -41,9 +41,9 @@ type CohereEmbeddingProvider struct {
 	embdType      models.EmbeddingType
 	outputType    string
 
-	maxBatch   int
-	timeoutSec int64
-	extraInfo  *models.ModelExtraInfo
+	maxBatch  int
+	timeoutMs int64
+	extraInfo *models.ModelExtraInfo
 }
 
 func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (*CohereEmbeddingProvider, error) {
@@ -97,6 +97,8 @@ func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		return "int8"
 	}()
 
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
+
 	provider := CohereEmbeddingProvider{
 		client:        c,
 		url:           url,
@@ -107,7 +109,7 @@ func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		embdType:      embdType,
 		outputType:    outputType,
 		maxBatch:      96,
-		timeoutSec:    30,
+		timeoutMs:     timeoutMs,
 		extraInfo:     extraInfo,
 	}
 	return &provider, nil
@@ -143,7 +145,7 @@ func (provider *CohereEmbeddingProvider) CallEmbedding(ctx context.Context, text
 			end = numRows
 		}
 
-		resp, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], inputType, provider.outputType, provider.truncate, int(provider.embedDimParam), provider.timeoutSec)
+		resp, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], inputType, provider.outputType, provider.truncate, int(provider.embedDimParam), provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}

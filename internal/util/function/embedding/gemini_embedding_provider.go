@@ -40,9 +40,9 @@ type GeminiEmbeddingProvider struct {
 	embedDimParam int64
 	taskType      string
 
-	maxBatch   int
-	timeoutSec int64
-	extraInfo  *models.ModelExtraInfo
+	maxBatch  int
+	timeoutMs int64
+	extraInfo *models.ModelExtraInfo
 }
 
 func NewGeminiEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (*GeminiEmbeddingProvider, error) {
@@ -93,6 +93,8 @@ func NewGeminiEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		url = fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:batchEmbedContents", modelName)
 	}
 
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
+
 	provider := GeminiEmbeddingProvider{
 		client:        c,
 		url:           url,
@@ -101,7 +103,7 @@ func NewGeminiEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		embedDimParam: dim,
 		taskType:      taskType,
 		maxBatch:      32,
-		timeoutSec:    30,
+		timeoutMs:     timeoutMs,
 		extraInfo:     extraInfo,
 	}
 	return &provider, nil
@@ -135,7 +137,7 @@ func (provider *GeminiEmbeddingProvider) CallEmbedding(ctx context.Context, text
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], int(provider.embedDimParam), taskType, provider.timeoutSec)
+		resp, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], int(provider.embedDimParam), taskType, provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}
