@@ -527,8 +527,8 @@ func (sd *shardDelegator) syncCollectionIndexMeta(ctx context.Context, req *quer
 	loadMeta := req.GetLoadMeta()
 	if loadMeta == nil {
 		loadMeta = &querypb.LoadMetaInfo{
-			CollectionID:  req.GetCollectionID(),
-			SchemaVersion: sd.collection.SchemaVersion(),
+			CollectionID:         req.GetCollectionID(),
+			LogicalSchemaVersion: sd.collection.SchemaVersion(),
 		}
 	}
 
@@ -673,7 +673,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		log.Debug("load delete...")
 		// loadStreamDelete now handles distribution add atomically in Phase 3
 		err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker,
-			entries, req.GetLoadMeta().GetSchemaVersion())
+			entries, loadMetaSchemaBarrierTs(req.GetLoadMeta()))
 		if err != nil {
 			log.Warn("load stream delete failed", zap.Error(err))
 			// BM25 stats already loaded into idf oracle will be cleaned up
@@ -708,13 +708,23 @@ func (sd *shardDelegator) withPostLoadLimit(ctx context.Context, fn func() error
 func (sd *shardDelegator) addDistributionIfVersionOK(version uint64, entries ...SegmentEntry) error {
 	sd.schemaChangeMutex.RLock()
 	defer sd.schemaChangeMutex.RUnlock()
-	if version < sd.schemaVersion {
-		return merr.WrapErrServiceInternal("schema version changed")
+	if version < sd.schemaBarrierTs {
+		return merr.WrapErrServiceInternal("schema barrier changed")
 	}
 
 	// alter distribution
 	sd.distribution.AddDistributions(entries...)
 	return nil
+}
+
+func loadMetaSchemaBarrierTs(loadMeta *querypb.LoadMetaInfo) uint64 {
+	if loadMeta == nil {
+		return 0
+	}
+	if loadMeta.GetSchemaBarrierTs() > 0 {
+		return loadMeta.GetSchemaBarrierTs()
+	}
+	return loadMeta.GetSchemaVersion()
 }
 
 // LoadGrowing load growing segments locally.
@@ -924,7 +934,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	targetNodeID int64,
 	worker cluster.Worker,
 	entries []SegmentEntry,
-	schemaVersion uint64,
+	schemaBarrierTs uint64,
 ) error {
 	log := sd.getLogger(ctx)
 
@@ -1037,7 +1047,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	// Atomically add to distribution while still holding RLock.
 	// This guarantees no ProcessDelete can run between catch-up and distribution update,
 	// so there is no gap between "deletes applied" and "segment visible".
-	if err := sd.addDistributionIfVersionOK(schemaVersion, entries...); err != nil {
+	if err := sd.addDistributionIfVersionOK(schemaBarrierTs, entries...); err != nil {
 		return err
 	}
 	log.Info("load stream delete done")

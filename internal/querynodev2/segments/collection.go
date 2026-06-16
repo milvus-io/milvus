@@ -89,15 +89,18 @@ func (m *collectionManager) Get(collectionID int64) *Collection {
 func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error {
 	m.mut.Lock()
 	defer m.mut.Unlock()
+	logicalSchemaVersion := getLoadMetaLogicalSchemaVersion(schema, loadMeta)
 	if collection, ok := m.collections[collectionID]; ok {
-		if loadMeta.GetSchemaVersion() > collection.SchemaVersion() {
-			if err := collection.ccollection.UpdateSchema(schema, loadMeta.GetSchemaVersion()); err != nil {
+		if logicalSchemaVersion > collection.SchemaVersion() {
+			if err := collection.ccollection.UpdateSchema(schema, logicalSchemaVersion); err != nil {
 				return err
 			}
-			collection.setSchema(schema, loadMeta.GetSchemaVersion())
+			collection.setSchema(schema, logicalSchemaVersion)
 			log.Info("update collection schema",
 				zap.Int64("collectionID", collectionID),
-				zap.Uint64("schemaVersion", loadMeta.GetSchemaVersion()),
+				zap.Uint64("logicalSchemaVersion", logicalSchemaVersion),
+				zap.Uint64("schemaBarrierTs", loadMeta.GetSchemaBarrierTs()),
+				zap.Uint64("legacySchemaVersion", loadMeta.GetSchemaVersion()),
 				zap.Any("schema", schema),
 			)
 		}
@@ -134,15 +137,33 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 		return merr.WrapErrCollectionNotFound(collectionID, "collection not found in querynode collection manager")
 	}
 
-	if version <= collection.SchemaVersion() {
+	logicalSchemaVersion := getLogicalSchemaVersion(schema, version)
+	if logicalSchemaVersion <= collection.SchemaVersion() {
 		return nil
 	}
 
-	if err := collection.ccollection.UpdateSchema(schema, version); err != nil {
+	if err := collection.ccollection.UpdateSchema(schema, logicalSchemaVersion); err != nil {
 		return err
 	}
-	collection.setSchema(schema, version)
+	collection.setSchema(schema, logicalSchemaVersion)
 	return nil
+}
+
+func getLogicalSchemaVersion(schema *schemapb.CollectionSchema, fallback uint64) uint64 {
+	if schema != nil && schema.GetVersion() > 0 {
+		return uint64(schema.GetVersion())
+	}
+	return fallback
+}
+
+func getLoadMetaLogicalSchemaVersion(schema *schemapb.CollectionSchema, loadMeta *querypb.LoadMetaInfo) uint64 {
+	if schema != nil && schema.GetVersion() > 0 {
+		return uint64(schema.GetVersion())
+	}
+	if loadMeta.GetLogicalSchemaVersion() > 0 {
+		return loadMeta.GetLogicalSchemaVersion()
+	}
+	return loadMeta.GetSchemaVersion()
 }
 
 func (m *collectionManager) updateMetric() {
@@ -359,7 +380,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	for _, partitionID := range loadMetaInfo.GetPartitionIDs() {
 		coll.partitions.Insert(partitionID)
 	}
-	coll.setSchema(schema, loadMetaInfo.GetSchemaVersion())
+	coll.setSchema(schema, getLoadMetaLogicalSchemaVersion(schema, loadMetaInfo))
 
 	return coll, nil
 }

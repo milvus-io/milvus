@@ -168,9 +168,9 @@ type shardDelegator struct {
 	// current forward policy
 	l0ForwardPolicy string
 
-	// schema version
+	// schemaBarrierTs fences load results started before the latest schema update.
 	schemaChangeMutex sync.RWMutex
-	schemaVersion     uint64
+	schemaBarrierTs   uint64
 
 	// limits delegator-side post-load work after worker LoadSegments returns.
 	postLoadSem           *syncutil.Semaphore
@@ -1211,6 +1211,7 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	defer sd.lifetime.Done()
 
 	log.Info("delegator received update schema event")
+	logicalSchemaVersion := uint64(schema.GetVersion())
 
 	newFunctionState, err := buildFunctionRuntimeState(schema)
 	if err != nil {
@@ -1228,9 +1229,9 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		return merr.WrapErrServiceInternal("unsupported non-additive BM25 function schema change on loaded collection")
 	}
 
-	// set updated schema version as load barrier
+	// set updated schema barrier as load barrier
 	// prevent concurrent load segment with old schema
-	sd.schemaVersion = schVersion
+	sd.schemaBarrierTs = schVersion
 
 	sealed, growing, version := sd.distribution.PinOnlineSegments()
 	defer sd.distribution.Unpin(version)
@@ -1244,9 +1245,11 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
-		CollectionID: sd.collectionID,
-		Schema:       schema,
-		Version:      schVersion,
+		CollectionID:         sd.collectionID,
+		Schema:               schema,
+		Version:              schVersion,
+		LogicalSchemaVersion: logicalSchemaVersion,
+		SchemaBarrierTs:      schVersion,
 	},
 		sealed,
 		growing,
@@ -1294,7 +1297,8 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	}
 	sd.functionState.swap(newFunctionState).Close()
 	log.Info("delegator finished update schema event",
-		zap.Uint64("schemaVersion", schVersion),
+		zap.Uint64("logicalSchemaVersion", logicalSchemaVersion),
+		zap.Uint64("schemaBarrierTs", schVersion),
 		zap.Int("sealedNum", len(sealed)),
 		zap.Int("growingNum", len(growing)),
 		zap.Int("bm25FunctionNum", len(newSet)),

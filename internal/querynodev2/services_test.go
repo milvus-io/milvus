@@ -2502,6 +2502,20 @@ func (suite *ServiceSuite) TestUpdateSchema() {
 		suite.NoError(merr.CheckRPCCall(status, err))
 	})
 
+	suite.Run("prefer_logical_schema_version", func() {
+		req := &querypb.UpdateSchemaRequest{
+			CollectionID:         suite.collectionID,
+			Schema:               suite.schema,
+			Version:              uint64(100),
+			LogicalSchemaVersion: uint64(2),
+			SchemaBarrierTs:      uint64(100),
+		}
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, suite.schema, uint64(2)).Return(nil).Once()
+
+		status, err := suite.node.UpdateSchema(ctx, req)
+		suite.NoError(merr.CheckRPCCall(status, err))
+	})
+
 	suite.Run("manager_returns_error", func() {
 		mockManager.EXPECT().UpdateSchema(suite.collectionID, suite.schema, uint64(100)).Return(merr.WrapErrServiceInternal("mocked")).Once()
 

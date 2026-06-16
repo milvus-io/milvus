@@ -77,6 +77,31 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 		s.Same(currentSchema, updatedSchema)
 	})
 
+	s.Run("stale_logical_schema_with_larger_timestamp", func() {
+		schemaV8 := mock_segcore.GenTestCollectionSchema("collection_v8", schemapb.DataType_Int64, false)
+		schemaV8.Version = 8
+		schemaV8.Fields = append(schemaV8.Fields, &schemapb.FieldSchema{
+			FieldID:  common.StartOfUserFieldID + int64(len(schemaV8.Fields)),
+			Name:     "field_v8",
+			DataType: schemapb.DataType_Bool,
+			Nullable: true,
+		})
+
+		err := s.cm.UpdateSchema(1, schemaV8, 100)
+		s.NoError(err)
+		s.Equal(uint64(8), s.cm.Get(1).SchemaVersion())
+
+		schemaV7 := mock_segcore.GenTestCollectionSchema("collection_v7", schemapb.DataType_Int64, false)
+		schemaV7.Version = 7
+
+		err = s.cm.UpdateSchema(1, schemaV7, 200)
+		s.NoError(err)
+
+		updatedSchema, updatedVersion := s.cm.Get(1).SchemaAndVersion()
+		s.Equal(uint64(8), updatedVersion)
+		s.Same(schemaV8, updatedSchema)
+	})
+
 	s.Run("not_exist_collection", func() {
 		schema := mock_segcore.GenTestCollectionSchema("collection_1", schemapb.DataType_Int64, false)
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
@@ -154,6 +179,7 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 
 	// Add a new vector field to simulate schema evolution.
 	schema := mock_segcore.GenTestCollectionSchema("collection_1", schemapb.DataType_Int64, false)
+	schema.Version = 2
 	newVecFieldID := int64(200)
 	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 		FieldID:  newVecFieldID,
@@ -178,15 +204,16 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 
 	// PutOrRef on an existing collection should update its IndexMeta.
 	err := s.cm.PutOrRef(1, schema, newIndexMeta, &querypb.LoadMetaInfo{
-		LoadType:      querypb.LoadType_LoadCollection,
-		SchemaVersion: 100,
+		LoadType:        querypb.LoadType_LoadCollection,
+		SchemaVersion:   100,
+		SchemaBarrierTs: 100,
 	})
 	s.Require().NoError(err)
 	defer s.cm.Unref(1, 1)
 
 	updatedCollection := s.cm.Get(1)
 	updatedSchema, updatedVersion := updatedCollection.SchemaAndVersion()
-	s.Equal(uint64(100), updatedVersion)
+	s.Equal(uint64(2), updatedVersion)
 	s.Len(updatedSchema.GetFields(), len(schema.GetFields()))
 
 	// Verify IndexMeta now contains the new field.

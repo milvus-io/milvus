@@ -576,17 +576,26 @@ func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSche
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Uint64("schemaVersion", req.GetVersion()),
+		zap.Uint64("legacySchemaVersion", req.GetVersion()),
+		zap.Uint64("logicalSchemaVersion", req.GetLogicalSchemaVersion()),
+		zap.Uint64("schemaBarrierTs", req.GetSchemaBarrierTs()),
 	)
 
 	log.Info("querynode received update schema request")
 
-	err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema(), req.GetVersion())
+	err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema(), updateSchemaLogicalVersion(req))
 	if err != nil {
 		log.Warn("failed to update schema", zap.Error(err))
 	}
 
 	return merr.Status(err), nil
+}
+
+func updateSchemaLogicalVersion(req *querypb.UpdateSchemaRequest) uint64 {
+	if req.GetLogicalSchemaVersion() > 0 {
+		return req.GetLogicalSchemaVersion()
+	}
+	return req.GetVersion()
 }
 
 // ReleaseCollection clears all data related to this collection on the querynode

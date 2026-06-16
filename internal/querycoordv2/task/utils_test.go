@@ -36,6 +36,22 @@ type UtilsSuite struct {
 	suite.Suite
 }
 
+func (s *UtilsSuite) TestPackLoadMetaSchemaVersions() {
+	collectionInfoResp := &milvuspb.DescribeCollectionResponse{
+		CollectionID:    100,
+		DbName:          "default",
+		UpdateTimestamp: 200,
+		Schema: &schemapb.CollectionSchema{
+			Version: 3,
+		},
+	}
+
+	loadMeta := packLoadMeta(querypb.LoadType_LoadCollection, collectionInfoResp, "rg", []int64{10}, 20)
+	s.Equal(uint64(200), loadMeta.GetSchemaVersion())
+	s.Equal(uint64(200), loadMeta.GetSchemaBarrierTs())
+	s.Equal(uint64(3), loadMeta.GetLogicalSchemaVersion())
+}
+
 func (s *UtilsSuite) TestPackLoadSegmentRequest() {
 	ctx := context.Background()
 
