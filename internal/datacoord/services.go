@@ -2403,6 +2403,14 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 	}
 	mlog.Info(context.TODO(), "receive RestoreSnapshot request")
 
+	if req.GetExternal() {
+		err := merr.WrapErrServiceUnimplemented(errors.New("RestoreExternalSnapshot is not implemented"))
+		mlog.Warn(ctx, "restore external snapshot is not implemented", mlog.Err(err))
+		return &datapb.RestoreSnapshotResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
 	// Validate parameters
 	if req.GetName() == "" {
 		err := merr.WrapErrParameterMissingMsg("snapshot name is required")
@@ -2442,6 +2450,15 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 	return &datapb.RestoreSnapshotResponse{
 		Status: merr.Success(),
 		JobId:  jobID,
+	}, nil
+}
+
+func (s *Server) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotRequest) (*datapb.ExportSnapshotResponse, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	return &datapb.ExportSnapshotResponse{
+		Status: merr.Status(merr.WrapErrServiceUnimplemented(errors.New("ExportSnapshot is not implemented"))),
 	}, nil
 }
 

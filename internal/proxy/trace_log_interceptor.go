@@ -23,9 +23,11 @@ import (
 	"path"
 
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 )
 
@@ -106,6 +108,18 @@ func GetRequestFieldWithoutSensitiveInfo(req interface{}) mlog.Field {
 			CreatedUtcTimestamps:  updateCredentialReq.CreatedUtcTimestamps,
 			ModifiedUtcTimestamps: updateCredentialReq.ModifiedUtcTimestamps,
 		})
+	}
+	restoreExternalSnapshotReq, ok := req.(*milvuspb.RestoreExternalSnapshotRequest)
+	if ok {
+		redactedReq := proto.Clone(restoreExternalSnapshotReq).(*milvuspb.RestoreExternalSnapshotRequest)
+		redactedReq.ExternalSpec = externalspec.RedactExternalSpec(redactedReq.GetExternalSpec())
+		return mlog.Any("request", redactedReq)
+	}
+	exportSnapshotReq, ok := req.(*milvuspb.ExportSnapshotRequest)
+	if ok {
+		redactedReq := proto.Clone(exportSnapshotReq).(*milvuspb.ExportSnapshotRequest)
+		redactedReq.ExternalSpec = externalspec.RedactExternalSpec(redactedReq.GetExternalSpec())
+		return mlog.Any("request", redactedReq)
 	}
 	return mlog.Any("request", req)
 }

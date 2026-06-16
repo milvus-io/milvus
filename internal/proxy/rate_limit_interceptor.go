@@ -196,6 +196,14 @@ func getCollectionID(r reqCollName) (int64, map[int64][]int64) {
 	return db.dbID, map[int64][]int64{collectionID: {}}
 }
 
+func getDatabaseID(dbName string) int64 {
+	db, _ := globalMetaCache.GetDatabaseInfo(context.TODO(), dbName)
+	if db == nil {
+		return util.InvalidDBID
+	}
+	return db.dbID
+}
+
 // failedMutationResult returns failed mutation result.
 func failedMutationResult(err error) *milvuspb.MutationResult {
 	return &milvuspb.MutationResult{

@@ -111,6 +111,7 @@ service DataCoord {
   rpc ListSnapshots(ListSnapshotsRequest) returns(ListSnapshotsResponse){}
   rpc DescribeSnapshot(DescribeSnapshotRequest) returns(DescribeSnapshotResponse){}
   rpc RestoreSnapshot(RestoreSnapshotRequest) returns(RestoreSnapshotResponse){}
+  rpc ExportSnapshot(ExportSnapshotRequest) returns(ExportSnapshotResponse){}
   rpc GetRestoreSnapshotState(GetRestoreSnapshotStateRequest) returns(GetRestoreSnapshotStateResponse){}
   rpc ListRestoreSnapshotJobs(ListRestoreSnapshotJobsRequest) returns(ListRestoreSnapshotJobsResponse){}
   rpc PinSnapshotData(PinSnapshotDataRequest) returns(PinSnapshotDataResponse){}
@@ -1076,6 +1077,11 @@ message CopySegmentSource {
 
   // Whether the source segment belongs to an external collection.
   bool is_external_collection = 13;
+
+  // Optional source root path for external snapshot restore.
+  // When set, DataNode rewrites this prefix to the target root path before
+  // replacing collection/partition/segment IDs.
+  string source_root_path = 14;
 }
 
 message CopySegmentTarget {
@@ -1083,6 +1089,7 @@ message CopySegmentTarget {
   int64 partition_id = 2;   // target partition ID
   int64 segment_id = 3;     // target segment ID
   map<int64, int64> new_build_ids = 4;  // srcBuildID -> newBuildID mapping for target segment indexes
+  string target_root_path = 5; // target root path for external snapshot restore
 }
 
 message CopySegmentRequest {
@@ -1096,6 +1103,7 @@ message CopySegmentRequest {
 
   index.StorageConfig storage_config = 6;
   int64 task_slot = 7;
+  string external_spec = 8;
 }
 
 message QueryCopySegmentRequest {
@@ -1261,6 +1269,12 @@ message CopySegmentJob {
   // dropped (by DropSnapshot RPC, drop-collection cascade, or GC) while this
   // job is still reading its data.
   int64 pin_id = 18;
+
+  // External snapshot restore reads snapshot metadata directly from object
+  // storage instead of local snapshot catalog.
+  bool external = 19;
+  string snapshot_s3_location = 20;
+  string external_spec = 21;
 }
 
 message ImportJob {
@@ -1548,6 +1562,19 @@ message ListSnapshotsResponse {
   repeated string snapshots = 2;
 }
 
+message ExportSnapshotRequest {
+  common.MsgBase base = 1;
+  string name = 2; // snapshot name
+  int64 collection_id = 3; // source collection id
+  string target_s3_path = 4; // target root path for the exported snapshot bundle
+  string external_spec = 5; // optional external storage spec for cross-bucket export target
+}
+
+message ExportSnapshotResponse {
+  common.Status status = 1;
+  string snapshot_metadata_uri = 2;
+}
+
 message SegmentDescription {
   int64 segment_id = 1; // segment id
   int64 partition_id = 2; // partition id
@@ -1609,6 +1636,12 @@ message StorageV2SegmentManifest {
   string manifest = 2;
 }
 
+enum SnapshotLayout {
+  SnapshotLayoutUnknown = 0;
+  SnapshotLayoutReferenced = 1;
+  SnapshotLayoutSelfContained = 2;
+}
+
 // SnapshotMetadata is the root structure for snapshot metadata JSON file.
 // This file serves as the entry point for reading a snapshot, containing:
 //   - Snapshot identification and status information
@@ -1626,6 +1659,7 @@ message SnapshotMetadata {
   repeated StorageV2SegmentManifest storagev2_manifest_list = 6;
   repeated int64 segment_ids = 7;
   repeated int64 build_ids = 8;
+  SnapshotLayout layout = 9;
 }
 
 message RestoreSnapshotInfo {
@@ -1664,6 +1698,9 @@ message RestoreSnapshotRequest {
   string target_db_name = 3; // target database name (where to restore to)
   string target_collection_name = 4; // target collection name (must not exist)
   int64 source_collection_id = 5; // source collection id for per-collection snapshot name lookup
+  bool external = 6; // true when restoring from an external snapshot metadata URI
+  string snapshot_s3_location = 7; // metadata file path for external snapshot restore
+  string external_spec = 8; // optional external storage spec for cross-bucket restore source
 }
 
 message RestoreSnapshotResponse {
