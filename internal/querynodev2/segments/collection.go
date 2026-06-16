@@ -157,13 +157,13 @@ func getLogicalSchemaVersion(schema *schemapb.CollectionSchema, fallback uint64)
 }
 
 func getLoadMetaLogicalSchemaVersion(schema *schemapb.CollectionSchema, loadMeta *querypb.LoadMetaInfo) uint64 {
-	if schema != nil && schema.GetVersion() > 0 {
-		return uint64(schema.GetVersion())
-	}
 	if loadMeta.GetLogicalSchemaVersion() > 0 {
 		return loadMeta.GetLogicalSchemaVersion()
 	}
-	return loadMeta.GetSchemaVersion()
+	if loadMeta.GetSchemaVersion() > 0 {
+		return loadMeta.GetSchemaVersion()
+	}
+	return getLogicalSchemaVersion(schema, 0)
 }
 
 func (m *collectionManager) updateMetric() {

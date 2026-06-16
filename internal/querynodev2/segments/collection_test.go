@@ -78,6 +78,17 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 	})
 
 	s.Run("stale_logical_schema_with_larger_timestamp", func() {
+		cm := NewCollectionManager()
+		baseSchema := mock_segcore.GenTestCollectionSchema("collection_v7", schemapb.DataType_Int64, false)
+		baseSchema.Version = 7
+		err := cm.PutOrRef(10, baseSchema, mock_segcore.GenTestIndexMeta(10, baseSchema), &querypb.LoadMetaInfo{
+			LoadType:             querypb.LoadType_LoadCollection,
+			SchemaVersion:        50,
+			LogicalSchemaVersion: 7,
+		})
+		s.Require().NoError(err)
+		defer cm.Unref(10, 1)
+
 		schemaV8 := mock_segcore.GenTestCollectionSchema("collection_v8", schemapb.DataType_Int64, false)
 		schemaV8.Version = 8
 		schemaV8.Fields = append(schemaV8.Fields, &schemapb.FieldSchema{
@@ -87,17 +98,17 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 			Nullable: true,
 		})
 
-		err := s.cm.UpdateSchema(1, schemaV8, 100)
+		err = cm.UpdateSchema(10, schemaV8, 100)
 		s.NoError(err)
-		s.Equal(uint64(8), s.cm.Get(1).SchemaVersion())
+		s.Equal(uint64(8), cm.Get(10).SchemaVersion())
 
 		schemaV7 := mock_segcore.GenTestCollectionSchema("collection_v7", schemapb.DataType_Int64, false)
 		schemaV7.Version = 7
 
-		err = s.cm.UpdateSchema(1, schemaV7, 200)
+		err = cm.UpdateSchema(10, schemaV7, 200)
 		s.NoError(err)
 
-		updatedSchema, updatedVersion := s.cm.Get(1).SchemaAndVersion()
+		updatedSchema, updatedVersion := cm.Get(10).SchemaAndVersion()
 		s.Equal(uint64(8), updatedVersion)
 		s.Same(schemaV8, updatedSchema)
 	})
@@ -204,9 +215,10 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 
 	// PutOrRef on an existing collection should update its IndexMeta.
 	err := s.cm.PutOrRef(1, schema, newIndexMeta, &querypb.LoadMetaInfo{
-		LoadType:        querypb.LoadType_LoadCollection,
-		SchemaVersion:   100,
-		SchemaBarrierTs: 100,
+		LoadType:             querypb.LoadType_LoadCollection,
+		SchemaVersion:        100,
+		SchemaBarrierTs:      100,
+		LogicalSchemaVersion: 2,
 	})
 	s.Require().NoError(err)
 	defer s.cm.Unref(1, 1)
@@ -228,6 +240,30 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 	s.True(found,
 		"PutOrRef should update IndexMeta for existing collections; field %d is missing",
 		newVecFieldID)
+}
+
+func (s *CollectionManagerSuite) TestPutOrRefUsesLegacySchemaVersionWithoutLogicalVersion() {
+	cm := NewCollectionManager()
+	initialSchema := mock_segcore.GenTestCollectionSchema("collection_legacy_v100", schemapb.DataType_Int64, false)
+	err := cm.PutOrRef(10, initialSchema, mock_segcore.GenTestIndexMeta(10, initialSchema), &querypb.LoadMetaInfo{
+		LoadType:      querypb.LoadType_LoadCollection,
+		SchemaVersion: 100,
+	})
+	s.Require().NoError(err)
+	defer cm.Unref(10, 1)
+
+	updatedSchema := mock_segcore.GenTestCollectionSchema("collection_legacy_v200", schemapb.DataType_Int64, false)
+	updatedSchema.Version = 1
+	err = cm.PutOrRef(10, updatedSchema, mock_segcore.GenTestIndexMeta(10, updatedSchema), &querypb.LoadMetaInfo{
+		LoadType:      querypb.LoadType_LoadCollection,
+		SchemaVersion: 200,
+	})
+	s.Require().NoError(err)
+	defer cm.Unref(10, 1)
+
+	schema, version := cm.Get(10).SchemaAndVersion()
+	s.Equal(uint64(200), version)
+	s.Same(updatedSchema, schema)
 }
 
 func (s *CollectionManagerSuite) TestGpuIndexFlagWithCagraAdaptForCPU() {
