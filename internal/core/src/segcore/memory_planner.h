@@ -22,9 +22,11 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "cachinglayer/Utils.h"
 #include "common/Channel.h"
 #include "common/FieldData.h"
 #include "common/GroupChunk.h"
@@ -139,6 +141,11 @@ SetFieldDataReadWindowBytes(int64_t bytes);
 
 void
 SetFieldDataMaxReadParallelism(int64_t parallelism);
+
+milvus::cachinglayer::ResourceUsage
+FieldDataLoadingOverheadUpperBound(
+    int64_t max_memory_overhead,
+    std::optional<int64_t> max_file_overhead = std::nullopt);
 
 // A cell specification: identifies a cell's location within a specific file.
 struct CellSpec {

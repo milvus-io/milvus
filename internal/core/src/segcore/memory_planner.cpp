@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "arrow/api.h"
+#include "cachinglayer/LoadingOverheadTracker.h"
 #include "common/Channel.h"
 #include "common/Common.h"
 #include "common/EasyAssert.h"
@@ -113,6 +114,24 @@ SetFieldDataMaxReadParallelism(int64_t parallelism) {
     FIELD_DATA_MAX_READ_PARALLELISM.store(std::max<int64_t>(parallelism, 1));
     LOG_INFO("set field data max read parallelism: {}",
              FIELD_DATA_MAX_READ_PARALLELISM.load());
+}
+
+milvus::cachinglayer::ResourceUsage
+FieldDataLoadingOverheadUpperBound(int64_t max_memory_overhead,
+                                   std::optional<int64_t> max_file_overhead) {
+    auto budget_capacity = static_cast<int64_t>(
+        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
+            .CapacityBytes());
+    if (budget_capacity == 0) {
+        return milvus::cachinglayer::LoadingOverheadTracker::kUnlimited;
+    }
+
+    auto memory_ub = std::max<int64_t>(budget_capacity, max_memory_overhead);
+    auto file_ub =
+        max_file_overhead.has_value()
+            ? std::max<int64_t>(budget_capacity, max_file_overhead.value())
+            : int64_t{0};
+    return {memory_ub, file_ub};
 }
 
 namespace {

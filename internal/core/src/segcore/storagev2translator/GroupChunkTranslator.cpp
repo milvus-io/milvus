@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -218,16 +219,10 @@ GroupChunkTranslator::GroupChunkTranslator(
     if (!meta_.chunk_memory_size_.empty()) {
         int64_t max_cell_sz = *std::max_element(
             meta_.chunk_memory_size_.begin(), meta_.chunk_memory_size_.end());
-        auto budget_capacity = static_cast<int64_t>(
-            milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
-                .CapacityBytes());
         auto max_overhead_size = loading_overhead_bytes(max_cell_sz);
-        auto memory_ub = std::max<int64_t>(budget_capacity, max_overhead_size);
-        auto file_ub = use_mmap_
-                           ? std::max<int64_t>(budget_capacity, max_cell_sz)
-                           : int64_t{0};
-        auto upper_bound =
-            milvus::cachinglayer::ResourceUsage{memory_ub, file_ub};
+        auto upper_bound = milvus::segcore::FieldDataLoadingOverheadUpperBound(
+            max_overhead_size,
+            use_mmap_ ? std::optional<int64_t>{max_cell_sz} : std::nullopt);
         // Keep MCL reservation aligned with the process-wide transient load
         // budget rather than multiplying it by translator type.
         auto group = milvus::segcore::kLoadTransientOverheadGroup;

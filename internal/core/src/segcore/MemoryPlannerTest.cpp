@@ -20,10 +20,12 @@
 #include <cstdint>
 #include <future>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "arrow/api.h"
+#include "cachinglayer/LoadingOverheadTracker.h"
 #include <folly/CancellationToken.h>
 #include "folly/ScopeGuard.h"
 #include "common/EasyAssert.h"
@@ -207,6 +209,52 @@ TEST(FieldDataLoadBatchSplitTargetBytes, CapsTargetByConfiguredBudget) {
     budget.SetCapacityBytes(8 * MB);
 
     EXPECT_EQ(FieldDataLoadBatchSplitTargetBytes(), 8 * MB);
+}
+
+TEST(FieldDataLoadingOverheadUpperBound, UsesUnlimitedWhenBudgetDisabled) {
+    auto& budget =
+        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto old_capacity = budget.CapacityBytes();
+    auto cleanup = folly::makeGuard(
+        [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
+
+    budget.SetCapacityBytes(0);
+
+    auto upper_bound =
+        FieldDataLoadingOverheadUpperBound(/*max_memory_overhead=*/128);
+
+    EXPECT_EQ(
+        upper_bound.memory_bytes,
+        milvus::cachinglayer::LoadingOverheadTracker::kUnlimited.memory_bytes);
+    EXPECT_EQ(
+        upper_bound.file_bytes,
+        milvus::cachinglayer::LoadingOverheadTracker::kUnlimited.file_bytes);
+}
+
+TEST(FieldDataLoadingOverheadUpperBound, UsesBudgetWithMaxOverheadFloor) {
+    constexpr int64_t MB = 1 << 20;
+    auto& budget =
+        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto old_capacity = budget.CapacityBytes();
+    auto cleanup = folly::makeGuard(
+        [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
+
+    budget.SetCapacityBytes(8 * MB);
+
+    auto memory_only =
+        FieldDataLoadingOverheadUpperBound(/*max_memory_overhead=*/16 * MB);
+    EXPECT_EQ(memory_only.memory_bytes, 16 * MB);
+    EXPECT_EQ(memory_only.file_bytes, 0);
+
+    auto mmap_smaller_overhead = FieldDataLoadingOverheadUpperBound(
+        /*max_memory_overhead=*/4 * MB, std::optional<int64_t>{2 * MB});
+    EXPECT_EQ(mmap_smaller_overhead.memory_bytes, 8 * MB);
+    EXPECT_EQ(mmap_smaller_overhead.file_bytes, 8 * MB);
+
+    auto mmap_larger_file_overhead = FieldDataLoadingOverheadUpperBound(
+        /*max_memory_overhead=*/4 * MB, std::optional<int64_t>{32 * MB});
+    EXPECT_EQ(mmap_larger_file_overhead.memory_bytes, 8 * MB);
+    EXPECT_EQ(mmap_larger_file_overhead.file_bytes, 32 * MB);
 }
 
 // ---- LoadCellBatchAsync tests ----
