@@ -179,6 +179,9 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 		}
 		// If multiple different equals present, AND implies contradiction unless identical.
 		if len(eqUnique) > 1 {
+			if hasNullableFieldSemantics(g.col) {
+				continue
+			}
 			for _, ti := range g.termIdxs {
 				used[ti] = true
 			}
@@ -197,6 +200,9 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 				inSet = true
 				break
 			}
+		}
+		if !inSet && hasNullableFieldSemantics(g.col) {
+			continue
 		}
 		for _, ti := range g.termIdxs {
 			used[ti] = true
@@ -368,6 +374,9 @@ func (v *visitor) combineAndInWithRange(parts []*planpb.Expr) []*planpb.Expr {
 			continue
 		}
 		filtered := filterValuesByRange(effectiveDataType(g.col), termVals, g.lower, g.lowerInc, g.upper, g.upperInc)
+		if len(filtered) == 0 && hasNullableFieldSemantics(g.col) {
+			continue
+		}
 		used[g.termIdx] = true
 		for _, ri := range g.rangeIdxs {
 			used[ri] = true
@@ -493,6 +502,9 @@ func (v *visitor) combineAndInWithIn(parts []*planpb.Expr) []*planpb.Expr {
 				inter = append(inter, v)
 			}
 		}
+		if len(inter) == 0 && hasNullableFieldSemantics(g.col) {
+			continue
+		}
 		for _, i := range g.idxs {
 			used[i] = true
 		}
@@ -568,6 +580,9 @@ func (v *visitor) combineAndInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr 
 			if !excluded {
 				filtered = append(filtered, tv)
 			}
+		}
+		if len(filtered) == 0 && hasNullableFieldSemantics(g.col) {
+			continue
 		}
 		used[g.termIdx] = true
 		for _, ni := range g.neqIdxs {
@@ -647,6 +662,9 @@ func (v *visitor) combineOrInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
 			}
 		}
 		if containsAny {
+			if hasNullableFieldSemantics(g.col) {
+				continue
+			}
 			used[g.termIdx] = true
 			for _, ni := range g.neqIdxs {
 				used[ni] = true

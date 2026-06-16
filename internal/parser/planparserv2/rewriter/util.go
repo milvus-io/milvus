@@ -203,6 +203,10 @@ func newAlwaysTrueExpr() *planpb.Expr {
 	}
 }
 
+func hasNullableFieldSemantics(col *planpb.ColumnInfo) bool {
+	return col != nil && col.GetNullable() && len(col.GetNestedPath()) == 0 && !col.GetIsElementLevel()
+}
+
 func newAlwaysFalseExpr() *planpb.Expr {
 	return &planpb.Expr{
 		Expr: &planpb.Expr_UnaryExpr{

@@ -44,6 +44,8 @@ func buildSchemaHelperForRewriteNullableT(t *testing.T) *typeutil.SchemaHelper {
 	fields := []*schemapb.FieldSchema{
 		{FieldID: 101, Name: "Int64Field", DataType: schemapb.DataType_Int64},
 		{FieldID: 106, Name: "NullableBoolField", DataType: schemapb.DataType_Bool, Nullable: true},
+		{FieldID: 107, Name: "NullableInt64Field", DataType: schemapb.DataType_Int64, Nullable: true},
+		{FieldID: 108, Name: "NullableVarCharField", DataType: schemapb.DataType_VarChar, Nullable: true},
 	}
 	schema := &schemapb.CollectionSchema{
 		Name:   "rewrite_nullable_test",
@@ -251,16 +253,14 @@ func TestRewrite_Bool_In_DedupedSingleTrue_ToEqual(t *testing.T) {
 	require.Equal(t, true, ure.GetValue().GetBoolVal())
 }
 
-func TestRewrite_Bool_In_TrueFalse_Nullable_ToIsNotNull(t *testing.T) {
-	// For nullable bool, in [true, false] should become IS NOT NULL (not AlwaysTrueExpr)
-	// because null values should not match.
+func TestRewrite_Bool_In_TrueFalse_Nullable_KeepsTerm(t *testing.T) {
+	// Keep the original comparison for nullable bool. It is equivalent to IS NOT NULL
+	// as a final filter, but not under NOT because NULL must stay unknown.
 	helper := buildSchemaHelperForRewriteNullableT(t)
 	expr, err := parser.ParseExpr(helper, `NullableBoolField in [true,false]`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-	nullExpr := expr.GetNullExpr()
-	require.NotNil(t, nullExpr, "nullable bool IN [true, false] should be rewritten to IS NOT NULL")
-	require.Equal(t, planpb.NullExpr_IsNotNull, nullExpr.GetOp())
+	require.NotNil(t, expr.GetTermExpr(), "nullable bool IN [true, false] should remain a TermExpr")
 }
 
 func TestRewrite_Bool_In_SingleTrue_Nullable_ToEqual(t *testing.T) {
@@ -285,15 +285,16 @@ func TestRewrite_Bool_NotIn_TrueFalse_ToAlwaysFalse(t *testing.T) {
 		"bool NOT IN [true, false] should be rewritten to AlwaysFalseExpr")
 }
 
-func TestRewrite_Bool_NotIn_TrueFalse_Nullable_ToIsNull(t *testing.T) {
+func TestRewrite_Bool_NotIn_TrueFalse_Nullable_KeepsNotTerm(t *testing.T) {
 	helper := buildSchemaHelperForRewriteNullableT(t)
-	// not in [true, false] on nullable → only NULL matches → IS NULL
+	// Keep NOT(IN) so NULL remains unknown rather than becoming a matching IS NULL.
 	expr, err := parser.ParseExpr(helper, `NullableBoolField not in [true,false]`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-	nullExpr := expr.GetNullExpr()
-	require.NotNil(t, nullExpr, "nullable bool NOT IN [true, false] should be rewritten to IS NULL")
-	require.Equal(t, planpb.NullExpr_IsNull, nullExpr.GetOp())
+	unary := expr.GetUnaryExpr()
+	require.NotNil(t, unary, "nullable bool NOT IN [true, false] should remain NOT(TermExpr)")
+	require.Equal(t, planpb.UnaryExpr_Not, unary.GetOp())
+	require.NotNil(t, unary.GetChild().GetTermExpr())
 }
 
 func TestRewrite_Bool_NotIn_SingleTrue_ToNotEqual(t *testing.T) {
@@ -446,6 +447,51 @@ func TestRewrite_Or_In_Or_NotEqual_VarChar_Tautology(t *testing.T) {
 		"OR(IN, !=) tautology with VarChar should be rewritten to AlwaysTrueExpr")
 }
 
+func TestRewrite_Or_In_Or_NotEqual_Nullable_KeepsOriginalPredicate(t *testing.T) {
+	helper := buildSchemaHelperForRewriteNullableT(t)
+
+	for _, exprStr := range []string{
+		`NullableInt64Field in [1, 2] or NullableInt64Field != 1`,
+		`NullableVarCharField in ["", "a", "b"] or NullableVarCharField != ""`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err)
+		require.NotNil(t, expr)
+		require.NotNil(t, expr.GetBinaryExpr(), "nullable OR(IN, !=) should keep OR predicate shape: %s", exprStr)
+		require.NotNil(t, findTermExpr(expr), "nullable OR(IN, !=) should keep IN term: %s", exprStr)
+		require.NotNil(t, findUnaryRangeExpr(expr, planpb.OpType_NotEqual), "nullable OR(IN, !=) should keep != predicate: %s", exprStr)
+	}
+}
+
+func TestRewrite_Or_In_Or_NotEqual_Nullable_NotDoesNotBecomeIsNull(t *testing.T) {
+	helper := buildSchemaHelperForRewriteNullableT(t)
+
+	expr, err := parser.ParseExpr(helper, `not (NullableInt64Field in [1, 2] or NullableInt64Field != 1)`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.Nil(t, expr.GetNullExpr(), "negated nullable tautology must not become IS NULL")
+	unary := expr.GetUnaryExpr()
+	require.NotNil(t, unary)
+	require.NotNil(t, unary.GetChild().GetBinaryExpr())
+}
+
+func TestRewrite_NullableContradictions_UnderNot_DoNotBecomeAlwaysTrue(t *testing.T) {
+	helper := buildSchemaHelperForRewriteNullableT(t)
+
+	for _, exprStr := range []string{
+		`not (NullableInt64Field in [1] and NullableInt64Field == 2)`,
+		`not (NullableInt64Field in [1] and NullableInt64Field in [2])`,
+		`not (NullableInt64Field in [1] and NullableInt64Field != 1)`,
+		`not (NullableInt64Field in [1] and NullableInt64Field > 2)`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		require.NotNil(t, expr, exprStr)
+		require.False(t, rewriter.IsAlwaysTrueExpr(expr), "nullable contradiction under NOT must preserve NULL semantics: %s", exprStr)
+		require.NotNil(t, expr.GetUnaryExpr(), "nullable contradiction under NOT should remain negated: %s", exprStr)
+	}
+}
+
 func TestRewrite_Or_In_Or_NotEqual_VNotInSet_ToNotEqual(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] or Int64Field != 20`, nil)
@@ -538,6 +584,25 @@ func findTermExpr(expr *planpb.Expr) *planpb.TermExpr {
 	}
 	if ue := expr.GetUnaryExpr(); ue != nil {
 		return findTermExpr(ue.GetChild())
+	}
+	return nil
+}
+
+func findUnaryRangeExpr(expr *planpb.Expr, op planpb.OpType) *planpb.UnaryRangeExpr {
+	if expr == nil {
+		return nil
+	}
+	if ure := expr.GetUnaryRangeExpr(); ure != nil && ure.GetOp() == op {
+		return ure
+	}
+	if be := expr.GetBinaryExpr(); be != nil {
+		if found := findUnaryRangeExpr(be.GetLeft(), op); found != nil {
+			return found
+		}
+		return findUnaryRangeExpr(be.GetRight(), op)
+	}
+	if ue := expr.GetUnaryExpr(); ue != nil {
+		return findUnaryRangeExpr(ue.GetChild(), op)
 	}
 	return nil
 }
