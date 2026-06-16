@@ -19,10 +19,12 @@ package datacoord
 import "sync"
 
 var (
-	buildIndexCh     chan UniqueID
-	statsTaskCh      chan UniqueID
-	buildIndexChOnce sync.Once
-	statsTaskChOnce  sync.Once
+	buildIndexCh           chan UniqueID
+	buildIndexOverflowCh   chan struct{}
+	statsTaskCh            chan UniqueID
+	buildIndexChOnce       sync.Once
+	buildIndexOverflowOnce sync.Once
+	statsTaskChOnce        sync.Once
 )
 
 func getBuildIndexChSingleton() chan UniqueID {
@@ -33,11 +35,22 @@ func getBuildIndexChSingleton() chan UniqueID {
 	return buildIndexCh
 }
 
+func getBuildIndexOverflowChSingleton() chan struct{} {
+	buildIndexOverflowOnce.Do(func() {
+		buildIndexOverflowCh = make(chan struct{}, 1)
+	})
+	return buildIndexOverflowCh
+}
+
 func notifySegmentIndexBuild(segIDs ...UniqueID) {
 	for _, segID := range segIDs {
 		select {
 		case getBuildIndexChSingleton() <- segID:
 		default:
+			select {
+			case getBuildIndexOverflowChSingleton() <- struct{}{}:
+			default:
+			}
 		}
 	}
 }

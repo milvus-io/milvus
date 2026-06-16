@@ -2126,6 +2126,12 @@ func TestPostFlush(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		svr.mixCoord = &rootCoordSegFlushComplete{flag: true}
+		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+		drainBuildIndexChForTest()
+		defer drainBuildIndexChForTest()
+		drainStatsTaskChForTest()
+		defer drainStatsTaskChForTest()
 
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
 			ID:           1,
@@ -2139,6 +2145,75 @@ func TestPostFlush(t *testing.T) {
 
 		err = svr.postFlush(context.Background(), 1)
 		assert.NoError(t, err)
+		assertBuildIndexEvents(t, 1)
+	})
+
+	t.Run("sort compaction post flush only triggers stats task", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+		svr.mixCoord = &rootCoordSegFlushComplete{flag: true}
+		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "true")
+		paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "true")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompaction.Key)
+		drainBuildIndexChForTest()
+		defer drainBuildIndexChForTest()
+		drainStatsTaskChForTest()
+		defer drainStatsTaskChForTest()
+
+		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 1,
+			PartitionID:  1,
+			State:        commonpb.SegmentState_Flushing,
+		}))
+		assert.NoError(t, err)
+
+		err = svr.postFlush(context.Background(), 1)
+		assert.NoError(t, err)
+		assertNoBuildIndexEvent(t)
+		select {
+		case segID := <-getStatsTaskChSingleton():
+			assert.Equal(t, UniqueID(1), segID)
+		case <-time.After(100 * time.Millisecond):
+			require.Fail(t, "missing stats task event")
+		}
+	})
+
+	t.Run("external collection post flush triggers build index directly", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+		svr.mixCoord = &rootCoordSegFlushComplete{flag: true}
+		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "true")
+		paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "true")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompaction.Key)
+		drainBuildIndexChForTest()
+		defer drainBuildIndexChForTest()
+		drainStatsTaskChForTest()
+		defer drainStatsTaskChForTest()
+
+		svr.meta.AddCollection(&collectionInfo{
+			ID: 1,
+			Schema: &schemapb.CollectionSchema{
+				ExternalSource: "s3://external",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk_col"},
+				},
+			},
+		})
+		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 1,
+			PartitionID:  1,
+			State:        commonpb.SegmentState_Flushing,
+		}))
+		assert.NoError(t, err)
+
+		err = svr.postFlush(context.Background(), 1)
+		assert.NoError(t, err)
+		assertBuildIndexEvents(t, 1)
+		assertNoStatsTaskEvent(t)
 	})
 }
 

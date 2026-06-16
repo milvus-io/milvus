@@ -881,6 +881,9 @@ func (m *indexMeta) GetUnIndexedSegmentIDsForIndexTask(collectionID UniqueID, se
 		}
 	}
 	m.fieldIndexLock.RUnlock()
+	if len(activeIndexIDs) == 0 {
+		return unindexed
+	}
 
 	for _, segID := range segIDs {
 		// the segment should be unindexed status if the fieldIndexes is not nil
