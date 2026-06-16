@@ -4181,6 +4181,7 @@ class TestCreateImportJobNegative(TestBase):
         c = Collection(name)
         assert c.num_entities == 0
 
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_create_import_job_with_new_user(self):
         # create collection
         name = gen_collection_name()
@@ -4518,6 +4519,7 @@ class TestGetImportJobProgressNegative(TestBase):
             except Exception as e:
                 logger.error(f"get import job progress failed: {e}")
 
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_list_job_with_new_user(self):
         # create new user
         user_name = "test_user"

@@ -1531,7 +1531,7 @@ class TestRestExternalCollection(TestBase):
         assert len(rows) == 1, rows
         _assert_basic_row_body(rows[0], 0)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_rest_external_collection_job_api_invalid_token(self):
         """
         target: verify external job APIs reject invalid tokens when auth is enforced

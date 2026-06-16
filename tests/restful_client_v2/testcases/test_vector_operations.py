@@ -5501,7 +5501,7 @@ class TestDeleteVectorNegative(TestBase):
         assert "can't find collection" in rsp["message"]
 
 
-@pytest.mark.tags(CaseLabel.L1)
+@pytest.mark.tags(CaseLabel.RBAC)
 class TestVectorWithAuth(TestBase):
     def test_upsert_vector_with_invalid_api_key(self):
         """

@@ -3751,7 +3751,7 @@ class TestImport2PCRestOperation(TestBase):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.RBAC)
     @pytest.mark.xfail(
         reason="milvus-io/milvus#50458: REST import commit/abort currently bypass PrivilegeImport authorization",
         strict=True,

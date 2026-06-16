@@ -28,7 +28,7 @@ class TestUserE2E(TestBase):
                     self.role_client.role_revoke(payload)
                 self.role_client.role_drop(payload)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_user_e2e(self):
         # list user before create
 
@@ -56,7 +56,7 @@ class TestUserE2E(TestBase):
         rsp = self.user_client.user_list()
         assert user_name not in rsp["data"]
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_user_binding_role(self):
         # create user
         user_name = gen_unique_str("user")
@@ -106,7 +106,7 @@ class TestUserE2E(TestBase):
         assert rsp["code"] == 0
 
 
-@pytest.mark.tags(CaseLabel.L1)
+@pytest.mark.tags(CaseLabel.RBAC)
 class TestUserNegative(TestBase):
     def test_create_user_with_short_password(self):
         # list user before create

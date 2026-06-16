@@ -4,7 +4,7 @@ from utils.constant import CaseLabel
 from utils.utils import gen_unique_str
 
 
-@pytest.mark.tags(CaseLabel.L1)
+@pytest.mark.tags(CaseLabel.RBAC)
 class TestRoleE2E(TestBase):
     def teardown_method(self):
         # because role num is limited, so we need to delete all roles after test

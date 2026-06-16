@@ -1335,7 +1335,7 @@ class TestRenameCollection(TestBase):
         assert name not in all_collections
 
 
-@pytest.mark.tags(CaseLabel.L1)
+@pytest.mark.tags(CaseLabel.RBAC)
 class TestCollectionWithAuth(TestBase):
     def test_drop_collections_with_invalid_api_key(self):
         """
