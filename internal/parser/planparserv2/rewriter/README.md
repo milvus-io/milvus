@@ -92,7 +92,7 @@ The rewriter can be configured via the following parameter (refreshable at runti
 - Rewrite runs after template value filling; template placeholders do not appear here.
 - Sorting/dedup for IN/NOT IN is deterministic; duplicates are removed post-sort.
 - Numeric-threshold for OR→IN / AND≠→NOT IN is defined in `util.go` (`defaultConvertOrToInNumericLimit`, default 150).
-- Nullable scalar fields keep contradiction/tautology predicates instead of folding to valid `true`/`false`, because NULL must remain unknown under outer logical operators such as `NOT`.
+- Nullable fields keep contradiction/tautology predicates instead of folding to valid `true`/`false`, because NULL must remain unknown under outer logical operators such as `NOT`. Fixed JSON/array paths also avoid domain-wide folds that assume every path/index exists.
 
 ### Pass Ordering (current)
 - OR branch:
@@ -135,4 +135,3 @@ Each construction of IN will be normalized (sorted and deduplicated). TEXT_MATCH
 - Advanced BinaryRangeExpr merging:
   - OR with 3+ intervals: Currently limited to 2 intervals. Full interval merging algorithm needed for `(10 < x < 20) OR (15 < x < 25) OR (22 < x < 30)` → `(10 < x < 30)`.
   - OR with unbounded + bounded: Currently skipped. Could optimize `(x > 10) OR (5 < x < 15)` → `x > 5`.
-

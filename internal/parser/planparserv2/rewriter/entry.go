@@ -111,11 +111,14 @@ func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
 			sortTermValues(te)
 			col := te.GetColumnInfo()
 			if v.optimizeEnabled && effectiveDataType(col) == schemapb.DataType_Bool {
-				if hasNullableFieldSemantics(col) && boolValuesCoverDomain(te.GetValues()) {
+				if !canFoldBoolDomainToConstant(col) && boolValuesCoverDomain(te.GetValues()) {
 					return notExpr(&planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: te}})
 				}
 				// Let other bool NOT IN flow through to visitTermExpr for bool-specific optimization.
 			} else if col != nil && len(te.GetValues()) == 1 {
+				if hasNonJSONMissingPathNotEqualSemantics(col) {
+					return notExpr(&planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: te}})
+				}
 				// Single-value NOT IN → != (avoids SIMD setup overhead for trivial case)
 				return newUnaryRangeExpr(col, planpb.OpType_NotEqual, te.GetValues()[0])
 			}
@@ -146,6 +149,16 @@ func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
 		// NOT (col == val) → col != val
 		// Handles: bool NOT IN [true] → != true, bool NOT IN [false] → != false
 		if ure := child.GetUnaryRangeExpr(); ure != nil && ure.GetOp() == planpb.OpType_Equal {
+			if hasNonJSONMissingPathNotEqualSemantics(ure.GetColumnInfo()) {
+				return &planpb.Expr{
+					Expr: &planpb.Expr_UnaryExpr{
+						UnaryExpr: &planpb.UnaryExpr{
+							Op:    expr.GetOp(),
+							Child: child,
+						},
+					},
+				}
+			}
 			return newUnaryRangeExpr(ure.GetColumnInfo(), planpb.OpType_NotEqual, ure.GetValue())
 		}
 	}
@@ -174,7 +187,7 @@ func (v *visitor) visitTermExpr(expr *planpb.TermExpr) interface{} {
 		values := expr.GetValues()
 		if allBoolVals(values) {
 			if boolValuesCoverDomain(values) {
-				if hasNullableFieldSemantics(expr.GetColumnInfo()) {
+				if !canFoldBoolDomainToConstant(expr.GetColumnInfo()) {
 					return &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: expr}}
 				}
 				return newAlwaysTrueExpr()

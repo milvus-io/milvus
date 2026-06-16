@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -16,6 +17,7 @@ func buildSchemaHelperWithJSON(t *testing.T) *typeutil.SchemaHelper {
 		{FieldID: 101, Name: "Int64Field", DataType: schemapb.DataType_Int64},
 		{FieldID: 102, Name: "JSONField", DataType: schemapb.DataType_JSON},
 		{FieldID: 103, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+		{FieldID: 104, Name: "NullableJSONField", DataType: schemapb.DataType_JSON, Nullable: true},
 	}
 	schema := &schemapb.CollectionSchema{
 		Name:               "rewrite_json_test",
@@ -26,6 +28,45 @@ func buildSchemaHelperWithJSON(t *testing.T) *typeutil.SchemaHelper {
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	require.NoError(t, err)
 	return helper
+}
+
+func TestRewrite_JSON_NestedPath_NullableColumnInfo(t *testing.T) {
+	helper := buildSchemaHelperWithJSON(t)
+
+	expr, err := parser.ParseExpr(helper, `NullableJSONField["age"] in [1, 2]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	term := expr.GetTermExpr()
+	require.NotNil(t, term)
+	require.True(t, term.GetColumnInfo().GetNullable())
+	require.Equal(t, []string{"age"}, term.GetColumnInfo().GetNestedPath())
+}
+
+func TestRewrite_JSON_NestedPath_Nullable_TautologyKeepsPredicate(t *testing.T) {
+	helper := buildSchemaHelperWithJSON(t)
+
+	expr, err := parser.ParseExpr(helper, `NullableJSONField["age"] in [1, 2] or NullableJSONField["age"] != 1`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.False(t, rewriter.IsAlwaysTrueExpr(expr))
+	require.NotNil(t, expr.GetBinaryExpr())
+}
+
+func TestRewrite_JSON_NestedPath_Nullable_ContradictionsKeepPredicate(t *testing.T) {
+	helper := buildSchemaHelperWithJSON(t)
+
+	for _, exprStr := range []string{
+		`NullableJSONField["age"] in [1] and NullableJSONField["age"] == 2`,
+		`NullableJSONField["age"] > 100 and NullableJSONField["age"] < 50`,
+		`not (NullableJSONField["age"] in [1] and NullableJSONField["age"] == 2)`,
+		`not (NullableJSONField["age"] > 100 and NullableJSONField["age"] < 50)`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		require.NotNil(t, expr, exprStr)
+		require.False(t, rewriter.IsAlwaysFalseExpr(expr), "nullable JSON path must not fold to valid false: %s", exprStr)
+		require.False(t, rewriter.IsAlwaysTrueExpr(expr), "nullable JSON path under NOT must not fold to valid true: %s", exprStr)
+	}
 }
 
 // Test JSON field with int comparison - AND tightening

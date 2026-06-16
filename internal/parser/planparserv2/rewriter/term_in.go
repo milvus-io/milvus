@@ -93,6 +93,12 @@ func (v *visitor) combineAndNotEqualsToNotIn(parts []*planpb.Expr) []*planpb.Exp
 	out = append(out, others...)
 	for _, g := range groups {
 		if len(g.values) >= 2 {
+			if hasNonJSONMissingPathNotEqualSemantics(g.col) {
+				for _, i := range g.origIndices {
+					out = append(out, indexToExpr[i])
+				}
+				continue
+			}
 			g.values = sortGenericValues(g.values)
 			in := newTermExpr(g.col, g.values)
 			out = append(out, notExpr(in))
@@ -662,7 +668,7 @@ func (v *visitor) combineOrInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
 			}
 		}
 		if containsAny {
-			if hasNullableFieldSemantics(g.col) {
+			if !canFoldInNotEqualTautologyToTrue(g.col) {
 				continue
 			}
 			used[g.termIdx] = true
