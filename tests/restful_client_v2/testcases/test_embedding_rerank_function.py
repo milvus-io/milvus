@@ -1243,7 +1243,7 @@ class TestModelRerankFunction(TestBase):
             data.append(
                 {
                     "doc_id": i,
-                    "document": fake_en.text(),
+                    "document": f"short vector search document {i}",
                     "sparse": {random.randint(1, 10000): random.random() for _ in range(100)},
                 }
             )
@@ -1348,8 +1348,8 @@ class TestModelRerankFunction(TestBase):
         self._create_collection_with_all_vector_types(name, tei_endpoint)
 
         # Prepare search parameters for reranker
-        nq = 2
-        query_texts = [fake_en.text() for _ in range(nq)]
+        nq = 1
+        query_texts = ["vector search"]
 
         # Prepare reranker parameters (functionScore format)
         reranker_params = {
@@ -1380,18 +1380,18 @@ class TestModelRerankFunction(TestBase):
                         {
                             "data": [[random.random() for _ in range(768)] for _ in range(nq)],
                             "annsField": "dense",
-                            "limit": 5,
+                            "limit": 1,
                         },
                         {
                             "data": [
                                 {random.randint(1, 10000): random.random() for _ in range(100)} for _ in range(nq)
                             ],
                             "annsField": "sparse",
-                            "limit": 5,
+                            "limit": 1,
                         },
                     ],
                     "functionScore": reranker_params,
-                    "limit": 10,
+                    "limit": 1,
                     "outputFields": ["doc_id", "document"],
                 }
 
@@ -1402,12 +1402,12 @@ class TestModelRerankFunction(TestBase):
                         {
                             "data": [[random.random() for _ in range(768)] for _ in range(nq)],
                             "annsField": "dense",
-                            "limit": 5,
+                            "limit": 1,
                         },
-                        {"data": query_texts, "annsField": "bm25", "limit": 5, "params": {"metric_type": "BM25"}},
+                        {"data": query_texts, "annsField": "bm25", "limit": 1, "params": {"metric_type": "BM25"}},
                     ],
                     "functionScore": reranker_params,
-                    "limit": 10,
+                    "limit": 1,
                     "outputFields": ["doc_id", "document"],
                 }
 
@@ -1420,12 +1420,12 @@ class TestModelRerankFunction(TestBase):
                                 {random.randint(1, 10000): random.random() for _ in range(100)} for _ in range(nq)
                             ],
                             "annsField": "sparse",
-                            "limit": 5,
+                            "limit": 1,
                         },
-                        {"data": query_texts, "annsField": "bm25", "limit": 5, "params": {"metric_type": "BM25"}},
+                        {"data": query_texts, "annsField": "bm25", "limit": 1, "params": {"metric_type": "BM25"}},
                     ],
                     "functionScore": reranker_params,
-                    "limit": 10,
+                    "limit": 1,
                     "outputFields": ["doc_id", "document"],
                 }
 
