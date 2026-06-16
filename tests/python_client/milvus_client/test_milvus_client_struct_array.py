@@ -4697,11 +4697,11 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_embedding_list_field_nullable_insert_none_not_supported(self):
+    def test_embedding_list_field_nullable_insert_none_supported(self):
         """
         target: test embedding list field nullable boundary
         method: create struct array field with nullable=True and insert None
-        expected: create collection succeeds, but partial struct sub-field payload is rejected
+        expected: create collection and insert succeed, and null parent field is queryable
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -4735,17 +4735,17 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
                 "clips": None,
             }
         ]
-        error = {
-            ct.err_code: 65535,
-            ct.err_msg: "inconsistent sub-field data in struct 'clips'",
-        }
-        self.insert(
+        res, check = self.insert(
             client,
             collection_name,
             data,
-            check_task=CheckTasks.err_res,
-            check_items=error,
         )
+        assert check
+        assert res["insert_count"] == 1
+
+        res, check = self.query(client, collection_name, filter="id == 0", output_fields=["id", "clips"])
+        assert check
+        assert res == [{"id": 0, "clips": None}]
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_struct_array_range_search_not_supported(self):

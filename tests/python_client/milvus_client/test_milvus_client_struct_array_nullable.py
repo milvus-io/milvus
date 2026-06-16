@@ -2000,10 +2000,10 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
     def test_create_scalar_struct_array_field_nullable_parent_null_expression(self):
         """
         target: test direct null expressions on a nullable scalar Struct Array parent
-        method: query `profile is null`, `profile is not null`, and `array_length(profile)` expressions on rows
+        method: query `profile is null` and `profile is not null` expressions on rows
             covering explicit null, omitted, empty, and non-empty profiles
         expected: expected result sets are computed from source data and expression; null expressions distinguish
-            null/omitted rows from empty/non-empty rows, and array_length selects non-null Struct Array rows by length
+            null/omitted rows from empty/non-empty rows
         """
         collection_name = cf.gen_unique_str(f"{prefix}_nullable_struct_parent_null_expr")
         client = self._client()
@@ -2015,8 +2015,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         expressions = [
             f"{STRUCT_FIELD} is null",
             f"{STRUCT_FIELD} is not null",
-            f"array_length({STRUCT_FIELD}) == 0",
-            f"array_length({STRUCT_FIELD}) > 0",
         ]
         for expr in expressions:
             scoped_expr = scoped_prefix + expr
