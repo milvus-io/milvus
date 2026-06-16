@@ -71,7 +71,6 @@ set(CONAN_TARGETS
     xsimd
     unordered_dense::unordered_dense
     abseil::abseil
-    rapidjson
     simde::simde
     milvus-common::milvus-common
     LibLZMA::LibLZMA
