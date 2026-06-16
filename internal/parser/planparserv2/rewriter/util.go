@@ -15,13 +15,15 @@ import (
 
 func columnKey(c *planpb.ColumnInfo) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d|%d|%d|%t|%t|%t|",
+	fmt.Fprintf(&b, "%d|%d|%d|%t|%t|%t|%t|%t|",
 		c.GetFieldId(),
 		int32(c.GetDataType()),
 		int32(c.GetElementType()),
 		c.GetIsPrimaryKey(),
 		c.GetIsAutoID(),
-		c.GetIsPartitionKey())
+		c.GetIsPartitionKey(),
+		c.GetNullable(),
+		c.GetIsElementLevel())
 	for _, p := range c.GetNestedPath() {
 		b.WriteString(p)
 		b.WriteByte('|')
@@ -204,7 +206,23 @@ func newAlwaysTrueExpr() *planpb.Expr {
 }
 
 func hasNullableFieldSemantics(col *planpb.ColumnInfo) bool {
-	return col != nil && col.GetNullable() && len(col.GetNestedPath()) == 0 && !col.GetIsElementLevel()
+	return col != nil && col.GetNullable()
+}
+
+func hasMissingPathSemantics(col *planpb.ColumnInfo) bool {
+	return col != nil && len(col.GetNestedPath()) > 0
+}
+
+func canFoldBoolDomainToConstant(col *planpb.ColumnInfo) bool {
+	return !hasNullableFieldSemantics(col) && !hasMissingPathSemantics(col)
+}
+
+func canFoldInNotEqualTautologyToTrue(col *planpb.ColumnInfo) bool {
+	return !hasNullableFieldSemantics(col) && !hasMissingPathSemantics(col)
+}
+
+func hasNonJSONMissingPathNotEqualSemantics(col *planpb.ColumnInfo) bool {
+	return hasMissingPathSemantics(col) && col.GetDataType() != schemapb.DataType_JSON
 }
 
 func newAlwaysFalseExpr() *planpb.Expr {

@@ -244,6 +244,8 @@ func buildSchemaHelperWithArraysT(t *testing.T) *typeutil.SchemaHelper {
 		{FieldID: 201, Name: "ArrayInt", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
 		{FieldID: 202, Name: "ArrayFloat", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Double},
 		{FieldID: 203, Name: "ArrayVarchar", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar},
+		{FieldID: 204, Name: "ArrayBool", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Bool},
+		{FieldID: 205, Name: "NullableArrayInt", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true},
 	}
 	schema := &schemapb.CollectionSchema{
 		Name:   "rewrite_array_test",

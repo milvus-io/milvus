@@ -321,6 +321,53 @@ func TestRewrite_Bool_NotIn_SingleFalse_ToNotEqual(t *testing.T) {
 	require.Equal(t, false, ure.GetValue().GetBoolVal())
 }
 
+func TestRewrite_Bool_ArrayIndex_In_TrueFalse_KeepsTerm(t *testing.T) {
+	helper := buildSchemaHelperWithArraysT(t)
+
+	expr, err := parser.ParseExpr(helper, `ArrayBool[0] in [true,false]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.NotNil(t, expr.GetTermExpr(), "indexed array bool IN may be false when the index is absent")
+}
+
+func TestRewrite_Bool_ArrayIndex_NotIn_TrueFalse_KeepsNotTerm(t *testing.T) {
+	helper := buildSchemaHelperWithArraysT(t)
+
+	expr, err := parser.ParseExpr(helper, `ArrayBool[0] not in [true,false]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	unary := expr.GetUnaryExpr()
+	require.NotNil(t, unary)
+	require.Equal(t, planpb.UnaryExpr_Not, unary.GetOp())
+	require.NotNil(t, unary.GetChild().GetTermExpr(), "indexed array bool NOT IN must not become a valid constant")
+}
+
+func TestRewrite_ArrayIndex_NotInSingle_KeepsNotTerm(t *testing.T) {
+	helper := buildSchemaHelperWithArraysT(t)
+
+	expr, err := parser.ParseExpr(helper, `ArrayInt[0] not in [1]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	unary := expr.GetUnaryExpr()
+	require.NotNil(t, unary)
+	require.Equal(t, planpb.UnaryExpr_Not, unary.GetOp())
+	require.NotNil(t, unary.GetChild().GetTermExpr(), "indexed array NOT(IN) is not equivalent to indexed !=")
+}
+
+func TestRewrite_ArrayIndex_NotEqualComplement_KeepsNotEqual(t *testing.T) {
+	helper := buildSchemaHelperWithArraysT(t)
+
+	expr, err := parser.ParseExpr(helper, `not (ArrayInt[0] == 1)`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	unary := expr.GetUnaryExpr()
+	require.NotNil(t, unary)
+	require.Equal(t, planpb.UnaryExpr_Not, unary.GetOp())
+	ure := unary.GetChild().GetUnaryRangeExpr()
+	require.NotNil(t, ure)
+	require.Equal(t, planpb.OpType_Equal, ure.GetOp())
+}
+
 func TestRewrite_Flatten_Then_OR_ToIN(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	// nested OR-equals should flatten and merge to IN
@@ -460,6 +507,41 @@ func TestRewrite_Or_In_Or_NotEqual_Nullable_KeepsOriginalPredicate(t *testing.T)
 		require.NotNil(t, expr.GetBinaryExpr(), "nullable OR(IN, !=) should keep OR predicate shape: %s", exprStr)
 		require.NotNil(t, findTermExpr(expr), "nullable OR(IN, !=) should keep IN term: %s", exprStr)
 		require.NotNil(t, findUnaryRangeExpr(expr, planpb.OpType_NotEqual), "nullable OR(IN, !=) should keep != predicate: %s", exprStr)
+	}
+}
+
+func TestRewrite_Or_In_Or_NotEqual_ArrayIndex_KeepsOriginalPredicate(t *testing.T) {
+	helper := buildSchemaHelperWithArraysT(t)
+
+	expr, err := parser.ParseExpr(helper, `ArrayInt[0] in [1, 2] or ArrayInt[0] != 1`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.False(t, rewriter.IsAlwaysTrueExpr(expr), "indexed array OR(IN, !=) is not a tautology when the index is absent")
+	require.NotNil(t, expr.GetBinaryExpr())
+}
+
+func TestRewrite_And_NotEquals_ArrayIndex_KeepsPredicates(t *testing.T) {
+	helper := buildSchemaHelperWithArraysT(t)
+
+	expr, err := parser.ParseExpr(helper, `ArrayInt[0] != 1 and ArrayInt[0] != 2`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.NotNil(t, expr.GetBinaryExpr(), "indexed array != chain must not become NOT(IN)")
+	require.NotNil(t, findUnaryRangeExpr(expr, planpb.OpType_NotEqual))
+}
+
+func TestRewrite_NullableArrayIndex_ContradictionsKeepPredicate(t *testing.T) {
+	helper := buildSchemaHelperWithArraysT(t)
+
+	for _, exprStr := range []string{
+		`NullableArrayInt[0] in [1] and NullableArrayInt[0] == 2`,
+		`not (NullableArrayInt[0] in [1] and NullableArrayInt[0] == 2)`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		require.NotNil(t, expr, exprStr)
+		require.False(t, rewriter.IsAlwaysFalseExpr(expr), "nullable indexed array must not fold to valid false: %s", exprStr)
+		require.False(t, rewriter.IsAlwaysTrueExpr(expr), "nullable indexed array under NOT must not fold to valid true: %s", exprStr)
 	}
 }
 
