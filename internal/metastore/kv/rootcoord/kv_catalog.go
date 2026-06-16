@@ -1230,7 +1230,7 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 
 		for _, key := range keys {
 			roleMappingInfos := typeutil.AfterN(key, roleMappingKey, "/")
-			if len(roleMappingInfos) != 2 {
+			if len(roleMappingInfos) != 2 || funcutil.IsEmptyString(roleMappingInfos[0]) || funcutil.IsEmptyString(roleMappingInfos[1]) {
 				log.Ctx(ctx).Warn("invalid role mapping key", zap.String("string", key), zap.String("sub_string", roleMappingKey))
 				continue
 			}
@@ -1260,7 +1260,7 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 		}
 		for _, key := range keys {
 			infoArr := typeutil.AfterN(key, roleKey, "/")
-			if len(infoArr) != 1 || len(infoArr[0]) == 0 {
+			if len(infoArr) != 1 || funcutil.IsEmptyString(infoArr[0]) {
 				log.Ctx(ctx).Warn("invalid role key", zap.String("string", key), zap.String("sub_string", roleKey))
 				continue
 			}
@@ -1292,7 +1292,7 @@ func (kc *Catalog) getRolesByUsername(ctx context.Context, tenant string, userna
 	}
 	for _, key := range keys {
 		roleMappingInfos := typeutil.AfterN(key, k, "/")
-		if len(roleMappingInfos) != 1 {
+		if len(roleMappingInfos) != 1 || funcutil.IsEmptyString(roleMappingInfos[0]) {
 			log.Ctx(ctx).Warn("invalid role mapping key", zap.String("string", key), zap.String("sub_string", k))
 			continue
 		}
@@ -1447,7 +1447,7 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 		}
 		for i, key := range keys {
 			granteeIDInfos := typeutil.AfterN(key, granteeIDKey, "/")
-			if len(granteeIDInfos) != 1 {
+			if len(granteeIDInfos) != 1 || funcutil.IsEmptyString(granteeIDInfos[0]) {
 				log.Ctx(ctx).Warn("invalid grantee id", zap.String("string", key), zap.String("sub_string", granteeIDKey))
 				continue
 			}
@@ -1508,7 +1508,7 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 		}
 		for i, key := range keys {
 			grantInfos := typeutil.AfterN(key, granteeKey, "/")
-			if len(grantInfos) != 2 {
+			if len(grantInfos) != 2 || funcutil.IsEmptyString(grantInfos[0]) || funcutil.IsEmptyString(grantInfos[1]) {
 				log.Ctx(ctx).Warn("invalid grantee key", zap.String("string", key), zap.String("sub_string", granteeKey))
 				continue
 			}
@@ -1700,7 +1700,10 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.G
 
 	for i, key := range keys {
 		grantInfos := typeutil.AfterN(key, granteeKey, "/")
-		if len(grantInfos) != 3 {
+		if len(grantInfos) != 3 ||
+			funcutil.IsEmptyString(grantInfos[0]) ||
+			funcutil.IsEmptyString(grantInfos[1]) ||
+			funcutil.IsEmptyString(grantInfos[2]) {
 			log.Ctx(ctx).Warn("invalid grantee key", zap.String("string", key), zap.String("sub_string", granteeKey))
 			continue
 		}
@@ -1712,7 +1715,7 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.G
 		}
 		for _, idKey := range idKeys {
 			granteeIDInfos := typeutil.AfterN(idKey, granteeIDKey, "/")
-			if len(granteeIDInfos) != 1 {
+			if len(granteeIDInfos) != 1 || funcutil.IsEmptyString(granteeIDInfos[0]) {
 				log.Ctx(ctx).Warn("invalid grantee id", zap.String("string", idKey), zap.String("sub_string", granteeIDKey))
 				continue
 			}
@@ -1749,7 +1752,7 @@ func (kc *Catalog) ListUserRole(ctx context.Context, tenant string) ([]string, e
 
 	for _, key := range keys {
 		userRolesInfos := typeutil.AfterN(key, k, "/")
-		if len(userRolesInfos) != 2 {
+		if len(userRolesInfos) != 2 || funcutil.IsEmptyString(userRolesInfos[0]) || funcutil.IsEmptyString(userRolesInfos[1]) {
 			log.Ctx(ctx).Warn("invalid user-role key", zap.String("string", key), zap.String("sub_string", k))
 			continue
 		}
