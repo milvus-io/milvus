@@ -4743,6 +4743,11 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         assert check
         assert res["insert_count"] == 1
 
+        res, check = self.flush(client, collection_name)
+        assert check
+        res, check = self.load_collection(client, collection_name)
+        assert check
+
         res, check = self.query(client, collection_name, filter="id == 0", output_fields=["id", "clips"])
         assert check
         assert res == [{"id": 0, "clips": None}]
