@@ -4,8 +4,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 func newRoutingCollection() *Collection {
@@ -94,4 +96,55 @@ func TestCollectionRoutingFieldsClone(t *testing.T) {
 	coll.ShardInfos["v0"].State = pb.ShardState_ShardDropped
 	assert.Equal(t, []byte{0x80}, clone.ShardInfos["v0"].RoutingKeyUpper)
 	assert.Equal(t, pb.ShardState_ShardSplitting, clone.ShardInfos["v0"].State)
+}
+
+func TestApplyUpdatesShardSplitRouting(t *testing.T) {
+	// A legacy single-shard hash collection that a split grows into three
+	// shards: the source becomes Splitting, two range targets are added.
+	coll := &Collection{
+		CollectionID:         1,
+		Name:                 "col",
+		VirtualChannelNames:  []string{"v0"},
+		PhysicalChannelNames: []string{"p0"},
+		RoutingVersion:       0,
+		RoutingMode:          pb.RoutingMode_RoutingModeHash,
+		ShardInfos: map[string]*ShardInfo{
+			"v0": {VChannelName: "v0", PChannelName: "p0", State: pb.ShardState_ShardNormal},
+		},
+	}
+
+	header := &message.AlterCollectionMessageHeader{
+		CollectionId: 1,
+		UpdateMask:   &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionShardSplitRouting}},
+	}
+	body := &message.AlterCollectionMessageBody{
+		Updates: &message.AlterCollectionMessageUpdates{
+			VirtualChannelNames:  []string{"v0", "v1", "v2"},
+			PhysicalChannelNames: []string{"p0", "p1", "p2"},
+			RoutingVersion:       1,
+			RoutingMode:          pb.RoutingMode_RoutingModeRange,
+			ShardInfos: []*pb.CollectionShardInfo{
+				{State: pb.ShardState_ShardSplitting},
+				{RoutingKeyUpper: []byte{0x80}, State: pb.ShardState_ShardCreating, LastTruncateTimeTick: 9},
+				{RoutingKeyLower: []byte{0x80}, State: pb.ShardState_ShardCreating},
+			},
+		},
+	}
+
+	coll.ApplyUpdates(header, body)
+
+	// the whole routing topology is replaced atomically.
+	assert.Equal(t, []string{"v0", "v1", "v2"}, coll.VirtualChannelNames)
+	assert.Equal(t, []string{"p0", "p1", "p2"}, coll.PhysicalChannelNames)
+	assert.Equal(t, int64(1), coll.RoutingVersion)
+	assert.Equal(t, pb.RoutingMode_RoutingModeRange, coll.RoutingMode)
+	assert.Len(t, coll.ShardInfos, 3)
+	// the source shard is now Splitting; the targets carry their ranges.
+	assert.Equal(t, pb.ShardState_ShardSplitting, coll.ShardInfos["v0"].State)
+	assert.Equal(t, "p1", coll.ShardInfos["v1"].PChannelName)
+	assert.Equal(t, "v1", coll.ShardInfos["v1"].VChannelName)
+	assert.Equal(t, []byte{0x80}, coll.ShardInfos["v1"].RoutingKeyUpper)
+	assert.Equal(t, uint64(9), coll.ShardInfos["v1"].LastTruncateTimeTick)
+	assert.Equal(t, []byte{0x80}, coll.ShardInfos["v2"].RoutingKeyLower)
+	assert.Equal(t, pb.ShardState_ShardCreating, coll.ShardInfos["v2"].State)
 }

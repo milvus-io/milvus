@@ -44,6 +44,7 @@ const (
 	RootCoord_ShowCollectionIDs_FullMethodName             = "/milvus.proto.rootcoord.RootCoord/ShowCollectionIDs"
 	RootCoord_AlterCollection_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/AlterCollection"
 	RootCoord_AlterCollectionField_FullMethodName          = "/milvus.proto.rootcoord.RootCoord/AlterCollectionField"
+	RootCoord_CommitShardSplitRouting_FullMethodName       = "/milvus.proto.rootcoord.RootCoord/CommitShardSplitRouting"
 	RootCoord_AddCollectionFunction_FullMethodName         = "/milvus.proto.rootcoord.RootCoord/AddCollectionFunction"
 	RootCoord_AlterCollectionFunction_FullMethodName       = "/milvus.proto.rootcoord.RootCoord/AlterCollectionFunction"
 	RootCoord_DropCollectionFunction_FullMethodName        = "/milvus.proto.rootcoord.RootCoord/DropCollectionFunction"
@@ -177,6 +178,12 @@ type RootCoordClient interface {
 	ShowCollectionIDs(ctx context.Context, in *ShowCollectionIDsRequest, opts ...grpc.CallOption) (*ShowCollectionIDsResponse, error)
 	AlterCollection(ctx context.Context, in *milvuspb.AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	AlterCollectionField(ctx context.Context, in *milvuspb.AlterCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// CommitShardSplitRouting commits a shard-split routing change into the
+	// collection meta as a DDL: it grows the vchannel list with the split
+	// targets, sets every shard's routing key range and lifecycle state, and
+	// bumps routing_version, all in one broadcast transaction. Called by
+	// datacoord at the routing-commit and at the adoption flip of a split.
+	CommitShardSplitRouting(ctx context.Context, in *CommitShardSplitRoutingRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	AddCollectionFunction(ctx context.Context, in *milvuspb.AddCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	AlterCollectionFunction(ctx context.Context, in *milvuspb.AlterCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	DropCollectionFunction(ctx context.Context, in *milvuspb.DropCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -448,6 +455,15 @@ func (c *rootCoordClient) AlterCollection(ctx context.Context, in *milvuspb.Alte
 func (c *rootCoordClient) AlterCollectionField(ctx context.Context, in *milvuspb.AlterCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, RootCoord_AlterCollectionField_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) CommitShardSplitRouting(ctx context.Context, in *CommitShardSplitRoutingRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_CommitShardSplitRouting_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1017,6 +1033,12 @@ type RootCoordServer interface {
 	ShowCollectionIDs(context.Context, *ShowCollectionIDsRequest) (*ShowCollectionIDsResponse, error)
 	AlterCollection(context.Context, *milvuspb.AlterCollectionRequest) (*commonpb.Status, error)
 	AlterCollectionField(context.Context, *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error)
+	// CommitShardSplitRouting commits a shard-split routing change into the
+	// collection meta as a DDL: it grows the vchannel list with the split
+	// targets, sets every shard's routing key range and lifecycle state, and
+	// bumps routing_version, all in one broadcast transaction. Called by
+	// datacoord at the routing-commit and at the adoption flip of a split.
+	CommitShardSplitRouting(context.Context, *CommitShardSplitRoutingRequest) (*commonpb.Status, error)
 	AddCollectionFunction(context.Context, *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error)
 	AlterCollectionFunction(context.Context, *milvuspb.AlterCollectionFunctionRequest) (*commonpb.Status, error)
 	DropCollectionFunction(context.Context, *milvuspb.DropCollectionFunctionRequest) (*commonpb.Status, error)
@@ -1163,6 +1185,9 @@ func (UnimplementedRootCoordServer) AlterCollection(context.Context, *milvuspb.A
 }
 func (UnimplementedRootCoordServer) AlterCollectionField(context.Context, *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AlterCollectionField not implemented")
+}
+func (UnimplementedRootCoordServer) CommitShardSplitRouting(context.Context, *CommitShardSplitRoutingRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CommitShardSplitRouting not implemented")
 }
 func (UnimplementedRootCoordServer) AddCollectionFunction(context.Context, *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AddCollectionFunction not implemented")
@@ -1712,6 +1737,24 @@ func _RootCoord_AlterCollectionField_Handler(srv interface{}, ctx context.Contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RootCoordServer).AlterCollectionField(ctx, req.(*milvuspb.AlterCollectionFieldRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_CommitShardSplitRouting_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CommitShardSplitRoutingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).CommitShardSplitRouting(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_CommitShardSplitRouting_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).CommitShardSplitRouting(ctx, req.(*CommitShardSplitRoutingRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2778,6 +2821,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AlterCollectionField",
 			Handler:    _RootCoord_AlterCollectionField_Handler,
+		},
+		{
+			MethodName: "CommitShardSplitRouting",
+			Handler:    _RootCoord_CommitShardSplitRouting_Handler,
 		},
 		{
 			MethodName: "AddCollectionFunction",

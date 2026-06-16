@@ -1423,6 +1423,45 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 	return merr.Success(), nil
 }
 
+// CommitShardSplitRouting commits a shard-split routing change into the
+// collection meta as a DDL: it grows the vchannel list with the split targets,
+// sets every shard's routing key range and lifecycle state, and bumps
+// routing_version, all atomically. Called by datacoord at the routing-commit and
+// at the adoption flip of a split. The call is idempotent: a retry carrying the
+// already-committed routing version is a no-op.
+func (c *Core) CommitShardSplitRouting(ctx context.Context, in *rootcoordpb.CommitShardSplitRoutingRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("CommitShardSplitRouting", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("CommitShardSplitRouting")
+
+	log := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
+		zap.String("dbName", in.GetDbName()),
+		zap.String("collectionName", in.GetCollectionName()),
+		zap.Int64("collectionID", in.GetCollectionId()),
+		zap.Int64("routingVersion", in.GetRoutingVersion()),
+	)
+	log.Info("received request to commit shard split routing")
+
+	if err := c.broadcastCommitShardSplitRouting(ctx, in); err != nil {
+		if errors.Is(err, errIgnoredAlterCollection) {
+			log.Info("shard split routing already committed at this version, ignore it")
+			metrics.RootCoordDDLReqCounter.WithLabelValues("CommitShardSplitRouting", metrics.SuccessLabel).Inc()
+			return merr.Success(), nil
+		}
+		log.Warn("failed to commit shard split routing", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("CommitShardSplitRouting", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("CommitShardSplitRouting", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("CommitShardSplitRouting").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	log.Info("done to commit shard split routing")
+	return merr.Success(), nil
+}
+
 func (c *Core) AddCollectionFunction(ctx context.Context, in *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil

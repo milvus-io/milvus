@@ -346,6 +346,17 @@ func (c *Client) AlterCollectionField(ctx context.Context, request *milvuspb.Alt
 	})
 }
 
+func (c *Client) CommitShardSplitRouting(ctx context.Context, request *rootcoordpb.CommitShardSplitRoutingRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	request = typeutil.Clone(request)
+	commonpbutil.UpdateMsgBase(
+		request.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.CommitShardSplitRouting(ctx, request)
+	})
+}
+
 func (c *Client) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest, opts ...grpc.CallOption) (*milvuspb.AlterCollectionSchemaResponse, error) {
 	request = typeutil.Clone(request)
 	commonpbutil.UpdateMsgBase(

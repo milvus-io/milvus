@@ -104,8 +104,15 @@ service RootCoord {
     rpc ShowCollectionIDs(ShowCollectionIDsRequest) returns (ShowCollectionIDsResponse) {}
 
     rpc AlterCollection(milvus.AlterCollectionRequest) returns (common.Status) {}
-    
+
     rpc AlterCollectionField(milvus.AlterCollectionFieldRequest) returns (common.Status) {}
+
+    // CommitShardSplitRouting commits a shard-split routing change into the
+    // collection meta as a DDL: it grows the vchannel list with the split
+    // targets, sets every shard's routing key range and lifecycle state, and
+    // bumps routing_version, all in one broadcast transaction. Called by
+    // datacoord at the routing-commit and at the adoption flip of a split.
+    rpc CommitShardSplitRouting(CommitShardSplitRoutingRequest) returns (common.Status) {}
 
     rpc AddCollectionFunction(milvus.AddCollectionFunctionRequest) returns (common.Status) {}
 
@@ -326,6 +333,24 @@ message DBCollections {
 message ShowCollectionIDsResponse {
   common.Status status = 1;
   repeated DBCollections db_collections = 2;
+}
+
+// CommitShardSplitRoutingRequest carries the full post-split routing state of a
+// collection. datacoord computes it from the split task; rootcoord validates
+// (routing_version strictly increases; physical/shard arrays parallel the
+// vchannel list) and applies it atomically as a DDL under the collection lock.
+message CommitShardSplitRoutingRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+  int64 collection_id = 4;
+  // The full new vchannel topology (existing shards plus the split targets) and
+  // the per-shard routing facts, parallel to virtual_channel_names.
+  repeated string virtual_channel_names = 5;
+  repeated string physical_channel_names = 6;
+  repeated etcd.CollectionShardInfo shard_infos = 7;
+  int64 routing_version = 8;
+  etcd.RoutingMode routing_mode = 9;
 }
 
 message CreatePartitionResponse {

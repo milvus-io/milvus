@@ -10,7 +10,8 @@
         "FieldMaskCollectionDescription": "description",
         "FieldMaskCollectionSchema": "schema",
         "FieldMaskCollectionProperties": "properties",
-        "FieldMaskCollectionConsistencyLevel": "consistency_level"
+        "FieldMaskCollectionConsistencyLevel": "consistency_level",
+        "FieldMaskCollectionShardSplitRouting": "shard_split_routing"
     },
     "ExtraExportTypes": [
         "messagespb.PartitionSegmentAssignment",
