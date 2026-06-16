@@ -137,7 +137,6 @@ enum class ChunkManagerType : int8_t {
     Local = 1,
     Minio = 2,
     Remote = 3,
-    OpenDAL = 4,
 };
 
 extern std::map<std::string, ChunkManagerType> ChunkManagerType_Map;

@@ -50,9 +50,6 @@
 #include "storage/LocalChunkManager.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/minio/MinioChunkManager.h"
-#ifdef USE_OPENDAL
-#include "storage/opendal/OpenDALChunkManager.h"
-#endif
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "common/Common.h"
@@ -82,8 +79,7 @@ constexpr const char* TEMP = "tmp";
 std::map<std::string, ChunkManagerType> ChunkManagerType_Map = {
     {"local", ChunkManagerType::Local},
     {"minio", ChunkManagerType::Minio},
-    {"remote", ChunkManagerType::Remote},
-    {"opendal", ChunkManagerType::OpenDAL}};
+    {"remote", ChunkManagerType::Remote}};
 
 static std::shared_ptr<arrow::Array>
 NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array,
@@ -1180,11 +1176,6 @@ CreateChunkManager(const StorageConfig& storage_config) {
                 }
             }
         }
-#ifdef USE_OPENDAL
-        case ChunkManagerType::OpenDAL: {
-            return std::make_shared<OpenDALChunkManager>(storage_config);
-        }
-#endif
         default: {
             ThrowInfo(ConfigInvalid,
                       "unsupported storage_config.storage_type {}",
