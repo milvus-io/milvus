@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -112,6 +113,12 @@ func TestShardSplitManagerDetect(t *testing.T) {
 	defer params.Reset(params.DataCoordCfg.ShardSplitEnable.Key)
 	defer params.Reset(params.DataCoordCfg.ShardSplitMaxShardRows.Key)
 
+	// The cluster is not replicating in these cases; stub the balancer lookup so
+	// the detection loop neither blocks on the (absent) balancer nor flips on the
+	// D6 gate. The replicating path has its own test below.
+	notReplicating := mockey.Mock((*shardSplitManager).clusterReplicating).Return(false).Build()
+	defer notReplicating.UnPatch()
+
 	t.Run("trigger on multi-namespace shard over rows", func(t *testing.T) {
 		m := newSplitTestMeta(true, "v0", map[int64]int64{10: 80, 11: 40})
 		manager, catalog := newSplitTestManager(t, m)
@@ -203,6 +210,26 @@ func TestShardSplitManagerDetect(t *testing.T) {
 		manager.detectOnce()
 		assert.Equal(t, 0, manager.activeTaskCount())
 	})
+}
+
+// TestShardSplitManagerDetectSuppressedWhenReplicating verifies the D6 gate: the
+// trigger creates no task while the cluster is replicating, even for a shard that
+// is otherwise over the thresholds.
+func TestShardSplitManagerDetectSuppressedWhenReplicating(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	params.Save(params.DataCoordCfg.ShardSplitEnable.Key, "true")
+	params.Save(params.DataCoordCfg.ShardSplitMaxShardRows.Key, "100")
+	defer params.Reset(params.DataCoordCfg.ShardSplitEnable.Key)
+	defer params.Reset(params.DataCoordCfg.ShardSplitMaxShardRows.Key)
+
+	replicating := mockey.Mock((*shardSplitManager).clusterReplicating).Return(true).Build()
+	defer replicating.UnPatch()
+
+	m := newSplitTestMeta(true, "v0", map[int64]int64{10: 80, 11: 40})
+	manager, _ := newSplitTestManager(t, m)
+	manager.detectOnce()
+	assert.Equal(t, 0, manager.activeTaskCount())
 }
 
 func TestShardSplitManagerShouldSplit(t *testing.T) {
