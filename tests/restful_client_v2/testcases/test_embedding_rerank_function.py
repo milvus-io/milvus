@@ -1339,7 +1339,7 @@ class TestModelRerankFunction(TestBase):
     def test_hybrid_vector_search_with_model_rerank(self, tei_endpoint, tei_reranker_endpoint):
         """
         target: test hybrid vector search with model rerank using RESTful API
-        method: test dense+sparse/dense+bm25/sparse+bm25 search with model reranker
+        method: test dense+bm25/sparse+bm25 search with model reranker
         expected: hybrid search should succeed with model reranker
         """
         import random
@@ -1371,33 +1371,11 @@ class TestModelRerankFunction(TestBase):
             ]
         }
 
-        # Test different hybrid search combinations
-        for search_type in ["dense+sparse", "dense+bm25", "sparse+bm25"]:
+        # Test hybrid search combinations with text queries for the model reranker.
+        for search_type in ["dense+bm25", "sparse+bm25"]:
             logger.info(f"Executing {search_type} hybrid search with model reranker")
 
-            if search_type == "dense+sparse":
-                hybrid_search_payload = {
-                    "collectionName": name,
-                    "search": [
-                        {
-                            "data": [[random.random() for _ in range(768)] for _ in range(nq)],
-                            "annsField": "dense",
-                            "limit": 1,
-                        },
-                        {
-                            "data": [
-                                {random.randint(1, 10000): random.random() for _ in range(100)} for _ in range(nq)
-                            ],
-                            "annsField": "sparse",
-                            "limit": 1,
-                        },
-                    ],
-                    "functionScore": reranker_params,
-                    "limit": 1,
-                    "outputFields": ["doc_id", "document"],
-                }
-
-            elif search_type == "dense+bm25":
+            if search_type == "dense+bm25":
                 hybrid_search_payload = {
                     "collectionName": name,
                     "search": [
