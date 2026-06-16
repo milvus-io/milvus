@@ -1,14 +1,23 @@
 import numpy as np
 import pytest
 from base.testbase import TestBase
-from faker import Faker
 from utils.constant import CaseLabel
 from utils.util_log import test_log as logger
 from utils.utils import gen_collection_name
 
-fake_en = Faker("en_US")
-
 prefix = "text_embedding_search"
+
+
+def _short_text(index=0):
+    return f"short vector search document {index}"
+
+
+def _short_query(index=0):
+    return f"short vector search query {index}"
+
+
+def _long_text(token, word_count):
+    return " ".join(f"{token}{i % 16}" for i in range(word_count))
 
 
 @pytest.mark.tags(CaseLabel.L0)
@@ -197,9 +206,9 @@ class TestTextEmbeddingSearch(TestBase):
         rsp = self.collection_client.collection_create(payload)
         assert rsp["code"] == 0
 
-        # Prepare test data with long text similar to ORM test
-        left_text = " ".join([fake_en.word() for _ in range(512)])
-        right_text = " ".join([fake_en.word() for _ in range(512)])
+        # Keep long text here because this case verifies truncation direction.
+        left_text = _long_text("left", 512)
+        right_text = _long_text("right", 512)
         data = [
             {"id": 0, "document": left_text + " " + right_text},
             {"id": 1, "document": left_text},
@@ -312,7 +321,7 @@ class TestTextEmbeddingSearch(TestBase):
         nb = 10
         data = []
         for i in range(nb):
-            data.append({"id": i, "document": fake_en.text()})
+            data.append({"id": i, "document": _short_text(i)})
 
         payload = {"collectionName": name, "data": data}
 
@@ -465,7 +474,7 @@ class TestTextEmbeddingSearch(TestBase):
         # Insert test data
         data = []
         for i in range(10):
-            data.append({"id": i, "document": fake_en.text().lower()})
+            data.append({"id": i, "document": _short_text(i).lower()})
 
         payload = {"collectionName": name, "data": data}
         rsp = self.vector_client.vector_insert(payload)
@@ -475,7 +484,7 @@ class TestTextEmbeddingSearch(TestBase):
         # Test search with BM25 (sparse vector)
         search_payload = {
             "collectionName": name,
-            "data": [fake_en.text().lower()],
+            "data": [_short_query().lower()],
             "annsField": "sparse",
             "limit": 5,
             "outputFields": ["id", "document"],
@@ -488,7 +497,7 @@ class TestTextEmbeddingSearch(TestBase):
         # test search with dense vector
         search_payload = {
             "collectionName": name,
-            "data": [fake_en.text().lower()],
+            "data": [_short_query().lower()],
             "annsField": "dense",
             "limit": 5,
             "outputFields": ["id", "document"],
@@ -668,7 +677,7 @@ class TestTextEmbeddingSearchAdvanced(TestBase):
             data.append(
                 {
                     "id": i,
-                    "document": fake_en.text(),
+                    "document": _short_text(i),
                     "category": categories[i % len(categories)],
                     "year": years[i % len(years)],
                 }
@@ -874,7 +883,7 @@ class TestTextEmbeddingSearchNegative(TestBase):
         assert rsp["code"] == 0
 
         # Insert sample data
-        data = [{"id": i, "document": fake_en.text()} for i in range(10)]
+        data = [{"id": i, "document": _short_text(i)} for i in range(10)]
 
         payload = {"collectionName": name, "data": data}
 
@@ -975,7 +984,7 @@ class TestTextEmbeddingFunctionOutput(TestBase):
         # insert data with function output field (dense vector) should fail
         import random
 
-        data = [{"id": i, "document": fake_en.text(), "dense": [random.random() for _ in range(dim)]} for i in range(5)]
+        data = [{"id": i, "document": _short_text(i), "dense": [random.random() for _ in range(dim)]} for i in range(5)]
         rsp = self.vector_client.vector_insert({"collectionName": name, "data": data})
         assert rsp["code"] != 0
         assert "function output" in rsp["message"].lower()
@@ -1030,7 +1039,7 @@ class TestTextEmbeddingFunctionOutput(TestBase):
         data = []
         for i in range(nb):
             vec = preprocessing.normalize([np.random.rand(dim).astype(np.float32)])[0].tolist()
-            data.append({"id": i, "document": fake_en.text(), "dense": vec})
+            data.append({"id": i, "document": _short_text(i), "dense": vec})
         rsp = self.vector_client.vector_insert({"collectionName": name, "data": data})
         assert rsp["code"] == 0, f"Insert failed: {rsp}"
         assert rsp["data"]["insertCount"] == nb
@@ -1091,7 +1100,7 @@ class TestTextEmbeddingFunctionOutput(TestBase):
 
         # insert without function output field — TEI should auto-generate
         nb = 10
-        data = [{"id": i, "document": fake_en.text()} for i in range(nb)]
+        data = [{"id": i, "document": _short_text(i)} for i in range(nb)]
         rsp = self.vector_client.vector_insert({"collectionName": name, "data": data})
         assert rsp["code"] == 0, f"Insert failed: {rsp}"
         assert rsp["data"]["insertCount"] == nb
@@ -1160,7 +1169,7 @@ class TestTextEmbeddingFunctionOutput(TestBase):
         assert rsp["code"] == 0
 
         # insert data with BM25 output field (sparse) should fail
-        data = [{"id": i, "document": fake_en.text(), "sparse": {1: 0.5, 2: 0.3, 3: 0.1}} for i in range(5)]
+        data = [{"id": i, "document": _short_text(i), "sparse": {1: 0.5, 2: 0.3, 3: 0.1}} for i in range(5)]
         rsp = self.vector_client.vector_insert({"collectionName": name, "data": data})
         assert rsp["code"] != 0
         assert "bm25" in rsp["message"].lower() or "function output" in rsp["message"].lower()
@@ -1268,10 +1277,7 @@ class TestModelRerankFunction(TestBase):
 
         # Prepare search parameters for reranker
         nq = 2
-        query_texts = [fake_en.text() for _ in range(nq)]
-        if enable_truncate:
-            # Make query texts larger for truncation test
-            query_texts = [" ".join([fake_en.word() for _ in range(1024)]) for _ in range(nq)]
+        query_texts = [_short_query(i) for i in range(nq)]
 
         # Prepare reranker parameters (functionScore format)
         reranker_params = {
@@ -1886,7 +1892,7 @@ class TestDecayRerankNegative(TestBase):
         assert rsp["code"] == 0, f"Collection creation failed: {rsp}"
 
         # Insert data
-        data = [{"doc_id": i, "document": fake_en.text(), "category": "tech"} for i in range(5)]
+        data = [{"doc_id": i, "document": _short_text(i), "category": "tech"} for i in range(5)]
         payload = {"collectionName": name, "data": data}
         rsp = self.vector_client.vector_insert(payload)
         assert rsp["code"] == 0, f"Insert failed: {rsp}"
@@ -2070,7 +2076,7 @@ class TestRRFWeightedRerank(TestBase):
             data.append(
                 {
                     "doc_id": str(i),
-                    "document": fake_en.text(),
+                    "document": _short_text(i),
                     "sparse": {random.randint(1, 10000): random.random() for _ in range(100)},
                     "dense": [random.random() for _ in range(768)],
                 }
@@ -2096,7 +2102,7 @@ class TestRRFWeightedRerank(TestBase):
 
         # Prepare search parameters for reranker
         nq = 2  # Reduced for faster testing
-        query_texts = [fake_en.text() for _ in range(nq)]
+        query_texts = [_short_query(i) for i in range(nq)]
 
         # Prepare reranker parameters (functionScore format)
         if ranker_model == "rrf":
