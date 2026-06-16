@@ -93,7 +93,7 @@ func (v *visitor) combineAndNotEqualsToNotIn(parts []*planpb.Expr) []*planpb.Exp
 	out = append(out, others...)
 	for _, g := range groups {
 		if len(g.values) >= 2 {
-			if hasNonJSONMissingPathNotEqualSemantics(g.col) {
+			if hasMissingPathNotEqualSemantics(g.col, g.values...) {
 				for _, i := range g.origIndices {
 					out = append(out, indexToExpr[i])
 				}

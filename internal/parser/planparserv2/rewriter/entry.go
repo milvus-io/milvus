@@ -116,7 +116,7 @@ func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
 				}
 				// Let other bool NOT IN flow through to visitTermExpr for bool-specific optimization.
 			} else if col != nil && len(te.GetValues()) == 1 {
-				if hasNonJSONMissingPathNotEqualSemantics(col) {
+				if hasMissingPathNotEqualSemantics(col, te.GetValues()...) {
 					return notExpr(&planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: te}})
 				}
 				// Single-value NOT IN → != (avoids SIMD setup overhead for trivial case)
@@ -149,7 +149,7 @@ func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
 		// NOT (col == val) → col != val
 		// Handles: bool NOT IN [true] → != true, bool NOT IN [false] → != false
 		if ure := child.GetUnaryRangeExpr(); ure != nil && ure.GetOp() == planpb.OpType_Equal {
-			if hasNonJSONMissingPathNotEqualSemantics(ure.GetColumnInfo()) {
+			if hasMissingPathNotEqualSemantics(ure.GetColumnInfo(), ure.GetValue()) {
 				return &planpb.Expr{
 					Expr: &planpb.Expr_UnaryExpr{
 						UnaryExpr: &planpb.UnaryExpr{
