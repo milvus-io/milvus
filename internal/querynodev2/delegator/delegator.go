@@ -1245,11 +1245,12 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
-		CollectionID:         sd.collectionID,
-		Schema:               schema,
-		Version:              schVersion,
-		LogicalSchemaVersion: logicalSchemaVersion,
+		CollectionID: sd.collectionID,
+		Schema:       schema,
+		// SchemaBarrierTs fences stale load results; LogicalSchemaVersion is
+		// used by QueryNode collection freshness checks. Keep them separate.
 		SchemaBarrierTs:      schVersion,
+		LogicalSchemaVersion: logicalSchemaVersion,
 	},
 		sealed,
 		growing,

@@ -576,9 +576,8 @@ func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSche
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Uint64("legacySchemaVersion", req.GetVersion()),
-		zap.Uint64("logicalSchemaVersion", req.GetLogicalSchemaVersion()),
 		zap.Uint64("schemaBarrierTs", req.GetSchemaBarrierTs()),
+		zap.Uint64("logicalSchemaVersion", req.GetLogicalSchemaVersion()),
 	)
 
 	log.Info("querynode received update schema request")
@@ -592,10 +591,16 @@ func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSche
 }
 
 func updateSchemaLogicalVersion(req *querypb.UpdateSchemaRequest) uint64 {
+	// SchemaBarrierTs is a timestamp fence for load results, not a schema
+	// freshness version. Prefer logical schema values and only fall back to the
+	// barrier for old schema update requests that do not carry a logical version.
+	if req.GetSchema() != nil && req.GetSchema().GetVersion() > 0 {
+		return uint64(req.GetSchema().GetVersion())
+	}
 	if req.GetLogicalSchemaVersion() > 0 {
 		return req.GetLogicalSchemaVersion()
 	}
-	return req.GetVersion()
+	return req.GetSchemaBarrierTs()
 }
 
 // ReleaseCollection clears all data related to this collection on the querynode

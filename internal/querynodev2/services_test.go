@@ -2482,10 +2482,12 @@ func (suite *ServiceSuite) TestUpdateSchema() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	schema := typeutil.Clone(suite.schema)
+	schema.Version = 100
 	req := &querypb.UpdateSchemaRequest{
-		CollectionID: suite.collectionID,
-		Schema:       suite.schema,
-		Version:      uint64(100),
+		CollectionID:    suite.collectionID,
+		Schema:          schema,
+		SchemaBarrierTs: uint64(100),
 	}
 	manager := suite.node.manager.Collection
 	// reset manager to align default teardown logic
@@ -2496,7 +2498,7 @@ func (suite *ServiceSuite) TestUpdateSchema() {
 	suite.node.manager.Collection = mockManager
 
 	suite.Run("normal", func() {
-		mockManager.EXPECT().UpdateSchema(suite.collectionID, suite.schema, uint64(100)).Return(nil).Once()
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(nil).Once()
 
 		status, err := suite.node.UpdateSchema(ctx, req)
 		suite.NoError(merr.CheckRPCCall(status, err))
@@ -2506,7 +2508,6 @@ func (suite *ServiceSuite) TestUpdateSchema() {
 		req := &querypb.UpdateSchemaRequest{
 			CollectionID:         suite.collectionID,
 			Schema:               suite.schema,
-			Version:              uint64(100),
 			LogicalSchemaVersion: uint64(2),
 			SchemaBarrierTs:      uint64(100),
 		}
@@ -2517,7 +2518,7 @@ func (suite *ServiceSuite) TestUpdateSchema() {
 	})
 
 	suite.Run("manager_returns_error", func() {
-		mockManager.EXPECT().UpdateSchema(suite.collectionID, suite.schema, uint64(100)).Return(merr.WrapErrServiceInternal("mocked")).Once()
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(merr.WrapErrServiceInternal("mocked")).Once()
 
 		status, err := suite.node.UpdateSchema(ctx, req)
 		suite.Error(merr.CheckRPCCall(status, err))

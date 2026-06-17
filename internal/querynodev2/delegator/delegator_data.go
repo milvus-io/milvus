@@ -717,14 +717,14 @@ func (sd *shardDelegator) addDistributionIfVersionOK(version uint64, entries ...
 	return nil
 }
 
+// loadMetaSchemaBarrierTs returns the schema timestamp barrier attached to a
+// load request. Delegator compares it with the latest schema update barrier to
+// reject load results that started before the schema changed.
 func loadMetaSchemaBarrierTs(loadMeta *querypb.LoadMetaInfo) uint64 {
 	if loadMeta == nil {
 		return 0
 	}
-	if loadMeta.GetSchemaBarrierTs() > 0 {
-		return loadMeta.GetSchemaBarrierTs()
-	}
-	return loadMeta.GetSchemaVersion()
+	return loadMeta.GetSchemaBarrierTs()
 }
 
 // LoadGrowing load growing segments locally.

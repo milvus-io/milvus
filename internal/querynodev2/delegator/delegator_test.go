@@ -171,8 +171,8 @@ func (s *DelegatorSuite) SetupTest() {
 			},
 		},
 	}, &querypb.LoadMetaInfo{
-		PartitionIDs:  s.partitionIDs,
-		SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0),
+		PartitionIDs:    s.partitionIDs,
+		SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now(), 0),
 	})
 
 	s.mq = &msgstream.MockMsgStream{}
@@ -218,7 +218,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 				InputFieldIds:  []int64{102},
 				OutputFieldIds: []int64{101, 103}, // invalid output field
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
 		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.Error(err)
@@ -257,7 +257,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 				InputFieldIds:  []int64{102},
 				OutputFieldIds: []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
 		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.NoError(err)
@@ -1412,14 +1412,12 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 		workers[2] = worker2
 
 		worker1.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).RunAndReturn(func(ctx context.Context, usr *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
-			s.Equal(uint64(100), usr.GetVersion())
 			s.Equal(uint64(10), usr.GetLogicalSchemaVersion())
 			s.Equal(uint64(100), usr.GetSchemaBarrierTs())
 			return merr.Success(), nil
 		}).Twice()
 
 		worker2.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).RunAndReturn(func(ctx context.Context, usr *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
-			s.Equal(uint64(100), usr.GetVersion())
 			s.Equal(uint64(10), usr.GetLogicalSchemaVersion())
 			s.Equal(uint64(100), usr.GetSchemaBarrierTs())
 			return merr.Success(), nil
@@ -1520,7 +1518,7 @@ func (s *DelegatorSuite) nextSchemaVersionLoadMeta() *querypb.LoadMetaInfo {
 	if collection := s.manager.Collection.Get(s.collectionID); collection != nil {
 		version = collection.SchemaVersion() + 1
 	}
-	return &querypb.LoadMetaInfo{SchemaVersion: version}
+	return &querypb.LoadMetaInfo{SchemaBarrierTs: version}
 }
 
 func (s *DelegatorSuite) TestRunAnalyzer() {
@@ -2384,7 +2382,7 @@ func TestUpdateSchemaRefreshesCollectionBaselineForSequentialBM25Validation(t *t
 	paramtable.SetNodeID(1)
 	manager := segments.NewManager()
 	oldSchema := newFunctionRuntimeTestSchema()
-	require.NoError(t, manager.Collection.PutOrRef(1000, oldSchema, nil, &querypb.LoadMetaInfo{SchemaVersion: 1}))
+	require.NoError(t, manager.Collection.PutOrRef(1000, oldSchema, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: 1}))
 	defer manager.Collection.Unref(1000, 1)
 
 	worker := cluster.NewMockWorker(t)
@@ -2830,7 +2828,7 @@ func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
 
 	s.Run("alloc function failed", func() {
 		manager := segments.NewManager()
-		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
 		delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.Require().NoError(err)
@@ -2862,7 +2860,7 @@ func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
 	s.Run("init function ", func() {
 		minHashFunctionSchema.OutputFieldIds = []int64{101}
 		manager := segments.NewManager()
-		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
 		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.NoError(err)

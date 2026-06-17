@@ -83,7 +83,7 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 		baseSchema.Version = 7
 		err := cm.PutOrRef(10, baseSchema, mock_segcore.GenTestIndexMeta(10, baseSchema), &querypb.LoadMetaInfo{
 			LoadType:             querypb.LoadType_LoadCollection,
-			SchemaVersion:        50,
+			SchemaBarrierTs:      50,
 			LogicalSchemaVersion: 7,
 		})
 		s.Require().NoError(err)
@@ -216,7 +216,6 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 	// PutOrRef on an existing collection should update its IndexMeta.
 	err := s.cm.PutOrRef(1, schema, newIndexMeta, &querypb.LoadMetaInfo{
 		LoadType:             querypb.LoadType_LoadCollection,
-		SchemaVersion:        100,
 		SchemaBarrierTs:      100,
 		LogicalSchemaVersion: 2,
 	})
@@ -246,8 +245,8 @@ func (s *CollectionManagerSuite) TestPutOrRefKeepsFreshCollectionInLogicalVersio
 	cm := NewCollectionManager()
 	initialSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
 	err := cm.PutOrRef(10, initialSchema, mock_segcore.GenTestIndexMeta(10, initialSchema), &querypb.LoadMetaInfo{
-		LoadType:      querypb.LoadType_LoadCollection,
-		SchemaVersion: 100,
+		LoadType:        querypb.LoadType_LoadCollection,
+		SchemaBarrierTs: 100,
 	})
 	s.Require().NoError(err)
 	defer cm.Unref(10, 1)

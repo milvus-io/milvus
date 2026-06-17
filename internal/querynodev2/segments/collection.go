@@ -100,7 +100,6 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 				zap.Int64("collectionID", collectionID),
 				zap.Uint64("logicalSchemaVersion", logicalSchemaVersion),
 				zap.Uint64("schemaBarrierTs", loadMeta.GetSchemaBarrierTs()),
-				zap.Uint64("legacySchemaVersion", loadMeta.GetSchemaVersion()),
 				zap.Any("schema", schema),
 			)
 		}
@@ -149,6 +148,10 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 	return nil
 }
 
+// getLogicalSchemaVersion returns the monotonic version used to decide whether
+// QueryNode's in-memory collection schema should be refreshed. For new schema
+// messages this is CollectionSchema.Version; fallback is only for old callers
+// that still pass the version separately.
 func getLogicalSchemaVersion(schema *schemapb.CollectionSchema, fallback uint64) uint64 {
 	if schema != nil && schema.GetVersion() > 0 {
 		return uint64(schema.GetVersion())
@@ -156,17 +159,20 @@ func getLogicalSchemaVersion(schema *schemapb.CollectionSchema, fallback uint64)
 	return fallback
 }
 
+// getLoadMetaLogicalSchemaVersion seeds a loaded collection's schema freshness
+// version. A loaded schema with version 0 is a valid fresh collection state, so
+// the schema itself wins over any timestamp barrier carried by load metadata.
 func getLoadMetaLogicalSchemaVersion(schema *schemapb.CollectionSchema, loadMeta *querypb.LoadMetaInfo) uint64 {
 	if schema != nil {
 		return uint64(schema.GetVersion())
 	}
+	if loadMeta == nil {
+		return 0
+	}
 	if loadMeta.GetLogicalSchemaVersion() > 0 {
 		return loadMeta.GetLogicalSchemaVersion()
 	}
-	if loadMeta.GetSchemaVersion() > 0 {
-		return loadMeta.GetSchemaVersion()
-	}
-	return 0
+	return loadMeta.GetSchemaBarrierTs()
 }
 
 func (m *collectionManager) updateMetric() {

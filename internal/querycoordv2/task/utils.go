@@ -192,13 +192,14 @@ func packReleaseSegmentRequest(task *SegmentTask, action *SegmentAction) *queryp
 
 func packLoadMeta(loadType querypb.LoadType, collectionInfo *milvuspb.DescribeCollectionResponse, resourceGroup string, loadFields []int64, partitions ...int64) *querypb.LoadMetaInfo {
 	return &querypb.LoadMetaInfo{
-		LoadType:             loadType,
-		CollectionID:         collectionInfo.GetCollectionID(),
-		PartitionIDs:         partitions,
-		DbName:               collectionInfo.GetDbName(),
-		ResourceGroup:        resourceGroup,
-		LoadFields:           loadFields,
-		SchemaVersion:        collectionInfo.GetUpdateTimestamp(),
+		LoadType:      loadType,
+		CollectionID:  collectionInfo.GetCollectionID(),
+		PartitionIDs:  partitions,
+		DbName:        collectionInfo.GetDbName(),
+		ResourceGroup: resourceGroup,
+		LoadFields:    loadFields,
+		// The update timestamp is a load barrier, not the logical schema version.
+		// QueryNode uses it only to reject stale load results after schema changes.
 		SchemaBarrierTs:      collectionInfo.GetUpdateTimestamp(),
 		LogicalSchemaVersion: uint64(collectionInfo.GetSchema().GetVersion()),
 	}
