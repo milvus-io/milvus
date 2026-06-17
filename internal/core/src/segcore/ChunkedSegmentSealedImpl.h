@@ -1268,6 +1268,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     LoadBatchFieldData(milvus::tracer::TraceContext& trace_ctx,
+                       const SegmentLoadInfo& target_load_info,
                        std::vector<std::pair<std::vector<FieldId>,
                                              proto::segcore::FieldBinlog>>&
                            field_binlog_to_load,
@@ -1287,6 +1288,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     LoadColumnGroups(
+        const SegmentLoadInfo& target_load_info,
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
         std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
@@ -1296,7 +1298,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     // Load column groups from a manifest file path (for external collections)
     void
-    LoadColumnGroups(const std::string& manifest_path,
+    LoadColumnGroups(const SegmentLoadInfo& target_load_info,
+                     const std::string& manifest_path,
                      milvus::OpContext* op_ctx = nullptr);
 
     /**
@@ -1314,6 +1317,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
      */
     void
     LoadColumnGroup(
+        const SegmentLoadInfo& target_load_info,
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
         int64_t index,
@@ -1326,7 +1330,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // for external collections. External collections don't have real PK or
     // timestamp fields in their parquet data, so these must be generated.
     void
-    SynthesizeExternalSystemFields();
+    SynthesizeExternalSystemFields(const SegmentLoadInfo& target_load_info);
 
     /**
      * @brief Reloads columns from the specified field IDs
@@ -1352,19 +1356,21 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             text_indexes_to_load);
 
     /**
-     * @brief Apply load differences to update segment load information
+     * @brief Apply load differences for a target load snapshot
      *
-     * This method processes the differences between current and new load states,
-     * updating the segment's loaded fields and indexes accordingly. It handles
-     * incremental updates during segment reopen operations.
+     * This method processes the differences between current and target load
+     * states, updates runtime resources, and records runtime-only markers into
+     * the staged snapshot for a later publish.
      *
      * @param op_ctx The operation context
-     * @param segment_load_info The segment load information to be updated
+     * @param target_load_info The target load information that drives resource loading
+     * @param staged_load_info Mutable staged load information updated during apply
      * @param load_diff The differences to apply, containing fields and indexes to add/remove
      */
     void
     ApplyLoadDiff(milvus::OpContext* op_ctx,
-                  SegmentLoadInfo& segment_load_info,
+                  const SegmentLoadInfo& target_load_info,
+                  SegmentLoadInfo* staged_load_info,
                   LoadDiff& load_diff);
 
     void
@@ -1376,12 +1382,23 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     RecordDefaultFieldsFilled(const std::vector<FieldId>& field_ids);
 
+    void
+    RecordDefaultFieldsFilled(SegmentLoadInfo& staged_load_info,
+                              const std::vector<FieldId>& field_ids);
+
+    void
+    CreateTextIndexNoPublish(FieldId field_id,
+                             milvus::OpContext* op_ctx = nullptr);
+
     // Atomically records that a text index has been created for `field_id` in
     // the published segment_load_info_. Uses a CAS loop so it is safe whether
     // or not the caller holds reopen_mutex_ (tests call CreateTextIndex
     // directly, outside a Reopen/Load chain).
     void
     RecordTextIndexCreated(FieldId field_id);
+
+    void
+    RecordTextIndexCreated(SegmentLoadInfo& staged_load_info, FieldId field_id);
 
     void
     load_field_data_common(
@@ -1392,6 +1409,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool enable_mmap,
         bool is_proxy_column,
         std::optional<ParquetStatistics> statistics = {},
+        int64_t storage_version = STORAGE_V1,
         milvus::OpContext* op_ctx = nullptr,
         bool is_replace = false);
 
