@@ -302,6 +302,9 @@ class PhyCompareFilterExpr : public Expr {
     bool
     IsStringExpr();
 
+    bool
+    CanUseBothDataFastPath();
+
     template <typename T, typename U, typename FUNC, typename... ValTypes>
     int64_t
     ProcessBothDataChunks(FUNC func,
@@ -606,6 +609,7 @@ class PhyCompareFilterExpr : public Expr {
     int64_t right_current_chunk_pos_{0};
     int64_t current_chunk_id_{0};
     int64_t current_chunk_pos_{0};
+    std::optional<bool> can_use_both_data_sequential_fast_path_;
 
     const segcore::SegmentChunkReader segment_chunk_reader_;
     int64_t batch_size_;

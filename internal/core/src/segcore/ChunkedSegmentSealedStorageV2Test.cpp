@@ -66,6 +66,7 @@
 #include "segcore/SegmentChunkReader.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
+#include "segcore/storagev2translator/GroupCTMeta.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
 #include "storage/FileManager.h"
 #include "storage/Types.h"
@@ -165,6 +166,21 @@ class RawLookupOnlyIndex : public index::ScalarIndex<int64_t> {
     }
 
     mutable size_t last_lookup_offset = 0;
+};
+
+class StorageV2CellTargetGuard {
+ public:
+    explicit StorageV2CellTargetGuard(int64_t bytes)
+        : old_bytes_(segcore::storagev2translator::GetCellTargetSizeBytes()) {
+        segcore::storagev2translator::SetCellTargetSizeBytes(bytes);
+    }
+
+    ~StorageV2CellTargetGuard() {
+        segcore::storagev2translator::SetCellTargetSizeBytes(old_bytes_);
+    }
+
+ private:
+    int64_t old_bytes_;
 };
 }  // namespace
 
@@ -558,6 +574,132 @@ TEST_P(TestChunkSegmentStorageV2, TestCompareExpr) {
     final = query::ExecuteQueryExpr(
         plan, segment.get(), chunk_num * test_data_count, MAX_TIMESTAMP);
     ASSERT_EQ(chunk_num * test_data_count, final.count());
+}
+
+TEST(TestChunkSegmentStorageV2Regression,
+     TestCompareExprFallsBackWhenColumnGroupChunksAreMisaligned) {
+    StorageV2CellTargetGuard cell_target_guard(1 * 1024 * 1024);
+
+    auto schema = std::make_shared<Schema>();
+    auto left_fid = schema->AddDebugField("left", DataType::INT64, false);
+    auto right_fid = schema->AddDebugField("right", DataType::INT64, false);
+    schema->AddDebugField("payload", DataType::VARCHAR, false);
+    schema->AddField(FieldName("ts"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->set_primary_field_id(right_fid);
+
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    const std::string root = "test_compare_expr_misaligned_storage_v2";
+    auto cleanup_status = fs->DeleteDir(root);
+    (void)cleanup_status;
+    ASSERT_TRUE(fs->CreateDir(root + "/0").ok());
+    ASSERT_TRUE(
+        fs->CreateDir(root + "/" + std::to_string(right_fid.get())).ok());
+
+    std::vector<std::string> paths = {
+        root + "/0/10000.parquet",
+        root + "/" + std::to_string(right_fid.get()) + "/10001.parquet"};
+    std::vector<std::vector<int>> column_groups = {{0, 2, 3}, {1}};
+    auto storage_config = milvus_storage::StorageConfig();
+    auto result = milvus_storage::PackedRecordBatchWriter::Make(
+        fs,
+        paths,
+        schema->ConvertToArrowSchema(),
+        storage_config,
+        column_groups,
+        16 * 1024 * 1024,
+        ::parquet::default_writer_properties());
+    ASSERT_TRUE(result.ok());
+    auto writer = result.ValueOrDie();
+
+    constexpr int64_t rows_per_batch = 10000;
+    constexpr int64_t batch_count = 2;
+    auto arrow_schema = schema->ConvertToArrowSchema();
+    for (int64_t batch = 0; batch < batch_count; ++batch) {
+        std::vector<std::shared_ptr<arrow::Array>> arrays;
+        auto start = batch * rows_per_batch;
+        for (int i = 0; i < arrow_schema->fields().size(); ++i) {
+            if (arrow_schema->fields()[i]->type()->id() == arrow::Type::INT64) {
+                std::vector<int64_t> values(rows_per_batch);
+                std::iota(values.begin(), values.end(), start);
+                arrow::Int64Builder builder;
+                ASSERT_TRUE(
+                    builder.AppendValues(values.data(), rows_per_batch).ok());
+                std::shared_ptr<arrow::Array> array;
+                ASSERT_TRUE(builder.Finish(&array).ok());
+                arrays.push_back(array);
+            } else {
+                arrow::StringBuilder builder;
+                std::vector<std::string> values;
+                values.reserve(rows_per_batch);
+                for (int64_t row = 0; row < rows_per_batch; ++row) {
+                    values.emplace_back(2048, 'x');
+                }
+                ASSERT_TRUE(builder.AppendValues(values).ok());
+                std::shared_ptr<arrow::Array> array;
+                ASSERT_TRUE(builder.Finish(&array).ok());
+                arrays.push_back(array);
+            }
+        }
+
+        auto record_batch =
+            arrow::RecordBatch::Make(arrow_schema, rows_per_batch, arrays);
+        ASSERT_TRUE(writer->Write(record_batch).ok());
+    }
+    ASSERT_TRUE(writer->Close().ok());
+
+    const int64_t row_count = rows_per_batch * batch_count;
+    LoadFieldDataInfo load_info;
+    load_info.storage_version = 2;
+    load_info.field_infos.emplace(
+        int64_t(0),
+        FieldBinlogInfo{int64_t(0),
+                        row_count,
+                        std::vector<int64_t>(row_count),
+                        std::vector<int64_t>(row_count * 4),
+                        false,
+                        "",
+                        std::vector<std::string>({paths[0]})});
+    load_info.field_infos.emplace(
+        right_fid.get(),
+        FieldBinlogInfo{right_fid.get(),
+                        row_count,
+                        std::vector<int64_t>(row_count),
+                        std::vector<int64_t>(row_count * 4),
+                        false,
+                        "",
+                        std::vector<std::string>({paths[1]})});
+
+    auto segment = segcore::CreateSealedSegment(
+        schema, nullptr, -1, segcore::SegcoreConfig::default_config(), true);
+    segment->AddFieldDataInfoForSealed(load_info);
+    for (auto& [id, info] : load_info.field_infos) {
+        LoadFieldDataInfo one_field;
+        one_field.storage_version = 2;
+        one_field.field_infos.emplace(id, info);
+        segment->LoadFieldData(one_field);
+    }
+
+    ASSERT_GT(segment->num_chunk_data(left_fid),
+              segment->num_chunk_data(right_fid));
+
+    auto expr =
+        std::make_shared<expr::CompareExpr>(left_fid,
+                                            right_fid,
+                                            milvus::DataType::INT64,
+                                            milvus::DataType::INT64,
+                                            proto::plan::OpType::GreaterEqual);
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+
+    auto final =
+        query::ExecuteQueryExpr(plan, segment.get(), row_count, MAX_TIMESTAMP);
+    ASSERT_EQ(row_count, final.count());
+
+    ASSERT_TRUE(fs->DeleteDir(root).ok());
 }
 
 TEST_P(TestChunkSegmentStorageV2, TestColumnExprWithScalarIndexRawData) {

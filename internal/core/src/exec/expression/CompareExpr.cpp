@@ -35,6 +35,47 @@ PhyCompareFilterExpr::IsStringExpr() {
            expr_->right_data_type_ == DataType::VARCHAR;
 }
 
+bool
+PhyCompareFilterExpr::CanUseBothDataFastPath() {
+    if (is_left_indexed_ || is_right_indexed_ || IsStringExpr()) {
+        return false;
+    }
+
+    // Offset-input path resolves each field's chunk from the row offset
+    // independently, so it does not require left/right chunk boundaries to
+    // align.
+    if (has_offset_input_) {
+        return true;
+    }
+
+    if (can_use_both_data_sequential_fast_path_.has_value()) {
+        return can_use_both_data_sequential_fast_path_.value();
+    }
+
+    auto segment = segment_chunk_reader_.segment_;
+    if (!segment->is_chunked() || segment->type() == SegmentType::Growing) {
+        can_use_both_data_sequential_fast_path_ = true;
+        return true;
+    }
+
+    auto left_chunks = segment->num_chunk_data(left_field_);
+    auto right_chunks = segment->num_chunk_data(right_field_);
+    if (left_chunks <= 0 || right_chunks <= 0 || left_chunks != right_chunks) {
+        can_use_both_data_sequential_fast_path_ = false;
+        return false;
+    }
+
+    for (int64_t i = 0; i <= left_chunks; ++i) {
+        if (segment->num_rows_until_chunk(left_field_, i) !=
+            segment->num_rows_until_chunk(right_field_, i)) {
+            can_use_both_data_sequential_fast_path_ = false;
+            return false;
+        }
+    }
+    can_use_both_data_sequential_fast_path_ = true;
+    return true;
+}
+
 int64_t
 PhyCompareFilterExpr::GetNextBatchSize() {
     auto current_rows = GetCurrentRows();
@@ -225,7 +266,7 @@ PhyCompareFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     SetHasOffsetInput((input != nullptr));
     // For segment both fields has no index, can use SIMD to speed up.
     // Avoiding too much call stack that blocks SIMD.
-    if (!is_left_indexed_ && !is_right_indexed_ && !IsStringExpr()) {
+    if (CanUseBothDataFastPath()) {
         result = ExecCompareExprDispatcherForBothDataSegment(context);
         return;
     }
