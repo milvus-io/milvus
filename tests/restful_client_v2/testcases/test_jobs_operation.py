@@ -3967,6 +3967,7 @@ class TestCreateImportJobNegative(TestBase):
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
 
+    @pytest.mark.L0
     def test_import_job_with_empty_files(self):
         # create collection
         name = gen_collection_name()
@@ -4153,6 +4154,7 @@ class TestCreateImportJobNegative(TestBase):
         c = Collection(name)
         assert c.num_entities == 0
 
+    @pytest.mark.L0
     def test_create_import_job_with_new_user(self):
         # create collection
         name = gen_collection_name()
@@ -4170,54 +4172,63 @@ class TestCreateImportJobNegative(TestBase):
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
         rsp = self.collection_client.collection_create(payload)
+        assert rsp["code"] == 0
         # create new user
-        username = "test_user"
+        username = f"test_user_{uuid4().hex[:8]}"
         password = "12345678"
         payload = {
             "userName": username,
             "password": password
         }
-        self.user_client.user_create(payload)
-        # try to describe collection with new user
-        self.collection_client.api_key = f"{username}:{password}"
+        rsp = self.user_client.user_create(payload)
+        assert rsp["code"] == 0
         try:
-            rsp = self.collection_client.collection_describe(collection_name=name)
-            logger.info(f"describe collection: {rsp}")
-        except Exception as e:
-            logger.error(f"describe collection failed: {e}")
-
-        # upload file to storage
-        data = []
-        auto_id = True
-        enable_dynamic_field = True
-        for i in range(1):
-            tmp = {
-                "word_count": i,
-                "book_describe": f"book_{i}",
-                "book_intro": [np.float32(random.random()) for _ in range(dim)]
+            payload = {
+                "collectionName": name,
+                "files": [[f"missing_file_{uuid4().hex}.json"]],
             }
-            if not auto_id:
-                tmp["book_id"] = i
-            if enable_dynamic_field:
-                tmp.update({f"dynamic_field_{i}": i})
-            data.append(tmp)
+            self.import_job_client.api_key = f"{username}:{password}"
+            rsp = self.import_job_client.create_import_jobs(payload)
+            if rsp["code"] == 0:
+                pytest.skip("authorization is disabled; new-user privilege denial cannot be validated")
+            assert rsp["code"] == 65535
+            assert "PermissionDenied" in rsp["message"]
+            assert "PrivilegeImport" in rsp["message"]
+            assert "permission deny" in rsp["message"]
+        finally:
+            self.import_job_client.api_key = self.api_key
+            self.user_client.api_key = self.api_key
+            self.user_client.user_drop({"userName": username})
 
-        # dump data to file
-        file_name = f"bulk_insert_data_{uuid4()}.json"
-        file_path = f"/tmp/{file_name}"
-        with open(file_path, "w") as f:
-            json.dump(data, f, cls=NumpyEncoder)
-        # upload file to minio storage
-        self.storage_client.upload_file(file_path, file_name)
-
-        # create import job
+    @pytest.mark.L0
+    def test_collection_create_with_reused_payload_and_db_name(self):
+        db1 = f"db1_{uuid4().hex[:8]}"
+        db2 = f"db2_{uuid4().hex[:8]}"
+        name = gen_collection_name()
+        dim = 16
         payload = {
             "collectionName": name,
-            "files": [[file_name]],
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                ]
+            },
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
-        self.import_job_client.api_key = f"{username}:{password}"
-        rsp = self.import_job_client.create_import_jobs(payload)
-        assert rsp['code'] == 1100 and "empty" in rsp['message']
+        for db_name in [db1, db2]:
+            rsp = self.database_client.database_create({"dbName": db_name})
+            assert rsp["code"] == 0
+
+        rsp = self.collection_client.collection_create(payload, db_name=db1)
+        assert rsp["code"] == 0
+        rsp = self.collection_client.collection_create(payload, db_name=db2)
+        assert rsp["code"] == 0
+
+        rsp = self.collection_client.collection_has(db_name=db1, collection_name=name)
+        assert rsp["code"] == 0 and rsp["data"]["has"] is True
+        rsp = self.collection_client.collection_has(db_name=db2, collection_name=name)
+        assert rsp["code"] == 0 and rsp["data"]["has"] is True
 
 
 
@@ -4460,34 +4471,46 @@ class TestGetImportJobProgress(TestBase):
 @pytest.mark.L1
 class TestGetImportJobProgressNegative(TestBase):
 
+    @pytest.mark.L0
     def test_list_job_with_invalid_job_id(self):
 
         # get import job progress with invalid job id
-        job_id_list = ["invalid_job_id", None]
-        for job_id in job_id_list:
-            try:
-                rsp = self.import_job_client.get_import_job_progress(job_id)
-                logger.info(f"job progress: {rsp}")
-            except Exception as e:
-                logger.error(f"get import job progress failed: {e}")
+        job_id_list = [
+            ("invalid_job_id", 1100, "parse job id failed"),
+            (None, 1802, "missing required parameters"),
+        ]
+        for job_id, code, message in job_id_list:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            assert rsp["code"] == code
+            assert message in rsp["message"]
 
     def test_list_job_with_job_id(self):
 
         # get import job progress with invalid job id
-        job_id_list = ["invalid_job_id", None]
-        for job_id in job_id_list:
-            try:
-                rsp = self.import_job_client.get_import_job_progress(job_id)
-                logger.info(f"job progress: {rsp}")
-            except Exception as e:
-                logger.error(f"get import job progress failed: {e}")
+        job_id_list = [
+            ("invalid_job_id", 1100, "parse job id failed"),
+            (None, 1802, "missing required parameters"),
+        ]
+        for job_id, code, message in job_id_list:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            assert rsp["code"] == code
+            assert message in rsp["message"]
 
     def test_list_job_with_new_user(self):
         # create new user
-        user_name = "test_user"
+        user_name = f"test_user_{uuid4().hex[:8]}"
         password = "12345678"
-        self.user_client.user_create({
+        rsp = self.user_client.user_create({
             "userName": user_name,
             "password": password,
         })
-
+        assert rsp["code"] == 0
+        try:
+            self.import_job_client.api_key = f"{user_name}:{password}"
+            rsp = self.import_job_client.get_import_job_progress("1")
+            assert rsp["code"] == 2101
+            assert "import job does not exist" in rsp["message"]
+        finally:
+            self.import_job_client.api_key = self.api_key
+            self.user_client.api_key = self.api_key
+            self.user_client.user_drop({"userName": user_name})
