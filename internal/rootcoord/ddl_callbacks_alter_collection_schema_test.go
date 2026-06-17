@@ -935,16 +935,104 @@ func mustParseInt64(s string) int64 {
 	return v
 }
 
-func TestBuildSchemaForDropFunction(t *testing.T) {
+func TestBuildSchemaForDetachFunction(t *testing.T) {
 	t.Run("function not found", func(t *testing.T) {
 		coll := &model.Collection{
 			Functions: []*model.Function{
 				{Name: "func1", OutputFieldIDs: []int64{103}},
 			},
 		}
-		_, _, _, err := buildSchemaForDropFunction(coll, "nonexistent")
+		_, _, _, err := buildSchemaForDetachFunction(coll, "nonexistent")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "function not found")
+	})
+
+	t.Run("detach function keeps output fields", func(t *testing.T) {
+		coll := &model.Collection{
+			Name: "test_coll",
+			Fields: []*model.Field{
+				{FieldID: 100, Name: "pk"},
+				{FieldID: 101, Name: "text"},
+				{FieldID: 102, Name: "minhash_vec", IsFunctionOutput: true},
+				{FieldID: 103, Name: "dense_vec"},
+			},
+			Functions: []*model.Function{
+				{
+					Name:             "minhash_func",
+					Type:             schemapb.FunctionType_MinHash,
+					InputFieldIDs:    []int64{101},
+					InputFieldNames:  []string{"text"},
+					OutputFieldIDs:   []int64{102},
+					OutputFieldNames: []string{"minhash_vec"},
+				},
+				{
+					Name:             "embed_func",
+					Type:             schemapb.FunctionType_TextEmbedding,
+					InputFieldIDs:    []int64{101},
+					InputFieldNames:  []string{"text"},
+					OutputFieldIDs:   []int64{103},
+					OutputFieldNames: []string{"dense_vec"},
+				},
+			},
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.MaxFieldIDKey, Value: "103"},
+			},
+			SchemaVersion: 3,
+		}
+
+		schema, properties, droppedFieldIDs, err := buildSchemaForDetachFunction(coll, "minhash_func")
+		require.NoError(t, err)
+		require.Empty(t, droppedFieldIDs)
+		require.Equal(t, coll.Properties, properties)
+		require.Equal(t, int32(4), schema.Version)
+
+		require.Len(t, schema.Fields, 4)
+		var minhashField *schemapb.FieldSchema
+		for _, field := range schema.Fields {
+			if field.GetName() == "minhash_vec" {
+				minhashField = field
+				break
+			}
+		}
+		require.NotNil(t, minhashField)
+		require.False(t, minhashField.GetIsFunctionOutput())
+		require.Len(t, schema.Functions, 1)
+		require.Equal(t, "embed_func", schema.Functions[0].GetName())
+	})
+
+	t.Run("detach bm25 function fails", func(t *testing.T) {
+		coll := &model.Collection{
+			Functions: []*model.Function{
+				{Name: "bm25_func", Type: schemapb.FunctionType_BM25, OutputFieldIDs: []int64{102}},
+			},
+		}
+		_, _, _, err := buildSchemaForDetachFunction(coll, "bm25_func")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "BM25 function must be dropped with its output field")
+	})
+}
+
+func TestBuildSchemaForDropFunctionField(t *testing.T) {
+	t.Run("function not found", func(t *testing.T) {
+		coll := &model.Collection{
+			Functions: []*model.Function{
+				{Name: "func1", OutputFieldIDs: []int64{103}},
+			},
+		}
+		_, _, _, err := buildSchemaForDropFunctionField(coll, "nonexistent")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "function not found")
+	})
+
+	t.Run("unsupported function type", func(t *testing.T) {
+		coll := &model.Collection{
+			Functions: []*model.Function{
+				{Name: "embed_func", Type: schemapb.FunctionType_TextEmbedding, OutputFieldIDs: []int64{103}},
+			},
+		}
+		_, _, _, err := buildSchemaForDropFunctionField(coll, "embed_func")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "only BM25 and MinHash functions support dropping output fields")
 	})
 
 	t.Run("drop function removes function and output fields", func(t *testing.T) {
@@ -959,6 +1047,7 @@ func TestBuildSchemaForDropFunction(t *testing.T) {
 			Functions: []*model.Function{
 				{
 					Name:             "embedding_func",
+					Type:             schemapb.FunctionType_BM25,
 					InputFieldIDs:    []int64{101},
 					InputFieldNames:  []string{"text"},
 					OutputFieldIDs:   []int64{103},
@@ -968,7 +1057,7 @@ func TestBuildSchemaForDropFunction(t *testing.T) {
 			SchemaVersion: 5,
 		}
 
-		schema, properties, droppedFieldIDs, err := buildSchemaForDropFunction(coll, "embedding_func")
+		schema, properties, droppedFieldIDs, err := buildSchemaForDropFunctionField(coll, "embedding_func")
 		require.NoError(t, err)
 		require.Equal(t, []int64{103}, droppedFieldIDs)
 
@@ -1000,12 +1089,14 @@ func TestBuildSchemaForDropFunction(t *testing.T) {
 			Functions: []*model.Function{
 				{
 					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
 					InputFieldIDs:    []int64{101},
 					OutputFieldIDs:   []int64{102},
 					OutputFieldNames: []string{"sparse_vec"},
 				},
 				{
 					Name:             "embed_func",
+					Type:             schemapb.FunctionType_TextEmbedding,
 					InputFieldIDs:    []int64{101},
 					OutputFieldIDs:   []int64{103},
 					OutputFieldNames: []string{"dense_vec"},
@@ -1014,7 +1105,7 @@ func TestBuildSchemaForDropFunction(t *testing.T) {
 			SchemaVersion: 3,
 		}
 
-		schema, _, droppedFieldIDs, err := buildSchemaForDropFunction(coll, "bm25_func")
+		schema, _, droppedFieldIDs, err := buildSchemaForDropFunctionField(coll, "bm25_func")
 		require.NoError(t, err)
 		require.Equal(t, []int64{102}, droppedFieldIDs)
 

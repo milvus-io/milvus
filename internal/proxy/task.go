@@ -1144,7 +1144,7 @@ func (t *alterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
 
 	switch id := dropReq.GetIdentifier().(type) {
 	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FunctionName:
-		return validateDropFunction(t.oldSchema, id.FunctionName)
+		return validateDropFunction(t.oldSchema, id.FunctionName, dropReq.GetDropFunctionOutputFields())
 
 	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId:
 		for _, f := range t.oldSchema.Fields {
@@ -1314,11 +1314,7 @@ func validateDropStructArrayField(schema *schemapb.CollectionSchema, sf *schemap
 	return nil
 }
 
-// validateDropFunction checks that the function exists, and that the cascade
-// removal of its output fields would not leave the collection without any
-// vector field. Without this check, a user told to "drop function first" by
-// validateDropField could end up with an unsearchable collection.
-func validateDropFunction(schema *schemapb.CollectionSchema, functionName string) error {
+func validateDropFunction(schema *schemapb.CollectionSchema, functionName string, dropOutputFields bool) error {
 	if functionName == "" {
 		return merr.WrapErrParameterInvalidMsg("function name is empty")
 	}
@@ -1334,7 +1330,19 @@ func validateDropFunction(schema *schemapb.CollectionSchema, functionName string
 		return merr.WrapErrParameterInvalidMsg("function not found: %s", functionName)
 	}
 
-	// Cascade removes the function's output fields; refuse if it removes all vectors.
+	if !dropOutputFields {
+		if targetFunc.GetType() == schemapb.FunctionType_BM25 {
+			return merr.WrapErrParameterInvalidMsg("BM25 function must be dropped with its output field in drop_function_field interface: %s", functionName)
+		}
+		return nil
+	}
+
+	switch targetFunc.GetType() {
+	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
+	default:
+		return merr.WrapErrParameterInvalidMsg("only BM25 and MinHash functions support dropping output fields: %s", functionName)
+	}
+
 	removedVectors := 0
 	for _, name := range targetFunc.OutputFieldNames {
 		if f := typeutil.GetFieldByName(schema, name); f != nil && typeutil.IsVectorType(f.DataType) {
