@@ -1044,7 +1044,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 func (t *searchTask) skipRequeryByNamespacePartitionMode() bool {
 	return t.schema != nil &&
 		t.schema.CollectionSchema != nil &&
-		common.IsNamespaceModePartition(t.schema.CollectionSchema.GetProperties()...)
+		common.IsNamespaceModePartition(t.schema.GetProperties()...)
 }
 
 // convertPlaceholderIfNeeded converts fp32 vectors to fp16/bf16 if the target field uses lower precision.
