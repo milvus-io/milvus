@@ -35,7 +35,6 @@ add_subdirectory(boost_ext)
 add_subdirectory(rocksdb)
 add_subdirectory(rdkafka)
 add_subdirectory(simdjson)
-add_subdirectory(bsoncxx)
 add_subdirectory(tantivy)
 
 if (LINUX)

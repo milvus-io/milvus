@@ -31,7 +31,7 @@
 
 #include "boost/container/vector.hpp"
 #include "boost/cstdint.hpp"
-#include "bsoncxx/array/view.hpp"
+#include "common/bson_view.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/Json.h"
@@ -1235,8 +1235,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                         return;
                     }
                     auto sub_array = milvus::BsonView::GetNthElementInArray<
-                        bsoncxx::array::view>(array_value.value().data(),
-                                              array_index);
+                        milvus::bson::array_view>(array_value.value().data(),
+                                                  array_index);
                     if (!sub_array.has_value()) {
                         res_view[row_id] =
                             (op_type == proto::plan::OpType::NotEqual);

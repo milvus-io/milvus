@@ -143,10 +143,9 @@ set( MILVUS_THIRDPARTY_SRC  ${PROJECT_SOURCE_DIR}/thirdparty )
 # self-installed dynamic libraries will be correctly linked by excutable
 set( CMAKE_INSTALL_RPATH "/usr/lib" "${CMAKE_INSTALL_PREFIX}/lib" "${CMAKE_INSTALL_PREFIX}/lib64" )
 set( CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE )
-# FetchContent-built shared libs (libbson, libbsoncxx, etc.) are placed in
-# ${CMAKE_BINARY_DIR}/lib. The linker needs -rpath-link to resolve transitive
-# shared library dependencies (e.g. libbsoncxx.so -> libbson-1.0.so) when
-# linking test binaries.
+# The FetchContent-built libbson shared lib is placed in ${CMAKE_BINARY_DIR}/lib.
+# The linker needs -rpath-link to resolve it (e.g. libmilvus_core.so ->
+# libbson-1.0.so) when linking test binaries.
 set( CMAKE_BUILD_RPATH "${CMAKE_BINARY_DIR}/lib" )
 
 # **************************** Dependencies ****************************
@@ -186,6 +185,7 @@ find_package(gflags REQUIRED)
 find_package(xsimd REQUIRED)
 find_package(unordered_dense REQUIRED)
 find_package(absl REQUIRED)
+find_package(bson-1.0 REQUIRED)
 find_package(simde REQUIRED)
 find_package(milvus-common REQUIRED)
 if (LINUX)

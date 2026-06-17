@@ -60,8 +60,10 @@ case "${unameOut}" in
       export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$MILVUS_LIB_DIRS"
       export RPATH=$MILVUS_LIB_DIRS;;
     Darwin*)
-      # detect llvm version by valid list (supports LLVM 14-18)
-      for llvm_version in 18 17 16 15 14 NOT_FOUND ; do
+      # detect llvm version by valid list (supports LLVM 14-21)
+      # Prefer 19+ on macOS: libc++ 17/18 has a chrono operator<< that conflicts
+      # with arrow's vendored date library; libc++ 19 resolves it.
+      for llvm_version in 21 20 19 18 17 16 15 14 NOT_FOUND ; do
         if brew ls --versions llvm@${llvm_version} > /dev/null 2>&1; then
           break
         fi

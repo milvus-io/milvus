@@ -1,7 +1,4 @@
-#include <bsoncxx/builder/basic/array.hpp>
-#include <bsoncxx/builder/basic/document.hpp>
-#include <bsoncxx/types.hpp>
-#include <bsoncxx/types/bson_value/view.hpp>
+#include <bson/bson.h>
 #include <stddef.h>
 #include <cstdint>
 #include <iostream>
@@ -15,11 +12,7 @@
 #include <utility>
 #include <vector>
 
-#include "bsoncxx/array/element.hpp"
-#include "bsoncxx/array/view.hpp"
-#include "bsoncxx/builder/basic/kvp.hpp"
-#include "bsoncxx/document/element.hpp"
-#include "bsoncxx/document/view.hpp"
+#include "common/bson_shim.h"
 #include "common/bson_view.h"
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
@@ -44,15 +37,18 @@ TEST_F(BsonViewTest, ConstructorTest) {
 
 TEST_F(BsonViewTest, ParseAsValueAtOffsetTest) {
     // Create a BSON document with various types
-    bsoncxx::builder::basic::document doc;
-    doc.append(bsoncxx::builder::basic::kvp("int32_field", 42));
-    doc.append(bsoncxx::builder::basic::kvp("double_field", 3.14159));
-    doc.append(bsoncxx::builder::basic::kvp("bool_field", true));
-    doc.append(bsoncxx::builder::basic::kvp("string_field", "test string"));
+    bson_t doc;
+    bson_init(&doc);
+    bson_append_int32(&doc, "int32_field", -1, 42);
+    bson_append_double(&doc, "double_field", -1, 3.14159);
+    bson_append_bool(&doc, "bool_field", -1, true);
+    bson_append_utf8(&doc, "string_field", -1, "test string", -1);
 
-    BsonView view(doc.view().data(), doc.view().length());
+    const uint8_t* data = bson_get_data(&doc);
+    uint32_t len = doc.len;
+    BsonView view(data, len);
 
-    auto offsets = BsonBuilder::ExtractBsonKeyOffsets(doc.view());
+    auto offsets = BsonBuilder::ExtractBsonKeyOffsets(data, len);
     for (const auto& offset : offsets) {
         std::cout << offset.first << " " << offset.second << std::endl;
     }
@@ -76,17 +72,20 @@ TEST_F(BsonViewTest, ParseAsValueAtOffsetTest) {
     auto string_val = view.ParseAsValueAtOffset<std::string>(offsets[3].second);
     EXPECT_TRUE(string_val.has_value());
     EXPECT_EQ(string_val.value(), "test string");
+
+    bson_destroy(&doc);
 }
 
 TEST_F(BsonViewTest, ParseAsArrayAtOffsetTest) {
     // Test case 1: offset = 0 (whole array)
     {
-        bsoncxx::builder::basic::array arr;
-        arr.append("value1");
-        arr.append(42);
-        arr.append(true);
+        bson_t arr;
+        bson_init(&arr);
+        bson_append_utf8(&arr, "0", -1, "value1", -1);
+        bson_append_int32(&arr, "1", -1, 42);
+        bson_append_bool(&arr, "2", -1, true);
 
-        BsonView view(arr.view().data(), arr.view().length());
+        BsonView view(bson_get_data(&arr), arr.len);
         auto array_view = view.ParseAsArrayAtOffset(0);
 
         // Verify array content
@@ -94,26 +93,35 @@ TEST_F(BsonViewTest, ParseAsArrayAtOffsetTest) {
         EXPECT_EQ(
             std::distance(array_view.value().begin(), array_view.value().end()),
             3);
-        EXPECT_STREQ(array_view.value()[0].get_string().value.data(), "value1");
-        EXPECT_EQ(array_view.value()[1].get_int32(), 42);
-        EXPECT_TRUE(array_view.value()[2].get_bool());
+
+        auto it = array_view.value().begin();
+        EXPECT_STREQ(std::string(it->get_string().value).c_str(), "value1");
+        ++it;
+        EXPECT_EQ(it->get_int32().value, 42);
+        ++it;
+        EXPECT_TRUE(it->get_bool().value);
+
+        bson_destroy(&arr);
     }
 
     // Test case 2: offset != 0 (array in document)
     {
-        bsoncxx::builder::basic::array arr;
-        arr.append("array_value1");
-        arr.append(123);
-        arr.append(3.14159);
+        bson_t doc;
+        bson_init(&doc);
+        bson_append_utf8(&doc, "top_field", -1, "top_value", -1);
+        bson_t arr;
+        bson_append_array_begin(&doc, "array_field", -1, &arr);
+        bson_append_utf8(&arr, "0", -1, "array_value1", -1);
+        bson_append_int32(&arr, "1", -1, 123);
+        bson_append_double(&arr, "2", -1, 3.14159);
+        bson_append_array_end(&doc, &arr);
 
-        bsoncxx::builder::basic::document doc;
-        doc.append(bsoncxx::builder::basic::kvp("top_field", "top_value"));
-        doc.append(bsoncxx::builder::basic::kvp("array_field", arr));
-
-        BsonView view(doc.view().data(), doc.view().length());
+        const uint8_t* data = bson_get_data(&doc);
+        uint32_t len = doc.len;
+        BsonView view(data, len);
 
         // Find the offset of the array
-        auto offsets = BsonBuilder::ExtractBsonKeyOffsets(doc.view());
+        auto offsets = BsonBuilder::ExtractBsonKeyOffsets(data, len);
         size_t array_offset = 0;
         for (const auto& offset : offsets) {
             if (offset.first == "/array_field") {
@@ -128,202 +136,249 @@ TEST_F(BsonViewTest, ParseAsArrayAtOffsetTest) {
         EXPECT_EQ(
             std::distance(array_view.value().begin(), array_view.value().end()),
             3);
-        EXPECT_STREQ(array_view.value()[0].get_string().value.data(),
+
+        auto it = array_view.value().begin();
+        EXPECT_STREQ(std::string(it->get_string().value).c_str(),
                      "array_value1");
-        EXPECT_EQ(array_view.value()[1].get_int32(), 123);
-        EXPECT_DOUBLE_EQ(array_view.value()[2].get_double(), 3.14159);
+        ++it;
+        EXPECT_EQ(it->get_int32().value, 123);
+        ++it;
+        EXPECT_DOUBLE_EQ(it->get_double().value, 3.14159);
+
+        bson_destroy(&doc);
     }
 
     // Test case 4: Error cases
     {
-        bsoncxx::builder::basic::document doc;
-        doc.append(bsoncxx::builder::basic::kvp("field", "value"));
-        BsonView view(doc.view().data(), doc.view().length());
+        bson_t doc;
+        bson_init(&doc);
+        bson_append_utf8(&doc, "field", -1, "value", -1);
+        BsonView view(bson_get_data(&doc), doc.len);
 
         // Test invalid offset (out of range)
         EXPECT_THROW(view.ParseAsArrayAtOffset(1000), std::runtime_error);
+
+        bson_destroy(&doc);
     }
 }
 
 TEST_F(BsonViewTest, FindByPathTest) {
     // Create a complex nested BSON document
-    bsoncxx::builder::basic::document nested_doc;
-    nested_doc.append(bsoncxx::builder::basic::kvp("nested_field", "value"));
+    bson_t doc;
+    bson_init(&doc);
+    bson_t nested_doc;
+    bson_append_document_begin(&doc, "level1", -1, &nested_doc);
+    bson_append_utf8(&nested_doc, "nested_field", -1, "value", -1);
+    bson_append_document_end(&doc, &nested_doc);
+    bson_append_utf8(&doc, "simple_field", -1, "simple_value", -1);
 
-    bsoncxx::builder::basic::document doc;
-    doc.append(bsoncxx::builder::basic::kvp("level1", nested_doc));
-    doc.append(bsoncxx::builder::basic::kvp("simple_field", "simple_value"));
-
-    BsonView view(doc.view().data(), doc.view().length());
+    const uint8_t* data = bson_get_data(&doc);
+    uint32_t len = doc.len;
+    BsonView view(data, len);
+    milvus::bson::document_view doc_view(data, len);
 
     // Test finding nested field
     std::vector<std::string> path = {"level1", "nested_field"};
-    auto value = view.FindByPath(doc.view(), path);
+    auto value = view.FindByPath(doc_view, path);
     EXPECT_TRUE(value.has_value());
-    EXPECT_STREQ(value.value().get_string().value.data(), "value");
+    EXPECT_STREQ(std::string(value.value().get_string().value).c_str(),
+                 "value");
 
     // Test finding simple field
     path = {"simple_field"};
-    value = view.FindByPath(doc.view(), path);
+    value = view.FindByPath(doc_view, path);
     EXPECT_TRUE(value.has_value());
-    EXPECT_STREQ(value.value().get_string().value.data(), "simple_value");
+    EXPECT_STREQ(std::string(value.value().get_string().value).c_str(),
+                 "simple_value");
 
     // Test non-existent path
     path = {"non_existent"};
-    value = view.FindByPath(doc.view(), path);
+    value = view.FindByPath(doc_view, path);
     EXPECT_FALSE(value.has_value());
 
     // Test invalid nested path
     path = {"level1", "non_existent"};
-    value = view.FindByPath(doc.view(), path);
+    value = view.FindByPath(doc_view, path);
     EXPECT_FALSE(value.has_value());
+
+    bson_destroy(&doc);
 }
 
 TEST_F(BsonViewTest, GetNthElementInArrayTest) {
     // Create a BSON array with mixed types
-    bsoncxx::builder::basic::array arr;
-    arr.append("string_item");
-    arr.append(42);
-    arr.append(true);
-    arr.append(3.14159);
+    bson_t arr;
+    bson_init(&arr);
+    bson_append_utf8(&arr, "0", -1, "string_item", -1);
+    bson_append_int32(&arr, "1", -1, 42);
+    bson_append_bool(&arr, "2", -1, true);
+    bson_append_double(&arr, "3", -1, 3.14159);
+
+    const uint8_t* data = bson_get_data(&arr);
 
     // Test string element
-    auto string_val =
-        BsonView::GetNthElementInArray<std::string>(arr.view().data(), 0);
+    auto string_val = BsonView::GetNthElementInArray<std::string>(data, 0);
     EXPECT_TRUE(string_val.has_value());
     EXPECT_EQ(string_val.value(), "string_item");
 
     // Test int32 element
-    auto int_val =
-        BsonView::GetNthElementInArray<int32_t>(arr.view().data(), 1);
+    auto int_val = BsonView::GetNthElementInArray<int32_t>(data, 1);
     EXPECT_TRUE(int_val.has_value());
     EXPECT_EQ(int_val.value(), 42);
 
     // Test bool element
-    auto bool_val = BsonView::GetNthElementInArray<bool>(arr.view().data(), 2);
+    auto bool_val = BsonView::GetNthElementInArray<bool>(data, 2);
     EXPECT_TRUE(bool_val.has_value());
     EXPECT_TRUE(bool_val.value());
 
     // Test double element
-    auto double_val =
-        BsonView::GetNthElementInArray<double>(arr.view().data(), 3);
+    auto double_val = BsonView::GetNthElementInArray<double>(data, 3);
     EXPECT_TRUE(double_val.has_value());
     EXPECT_DOUBLE_EQ(double_val.value(), 3.14159);
 
     // Test out of bounds
-    auto out_of_bounds =
-        BsonView::GetNthElementInArray<std::string>(arr.view().data(), 10);
+    auto out_of_bounds = BsonView::GetNthElementInArray<std::string>(data, 10);
     EXPECT_FALSE(out_of_bounds.has_value());
 
     // Test invalid type conversion
-    auto invalid_type =
-        BsonView::GetNthElementInArray<std::string>(arr.view().data(), 1);
+    auto invalid_type = BsonView::GetNthElementInArray<std::string>(data, 1);
     EXPECT_FALSE(invalid_type.has_value());
+
+    bson_destroy(&arr);
 }
 
 TEST_F(BsonViewTest, ParseBsonFieldTest) {
     // Create a simple BSON document
-    bsoncxx::builder::basic::document doc;
-    doc.append(bsoncxx::builder::basic::kvp("test_field", "test_value"));
+    bson_t doc;
+    bson_init(&doc);
+    bson_append_utf8(&doc, "test_field", -1, "test_value", -1);
 
-    BsonView view(doc.view().data(), doc.view().length());
+    const uint8_t* data = bson_get_data(&doc);
+    BsonView view(data, doc.len);
 
     // Test field parsing
-    auto field = view.ParseBsonField(doc.view().data(), 4);
-    EXPECT_EQ(field.type, bsoncxx::type::k_string);
+    auto field = view.ParseBsonField(data, 4);
+    EXPECT_EQ(field.type, milvus::bson::type::k_string);
     EXPECT_EQ(field.key, "test_field");
     EXPECT_NE(field.value_ptr, nullptr);
+
+    bson_destroy(&doc);
 }
 
 TEST_F(BsonViewTest, GetValueFromElementTest) {
     // Create a BSON document with various types
-    bsoncxx::builder::basic::document doc;
-    doc.append(bsoncxx::builder::basic::kvp("int32_field", 42));
-    doc.append(bsoncxx::builder::basic::kvp("double_field", 3.14159));
-    doc.append(bsoncxx::builder::basic::kvp("bool_field", true));
-    doc.append(bsoncxx::builder::basic::kvp("string_field", "test string"));
+    bson_t doc;
+    bson_init(&doc);
+    bson_append_int32(&doc, "int32_field", -1, 42);
+    bson_append_double(&doc, "double_field", -1, 3.14159);
+    bson_append_bool(&doc, "bool_field", -1, true);
+    bson_append_utf8(&doc, "string_field", -1, "test string", -1);
 
-    auto view = doc.view();
+    milvus::bson::document_view view(bson_get_data(&doc), doc.len);
+
+    // Collect elements by key for lookup
+    auto find_elem = [&](std::string_view key) -> milvus::bson::element {
+        for (auto&& e : view) {
+            if (e.key() == key) {
+                return e;
+            }
+        }
+        return milvus::bson::element();
+    };
 
     // Test int32
     auto int32_val =
-        BsonView::GetValueFromElement<int32_t>(view["int32_field"]);
+        BsonView::GetValueFromElement<int32_t>(find_elem("int32_field"));
     EXPECT_TRUE(int32_val.has_value());
     EXPECT_EQ(int32_val.value(), 42);
 
     // Test double
     auto double_val =
-        BsonView::GetValueFromElement<double>(view["double_field"]);
-    EXPECT_TRUE(double_val.has_value());
-    EXPECT_DOUBLE_EQ(double_val.value(), 3.14159);
-
-    // Test bool
-    auto bool_val = BsonView::GetValueFromElement<bool>(view["bool_field"]);
-    EXPECT_TRUE(bool_val.has_value());
-    EXPECT_TRUE(bool_val.value());
-
-    // Test string
-    auto string_val =
-        BsonView::GetValueFromElement<std::string>(view["string_field"]);
-    EXPECT_TRUE(string_val.has_value());
-    EXPECT_EQ(string_val.value(), "test string");
-
-    // Test string_view
-    auto string_view_val =
-        BsonView::GetValueFromElement<std::string_view>(view["string_field"]);
-    EXPECT_TRUE(string_view_val.has_value());
-    EXPECT_EQ(string_view_val.value(), "test string");
-
-    // Test invalid type conversion
-    auto invalid_val =
-        BsonView::GetValueFromElement<std::string>(view["int32_field"]);
-    EXPECT_FALSE(invalid_val.has_value());
-}
-
-TEST_F(BsonViewTest, GetValueFromBsonViewTest) {
-    // Create a BSON document with various types
-    bsoncxx::builder::basic::document doc;
-    doc.append(bsoncxx::builder::basic::kvp("int32_field", 42));
-    doc.append(bsoncxx::builder::basic::kvp("double_field", 3.14159));
-    doc.append(bsoncxx::builder::basic::kvp("bool_field", true));
-    doc.append(bsoncxx::builder::basic::kvp("string_field", "test string"));
-
-    auto view = doc.view();
-
-    // Test int32
-    auto int32_val = BsonView::GetValueFromBsonView<int32_t>(
-        view["int32_field"].get_value());
-    EXPECT_TRUE(int32_val.has_value());
-    EXPECT_EQ(int32_val.value(), 42);
-
-    // Test double
-    auto double_val = BsonView::GetValueFromBsonView<double>(
-        view["double_field"].get_value());
+        BsonView::GetValueFromElement<double>(find_elem("double_field"));
     EXPECT_TRUE(double_val.has_value());
     EXPECT_DOUBLE_EQ(double_val.value(), 3.14159);
 
     // Test bool
     auto bool_val =
-        BsonView::GetValueFromBsonView<bool>(view["bool_field"].get_value());
+        BsonView::GetValueFromElement<bool>(find_elem("bool_field"));
     EXPECT_TRUE(bool_val.has_value());
     EXPECT_TRUE(bool_val.value());
 
     // Test string
-    auto string_val = BsonView::GetValueFromBsonView<std::string>(
-        view["string_field"].get_value());
+    auto string_val =
+        BsonView::GetValueFromElement<std::string>(find_elem("string_field"));
+    EXPECT_TRUE(string_val.has_value());
+    EXPECT_EQ(string_val.value(), "test string");
+
+    // Test string_view
+    auto string_view_val = BsonView::GetValueFromElement<std::string_view>(
+        find_elem("string_field"));
+    EXPECT_TRUE(string_view_val.has_value());
+    EXPECT_EQ(string_view_val.value(), "test string");
+
+    // Test invalid type conversion
+    auto invalid_val =
+        BsonView::GetValueFromElement<std::string>(find_elem("int32_field"));
+    EXPECT_FALSE(invalid_val.has_value());
+
+    bson_destroy(&doc);
+}
+
+TEST_F(BsonViewTest, GetValueFromBsonViewTest) {
+    // Create a BSON document with various types
+    bson_t doc;
+    bson_init(&doc);
+    bson_append_int32(&doc, "int32_field", -1, 42);
+    bson_append_double(&doc, "double_field", -1, 3.14159);
+    bson_append_bool(&doc, "bool_field", -1, true);
+    bson_append_utf8(&doc, "string_field", -1, "test string", -1);
+
+    milvus::bson::document_view view(bson_get_data(&doc), doc.len);
+
+    auto find_value = [&](std::string_view key) -> milvus::bson::value_view {
+        for (auto&& e : view) {
+            if (e.key() == key) {
+                return e.get_value();
+            }
+        }
+        return milvus::bson::value_view();
+    };
+
+    // Test int32
+    auto int32_val =
+        BsonView::GetValueFromBsonView<int32_t>(find_value("int32_field"));
+    EXPECT_TRUE(int32_val.has_value());
+    EXPECT_EQ(int32_val.value(), 42);
+
+    // Test double
+    auto double_val =
+        BsonView::GetValueFromBsonView<double>(find_value("double_field"));
+    EXPECT_TRUE(double_val.has_value());
+    EXPECT_DOUBLE_EQ(double_val.value(), 3.14159);
+
+    // Test bool
+    auto bool_val =
+        BsonView::GetValueFromBsonView<bool>(find_value("bool_field"));
+    EXPECT_TRUE(bool_val.has_value());
+    EXPECT_TRUE(bool_val.value());
+
+    // Test string
+    auto string_val =
+        BsonView::GetValueFromBsonView<std::string>(find_value("string_field"));
     EXPECT_TRUE(string_val.has_value());
     EXPECT_EQ(string_val.value(), "test string");
 
     // Test string_view
     auto string_view_val = BsonView::GetValueFromBsonView<std::string_view>(
-        view["string_field"].get_value());
+        find_value("string_field"));
     EXPECT_TRUE(string_view_val.has_value());
     EXPECT_EQ(string_view_val.value(), "test string");
 
     // Test invalid type conversion
-    auto invalid_val = BsonView::GetValueFromBsonView<std::string>(
-        view["int32_field"].get_value());
+    auto invalid_val =
+        BsonView::GetValueFromBsonView<std::string>(find_value("int32_field"));
     EXPECT_FALSE(invalid_val.has_value());
+
+    bson_destroy(&doc);
 }
 
 }  // namespace milvus::index
