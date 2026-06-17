@@ -241,7 +241,7 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 		var ok bool
 		diskPQCodeBudgetGBRatio, ok = indexParams[DiskPQCodeBudgetRatioKey]
 		if !ok {
-			diskPQCodeBudgetGBRatio = params.CommonCfg.AiSAQCfg.DiskPQCodeBudgetGBRatio.GetValue()
+			diskPQCodeBudgetGBRatio = strconv.Itoa(0)
 		}
 		maxDegree, ok = indexParams[MaxDegreeKey]
 		if !ok {
