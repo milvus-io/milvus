@@ -7642,13 +7642,6 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		Name:     "sparse_bm25",
 		DataType: schemapb.DataType_SparseFloatVector,
 	}
-	minHashOutputField := &schemapb.FieldSchema{
-		Name:     "minhash_binary",
-		DataType: schemapb.DataType_BinaryVector,
-		TypeParams: []*commonpb.KeyValuePair{
-			{Key: common.DimKey, Value: "32"},
-		},
-	}
 
 	// BM25 function schema: input "text", output "sparse_bm25".
 	functionSchema := &schemapb.FunctionSchema{
@@ -7657,10 +7650,29 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		InputFieldNames:  []string{"text"},
 		OutputFieldNames: []string{"sparse_bm25"},
 	}
+	functionOnlyOldSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+	functionOnlyOldSchema.Fields = append(functionOnlyOldSchema.Fields, &schemapb.FieldSchema{
+		FieldID:  102,
+		Name:     "existing_minhash_output",
+		DataType: schemapb.DataType_BinaryVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "4096"},
+		},
+	})
+	minHashFunctionOnlySchema := &schemapb.FunctionSchema{
+		Name:             "minhash_existing_func",
+		Type:             schemapb.FunctionType_MinHash,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"existing_minhash_output"},
+		Params: []*commonpb.KeyValuePair{
+			{Key: "num_hashes", Value: "128"},
+			{Key: "shingle_size", Value: "3"},
+			{Key: "hash_function", Value: "xxhash64"},
+			{Key: "seed", Value: "42"},
+		},
+	}
 
-	buildAddFunctionRequest := func(field *schemapb.FieldSchema, function *schemapb.FunctionSchema) *milvuspb.AlterCollectionSchemaRequest {
-		field = proto.Clone(field).(*schemapb.FieldSchema)
-		function = proto.Clone(function).(*schemapb.FunctionSchema)
+	buildValidRequest := func() *milvuspb.AlterCollectionSchemaRequest {
 		return &milvuspb.AlterCollectionSchemaRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
@@ -7668,17 +7680,51 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
 					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
 						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
-							{FieldSchema: field},
+							{FieldSchema: proto.Clone(sparseOutputField).(*schemapb.FieldSchema)},
 						},
-						FuncSchema: []*schemapb.FunctionSchema{function},
+						FuncSchema: []*schemapb.FunctionSchema{proto.Clone(functionSchema).(*schemapb.FunctionSchema)},
 					},
 				},
 			},
 		}
 	}
 
-	buildValidRequest := func() *milvuspb.AlterCollectionSchemaRequest {
-		return buildAddFunctionRequest(sparseOutputField, functionSchema)
+	buildAddFieldRequest := func(fieldName string, nullable bool, doBackfill bool) *milvuspb.AlterCollectionSchemaRequest {
+		return &milvuspb.AlterCollectionSchemaRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+							{FieldSchema: &schemapb.FieldSchema{
+								Name:     fieldName,
+								DataType: schemapb.DataType_VarChar,
+								Nullable: nullable,
+								TypeParams: []*commonpb.KeyValuePair{
+									{Key: common.MaxLengthKey, Value: "128"},
+								},
+							}},
+						},
+						DoPhysicalBackfill: doBackfill,
+					},
+				},
+			},
+		}
+	}
+
+	buildAddFunctionRequest := func(functionSchema *schemapb.FunctionSchema) *milvuspb.AlterCollectionSchemaRequest {
+		return &milvuspb.AlterCollectionSchemaRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+						FuncSchema: []*schemapb.FunctionSchema{functionSchema},
+					},
+				},
+			},
+		}
 	}
 
 	buildTask := func(req *milvuspb.AlterCollectionSchemaRequest, schema *schemapb.CollectionSchema) *alterCollectionSchemaTask {
@@ -7765,25 +7811,39 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
-	t.Run("PreExecute zero funcSchemas", func(t *testing.T) {
-		req := &milvuspb.AlterCollectionSchemaRequest{
-			DbName:         dbName,
-			CollectionName: collectionName,
-			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
-				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
-					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
-						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
-							{FieldSchema: sparseOutputField},
-						},
-						FuncSchema: nil, // no functions
-					},
-				},
-			},
-		}
-		task := buildTask(req, oldSchema)
+	t.Run("PreExecute add field without funcSchema", func(t *testing.T) {
+		task := buildTask(buildAddFieldRequest("extra_text", true, false), oldSchema)
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("PreExecute add field without funcSchema ignores physical backfill flag", func(t *testing.T) {
+		task := buildTask(buildAddFieldRequest("extra_text_backfill", true, true), oldSchema)
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("PreExecute add field without funcSchema requires nullable field", func(t *testing.T) {
+		task := buildTask(buildAddFieldRequest("extra_text_not_nullable", false, false), oldSchema)
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "added field must be nullable")
+	})
+
+	t.Run("PreExecute rejects duplicated add field name", func(t *testing.T) {
+		task := buildTask(buildAddFieldRequest("text", true, false), oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "duplicated field name")
+	})
+
+	t.Run("PreExecute rejects invalid add field name", func(t *testing.T) {
+		task := buildTask(buildAddFieldRequest("invalid field name", true, false), oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "Invalid field name")
 	})
 
 	t.Run("PreExecute multiple funcSchemas", func(t *testing.T) {
@@ -7807,23 +7867,42 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
-	t.Run("PreExecute empty fieldInfos", func(t *testing.T) {
+	t.Run("PreExecute nil funcSchema", func(t *testing.T) {
+		task := buildTask(buildAddFunctionRequest(nil), oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "function schema is nil")
+	})
+
+	t.Run("PreExecute add function without fieldInfos", func(t *testing.T) {
+		task := buildTask(buildAddFunctionRequest(minHashFunctionOnlySchema), functionOnlyOldSchema)
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("PreExecute rejects function-only BM25 request", func(t *testing.T) {
+		task := buildTask(buildAddFunctionRequest(functionSchema), oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "add_function_field")
+	})
+
+	t.Run("PreExecute rejects empty add request", func(t *testing.T) {
 		req := &milvuspb.AlterCollectionSchemaRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
 				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
-					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
-						FieldInfos: nil, // empty
-						FuncSchema: []*schemapb.FunctionSchema{functionSchema},
-					},
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{},
 				},
 			},
 		}
 		task := buildTask(req, oldSchema)
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterMissing)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
 	t.Run("PreExecute multiple fieldInfos", func(t *testing.T) {
@@ -7899,14 +7978,29 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
-	t.Run("PreExecute happy path for MinHash", func(t *testing.T) {
-		functionSchema := &schemapb.FunctionSchema{
-			Name:             "minhash_func",
-			Type:             schemapb.FunctionType_MinHash,
-			InputFieldNames:  []string{"text"},
-			OutputFieldNames: []string{"minhash_binary"},
+	t.Run("PreExecute supports MinHash function with new output field", func(t *testing.T) {
+		req := buildValidRequest()
+		addRequest := req.GetAction().GetAddRequest()
+		addRequest.FieldInfos[0].FieldSchema = &schemapb.FieldSchema{
+			Name:     "binary_minhash",
+			DataType: schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "4096"},
+			},
 		}
-		task := buildTask(buildAddFunctionRequest(minHashOutputField, functionSchema), oldSchema)
+		functionSchema := proto.Clone(addRequest.GetFuncSchema()[0]).(*schemapb.FunctionSchema)
+		functionSchema.Name = "minhash_func"
+		functionSchema.Type = schemapb.FunctionType_MinHash
+		functionSchema.OutputFieldNames = []string{"binary_minhash"}
+		functionSchema.Params = []*commonpb.KeyValuePair{
+			{Key: "num_hashes", Value: "128"},
+			{Key: "shingle_size", Value: "3"},
+			{Key: "hash_function", Value: "xxhash64"},
+			{Key: "seed", Value: "42"},
+		}
+		addRequest.FuncSchema = []*schemapb.FunctionSchema{functionSchema}
+
+		task := buildTask(req, oldSchema)
 		err := task.PreExecute(ctx)
 		assert.NoError(t, err)
 	})
@@ -7933,13 +8027,42 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("PreExecute rejects multiple function outputs", func(t *testing.T) {
+		req := buildValidRequest()
+		req.GetAction().GetAddRequest().GetFuncSchema()[0].OutputFieldNames = []string{"sparse_bm25", "sparse_bm25_extra"}
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "exactly one output field")
+	})
+
+	t.Run("PreExecute rejects function-only request with missing output field", func(t *testing.T) {
+		req := buildAddFunctionRequest(&schemapb.FunctionSchema{
+			Name:             "missing_output_func",
+			Type:             schemapb.FunctionType_MinHash,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"missing_output"},
+			Params: []*commonpb.KeyValuePair{
+				{Key: "num_hashes", Value: "128"},
+				{Key: "shingle_size", Value: "3"},
+				{Key: "hash_function", Value: "xxhash64"},
+				{Key: "seed", Value: "42"},
+			},
+		})
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "function output field not found")
+	})
+
 	t.Run("PreExecute happy path", func(t *testing.T) {
 		task := buildTask(buildValidRequest(), oldSchema)
 		err := task.PreExecute(ctx)
 		assert.NoError(t, err)
 	})
 
-	t.Run("Execute sets IsFunctionOutput and calls AlterCollectionSchema", func(t *testing.T) {
+	t.Run("Execute leaves function output marker to RootCoord", func(t *testing.T) {
 		req := buildValidRequest()
 		task := buildTask(req, oldSchema)
 
@@ -7950,12 +8073,52 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		err = task.Execute(ctx)
 		assert.NoError(t, err)
 
-		// After Execute, the output field should have IsFunctionOutput = true.
 		addReq := req.GetAction().GetAddRequest()
 		assert.NotNil(t, addReq)
 		for _, fi := range addReq.GetFieldInfos() {
-			assert.True(t, fi.GetFieldSchema().GetIsFunctionOutput())
+			assert.False(t, fi.GetFieldSchema().GetIsFunctionOutput())
 		}
+	})
+
+	t.Run("Execute keeps plain added field as non-function output", func(t *testing.T) {
+		req := buildAddFieldRequest("execute_plain_text", true, true)
+		task := buildTask(req, oldSchema)
+
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+
+		addReq := req.GetAction().GetAddRequest()
+		assert.NotNil(t, addReq)
+		for _, fi := range addReq.GetFieldInfos() {
+			assert.False(t, fi.GetFieldSchema().GetIsFunctionOutput())
+		}
+	})
+
+	t.Run("Execute supports function-only add request", func(t *testing.T) {
+		req := buildAddFunctionRequest(minHashFunctionOnlySchema)
+		task := buildTask(req, functionOnlyOldSchema)
+
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+		assert.Empty(t, req.GetAction().GetAddRequest().GetFieldInfos())
+	})
+
+	t.Run("Execute skips nil field infos", func(t *testing.T) {
+		req := buildValidRequest()
+		req.GetAction().GetAddRequest().FieldInfos = []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+			nil,
+			{FieldSchema: nil},
+		}
+		task := buildTask(req, oldSchema)
+
+		err := task.Execute(ctx)
+		assert.NoError(t, err)
 	})
 
 	t.Run("Execute returns error when mixCoord AlterCollectionSchema fails", func(t *testing.T) {
@@ -8308,7 +8471,7 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 		}
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "exactly one function schema is required")
+		assert.Contains(t, err.Error(), "add_request is nil")
 	})
 
 	t.Run("drop by field_name - validation error", func(t *testing.T) {
