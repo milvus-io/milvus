@@ -78,6 +78,36 @@ func TestCachedProxyServiceProvider_DescribeCollection_IgnoresLegacyDoPhysicalBa
 	assert.False(t, resp.GetSchema().GetDoPhysicalBackfill())
 }
 
+func TestCachedProxyServiceProvider_DescribeCollection_NotFound(t *testing.T) {
+	ctx := context.Background()
+
+	origCache := globalMetaCache
+	defer func() { globalMetaCache = origCache }()
+
+	dbName := "test_db"
+	collectionName := "test_collection"
+
+	mockCache := &MockCache{}
+	mockCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).
+		Return(int64(0), merr.WrapErrCollectionNotFound(collectionName))
+	globalMetaCache = mockCache
+
+	provider := &CachedProxyServiceProvider{Proxy: &Proxy{}}
+	resp, err := provider.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+	})
+	assert.NoError(t, err)
+	status := resp.GetStatus()
+	// The modern merr Code is filled (consistent with every other op's
+	// not-found), while the legacy ErrorCode / Reason / ExtraInfo are kept for
+	// back-compat.
+	assert.Equal(t, merr.Code(merr.ErrCollectionNotFound), status.GetCode())
+	assert.Equal(t, commonpb.ErrorCode_CollectionNotExists, status.GetErrorCode())
+	assert.Equal(t, "true", status.GetExtraInfo()[merr.InputErrorFlagKey])
+	assert.Contains(t, status.GetReason(), "can't find collection")
+}
+
 func TestCachedProxyServiceProvider_DescribeCollection_FilterNamespaceField(t *testing.T) {
 	ctx := context.Background()
 
