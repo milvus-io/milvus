@@ -1906,7 +1906,7 @@ class TestSearchAggregationVector(TestBase):
             ),
             (
                 {"fields": ["brand"], "size": 1, "order": [{"key": "_count", "direction": "up"}]},
-                "up",
+                "asc or desc",
             ),
         ],
     )
