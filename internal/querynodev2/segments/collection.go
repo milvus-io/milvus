@@ -89,16 +89,16 @@ func (m *collectionManager) Get(collectionID int64) *Collection {
 func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error {
 	m.mut.Lock()
 	defer m.mut.Unlock()
-	logicalSchemaVersion := getLoadMetaLogicalSchemaVersion(schema, loadMeta)
+	schemaVersion := getLoadMetaSchemaVersion(schema, loadMeta)
 	if collection, ok := m.collections[collectionID]; ok {
-		if logicalSchemaVersion > collection.SchemaVersion() {
-			if err := collection.ccollection.UpdateSchema(schema, logicalSchemaVersion); err != nil {
+		if schemaVersion > collection.SchemaVersion() {
+			if err := collection.ccollection.UpdateSchema(schema, schemaVersion); err != nil {
 				return err
 			}
-			collection.setSchema(schema, logicalSchemaVersion)
+			collection.setSchema(schema, schemaVersion)
 			log.Info("update collection schema",
 				zap.Int64("collectionID", collectionID),
-				zap.Uint64("logicalSchemaVersion", logicalSchemaVersion),
+				zap.Uint64("schemaVersion", schemaVersion),
 				zap.Uint64("schemaBarrierTs", loadMeta.GetSchemaBarrierTs()),
 				zap.Any("schema", schema),
 			)
@@ -127,7 +127,7 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	return nil
 }
 
-func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, version uint64) error {
+func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, schemaVersion uint64) error {
 	m.mut.Lock()
 	defer m.mut.Unlock()
 
@@ -136,41 +136,28 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 		return merr.WrapErrCollectionNotFound(collectionID, "collection not found in querynode collection manager")
 	}
 
-	logicalSchemaVersion := getLogicalSchemaVersion(schema, version)
-	if logicalSchemaVersion <= collection.SchemaVersion() {
+	if schemaVersion <= collection.SchemaVersion() {
 		return nil
 	}
 
-	if err := collection.ccollection.UpdateSchema(schema, logicalSchemaVersion); err != nil {
+	if err := collection.ccollection.UpdateSchema(schema, schemaVersion); err != nil {
 		return err
 	}
-	collection.setSchema(schema, logicalSchemaVersion)
+	collection.setSchema(schema, schemaVersion)
 	return nil
 }
 
-// getLogicalSchemaVersion returns the monotonic version used to decide whether
-// QueryNode's in-memory collection schema should be refreshed. For new schema
-// messages this is CollectionSchema.Version; fallback is only for old callers
-// that still pass the version separately.
-func getLogicalSchemaVersion(schema *schemapb.CollectionSchema, fallback uint64) uint64 {
-	if schema != nil && schema.GetVersion() > 0 {
-		return uint64(schema.GetVersion())
-	}
-	return fallback
-}
-
-// getLoadMetaLogicalSchemaVersion seeds a loaded collection's schema freshness
-// version. A loaded schema with version 0 is a valid fresh collection state, so
-// the schema itself wins over any timestamp barrier carried by load metadata.
-func getLoadMetaLogicalSchemaVersion(schema *schemapb.CollectionSchema, loadMeta *querypb.LoadMetaInfo) uint64 {
+// getLoadMetaSchemaVersion seeds a loaded collection's schema freshness version.
+// Schema payload is the source of truth whenever it is present, including the
+// valid initial collection schema version 0. The timestamp barrier in load meta
+// is not a schema version; it is only used as a compatibility fallback for old
+// call paths that can reach here without a schema payload.
+func getLoadMetaSchemaVersion(schema *schemapb.CollectionSchema, loadMeta *querypb.LoadMetaInfo) uint64 {
 	if schema != nil {
 		return uint64(schema.GetVersion())
 	}
 	if loadMeta == nil {
 		return 0
-	}
-	if loadMeta.GetLogicalSchemaVersion() > 0 {
-		return loadMeta.GetLogicalSchemaVersion()
 	}
 	return loadMeta.GetSchemaBarrierTs()
 }
@@ -389,7 +376,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	for _, partitionID := range loadMetaInfo.GetPartitionIDs() {
 		coll.partitions.Insert(partitionID)
 	}
-	coll.setSchema(schema, getLoadMetaLogicalSchemaVersion(schema, loadMetaInfo))
+	coll.setSchema(schema, getLoadMetaSchemaVersion(schema, loadMetaInfo))
 
 	return coll, nil
 }

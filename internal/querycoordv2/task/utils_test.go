@@ -48,7 +48,6 @@ func (s *UtilsSuite) TestPackLoadMetaSchemaVersions() {
 
 	loadMeta := packLoadMeta(querypb.LoadType_LoadCollection, collectionInfoResp, "rg", []int64{10}, 20)
 	s.Equal(uint64(200), loadMeta.GetSchemaBarrierTs())
-	s.Equal(uint64(3), loadMeta.GetLogicalSchemaVersion())
 }
 
 func (s *UtilsSuite) TestPackLoadSegmentRequest() {

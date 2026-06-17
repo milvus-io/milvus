@@ -577,12 +577,12 @@ func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSche
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Uint64("schemaBarrierTs", req.GetSchemaBarrierTs()),
-		zap.Uint64("logicalSchemaVersion", req.GetLogicalSchemaVersion()),
+		zap.Int32("schemaVersion", req.GetSchema().GetVersion()),
 	)
 
 	log.Info("querynode received update schema request")
 
-	err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema(), updateSchemaLogicalVersion(req))
+	err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema(), updateSchemaVersion(req))
 	if err != nil {
 		log.Warn("failed to update schema", zap.Error(err))
 	}
@@ -590,16 +590,18 @@ func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSche
 	return merr.Status(err), nil
 }
 
-func updateSchemaLogicalVersion(req *querypb.UpdateSchemaRequest) uint64 {
-	// SchemaBarrierTs is a timestamp fence for load results, not a schema
-	// freshness version. Prefer logical schema values and only fall back to the
-	// barrier for old schema update requests that do not carry a logical version.
-	if req.GetSchema() != nil && req.GetSchema().GetVersion() > 0 {
+func updateSchemaVersion(req *querypb.UpdateSchemaRequest) uint64 {
+	// Schema payload is the source of truth for collection schema freshness.
+	// Version 0 is a valid initial collection schema version, so any present
+	// schema wins over the timestamp barrier.
+	if req.GetSchema() != nil {
 		return uint64(req.GetSchema().GetVersion())
 	}
-	if req.GetLogicalSchemaVersion() > 0 {
-		return req.GetLogicalSchemaVersion()
-	}
+	// Compatibility fallback for rolling upgrade and replayed legacy requests:
+	// older senders populate the value that new code reads as SchemaBarrierTs.
+	// That value used to be consumed as the collection schema version, although
+	// semantically it is a timestamp barrier. Falling back preserves the old
+	// behavior only when the schema payload is absent.
 	return req.GetSchemaBarrierTs()
 }
 

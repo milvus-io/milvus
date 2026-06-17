@@ -77,14 +77,13 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 		s.Same(currentSchema, updatedSchema)
 	})
 
-	s.Run("stale_logical_schema_with_larger_timestamp", func() {
+	s.Run("stale_schema_version_with_larger_timestamp", func() {
 		cm := NewCollectionManager()
 		baseSchema := mock_segcore.GenTestCollectionSchema("collection_v7", schemapb.DataType_Int64, false)
 		baseSchema.Version = 7
 		err := cm.PutOrRef(10, baseSchema, mock_segcore.GenTestIndexMeta(10, baseSchema), &querypb.LoadMetaInfo{
-			LoadType:             querypb.LoadType_LoadCollection,
-			SchemaBarrierTs:      50,
-			LogicalSchemaVersion: 7,
+			LoadType:        querypb.LoadType_LoadCollection,
+			SchemaBarrierTs: 50,
 		})
 		s.Require().NoError(err)
 		defer cm.Unref(10, 1)
@@ -98,19 +97,37 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 			Nullable: true,
 		})
 
-		err = cm.UpdateSchema(10, schemaV8, 100)
+		err = cm.UpdateSchema(10, schemaV8, 8)
 		s.NoError(err)
 		s.Equal(uint64(8), cm.Get(10).SchemaVersion())
 
 		schemaV7 := mock_segcore.GenTestCollectionSchema("collection_v7", schemapb.DataType_Int64, false)
 		schemaV7.Version = 7
 
-		err = cm.UpdateSchema(10, schemaV7, 200)
+		err = cm.UpdateSchema(10, schemaV7, 7)
 		s.NoError(err)
 
 		updatedSchema, updatedVersion := cm.Get(10).SchemaAndVersion()
 		s.Equal(uint64(8), updatedVersion)
 		s.Same(schemaV8, updatedSchema)
+	})
+
+	s.Run("manager_uses_schema_version_from_caller", func() {
+		cm := NewCollectionManager()
+		baseSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
+		err := cm.PutOrRef(10, baseSchema, mock_segcore.GenTestIndexMeta(10, baseSchema), &querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		})
+		s.Require().NoError(err)
+		defer cm.Unref(10, 1)
+
+		schema := mock_segcore.GenTestCollectionSchema("collection_v2", schemapb.DataType_Int64, false)
+		schema.Version = 2
+		err = cm.UpdateSchema(10, schema, 2)
+		s.NoError(err)
+
+		_, version := cm.Get(10).SchemaAndVersion()
+		s.Equal(uint64(2), version)
 	})
 
 	s.Run("not_exist_collection", func() {
@@ -215,9 +232,8 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 
 	// PutOrRef on an existing collection should update its IndexMeta.
 	err := s.cm.PutOrRef(1, schema, newIndexMeta, &querypb.LoadMetaInfo{
-		LoadType:             querypb.LoadType_LoadCollection,
-		SchemaBarrierTs:      100,
-		LogicalSchemaVersion: 2,
+		LoadType:        querypb.LoadType_LoadCollection,
+		SchemaBarrierTs: 100,
 	})
 	s.Require().NoError(err)
 	defer s.cm.Unref(1, 1)
@@ -241,7 +257,7 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 		newVecFieldID)
 }
 
-func (s *CollectionManagerSuite) TestPutOrRefKeepsFreshCollectionInLogicalVersionDomain() {
+func (s *CollectionManagerSuite) TestPutOrRefKeepsFreshCollectionInSchemaVersionDomain() {
 	cm := NewCollectionManager()
 	initialSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
 	err := cm.PutOrRef(10, initialSchema, mock_segcore.GenTestIndexMeta(10, initialSchema), &querypb.LoadMetaInfo{
@@ -262,6 +278,35 @@ func (s *CollectionManagerSuite) TestPutOrRefKeepsFreshCollectionInLogicalVersio
 	schema, version := cm.Get(10).SchemaAndVersion()
 	s.Equal(uint64(1), version)
 	s.Same(updatedSchema, schema)
+}
+
+func (s *CollectionManagerSuite) TestLoadMetaSchemaVersionCompatibility() {
+	s.Run("use_schema_version_when_schema_is_present", func() {
+		schema := mock_segcore.GenTestCollectionSchema("collection_v7", schemapb.DataType_Int64, false)
+		schema.Version = 7
+		loadMeta := &querypb.LoadMetaInfo{
+			SchemaBarrierTs: 100,
+		}
+
+		s.Equal(uint64(7), getLoadMetaSchemaVersion(schema, loadMeta))
+	})
+
+	s.Run("keep_zero_schema_version_for_new_collection", func() {
+		schema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
+		loadMeta := &querypb.LoadMetaInfo{
+			SchemaBarrierTs: 100,
+		}
+
+		s.Equal(uint64(0), getLoadMetaSchemaVersion(schema, loadMeta))
+	})
+
+	s.Run("fallback_to_legacy_barrier_without_schema", func() {
+		loadMeta := &querypb.LoadMetaInfo{
+			SchemaBarrierTs: 100,
+		}
+
+		s.Equal(uint64(100), getLoadMetaSchemaVersion(nil, loadMeta))
+	})
 }
 
 func (s *CollectionManagerSuite) TestGpuIndexFlagWithCagraAdaptForCPU() {

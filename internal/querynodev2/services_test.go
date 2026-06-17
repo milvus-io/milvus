@@ -2504,14 +2504,15 @@ func (suite *ServiceSuite) TestUpdateSchema() {
 		suite.NoError(merr.CheckRPCCall(status, err))
 	})
 
-	suite.Run("prefer_logical_schema_version", func() {
+	suite.Run("prefer_schema_version_over_barrier", func() {
+		schema := typeutil.Clone(suite.schema)
+		schema.Version = 2
 		req := &querypb.UpdateSchemaRequest{
-			CollectionID:         suite.collectionID,
-			Schema:               suite.schema,
-			LogicalSchemaVersion: uint64(2),
-			SchemaBarrierTs:      uint64(100),
+			CollectionID:    suite.collectionID,
+			Schema:          schema,
+			SchemaBarrierTs: uint64(100),
 		}
-		mockManager.EXPECT().UpdateSchema(suite.collectionID, suite.schema, uint64(2)).Return(nil).Once()
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(2)).Return(nil).Once()
 
 		status, err := suite.node.UpdateSchema(ctx, req)
 		suite.NoError(merr.CheckRPCCall(status, err))

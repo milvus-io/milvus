@@ -353,7 +353,6 @@ message LoadMetaInfo {
     repeated int64 load_fields = 7;
     repeated common.KeyValuePair db_properties = 8;
     uint64 schema_barrier_ts = 9; // Wire-compatible rename of legacy schema_version; timestamp barrier used to fence stale load results.
-    uint64 logical_schema_version = 10; // schema.CollectionSchema.version used for schema freshness detection.
 }
 
 message WatchDmChannelsRequest {
@@ -1032,7 +1031,6 @@ message UpdateSchemaRequest {
     int64 collectionID = 2;
     schema.CollectionSchema schema = 3;
     uint64 schema_barrier_ts = 4; // Wire-compatible rename of legacy version; timestamp barrier used to fence stale load results.
-    uint64 logical_schema_version = 5; // schema.CollectionSchema.version used for schema freshness detection.
 }
 
 message UpdateIndexRequest {

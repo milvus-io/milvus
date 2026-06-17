@@ -527,8 +527,7 @@ func (sd *shardDelegator) syncCollectionIndexMeta(ctx context.Context, req *quer
 	loadMeta := req.GetLoadMeta()
 	if loadMeta == nil {
 		loadMeta = &querypb.LoadMetaInfo{
-			CollectionID:         req.GetCollectionID(),
-			LogicalSchemaVersion: sd.collection.SchemaVersion(),
+			CollectionID: req.GetCollectionID(),
 		}
 	}
 
@@ -673,7 +672,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		log.Debug("load delete...")
 		// loadStreamDelete now handles distribution add atomically in Phase 3
 		err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker,
-			entries, loadMetaSchemaBarrierTs(req.GetLoadMeta()))
+			entries, req.GetLoadMeta().GetSchemaBarrierTs())
 		if err != nil {
 			log.Warn("load stream delete failed", zap.Error(err))
 			// BM25 stats already loaded into idf oracle will be cleaned up
@@ -715,16 +714,6 @@ func (sd *shardDelegator) addDistributionIfVersionOK(version uint64, entries ...
 	// alter distribution
 	sd.distribution.AddDistributions(entries...)
 	return nil
-}
-
-// loadMetaSchemaBarrierTs returns the schema timestamp barrier attached to a
-// load request. Delegator compares it with the latest schema update barrier to
-// reject load results that started before the schema changed.
-func loadMetaSchemaBarrierTs(loadMeta *querypb.LoadMetaInfo) uint64 {
-	if loadMeta == nil {
-		return 0
-	}
-	return loadMeta.GetSchemaBarrierTs()
 }
 
 // LoadGrowing load growing segments locally.

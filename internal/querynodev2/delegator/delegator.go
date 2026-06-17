@@ -1210,8 +1210,11 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	}
 	defer sd.lifetime.Done()
 
-	log.Info("delegator received update schema event")
-	logicalSchemaVersion := uint64(schema.GetVersion())
+	schemaVersion := uint64(schema.GetVersion())
+	log.Info("delegator received update schema event",
+		zap.Uint64("schemaVersion", schemaVersion),
+		zap.Uint64("schemaBarrierTs", schVersion),
+	)
 
 	newFunctionState, err := buildFunctionRuntimeState(schema)
 	if err != nil {
@@ -1247,10 +1250,10 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		),
 		CollectionID: sd.collectionID,
 		Schema:       schema,
-		// SchemaBarrierTs fences stale load results; LogicalSchemaVersion is
-		// used by QueryNode collection freshness checks. Keep them separate.
-		SchemaBarrierTs:      schVersion,
-		LogicalSchemaVersion: logicalSchemaVersion,
+		// SchemaBarrierTs fences stale load results. Schema freshness is carried
+		// by schema.version, so the timestamp barrier must not be used to order
+		// schema updates when schema is present.
+		SchemaBarrierTs: schVersion,
 	},
 		sealed,
 		growing,
@@ -1276,7 +1279,7 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		return err
 	}
 
-	if err := sd.collectionManager.UpdateSchema(sd.collectionID, schema, schVersion); err != nil {
+	if err := sd.collectionManager.UpdateSchema(sd.collectionID, schema, schemaVersion); err != nil {
 		newFunctionState.Close()
 		return err
 	}
@@ -1298,7 +1301,7 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	}
 	sd.functionState.swap(newFunctionState).Close()
 	log.Info("delegator finished update schema event",
-		zap.Uint64("logicalSchemaVersion", logicalSchemaVersion),
+		zap.Uint64("schemaVersion", schemaVersion),
 		zap.Uint64("schemaBarrierTs", schVersion),
 		zap.Int("sealedNum", len(sealed)),
 		zap.Int("growingNum", len(growing)),
