@@ -383,6 +383,13 @@ func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema 
 		return nil
 	}
 
+	if common.IsNamespaceModePartition(t.Req.GetProperties()...) {
+		if hasPartitionKey {
+			return merr.WrapErrParameterInvalidMsg("namespace is not supported with partition key mode")
+		}
+		return nil
+	}
+
 	if typeutil.IsExternalCollection(schema) {
 		return merr.WrapErrParameterInvalidMsg("external collection does not support namespace field")
 	}
@@ -485,6 +492,9 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 		return err
 	}
 	t.appendDynamicField(ctx, t.body.CollectionSchema)
+	if err := common.ValidateNamespaceMode(t.Req.GetProperties()...); err != nil {
+		return err
+	}
 	if err := t.handleNamespaceField(ctx, t.body.CollectionSchema); err != nil {
 		return err
 	}
@@ -514,9 +524,6 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.Req.GetProperties())
 	if exist && !timestamptz.IsTimezoneValid(tz) {
 		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
-	}
-	if err := common.ValidateNamespaceMode(t.Req.GetProperties()...); err != nil {
-		return err
 	}
 
 	// Set properties for persistent
