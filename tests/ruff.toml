@@ -23,7 +23,14 @@ ignore = [
 [lint.per-file-ignores]
 "__init__.py" = ["F401", "F403"]
 "conftest.py" = ["F401", "F811"]
-"**/testcases/**/*.py" = ["E402"]
+# Test modules conventionally use `from common.common_type import *` etc., so
+# star-import rules (F403/F405) are noise. They also build expressions as
+# strings and eval them, so locals that look unused to ruff are in fact used
+# (F841) — removing them breaks the tests; ignore it here. E402 covers
+# module-level setup before imports.
+"**/testcases/**/*.py" = ["E402", "F403", "F405", "F841"]
+"**/milvus_client/**/*.py" = ["E402", "F403", "F405", "F841"]
+"**/milvus_client_v2/**/*.py" = ["E402", "F403", "F405", "F841"]
 "**/chaos/**/*.py" = ["E402"]
 
 [format]
