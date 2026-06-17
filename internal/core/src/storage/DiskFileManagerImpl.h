@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <shared_mutex>
@@ -221,6 +222,12 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     GetRemoteTextLogPath(const std::string& file_name, int64_t slice_num) const;
 
+    std::string
+    AppendLocalPathGeneration(const std::string& prefix) const;
+
+    void
+    RemoveLocalDirBestEffort(const std::string& dir) noexcept;
+
     bool
     AddFileInternal(const std::string& file_name,
                     const std::function<std::string(const std::string&, int)>&
@@ -277,6 +284,8 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::map<std::string, int64_t> remote_paths_to_size_;
 
     size_t added_total_file_size_ = 0;
+
+    uint64_t file_path_generation_;
 };
 
 using DiskANNFileManagerImplPtr = std::shared_ptr<DiskFileManagerImpl>;
