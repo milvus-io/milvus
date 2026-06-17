@@ -1981,7 +1981,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 				segDiskLoadingSize += estimateResult.MaxDiskCost
 			}
 
-			if vecindexmgr.GetVecIndexMgrInstance().IsGPUVecIndex(common.GetIndexType(fieldIndexInfo.IndexParams)) {
+			if gpuIndexRequiresGpu(fieldIndexInfo.IndexParams) {
 				fieldGpuMemorySize = append(fieldGpuMemorySize, estimateResult.MaxMemoryCost)
 			}
 
@@ -2362,6 +2362,37 @@ func getBinlogDataMemorySize(fieldBinlog *datapb.FieldBinlog) int64 {
 	}
 
 	return fieldSize
+}
+
+func gpuIndexRequiresGpu(indexParams []*commonpb.KeyValuePair) bool {
+	indexParamMap := funcutil.KeyValuePair2Map(indexParams)
+	indexType := indexParamMap[common.IndexTypeKey]
+
+	switch indexType {
+	case "GPU_CAGRA", "GPU_CUVS_CAGRA":
+	case "GPU_BRUTE_FORCE", "GPU_CUVS_BRUTE_FORCE",
+		"GPU_IVF_FLAT", "GPU_CUVS_IVF_FLAT",
+		"GPU_IVF_PQ", "GPU_CUVS_IVF_PQ":
+		return true
+	default:
+		return false
+	}
+
+	err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParamMap)
+	if err != nil {
+		log.Warn("failed to append prepare load params for gpu index resource check",
+			zap.String("indexType", indexType),
+			zap.Error(err))
+	}
+
+	adaptForCPU, ok := indexParamMap["adapt_for_cpu"]
+	if ok {
+		enabled, err := strconv.ParseBool(adaptForCPU)
+		if err == nil && enabled {
+			return false
+		}
+	}
+	return true
 }
 
 func checkSegmentGpuMemSize(fieldGpuMemSizeList []uint64, OverloadedMemoryThresholdPercentage float32) error {

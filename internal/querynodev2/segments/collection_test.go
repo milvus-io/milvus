@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -85,6 +86,117 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 			err := s.cm.UpdateSchema(1, nil, 100)
 			s.Error(err)
 		})
+	})
+}
+
+func (s *CollectionManagerSuite) TestGpuIndexFlagWithCagraAdaptForCPU() {
+	schema := mock_segcore.GenTestCollectionSchema("collection_cagra", schemapb.DataType_Int64, false)
+	vectorFieldID := int64(0)
+	for _, field := range schema.GetFields() {
+		if field.GetDataType() == schemapb.DataType_FloatVector {
+			vectorFieldID = field.GetFieldID()
+			break
+		}
+	}
+	s.Require().NotZero(vectorFieldID)
+
+	tests := []struct {
+		name       string
+		indexType  string
+		adaptValue string
+		expected   bool
+	}{
+		{
+			name:       "GPU_CAGRA adapt for CPU",
+			indexType:  "GPU_CAGRA",
+			adaptValue: "true",
+			expected:   false,
+		},
+		{
+			name:       "GPU_CUVS_CAGRA adapt for CPU",
+			indexType:  "GPU_CUVS_CAGRA",
+			adaptValue: "1",
+			expected:   false,
+		},
+		{
+			name:      "GPU_CAGRA without adapt for CPU",
+			indexType: "GPU_CAGRA",
+			expected:  true,
+		},
+		{
+			name:       "other GPU index",
+			indexType:  "GPU_IVF_FLAT",
+			adaptValue: "true",
+			expected:   true,
+		},
+	}
+
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			indexParams := []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: test.indexType},
+				{Key: common.MetricTypeKey, Value: "L2"},
+			}
+			if test.adaptValue != "" {
+				indexParams = append(indexParams, &commonpb.KeyValuePair{Key: "adapt_for_cpu", Value: test.adaptValue})
+			}
+			indexMeta := &segcorepb.CollectionIndexMeta{
+				MaxIndexRowCount: 1,
+				IndexMetas: []*segcorepb.FieldIndexMeta{
+					{
+						FieldID:     vectorFieldID,
+						IndexName:   test.indexType,
+						IndexParams: indexParams,
+					},
+				},
+			}
+
+			collection, err := NewCollection(10, schema, indexMeta, &querypb.LoadMetaInfo{
+				LoadType: querypb.LoadType_LoadCollection,
+			})
+			s.Require().NoError(err)
+			defer DeleteCollection(collection)
+			s.Equal(test.expected, collection.IsGpuIndex())
+		})
+	}
+
+	s.Run("GPU_CAGRA adapt for CPU from load config", func() {
+		params := paramtable.Get()
+		oldEnable := params.KnowhereConfig.Enable.GetValue()
+		adaptKey := params.KnowhereConfig.IndexParam.KeyPrefix + "GPU_CAGRA.load.adapt_for_cpu"
+		oldAdaptValue := params.GetWithDefault(adaptKey, "")
+		defer params.Save(params.KnowhereConfig.Enable.Key, oldEnable)
+		defer func() {
+			if oldAdaptValue == "" {
+				params.Remove(adaptKey)
+				return
+			}
+			params.Save(adaptKey, oldAdaptValue)
+		}()
+
+		params.Save(params.KnowhereConfig.Enable.Key, "true")
+		params.Save(adaptKey, "true")
+
+		indexMeta := &segcorepb.CollectionIndexMeta{
+			MaxIndexRowCount: 1,
+			IndexMetas: []*segcorepb.FieldIndexMeta{
+				{
+					FieldID:   vectorFieldID,
+					IndexName: "GPU_CAGRA",
+					IndexParams: []*commonpb.KeyValuePair{
+						{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+						{Key: common.MetricTypeKey, Value: "L2"},
+					},
+				},
+			},
+		}
+
+		collection, err := NewCollection(10, schema, indexMeta, &querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		})
+		s.Require().NoError(err)
+		defer DeleteCollection(collection)
+		s.False(collection.IsGpuIndex())
 	})
 }
 

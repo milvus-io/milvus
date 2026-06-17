@@ -88,6 +88,7 @@ class MilvusConan(ConanFile):
         "onetbb:tbbproxy": False,
         "gdal:shared": True,
         "gdal:fPIC": True,
+        "openblas:use_openmp": True,
     }
 
     def configure(self):
