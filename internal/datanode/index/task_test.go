@@ -131,6 +131,44 @@ func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 	suite.NoError(err)
 }
 
+func (suite *IndexBuildTaskSuite) TestBuildDiskIndex() {
+	ctx, cancel := context.WithCancel(context.Background())
+	req := &workerpb.CreateJobRequest{
+		BuildID:      1,
+		IndexVersion: 1,
+		DataPaths:    []string{suite.dataPath},
+		IndexID:      0,
+		IndexName:    "",
+		IndexParams:  []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "DISKANN"}, {Key: common.MetricTypeKey, Value: metric.L2}},
+		TypeParams:   []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}},
+		NumRows:      int64(suite.numRows),
+		StorageConfig: &indexpb.StorageConfig{
+			RootPath:    suite.rootPath,
+			StorageType: "local",
+		},
+		CollectionID: 1,
+		PartitionID:  2,
+		SegmentID:    3,
+		FieldID:      102,
+		FieldName:    "vec",
+		FieldType:    schemapb.DataType_ArrayOfVector,
+	}
+
+	cm, err := dependency.NewDefaultFactory(true).NewPersistentStorageChunkManager(ctx)
+	suite.NoError(err)
+	blobs, err := suite.serializeData()
+	suite.NoError(err)
+	err = cm.Write(ctx, suite.dataPath, blobs[0].Value)
+	suite.NoError(err)
+
+	t := NewIndexBuildTask(ctx, cancel, req, cm, NewTaskManager(context.Background()), nil)
+
+	err = t.PreExecute(context.Background())
+	suite.NoError(err)
+	err = t.Execute(context.Background())
+	suite.Error(err)
+}
+
 func TestIndexBuildTask(t *testing.T) {
 	suite.Run(t, new(IndexBuildTaskSuite))
 }
