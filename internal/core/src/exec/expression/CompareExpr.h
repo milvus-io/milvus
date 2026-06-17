@@ -149,27 +149,30 @@ class PhyCompareFilterExpr : public Expr {
         pinned_index_right_ = PinIndex(op_ctx_, segment, right_field_meta);
         is_left_indexed_ = pinned_index_left_.size() > 0;
         is_right_indexed_ = pinned_index_right_.size() > 0;
+        left_use_index_data_ =
+            is_left_indexed_ && segment->HasRawData(left_field_.get());
+        right_use_index_data_ =
+            is_right_indexed_ && segment->HasRawData(right_field_.get());
         if (segment->is_chunked()) {
             left_num_chunk_ =
-                is_left_indexed_ ? pinned_index_left_.size()
+                left_use_index_data_ ? pinned_index_left_.size()
                 : segment->type() == SegmentType::Growing
                     ? upper_div(segment_chunk_reader_.active_count_,
                                 segment_chunk_reader_.SizePerChunk())
                     : segment->num_chunk_data(left_field_);
             right_num_chunk_ =
-                is_right_indexed_ ? pinned_index_right_.size()
+                right_use_index_data_ ? pinned_index_right_.size()
                 : segment->type() == SegmentType::Growing
                     ? upper_div(segment_chunk_reader_.active_count_,
                                 segment_chunk_reader_.SizePerChunk())
                     : segment->num_chunk_data(right_field_);
             num_chunk_ = left_num_chunk_;
         } else {
-            num_chunk_ = is_left_indexed_
+            num_chunk_ = left_use_index_data_
                              ? pinned_index_left_.size()
                              : upper_div(segment_chunk_reader_.active_count_,
                                          segment_chunk_reader_.SizePerChunk());
         }
-
         AssertInfo(
             batch_size_ > 0,
             fmt::format("expr batch size should greater than zero, but now: {}",
@@ -190,7 +193,7 @@ class PhyCompareFilterExpr : public Expr {
     MoveCursor() override {
         if (!has_offset_input_) {
             if (segment_chunk_reader_.segment_->is_chunked()) {
-                if (is_left_indexed_) {
+                if (left_use_index_data_) {
                     MoveCursorForIndexed(left_current_chunk_pos_);
                 } else {
                     segment_chunk_reader_.MoveCursorForMultipleChunk(
@@ -200,7 +203,7 @@ class PhyCompareFilterExpr : public Expr {
                         left_num_chunk_,
                         batch_size_);
                 }
-                if (is_right_indexed_) {
+                if (right_use_index_data_) {
                     MoveCursorForIndexed(right_current_chunk_pos_);
                 } else {
                     segment_chunk_reader_.MoveCursorForMultipleChunk(
@@ -236,12 +239,27 @@ class PhyCompareFilterExpr : public Expr {
     }
 
  private:
+    segcore::PinnedIndexView
+    LeftPinnedIndexForRawLookup() const {
+        if (!left_use_index_data_) {
+            return {};
+        }
+        return {pinned_index_left_.data(), pinned_index_left_.size()};
+    }
+
+    segcore::PinnedIndexView
+    RightPinnedIndexForRawLookup() const {
+        if (!right_use_index_data_) {
+            return {};
+        }
+        return {pinned_index_right_.data(), pinned_index_right_.size()};
+    }
+
     int64_t
     GetCurrentRows() {
         if (segment_chunk_reader_.segment_->is_chunked()) {
             auto current_rows =
-                is_left_indexed_ && segment_chunk_reader_.segment_->HasRawData(
-                                        left_field_.get())
+                left_use_index_data_
                     ? left_current_chunk_pos_
                     : segment_chunk_reader_.segment_->num_rows_until_chunk(
                           left_field_, left_current_chunk_id_) +
@@ -543,6 +561,8 @@ class PhyCompareFilterExpr : public Expr {
     const FieldId right_field_;
     bool is_left_indexed_;
     bool is_right_indexed_;
+    bool left_use_index_data_;
+    bool right_use_index_data_;
     int64_t num_chunk_{0};
     int64_t left_num_chunk_{0};
     int64_t right_num_chunk_{0};
