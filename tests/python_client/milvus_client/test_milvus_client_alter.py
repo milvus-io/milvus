@@ -153,9 +153,14 @@ class TestMilvusClientAlterIndex(TestMilvusClientV2Base):
         unsupported_values = [None, [], "", 20, "  ", 0.01, "new_value"]
         for value in unsupported_values:
             error = {ct.err_code: 1100, ct.err_msg: "invalid mmap.enabled value"}
-            self.alter_index_properties(client, collection_name, idx_names[0],
-                                        properties={"mmap.enabled": value},
-                                        check_task=CheckTasks.err_res, check_items=error)
+            self.alter_index_properties(
+                client,
+                collection_name,
+                idx_names[0],
+                properties={"mmap.enabled": value},
+                check_task=CheckTasks.err_res,
+                check_items=error,
+            )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_create_index_idempotent_with_field_warmup(self):

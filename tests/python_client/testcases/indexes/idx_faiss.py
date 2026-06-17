@@ -1,6 +1,5 @@
-from pymilvus import DataType
-
 import common.common_type as ct
+from pymilvus import DataType
 
 success = "success"
 

@@ -477,7 +477,10 @@ class TestSearchAggregation(TestMilvusClientV2Base):
         expected: proxy rejects FLOAT/DOUBLE group-by keys.
         """
         client = self._client(alias=self.shared_alias)
-        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "FLOAT / DOUBLE fields are not supported with search_aggregation"}
+        error = {
+            ct.err_code: ct.ANY_CODE,
+            ct.err_msg: "FLOAT / DOUBLE fields are not supported with search_aggregation",
+        }
         self.search(
             client,
             self.collection_name,
@@ -1135,7 +1138,10 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
             client, collection_name
         )
 
-        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation"}
+        error = {
+            ct.err_code: ct.ANY_CODE,
+            ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation",
+        }
         self.search(
             client,
             collection_name,
@@ -1162,7 +1168,10 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
             client, collection_name
         )
 
-        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation"}
+        error = {
+            ct.err_code: ct.ANY_CODE,
+            ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation",
+        }
         self.search(
             client,
             collection_name,
@@ -1270,7 +1279,10 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         vectors, vector_field, _, json_field, _ = self._prepare_json_field_collection(client, collection_name)
 
-        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation"}
+        error = {
+            ct.err_code: ct.ANY_CODE,
+            ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation",
+        }
         self.search(
             client,
             collection_name,

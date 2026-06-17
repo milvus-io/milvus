@@ -107,7 +107,7 @@ class TestAliasOperation(TestcaseBase):
     def test_alias_create_operation_default(self):
         """
         target: test collection creating alias
-        method: 
+        method:
                 1.create a collection and create 10 partitions for it
                 2.collection create an alias, then init a collection with this alias but not create partitions
         expected: collection is equal to alias
@@ -136,11 +136,11 @@ class TestAliasOperation(TestcaseBase):
     def test_alias_drop_operation_default(self):
         """
         target: test collection dropping alias
-        method: 
+        method:
                 1.create a collection with 10 partitions
                 2.collection create an alias
                 3.collection drop the alias
-        expected: 
+        expected:
                 after step 2, collection is equal to alias
                 after step 3, collection with alias name is not exist
         """
@@ -175,7 +175,7 @@ class TestAliasOperation(TestcaseBase):
     def test_alias_called_by_utility_has_collection(self):
         """
         target: test utility has collection by alias
-        method: 
+        method:
                1.create collection with alias
                2.call has_collection function with alias as param
         expected: result is True
@@ -201,7 +201,7 @@ class TestAliasOperation(TestcaseBase):
     def test_alias_called_by_utility_drop_collection(self):
         """
         target: test utility drop collection by alias
-        method: 
+        method:
                1.create collection with alias
                2.call drop_collection function with alias as param
         expected: Got error: collection cannot be dropped via alias.
@@ -233,7 +233,7 @@ class TestAliasOperation(TestcaseBase):
     def test_alias_called_by_utility_has_partition(self):
         """
         target: test utility has partition by alias
-        method: 
+        method:
                1.create collection with partition and alias
                2.call has_partition function with alias as param
         expected: result is True
@@ -290,10 +290,10 @@ class TestAliasOperationInvalid(TestcaseBase):
     def test_alias_create_duplication_alias(self):
         """
         target: test two collections creating alias with same name
-        method: 
+        method:
                 1.create a collection_1 with alias name alias_a
                 2.create a collection_2 also with alias name alias_a
-        expected: 
+        expected:
                 in step 2, creating alias with a duplication name is not allowed
         """
         self._connect()
@@ -319,10 +319,10 @@ class TestAliasOperationInvalid(TestcaseBase):
     def test_alias_alter_not_exist_alias(self):
         """
         target: test collection altering to alias which is not exist
-        method: 
+        method:
                 1.create a collection with alias
                 2.collection alters to an alias name which is not exist
-        expected: 
+        expected:
                 in step 2, alter alias with a not exist name is not allowed
         """
         self._connect()
@@ -344,7 +344,7 @@ class TestAliasOperationInvalid(TestcaseBase):
     def test_alias_drop_not_exist_alias(self):
         """
         target: test collection dropping alias which is not exist
-        method: 
+        method:
                 1.create a collection with alias
                 2.collection drop alias which is not exist
         expected: drop alias succ
@@ -363,7 +363,7 @@ class TestAliasOperationInvalid(TestcaseBase):
     def test_alias_drop_same_alias_twice(self):
         """
         target: test collection dropping same alias twice
-        method: 
+        method:
                 1.create a collection with alias
                 2.collection drop alias
                 3.collection drop alias again

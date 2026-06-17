@@ -1131,7 +1131,10 @@ class TestNewIndexBinary(TestcaseBase):
         if metric_type in ["JACCARD", "HAMMING"]:
             collection_w.create_index(default_binary_vec_field_name, binary_index_params)
         else:
-            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"binary vector index does not support metric type: {metric_type}"}
+            error = {
+                ct.err_code: ct.ANY_CODE,
+                ct.err_msg: f"binary vector index does not support metric type: {metric_type}",
+            }
             collection_w.create_index(
                 default_binary_vec_field_name, binary_index_params, check_task=CheckTasks.err_res, check_items=error
             )

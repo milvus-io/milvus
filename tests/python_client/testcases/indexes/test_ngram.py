@@ -223,7 +223,10 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
                 collection_name,
                 index_params,
                 check_task=CheckTasks.err_res,
-                check_items={"err_code": ct.ANY_CODE, "err_msg": "ngram index can only be created on VARCHAR or JSON field"},
+                check_items={
+                    "err_code": ct.ANY_CODE,
+                    "err_msg": "ngram index can only be created on VARCHAR or JSON field",
+                },
             )
         else:
             self.create_index(client, collection_name, index_params)

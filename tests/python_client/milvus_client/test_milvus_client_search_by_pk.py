@@ -272,7 +272,10 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
             )
 
         #  search again without specify anns_field
-        error = {"err_code": ct.ANY_CODE, "err_msg": "multiple vector fields exist, please specify anns_field in search_params"}
+        error = {
+            "err_code": ct.ANY_CODE,
+            "err_msg": "multiple vector fields exist, please specify anns_field in search_params",
+        }
         self.search(
             client,
             collection_name,
@@ -874,7 +877,10 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         search_params = {"metric_type": self.sparse_vector_metric, "params": {"nprobe": 100}}
 
         # search with mismatched metric type
-        error = {"err_code": ct.ANY_CODE, "err_msg": "metric type not match: invalid parameter[expected=COSINE][actual=IP]"}
+        error = {
+            "err_code": ct.ANY_CODE,
+            "err_msg": "metric type not match: invalid parameter[expected=COSINE][actual=IP]",
+        }
         self.search(
             client,
             collection_name,

@@ -738,7 +738,10 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=default_dim)
 
-        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "description [None] has type NoneType, but expected one of: bytes, str"}
+        error = {
+            ct.err_code: ct.ANY_CODE,
+            ct.err_msg: "description [None] has type NoneType, but expected one of: bytes, str",
+        }
         self.create_collection(client, collection_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -5469,7 +5472,10 @@ class TestMilvusClientCollectionString(TestMilvusClientV2Base):
         schema.add_field("int64_pk", DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
         # Try to add field with deprecated DataType.STRING
-        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "string data type not supported yet, please use VarChar type instead"}
+        error = {
+            ct.err_code: ct.ANY_CODE,
+            ct.err_msg: "string data type not supported yet, please use VarChar type instead",
+        }
         schema.add_field("string_field", DataType.STRING)
         self.create_collection(client, collection_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
