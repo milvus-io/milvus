@@ -242,9 +242,9 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 		newVecFieldID)
 }
 
-func (s *CollectionManagerSuite) TestPutOrRefUsesLegacySchemaVersionWithoutLogicalVersion() {
+func (s *CollectionManagerSuite) TestPutOrRefKeepsFreshCollectionInLogicalVersionDomain() {
 	cm := NewCollectionManager()
-	initialSchema := mock_segcore.GenTestCollectionSchema("collection_legacy_v100", schemapb.DataType_Int64, false)
+	initialSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
 	err := cm.PutOrRef(10, initialSchema, mock_segcore.GenTestIndexMeta(10, initialSchema), &querypb.LoadMetaInfo{
 		LoadType:      querypb.LoadType_LoadCollection,
 		SchemaVersion: 100,
@@ -252,17 +252,16 @@ func (s *CollectionManagerSuite) TestPutOrRefUsesLegacySchemaVersionWithoutLogic
 	s.Require().NoError(err)
 	defer cm.Unref(10, 1)
 
-	updatedSchema := mock_segcore.GenTestCollectionSchema("collection_legacy_v200", schemapb.DataType_Int64, false)
+	_, version := cm.Get(10).SchemaAndVersion()
+	s.Equal(uint64(0), version)
+
+	updatedSchema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
 	updatedSchema.Version = 1
-	err = cm.PutOrRef(10, updatedSchema, mock_segcore.GenTestIndexMeta(10, updatedSchema), &querypb.LoadMetaInfo{
-		LoadType:      querypb.LoadType_LoadCollection,
-		SchemaVersion: 200,
-	})
+	err = cm.UpdateSchema(10, updatedSchema, 200)
 	s.Require().NoError(err)
-	defer cm.Unref(10, 1)
 
 	schema, version := cm.Get(10).SchemaAndVersion()
-	s.Equal(uint64(200), version)
+	s.Equal(uint64(1), version)
 	s.Same(updatedSchema, schema)
 }
 
