@@ -553,6 +553,10 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if queryInfo.GetSearchIteratorV2Info() != nil {
+			return merr.WrapErrParameterInvalid("", "",
+				"search iterator v2 is not supported for hybrid search")
+		}
 
 		convertedPlaceholder, placeholderType, err := t.convertPlaceholderIfNeeded(subReq.GetPlaceholderGroup(), queryInfo.GetQueryFieldId())
 		if err != nil {
