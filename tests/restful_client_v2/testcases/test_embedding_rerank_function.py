@@ -1267,11 +1267,9 @@ class TestModelRerankFunction(TestBase):
     def test_single_vector_search_with_model_rerank(self, tei_endpoint, enable_truncate, tei_reranker_endpoint):
         """
         target: test single vector search with model rerank using RESTful API
-        method: test dense/sparse/bm25 search with model reranker separately
+        method: test dense/bm25 text-query search with model reranker separately
         expected: search should succeed with model reranker
         """
-        import random
-
         name = gen_collection_name(prefix)
         self._create_collection_with_all_vector_types(name, tei_endpoint)
 
@@ -1299,27 +1297,16 @@ class TestModelRerankFunction(TestBase):
             ]
         }
 
-        # Test different search types
-        for search_type in ["dense", "sparse", "bm25"]:
+        # Model rerank expects text queries. Keep single-vector requests text-based.
+        for search_type in ["dense", "bm25"]:
             logger.info(f"Executing {search_type} search with model reranker")
 
             if search_type == "dense":
                 # Dense vector search
                 search_payload = {
                     "collectionName": name,
-                    "data": [[random.random() for _ in range(768)] for _ in range(nq)],
+                    "data": query_texts,
                     "annsField": "dense",
-                    "limit": 10,
-                    "outputFields": ["doc_id", "document"],
-                    "functionScore": reranker_params,
-                }
-
-            elif search_type == "sparse":
-                # Sparse vector search
-                search_payload = {
-                    "collectionName": name,
-                    "data": [{random.randint(1, 10000): random.random() for _ in range(100)} for _ in range(nq)],
-                    "annsField": "sparse",
                     "limit": 10,
                     "outputFields": ["doc_id", "document"],
                     "functionScore": reranker_params,
