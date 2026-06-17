@@ -336,6 +336,9 @@ const (
 	QueryModeLargeTopK = "large_topk"
 	ValidQueryModes    = QueryModeLargeTopK // comma-separated if more modes added later
 
+	// namespace sharding
+	NamespaceShardingEnabledKey = "namespace.sharding.enabled"
+
 	// warmup related
 	WarmupKey            = "warmup"
 	WarmupScalarFieldKey = "warmup.scalarField"
@@ -572,6 +575,72 @@ func ValidateQueryMode(kvs ...*commonpb.KeyValuePair) error {
 // IsQueryModeLargeTopK checks if query_mode is set to "large_topk".
 func IsQueryModeLargeTopK(kvs ...*commonpb.KeyValuePair) bool {
 	return GetQueryMode(kvs...) == QueryModeLargeTopK
+}
+
+// IsNamespaceShardingEnabledKeyExists checks if namespace.sharding.enabled exists in the key-value pairs.
+func IsNamespaceShardingEnabledKeyExists(kvs ...*commonpb.KeyValuePair) bool {
+	for _, kv := range kvs {
+		if kv.Key == NamespaceShardingEnabledKey {
+			return true
+		}
+	}
+	return false
+}
+
+// IsNamespaceShardingEnabled extracts namespace.sharding.enabled from properties.
+// Returns false if not set.
+func IsNamespaceShardingEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {
+	for _, kv := range kvs {
+		if kv.Key == NamespaceShardingEnabledKey {
+			switch kv.Value {
+			case "true":
+				return true, nil
+			case "false":
+				return false, nil
+			default:
+				return false, merr.WrapErrParameterInvalidMsg("invalid namespace.sharding.enabled value %q, valid values: [true,false]", kv.Value)
+			}
+		}
+	}
+	return false, nil
+}
+
+// ValidateNamespaceShardingEnabled validates namespace.sharding.enabled. Returns nil if
+// the value is valid or if namespace.sharding.enabled is not set. Also rejects
+// case-variant keys that would be silently ignored.
+func ValidateNamespaceShardingEnabled(kvs ...*commonpb.KeyValuePair) error {
+	for _, kv := range kvs {
+		if kv.Key == NamespaceShardingEnabledKey {
+			_, err := IsNamespaceShardingEnabled(kv)
+			return err
+		}
+		if strings.EqualFold(kv.Key, NamespaceShardingEnabledKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", kv.Key, NamespaceShardingEnabledKey)
+		}
+	}
+	return nil
+}
+
+// ValidateNamespaceShardingEnabledNotAltered rejects attempts to update or
+// delete namespace.sharding.enabled after collection creation.
+func ValidateNamespaceShardingEnabledNotAltered(properties []*commonpb.KeyValuePair, deleteKeys []string) error {
+	for _, property := range properties {
+		if property.GetKey() == NamespaceShardingEnabledKey {
+			return merr.WrapErrParameterInvalidMsg("cannot alter %s after collection creation", NamespaceShardingEnabledKey)
+		}
+		if strings.EqualFold(property.GetKey(), NamespaceShardingEnabledKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", property.GetKey(), NamespaceShardingEnabledKey)
+		}
+	}
+	for _, key := range deleteKeys {
+		if key == NamespaceShardingEnabledKey {
+			return merr.WrapErrParameterInvalidMsg("cannot delete %s after collection creation", NamespaceShardingEnabledKey)
+		}
+		if strings.EqualFold(key, NamespaceShardingEnabledKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, NamespaceShardingEnabledKey)
+		}
+	}
+	return nil
 }
 
 func IsDisableFuncRuntimeCheck(kvs ...*commonpb.KeyValuePair) (bool, error) {

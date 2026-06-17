@@ -536,6 +536,117 @@ func TestQueryMode(t *testing.T) {
 	})
 }
 
+func TestNamespaceShardingEnabled(t *testing.T) {
+	t.Run("IsNamespaceShardingEnabled returns value when set", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: NamespaceShardingEnabledKey, Value: "true"},
+		}
+		enabled, err := IsNamespaceShardingEnabled(kvs...)
+		assert.NoError(t, err)
+		assert.True(t, enabled)
+	})
+
+	t.Run("IsNamespaceShardingEnabled defaults to false", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: "other.key", Value: "true"},
+		}
+		enabled, err := IsNamespaceShardingEnabled(kvs...)
+		assert.NoError(t, err)
+		assert.False(t, enabled)
+		enabled, err = IsNamespaceShardingEnabled()
+		assert.NoError(t, err)
+		assert.False(t, enabled)
+	})
+
+	t.Run("IsNamespaceShardingEnabledKeyExists returns true", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: NamespaceShardingEnabledKey, Value: "false"},
+		}
+		assert.True(t, IsNamespaceShardingEnabledKeyExists(kvs...))
+	})
+
+	t.Run("IsNamespaceShardingEnabledKeyExists returns false when not set", func(t *testing.T) {
+		assert.False(t, IsNamespaceShardingEnabledKeyExists())
+	})
+
+	t.Run("ValidateNamespaceShardingEnabled accepts true and false", func(t *testing.T) {
+		for _, val := range []string{"true", "false"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: NamespaceShardingEnabledKey, Value: val},
+			}
+			assert.NoError(t, ValidateNamespaceShardingEnabled(kvs...), "value %q should be accepted", val)
+		}
+	})
+
+	t.Run("ValidateNamespaceShardingEnabled accepts missing key", func(t *testing.T) {
+		assert.NoError(t, ValidateNamespaceShardingEnabled())
+	})
+
+	t.Run("ValidateNamespaceShardingEnabled rejects invalid values", func(t *testing.T) {
+		for _, val := range []string{"invalid", "True", "FALSE", "1", "0"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: NamespaceShardingEnabledKey, Value: val},
+			}
+			err := ValidateNamespaceShardingEnabled(kvs...)
+			assert.Error(t, err, "value %q should be rejected", val)
+			assert.Contains(t, err.Error(), "valid values")
+			assert.Contains(t, err.Error(), "namespace.sharding.enabled")
+		}
+	})
+
+	t.Run("ValidateNamespaceShardingEnabled rejects wrong case key", func(t *testing.T) {
+		for _, key := range []string{"NAMESPACE.SHARDING.ENABLED", "Namespace.Sharding.Enabled", "Namespace.sharding.enabled"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: key, Value: "true"},
+			}
+			err := ValidateNamespaceShardingEnabled(kvs...)
+			if assert.Error(t, err, "key %q should be rejected", key) {
+				assert.Contains(t, err.Error(), "did you mean")
+			}
+		}
+	})
+
+	t.Run("ValidateNamespaceShardingEnabledNotAltered rejects update", func(t *testing.T) {
+		err := ValidateNamespaceShardingEnabledNotAltered(
+			[]*commonpb.KeyValuePair{{Key: NamespaceShardingEnabledKey, Value: "true"}},
+			nil,
+		)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot alter namespace.sharding.enabled")
+	})
+
+	t.Run("ValidateNamespaceShardingEnabledNotAltered rejects delete", func(t *testing.T) {
+		err := ValidateNamespaceShardingEnabledNotAltered(nil, []string{NamespaceShardingEnabledKey})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot delete namespace.sharding.enabled")
+	})
+
+	t.Run("ValidateNamespaceShardingEnabledNotAltered rejects wrong case update", func(t *testing.T) {
+		err := ValidateNamespaceShardingEnabledNotAltered(
+			[]*commonpb.KeyValuePair{{Key: "Namespace.Sharding.Enabled", Value: "true"}},
+			nil,
+		)
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "did you mean")
+		}
+	})
+
+	t.Run("ValidateNamespaceShardingEnabledNotAltered rejects wrong case delete", func(t *testing.T) {
+		err := ValidateNamespaceShardingEnabledNotAltered(nil, []string{"Namespace.Sharding.Enabled"})
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "did you mean")
+		}
+	})
+
+	t.Run("ValidateNamespaceShardingEnabledNotAltered accepts unrelated changes", func(t *testing.T) {
+		err := ValidateNamespaceShardingEnabledNotAltered(
+			[]*commonpb.KeyValuePair{{Key: "other.key", Value: "true"}},
+			[]string{"other.deleted.key"},
+		)
+		assert.NoError(t, err)
+	})
+}
+
 func TestClampScalarIndexVersion(t *testing.T) {
 	max := MaximumScalarIndexEngineVersion
 
