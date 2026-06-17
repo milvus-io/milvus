@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -500,9 +502,10 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 	defer func() { log.Info("recycleUnusedBinlogFiles done", zap.Duration("timeCost", time.Since(start))) }()
 
 	type scanTask struct {
-		prefix  string
-		checker func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool
-		label   string
+		prefix            string
+		checker           func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool
+		segmentIDFromPath func(rootPath, filePath string) (int64, error)
+		label             string
 	}
 	scanTasks := []scanTask{
 		{
@@ -510,7 +513,8 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
 				return segment != nil
 			},
-			label: metrics.InsertFileLabel,
+			segmentIDFromPath: storage.ParseSegmentIDByBinlog,
+			label:             metrics.InsertFileLabel,
 		},
 		{
 			prefix: path.Join(gc.option.cli.RootPath(), common.SegmentStatslogPath),
@@ -522,7 +526,8 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 				}
 				return segment != nil && segment.IsStatsLogExists(logID)
 			},
-			label: metrics.StatFileLabel,
+			segmentIDFromPath: storage.ParseSegmentIDByBinlog,
+			label:             metrics.StatFileLabel,
 		},
 		{
 			prefix: path.Join(gc.option.cli.RootPath(), common.SegmentDeltaLogPath),
@@ -534,19 +539,56 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 				}
 				return segment != nil && segment.IsDeltaLogExists(logID)
 			},
-			label: metrics.DeleteFileLabel,
+			segmentIDFromPath: storage.ParseSegmentIDByBinlog,
+			label:             metrics.DeleteFileLabel,
+		},
+		{
+			prefix: path.Join(gc.option.cli.RootPath(), common.TextIndexPath),
+			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
+				if segment == nil {
+					return false
+				}
+				_, ok := getTextLogPaths(segment, gc.option.cli.RootPath())[objectInfo.FilePath]
+				return ok
+			},
+			segmentIDFromPath: parseSegmentIDFromTextIndexPath,
+			label:             common.TextIndexPath,
+		},
+		{
+			prefix: path.Join(gc.option.cli.RootPath(), common.JSONStatsPath),
+			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
+				if segment == nil {
+					return false
+				}
+				_, ok := getJSONKeyLogs(segment, gc)[objectInfo.FilePath]
+				return ok
+			},
+			segmentIDFromPath: parseSegmentIDFromJSONStatsPath,
+			label:             common.JSONStatsPath,
+		},
+		{
+			prefix: path.Join(gc.option.cli.RootPath(), common.JSONIndexPath),
+			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
+				if segment == nil {
+					return false
+				}
+				_, ok := getJSONKeyLogs(segment, gc)[objectInfo.FilePath]
+				return ok
+			},
+			segmentIDFromPath: parseSegmentIDFromJSONIndexPath,
+			label:             common.JSONIndexPath,
 		},
 	}
 
 	for _, task := range scanTasks {
-		gc.recycleUnusedBinLogWithChecker(ctx, task.prefix, task.label, task.checker)
+		gc.recycleUnusedBinLogWithChecker(ctx, task.prefix, task.label, task.segmentIDFromPath, task.checker)
 	}
 	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
 }
 
 // recycleUnusedBinLogWithChecker scans the prefix and checks the path with checker.
 // GC the file if checker returns false.
-func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, prefix string, label string, checker func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool) {
+func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, prefix string, label string, segmentIDFromPath func(rootPath, filePath string) (int64, error), checker func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool) {
 	logger := log.With(zap.String("prefix", prefix))
 	logger.Info("garbageCollector recycleUnusedBinlogFiles start", zap.String("prefix", prefix))
 	lastFilePath := ""
@@ -569,7 +611,7 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 
 		// Parse segmentID from file path.
 		// TODO: Does all files in the same segment have the same segmentID?
-		segmentID, err := storage.ParseSegmentIDByBinlog(gc.option.cli.RootPath(), chunkInfo.FilePath)
+		segmentID, err := segmentIDFromPath(gc.option.cli.RootPath(), chunkInfo.FilePath)
 		if err != nil {
 			unexpectedFailure.Inc()
 			logger.Warn("garbageCollector recycleUnusedBinlogFiles parse segment id error",
@@ -955,6 +997,53 @@ func (gc *garbageCollector) isExpire(dropts Timestamp) bool {
 	return time.Since(droptime) > gc.option.dropTolerance
 }
 
+// parseV3SegmentID attempts to parse segmentID from a V3 path format.
+// V3 paths: {root}/insert_log/{coll}/{part}/{seg}/...
+// Returns segmentID or error if path doesn't match.
+func parseV3SegmentID(rootPath, filePath string) (int64, error) {
+	if !strings.HasPrefix(filePath, rootPath) {
+		return 0, merr.WrapErrServiceInternal(fmt.Sprintf("path %q does not contain rootPath %q", filePath, rootPath))
+	}
+	p := strings.TrimPrefix(filePath[len(rootPath):], "/")
+	parts := strings.Split(p, "/")
+	if len(parts) < 5 || parts[0] != common.SegmentInsertLogPath {
+		return 0, merr.WrapErrServiceInternal(fmt.Sprintf("not a V3 insert_log path: %s", filePath))
+	}
+	return strconv.ParseInt(parts[3], 10, 64)
+}
+
+func parseSegmentIDFromAuxIndexPath(rootPath, filePath string) (int64, error) {
+	if !strings.HasPrefix(filePath, rootPath) {
+		return 0, merr.WrapErrServiceInternal(fmt.Sprintf("path %q does not contain rootPath %q", filePath, rootPath))
+	}
+	p := strings.TrimPrefix(filePath[len(rootPath):], "/")
+	parts := strings.Split(p, "/")
+	if len(parts) < 8 || (parts[0] != common.TextIndexPath && parts[0] != common.JSONIndexPath) {
+		return 0, merr.WrapErrServiceInternal(fmt.Sprintf("not an auxiliary index path: %s", filePath))
+	}
+	return strconv.ParseInt(parts[5], 10, 64)
+}
+
+func parseSegmentIDFromJSONStatsPath(rootPath, filePath string) (int64, error) {
+	if !strings.HasPrefix(filePath, rootPath) {
+		return 0, merr.WrapErrServiceInternal(fmt.Sprintf("path %q does not contain rootPath %q", filePath, rootPath))
+	}
+	p := strings.TrimPrefix(filePath[len(rootPath):], "/")
+	parts := strings.Split(p, "/")
+	if len(parts) < 9 || parts[0] != common.JSONStatsPath {
+		return 0, merr.WrapErrServiceInternal(fmt.Sprintf("not a json stats path: %s", filePath))
+	}
+	return strconv.ParseInt(parts[6], 10, 64)
+}
+
+func parseSegmentIDFromTextIndexPath(rootPath, filePath string) (int64, error) {
+	return parseSegmentIDFromAuxIndexPath(rootPath, filePath)
+}
+
+func parseSegmentIDFromJSONIndexPath(rootPath, filePath string) (int64, error) {
+	return parseSegmentIDFromAuxIndexPath(rootPath, filePath)
+}
+
 func getLogs(sinfo *SegmentInfo) map[string]struct{} {
 	logs := make(map[string]struct{})
 	for _, flog := range sinfo.GetBinlogs() {
@@ -981,9 +1070,24 @@ func getLogs(sinfo *SegmentInfo) map[string]struct{} {
 }
 
 func getTextLogs(sinfo *SegmentInfo) map[string]struct{} {
+	return getTextLogPaths(sinfo, "")
+}
+
+func getTextLogPaths(sinfo *SegmentInfo, rootPath string) map[string]struct{} {
 	textLogs := make(map[string]struct{})
 	for _, flog := range sinfo.GetTextStatsLogs() {
 		for _, file := range flog.GetFiles() {
+			if rootPath != "" {
+				file = path.Join(rootPath, common.TextIndexPath,
+					fmt.Sprintf("%d", flog.GetBuildID()),
+					fmt.Sprintf("%d", flog.GetVersion()),
+					fmt.Sprintf("%d", sinfo.GetCollectionID()),
+					fmt.Sprintf("%d", sinfo.GetPartitionID()),
+					fmt.Sprintf("%d", sinfo.GetID()),
+					fmt.Sprintf("%d", flog.GetFieldID()),
+					file,
+				)
+			}
 			textLogs[file] = struct{}{}
 		}
 	}
@@ -995,8 +1099,23 @@ func getJSONKeyLogs(sinfo *SegmentInfo, gc *garbageCollector) map[string]struct{
 	jsonkeyLogs := make(map[string]struct{})
 	for _, flog := range sinfo.GetJsonKeyStats() {
 		for _, file := range flog.GetFiles() {
-			prefix := fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d/%d", gc.option.cli.RootPath(), common.JSONIndexPath,
-				flog.GetBuildID(), flog.GetVersion(), sinfo.GetCollectionID(), sinfo.GetPartitionID(), sinfo.GetID(), flog.GetFieldID())
+			var prefix string
+			if flog.GetJsonKeyStatsDataFormat() >= 2 {
+				prefix = path.Join(
+					gc.option.cli.RootPath(),
+					common.JSONStatsPath,
+					fmt.Sprintf("%d", flog.GetJsonKeyStatsDataFormat()),
+					fmt.Sprintf("%d", flog.GetBuildID()),
+					fmt.Sprintf("%d", flog.GetVersion()),
+					fmt.Sprintf("%d", sinfo.GetCollectionID()),
+					fmt.Sprintf("%d", sinfo.GetPartitionID()),
+					fmt.Sprintf("%d", sinfo.GetID()),
+					fmt.Sprintf("%d", flog.GetFieldID()),
+				)
+			} else {
+				prefix = fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d/%d", gc.option.cli.RootPath(), common.JSONIndexPath,
+					flog.GetBuildID(), flog.GetVersion(), sinfo.GetCollectionID(), sinfo.GetPartitionID(), sinfo.GetID(), flog.GetFieldID())
+			}
 			file = path.Join(prefix, file)
 			jsonkeyLogs[file] = struct{}{}
 		}
