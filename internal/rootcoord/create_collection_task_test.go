@@ -2069,6 +2069,27 @@ func TestNamespaceProperty(t *testing.T) {
 		assert.True(t, hasNamespaceField(schema))
 	})
 
+	t.Run("test namespace partition mode", func(t *testing.T) {
+		schema := initSchema()
+		task := &createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				CollectionName: collectionName,
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+				},
+			},
+			header: &message.CreateCollectionMessageHeader{},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
+			},
+		}
+
+		err := task.handleNamespaceField(ctx, schema)
+		assert.NoError(t, err)
+		assert.False(t, hasNamespaceField(schema))
+		assert.False(t, hasIsolationProperty(task.Req.Properties...))
+	})
+
 	t.Run("test namespace disabled with isolation and partition key", func(t *testing.T) {
 		schema := initSchema()
 		schema.EnableNamespace = false

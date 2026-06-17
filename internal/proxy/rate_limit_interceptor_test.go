@@ -28,6 +28,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -262,6 +264,77 @@ func TestRateLimitInterceptor(t *testing.T) {
 
 		_, _, _, _, err = GetRequestInfo(context.Background(), &milvuspb.CalcDistanceRequest{})
 		assert.NoError(t, err)
+	})
+
+	t.Run("namespace partition mode request info", func(t *testing.T) {
+		namespace := "tenant_partition"
+		schema := &schemapb.CollectionSchema{
+			EnableNamespace: true,
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+			},
+		}
+		mockCache := NewMockCache(t)
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
+			dbID:             100,
+			createdTimestamp: 1,
+		}, nil).Times(4)
+		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Times(4)
+		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(newSchemaInfo(schema), nil).Times(4)
+		mockCache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, namespace).Return(&partitionInfo{
+			name:                namespace,
+			partitionID:         20,
+			createdTimestamp:    10001,
+			createdUtcTimestamp: 10002,
+		}, nil).Times(4)
+		globalMetaCache = mockCache
+
+		database, col2part, rt, _, err := GetRequestInfo(context.Background(), &milvuspb.InsertRequest{
+			CollectionName: "foo",
+			DbName:         "db1",
+			Namespace:      &namespace,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, int64(100), database)
+		assert.Equal(t, internalpb.RateType_DMLInsert, rt)
+		assert.Equal(t, []int64{20}, col2part[1])
+
+		database, col2part, rt, _, err = GetRequestInfo(context.Background(), &milvuspb.DeleteRequest{
+			CollectionName: "foo",
+			DbName:         "db1",
+			Namespace:      &namespace,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, int64(100), database)
+		assert.Equal(t, internalpb.RateType_DMLDelete, rt)
+		assert.Equal(t, []int64{20}, col2part[1])
+
+		database, col2part, rt, size, err := GetRequestInfo(context.Background(), &milvuspb.SearchRequest{
+			CollectionName: "foo",
+			DbName:         "db1",
+			Nq:             5,
+			Namespace:      &namespace,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, int64(100), database)
+		assert.Equal(t, internalpb.RateType_DQLSearch, rt)
+		assert.Equal(t, 5, size)
+		assert.Equal(t, []int64{20}, col2part[1])
+
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.HybridSearchRequest{
+			CollectionName: "foo",
+			DbName:         "db1",
+			Namespace:      &namespace,
+			Requests: []*milvuspb.SearchRequest{
+				{Nq: 2},
+				{Nq: 3},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, int64(100), database)
+		assert.Equal(t, internalpb.RateType_DQLSearch, rt)
+		assert.Equal(t, 5, size)
+		assert.Equal(t, []int64{20}, col2part[1])
 	})
 
 	t.Run("test GetFailedResponse", func(t *testing.T) {

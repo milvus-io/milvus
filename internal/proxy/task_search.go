@@ -197,6 +197,13 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		log.Warn("is partition key mode failed", zap.Error(err))
 		return err
 	}
+	partitionNames, namespaceAsPartition, err := resolveNamespacePartitionNames(t.schema.CollectionSchema, t.request.Namespace, t.request.GetPartitionNames())
+	if err != nil {
+		return err
+	}
+	if namespaceAsPartition {
+		t.request.PartitionNames = partitionNames
+	}
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
 		return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
 	}
@@ -212,10 +219,6 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			log.Warn("failed to get partition ids", zap.Error(err))
 			return err
 		}
-	}
-	err = common.CheckNamespace(t.schema.CollectionSchema, t.request.Namespace)
-	if err != nil {
-		return err
 	}
 
 	var aggs []agg.AggregateBase
@@ -679,7 +682,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			plan.OutputFieldIds = allFieldIDs.Collect()
 			plan.DynamicFields = t.userDynamicFields
 		}
-		plan.Namespace = t.request.Namespace
+		plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 
 		internalSubReq.SerializedExprPlan, err = proto.Marshal(plan)
 		if err != nil {
@@ -936,7 +939,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 			}
 		}
 	}
-	plan.Namespace = t.request.Namespace
+	plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 
 	// Propagate agg-path overrides into queryInfo BEFORE plan serialization so
 	// segcore sees the derived topK / groupSize and plural GroupByFieldIds.
@@ -1048,7 +1051,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 func (t *searchTask) skipRequeryByNamespacePartitionMode() bool {
 	return t.schema != nil &&
 		t.schema.CollectionSchema != nil &&
-		common.IsNamespaceModePartition(t.schema.GetProperties()...)
+		namespacePartitionModeEnabled(t.schema.CollectionSchema)
 }
 
 // convertPlaceholderIfNeeded converts fp32 vectors to fp16/bf16 if the target field uses lower precision.

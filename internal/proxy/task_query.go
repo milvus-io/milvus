@@ -701,9 +701,12 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err := validateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
 		return err
 	}
-	err = common.CheckNamespace(t.schema.CollectionSchema, t.request.Namespace)
+	partitionNames, namespaceAsPartition, err := resolveNamespacePartitionNames(t.schema.CollectionSchema, t.request.Namespace, t.request.GetPartitionNames())
 	if err != nil {
 		return err
+	}
+	if namespaceAsPartition {
+		t.request.PartitionNames = partitionNames
 	}
 
 	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
@@ -827,7 +830,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if t.hasCountStar() && t.queryParams.limit != typeutil.Unlimited && len(t.GetGroupByFieldIds()) == 0 {
 		return merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed")
 	}
-	t.plan.Namespace = t.request.Namespace
+	t.plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 
 	t.SerializedExprPlan, err = proto.Marshal(t.plan)
 	if err != nil {

@@ -409,6 +409,10 @@ func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema 
 		return merr.WrapErrParameterInvalidMsg("namespace is not supported with partition key mode")
 	}
 
+	if common.IsNamespaceModePartition(t.Req.GetProperties()...) {
+		return nil
+	}
+
 	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 		Name:           common.NamespaceFieldName,
 		IsPartitionKey: true,

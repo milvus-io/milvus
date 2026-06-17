@@ -2721,12 +2721,66 @@ func checkDynamicFieldDataForPartialUpdate(schema *schemapb.CollectionSchema, in
 	return doCheckDynamicFieldData(schema, insertMsg, true)
 }
 
+func namespacePartitionModeEnabled(schema *schemapb.CollectionSchema) bool {
+	return schema.GetEnableNamespace() && common.IsNamespaceModePartition(schema.GetProperties()...)
+}
+
+func resolveNamespacePartitionName(schema *schemapb.CollectionSchema, namespace *string, partitionName string) (string, bool, error) {
+	if err := common.CheckNamespace(schema, namespace); err != nil {
+		return "", false, err
+	}
+	if !namespacePartitionModeEnabled(schema) {
+		return partitionName, false, nil
+	}
+
+	namespacePartitionName := *namespace
+	if err := validatePartitionTag(namespacePartitionName, true); err != nil {
+		return "", true, err
+	}
+	if partitionName != "" && partitionName != namespacePartitionName {
+		return "", true, merr.WrapErrParameterInvalidMsg("partition name %q mismatches namespace %q", partitionName, namespacePartitionName)
+	}
+	return namespacePartitionName, true, nil
+}
+
+func resolveNamespacePartitionNames(schema *schemapb.CollectionSchema, namespace *string, partitionNames []string) ([]string, bool, error) {
+	if err := common.CheckNamespace(schema, namespace); err != nil {
+		return nil, false, err
+	}
+	if !namespacePartitionModeEnabled(schema) {
+		return partitionNames, false, nil
+	}
+
+	namespacePartitionName := *namespace
+	if err := validatePartitionTag(namespacePartitionName, true); err != nil {
+		return nil, true, err
+	}
+	if len(partitionNames) == 0 {
+		return []string{namespacePartitionName}, true, nil
+	}
+	if len(partitionNames) == 1 && partitionNames[0] == namespacePartitionName {
+		return partitionNames, true, nil
+	}
+	return nil, true, merr.WrapErrParameterInvalidMsg("partition names %v mismatch namespace %q", partitionNames, namespacePartitionName)
+}
+
+func namespaceForPlan(schema *schemapb.CollectionSchema, namespace *string) *string {
+	if namespacePartitionModeEnabled(schema) {
+		return nil
+	}
+	return namespace
+}
+
 func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
-	err := common.CheckNamespace(schema, insertMsg.Namespace)
+	partitionName, namespaceAsPartition, err := resolveNamespacePartitionName(schema, insertMsg.Namespace, insertMsg.GetPartitionName())
 	if err != nil {
 		return err
 	}
 	if !schema.GetEnableNamespace() {
+		return nil
+	}
+	if namespaceAsPartition {
+		insertMsg.PartitionName = partitionName
 		return nil
 	}
 
@@ -2902,6 +2956,13 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 	case *milvuspb.SearchRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, req.(reqPartNames))
 		return dbID, collToPartIDs, internalpb.RateType_DQLSearch, int(r.GetNq()), err
+	case *milvuspb.HybridSearchRequest:
+		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, req.(reqPartNames))
+		nq := 0
+		for _, subReq := range r.GetRequests() {
+			nq += int(subReq.GetNq())
+		}
+		return dbID, collToPartIDs, internalpb.RateType_DQLSearch, nq, err
 	case *milvuspb.QueryRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, req.(reqPartNames))
 		return dbID, collToPartIDs, internalpb.RateType_DQLQuery, 1, err // think of the query request's nq as 1

@@ -1330,6 +1330,7 @@ type requeryOperator struct {
 	consistencyLevel   commonpb.ConsistencyLevel
 	guaranteeTimestamp uint64
 	namespace          *string
+	planNamespace      *string
 
 	node types.ProxyComponent
 }
@@ -1381,6 +1382,7 @@ func newRequeryOperator(t *searchTask, _ map[string]any) (operator, error) {
 		partitionIDs:       t.GetPartitionIDs(),
 		node:               t.node,
 		namespace:          t.request.Namespace,
+		planNamespace:      namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace),
 	}, nil
 }
 
@@ -1418,7 +1420,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		Namespace:             op.namespace,
 	}
 	plan := planparserv2.CreateRequeryPlan(op.primaryFieldSchema, ids)
-	plan.Namespace = op.namespace
+	plan.Namespace = op.planNamespace
 	channelsMvcc := make(map[string]Timestamp)
 	for k, v := range op.queryChannelsTs {
 		channelsMvcc[k] = v

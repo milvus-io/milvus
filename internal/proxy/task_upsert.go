@@ -204,7 +204,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 	}
 
 	plan := planparserv2.CreateRequeryPlan(pkField, ids)
-	plan.Namespace = t.req.Namespace
+	plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.req.Namespace)
 	qt := &queryTask{
 		ctx:       t.ctx,
 		Condition: NewTaskCondition(t.ctx),
@@ -1305,9 +1305,12 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		it.req.PartialUpdate = true
 	}
 
-	err = common.CheckNamespace(schema.CollectionSchema, it.req.Namespace)
+	partitionName, namespaceAsPartition, err := resolveNamespacePartitionName(schema.CollectionSchema, it.req.Namespace, it.req.GetPartitionName())
 	if err != nil {
 		return err
+	}
+	if namespaceAsPartition {
+		it.req.PartitionName = partitionName
 	}
 
 	if it.req.GetPartialUpdate() && len(schema.GetStructArrayFields()) > 0 {
