@@ -945,7 +945,9 @@ func TestHybridSearchWithRerank(t *testing.T) {
 		Status:         &StatusSuccess,
 	}, nil).Once()
 
-	mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
+	mp.EXPECT().HybridSearch(mock.Anything, mock.MatchedBy(func(req *milvuspb.HybridSearchRequest) bool {
+		return assert.ObjectsAreEqual([]string{"part_a"}, req.GetPartitionNames())
+	})).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
 		TopK:         int64(3),
 		OutputFields: []string{FieldWordCount},
 		FieldsData:   generateFieldData(),
@@ -955,7 +957,7 @@ func TestHybridSearchWithRerank(t *testing.T) {
 
 	queryTestCases := requestBodyTestCase{
 		path:        versionalV2(EntityCategory, HybridSearchAction),
-		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}, {"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}], "functionScore": {"functions": [{"name": "testRank", "type": "Rerank", "inputFieldNames": ["FieldWordCount"], "params": {"name": "decay"}}]}}`),
+		requestBody: []byte(`{"collectionName": "hello_milvus", "partitionNames": ["part_a"], "search": [{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}, {"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}], "functionScore": {"functions": [{"name": "testRank", "type": "Rerank", "inputFieldNames": ["FieldWordCount"], "params": {"name": "decay"}}]}}`),
 	}
 	sendReqAndVerify(t, testEngine, queryTestCases.path, http.MethodPost, queryTestCases)
 }
