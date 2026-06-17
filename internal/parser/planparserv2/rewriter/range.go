@@ -206,6 +206,10 @@ func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr
 				}
 			}
 
+			if isEmpty && hasNullableFieldSemantics(g.col) {
+				continue
+			}
+
 			for _, b := range g.lowers {
 				used[b.exprIndex] = true
 			}
@@ -604,6 +608,9 @@ func (v *visitor) combineAndBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 				}
 			}
 			if isEmpty {
+				if hasNullableFieldSemantics(g.col) {
+					continue
+				}
 				// Empty intersection → constant false
 				for _, iv := range g.intervals {
 					used[iv.exprIndex] = true

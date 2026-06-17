@@ -111,8 +111,14 @@ func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
 			sortTermValues(te)
 			col := te.GetColumnInfo()
 			if v.optimizeEnabled && effectiveDataType(col) == schemapb.DataType_Bool {
-				// Let bool NOT IN flow through to visitTermExpr for bool-specific optimization
+				if !canFoldBoolDomainToConstant(col) && boolValuesCoverDomain(te.GetValues()) {
+					return notExpr(&planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: te}})
+				}
+				// Let other bool NOT IN flow through to visitTermExpr for bool-specific optimization.
 			} else if col != nil && len(te.GetValues()) == 1 {
+				if hasMissingPathNotEqualSemantics(col, te.GetValues()...) {
+					return notExpr(&planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: te}})
+				}
 				// Single-value NOT IN → != (avoids SIMD setup overhead for trivial case)
 				return newUnaryRangeExpr(col, planpb.OpType_NotEqual, te.GetValues()[0])
 			}
@@ -132,7 +138,6 @@ func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
 			return newAlwaysFalseExpr()
 		}
 		// NOT (IS NOT NULL) → IS NULL
-		// Handles: nullable bool NOT IN [true, false] → IS NULL
 		if ne := child.GetNullExpr(); ne != nil {
 			if ne.GetOp() == planpb.NullExpr_IsNotNull {
 				return newNullExpr(ne.GetColumnInfo(), planpb.NullExpr_IsNull)
@@ -144,6 +149,16 @@ func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
 		// NOT (col == val) → col != val
 		// Handles: bool NOT IN [true] → != true, bool NOT IN [false] → != false
 		if ure := child.GetUnaryRangeExpr(); ure != nil && ure.GetOp() == planpb.OpType_Equal {
+			if hasMissingPathNotEqualSemantics(ure.GetColumnInfo(), ure.GetValue()) {
+				return &planpb.Expr{
+					Expr: &planpb.Expr_UnaryExpr{
+						UnaryExpr: &planpb.UnaryExpr{
+							Op:    expr.GetOp(),
+							Child: child,
+						},
+					},
+				}
+			}
 			return newUnaryRangeExpr(ure.GetColumnInfo(), planpb.OpType_NotEqual, ure.GetValue())
 		}
 	}
@@ -165,23 +180,15 @@ func (v *visitor) visitTermExpr(expr *planpb.TermExpr) interface{} {
 	}
 
 	// Optimize bool IN expressions:
-	// - in [true, false] → AlwaysTrueExpr (non-nullable) or IS NOT NULL (nullable)
+	// - in [true, false] → AlwaysTrueExpr for non-nullable fields; nullable fields keep TermExpr
 	// - in [true] → == true (uses fast SIMD path instead of slow scalar loop)
 	// - in [false] → == false
 	if v.optimizeEnabled && effectiveDataType(expr.GetColumnInfo()) == schemapb.DataType_Bool {
 		values := expr.GetValues()
 		if allBoolVals(values) {
-			hasFalse, hasTrue := false, false
-			for _, val := range values {
-				if val.GetBoolVal() {
-					hasTrue = true
-				} else {
-					hasFalse = true
-				}
-			}
-			if hasTrue && hasFalse {
-				if expr.GetColumnInfo().GetNullable() {
-					return newNullExpr(expr.GetColumnInfo(), planpb.NullExpr_IsNotNull)
+			if boolValuesCoverDomain(values) {
+				if !canFoldBoolDomainToConstant(expr.GetColumnInfo()) {
+					return &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: expr}}
 				}
 				return newAlwaysTrueExpr()
 			}
@@ -197,6 +204,18 @@ func (v *visitor) visitTermExpr(expr *planpb.TermExpr) interface{} {
 	}
 
 	return &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: expr}}
+}
+
+func boolValuesCoverDomain(values []*planpb.GenericValue) bool {
+	hasFalse, hasTrue := false, false
+	for _, val := range values {
+		if val.GetBoolVal() {
+			hasTrue = true
+		} else {
+			hasFalse = true
+		}
+	}
+	return hasTrue && hasFalse
 }
 
 // allBoolVals returns true if all values in the slice are BoolVal type.
