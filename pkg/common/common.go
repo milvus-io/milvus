@@ -61,6 +61,11 @@ const (
 	// NamespaceFieldName defines the name of the Namespace field
 	NamespaceFieldName = "$namespace_id"
 
+	NamespaceModeKey          = "namespace.mode"
+	NamespaceModePartitionKey = "partition_key"
+	NamespaceModePartition    = "partition"
+	ValidNamespaceModes       = NamespaceModePartitionKey + ", " + NamespaceModePartition
+
 	// MetaFieldName is the field name of dynamic schema
 	MetaFieldName = "$meta"
 
@@ -331,6 +336,9 @@ const (
 	QueryModeLargeTopK = "large_topk"
 	ValidQueryModes    = QueryModeLargeTopK // comma-separated if more modes added later
 
+	// namespace sharding
+	NamespaceShardingEnabledKey = "namespace.sharding.enabled"
+
 	// warmup related
 	WarmupKey            = "warmup"
 	WarmupScalarFieldKey = "warmup.scalarField"
@@ -569,6 +577,72 @@ func IsQueryModeLargeTopK(kvs ...*commonpb.KeyValuePair) bool {
 	return GetQueryMode(kvs...) == QueryModeLargeTopK
 }
 
+// IsNamespaceShardingEnabledKeyExists checks if namespace.sharding.enabled exists in the key-value pairs.
+func IsNamespaceShardingEnabledKeyExists(kvs ...*commonpb.KeyValuePair) bool {
+	for _, kv := range kvs {
+		if kv.Key == NamespaceShardingEnabledKey {
+			return true
+		}
+	}
+	return false
+}
+
+// IsNamespaceShardingEnabled extracts namespace.sharding.enabled from properties.
+// Returns false if not set.
+func IsNamespaceShardingEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {
+	for _, kv := range kvs {
+		if kv.Key == NamespaceShardingEnabledKey {
+			switch kv.Value {
+			case "true":
+				return true, nil
+			case "false":
+				return false, nil
+			default:
+				return false, merr.WrapErrParameterInvalidMsg("invalid namespace.sharding.enabled value %q, valid values: [true,false]", kv.Value)
+			}
+		}
+	}
+	return false, nil
+}
+
+// ValidateNamespaceShardingEnabled validates namespace.sharding.enabled. Returns nil if
+// the value is valid or if namespace.sharding.enabled is not set. Also rejects
+// case-variant keys that would be silently ignored.
+func ValidateNamespaceShardingEnabled(kvs ...*commonpb.KeyValuePair) error {
+	for _, kv := range kvs {
+		if kv.Key == NamespaceShardingEnabledKey {
+			_, err := IsNamespaceShardingEnabled(kv)
+			return err
+		}
+		if strings.EqualFold(kv.Key, NamespaceShardingEnabledKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", kv.Key, NamespaceShardingEnabledKey)
+		}
+	}
+	return nil
+}
+
+// ValidateNamespaceShardingEnabledNotAltered rejects attempts to update or
+// delete namespace.sharding.enabled after collection creation.
+func ValidateNamespaceShardingEnabledNotAltered(properties []*commonpb.KeyValuePair, deleteKeys []string) error {
+	for _, property := range properties {
+		if property.GetKey() == NamespaceShardingEnabledKey {
+			return merr.WrapErrParameterInvalidMsg("cannot alter %s after collection creation", NamespaceShardingEnabledKey)
+		}
+		if strings.EqualFold(property.GetKey(), NamespaceShardingEnabledKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", property.GetKey(), NamespaceShardingEnabledKey)
+		}
+	}
+	for _, key := range deleteKeys {
+		if key == NamespaceShardingEnabledKey {
+			return merr.WrapErrParameterInvalidMsg("cannot delete %s after collection creation", NamespaceShardingEnabledKey)
+		}
+		if strings.EqualFold(key, NamespaceShardingEnabledKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, NamespaceShardingEnabledKey)
+		}
+	}
+	return nil
+}
+
 func IsDisableFuncRuntimeCheck(kvs ...*commonpb.KeyValuePair) (bool, error) {
 	for _, kv := range kvs {
 		if kv.Key == DisableFuncRuntimeCheck {
@@ -592,6 +666,59 @@ func IsPartitionKeyIsolationPropEnabled(props map[string]string) (bool, error) {
 		return false, merr.WrapErrParameterInvalidMsg("failed to parse partition key isolation property: %v", parseErr)
 	}
 	return iso, nil
+}
+
+func GetNamespaceMode(kvs ...*commonpb.KeyValuePair) string {
+	for _, kv := range kvs {
+		if kv.GetKey() == NamespaceModeKey {
+			mode, ok := normalizeNamespaceMode(kv.GetValue())
+			if ok {
+				return mode
+			}
+			return kv.GetValue()
+		}
+	}
+	return NamespaceModePartitionKey
+}
+
+func IsNamespaceModePartitionKey(kvs ...*commonpb.KeyValuePair) bool {
+	return GetNamespaceMode(kvs...) == NamespaceModePartitionKey
+}
+
+func IsNamespaceModePartition(kvs ...*commonpb.KeyValuePair) bool {
+	return GetNamespaceMode(kvs...) == NamespaceModePartition
+}
+
+type namespaceModeError string
+
+func (e namespaceModeError) Error() string {
+	return string(e)
+}
+
+func ValidateNamespaceMode(kvs ...*commonpb.KeyValuePair) error {
+	for _, kv := range kvs {
+		if kv.GetKey() == NamespaceModeKey {
+			if _, ok := normalizeNamespaceMode(kv.GetValue()); !ok {
+				return namespaceModeError("invalid namespace.mode value " + strconv.Quote(kv.GetValue()) + ", valid values: [" + ValidNamespaceModes + "]")
+			}
+			return nil
+		}
+		if strings.EqualFold(kv.GetKey(), NamespaceModeKey) {
+			return namespaceModeError("invalid property key " + strconv.Quote(kv.GetKey()) + ", did you mean " + strconv.Quote(NamespaceModeKey) + "?")
+		}
+	}
+	return nil
+}
+
+func normalizeNamespaceMode(mode string) (string, bool) {
+	switch mode {
+	case "", NamespaceModePartitionKey:
+		return NamespaceModePartitionKey, true
+	case NamespaceModePartition:
+		return NamespaceModePartition, true
+	default:
+		return "", false
+	}
 }
 
 const (

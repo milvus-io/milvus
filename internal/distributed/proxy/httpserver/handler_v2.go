@@ -1877,6 +1877,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	req := &milvuspb.HybridSearchRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
+		PartitionNames: httpReq.PartitionNames,
 		Requests:       []*milvuspb.SearchRequest{},
 		OutputFields:   httpReq.OutputFields,
 	}

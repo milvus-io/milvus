@@ -59,10 +59,30 @@ const (
 //
 // Outputs:
 //   - outputs[0]: combined score column
+type ScoreCombineNullPolicy int
+
+const (
+	// ScoreCombineNullPropagate returns null if any input is null.
+	ScoreCombineNullPropagate ScoreCombineNullPolicy = iota
+	// ScoreCombineNullAsZero treats null inputs as zero.
+	ScoreCombineNullAsZero
+	// ScoreCombineNullSkip skips null inputs and returns null if all inputs are null.
+	ScoreCombineNullSkip
+)
+
 type ScoreCombineExpr struct {
 	BaseExpr
-	mode    string    // combine mode: multiply, sum, max, min, avg, weighted
-	weights []float64 // weights for weighted mode
+	mode       string                 // combine mode: multiply, sum, max, min, avg, weighted
+	weights    []float64              // weights for weighted mode
+	nullPolicy ScoreCombineNullPolicy // null handling policy
+}
+
+type ScoreCombineOption func(*ScoreCombineExpr)
+
+func WithNullPolicy(policy ScoreCombineNullPolicy) ScoreCombineOption {
+	return func(s *ScoreCombineExpr) {
+		s.nullPolicy = policy
+	}
 }
 
 // =============================================================================
@@ -72,7 +92,7 @@ type ScoreCombineExpr struct {
 // NewScoreCombineExpr creates a new ScoreCombineExpr with the given parameters.
 // Note: Column mapping (which columns to use as input/output) is handled by MapOp,
 // not by the function itself.
-func NewScoreCombineExpr(mode string, weights []float64) (*ScoreCombineExpr, error) {
+func NewScoreCombineExpr(mode string, weights []float64, opts ...ScoreCombineOption) (*ScoreCombineExpr, error) {
 	// Default mode
 	if mode == "" {
 		mode = ModeMultiply
@@ -98,11 +118,16 @@ func NewScoreCombineExpr(mode string, weights []float64) (*ScoreCombineExpr, err
 	}
 
 	// nil supportStages means the function supports all stages
-	return &ScoreCombineExpr{
-		BaseExpr: *NewBaseExpr("score_combine", nil),
-		mode:     mode,
-		weights:  weights,
-	}, nil
+	expr := &ScoreCombineExpr{
+		BaseExpr:   *NewBaseExpr("score_combine", nil),
+		mode:       mode,
+		weights:    weights,
+		nullPolicy: ScoreCombineNullPropagate,
+	}
+	for _, opt := range opts {
+		opt(expr)
+	}
+	return expr, nil
 }
 
 // NewScoreCombineExprFromParams creates a ScoreCombineExpr from a parameter map.
@@ -190,42 +215,113 @@ func (s *ScoreCombineExpr) processChunk(ctx *types.FuncContext, inputs []*arrow.
 	defer builder.Release()
 
 	chunkLen := inputs[0].Chunk(chunkIdx).Len()
-
-	for rowIdx := 0; rowIdx < chunkLen; rowIdx++ {
-		// Check if any input is null
-		hasNull := false
-		for _, input := range inputs {
-			if input.Chunk(chunkIdx).IsNull(rowIdx) {
-				hasNull = true
-				break
-			}
+	readers := make([]numericReader, len(inputs))
+	for colIdx, input := range inputs {
+		chunk := input.Chunk(chunkIdx)
+		if chunk.Len() != chunkLen {
+			return nil, merr.WrapErrServiceInternalMsg("score_combine: input 0 chunk %d has %d rows but input %d has %d rows", chunkIdx, chunkLen, colIdx, chunk.Len())
 		}
-
-		if hasNull {
-			builder.AppendNull()
-			continue
+		reader, ok := newNumericReader(chunk)
+		if !ok {
+			return nil, merr.WrapErrServiceInternalMsg("score_combine: column %d: unsupported input column type %T, expected numeric type", colIdx, chunk)
 		}
-
-		// Collect values from all input columns using base_expr utility
-		values := make([]float64, len(inputs))
-		for colIdx, input := range inputs {
-			val, err := GetNumericValue(input.Chunk(chunkIdx), rowIdx)
-			if err != nil {
-				return nil, merr.WrapErrServiceInternalMsg("score_combine: column %d: %v", colIdx, err)
-			}
-			values[colIdx] = val
-		}
-
-		// Combine values based on mode
-		result := s.combine(values)
-		builder.Append(float32(result))
+		readers[colIdx] = reader
 	}
+
+	s.processRows(builder, readers, chunkLen)
 
 	return builder.NewArray(), nil
 }
 
+func (s *ScoreCombineExpr) processRows(builder *array.Float32Builder, readers []numericReader, chunkLen int) {
+	values := make([]float64, 0, len(readers))
+	weights := make([]float64, 0, len(readers))
+	for rowIdx := 0; rowIdx < chunkLen; rowIdx++ {
+		rowValues, rowWeights, ok := s.collectRowValues(readers, rowIdx, values, weights)
+		if !ok {
+			builder.AppendNull()
+			continue
+		}
+		builder.Append(float32(s.combine(rowValues, rowWeights)))
+	}
+}
+
+func (s *ScoreCombineExpr) collectRowValues(readers []numericReader, rowIdx int, values []float64, weights []float64) ([]float64, []float64, bool) {
+	values = values[:0]
+	weights = weights[:0]
+	for idx, reader := range readers {
+		if reader.IsNull(rowIdx) {
+			switch s.nullPolicy {
+			case ScoreCombineNullPropagate:
+				return values, weights, false
+			case ScoreCombineNullAsZero:
+				values = append(values, 0)
+				if s.mode == ModeWeighted {
+					weights = append(weights, s.weights[idx])
+				}
+			case ScoreCombineNullSkip:
+				continue
+			default:
+				return values, weights, false
+			}
+			continue
+		}
+
+		values = append(values, reader.Float64(rowIdx))
+		if s.mode == ModeWeighted {
+			weights = append(weights, s.weights[idx])
+		}
+	}
+	return values, weights, len(values) > 0
+}
+
+type numericReader interface {
+	IsNull(int) bool
+	Float64(int) float64
+}
+
+type numericValue interface {
+	~int8 | ~int16 | ~int32 | ~int64 | ~float32 | ~float64
+}
+
+type arrowNumericArray[T numericValue] interface {
+	IsNull(int) bool
+	Value(int) T
+}
+
+type typedNumericReader[T numericValue, A arrowNumericArray[T]] struct {
+	arr A
+}
+
+func (r typedNumericReader[T, A]) IsNull(idx int) bool {
+	return r.arr.IsNull(idx)
+}
+
+func (r typedNumericReader[T, A]) Float64(idx int) float64 {
+	return float64(r.arr.Value(idx))
+}
+
+func newNumericReader(arr arrow.Array) (numericReader, bool) {
+	switch a := arr.(type) {
+	case *array.Int8:
+		return typedNumericReader[int8, *array.Int8]{arr: a}, true
+	case *array.Int16:
+		return typedNumericReader[int16, *array.Int16]{arr: a}, true
+	case *array.Int32:
+		return typedNumericReader[int32, *array.Int32]{arr: a}, true
+	case *array.Int64:
+		return typedNumericReader[int64, *array.Int64]{arr: a}, true
+	case *array.Float32:
+		return typedNumericReader[float32, *array.Float32]{arr: a}, true
+	case *array.Float64:
+		return typedNumericReader[float64, *array.Float64]{arr: a}, true
+	default:
+		return nil, false
+	}
+}
+
 // combine combines multiple values based on the mode.
-func (s *ScoreCombineExpr) combine(values []float64) float64 {
+func (s *ScoreCombineExpr) combine(values []float64, weights []float64) float64 {
 	switch s.mode {
 	case ModeMultiply:
 		result := 1.0
@@ -265,7 +361,7 @@ func (s *ScoreCombineExpr) combine(values []float64) float64 {
 	case ModeWeighted:
 		sum := 0.0
 		for i, v := range values {
-			sum += v * s.weights[i]
+			sum += v * weights[i]
 		}
 		return sum
 

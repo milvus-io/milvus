@@ -2151,45 +2151,53 @@ SegmentGrowingImpl::BuildTextIndexFromTextLobRefs(
         }
 
         auto raw_refs = static_cast<const std::string*>(data->Data());
-        FixedVector<std::string> decoded_texts(n);
-        FixedVector<bool> valid_data(n, true);
-        std::vector<int64_t> pending_indices;
-        std::vector<milvus_storage::lob_column::EncodedRef> encoded_refs;
-        pending_indices.reserve(n);
-        encoded_refs.reserve(n);
+        for (int64_t batch_start = 0; batch_start < n;
+             batch_start += kTextLobIndexBuildBatchSize) {
+            auto batch_n = std::min<int64_t>(
+                static_cast<int64_t>(kTextLobIndexBuildBatchSize),
+                n - batch_start);
+            FixedVector<std::string> decoded_texts(batch_n);
+            FixedVector<bool> valid_data(batch_n, true);
+            std::vector<int64_t> pending_indices;
+            std::vector<milvus_storage::lob_column::EncodedRef> encoded_refs;
+            pending_indices.reserve(batch_n);
+            encoded_refs.reserve(batch_n);
 
-        for (int64_t i = 0; i < n; ++i) {
-            auto valid = !field_meta.is_nullable() || data->is_valid(i);
-            valid_data[i] = valid;
-            if (!valid) {
-                continue;
+            for (int64_t i = 0; i < batch_n; ++i) {
+                auto row = batch_start + i;
+                auto valid = !field_meta.is_nullable() || data->is_valid(row);
+                valid_data[i] = valid;
+                if (!valid) {
+                    continue;
+                }
+
+                const auto& ref = raw_refs[row];
+                encoded_refs.push_back(
+                    MakeTextLobEncodedRef(ref.data(), ref.size()));
+                pending_indices.push_back(i);
             }
 
-            const auto& ref = raw_refs[i];
-            encoded_refs.push_back(
-                {reinterpret_cast<const uint8_t*>(ref.data()), ref.size()});
-            pending_indices.push_back(i);
-        }
-
-        if (!encoded_refs.empty()) {
-            auto texts =
-                cache.ReadBatch(lob_base_path, fs, *properties, encoded_refs);
-            AssertInfo(texts.size() == pending_indices.size(),
-                       "TEXT LOB batch read returned inconsistent result size, "
-                       "field {}, expected {}, actual {}",
-                       field_id.get(),
-                       pending_indices.size(),
-                       texts.size());
-            for (size_t i = 0; i < pending_indices.size(); ++i) {
-                decoded_texts[pending_indices[i]] = std::move(texts[i]);
+            if (!encoded_refs.empty()) {
+                auto texts = cache.ReadBatch(
+                    lob_base_path, fs, *properties, encoded_refs);
+                AssertInfo(
+                    texts.size() == pending_indices.size(),
+                    "TEXT LOB batch read returned inconsistent result size, "
+                    "field {}, expected {}, actual {}",
+                    field_id.get(),
+                    pending_indices.size(),
+                    texts.size());
+                for (size_t i = 0; i < pending_indices.size(); ++i) {
+                    decoded_texts[pending_indices[i]] = std::move(texts[i]);
+                }
             }
-        }
 
-        index->AddTextsGrowing(
-            n,
-            decoded_texts.data(),
-            field_meta.is_nullable() ? valid_data.data() : nullptr,
-            offset);
+            index->AddTextsGrowing(
+                batch_n,
+                decoded_texts.data(),
+                field_meta.is_nullable() ? valid_data.data() : nullptr,
+                offset + batch_start);
+        }
         offset += n;
     }
 

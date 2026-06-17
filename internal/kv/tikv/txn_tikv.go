@@ -259,7 +259,7 @@ func (kv *txnTiKV) MultiLoad(ctx context.Context, keys []string) ([]string, erro
 			missingValues = append(missingValues, k)
 		}
 		// Check if empty value placeholder
-		strVal := convertEmptyByteToString(v)
+		strVal := convertEmptyByteToString(v.Value)
 		validValues = append(validValues, strVal)
 	}
 	if len(missingValues) != 0 {
@@ -460,7 +460,7 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 			loggingErr = merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error())
 			return loggingErr
 		}
-		if !pred.IsTrue(val) {
+		if !pred.IsTrue(val.Value) {
 			loggingErr = merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue()))
 			return loggingErr
 		}
@@ -528,7 +528,7 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 			loggingErr = merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error())
 			return loggingErr
 		}
-		if !pred.IsTrue(val) {
+		if !pred.IsTrue(val.Value) {
 			loggingErr = merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue()))
 			return loggingErr
 		}
@@ -672,12 +672,12 @@ func (kv *txnTiKV) getTiKVMeta(ctx context.Context, key string) (string, error) 
 	}
 
 	// Check if value is the empty placeholder
-	strVal := convertEmptyByteToString(val)
+	strVal := convertEmptyByteToString(val.Value)
 
 	elapsed := start.ElapseSpan()
 
 	metrics.MetaOpCounter.WithLabelValues(metrics.MetaGetLabel, metrics.TotalLabel).Inc()
-	metrics.MetaKvSize.WithLabelValues(metrics.MetaGetLabel).Observe(float64(len(val)))
+	metrics.MetaKvSize.WithLabelValues(metrics.MetaGetLabel).Observe(float64(len(val.Value)))
 	metrics.MetaRequestLatency.WithLabelValues(metrics.MetaGetLabel).Observe(float64(elapsed.Milliseconds()))
 	metrics.MetaOpCounter.WithLabelValues(metrics.MetaGetLabel, metrics.SuccessLabel).Inc()
 

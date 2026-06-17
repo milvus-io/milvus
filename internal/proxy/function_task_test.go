@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/util/function/validator"
 )
 
 type FunctionTaskSuite struct {
@@ -199,7 +200,7 @@ func (f *FunctionTaskSuite) TestAddCollectionFunctionTaskPreExecute() {
 		cache := NewMockCache(f.T())
 		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
 		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(coll, nil).Maybe()
-		m := mockey.Mock(validateFunction).Return(nil).Build()
+		m := mockey.Mock(validator.ValidateFunction).Return(nil).Build()
 		defer m.UnPatch()
 		globalMetaCache = cache
 		err := task.PreExecute(ctx)
@@ -442,7 +443,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 		cache := NewMockCache(f.T())
 		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
 		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(coll, nil).Maybe()
-		m := mockey.Mock(validateFunction).Return(nil).Build()
+		m := mockey.Mock(validator.ValidateFunction).Return(nil).Build()
 		defer m.UnPatch()
 		globalMetaCache = cache
 		err := task.PreExecute(ctx)

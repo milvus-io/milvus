@@ -36,6 +36,7 @@ type siliconflowProvider struct {
 	url               string
 	modelName         string
 	params            map[string]any
+	timeoutMs         int64
 }
 
 func newSiliconflowProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (ModelProvider, error) {
@@ -83,18 +84,21 @@ func newSiliconflowProvider(params []*commonpb.KeyValuePair, conf map[string]str
 		return nil, merr.WrapErrParameterMissingMsg("siliconflow rerank model name is required")
 	}
 
+	timeoutMs := models.ResolveTimeoutMs(params)
+
 	provider := siliconflowProvider{
 		baseProvider:      baseProvider{batchSize: maxBatch},
 		siliconflowClient: siliconflowClient,
 		url:               url,
 		modelName:         modelName,
 		params:            rankParams,
+		timeoutMs:         timeoutMs,
 	}
 	return &provider, nil
 }
 
 func (provider *siliconflowProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	rerankResp, err := provider.siliconflowClient.Rerank(provider.url, provider.modelName, query, docs, nil, 30)
+	rerankResp, err := provider.siliconflowClient.Rerank(provider.url, provider.modelName, query, docs, nil, provider.timeoutMs)
 	if err != nil {
 		return nil, err
 	}

@@ -32,6 +32,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/function/validator"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -440,10 +442,10 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := validateFunction(t.schema, "", disableCheck); err != nil {
+	if err := validator.ValidateFunction(t.schema, "", disableCheck); err != nil {
 		return err
 	}
-	if err := normalizeFunctionOutputFields(t.schema); err != nil {
+	if err := validator.NormalizeFunctionOutputFields(t.schema); err != nil {
 		return err
 	}
 
@@ -544,6 +546,11 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	// validate query mode
 	if err := common.ValidateQueryMode(t.GetProperties()...); err != nil {
+		return err
+	}
+
+	// validate namespace sharding
+	if err := common.ValidateNamespaceShardingEnabled(t.GetProperties()...); err != nil {
 		return err
 	}
 
@@ -961,6 +968,9 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 	if err := validateTextStorageV3Enabled(schemaWithNewField); err != nil {
 		return err
 	}
+	if newFieldSchema.GetDataType() == schemapb.DataType_Text && newFieldSchema.GetDefaultValue() != nil {
+		return merr.WrapErrParameterInvalidMsg("default value is not supported when adding TEXT field, field name = %s", newFieldSchema.GetName())
+	}
 	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName, common.VirtualPKFieldName}, newFieldSchema.GetName()) {
 		return merr.WrapErrParameterInvalidMsg("not support to add system field, field name = %s", newFieldSchema.GetName())
 	}
@@ -994,7 +1004,7 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 
 	// NOTE: The nullable requirement for added fields is enforced by callers that deal with
 	// user-defined fields (e.g. addCollectionFieldTask). Function output fields managed by
-	// alterCollectionSchemaTask are explicitly prohibited from being nullable by validateFunction,
+	// alterCollectionSchemaTask are explicitly prohibited from being nullable by the function validator,
 	// so the check is intentionally left to callers rather than enforced here universally.
 	//
 	// Dense vector types require a dimension TypeParam. This check applies unconditionally
@@ -1087,69 +1097,42 @@ func (t *alterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 
 func (t *alterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 	addRequest := t.GetAction().GetAddRequest()
-
-	fieldInfos := addRequest.GetFieldInfos()
-	funcSchemas := addRequest.GetFuncSchema()
-
-	// AlterCollectionSchema currently only supports adding exactly one function with its output fields.
-	// RootCoord enforces the same constraint (ddl_callbacks_alter_collection_schema.go);
-	// validate early at Proxy to give clearer error messages.
-	if len(funcSchemas) != 1 || funcSchemas[0] == nil {
-		// Count constraint (covers both zero and >1), not a pure missing param,
-		// so keep this as an invalid-parameter error.
-		return merr.WrapErrParameterInvalidMsg("For now, exactly one function schema is required in alter schema task")
-	}
-	functionType := funcSchemas[0].GetType()
-	if functionType != schemapb.FunctionType_BM25 && functionType != schemapb.FunctionType_MinHash {
-		return merr.WrapErrParameterInvalidMsg("For now, only BM25 and MinHash functions are supported in alter schema task")
-	}
-	if len(fieldInfos) == 0 {
-		return merr.WrapErrParameterMissingMsg("fieldInfos is empty, function output fields are required")
-	}
-
-	if len(fieldInfos) != 1 {
-		return merr.WrapErrParameterInvalidMsg("For now, only one field info is supported in alter schema task")
-	}
-	newFieldSchema := fieldInfos[0].GetFieldSchema()
-	if newFieldSchema == nil {
-		return merr.WrapErrParameterInvalidMsg("empty new field schema in alter schema task")
-	}
-	if err := validateAddFieldRequest(t.oldSchema, newFieldSchema); err != nil {
-		return err
-	}
-	if err := ValidateField(newFieldSchema, t.oldSchema); err != nil {
+	plan, err := schemautil.ParseAlterSchemaAddRequest(addRequest)
+	if err != nil {
 		return err
 	}
 
-	// Verify that every OutputFieldName of the function refers to one of the newly-added
-	// fields (from fieldInfos), not to a field that already exists in the old schema.
-	// This prevents a caller from wiring function output to an existing field, which
-	// would corrupt that field's data silently.
-	newFieldNames := make(map[string]struct{}, len(fieldInfos))
-	for _, fi := range fieldInfos {
-		if fi.GetFieldSchema() != nil {
-			newFieldNames[fi.GetFieldSchema().GetName()] = struct{}{}
+	if plan.HasField() {
+		if err := validateAddFieldRequest(t.oldSchema, plan.Field); err != nil {
+			return err
+		}
+		if err := ValidateField(plan.Field, t.oldSchema); err != nil {
+			return err
+		}
+
+		if plan.Kind == schemautil.AlterSchemaAddField {
+			if !plan.Field.GetNullable() {
+				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("added field must be nullable, please check it, field name = %s", plan.Field.GetName()))
+			}
+			return nil
 		}
 	}
-	for _, outName := range funcSchemas[0].GetOutputFieldNames() {
-		if _, isNew := newFieldNames[outName]; !isNew {
-			return merr.WrapErrParameterInvalidMsg(
-				"function output field %q must be one of the newly-added fields, not an existing field",
-				outName,
-			)
+	if plan.HasFunction() {
+		if err := schemautil.ValidateAlterSchemaAddFunctionPlan(plan); err != nil {
+			return err
 		}
 	}
 
 	// Validate function-field type compatibility (e.g., BM25 requires varchar input,
-	// SparseFloatVector output). Construct a merged schema with old fields + new fields
+	// SparseFloatVector output). Construct a merged schema with old fields + optional new field
 	// + new function, then validate only the new function to avoid re-checking existing
 	// functions' runtime providers.
 	mergedSchema := proto.Clone(t.oldSchema).(*schemapb.CollectionSchema)
-	for _, fieldInfo := range fieldInfos {
-		mergedSchema.Fields = append(mergedSchema.Fields, proto.Clone(fieldInfo.GetFieldSchema()).(*schemapb.FieldSchema))
+	if plan.HasField() {
+		mergedSchema.Fields = append(mergedSchema.Fields, proto.Clone(plan.Field).(*schemapb.FieldSchema))
 	}
-	mergedSchema.Functions = append(mergedSchema.Functions, funcSchemas[0])
-	if err := validateFunction(mergedSchema, funcSchemas[0].GetName(), false); err != nil {
+	mergedSchema.Functions = append(mergedSchema.Functions, plan.Function)
+	if err := validator.ValidateFunction(mergedSchema, plan.Function.GetName(), false); err != nil {
 		return err
 	}
 
@@ -1161,7 +1144,7 @@ func (t *alterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
 
 	switch id := dropReq.GetIdentifier().(type) {
 	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FunctionName:
-		return validateDropFunction(t.oldSchema, id.FunctionName)
+		return validateDropFunction(t.oldSchema, id.FunctionName, dropReq.GetDropFunctionOutputFields())
 
 	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId:
 		for _, f := range t.oldSchema.Fields {
@@ -1194,16 +1177,6 @@ func (t *alterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
 }
 
 func (t *alterCollectionSchemaTask) Execute(ctx context.Context) error {
-	// For AddRequest, mark all new fields as function output before sending to RootCoord.
-	// DropRequest needs no extra processing here; RootCoord handles it entirely.
-	if addRequest := t.GetAction().GetAddRequest(); addRequest != nil {
-		for _, fieldInfo := range addRequest.GetFieldInfos() {
-			if fieldInfo != nil && fieldInfo.GetFieldSchema() != nil {
-				fieldInfo.GetFieldSchema().IsFunctionOutput = true
-			}
-		}
-	}
-
 	var err error
 	t.AlterCollectionSchemaResponse, err = t.mixCoord.AlterCollectionSchema(ctx, t.AlterCollectionSchemaRequest)
 	return merr.CheckRPCCall(t.GetAlterStatus(), err)
@@ -1244,6 +1217,12 @@ func validateDropField(schema *schemapb.CollectionSchema, fieldName string) erro
 	}
 	if targetField == nil {
 		return merr.WrapErrParameterInvalidMsg("field not found: %s", fieldName)
+	}
+
+	for _, property := range schema.GetProperties() {
+		if property.GetKey() == common.CollectionTTLFieldKey && property.GetValue() == fieldName {
+			return merr.WrapErrParameterInvalidMsg("cannot drop field %s because it is referenced by collection property %s, drop the property first", fieldName, common.CollectionTTLFieldKey)
+		}
 	}
 
 	// Check: cannot drop system fields
@@ -1335,11 +1314,7 @@ func validateDropStructArrayField(schema *schemapb.CollectionSchema, sf *schemap
 	return nil
 }
 
-// validateDropFunction checks that the function exists, and that the cascade
-// removal of its output fields would not leave the collection without any
-// vector field. Without this check, a user told to "drop function first" by
-// validateDropField could end up with an unsearchable collection.
-func validateDropFunction(schema *schemapb.CollectionSchema, functionName string) error {
+func validateDropFunction(schema *schemapb.CollectionSchema, functionName string, dropOutputFields bool) error {
 	if functionName == "" {
 		return merr.WrapErrParameterInvalidMsg("function name is empty")
 	}
@@ -1355,7 +1330,19 @@ func validateDropFunction(schema *schemapb.CollectionSchema, functionName string
 		return merr.WrapErrParameterInvalidMsg("function not found: %s", functionName)
 	}
 
-	// Cascade removes the function's output fields; refuse if it removes all vectors.
+	if !dropOutputFields {
+		if targetFunc.GetType() == schemapb.FunctionType_BM25 {
+			return merr.WrapErrParameterInvalidMsg("BM25 function must be dropped with its output field in drop_function_field interface: %s", functionName)
+		}
+		return nil
+	}
+
+	switch targetFunc.GetType() {
+	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
+	default:
+		return merr.WrapErrParameterInvalidMsg("only BM25 and MinHash functions support dropping output fields: %s", functionName)
+	}
+
 	removedVectors := 0
 	for _, name := range targetFunc.OutputFieldNames {
 		if f := typeutil.GetFieldByName(schema, name); f != nil && typeutil.IsVectorType(f.DataType) {
@@ -2178,6 +2165,9 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 				key)
 		}
 	}
+	if err := common.ValidateNamespaceShardingEnabledNotAltered(t.GetProperties(), t.GetDeleteKeys()); err != nil {
+		return err
+	}
 
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
@@ -2211,6 +2201,13 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 
 		for _, property := range t.Properties {
 			if property.GetKey() != common.CollectionDescription {
+				continue
+			}
+			// Only validate the description when it is actually changed. A
+			// pre-existing collection may resend its (possibly oversized)
+			// description unchanged while altering other properties (e.g. TTL);
+			// re-validating an unchanged value would reject legitimate alters.
+			if property.GetValue() == collSchema.GetDescription() {
 				continue
 			}
 			if err := validateCollectionDescription(property.GetValue()); err != nil {

@@ -361,6 +361,20 @@ func (t *createCollectionTask) appendConsistecyLevel() {
 	})
 }
 
+func (t *createCollectionTask) appendNamespaceShardingEnabled() error {
+	if err := common.ValidateNamespaceShardingEnabled(t.Req.Properties...); err != nil {
+		return err
+	}
+	if common.IsNamespaceShardingEnabledKeyExists(t.Req.Properties...) {
+		return nil
+	}
+	t.Req.Properties = append(t.Req.Properties, &commonpb.KeyValuePair{
+		Key:   common.NamespaceShardingEnabledKey,
+		Value: "false",
+	})
+	return nil
+}
+
 func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema *schemapb.CollectionSchema) error {
 	hasIsolation := hasIsolationProperty(t.Req.Properties...)
 	_, err := typeutil.GetPartitionKeyFieldSchema(schema)
@@ -467,6 +481,9 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	}
 
 	t.appendConsistecyLevel()
+	if err := t.appendNamespaceShardingEnabled(); err != nil {
+		return err
+	}
 	t.appendDynamicField(ctx, t.body.CollectionSchema)
 	if err := t.handleNamespaceField(ctx, t.body.CollectionSchema); err != nil {
 		return err
@@ -497,6 +514,9 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.Req.GetProperties())
 	if exist && !timestamptz.IsTimezoneValid(tz) {
 		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
+	}
+	if err := common.ValidateNamespaceMode(t.Req.GetProperties()...); err != nil {
+		return err
 	}
 
 	// Set properties for persistent

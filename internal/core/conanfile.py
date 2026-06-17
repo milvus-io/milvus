@@ -123,7 +123,6 @@ class MilvusConan(ConanFile):
         self.requires("nlohmann_json/3.11.3#ffb9e9236619f1c883e36662f944345d", force=True)
         self.requires("abseil/20250127.0#481edcc75deb0efb16500f511f0f0a1c", force=True)
         self.requires("fmt/11.2.0#eb98daa559c7c59d591f4720dde4cd5c", force=True)
-        self.requires("rapidjson/cci.20230929#0a3982e5f4fa453a9b9cd0dd5b1dcb3a", force=True)
         # azure-sdk-for-cpp is a transitive dep of Arrow, but must be declared
         # as a direct dep so CMakeDeps generates standalone cmake config files.
         # Without this, find_package(Azure) can't find include directories.

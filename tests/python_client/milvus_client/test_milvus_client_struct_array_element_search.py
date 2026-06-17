@@ -6395,21 +6395,15 @@ class TestMilvusClientStructArrayElementQueryIterator(TestMilvusClientV2Base):
     @pytest.mark.parametrize(
         "match_type,match_expr,predicate",
         [
-            pytest.param(
+            (
                 "ANY",
                 'match_any(structA, $[color] == "Red")',
                 lambda sa: any(e["color"] == "Red" for e in sa),
-                marks=pytest.mark.skip(
-                    reason="milvus-io/milvus#49755: query_iterator + match_any can trigger ASan abort"
-                ),
             ),
-            pytest.param(
+            (
                 "ALL",
                 "match_all(structA, $[int_val] >= 0)",
                 lambda sa: all(e["int_val"] >= 0 for e in sa),
-                marks=pytest.mark.skip(
-                    reason="milvus-io/milvus#49693: query_iterator full StructArray output can fail"
-                ),
             ),
         ],
     )
@@ -6425,10 +6419,6 @@ class TestMilvusClientStructArrayElementQueryIterator(TestMilvusClientV2Base):
 
         self._assert_match_query_and_iterator(client, collection_name, match_expr, predicate)
 
-    @pytest.mark.skip(
-        reason="milvus-io/milvus#49693: full StructArray output fails after release/load "
-        "when ArrayOfVector uses HNSW+COSINE index raw-data retrieve path"
-    )
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_iterator_full_struct_output_after_reload(self):
         """

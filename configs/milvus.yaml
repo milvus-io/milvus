@@ -442,6 +442,7 @@ queryCoord:
   channelTaskTimeout: 60000 # 1 minute
   segmentTaskTimeout: 120000 # 2 minute
   distPullInterval: 500
+  dispatchInterval: 500
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
   loadTimeoutSeconds: 600
   distRequestTimeout: 5000 # the request timeout for querycoord fetching data distribution from querynodes, in milliseconds
@@ -991,7 +992,7 @@ common:
   gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
   parquetStatsSkipIndex:
     enabled: false # whether to skip parquet stats index when reading; set true to enable skipping.
-  storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote, opendal], value minio is deprecated, use remote instead
+  storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote], value minio is deprecated, use remote instead
   storage:
     manifestTransactionRetryLimit: 10 # Maximum number of retry attempts for V3 storage manifest transaction commits on optimistic concurrency conflicts
     stv2:
@@ -1461,6 +1462,8 @@ credential:
 
 # Any configuration related to functions
 function:
+  model:
+    requestTimeout: 30s # Global timeout for external model requests, e.g. 30s. Function param timeout_ms overrides it.
   textEmbedding:
     providers:
       azure_openai:

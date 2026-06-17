@@ -41,9 +41,9 @@ type TeiEmbeddingProvider struct {
 	truncate            bool
 	truncationDirection string
 
-	maxBatch   int
-	timeoutSec int64
-	extraInfo  *models.ModelExtraInfo
+	maxBatch  int
+	timeoutMs int64
+	extraInfo *models.ModelExtraInfo
 }
 
 func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (*TeiEmbeddingProvider, error) {
@@ -91,6 +91,8 @@ func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *
 		return nil, err
 	}
 
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
+
 	provider := TeiEmbeddingProvider{
 		client:   c,
 		fieldDim: fieldDim,
@@ -100,7 +102,7 @@ func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *
 		truncationDirection: truncationDirection,
 		maxBatch:            maxBatch,
 		truncate:            truncate,
-		timeoutSec:          30,
+		timeoutMs:           timeoutMs,
 		extraInfo:           extraInfo,
 	}
 	return &provider, nil
@@ -129,7 +131,7 @@ func (provider *TeiEmbeddingProvider) CallEmbedding(ctx context.Context, texts [
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(texts[i:end], provider.truncate, provider.truncationDirection, prompt, provider.timeoutSec)
+		resp, err := provider.client.Embedding(texts[i:end], provider.truncate, provider.truncationDirection, prompt, provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}

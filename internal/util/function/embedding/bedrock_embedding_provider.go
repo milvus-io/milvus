@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -49,9 +50,9 @@ type BedrockEmbeddingProvider struct {
 	embedDimParam int64
 	normalize     bool
 
-	maxBatch   int
-	timeoutSec int
-	extraInfo  *models.ModelExtraInfo
+	maxBatch  int
+	timeoutMs int64
+	extraInfo *models.ModelExtraInfo
 }
 
 func createBedRockEmbeddingClient(awsAccessKeyId string, awsSecretAccessKey string, region string) (*bedrockruntime.Client, error) {
@@ -160,6 +161,8 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 		client = c
 	}
 
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
+
 	return &BedrockEmbeddingProvider{
 		client:        client,
 		fieldDim:      fieldDim,
@@ -167,7 +170,7 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 		embedDimParam: dim,
 		normalize:     normalize,
 		maxBatch:      1,
-		timeoutSec:    30,
+		timeoutMs:     timeoutMs,
 		extraInfo:     extraInfo,
 	}, nil
 }
@@ -198,11 +201,13 @@ func (provider *BedrockEmbeddingProvider) CallEmbedding(ctx context.Context, tex
 			return nil, err
 		}
 
-		output, err := provider.client.InvokeModel(context.Background(), &bedrockruntime.InvokeModelInput{
+		callCtx, cancel := context.WithTimeout(ctx, time.Duration(provider.timeoutMs)*time.Millisecond)
+		output, err := provider.client.InvokeModel(callCtx, &bedrockruntime.InvokeModelInput{
 			Body:        payloadBytes,
 			ModelId:     aws.String(provider.modelName),
 			ContentType: aws.String("application/json"),
 		})
+		cancel()
 		if err != nil {
 			return nil, err
 		}

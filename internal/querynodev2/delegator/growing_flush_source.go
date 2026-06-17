@@ -33,6 +33,7 @@ var errGrowingSourceProviderClosed = errors.New("growing source provider is clos
 type delegatorGrowingSourceProvider struct {
 	segmentManager  segments.SegmentManager
 	waitFence       func(context.Context, uint64) error
+	currentTSafe    func() uint64
 	mu              sync.Mutex
 	cond            *sync.Cond
 	closing         bool
@@ -46,7 +47,7 @@ type delegatorGrowingSourceProvider struct {
 	handoffAllowed  map[int64]struct{}
 }
 
-func newDelegatorGrowingSourceProvider(segmentManager segments.SegmentManager, waitFence func(context.Context, uint64) error) *delegatorGrowingSourceProvider {
+func newDelegatorGrowingSourceProvider(segmentManager segments.SegmentManager, waitFence func(context.Context, uint64) error, currentTSafe ...func() uint64) *delegatorGrowingSourceProvider {
 	provider := &delegatorGrowingSourceProvider{
 		segmentManager:  segmentManager,
 		waitFence:       waitFence,
@@ -54,6 +55,9 @@ func newDelegatorGrowingSourceProvider(segmentManager segments.SegmentManager, w
 		releaseAllowed:  make(map[int64]uint64),
 		releasePrepared: make(map[int64]int64),
 		handoffAllowed:  make(map[int64]struct{}),
+	}
+	if len(currentTSafe) > 0 {
+		provider.currentTSafe = currentTSafe[0]
 	}
 	provider.cond = sync.NewCond(&provider.mu)
 	return provider
@@ -65,7 +69,7 @@ func (p *delegatorGrowingSourceProvider) SetRegistration(registration *syncmgr.G
 	p.registration = registration
 }
 
-func (p *delegatorGrowingSourceProvider) GetGrowingFlushSource(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+func (p *delegatorGrowingSourceProvider) GetGrowingFlushSource(segmentID int64, targetOffset int64, endPos *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 	if !p.acquireLease(segmentID) {
 		return nil, syncmgr.GrowingSourceUnavailable
 	}
@@ -76,6 +80,9 @@ func (p *delegatorGrowingSourceProvider) GetGrowingFlushSource(segmentID int64, 
 		segment, ok = p.getRetained(segmentID)
 		if !ok {
 			p.releaseLease()
+			if p.activeProviderBehind(endPos) {
+				return nil, syncmgr.GrowingSourcePending
+			}
 			return nil, syncmgr.GrowingSourceUnavailable
 		}
 		retained = true
@@ -92,6 +99,17 @@ func (p *delegatorGrowingSourceProvider) GetGrowingFlushSource(segmentID int64, 
 		return source, syncmgr.GrowingSourcePending
 	}
 	return source, syncmgr.GrowingSourceUsable
+}
+
+func (p *delegatorGrowingSourceProvider) activeProviderBehind(endPos *msgpb.MsgPosition) bool {
+	if endPos == nil || endPos.GetTimestamp() == 0 || p.currentTSafe == nil {
+		return false
+	}
+	p.mu.Lock()
+	closing := p.closing
+	deactivated := p.deactivated
+	p.mu.Unlock()
+	return !closing && !deactivated && p.currentTSafe() < endPos.GetTimestamp()
 }
 
 func (p *delegatorGrowingSourceProvider) PrepareGrowingSourceReleaseHandoff(ctx context.Context, fenceTs uint64, segments []syncmgr.GrowingSourceReleaseHandoffSegment) error {

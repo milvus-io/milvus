@@ -425,6 +425,91 @@ class TestGroupSearch(TestMilvusClientV2Base):
                 check_items={"nq": ct.default_nq, "limit": ct.default_limit},
             )
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_hybrid_search_group_by_same_group_across_sub_requests(self):
+        """
+        target: reproduce hybrid search group-by with the same group value returned by different sub requests
+        method: create two vector fields; make each sub request prefer a different row with the same problem_id
+        expected: group_size=1 returns at most one hit per problem_id after weighted rerank
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 4
+        group_by_field = "problem_id"
+        vector_field_1 = "arcs_vector"
+        vector_field_2 = "description_vector"
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(self.primary_field, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(group_by_field, DataType.VARCHAR, max_length=64)
+        schema.add_field(vector_field_1, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(vector_field_2, DataType.FLOAT_VECTOR, dim=dim)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=vector_field_1, index_type="FLAT", metric_type="COSINE", params={})
+        index_params.add_index(field_name=vector_field_2, index_type="FLAT", metric_type="COSINE", params={})
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        rows = [
+            {
+                self.primary_field: 1,
+                group_by_field: "p1",
+                vector_field_1: [1.0, 0.0, 0.0, 0.0],
+                vector_field_2: [0.0, 1.0, 0.0, 0.0],
+            },
+            {
+                self.primary_field: 2,
+                group_by_field: "p1",
+                vector_field_1: [0.0, 1.0, 0.0, 0.0],
+                vector_field_2: [1.0, 0.0, 0.0, 0.0],
+            },
+            {
+                self.primary_field: 3,
+                group_by_field: "p2",
+                vector_field_1: [0.0, 0.0, 1.0, 0.0],
+                vector_field_2: [0.0, 0.0, 1.0, 0.0],
+            },
+            {
+                self.primary_field: 4,
+                group_by_field: "p3",
+                vector_field_1: [0.0, 0.0, 0.0, 1.0],
+                vector_field_2: [0.0, 0.0, 0.0, 1.0],
+            },
+        ]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        query_vector = [[1.0, 0.0, 0.0, 0.0]]
+        req_1 = AnnSearchRequest(
+            data=query_vector,
+            anns_field=vector_field_1,
+            param={"metric_type": "COSINE"},
+            limit=4,
+        )
+        req_2 = AnnSearchRequest(
+            data=query_vector,
+            anns_field=vector_field_2,
+            param={"metric_type": "COSINE"},
+            limit=4,
+        )
+        res = self.hybrid_search(
+            client,
+            collection_name,
+            reqs=[req_1, req_2],
+            ranker=WeightedRanker(0.5, 0.5),
+            limit=4,
+            group_by_field=group_by_field,
+            group_size=1,
+            strict_group_size=True,
+            output_fields=[group_by_field],
+            consistency_level="Strong",
+        )[0]
+
+        group_values = [hit.get(group_by_field) for hit in res[0]]
+        log.info(f"hybrid group-by results: ids={[hit.get(self.primary_field) for hit in res[0]]}, groups={group_values}")
+        assert len(group_values) == len(set(group_values)), f"duplicated group values in hybrid search: {group_values}"
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_hybrid_search_group_by_empty_results(self):
         """

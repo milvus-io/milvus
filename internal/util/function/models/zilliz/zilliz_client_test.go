@@ -294,11 +294,8 @@ func TestZillizClient_Embedding(t *testing.T) {
 	require.NoError(t, err)
 	defer conn.Close()
 
-	client := &ZillizClient{
-		modelDeploymentID: "test-deployment",
-		clusterID:         "test-cluster",
-		conn:              conn,
-	}
+	client := NewZilliClientForTests("test-deployment", "test-cluster", "", conn, 15)
+	assert.Equal(t, 15*time.Millisecond, client.timeout)
 
 	// Test successful embedding
 	ctx := context.Background()
@@ -341,11 +338,8 @@ func TestZillizClient_Embedding_Error(t *testing.T) {
 	require.NoError(t, err)
 	defer conn.Close()
 
-	client := &ZillizClient{
-		modelDeploymentID: "test-deployment",
-		clusterID:         "test-cluster",
-		conn:              conn,
-	}
+	client := NewZilliClientForTests("test-deployment", "test-cluster", "", conn, 15)
+	assert.Equal(t, 15*time.Millisecond, client.timeout)
 
 	// Test embedding with error
 	ctx := context.Background()
@@ -389,11 +383,8 @@ func TestZillizClient_Rerank(t *testing.T) {
 	require.NoError(t, err)
 	defer conn.Close()
 
-	client := &ZillizClient{
-		modelDeploymentID: "test-deployment",
-		clusterID:         "test-cluster",
-		conn:              conn,
-	}
+	client := NewZilliClientForTests("test-deployment", "test-cluster", "", conn, 15)
+	assert.Equal(t, 15*time.Millisecond, client.timeout)
 
 	// Test successful rerank
 	ctx := context.Background()
@@ -477,7 +468,7 @@ func TestNewZilliClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, err := NewZilliClient("test-deployment", "test-cluster", "test-db", tt.info)
+			client, err := NewZilliClient("test-deployment", "test-cluster", "test-db", tt.info, 0)
 			if tt.expectError {
 				assert.Error(t, err)
 				assert.Nil(t, client)
@@ -510,7 +501,7 @@ func TestNewZilliClient_WithMockServer(t *testing.T) {
 		}
 
 		// This will create the client but won't actually connect until first RPC
-		client, err := NewZilliClient("test-deployment", "test-cluster", "test-db", info)
+		client, err := NewZilliClient("test-deployment", "test-cluster", "test-db", info, 0)
 		// The client creation should succeed even if connection fails
 		// because grpc.NewClient creates lazy connections
 		if err != nil {
@@ -797,4 +788,30 @@ func TestZillizClient_Highlight_MismatchLength(t *testing.T) {
 			assert.Nil(t, scores)
 		})
 	}
+}
+
+func TestZillizClient_RequestContext(t *testing.T) {
+	// configured timeout produces a request deadline close to now+timeout
+	client := NewZilliClientForTests("test-deployment", "test-cluster", "", nil, 50)
+	assert.Equal(t, 50*time.Millisecond, client.timeout)
+
+	ctx, cancel := client.requestContext(context.Background())
+	defer cancel()
+	deadline, ok := ctx.Deadline()
+	assert.True(t, ok)
+	assert.Greater(t, time.Until(deadline), time.Duration(0))
+	assert.LessOrEqual(t, time.Until(deadline), 50*time.Millisecond)
+
+	// setMeta is applied on the request context
+	md, ok := metadata.FromOutgoingContext(ctx)
+	assert.True(t, ok)
+	assert.Equal(t, []string{"test-cluster"}, md.Get("instance-id"))
+
+	// a non-positive timeout falls back to the 30s default
+	fallback := &ZillizClient{clusterID: "test-cluster"}
+	fbCtx, fbCancel := fallback.requestContext(context.Background())
+	defer fbCancel()
+	fbDeadline, ok := fbCtx.Deadline()
+	assert.True(t, ok)
+	assert.Greater(t, time.Until(fbDeadline), 29*time.Second)
 }

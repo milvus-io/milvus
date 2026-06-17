@@ -22,6 +22,7 @@ import (
 	"math"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -71,9 +72,12 @@ type MultiSegmentWriter struct {
 }
 
 type compactionAlloactor struct {
-	segmentAlloc allocator.Interface
-	logIDAlloc   allocator.Interface
+	segmentAlloc             allocator.Interface
+	logIDAlloc               allocator.Interface
+	segmentIDBudgetExhausted bool
 }
+
+var errCompactionSegmentIDsExhausted = errors.New("pre-allocated compaction segment IDs exhausted")
 
 func NewCompactionAllocator(segmentAlloc, logIDAlloc allocator.Interface) *compactionAlloactor {
 	return &compactionAlloactor{
@@ -83,7 +87,18 @@ func NewCompactionAllocator(segmentAlloc, logIDAlloc allocator.Interface) *compa
 }
 
 func (alloc *compactionAlloactor) allocSegmentID() (typeutil.UniqueID, error) {
+	if alloc.isSegmentIDBudgetExhausted() {
+		return 0, errCompactionSegmentIDsExhausted
+	}
 	return alloc.segmentAlloc.AllocOne()
+}
+
+func (alloc *compactionAlloactor) isSegmentIDBudgetExhausted() bool {
+	return alloc.segmentIDBudgetExhausted
+}
+
+func (alloc *compactionAlloactor) markSegmentIDBudgetExhausted() {
+	alloc.segmentIDBudgetExhausted = true
 }
 
 func NewMultiSegmentWriter(ctx context.Context, binlogIO io.BinlogIO, allocator *compactionAlloactor, segmentSize int64,
@@ -151,15 +166,17 @@ func (w *MultiSegmentWriter) closeWriter() error {
 }
 
 func (w *MultiSegmentWriter) rotateWriter() error {
-	if err := w.closeWriter(); err != nil {
+	newSegmentID, err := w.allocator.allocSegmentID()
+	if err != nil {
+		if allocator.IsIDExhausted(err) {
+			return errors.Mark(err, errCompactionSegmentIDsExhausted)
+		}
 		return err
 	}
 
-	newSegmentID, err := w.allocator.allocSegmentID()
-	if err != nil {
+	if err := w.closeWriter(); err != nil {
 		return err
 	}
-	w.currentSegmentID = newSegmentID
 
 	chunkSize := w.binLogMaxSize
 
@@ -176,7 +193,38 @@ func (w *MultiSegmentWriter) rotateWriter() error {
 		return err
 	}
 
+	w.currentSegmentID = newSegmentID
 	w.writer = storage.NewBinlogValueWriter(rw, w.batchSize)
+	return nil
+}
+
+func (w *MultiSegmentWriter) rotateWriterOrGrowCurrent() error {
+	if w.writer == nil {
+		return w.rotateWriter()
+	}
+	if w.allocator.isSegmentIDBudgetExhausted() {
+		return nil
+	}
+	if w.writer.GetWrittenUncompressed() < uint64(w.segmentSize) {
+		return nil
+	}
+
+	if err := w.rotateWriter(); err != nil {
+		if !errors.Is(err, errCompactionSegmentIDsExhausted) {
+			return err
+		}
+
+		w.allocator.markSegmentIDBudgetExhausted()
+		writtenUncompressed := w.writer.GetWrittenUncompressed()
+		log.Warn("pre-allocated compaction segment IDs exhausted, continue writing current segment",
+			zap.Int64("collectionID", w.collectionID),
+			zap.Int64("partitionID", w.partitionID),
+			zap.String("channel", w.channel),
+			zap.Int64("segmentID", w.currentSegmentID),
+			zap.Uint64("currentSize", writtenUncompressed),
+			zap.Int64("expectedSegmentSize", w.segmentSize),
+			zap.Error(err))
+	}
 	return nil
 }
 
@@ -199,19 +247,15 @@ func (w *MultiSegmentWriter) GetCompactionSegments() []*datapb.CompactionSegment
 }
 
 func (w *MultiSegmentWriter) Write(r storage.Record) error {
-	if w.writer == nil || w.writer.GetWrittenUncompressed() >= uint64(w.segmentSize) {
-		if err := w.rotateWriter(); err != nil {
-			return err
-		}
+	if err := w.rotateWriterOrGrowCurrent(); err != nil {
+		return err
 	}
 	return w.writer.Write(r)
 }
 
 func (w *MultiSegmentWriter) WriteValue(v *storage.Value) error {
-	if w.writer == nil || w.writer.GetWrittenUncompressed() >= uint64(w.segmentSize) {
-		if err := w.rotateWriter(); err != nil {
-			return err
-		}
+	if err := w.rotateWriterOrGrowCurrent(); err != nil {
+		return err
 	}
 
 	return w.writer.WriteValue(v)

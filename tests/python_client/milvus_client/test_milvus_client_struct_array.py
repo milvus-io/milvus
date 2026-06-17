@@ -65,6 +65,10 @@ EMB_LIST_INDEX_CONFIGS = {
     },
 }
 EMB_LIST_INDEX_TYPES = list(EMB_LIST_INDEX_CONFIGS.keys())
+EMB_LIST_HNSW_INDEX_CONFIG = {
+    "build_params": INDEX_PARAMS,
+    "search_params": {"ef": 64},
+}
 
 # Supported vector types per emb list index type (for MaxSim metrics)
 EMB_LIST_VECTOR_TYPES = {
@@ -108,6 +112,13 @@ EMB_LIST_VECTOR_TYPES = {
         DataType.FLOAT16_VECTOR,
         DataType.BFLOAT16_VECTOR,
     ],
+}
+EMB_LIST_VECTOR_FIELD_NAMES = {
+    DataType.FLOAT_VECTOR: "clip_float_vector",
+    DataType.FLOAT16_VECTOR: "clip_float16_vector",
+    DataType.BFLOAT16_VECTOR: "clip_bfloat16_vector",
+    DataType.INT8_VECTOR: "clip_int8_vector",
+    DataType.BINARY_VECTOR: "clip_binary_vector",
 }
 
 # Dim for emb list index tests (smaller for faster index building)
@@ -161,16 +172,8 @@ EMB_LIST_STRATEGY_INDEX_CONFIGS = {
 }
 EMB_LIST_STRATEGY_INDEX_CASES = [
     ("tokenann", "HNSW"),
-    pytest.param(
-        "muvera",
-        "HNSW",
-        marks=pytest.mark.skip(reason="milvus-io/milvus#49748: muvera+HNSW can fail to load emb-list index"),
-    ),
-    pytest.param(
-        "lemur",
-        "HNSW",
-        marks=pytest.mark.skip(reason="milvus-io/milvus#49748: lemur+HNSW can fail to load emb-list index"),
-    ),
+    ("muvera", "HNSW"),
+    ("lemur", "HNSW"),
     ("tokenann", "DISKANN"),
 ]
 
@@ -534,8 +537,8 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
                 assert isinstance(record["int16_field"], int)
                 assert isinstance(record["int32_field"], int)
                 assert isinstance(record["int64_field"], int)
-                assert isinstance(record["float_field"], (int, float))
-                assert isinstance(record["double_field"], (int, float))
+                assert isinstance(record["float_field"], int | float)
+                assert isinstance(record["double_field"], int | float)
                 assert isinstance(record["varchar_field"], str)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1631,6 +1634,27 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             embedding_list.add(vector)
         return embedding_list
 
+    def get_emb_list_index_config(self, index_type: str):
+        """Get EmbList index build and search params by index type"""
+        if index_type == "HNSW":
+            return EMB_LIST_HNSW_INDEX_CONFIG
+        return EMB_LIST_INDEX_CONFIGS[index_type]
+
+    def get_emb_list_metric_type(self, vector_type: DataType):
+        """Get MAX_SIM metric for EmbList vector type"""
+        if vector_type == DataType.BINARY_VECTOR:
+            return BINARY_METRIC
+        if vector_type == DataType.INT8_VECTOR:
+            return INT8_METRIC
+        return FLOAT_METRIC
+
+    def create_embedding_list_by_vector_type(self, dim: int, num_vectors: int, vector_type: DataType):
+        """Create EmbeddingList for the specified vector type"""
+        vectors = cf.gen_vectors(num_vectors, dim, vector_type)
+        if vector_type == DataType.BINARY_VECTOR:
+            return EmbeddingList([np.frombuffer(v, dtype=np.uint8) if isinstance(v, bytes) else v for v in vectors])
+        return EmbeddingList([np.array(v) if not isinstance(v, np.ndarray) else v for v in vectors])
+
     def create_collection_with_configurable_index(
         self,
         client: MilvusClient,
@@ -2662,6 +2686,119 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         assert len(results[0]) > 0
         for hit in results[0]:
             assert hit["id"] not in delete_ids
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize(
+        "index_type",
+        list(EMB_LIST_VECTOR_TYPES.keys()),
+        ids=[index_type.lower() for index_type in EMB_LIST_VECTOR_TYPES],
+    )
+    def test_search_emb_list_index_type_with_all_supported_vector_subfields(self, index_type):
+        """
+        target: test emb list search on each index type with all supported vector subfield types
+        method: create one struct array containing all supported vector types for the index type, then search each field
+        expected: index creation, load, and search work for every supported vector subfield type
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_search_idx_{index_type.lower()}_vtypes")
+        client = self._client()
+        vector_types = EMB_LIST_VECTOR_TYPES[index_type]
+        index_config = self.get_emb_list_index_config(index_type)
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=EMB_LIST_DIM)
+
+        struct_schema = client.create_struct_field_schema()
+        for vector_type in vector_types:
+            struct_schema.add_field(EMB_LIST_VECTOR_FIELD_NAMES[vector_type], vector_type, dim=EMB_LIST_DIM)
+        struct_schema.add_field("scalar_field", DataType.INT64)
+        struct_schema.add_field("category", DataType.VARCHAR, max_length=128)
+
+        schema.add_field(
+            "clips",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=10,
+        )
+
+        res, check = self.create_collection(client, collection_name, schema=schema)
+        assert check
+
+        nb = 3000
+        clip_count = 2
+        vectors_by_type = {
+            vector_type: cf.gen_vectors(nb * clip_count, EMB_LIST_DIM, vector_type) for vector_type in vector_types
+        }
+        rows = []
+        for i in range(nb):
+            clips = []
+            for j in range(clip_count):
+                offset = i * clip_count + j
+                clip = {
+                    "scalar_field": i * 10 + j,
+                    "category": f"cat_{i % 5}",
+                }
+                for vector_type in vector_types:
+                    clip[EMB_LIST_VECTOR_FIELD_NAMES[vector_type]] = vectors_by_type[vector_type][offset]
+                clips.append(clip)
+
+            rows.append(
+                {
+                    "id": i,
+                    "normal_vector": [random.random() for _ in range(EMB_LIST_DIM)],
+                    "clips": clips,
+                }
+            )
+
+        res, check = self.insert(client, collection_name, rows)
+        assert check
+        assert res["insert_count"] == nb
+
+        res, check = self.flush(client, collection_name)
+        assert check
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="IVF_FLAT",
+            metric_type="L2",
+            params={"nlist": 128},
+        )
+        for vector_type in vector_types:
+            field_name = EMB_LIST_VECTOR_FIELD_NAMES[vector_type]
+            index_params.add_index(
+                field_name=f"clips[{field_name}]",
+                index_name=f"struct_vector_index_{field_name}",
+                index_type=index_type,
+                metric_type=self.get_emb_list_metric_type(vector_type),
+                params=index_config["build_params"],
+            )
+
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
+
+        res, check = self.load_collection(client, collection_name)
+        assert check
+
+        for vector_type in vector_types:
+            field_name = EMB_LIST_VECTOR_FIELD_NAMES[vector_type]
+            results, check = self.search(
+                client,
+                collection_name,
+                data=[self.create_embedding_list_by_vector_type(EMB_LIST_DIM, 3, vector_type)],
+                anns_field=f"clips[{field_name}]",
+                search_params={
+                    "metric_type": self.get_emb_list_metric_type(vector_type),
+                    "params": index_config["search_params"],
+                },
+                limit=10,
+                output_fields=["id"],
+            )
+            assert check
+            assert len(results[0]) > 0
+            for hit in results[0]:
+                assert 0 <= hit["id"] < nb
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("emb_list_strategy,index_type", EMB_LIST_STRATEGY_INDEX_CASES)
@@ -4523,7 +4660,6 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("nullable_field", ["clip_embedding1", "scalar_field"])
     def test_struct_array_with_nullable_field(self, nullable_field):
-
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
@@ -4561,11 +4697,11 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_embedding_list_field_nullable_insert_none_not_supported(self):
+    def test_embedding_list_field_nullable_insert_none_supported(self):
         """
         target: test embedding list field nullable boundary
         method: create struct array field with nullable=True and insert None
-        expected: create collection succeeds, but None row value is not supported
+        expected: create collection and insert succeed, and null parent field is queryable
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -4589,7 +4725,20 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             max_capacity=100,
             nullable=True,
         )
-        res, check = self.create_collection(client, collection_name, schema=schema)
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="clips[embedding]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
+        )
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
 
         data = [
@@ -4599,17 +4748,22 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
                 "clips": None,
             }
         ]
-        error = {
-            ct.err_code: 1,
-            ct.err_msg: "Expected list, got NoneType",
-        }
-        self.insert(
+        res, check = self.insert(
             client,
             collection_name,
             data,
-            check_task=CheckTasks.err_res,
-            check_items=error,
         )
+        assert check
+        assert res["insert_count"] == 1
+
+        res, check = self.flush(client, collection_name)
+        assert check
+        res, check = self.load_collection(client, collection_name)
+        assert check
+
+        res, check = self.query(client, collection_name, filter="id == 0", output_fields=["id", "clips"])
+        assert check
+        assert res == [{"id": 0, "clips": None}]
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_struct_array_range_search_not_supported(self):
@@ -4817,13 +4971,24 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         except S3Error as e:
             raise Exception(f"Failed to connect MinIO server {self.minio_endpoint}, error: {e}")
 
-    def call_bulkinsert(self, collection_name: str, batch_files: list[list[str]]):
+    def call_bulkinsert(
+        self,
+        collection_name: str,
+        batch_files: list[list[str]],
+        expect_fail: bool = False,
+        partition_name: str = "",
+    ) -> dict[str, Any]:
         """
         Call bulk import API and wait for completion
 
         Args:
             collection_name: Target collection name
             batch_files: List of file paths in MinIO
+            expect_fail: Whether the import job is expected to fail
+            partition_name: Optional target partition name
+
+        Returns:
+            Import result dict with state and reason
         """
         url = f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
 
@@ -4832,6 +4997,8 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             url=url,
             collection_name=collection_name,
             files=batch_files,
+            api_key=cf.param_info.param_token,
+            partition_name=partition_name,
         )
 
         job_id = resp.json()["data"]["jobId"]
@@ -4843,20 +5010,25 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         while time.time() - start_time < timeout:
             time.sleep(5)
 
-            resp = get_import_progress(url=url, job_id=job_id)
+            resp = get_import_progress(url=url, job_id=job_id, api_key=cf.param_info.param_token)
             state = resp.json()["data"]["state"]
-            progress = resp.json()["data"]["progress"]
+            progress = resp.json()["data"].get("progress", 0)
 
             log.info(f"Import job {job_id} - state: {state}, progress: {progress}%")
 
             if state == "Importing":
                 continue
             elif state == "Failed":
-                reason = resp.json()["data"]["reason"]
+                reason = resp.json()["data"].get("reason", "Unknown reason")
+                if expect_fail:
+                    log.info(f"Bulk import job {job_id} failed as expected: {reason}")
+                    return {"state": "Failed", "reason": reason}
                 raise Exception(f"Bulk import job {job_id} failed: {reason}")
             elif state == "Completed" and progress == 100:
+                if expect_fail:
+                    raise AssertionError(f"Bulk import job {job_id} unexpectedly completed")
                 log.info(f"Bulk import job {job_id} completed successfully")
-                break
+                return {"state": "Completed", "reason": None}
         else:
             raise Exception(f"Bulk import job {job_id} timeout after {timeout}s")
 

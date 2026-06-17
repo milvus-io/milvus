@@ -48,6 +48,10 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		return merr.WrapErrParameterInvalidMsg("can not alter cipher related properties")
 	}
 
+	if err := common.ValidateNamespaceShardingEnabledNotAltered(req.GetProperties(), req.GetDeleteKeys()); err != nil {
+		return err
+	}
+
 	if funcutil.SliceContain(req.GetDeleteKeys(), common.EnableDynamicSchemaKey) {
 		return merr.WrapErrParameterInvalidMsg("cannot delete key %s, dynamic field schema could support set to true/false", common.EnableDynamicSchemaKey)
 	}
