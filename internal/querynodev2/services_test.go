@@ -94,8 +94,6 @@ type ServiceSuite struct {
 	etcdClient          *clientv3.Client
 	rootPath            string
 	chunkManagerFactory *storage.ChunkManagerFactory
-	minioBucketName     string
-	originalBucketName  string
 
 	// Mock
 	factory *dependency.MockFactory
@@ -136,9 +134,6 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.factory = dependency.NewMockFactory(suite.T())
 	// TODO:: cpp chunk manager not support local chunk manager
 	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, suite.T().TempDir())
-	suite.originalBucketName = paramtable.Get().MinioCfg.BucketName.GetValue()
-	suite.minioBucketName = fmt.Sprintf("querynode-service-%s", strconv.FormatInt(time.Now().UnixNano(), 36))
-	paramtable.Get().Save(paramtable.Get().MinioCfg.BucketName.Key, suite.minioBucketName)
 	// suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus-test"))
 	suite.chunkManagerFactory = storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.factory.EXPECT().Init(mock.Anything).Return()
@@ -183,11 +178,10 @@ func (suite *ServiceSuite) TearDownTest() {
 	})
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
-	suite.node.chunkManager.RemoveWithPrefix(ctx, suite.node.chunkManager.RootPath())
+	suite.node.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().LocalStorageCfg.Path.GetValue())
 	suite.node.Stop()
 	suite.etcdClient.Close()
 	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
-	paramtable.Get().Save(paramtable.Get().MinioCfg.BucketName.Key, suite.originalBucketName)
 }
 
 func (suite *ServiceSuite) TestGetComponentStatesNormal() {
