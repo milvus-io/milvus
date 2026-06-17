@@ -292,6 +292,15 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 			}
 			logger.Warn("create handler failed", zap.Any("assignment", assign), zap.Error(err))
 
+			// Unrecoverable errors (e.g. replicate violation when the WAL is no longer
+			// a secondary cluster) won't change by retrying the same WAL role. Surface
+			// them immediately so callers get a typed error within RTT instead of
+			// retrying until their context deadline.
+			if status.AsStreamingError(err).IsUnrecoverable() {
+				logger.Warn("create handler failed with unrecoverable error, stop retrying", zap.Error(err))
+				return nil, err
+			}
+
 			// Check if the error is permanent failure until new assignment.
 			if isPermanentFailureUntilNewAssignment(err) {
 				reportErr := hc.rebalanceTrigger.ReportAssignmentError(ctx, assign.Channel, err)
