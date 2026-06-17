@@ -394,8 +394,14 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			}
 			totalRows, inputSegmentIDs := plan.A, plan.B
 
-			n := 11 * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
-			startID, endID, err := t.allocator.AllocN(n)
+			inputs := typeutil.NewSet[int64](inputSegmentIDs...)
+			totalSize := lo.SumBy(group.segments, func(s *SegmentInfo) int64 {
+				if inputs.Contain(s.GetID()) {
+					return s.getSegmentSize()
+				}
+				return 0
+			})
+			planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(t.allocator, float64(totalSize), float64(expectedSize))
 			if err != nil {
 				log.Warn("fail to allocate id", zap.Error(err))
 				return err
@@ -403,24 +409,21 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			start := time.Now()
 			pts, _ := tsoutil.ParseTS(ct.startTime)
 			task := &datapb.CompactionTask{
-				PlanID:         startID,
-				TriggerID:      signal.id,
-				State:          datapb.CompactionTaskState_pipelining,
-				StartTime:      pts.Unix(),
-				Type:           datapb.CompactionType_MixCompaction,
-				CollectionTtl:  ct.collectionTTL.Nanoseconds(),
-				CollectionID:   group.collectionID,
-				PartitionID:    group.partitionID,
-				Channel:        group.channelName,
-				InputSegments:  inputSegmentIDs,
-				ResultSegments: []int64{},
-				TotalRows:      totalRows,
-				Schema:         coll.Schema,
-				MaxSize:        expectedSize,
-				PreAllocatedSegmentIDs: &datapb.IDRange{
-					Begin: startID + 1,
-					End:   endID,
-				},
+				PlanID:                 planID,
+				TriggerID:              signal.id,
+				State:                  datapb.CompactionTaskState_pipelining,
+				StartTime:              pts.Unix(),
+				Type:                   datapb.CompactionType_MixCompaction,
+				CollectionTtl:          ct.collectionTTL.Nanoseconds(),
+				CollectionID:           group.collectionID,
+				PartitionID:            group.partitionID,
+				Channel:                group.channelName,
+				InputSegments:          inputSegmentIDs,
+				ResultSegments:         []int64{},
+				TotalRows:              totalRows,
+				Schema:                 coll.Schema,
+				MaxSize:                expectedSize,
+				PreAllocatedSegmentIDs: preAllocatedSegmentIDs,
 			}
 			err = t.inspector.enqueueCompaction(task)
 			if err != nil {

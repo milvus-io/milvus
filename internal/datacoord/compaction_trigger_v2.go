@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -443,11 +444,6 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 
 func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.Context, view CompactionView) {
 	log := log.Ctx(ctx).With(zap.String("view", view.String()))
-	taskID, _, err := m.allocator.AllocN(2)
-	if err != nil {
-		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
-		return
-	}
 	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
 	if err != nil {
 		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.Error(err))
@@ -469,37 +465,35 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		return
 	}
 
-	resultSegmentNum := (totalRows/preferSegmentRows + 1) * 2
-	n := resultSegmentNum * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
-	start, end, err := m.allocator.AllocN(n)
+	totalSize := view.GetTotalSize()
+	preferSegmentSize := float64(expectedSegmentSize) * paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat()
+	planID, analyzeTaskID, preAllocatedSegmentIDs, err := allocClusteringCompactionPlanIDs(m.allocator, totalSize, preferSegmentSize)
 	if err != nil {
-		log.Warn("pre-allocate result segments failed", zap.String("view", view.String()), zap.Error(err))
+		log.Warn("failed to pre-allocate result segment IDs", zap.Error(err))
 		return
 	}
+	now := time.Now().Unix()
 	task := &datapb.CompactionTask{
-		PlanID:             taskID,
-		TriggerID:          view.(*ClusteringSegmentsView).triggerID,
-		State:              datapb.CompactionTaskState_pipelining,
-		StartTime:          time.Now().Unix(),
-		CollectionTtl:      view.(*ClusteringSegmentsView).collectionTTL.Nanoseconds(),
-		Type:               datapb.CompactionType_ClusteringCompaction,
-		CollectionID:       view.GetGroupLabel().CollectionID,
-		PartitionID:        view.GetGroupLabel().PartitionID,
-		Channel:            view.GetGroupLabel().Channel,
-		Schema:             collection.Schema,
-		ClusteringKeyField: view.(*ClusteringSegmentsView).clusteringKeyField,
-		InputSegments:      lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
-		ResultSegments:     []int64{},
-		MaxSegmentRows:     maxSegmentRows,
-		PreferSegmentRows:  preferSegmentRows,
-		TotalRows:          totalRows,
-		AnalyzeTaskID:      taskID + 1,
-		LastStateStartTime: time.Now().Unix(),
-		PreAllocatedSegmentIDs: &datapb.IDRange{
-			Begin: start,
-			End:   end,
-		},
-		MaxSize: expectedSegmentSize,
+		PlanID:                 planID,
+		TriggerID:              view.(*ClusteringSegmentsView).triggerID,
+		State:                  datapb.CompactionTaskState_pipelining,
+		StartTime:              now,
+		CollectionTtl:          view.GetCollectionTTL().Nanoseconds(),
+		Type:                   datapb.CompactionType_ClusteringCompaction,
+		CollectionID:           view.GetGroupLabel().CollectionID,
+		PartitionID:            view.GetGroupLabel().PartitionID,
+		Channel:                view.GetGroupLabel().Channel,
+		Schema:                 collection.Schema,
+		ClusteringKeyField:     view.(*ClusteringSegmentsView).clusteringKeyField,
+		InputSegments:          lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
+		ResultSegments:         []int64{},
+		MaxSegmentRows:         maxSegmentRows,
+		PreferSegmentRows:      preferSegmentRows,
+		TotalRows:              totalRows,
+		AnalyzeTaskID:          analyzeTaskID,
+		LastStateStartTime:     now,
+		PreAllocatedSegmentIDs: preAllocatedSegmentIDs,
+		MaxSize:                expectedSegmentSize,
 	}
 	err = m.inspector.enqueueCompaction(task)
 	if err != nil {
@@ -517,16 +511,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 }
 
 func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Context, view CompactionView, triggerType CompactionTriggerType) {
-	// single view is definitely one-one mapping
 	log := log.Ctx(ctx).With(zap.String("trigger type", triggerType.String()), zap.String("view", view.String()))
-	// TODO[GOOSE], 11 = 1 planID + 10 segmentID, this is a hack need to be removed.
-	// Any plan that output segment number greater than 10 will be marked as invalid plan for now.
-	n := 11 * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
-	startID, endID, err := m.allocator.AllocN(n)
-	if err != nil {
-		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
-		return
-	}
 
 	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
 	if err != nil {
@@ -541,32 +526,38 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		log.Info("skip submitting single compaction for external collection", zap.Int64("collectionID", collection.ID))
 		return
 	}
+
+	expectedSize := getExpectedSegmentSize(m.meta, collection.ID, collection.Schema)
+	totalSize := view.GetTotalSize()
+	planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(m.allocator, totalSize, float64(expectedSize))
+	if err != nil {
+		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
+		return
+	}
+
 	var totalRows int64 = 0
 	for _, s := range view.GetSegmentsView() {
 		totalRows += s.NumOfRows
 	}
 
-	expectedSize := getExpectedSegmentSize(m.meta, collection.ID, collection.Schema)
+	now := time.Now().Unix()
 	task := &datapb.CompactionTask{
-		PlanID:             startID,
-		TriggerID:          view.(*MixSegmentView).triggerID,
-		State:              datapb.CompactionTaskState_pipelining,
-		StartTime:          time.Now().Unix(),
-		CollectionTtl:      view.(*MixSegmentView).collectionTTL.Nanoseconds(),
-		Type:               triggerType.GetCompactionType(),
-		CollectionID:       view.GetGroupLabel().CollectionID,
-		PartitionID:        view.GetGroupLabel().PartitionID,
-		Channel:            view.GetGroupLabel().Channel,
-		Schema:             collection.Schema,
-		InputSegments:      lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
-		ResultSegments:     []int64{},
-		TotalRows:          totalRows,
-		LastStateStartTime: time.Now().Unix(),
-		MaxSize:            expectedSize,
-		PreAllocatedSegmentIDs: &datapb.IDRange{
-			Begin: startID + 1,
-			End:   endID,
-		},
+		PlanID:                 planID,
+		TriggerID:              view.(*MixSegmentView).triggerID,
+		State:                  datapb.CompactionTaskState_pipelining,
+		StartTime:              now,
+		CollectionTtl:          view.GetCollectionTTL().Nanoseconds(),
+		Type:                   triggerType.GetCompactionType(),
+		CollectionID:           view.GetGroupLabel().CollectionID,
+		PartitionID:            view.GetGroupLabel().PartitionID,
+		Channel:                view.GetGroupLabel().Channel,
+		Schema:                 collection.Schema,
+		InputSegments:          lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
+		ResultSegments:         []int64{},
+		TotalRows:              totalRows,
+		LastStateStartTime:     now,
+		MaxSize:                expectedSize,
+		PreAllocatedSegmentIDs: preAllocatedSegmentIDs,
 	}
 	err = m.inspector.enqueueCompaction(task)
 	if err != nil {
@@ -585,51 +576,149 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 	)
 }
 
+func allocCompactionPlanIDs(allocator allocator.Allocator, totalSize float64, preferredSize float64) (int64, *datapb.IDRange, error) {
+	segmentIDCount := estimateResultSegmentCount(totalSize, preferredSize)
+	// Reserve one metadata ID because this helper returns one task ID: PlanID.
+	block, err := createCompactionIDBlock(allocator, segmentIDCount, 1)
+	if err != nil {
+		return 0, nil, err
+	}
+	planID, err := block.take()
+	if err != nil {
+		return 0, nil, err
+	}
+	return planID, block.segmentIDRange(), nil
+}
+
+func allocClusteringCompactionPlanIDs(allocator allocator.Allocator, totalSize float64, preferredSize float64) (int64, int64, *datapb.IDRange, error) {
+	segmentIDCount := estimateResultSegmentCount(totalSize, preferredSize)
+	// Reserve two metadata IDs because this helper returns PlanID and AnalyzeTaskID.
+	block, err := createCompactionIDBlock(allocator, segmentIDCount, 2)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	planID, err := block.take()
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	analyzeTaskID, err := block.take()
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	return planID, analyzeTaskID, block.segmentIDRange(), nil
+}
+
+// createCompactionIDBlock allocates one contiguous block where the
+// first segmentIDCount IDs are result segment IDs and the rest are task metadata IDs.
+func createCompactionIDBlock(allocator allocator.Allocator, segmentIDCount int64, metaIDCount int64) (*compactionIDBlock, error) {
+	segmentIDCount = max(segmentIDCount, 1)
+	expansionFactor := paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
+	if expansionFactor <= 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("compaction pre-allocate ID expansion factor must be positive: %d", expansionFactor)
+	}
+	maxBatchSize := int64(math.MaxUint32)
+	if metaIDCount < 0 || metaIDCount > maxBatchSize || segmentIDCount > (maxBatchSize-metaIDCount)/expansionFactor {
+		return nil, merr.WrapErrServiceInternal(
+			fmt.Sprintf(
+				"compaction too large to allocate IDs in a single batch: segment ID count %d with expansion factor %d and %d metadata IDs exceeds max batch size %d",
+				segmentIDCount, expansionFactor, metaIDCount, maxBatchSize,
+			),
+		)
+	}
+	segmentIDCount = segmentIDCount * expansionFactor
+	n := metaIDCount + segmentIDCount
+	startID, endID, err := allocator.AllocN(n)
+	if err != nil {
+		return nil, err
+	}
+	if endID-startID != n {
+		return nil, merr.WrapErrServiceInternal(
+			fmt.Sprintf("compaction ID allocation range mismatch: expected %d IDs, got %d IDs", n, endID-startID),
+		)
+	}
+	segmentIDEnd := startID + segmentIDCount
+	return &compactionIDBlock{
+		segments: &datapb.IDRange{Begin: startID, End: segmentIDEnd},
+		next:     segmentIDEnd,
+		end:      endID,
+	}, nil
+}
+
+// compactionIDBlock splits one contiguous RootCoord ID allocation into a fixed
+// result segment ID range followed by metadata IDs consumed by take().
+type compactionIDBlock struct {
+	segments *datapb.IDRange
+	next     int64
+	end      int64
+}
+
+func (b *compactionIDBlock) take() (int64, error) {
+	if b.next >= b.end {
+		return 0, merr.WrapErrServiceInternal("compaction metadata ID range exhausted")
+	}
+	id := b.next
+	b.next++
+	return id, nil
+}
+
+func (b *compactionIDBlock) segmentIDRange() *datapb.IDRange {
+	return b.segments
+}
+
+func estimateResultSegmentCount(totalSize float64, targetSize float64) int64 {
+	if targetSize <= 0 {
+		return 1
+	}
+	if totalSize <= 0 {
+		return 1
+	}
+	return max(int64(math.Ceil(totalSize/targetSize)), 1)
+}
+
 func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.Context, view CompactionView) {
 	log := log.Ctx(ctx).With(zap.String("view", view.String()))
-
-	taskID, err := m.allocator.AllocID(ctx)
-	if err != nil {
-		log.Warn("Failed to allocate task ID", zap.Error(err))
-		return
-	}
 
 	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
 	if err != nil {
 		log.Warn("Failed to get collection", zap.Error(err))
 		return
 	}
+	if collection == nil {
+		log.Warn("collection not found when submitting force merge compaction", zap.Int64("collectionID", view.GetGroupLabel().CollectionID))
+		return
+	}
+	if collection.IsExternal() {
+		log.Info("skip submitting force merge compaction for external collection", zap.Int64("collectionID", collection.ID))
+		return
+	}
 
 	totalRows := lo.SumBy(view.GetSegmentsView(), func(v *SegmentView) int64 { return v.NumOfRows })
 
-	targetCount := view.(*ForceMergeSegmentView).targetSegmentCount
-	n := targetCount * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
-	startID, endID, err := m.allocator.AllocN(n)
+	totalSize := view.GetTotalSize()
+	planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(m.allocator, totalSize, view.(*ForceMergeSegmentView).GetTargetSegmentSize())
 	if err != nil {
 		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
 		return
 	}
 
+	now := time.Now().Unix()
 	task := &datapb.CompactionTask{
-		PlanID:             taskID,
-		TriggerID:          view.GetTriggerID(),
-		State:              datapb.CompactionTaskState_pipelining,
-		StartTime:          time.Now().Unix(),
-		CollectionTtl:      view.(*ForceMergeSegmentView).collectionTTL.Nanoseconds(),
-		Type:               datapb.CompactionType_MixCompaction,
-		CollectionID:       view.GetGroupLabel().CollectionID,
-		PartitionID:        view.GetGroupLabel().PartitionID,
-		Channel:            view.GetGroupLabel().Channel,
-		Schema:             collection.Schema,
-		InputSegments:      lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
-		ResultSegments:     []int64{},
-		TotalRows:          totalRows,
-		LastStateStartTime: time.Now().Unix(),
-		MaxSize:            int64(view.(*ForceMergeSegmentView).targetSegmentSize),
-		PreAllocatedSegmentIDs: &datapb.IDRange{
-			Begin: startID + 1,
-			End:   endID,
-		},
+		PlanID:                 planID,
+		TriggerID:              view.GetTriggerID(),
+		State:                  datapb.CompactionTaskState_pipelining,
+		StartTime:              now,
+		CollectionTtl:          view.GetCollectionTTL().Nanoseconds(),
+		Type:                   datapb.CompactionType_MixCompaction,
+		CollectionID:           view.GetGroupLabel().CollectionID,
+		PartitionID:            view.GetGroupLabel().PartitionID,
+		Channel:                view.GetGroupLabel().Channel,
+		Schema:                 collection.Schema,
+		InputSegments:          lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
+		ResultSegments:         []int64{},
+		TotalRows:              totalRows,
+		LastStateStartTime:     now,
+		MaxSize:                int64(view.(*ForceMergeSegmentView).GetTargetSegmentSize()),
+		PreAllocatedSegmentIDs: preAllocatedSegmentIDs,
 	}
 
 	err = m.inspector.enqueueCompaction(task)
@@ -639,7 +728,7 @@ func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.C
 	}
 
 	log.Info("Finish to submit force merge task",
-		zap.Int64("planID", taskID),
+		zap.Int64("planID", task.GetPlanID()),
 		zap.Int64("triggerID", task.GetTriggerID()),
 		zap.Int64("collectionID", task.GetCollectionID()),
 		zap.Int64("targetSize", task.GetMaxSize()),
@@ -652,11 +741,6 @@ func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx co
 	if !ok {
 		log.Warn("unexpected view type for schema bump trigger, expected *BumpSchemaVersionView",
 			zap.String("actualType", fmt.Sprintf("%T", view)))
-		return
-	}
-	planID, endID, err := m.allocator.AllocN(2)
-	if err != nil {
-		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
 		return
 	}
 	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
@@ -682,26 +766,29 @@ func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx co
 		totalRows += s.NumOfRows
 	}
 	expectedSize := getExpectedSegmentSize(m.meta, collection.ID, collection.Schema)
+	planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(m.allocator, view.GetTotalSize(), float64(expectedSize))
+	if err != nil {
+		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
+		return
+	}
+	now := time.Now().Unix()
 	task := &datapb.CompactionTask{
-		PlanID:             planID,
-		TriggerID:          bumpView.triggerID,
-		State:              datapb.CompactionTaskState_pipelining,
-		StartTime:          time.Now().Unix(),
-		CollectionTtl:      collectionTTL.Nanoseconds(),
-		Type:               datapb.CompactionType_BumpSchemaVersionCompaction,
-		CollectionID:       view.GetGroupLabel().CollectionID,
-		PartitionID:        view.GetGroupLabel().PartitionID,
-		Channel:            view.GetGroupLabel().Channel,
-		Schema:             bumpView.schema,
-		InputSegments:      lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
-		ResultSegments:     []int64{},
-		TotalRows:          totalRows,
-		LastStateStartTime: time.Now().Unix(),
-		MaxSize:            expectedSize,
-		PreAllocatedSegmentIDs: &datapb.IDRange{
-			Begin: planID + 1,
-			End:   endID,
-		},
+		PlanID:                 planID,
+		TriggerID:              bumpView.triggerID,
+		State:                  datapb.CompactionTaskState_pipelining,
+		StartTime:              now,
+		CollectionTtl:          collectionTTL.Nanoseconds(),
+		Type:                   datapb.CompactionType_BumpSchemaVersionCompaction,
+		CollectionID:           view.GetGroupLabel().CollectionID,
+		PartitionID:            view.GetGroupLabel().PartitionID,
+		Channel:                view.GetGroupLabel().Channel,
+		Schema:                 bumpView.schema,
+		InputSegments:          lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
+		ResultSegments:         []int64{},
+		TotalRows:              totalRows,
+		LastStateStartTime:     now,
+		MaxSize:                expectedSize,
+		PreAllocatedSegmentIDs: preAllocatedSegmentIDs,
 	}
 	err = m.inspector.enqueueCompaction(task)
 	if err != nil {

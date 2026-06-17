@@ -528,6 +528,10 @@ func Test_compactionTrigger_force(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
+	preAllocateIDExpansionFactor := paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
+	preAllocatedSegmentIDBegin := int64(100)
+	preAllocatedSegmentIDEnd := preAllocatedSegmentIDBegin + preAllocateIDExpansionFactor
+	preAllocatedLogIDEnd := preAllocatedSegmentIDBegin + 4*preAllocateIDExpansionFactor
 
 	tests := []struct {
 		name         string
@@ -576,7 +580,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 			},
 			[]*datapb.CompactionPlan{
 				{
-					PlanID: 100,
+					PlanID: preAllocatedSegmentIDEnd,
 					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
 						{
 							SegmentID: 1,
@@ -629,8 +633,8 @@ func Test_compactionTrigger_force(t *testing.T) {
 					Channel:                "ch1",
 					TotalRows:              200,
 					Schema:                 schema,
-					PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 101, End: 200},
-					PreAllocatedLogIDs:     &datapb.IDRange{Begin: 100, End: 200},
+					PreAllocatedSegmentIDs: &datapb.IDRange{Begin: preAllocatedSegmentIDBegin, End: preAllocatedSegmentIDEnd},
+					PreAllocatedLogIDs:     &datapb.IDRange{Begin: preAllocatedSegmentIDBegin, End: preAllocatedLogIDEnd},
 					MaxSize:                1073741824,
 					SlotUsage:              paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
 					JsonParams:             params,
@@ -2574,6 +2578,55 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 			channel:      s.channel,
 			isForce:      true,
 		})
+	})
+
+	s.Run("force compaction preallocates segment IDs from input size", func() {
+		defer s.SetupTest()
+		pt := paramtable.Get()
+		pt.Save(pt.DataCoordCfg.IndexBasedCompaction.Key, "false")
+		defer pt.Reset(pt.DataCoordCfg.IndexBasedCompaction.Key)
+		pt.Save(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "1")
+		defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
+		pt.Save(pt.DataCoordCfg.SegmentMaxSize.Key, "100")
+		defer pt.Reset(pt.DataCoordCfg.SegmentMaxSize.Key)
+
+		const mb = 1024 * 1024
+		s.meta.segments.segments[1].Binlogs[0].Binlogs[0].MemorySize = 250 * mb
+
+		tr := s.tr
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.collectionID).
+			Return(&collectionInfo{
+				ID: s.collectionID,
+				Schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: s.vecFieldID, DataType: schemapb.DataType_FloatVector},
+					},
+				},
+			}, nil).Once()
+		tr.handler = handler
+
+		const (
+			startID = int64(20000)
+			planID  = int64(20003)
+			endID   = int64(20004)
+		)
+		s.allocator.EXPECT().AllocN(int64(4)).Return(startID, endID, nil).Once()
+		s.inspector.EXPECT().enqueueCompaction(mock.MatchedBy(func(task *datapb.CompactionTask) bool {
+			s.EqualValues(planID, task.GetPlanID())
+			s.ElementsMatch([]int64{1}, task.GetInputSegments())
+			s.EqualValues(startID, task.GetPreAllocatedSegmentIDs().GetBegin())
+			s.EqualValues(planID, task.GetPreAllocatedSegmentIDs().GetEnd())
+			return true
+		})).Return(nil).Once()
+
+		err := tr.handleSignal(NewCompactionSignal().
+			WithCollectionID(s.collectionID).
+			WithPartitionID(s.partitionID).
+			WithChannel(s.channel).
+			WithSegmentIDs(1).
+			WithIsForce(true))
+		s.NoError(err)
 	})
 }
 
