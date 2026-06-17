@@ -997,21 +997,6 @@ func (gc *garbageCollector) isExpire(dropts Timestamp) bool {
 	return time.Since(droptime) > gc.option.dropTolerance
 }
 
-// parseV3SegmentID attempts to parse segmentID from a V3 path format.
-// V3 paths: {root}/insert_log/{coll}/{part}/{seg}/...
-// Returns segmentID or error if path doesn't match.
-func parseV3SegmentID(rootPath, filePath string) (int64, error) {
-	if !strings.HasPrefix(filePath, rootPath) {
-		return 0, merr.WrapErrServiceInternal(fmt.Sprintf("path %q does not contain rootPath %q", filePath, rootPath))
-	}
-	p := strings.TrimPrefix(filePath[len(rootPath):], "/")
-	parts := strings.Split(p, "/")
-	if len(parts) < 5 || parts[0] != common.SegmentInsertLogPath {
-		return 0, merr.WrapErrServiceInternal(fmt.Sprintf("not a V3 insert_log path: %s", filePath))
-	}
-	return strconv.ParseInt(parts[3], 10, 64)
-}
-
 func parseSegmentIDFromAuxIndexPath(rootPath, filePath string) (int64, error) {
 	if !strings.HasPrefix(filePath, rootPath) {
 		return 0, merr.WrapErrServiceInternal(fmt.Sprintf("path %q does not contain rootPath %q", filePath, rootPath))
