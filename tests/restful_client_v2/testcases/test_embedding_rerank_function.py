@@ -994,7 +994,7 @@ class TestTextEmbeddingFunctionOutput(TestBase):
         target: test inserting text embedding function output field data succeeds
                 after enabling allowInsertNonBM25FunctionOutputs
         method: create collection, alter property, insert data with user-provided dense vector
-        expected: insert should succeed and search should return results
+        expected: insert should succeed and inserted vectors should be queryable
         """
         name = gen_collection_name(prefix)
         self.name = name
@@ -1044,16 +1044,18 @@ class TestTextEmbeddingFunctionOutput(TestBase):
         assert rsp["code"] == 0, f"Insert failed: {rsp}"
         assert rsp["data"]["insertCount"] == nb
 
-        # verify search works with the user-provided vectors
-        search_payload = {
+        # Verify the user-provided function output vector is stored.
+        query_payload = {
             "collectionName": name,
-            "data": [data[0]["dense"]],
-            "limit": 5,
-            "outputFields": ["id", "document"],
+            "filter": "id == 0",
+            "limit": 1,
+            "outputFields": ["id", "document", "dense"],
         }
-        rsp = self.vector_client.vector_search(search_payload)
+        rsp = self.vector_client.vector_query(query_payload)
         assert rsp["code"] == 0
-        assert len(rsp["data"]) > 0
+        assert len(rsp["data"]) == 1
+        assert rsp["data"][0]["id"] == 0
+        assert len(rsp["data"][0]["dense"]) == dim
 
     def test_insert_without_output_field_still_works_with_property(self, tei_endpoint):
         """
