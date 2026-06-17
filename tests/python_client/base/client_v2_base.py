@@ -98,7 +98,6 @@ class TestMilvusClientV2Base(Base):
 
     @trace()
     def create_struct_field_schema(self, client, check_task=None, check_items=None, **kwargs):
-
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.create_struct_field_schema], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
@@ -122,7 +121,6 @@ class TestMilvusClientV2Base(Base):
 
     @trace()
     def add_field(self, schema, field_name, datatype, check_task=None, check_items=None, **kwargs):
-
         # Set default parameters for specific field types
         if datatype == DataType.VARCHAR and "max_length" not in kwargs:
             kwargs["max_length"] = ct.default_length
@@ -790,7 +788,6 @@ class TestMilvusClientV2Base(Base):
 
     @trace()
     def prepare_index_params(self, client, check_task=None, check_items=None, **kwargs):
-
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.prepare_index_params], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
@@ -1678,6 +1675,38 @@ class TestMilvusClientV2Base(Base):
             collection_name=collection_name,
             field_name=field_name,
             field_id=field_id,
+            **kwargs,
+        )
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def add_collection_struct_field(
+        self,
+        client,
+        collection_name,
+        field_name,
+        struct_schema,
+        max_capacity,
+        desc=None,
+        timeout=None,
+        check_task=None,
+        check_items=None,
+        **kwargs,
+    ):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request(
+            [
+                client.add_collection_struct_field,
+                collection_name,
+                field_name,
+                struct_schema,
+                max_capacity,
+                desc,
+            ],
             **kwargs,
         )
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
