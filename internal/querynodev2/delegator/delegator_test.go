@@ -1458,7 +1458,7 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		err := s.delegator.UpdateSchema(ctx, &schemapb.CollectionSchema{}, 100)
+		err := s.delegator.UpdateSchema(ctx, newFunctionRuntimeTestSchemaWithVersion(s.nextSchemaVersion()), 100)
 		s.Error(err)
 	})
 
@@ -1469,7 +1469,7 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		err := s.delegator.UpdateSchema(ctx, &schemapb.CollectionSchema{}, 100)
+		err := s.delegator.UpdateSchema(ctx, newFunctionRuntimeTestSchemaWithVersion(s.nextSchemaVersion()), 100)
 		s.Error(err)
 	})
 
@@ -1482,7 +1482,7 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 		sd.distribution.MarkOfflineSegments(1001)
 		sd.distribution.Flush()
 
-		err := s.delegator.UpdateSchema(ctx, &schemapb.CollectionSchema{}, 100)
+		err := s.delegator.UpdateSchema(ctx, newFunctionRuntimeTestSchemaWithVersion(s.nextSchemaVersion()), 100)
 		s.Error(err)
 	})
 
@@ -2471,6 +2471,39 @@ func TestUpdateSchemaSyncsFunctionRuntimeMetadata(t *testing.T) {
 	assert.True(t, sd.functionState.hasFunctionType(102, schemapb.FunctionType_BM25))
 	assert.True(t, sd.functionState.hasFunctionType(104, schemapb.FunctionType_MinHash))
 	assert.False(t, sd.functionState.hasFunctionType(999, schemapb.FunctionType_BM25))
+}
+
+func TestUpdateSchemaSkipsStaleSchemaBeforeSideEffects(t *testing.T) {
+	paramtable.Init()
+	paramtable.SetNodeID(1)
+	currentSchema := newFunctionRuntimeTestSchemaWithVersion(2, newMinHashFunctionSchema())
+	currentFunctionState, err := buildFunctionRuntimeState(currentSchema)
+	require.NoError(t, err)
+	workerManager := cluster.NewMockManager(t)
+	collectionManager := segments.NewMockCollectionManager(t)
+	sd := &shardDelegator{
+		collectionID:               1000,
+		vchannelName:               "test-channel",
+		collection:                 segments.NewCollectionWithoutSegcoreForTest(1000, currentSchema),
+		collectionManager:          collectionManager,
+		lifetime:                   lifetime.NewLifetime(lifetime.Working),
+		distribution:               NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
+		workerManager:              workerManager,
+		functionState:              currentFunctionState,
+		schemaBarrierTs:            100,
+		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
+		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
+		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
+	}
+	defer sd.Close()
+
+	staleSchema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema())
+	err = sd.UpdateSchema(context.Background(), staleSchema, 200)
+	require.NoError(t, err)
+
+	assert.Equal(t, uint64(100), sd.schemaBarrierTs)
+	assert.True(t, sd.functionState.hasFunctionType(104, schemapb.FunctionType_MinHash))
+	assert.False(t, sd.functionState.hasFunctionType(102, schemapb.FunctionType_BM25))
 }
 
 func TestDelegatorSearchBM25InvalidMetricType(t *testing.T) {

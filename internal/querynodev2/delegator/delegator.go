@@ -1216,13 +1216,21 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		zap.Uint64("schemaBarrierTs", schVersion),
 	)
 
+	sd.schemaChangeMutex.Lock()
+	defer sd.schemaChangeMutex.Unlock()
+
+	if !segments.ShouldUpdateCollectionSchema(sd.collection, schema, schVersion) {
+		log.Info("delegator skip stale or no-op schema event",
+			zap.Uint64("schemaVersion", schemaVersion),
+			zap.Uint64("schemaBarrierTs", schVersion),
+		)
+		return nil
+	}
+
 	newFunctionState, err := buildFunctionRuntimeState(schema)
 	if err != nil {
 		return err
 	}
-
-	sd.schemaChangeMutex.Lock()
-	defer sd.schemaChangeMutex.Unlock()
 
 	oldSet := newBM25FunctionSet(sd.collection.Schema())
 	newSet := newBM25FunctionSet(schema)
@@ -1232,9 +1240,12 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		return merr.WrapErrServiceInternal("unsupported non-additive BM25 function schema change on loaded collection")
 	}
 
-	// set updated schema barrier as load barrier
-	// prevent concurrent load segment with old schema
-	sd.schemaBarrierTs = schVersion
+	// Keep the load barrier monotonic. A higher logical schema version can be
+	// replayed with a smaller barrier than an earlier same-version property
+	// refresh, but that must not reopen older load results.
+	if sd.schemaBarrierTs < schVersion {
+		sd.schemaBarrierTs = schVersion
+	}
 
 	sealed, growing, version := sd.distribution.PinOnlineSegments()
 	defer sd.distribution.Unpin(version)
@@ -1305,6 +1316,7 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	log.Info("delegator finished update schema event",
 		zap.Uint64("schemaVersion", schemaVersion),
 		zap.Uint64("schemaBarrierTs", schVersion),
+		zap.Uint64("loadBarrierTs", sd.schemaBarrierTs),
 		zap.Int("sealedNum", len(sealed)),
 		zap.Int("growingNum", len(growing)),
 		zap.Int("bm25FunctionNum", len(newSet)),

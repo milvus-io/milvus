@@ -53,6 +53,7 @@ func (s *CollectionManagerSuite) SetupTest() {
 func (s *CollectionManagerSuite) TestUpdateSchema() {
 	s.Run("normal_case", func() {
 		schema := mock_segcore.GenTestCollectionSchema("collection_1", schemapb.DataType_Int64, false)
+		schema.Version = 100
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 			FieldID:  common.StartOfUserFieldID + int64(len(schema.Fields)),
 			Name:     "added_field",
@@ -68,8 +69,9 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 	s.Run("stale_version", func() {
 		currentSchema, currentVersion := s.cm.Get(1).SchemaAndVersion()
 		staleSchema := mock_segcore.GenTestCollectionSchema("stale_collection", schemapb.DataType_Int64, false)
+		staleSchema.Version = int32(currentVersion - 1)
 
-		err := s.cm.UpdateSchema(1, staleSchema, currentVersion-1)
+		err := s.cm.UpdateSchema(1, staleSchema, currentVersion+1)
 		s.NoError(err)
 
 		updatedSchema, updatedVersion := s.cm.Get(1).SchemaAndVersion()
@@ -125,7 +127,7 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 		updatedSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
 		updatedSchema.Version = baseSchema.GetVersion()
 		updatedSchema.Properties = []*commonpb.KeyValuePair{
-			{Key: common.CollectionTTLFieldKey, Value: "ttl_dynamic"},
+			{Key: common.CollectionTTLFieldKey, Value: "int64Field"},
 		}
 
 		err = cm.UpdateSchema(10, updatedSchema, 100)
@@ -134,7 +136,26 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 		schema, version := cm.Get(10).SchemaAndVersion()
 		s.Equal(uint64(0), version)
 		s.Same(updatedSchema, schema)
-		s.Equal("ttl_dynamic", common.CloneKeyValuePairs(schema.GetProperties()).ToMap()[common.CollectionTTLFieldKey])
+		s.Equal("int64Field", common.CloneKeyValuePairs(schema.GetProperties()).ToMap()[common.CollectionTTLFieldKey])
+	})
+
+	s.Run("higher_schema_version_after_high_barrier_refresh_uses_monotonic_segcore_token", func() {
+		cm := NewCollectionManager()
+		baseSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
+		err := cm.PutOrRef(10, baseSchema, mock_segcore.GenTestIndexMeta(10, baseSchema), &querypb.LoadMetaInfo{
+			LoadType:        querypb.LoadType_LoadCollection,
+			SchemaBarrierTs: 100,
+		})
+		s.Require().NoError(err)
+		defer cm.Unref(10, 1)
+
+		schemaV1 := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
+		schemaV1.Version = 1
+		plan, shouldUpdate := prepareCollectionSchemaUpdate(cm.Get(10), uint64(schemaV1.GetVersion()), 80)
+		s.True(shouldUpdate)
+		s.Equal(uint64(1), plan.schemaVersion)
+		s.Equal(uint64(100), plan.schemaBarrierTs)
+		s.Equal(uint64(101), plan.segcoreToken)
 	})
 
 	s.Run("manager_uses_schema_version_from_caller", func() {
