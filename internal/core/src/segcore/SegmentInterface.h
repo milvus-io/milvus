@@ -46,6 +46,7 @@
 #include "common/Schema.h"
 #include "common/Span.h"
 #include "common/SystemProperty.h"
+#include "common/Trace.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/VectorArray.h"
@@ -104,7 +105,8 @@ class SegmentInterface {
            Timestamp collection_ttl,
            int64_t entity_ttl_physical_time_us = 0,
            bool filter_only = false,
-           bool enable_expr_cache = false) const = 0;
+           bool enable_expr_cache = false,
+           milvus::tracer::SpanPtr trace_span = nullptr) const = 0;
 
     // Only used for test
     std::unique_ptr<SearchResult>
@@ -482,7 +484,8 @@ class SegmentInternalInterface : public SegmentInterface {
            Timestamp collection_ttl,
            int64_t entity_ttl_physical_time_us = 0,
            bool filter_only = false,
-           bool enable_expr_cache = false) const override;
+           bool enable_expr_cache = false,
+           milvus::tracer::SpanPtr trace_span = nullptr) const override;
 
     void
     FillPrimaryKeys(const query::Plan* plan,

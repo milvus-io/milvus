@@ -431,7 +431,8 @@ AsyncSearch(CTraceContext c_trace,
                                                 collection_ttl,
                                                 entity_ttl_physical_time_us,
                                                 filter_only,
-                                                enable_expr_cache);
+                                                enable_expr_cache,
+                                                span);
             }
             if (!filter_only &&
                 !milvus::PositivelyRelated(
