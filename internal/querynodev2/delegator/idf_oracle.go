@@ -83,7 +83,7 @@ type bm25Stats map[int64]*storage.BM25Stats
 
 func (s bm25Stats) Clone() bm25Stats {
 	if len(s) == 0 {
-		return nil
+		return bm25Stats{}
 	}
 	cloned := make(bm25Stats, len(s))
 	for fieldID, stats := range s {
