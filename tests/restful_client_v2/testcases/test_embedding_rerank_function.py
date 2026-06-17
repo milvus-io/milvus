@@ -1345,16 +1345,13 @@ class TestModelRerankFunction(TestBase):
     def test_hybrid_vector_search_with_model_rerank(self, tei_endpoint, tei_reranker_endpoint):
         """
         target: test hybrid vector search with model rerank using RESTful API
-        method: test bm25+dense/bm25+sparse search with model reranker
+        method: test bm25+dense text-query search with model reranker
         expected: hybrid search should succeed with model reranker
         """
-        import random
-
         name = gen_collection_name(prefix)
         self._create_collection_with_all_vector_types(name, tei_endpoint)
 
         # Prepare search parameters for reranker
-        nq = 1
         query_texts = ["vector search"]
 
         # Prepare reranker parameters (functionScore format)
@@ -1377,48 +1374,23 @@ class TestModelRerankFunction(TestBase):
             ]
         }
 
-        # Put the BM25 text request first because model rerank uses text queries.
-        for search_type in ["bm25+dense", "bm25+sparse"]:
-            logger.info(f"Executing {search_type} hybrid search with model reranker")
+        # Model rerank expects text queries. Keep both hybrid requests text-based.
+        search_type = "bm25+dense"
+        hybrid_search_payload = {
+            "collectionName": name,
+            "search": [
+                {"data": query_texts, "annsField": "bm25", "limit": 1, "params": {"metric_type": "BM25"}},
+                {"data": query_texts, "annsField": "dense", "limit": 1},
+            ],
+            "functionScore": reranker_params,
+            "limit": 1,
+            "outputFields": ["doc_id", "document"],
+        }
 
-            if search_type == "bm25+dense":
-                hybrid_search_payload = {
-                    "collectionName": name,
-                    "search": [
-                        {"data": query_texts, "annsField": "bm25", "limit": 1, "params": {"metric_type": "BM25"}},
-                        {
-                            "data": [[random.random() for _ in range(768)] for _ in range(nq)],
-                            "annsField": "dense",
-                            "limit": 1,
-                        },
-                    ],
-                    "functionScore": reranker_params,
-                    "limit": 1,
-                    "outputFields": ["doc_id", "document"],
-                }
-
-            elif search_type == "bm25+sparse":
-                hybrid_search_payload = {
-                    "collectionName": name,
-                    "search": [
-                        {"data": query_texts, "annsField": "bm25", "limit": 1, "params": {"metric_type": "BM25"}},
-                        {
-                            "data": [
-                                {random.randint(1, 10000): random.random() for _ in range(100)} for _ in range(nq)
-                            ],
-                            "annsField": "sparse",
-                            "limit": 1,
-                        },
-                    ],
-                    "functionScore": reranker_params,
-                    "limit": 1,
-                    "outputFields": ["doc_id", "document"],
-                }
-
-            rsp = self.vector_client.vector_advanced_search(hybrid_search_payload)
-            assert rsp["code"] == 0, f"{search_type} hybrid search with model reranker failed: {rsp}"
-            assert len(rsp["data"]) > 0, f"{search_type} hybrid search returned no results"
-            logger.info(f"{search_type} hybrid search with TEI reranker succeeded")
+        rsp = self.vector_client.vector_advanced_search(hybrid_search_payload)
+        assert rsp["code"] == 0, f"{search_type} hybrid search with model reranker failed: {rsp}"
+        assert len(rsp["data"]) > 0, f"{search_type} hybrid search returned no results"
+        logger.info(f"{search_type} hybrid search with TEI reranker succeeded")
 
 
 @pytest.mark.tags(CaseLabel.L1)
