@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 )
@@ -122,6 +123,32 @@ func TestDelegatorGrowingSourceProviderUsesInsertCountAsOffset(t *testing.T) {
 	require.NotNil(t, source)
 	require.EqualValues(t, 12, source.CurrentOffset())
 	source.Release()
+}
+
+func TestDelegatorGrowingSourceProviderMissingSegmentPendingUntilTSafeCaughtUp(t *testing.T) {
+	segmentManager := segments.NewMockSegmentManager(t)
+	currentTSafe := uint64(100)
+	provider := newDelegatorGrowingSourceProvider(segmentManager, nil, func() uint64 {
+		return currentTSafe
+	})
+
+	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(nil).Once()
+	source, state := provider.GetGrowingFlushSource(1001, 10, &msgpb.MsgPosition{Timestamp: 200})
+	require.Equal(t, syncmgr.GrowingSourcePending, state)
+	require.Nil(t, source)
+
+	currentTSafe = 200
+	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(nil).Once()
+	source, state = provider.GetGrowingFlushSource(1001, 10, &msgpb.MsgPosition{Timestamp: 200})
+	require.Equal(t, syncmgr.GrowingSourceUnavailable, state)
+	require.Nil(t, source)
+
+	currentTSafe = 100
+	provider.Deactivate()
+	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(nil).Once()
+	source, state = provider.GetGrowingFlushSource(1001, 10, &msgpb.MsgPosition{Timestamp: 200})
+	require.Equal(t, syncmgr.GrowingSourceUnavailable, state)
+	require.Nil(t, source)
 }
 
 func TestDelegatorGrowingSourceProviderPrepareWaitsFence(t *testing.T) {

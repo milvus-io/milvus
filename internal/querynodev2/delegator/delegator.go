@@ -1476,7 +1476,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		sd.growingSourceProvider = newDelegatorGrowingSourceProvider(manager.Segment, func(ctx context.Context, fenceTs uint64) error {
 			_, err := sd.waitTSafe(ctx, fenceTs)
 			return err
-		})
+		}, sd.GetTSafe)
 		sd.growingSourceRegistration = syncmgr.DefaultGrowingSourceRegistry().Register(sd.vchannelName, sd.growingSourceProvider)
 		sd.growingSourceProvider.SetRegistration(sd.growingSourceRegistration)
 		log.Info("registered growing-source source support")
