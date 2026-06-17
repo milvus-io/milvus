@@ -1,5 +1,6 @@
 """MilvusClient external table tests."""
 
+import io
 import json
 import os
 import random
@@ -8,6 +9,7 @@ import time
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
@@ -19,7 +21,11 @@ from common.external_table_common import (
     FORMAT_NUM_FILES,
     FORMAT_ROWS_PER_FILE,
     FORMAT_TOTAL_ROWS,
+    FULL_MATRIX_ARRAY_FIELD,
+    FULL_MATRIX_DIM,
     FULL_MATRIX_NB,
+    FULL_MATRIX_SCALAR_FIELDS,
+    FULL_MATRIX_VECTOR_FIELDS,
     REFRESH_TIMEOUT,
     _build_iceberg_full_matrix_table,
     _float_vectors,
@@ -53,7 +59,8 @@ from common.external_table_common import (
     write_basic_format_dataset,
     write_vortex_table,
 )
-from pymilvus import AnnSearchRequest, DataType, RRFRanker
+from pymilvus import AnnSearchRequest, DataType, Function, FunctionType, RRFRanker
+from pymilvus.grpc_gen import schema_pb2
 from tenacity import Retrying, retry_if_result, stop_after_delay, wait_fixed
 from utils.util_log import test_log as log
 
@@ -64,6 +71,60 @@ _PLACEHOLDER_SRC = "s3://localhost:9000/milvus-bucket/placeholder/"
 _PLACEHOLDER_SPEC = build_external_spec()
 _PLACEHOLDER_NEW_SOURCE = "minio://localhost:9000/milvus-bucket/new/"
 _PLACEHOLDER_NEW_SPEC = build_external_spec()
+_EXTERNAL_ADD_FIELD_UNSUPPORTED_PUBLIC_TYPES = {
+    DataType.STRING: {"max_length": 64},
+    DataType.SPARSE_FLOAT_VECTOR: {},
+    DataType.STRUCT: {},
+}
+_EXTERNAL_ADD_FIELD_PROTO_ONLY_UNSUPPORTED_TYPES = {
+    "Mol": 27,
+}
+_EXTERNAL_ADD_FIELD_INTERNAL_TYPES = {
+    DataType.NONE,
+    DataType._ARRAY_OF_VECTOR,
+    DataType._ARRAY_OF_STRUCT,
+}
+_EXTERNAL_ADD_FIELD_SDK_ONLY_INTERNAL_TYPES = {
+    DataType.UNKNOWN,
+}
+
+
+def _supported_external_add_field_data_types():
+    supported = {dtype for _name, dtype, _arrow, _extra, _value_fn in FULL_MATRIX_SCALAR_FIELDS}
+    supported.add(DataType.ARRAY)
+    supported.add(DataType.GEOMETRY)
+    supported.update(dtype for _name, dtype, _dim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS)
+    return supported
+
+
+def _proto_data_type_values():
+    return {value.name: value.number for value in schema_pb2.DataType.DESCRIPTOR.values}
+
+
+def _assert_external_add_field_dtype_matrix_current():
+    supported = _supported_external_add_field_data_types()
+    proto_values = _proto_data_type_values()
+    sdk_numbers = {int(dtype) for dtype in DataType}
+    classified_numbers = (
+        {int(dtype) for dtype in supported}
+        | {int(dtype) for dtype in _EXTERNAL_ADD_FIELD_UNSUPPORTED_PUBLIC_TYPES}
+        | {int(dtype) for dtype in _EXTERNAL_ADD_FIELD_INTERNAL_TYPES}
+        | set(_EXTERNAL_ADD_FIELD_PROTO_ONLY_UNSUPPORTED_TYPES.values())
+    )
+    assert set(proto_values.values()) == classified_numbers, (
+        "external add-field proto DataType matrix is stale; "
+        f"unclassified={set(proto_values.values()) - classified_numbers}, "
+        f"obsolete={classified_numbers - set(proto_values.values())}, proto={proto_values}"
+    )
+    stale_proto_only = {
+        name: number
+        for name, number in _EXTERNAL_ADD_FIELD_PROTO_ONLY_UNSUPPORTED_TYPES.items()
+        if number in sdk_numbers
+    }
+    assert not stale_proto_only, (
+        "proto-only DataType is now exposed by PyMilvus DataType; "
+        f"move it to supported or unsupported public coverage: {stale_proto_only}"
+    )
 
 
 def assert_external_spec_persisted(actual_spec, expected_spec, context):
@@ -104,6 +165,145 @@ def _assert_basic_format_rows(self, client, coll, fmt, batches, dim=ct.default_d
         for j, v in enumerate(vec):
             expected = float(start_id) * 0.1 + j
             assert abs(v - expected) < 1e-2, f"[{fmt}] vec[{j}] for id={start_id} = {v}"
+
+
+def _new_float_vectors(ids, dim):
+    return np.array(
+        [[float(i) * 0.2 + d for d in range(dim)] for i in ids],
+        dtype=np.float32,
+    )
+
+
+def _ten_percent_null_ids(num_rows, protected_ids=()):
+    target = max(1, num_rows // 10)
+    protected = set(protected_ids)
+    preferred = [42] if 0 <= 42 < num_rows and 42 not in protected else []
+    candidates = preferred + [
+        row_id for row_id in range(num_rows) if row_id not in protected and row_id not in preferred
+    ]
+    null_ids = set(candidates[:target])
+    assert len(null_ids) == target, f"failed to generate {target} null ids from {num_rows} rows"
+    return null_ids
+
+
+def gen_add_field_parquet_bytes(
+    num_rows,
+    start_id,
+    dim=ct.default_dim,
+    include_score=True,
+    include_new_embedding=True,
+    new_embedding_dim=None,
+    score_array=None,
+    new_embedding_null_ids=None,
+):
+    """Generate parquet for external add-field schema evolution tests."""
+    ids = list(range(start_id, start_id + num_rows))
+    columns = {
+        "id": pa.array(ids, type=pa.int64()),
+        "value": pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
+        "embedding": pa.FixedSizeListArray.from_arrays(_float_vectors(ids, dim).flatten(), list_size=dim),
+    }
+    if include_score:
+        columns["score"] = (
+            score_array if score_array is not None else pa.array([float(i) * 0.01 for i in ids], type=pa.float64())
+        )
+    if include_new_embedding:
+        ext_dim = new_embedding_dim or dim
+        new_vectors = _new_float_vectors(ids, ext_dim)
+        if new_embedding_null_ids:
+            null_ids = set(new_embedding_null_ids)
+            columns["new_embedding"] = pa.array(
+                [None if row_id in null_ids else new_vectors[idx].tolist() for idx, row_id in enumerate(ids)],
+                type=pa.list_(pa.float32()),
+            )
+        else:
+            columns["new_embedding"] = pa.FixedSizeListArray.from_arrays(
+                new_vectors.flatten(),
+                list_size=ext_dim,
+            )
+
+    buf = io.BytesIO()
+    pq.write_table(pa.table(columns), buf, compression="snappy")
+    return buf.getvalue()
+
+
+def gen_add_scalar_core_types_parquet_bytes(num_rows, start_id, dim=ct.default_dim):
+    ids = list(range(start_id, start_id + num_rows))
+    columns = {
+        "id": pa.array(ids, type=pa.int64()),
+        "value": pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
+        "embedding": pa.FixedSizeListArray.from_arrays(_float_vectors(ids, dim).flatten(), list_size=dim),
+        "score_float": pa.array([float(i) * 0.25 for i in ids], type=pa.float32()),
+        "score_i64": pa.array([i * 10 for i in ids], type=pa.int64()),
+        "tag": pa.array([f"tag_{i % 5}" for i in ids], type=pa.string()),
+    }
+    buf = io.BytesIO()
+    pq.write_table(pa.table(columns), buf, compression="snappy")
+    return buf.getvalue()
+
+
+def gen_add_function_field_parquet_bytes(num_rows, start_id, dim=ct.default_dim):
+    ids = list(range(start_id, start_id + num_rows))
+    columns = {
+        "id": pa.array(ids, type=pa.int64()),
+        "text": pa.array([f"external document {i}" for i in ids], type=pa.string()),
+        "embedding": pa.FixedSizeListArray.from_arrays(_float_vectors(ids, dim).flatten(), list_size=dim),
+    }
+
+    buf = io.BytesIO()
+    pq.write_table(pa.table(columns), buf, compression="snappy")
+    return buf.getvalue()
+
+
+def gen_text_embedding_function_parquet_bytes(num_rows, start_id, phrases):
+    ids = list(range(start_id, start_id + num_rows))
+    columns = {
+        "id": pa.array(ids, type=pa.int64()),
+        "doc": pa.array([phrases[i % len(phrases)] for i in ids], type=pa.string()),
+    }
+
+    buf = io.BytesIO()
+    pq.write_table(pa.table(columns), buf, compression="snappy")
+    return buf.getvalue()
+
+
+def gen_add_all_supported_fields_parquet_bytes(num_rows, start_id):
+    """Generate parquet where every non-primary field can be added later."""
+    columns = _full_matrix_arrow_columns(num_rows, start_id)
+    ids = list(range(start_id, start_id + num_rows))
+    columns["base_embedding"] = pa.FixedSizeListArray.from_arrays(
+        _float_vectors(ids, FULL_MATRIX_DIM).flatten(),
+        list_size=FULL_MATRIX_DIM,
+    )
+    buf = io.BytesIO()
+    pq.write_table(pa.table(columns), buf, compression="snappy")
+    return buf.getvalue()
+
+
+def _assert_score_rows(rows, expected_ids):
+    assert len(rows) == len(expected_ids), f"expected ids {expected_ids}, got {rows}"
+    actual = {r["id"]: r["score"] for r in rows}
+    assert set(actual) == set(expected_ids), f"expected ids {expected_ids}, got {actual}"
+    for row_id in expected_ids:
+        assert abs(actual[row_id] - row_id * 0.01) < 1e-6, f"id={row_id}, score={actual[row_id]}"
+
+
+def _assert_l2_topk(hits, expected_ids):
+    assert len(hits) == len(expected_ids), f"expected topK ids {expected_ids}, got {hits}"
+    actual_ids = [hit["id"] for hit in hits]
+    assert actual_ids == expected_ids, f"expected topK ids {expected_ids}, got {actual_ids}"
+    distances = [hit["distance"] for hit in hits]
+    assert distances == sorted(distances), f"L2 distances should be ascending, got {distances}"
+
+
+def _assert_external_failure_reason(reason, reason_terms, context):
+    reason = reason or ""
+    assert reason, f"{context} failed without a reason"
+    if reason_terms:
+        lowered = reason.lower()
+        assert any(term.lower() in lowered for term in reason_terms), (
+            f"{context} reason {reason!r} did not contain any of {reason_terms}"
+        )
 
 
 # ============================================================
@@ -241,6 +441,34 @@ class ExternalTableTestBase(TestMilvusClientV2Base):
             assert any(term.lower() in reason for term in reason_terms), (
                 f"refresh job {job_id} reason {progress.reason!r} did not contain any of {reason_terms}"
             )
+        return job_id, progress
+
+    def refresh_or_later_must_fail(
+        self,
+        client,
+        collection_name,
+        later_operation,
+        timeout=60,
+        external_source=None,
+        external_spec=None,
+        reason_terms=(),
+    ):
+        job_id, progress = self.refresh_and_poll_terminal(
+            client,
+            collection_name,
+            timeout=timeout,
+            external_source=external_source,
+            external_spec=external_spec,
+            return_on_reason=True,
+        )
+        if progress.state == "RefreshFailed" or progress.reason:
+            _assert_external_failure_reason(progress.reason, reason_terms, f"refresh job {job_id}")
+            return job_id, progress
+
+        assert progress.state == "RefreshCompleted", f"refresh job {job_id} ended in {progress.state}"
+        with pytest.raises(Exception) as exc_info:
+            later_operation()
+        _assert_external_failure_reason(str(exc_info.value), reason_terms, "post-refresh operation")
         return job_id, progress
 
     def add_vector_index(
@@ -1650,6 +1878,1121 @@ class TestMilvusClientExternalTableLargeFile(ExternalTableTestBase):
 
 
 # ============================================================
+# 2.6 Schema evolution: add scalar/vector fields
+# ============================================================
+
+
+class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
+    """Schema evolution coverage for adding fields to external collections."""
+
+    def _add_full_matrix_fields(self, client, coll):
+        for name, dtype, _arrow, extra, _value_fn in FULL_MATRIX_SCALAR_FIELDS:
+            self.add_collection_field(
+                client,
+                collection_name=coll,
+                field_name=name,
+                data_type=dtype,
+                nullable=True,
+                external_field=name,
+                **extra,
+            )
+
+        arr_name, arr_elem_dtype, _ = FULL_MATRIX_ARRAY_FIELD
+        self.add_collection_field(
+            client,
+            collection_name=coll,
+            field_name=arr_name,
+            data_type=DataType.ARRAY,
+            element_type=arr_elem_dtype,
+            max_capacity=8,
+            nullable=True,
+            external_field=arr_name,
+        )
+        self.add_collection_field(
+            client,
+            collection_name=coll,
+            field_name="geo",
+            data_type=DataType.GEOMETRY,
+            nullable=True,
+            external_field="geo",
+        )
+
+        for name, vtype, vdim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS:
+            self.add_collection_field(
+                client,
+                collection_name=coll,
+                field_name=name,
+                data_type=vtype,
+                dim=vdim,
+                nullable=True,
+                external_field=name,
+            )
+
+    def _assert_unsupported_add_field_types_rejected(self, client, coll):
+        for dtype, extra in _EXTERNAL_ADD_FIELD_UNSUPPORTED_PUBLIC_TYPES.items():
+            field_name = f"unsupported_{dtype.name.lower()}"
+            self.add_collection_field(
+                client,
+                collection_name=coll,
+                field_name=field_name,
+                data_type=dtype,
+                nullable=True,
+                external_field=field_name,
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_code: 1100, ct.err_msg: "does not support field type"},
+                **extra,
+            )
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_external_table_add_scalar_field(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table add scalar field
+        method: add a DOUBLE field with external_field mapping, refresh, load, query, and filter it
+        expected: added scalar field is described, returns values from external storage, and preserves null values
+        """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+        nb = ct.default_nb
+        null_score_ids = _ten_percent_null_ids(nb, protected_ids=[*range(5), *range(100, 105)])
+
+        upload_parquet(
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
+            gen_add_field_parquet_bytes(
+                nb,
+                0,
+                include_new_embedding=False,
+                score_array=pa.array(
+                    [None if row_id in null_score_ids else float(row_id) * 0.01 for row_id in range(nb)],
+                    type=pa.float64(),
+                ),
+            ),
+        )
+
+        schema = _build_basic_schema(self, client, ext_url, ext_spec=build_external_spec(cfg))
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        assert self.query_count(client, coll) == nb
+
+        self.release_collection(client, coll)
+        self.add_collection_field(
+            client,
+            collection_name=coll,
+            field_name="score",
+            data_type=DataType.DOUBLE,
+            nullable=True,
+            external_field="score",
+        )
+
+        info = self.describe_collection(client, coll)[0]
+        score_field = next((f for f in info["fields"] if f["name"] == "score"), None)
+        assert score_field is not None, f"score field missing after add_collection_field: {info['fields']}"
+        assert score_field.get("external_field") == "score", f"score external_field mismatch: {score_field}"
+        assert score_field.get("nullable") is True, f"score should be nullable on external collection: {score_field}"
+
+        self.refresh_and_wait(client, coll)
+        self.load_collection(client, coll)
+
+        rows = self.query(client, coll, filter="id < 5", output_fields=["id", "score"], limit=10)[0]
+        _assert_score_rows(rows, [0, 1, 2, 3, 4])
+
+        null_rows = self.query(client, coll, filter="id == 42", output_fields=["id", "score"], limit=10)[0]
+        assert len(null_rows) == 1, f"missing null score row: {null_rows}"
+        assert null_rows[0]["score"] is None, f"score for id=42 should be null: {null_rows}"
+        null_filter_rows = self.query(
+            client,
+            coll,
+            filter="score is null",
+            output_fields=["id", "score"],
+            limit=len(null_score_ids) + 10,
+        )[0]
+        assert {row["id"] for row in null_filter_rows} == null_score_ids, (
+            f"unexpected score null rows: {null_filter_rows}"
+        )
+        assert all(row["score"] is None for row in null_filter_rows), f"non-null score returned: {null_filter_rows}"
+
+        filtered = self.query(
+            client,
+            coll,
+            filter="score >= 1.0 && score < 1.05",
+            output_fields=["id", "score"],
+            limit=10,
+        )[0]
+        _assert_score_rows(filtered, [100, 101, 102, 103, 104])
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("fmt", BASIC_FORMATS[1:], ids=BASIC_FORMAT_IDS[1:])
+    def test_milvus_client_external_table_add_scalar_field_non_parquet_formats(self, fmt, minio_env, external_prefix):
+        """
+        target: test external table add scalar field on non-parquet formats
+        method: add a DOUBLE field on lance-table, iceberg-table, and vortex sources, then refresh/load/query/filter
+        expected: added scalar field is readable after refresh across every supported non-parquet format
+        """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+        batches = [(0, 100)]
+
+        source, ext_spec = write_basic_format_dataset(
+            fmt,
+            minio_client,
+            cfg,
+            ext_url,
+            ext_key,
+            batches,
+            include_score=True,
+        )
+        schema = _build_basic_schema(self, client, source, ext_spec=ext_spec)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        assert self.query_count(client, coll) == 100
+
+        self.release_collection(client, coll)
+        self.add_collection_field(
+            client,
+            collection_name=coll,
+            field_name="score",
+            data_type=DataType.DOUBLE,
+            nullable=True,
+            external_field="score",
+        )
+
+        self.refresh_and_wait(client, coll)
+        self.load_collection(client, coll)
+
+        rows = self.query(client, coll, filter="id < 5", output_fields=["id", "score"], limit=10)[0]
+        _assert_score_rows(rows, [0, 1, 2, 3, 4])
+
+        filtered = self.query(
+            client,
+            coll,
+            filter="score >= 0.9 && score < 0.95",
+            output_fields=["id", "score"],
+            limit=10,
+        )[0]
+        _assert_score_rows(filtered, [90, 91, 92, 93, 94])
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_external_table_add_core_scalar_field_types(self, minio_env, external_prefix):
+        """
+        target: test external table add core scalar field types
+        method: add FLOAT, INT64, and VARCHAR fields, refresh, load, query, and filter them
+        expected: core scalar types added through schema evolution are readable and filterable
+        """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+        nb = ct.default_nb
+
+        upload_parquet(
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
+            gen_add_scalar_core_types_parquet_bytes(nb, 0),
+        )
+
+        schema = _build_basic_schema(self, client, ext_url, ext_spec=build_external_spec(cfg))
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        assert self.query_count(client, coll) == nb
+
+        self.release_collection(client, coll)
+        for field_name, data_type, kwargs in (
+            ("score_float", DataType.FLOAT, {}),
+            ("score_i64", DataType.INT64, {}),
+            ("tag", DataType.VARCHAR, {"max_length": 16}),
+        ):
+            self.add_collection_field(
+                client,
+                collection_name=coll,
+                field_name=field_name,
+                data_type=data_type,
+                nullable=True,
+                external_field=field_name,
+                **kwargs,
+            )
+
+        self.refresh_and_wait(client, coll)
+        self.load_collection(client, coll)
+
+        rows = self.query(
+            client,
+            coll,
+            filter="id == 42",
+            output_fields=["id", "score_float", "score_i64", "tag"],
+        )[0]
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["id"] == 42
+        assert abs(row["score_float"] - 10.5) < 1e-3
+        assert row["score_i64"] == 420
+        assert row["tag"] == "tag_2"
+
+        filtered = self.query(
+            client,
+            coll,
+            filter='score_i64 >= 1000 && score_i64 < 1050 && tag == "tag_0"',
+            output_fields=["id", "score_i64", "tag"],
+            limit=10,
+        )[0]
+        assert {row["id"] for row in filtered} == {100}
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(
+        reason="https://github.com/milvus-io/milvus/issues/50416: "
+        "querying newly added external field before refresh returns internal QueryNode assert",
+        strict=True,
+    )
+    def test_milvus_client_external_table_add_field_without_refresh_not_silent(self, minio_env, external_prefix):
+        """
+        target: test external table add field without refresh does not silently return wrong data
+        method: add a mapped field while the old snapshot is loaded, then query/filter it without refresh
+        expected: old-field search still works, and query/filter on the added field is rejected meaningfully
+        """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+
+        upload_parquet(
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
+            gen_add_field_parquet_bytes(ct.default_nb, 0, include_new_embedding=False),
+        )
+
+        schema = _build_basic_schema(self, client, ext_url, ext_spec=build_external_spec(cfg))
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+
+        baseline_hits = self.search(
+            client,
+            coll,
+            data=_float_vectors([0], ct.default_dim).tolist(),
+            limit=1,
+            anns_field="embedding",
+            output_fields=["id"],
+            search_params={"metric_type": "L2"},
+        )[0][0]
+        _assert_l2_topk(baseline_hits, [0])
+
+        self.add_collection_field(
+            client,
+            collection_name=coll,
+            field_name="score",
+            data_type=DataType.DOUBLE,
+            nullable=True,
+            external_field="score",
+        )
+
+        old_hits = self.search(
+            client,
+            coll,
+            data=_float_vectors([0], ct.default_dim).tolist(),
+            limit=1,
+            anns_field="embedding",
+            output_fields=["id"],
+            search_params={"metric_type": "L2"},
+        )[0][0]
+        assert [hit["id"] for hit in old_hits] == [hit["id"] for hit in baseline_hits]
+
+        err_check = {ct.err_code: 65535, ct.err_msg: "refresh"}
+        self.query(
+            client,
+            coll,
+            filter="id < 5",
+            output_fields=["id", "score"],
+            limit=10,
+            check_task=CheckTasks.err_res,
+            check_items=err_check,
+        )
+        self.query(
+            client,
+            coll,
+            filter="score > 0",
+            output_fields=["id", "score"],
+            limit=10,
+            check_task=CheckTasks.err_res,
+            check_items=err_check,
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_external_table_add_scalar_field_with_scalar_index(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table add scalar field with scalar index
+        method: add a DOUBLE field, refresh, create scalar index on it, load, and filter by the indexed field
+        expected: added scalar field can build scalar index and filter results remain correct
+        """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+        nb = ct.default_nb
+
+        upload_parquet(
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
+            gen_add_field_parquet_bytes(nb, 0, include_new_embedding=False),
+        )
+
+        schema = _build_basic_schema(self, client, ext_url, ext_spec=build_external_spec(cfg))
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        assert self.query_count(client, coll) == nb
+
+        self.release_collection(client, coll)
+        self.add_collection_field(
+            client,
+            collection_name=coll,
+            field_name="score",
+            data_type=DataType.DOUBLE,
+            nullable=True,
+            external_field="score",
+        )
+        self.refresh_and_wait(client, coll)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="score", index_type="INVERTED")
+        self.create_index(client, coll, index_params)
+        self.load_collection(client, coll)
+
+        index_info = self.describe_index(client, coll, "score")[0]
+        assert index_info.get("field_name") == "score", f"unexpected scalar index field: {index_info}"
+        assert index_info.get("index_type") == "INVERTED", f"unexpected scalar index type: {index_info}"
+
+        rows = self.query(
+            client,
+            coll,
+            filter="score >= 1.0 && score < 1.05",
+            output_fields=["id", "score"],
+            limit=10,
+        )[0]
+        _assert_score_rows(rows, [100, 101, 102, 103, 104])
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_external_table_add_vector_field(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table add vector field
+        method: add a FloatVector field with external_field mapping, refresh, index, load, and search it
+        expected: added vector field is searchable, preserves null values, and the original vector field remains searchable
+        """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+        nb = ct.default_nb
+        null_vector_ids = _ten_percent_null_ids(nb, protected_ids=range(5))
+
+        upload_parquet(
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
+            gen_add_field_parquet_bytes(nb, 0, include_score=False, new_embedding_null_ids=null_vector_ids),
+        )
+
+        schema = _build_basic_schema(self, client, ext_url, ext_spec=build_external_spec(cfg))
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.add_vector_index(client, coll, "embedding", "FLAT", "L2")
+        self.load_collection(client, coll)
+        assert self.query_count(client, coll) == nb
+
+        self.release_collection(client, coll)
+        self.add_collection_field(
+            client,
+            collection_name=coll,
+            field_name="new_embedding",
+            data_type=DataType.FLOAT_VECTOR,
+            dim=ct.default_dim,
+            nullable=True,
+            external_field="new_embedding",
+        )
+
+        info = self.describe_collection(client, coll)[0]
+        new_vec_field = next((f for f in info["fields"] if f["name"] == "new_embedding"), None)
+        assert new_vec_field is not None, f"new_embedding field missing: {info['fields']}"
+        assert new_vec_field.get("external_field") == "new_embedding", (
+            f"new_embedding external_field mismatch: {new_vec_field}"
+        )
+        assert new_vec_field.get("nullable") is True, f"new_embedding should be nullable: {new_vec_field}"
+
+        self.refresh_and_wait(client, coll)
+        self.add_vector_index(client, coll, "new_embedding", "FLAT", "L2")
+        self.load_collection(client, coll)
+
+        new_hits = self.search(
+            client,
+            coll,
+            data=_new_float_vectors([0], ct.default_dim).tolist(),
+            limit=5,
+            anns_field="new_embedding",
+            output_fields=["id"],
+            search_params={"metric_type": "L2"},
+        )[0][0]
+        _assert_l2_topk(new_hits, [0, 1, 2, 3, 4])
+
+        null_vector_rows = self.query(
+            client,
+            coll,
+            filter=f"id in {sorted(null_vector_ids)}",
+            output_fields=["id", "new_embedding"],
+            limit=len(null_vector_ids) + 10,
+        )[0]
+        assert {row["id"] for row in null_vector_rows} == null_vector_ids, (
+            f"unexpected null vector rows: {null_vector_rows}"
+        )
+        assert all(row["new_embedding"] is None for row in null_vector_rows), (
+            f"non-null new_embedding returned: {null_vector_rows}"
+        )
+
+        old_hits = self.search(
+            client,
+            coll,
+            data=_float_vectors([0], ct.default_dim).tolist(),
+            limit=5,
+            anns_field="embedding",
+            output_fields=["id"],
+            search_params={"metric_type": "L2"},
+        )[0][0]
+        _assert_l2_topk(old_hits, [0, 1, 2, 3, 4])
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_external_table_add_field_refresh_load_preserves_old_fields(self, minio_env, external_prefix):
+        """
+        target: test add field then refresh and load publishes new field without regressing old fields
+        method: add score, release, refresh, load, then query score/value and search original vector
+        expected: added score is readable and pre-existing scalar/vector fields remain correct
+        """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+        nb = ct.default_nb
+
+        upload_parquet(
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
+            gen_add_field_parquet_bytes(nb, 0, include_new_embedding=False),
+        )
+
+        schema = _build_basic_schema(self, client, ext_url, ext_spec=build_external_spec(cfg))
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.add_vector_index(client, coll, "embedding", "FLAT", "L2")
+        self.load_collection(client, coll)
+        assert self.query_count(client, coll) == nb
+
+        self.release_collection(client, coll)
+        self.add_collection_field(
+            client,
+            collection_name=coll,
+            field_name="score",
+            data_type=DataType.DOUBLE,
+            nullable=True,
+            external_field="score",
+        )
+        self.refresh_and_wait(client, coll)
+        self.load_collection(client, coll)
+
+        rows = self.query(
+            client,
+            coll,
+            filter="id < 5",
+            output_fields=["id", "value", "score"],
+            limit=10,
+        )[0]
+        _assert_score_rows(rows, [0, 1, 2, 3, 4])
+        values = {row["id"]: row["value"] for row in rows}
+        for row_id in range(5):
+            assert abs(values[row_id] - row_id * 1.5) < 1e-3
+
+        old_hits = self.search(
+            client,
+            coll,
+            data=_float_vectors([0], ct.default_dim).tolist(),
+            limit=5,
+            anns_field="embedding",
+            output_fields=["id"],
+            search_params={"metric_type": "L2"},
+        )[0][0]
+        _assert_l2_topk(old_hits, [0, 1, 2, 3, 4])
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "field_name,data_type,kwargs",
+        [
+            ("score", DataType.DOUBLE, {"nullable": True}),
+            ("new_embedding", DataType.FLOAT_VECTOR, {"dim": ct.default_dim, "nullable": True}),
+        ],
+        ids=["scalar", "vector"],
+    )
+    def test_milvus_client_external_table_add_field_requires_external_field(
+        self, field_name, data_type, kwargs, minio_env, external_prefix
+    ):
+        """
+        target: test MilvusClient external table add field requires external_field
+        method: add scalar/vector fields without external_field mapping
+        expected: add_collection_field rejects the request with an external_field error
+        """
+        client = self._client()
+        coll = self.prepare_refreshed_basic_collection(client, minio_env, external_prefix, num_rows=50)
+
+        self.add_collection_field(
+            client,
+            collection_name=coll,
+            field_name=field_name,
+            data_type=data_type,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "external_field"},
+            **kwargs,
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_external_table_add_field_duplicate_external_field_rejected(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table add field duplicate external_field rejected
+        method: add a new field mapped to an external column already owned by another user field
+        expected: add_collection_field rejects duplicate external_field ownership
+        """
+        client = self._client()
+        coll = self.prepare_refreshed_basic_collection(client, minio_env, external_prefix, num_rows=50)
+
+        self.add_collection_field(
+            client,
+            collection_name=coll,
+            field_name="score",
+            data_type=DataType.DOUBLE,
+            nullable=True,
+            external_field="value",
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "mapped by multiple fields"},
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_external_table_add_field_missing_external_column_fails_refresh(
+        self, minio_env, external_prefix
+    ):
+        """
+        target: test MilvusClient external table add field missing external column fails refresh
+        method: add a field mapped to a column absent from the current external source
+        expected: refresh fails with a clear reason instead of publishing bad data
+        """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+        nb = ct.default_nb
+
+        upload_parquet(
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
+            gen_add_field_parquet_bytes(nb, 0, include_score=False, include_new_embedding=False),
+        )
+
+        schema = _build_basic_schema(self, client, ext_url, ext_spec=build_external_spec(cfg))
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        assert self.query_count(client, coll) == nb
+
+        self.release_collection(client, coll)
+        self.add_collection_field(
+            client,
+            collection_name=coll,
+            field_name="score",
+            data_type=DataType.DOUBLE,
+            nullable=True,
+            external_field="score",
+        )
+        _job_id, progress = self.refresh_or_later_must_fail(
+            client,
+            coll,
+            later_operation=lambda: self.query(
+                client,
+                coll,
+                filter="id < 5",
+                output_fields=["id", "score"],
+                limit=10,
+            ),
+            timeout=60,
+            reason_terms=("score", "field", "column", "schema"),
+        )
+        log.info(f"missing added external column failed visibly: state={progress.state}, reason={progress.reason}")
+
+        info = self.describe_collection(client, coll)[0]
+        assert info.get("external_source") == ext_url, f"failed refresh polluted external_source: {info}"
+        assert_external_spec_persisted(info.get("external_spec"), build_external_spec(cfg), "failed add field refresh")
+
+        self.load_collection(client, coll)
+        assert self.query_count(client, coll) == nb
+        rows = self.query(client, coll, filter="id < 5", output_fields=["id", "value"], limit=10)[0]
+        assert len(rows) == 5
+        actual_values = {row["id"]: row["value"] for row in rows}
+        for row_id in range(5):
+            assert abs(actual_values[row_id] - row_id * 1.5) < 1e-3
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_external_table_add_field_refresh_override_source(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table add field refresh override source
+        method: add a scalar field, refresh with a new source that contains the new external column, then reuse it
+        expected: override source is persisted and the added field is readable
+        """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        base_key = external_prefix["key"]
+        key_a, key_b = f"{base_key}/src_a", f"{base_key}/src_b"
+        url_a = build_external_source(cfg, key_a)
+        url_b = build_external_source(cfg, key_b)
+        ext_spec = build_external_spec(cfg)
+        nb = ct.default_nb
+
+        upload_parquet(
+            minio_client,
+            cfg["bucket"],
+            f"{key_a}/data.parquet",
+            gen_add_field_parquet_bytes(nb, 0, include_score=False, include_new_embedding=False),
+        )
+        upload_parquet(
+            minio_client,
+            cfg["bucket"],
+            f"{key_b}/data.parquet",
+            gen_add_field_parquet_bytes(nb, 5000, include_new_embedding=False),
+        )
+
+        schema = _build_basic_schema(self, client, url_a, ext_spec=ext_spec)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        assert self.query_count(client, coll) == nb
+
+        self.release_collection(client, coll)
+        self.add_collection_field(
+            client,
+            collection_name=coll,
+            field_name="score",
+            data_type=DataType.DOUBLE,
+            nullable=True,
+            external_field="score",
+        )
+        self.refresh_and_wait(client, coll, external_source=url_b, external_spec=ext_spec)
+        self.load_collection(client, coll)
+        assert self.query_count(client, coll) == nb
+
+        rows = self.query(
+            client,
+            coll,
+            filter="id >= 5000 && id < 5005",
+            output_fields=["id", "value", "score"],
+            limit=10,
+        )[0]
+        _assert_score_rows(rows, [5000, 5001, 5002, 5003, 5004])
+        actual_values = {row["id"]: row["value"] for row in rows}
+        for row_id in range(5000, 5005):
+            assert abs(actual_values[row_id] - row_id * 1.5) < 1e-3
+
+        info = self.describe_collection(client, coll)[0]
+        assert info.get("external_source") == url_b, f"override source not persisted: {info.get('external_source')}"
+        assert_external_spec_persisted(info.get("external_spec"), ext_spec, "add field override external_spec")
+
+        old_vector_hits = self.search(
+            client,
+            coll,
+            data=_float_vectors([5000], ct.default_dim).tolist(),
+            limit=5,
+            anns_field="embedding",
+            output_fields=["id"],
+            search_params={"metric_type": "L2"},
+        )[0][0]
+        _assert_l2_topk(old_vector_hits, [5000, 5001, 5002, 5003, 5004])
+
+        self.release_collection(client, coll)
+        self.refresh_and_wait(client, coll)
+        self.load_collection(client, coll)
+        reused = self.query(client, coll, filter="id >= 5000 && id < 5005", output_fields=["id", "score"], limit=10)[0]
+        _assert_score_rows(reused, [5000, 5001, 5002, 5003, 5004])
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_external_table_add_field_failed_override_keeps_old_snapshot(
+        self, minio_env, external_prefix
+    ):
+        """
+        target: test add field failed refresh override keeps previous source and old snapshot
+        method: add score, override refresh to a source missing score, then verify old source/spec/data survive
+        expected: failed override is not published and old value/embedding data remains usable
+        """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        base_key = external_prefix["key"]
+        key_a, key_bad = f"{base_key}/src_a", f"{base_key}/src_bad"
+        url_a = build_external_source(cfg, key_a)
+        url_bad = build_external_source(cfg, key_bad)
+        ext_spec = build_external_spec(cfg)
+        nb = ct.default_nb
+
+        upload_parquet(
+            minio_client,
+            cfg["bucket"],
+            f"{key_a}/data.parquet",
+            gen_add_field_parquet_bytes(nb, 0, include_new_embedding=False),
+        )
+        upload_parquet(
+            minio_client,
+            cfg["bucket"],
+            f"{key_bad}/data.parquet",
+            gen_add_field_parquet_bytes(nb, 5000, include_score=False, include_new_embedding=False),
+        )
+
+        schema = _build_basic_schema(self, client, url_a, ext_spec=ext_spec)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.add_vector_index(client, coll, "embedding", "FLAT", "L2")
+        self.load_collection(client, coll)
+        assert self.query_count(client, coll) == nb
+
+        self.release_collection(client, coll)
+        self.add_collection_field(
+            client,
+            collection_name=coll,
+            field_name="score",
+            data_type=DataType.DOUBLE,
+            nullable=True,
+            external_field="score",
+        )
+
+        _job_id, progress = self.refresh_or_later_must_fail(
+            client,
+            coll,
+            external_source=url_bad,
+            external_spec=ext_spec,
+            later_operation=lambda: self.query(
+                client,
+                coll,
+                filter="id >= 5000 && id < 5005",
+                output_fields=["id", "score"],
+                limit=10,
+            ),
+            timeout=60,
+            reason_terms=("score", "field", "column", "schema"),
+        )
+        log.info(f"bad add-field override failed visibly: state={progress.state}, reason={progress.reason}")
+
+        info = self.describe_collection(client, coll)[0]
+        assert info.get("external_source") == url_a, f"failed add-field override polluted source: {info}"
+        assert_external_spec_persisted(info.get("external_spec"), ext_spec, "failed add-field override external_spec")
+
+        self.load_collection(client, coll)
+        assert self.query_count(client, coll) == nb
+        rows = self.query(client, coll, filter="id < 5", output_fields=["id", "value"], limit=10)[0]
+        assert len(rows) == 5
+        for row in rows:
+            assert abs(row["value"] - row["id"] * 1.5) < 1e-3
+
+        hits = self.search(
+            client,
+            coll,
+            data=_float_vectors([0], ct.default_dim).tolist(),
+            limit=5,
+            anns_field="embedding",
+            output_fields=["id"],
+            search_params={"metric_type": "L2"},
+        )[0][0]
+        _assert_l2_topk(hits, [0, 1, 2, 3, 4])
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_external_table_add_scalar_field_type_mismatch_rejected(self, minio_env, external_prefix):
+        """
+        target: test added scalar field Arrow type mismatch rejected
+        method: add score as DOUBLE while parquet stores score as string, then refresh/load/query
+        expected: mismatch fails visibly and is not silently converted into wrong double values
+        """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+        nb = 100
+
+        score_strings = pa.array(["abc" for _ in range(nb)], type=pa.string())
+        upload_parquet(
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
+            gen_add_field_parquet_bytes(
+                nb,
+                0,
+                include_new_embedding=False,
+                score_array=score_strings,
+            ),
+        )
+
+        schema = _build_basic_schema(self, client, ext_url, ext_spec=build_external_spec(cfg))
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        assert self.query_count(client, coll) == nb
+
+        self.release_collection(client, coll)
+        self.add_collection_field(
+            client,
+            collection_name=coll,
+            field_name="score",
+            data_type=DataType.DOUBLE,
+            nullable=True,
+            external_field="score",
+        )
+        self.refresh_or_later_must_fail(
+            client,
+            coll,
+            later_operation=lambda: self.query(
+                client,
+                coll,
+                filter="id < 5",
+                output_fields=["id", "score"],
+                limit=10,
+            ),
+            timeout=60,
+            reason_terms=("score", "double", "string", "type", "schema"),
+        )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_external_table_add_all_supported_field_types(self, minio_env, external_prefix):
+        """
+        target: test external table add all supported field types
+        method: validate the DataType matrix, add every supported parquet-backed type, and reject unsupported public types
+        expected: supported fields can be refreshed/indexed/queried/searched; unsupported public types remain rejected
+        """
+        _assert_external_add_field_dtype_matrix_current()
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+        nb = FULL_MATRIX_NB
+
+        upload_parquet(
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
+            gen_add_all_supported_fields_parquet_bytes(nb, 0),
+        )
+
+        schema = self.create_schema(
+            client,
+            external_source=ext_url,
+            external_spec=build_external_spec(cfg),
+        )[0]
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(
+            schema,
+            "base_embedding",
+            DataType.FLOAT_VECTOR,
+            dim=FULL_MATRIX_DIM,
+            external_field="base_embedding",
+        )
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.add_vector_index(client, coll, "base_embedding", "FLAT", "L2")
+        self.load_collection(client, coll)
+        assert self.query_count(client, coll) == nb
+
+        self.release_collection(client, coll)
+        self._add_full_matrix_fields(client, coll)
+        self._assert_unsupported_add_field_types_rejected(client, coll)
+
+        info = self.describe_collection(client, coll)[0]
+        added_field_names = {field["name"] for field in info["fields"]}
+        expected_added = {name for name, *_ in FULL_MATRIX_SCALAR_FIELDS}
+        expected_added.add(FULL_MATRIX_ARRAY_FIELD[0])
+        expected_added.add("geo")
+        expected_added.update(name for name, *_ in FULL_MATRIX_VECTOR_FIELDS)
+        assert expected_added.issubset(added_field_names), (
+            f"missing added full-matrix fields: {expected_added - added_field_names}"
+        )
+
+        self.refresh_and_wait(client, coll)
+        create_full_matrix_indexes(self, client, coll)
+        self.load_collection(client, coll)
+        _full_matrix_assert_basic(self, client, coll, nb)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_external_table_add_vector_field_dim_mismatch_rejected(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table add vector field dim mismatch rejected
+        method: add a vector field whose external column width differs from schema dim
+        expected: refresh fails with a dimension or field-name reason
+        """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+
+        upload_parquet(
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
+            gen_add_field_parquet_bytes(
+                100,
+                0,
+                include_score=False,
+                new_embedding_dim=ct.default_dim // 2,
+            ),
+        )
+
+        schema = _build_basic_schema(self, client, ext_url, ext_spec=build_external_spec(cfg))
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+
+        self.add_collection_field(
+            client,
+            collection_name=coll,
+            field_name="new_embedding",
+            data_type=DataType.FLOAT_VECTOR,
+            dim=ct.default_dim,
+            nullable=True,
+            external_field="new_embedding",
+        )
+        _job_id, progress = self.refresh_or_later_must_fail(
+            client,
+            coll,
+            later_operation=lambda: self.search(
+                client,
+                coll,
+                data=_new_float_vectors([0], ct.default_dim).tolist(),
+                limit=1,
+                anns_field="new_embedding",
+                output_fields=["id"],
+                search_params={"metric_type": "L2"},
+            ),
+            timeout=60,
+            reason_terms=("dim", "new_embedding", "dimension"),
+        )
+        log.info(f"added vector dim mismatch failed visibly: state={progress.state}, reason={progress.reason}")
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_external_table_add_bm25_function_field_rejected(self, minio_env, external_prefix):
+        """
+        target: test external table add BM25 function field rejected
+        method: add a BM25 function output field through add_function_field on an external collection
+        expected: schema change is rejected because alter schema add-function is not supported for external collections
+        """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+
+        upload_parquet(
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
+            gen_add_function_field_parquet_bytes(50, 0),
+        )
+
+        schema = self.create_schema(
+            client,
+            external_source=ext_url,
+            external_spec=build_external_spec(cfg),
+        )[0]
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, "text", DataType.VARCHAR, max_length=1024, enable_analyzer=True, external_field="text")
+        self.add_field(schema, "embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
+        self.create_collection(client, collection_name=coll, schema=schema)
+
+        bm25_field = self.create_field_schema(client, "bm25_sparse", DataType.SPARSE_FLOAT_VECTOR)[0]
+        bm25_function = Function(
+            name="bm25_func",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["bm25_sparse"],
+        )
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: "alter collection schema operation is not supported for external collection",
+        }
+        self.add_function_field(
+            client,
+            collection_name=coll,
+            field_schema=bm25_field,
+            func=bm25_function,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+
+        info = self.describe_collection(client, coll)[0]
+        field_names = {field["name"] for field in info["fields"]}
+        assert "bm25_sparse" not in field_names, f"BM25 output field should not be added: {info}"
+        function_names = {func["name"] for func in info.get("functions", [])}
+        assert "bm25_func" not in function_names, f"BM25 function should not be added: {info}"
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_external_table_drop_function_rejected(self, minio_env, external_prefix):
+        """
+        target: test external table drop function rejected
+        method: call drop_collection_function on an external collection
+        expected: function schema mutation is rejected for external collections
+        """
+        client = self._client()
+        coll = self.prepare_refreshed_basic_collection(client, minio_env, external_prefix, num_rows=50)
+
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: "alter collection schema operation is not supported for external collection",
+        }
+        self.drop_collection_function(
+            client,
+            coll,
+            "bm25_func",
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+
+        info = self.describe_collection(client, coll)[0]
+        field_names = {field["name"] for field in info["fields"]}
+        for field_name in ("id", "value", "embedding"):
+            assert field_name in field_names, f"drop function should not mutate external collection schema: {info}"
+        assert not info.get("functions"), f"external collection should still have no functions: {info}"
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_external_table_drop_field_rejected(self, minio_env, external_prefix):
+        """
+        target: test external table drop field rejected
+        method: call drop_collection_field on an external collection
+        expected: alter schema drop-field is rejected for external collections and schema remains unchanged
+        """
+        client = self._client()
+        coll = self.prepare_refreshed_basic_collection(client, minio_env, external_prefix, num_rows=50)
+
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: "alter collection schema operation is not supported for external collection",
+        }
+        self.drop_collection_field(
+            client,
+            coll,
+            field_name="value",
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+
+        info = self.describe_collection(client, coll)[0]
+        field_names = {field["name"] for field in info["fields"]}
+        assert "value" in field_names, f"drop field should not mutate external collection schema: {info}"
+
+
+# ============================================================
 # 3. Indexes (Vector + Scalar)
 # ============================================================
 
@@ -2761,6 +4104,98 @@ class TestMilvusClientExternalTableDQL(ExternalTableTestBase):
         )[0][0]
         assert len(hits) == 10
         assert all(50 <= h["id"] < 100 for h in hits), f"filter violated: {[h['id'] for h in hits]}"
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_external_table_text_embedding_function_search(
+        self,
+        minio_env,
+        external_prefix,
+        tei_endpoint,
+    ):
+        """
+        target: test external table TextEmbedding function output search
+        method: refresh a Parquet-backed external collection with doc -> dense TextEmbedding, index/load, and search
+        expected: dense FloatVector function output is searchable and retrievable
+        """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+        dim = 768
+        phrases = [
+            "machine learning models process large datasets",
+            "vector databases store high dimensional embeddings",
+            "distributed systems handle concurrent requests",
+            "natural language processing enables text understanding",
+            "cloud computing provides elastic infrastructure",
+        ]
+        num_files = 5
+        rows_per_file = 200
+        nb = num_files * rows_per_file
+
+        for file_idx in range(num_files):
+            upload_parquet(
+                minio_client,
+                cfg["bucket"],
+                f"{ext_key}/data{file_idx}.parquet",
+                gen_text_embedding_function_parquet_bytes(rows_per_file, file_idx * rows_per_file, phrases),
+            )
+
+        schema = self.create_schema(
+            client,
+            external_source=ext_url,
+            external_spec=build_external_spec(cfg),
+        )[0]
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, "doc", DataType.VARCHAR, max_length=1024, external_field="doc")
+        self.add_field(schema, "dense", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_function(
+            Function(
+                name="tei_fn",
+                function_type=FunctionType.TEXTEMBEDDING,
+                input_field_names=["doc"],
+                output_field_names=["dense"],
+                params={"provider": "TEI", "endpoint": tei_endpoint},
+            )
+        )
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        stats = self.get_collection_stats(client, coll)[0]
+        assert stats.get("row_count") == nb
+
+        self.add_vector_index(client, coll, "dense", "FLAT", "L2")
+        self.load_collection(client, coll)
+
+        for class_id, phrase in enumerate(phrases):
+            hits = self.search(
+                client,
+                coll,
+                data=[phrase],
+                limit=10,
+                anns_field="dense",
+                output_fields=["id"],
+                search_params={"metric_type": "L2"},
+            )[0][0]
+            assert len(hits) == 10
+            hit_ids = [hit["id"] for hit in hits]
+            matched = sum(1 for row_id in hit_ids if row_id % len(phrases) == class_id)
+            min_matched = max(1, len(hits) // len(phrases))
+            assert matched >= min_matched, (
+                f"TextEmbedding search for {phrase!r} returned {matched}/{len(hits)} same-class ids: {hit_ids}"
+            )
+
+        take_hits = self.search(
+            client,
+            coll,
+            data=[phrases[0]],
+            limit=5,
+            anns_field="dense",
+            output_fields=["id", "dense"],
+            search_params={"metric_type": "L2"},
+        )[0][0]
+        dense_values = [hit.get("entity", hit).get("dense") for hit in take_hits]
+        assert all(vec is not None for vec in dense_values), f"dense output missing from hits: {take_hits}"
+        assert all(len(vec) == dim for vec in dense_values), f"dense output dim mismatch: {dense_values}"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_external_table_hybrid_search_multi_vector(self, minio_env, external_prefix):

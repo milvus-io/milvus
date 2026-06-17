@@ -2419,7 +2419,6 @@ class TestRegexFilterStructArray(RegexFilterStructArraySharedBase):
         )
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="nullable StructArray None insert is not merged into master yet", strict=True)
     def test_regex_struct_array_nullable_null_field_query(self):
         """
         target: regex filtering excludes null StructArray fields when nullable StructArray insert is supported

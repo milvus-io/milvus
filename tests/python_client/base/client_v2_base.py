@@ -105,6 +105,22 @@ class TestMilvusClientV2Base(Base):
         return res, check_result
 
     @trace()
+    def create_field_schema(
+        self,
+        client,
+        name,
+        data_type,
+        desc="",
+        check_task=None,
+        check_items=None,
+        **kwargs,
+    ):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.create_field_schema, name, data_type, desc], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
     def add_field(self, schema, field_name, datatype, check_task=None, check_items=None, **kwargs):
 
         # Set default parameters for specific field types
@@ -1593,6 +1609,77 @@ class TestMilvusClientV2Base(Base):
 
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.add_collection_field, collection_name, field_name, data_type, desc], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def add_function_field(
+        self,
+        client,
+        collection_name,
+        field_schema,
+        func,
+        timeout=None,
+        check_task=None,
+        check_items=None,
+        **kwargs,
+    ):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request(
+            [client.add_function_field],
+            collection_name=collection_name,
+            field_schema=field_schema,
+            func=func,
+            **kwargs,
+        )
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def drop_collection_function(
+        self,
+        client,
+        collection_name,
+        function_name,
+        timeout=None,
+        check_task=None,
+        check_items=None,
+        **kwargs,
+    ):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.drop_collection_function, collection_name, function_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def drop_collection_field(
+        self,
+        client,
+        collection_name,
+        field_name="",
+        field_id=0,
+        timeout=None,
+        check_task=None,
+        check_items=None,
+        **kwargs,
+    ):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request(
+            [client.drop_collection_field],
+            collection_name=collection_name,
+            field_name=field_name,
+            field_id=field_id,
+            **kwargs,
+        )
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 

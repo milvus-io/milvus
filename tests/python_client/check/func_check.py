@@ -171,7 +171,7 @@ class ResponseChecker:
             #     f"but got {res.code} {res.message}")
             assert error_dict[ct.err_msg] in res.message, (
                 f"Response of API {self.func_name} "
-                f"expect get error message {error_dict[ct.err_code]}, "
+                f"expect get error message {error_dict[ct.err_msg]}, "
                 f"but got {res.code} {res.message}"
             )
 
