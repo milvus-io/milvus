@@ -13,10 +13,12 @@
 #include <gtest/gtest.h>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <numeric>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -35,6 +37,7 @@
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "storage/ChunkManager.h"
+#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/AssertUtils.h"
@@ -48,10 +51,11 @@ namespace milvus {
 namespace index {
 
 static storage::FileManagerContext
-CreateStringTestFileManagerContext() {
+CreateStringTestFileManagerContext(const std::string& root_path) {
+    std::filesystem::create_directories(root_path);
     storage::StorageConfig storage_config;
     storage_config.storage_type = "local";
-    storage_config.root_path = TestLocalPath;
+    storage_config.root_path = root_path;
     auto chunk_manager = storage::CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
     storage::FieldDataMeta field_meta{1, 2, 3, 101};
@@ -59,6 +63,11 @@ CreateStringTestFileManagerContext() {
     storage::IndexMeta index_meta{3, 101, 1000, 10000};
     storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
     return ctx;
+}
+
+static storage::FileManagerContext
+CreateStringTestFileManagerContext() {
+    return CreateStringTestFileManagerContext(TestLocalPath);
 }
 
 class StringIndexBaseTest : public ::testing::Test {
@@ -421,6 +430,49 @@ TEST_F(StringIndexMarisaTest, Codec) {
             ASSERT_TRUE(bitset[i]);
         }
     }
+}
+
+TEST_F(StringIndexMarisaTest, UnifiedCodecRecreatesMissingLocalChunkDir) {
+    auto file_manager_ctx = CreateStringTestFileManagerContext(
+        TestRemotePath + "string_marisa_missing_local_chunk/");
+    auto index = milvus::index::CreateStringIndexMarisa(file_manager_ctx);
+    std::vector<std::string> strings(nb);
+    for (int i = 0; i < nb; ++i) {
+        strings[i] = std::to_string(std::rand() % 10);
+    }
+
+    index->Build(nb, strings.data());
+
+    auto local_cm =
+        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    ASSERT_NE(local_cm, nullptr);
+    auto local_root = local_cm->GetRootPath();
+    ASSERT_FALSE(local_root.empty());
+
+    std::error_code ec;
+    std::filesystem::remove_all(local_root, ec);
+    ASSERT_FALSE(ec) << ec.message();
+    ASSERT_FALSE(std::filesystem::exists(local_root));
+
+    auto create_index_result = index->UploadUnified({});
+    ASSERT_TRUE(std::filesystem::is_directory(local_root));
+    auto index_files = create_index_result->GetIndexFiles();
+
+    std::filesystem::remove_all(local_root, ec);
+    ASSERT_FALSE(ec) << ec.message();
+    ASSERT_FALSE(std::filesystem::exists(local_root));
+
+    auto copy_index = milvus::index::CreateStringIndexMarisa(file_manager_ctx);
+    Config load_config;
+    load_config["index_files"] = index_files;
+    load_config[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::HIGH;
+    copy_index->LoadUnified(load_config);
+    ASSERT_TRUE(std::filesystem::is_directory(local_root));
+
+    auto bitset = copy_index->In(nb, strings.data());
+    ASSERT_EQ(bitset.size(), nb);
+    ASSERT_TRUE(bitset.any());
 }
 
 TEST_F(StringIndexMarisaTest, BaseIndexCodec) {
