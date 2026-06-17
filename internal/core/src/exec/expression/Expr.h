@@ -1280,35 +1280,12 @@ class SegmentExpr : public Expr {
             size = std::min(size, batch_size_ - processed_size);
             if (size == 0)
                 continue;  //do not go empty-loop at the bound of the chunk
-            bool access_sealed_variable_column = false;
-            if constexpr (std::is_same_v<T, std::string_view> ||
-                          std::is_same_v<T, Json> ||
-                          std::is_same_v<T, ArrayView>) {
-                if (segment_->type() == SegmentType::Sealed) {
-                    auto pw = segment_->get_batch_views<T>(
-                        op_ctx_, field_id_, i, data_pos, size);
-                    auto [data_vec, valid_data] = pw.get();
-                    ApplyValidData(valid_data.data(),
-                                   valid_result + processed_size,
-                                   valid_result + processed_size,
-                                   size);
-                    access_sealed_variable_column = true;
-                }
-            }
-
-            if (!access_sealed_variable_column) {
-                auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
-                auto chunk = pw.get();
-                const bool* valid_data = chunk.valid_data();
-                if (valid_data == nullptr) {
-                    return valid_result;
-                }
-                valid_data += data_pos;
-                ApplyValidData(valid_data,
-                               valid_result + processed_size,
-                               valid_result + processed_size,
-                               size);
-            }
+            segment_->ApplyFieldValidData(op_ctx_,
+                                          field_id_,
+                                          i,
+                                          data_pos,
+                                          size,
+                                          valid_result + processed_size);
 
             processed_size += size;
             if (processed_size >= batch_size_) {

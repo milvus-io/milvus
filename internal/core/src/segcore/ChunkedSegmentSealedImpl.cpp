@@ -664,6 +664,36 @@ ChunkedSegmentSealedImpl::prefetch_chunks(
     }
 }
 
+void
+ChunkedSegmentSealedImpl::ApplyFieldValidData(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t chunk_id,
+    int64_t offset,
+    int64_t size,
+    TargetBitmapView valid_result) const {
+    if (size == 0) {
+        return;
+    }
+
+    std::shared_ptr<ChunkedColumnInterface> column;
+    {
+        std::shared_lock lck(mutex_);
+        AssertInfo(
+            get_bit(field_data_ready_bitset_, field_id),
+            "Can't get bitset element at " + std::to_string(field_id.get()));
+        column = get_column(field_id);
+        AssertInfo(column != nullptr,
+                   "field {} must exist when applying valid data",
+                   field_id.get());
+    }
+    if (!column->IsNullable()) {
+        return;
+    }
+
+    column->ApplyValidDataInChunk(op_ctx, chunk_id, offset, size, valid_result);
+}
+
 PinWrapper<SpanBase>
 ChunkedSegmentSealedImpl::chunk_data_impl(milvus::OpContext* op_ctx,
                                           FieldId field_id,

@@ -269,6 +269,17 @@ class SegmentInternalInterface : public SegmentInterface {
         // do nothing
     }
 
+    virtual void
+    ApplyFieldValidData(milvus::OpContext* op_ctx,
+                        FieldId field_id,
+                        int64_t chunk_id,
+                        int64_t offset,
+                        int64_t size,
+                        TargetBitmapView valid_result) const {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "ApplyFieldValidData is not supported");
+    }
+
     template <typename T>
     PinWrapper<Span<T>>
     chunk_data(milvus::OpContext* op_ctx,
