@@ -1754,6 +1754,101 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 		assert.Equal(t, "100", common.CloneKeyValuePairs(task.body.CollectionSchema.Properties).ToMap()[common.MaxFieldIDKey])
 		assert.Len(t, task.Req.Properties, 2)
 	})
+
+	t.Run("reject invalid namespace mode", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).Return(&model.Database{
+			Name: "foo",
+			ID:   1,
+		}, nil).Twice()
+		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{
+			util.DefaultDBID: {1, 2},
+		}).Once()
+		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
+		defer cleanTestEnv()
+
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+
+		ticker := newRocksMqTtSynchronizer()
+		core := newTestCore(withValidIDAllocator(), withTtSynchronizer(ticker), withMeta(meta))
+
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{Name: field1, DataType: schemapb.DataType_Int64},
+			},
+		}
+
+		task := createCollectionTask{
+			Core: core,
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+				ShardsNum:      common.DefaultShardsNum,
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.NamespaceModeKey, Value: "invalid"},
+				},
+			},
+			header: &message.CreateCollectionMessageHeader{},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
+			},
+		}
+
+		err := task.Prepare(context.Background())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid namespace.mode")
+	})
+
+	t.Run("persist valid namespace mode", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).Return(&model.Database{
+			Name: "foo",
+			ID:   1,
+		}, nil).Twice()
+		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{
+			util.DefaultDBID: {1, 2},
+		}).Once()
+		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
+		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
+		defer cleanTestEnv()
+
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+
+		ticker := newRocksMqTtSynchronizer()
+		core := newTestCore(withValidIDAllocator(), withTtSynchronizer(ticker), withMeta(meta))
+
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{Name: field1, DataType: schemapb.DataType_Int64},
+			},
+		}
+
+		task := createCollectionTask{
+			Core: core,
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+				ShardsNum:      common.DefaultShardsNum,
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+				},
+			},
+			header: &message.CreateCollectionMessageHeader{},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
+			},
+		}
+
+		err := task.Prepare(context.Background())
+		require.NoError(t, err)
+		props := common.CloneKeyValuePairs(task.body.CollectionSchema.Properties).ToMap()
+		assert.Equal(t, common.NamespaceModePartition, props[common.NamespaceModeKey])
+	})
 }
 
 func Test_createCollectionTask_PartitionKey(t *testing.T) {
