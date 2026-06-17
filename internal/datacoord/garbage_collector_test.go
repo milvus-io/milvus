@@ -3967,6 +3967,151 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_SkipV3(t *testing.T) {
 	assert.Empty(t, removedFiles, "V3 segment files should not be removed by orphan scan")
 }
 
+func TestGarbageCollector_recycleUnusedBinlogFiles_TextAndJSONStats(t *testing.T) {
+	ctx := context.Background()
+
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            1003,
+			CollectionID:  100,
+			PartitionID:   10,
+			State:         commonpb.SegmentState_Flushed,
+			InsertChannel: "ch1",
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				101: {
+					FieldID: 101,
+					Version: 1,
+					BuildID: 501,
+					Files:   []string{"text_file_keep"},
+				},
+			},
+			JsonKeyStats: map[int64]*datapb.JsonKeyStats{
+				102: {
+					FieldID:                102,
+					Version:                1,
+					BuildID:                502,
+					Files:                  []string{"json_file_keep"},
+					JsonKeyStatsDataFormat: 1,
+				},
+				103: {
+					FieldID:                103,
+					Version:                1,
+					BuildID:                503,
+					Files:                  []string{"shared_key_index/json_file_keep"},
+					JsonKeyStatsDataFormat: 3,
+				},
+			},
+		},
+	}
+
+	meta := &meta{
+		catalog:      &datacoord.Catalog{},
+		snapshotMeta: &snapshotMeta{},
+		indexMeta:    &indexMeta{},
+		segments: &SegmentsInfo{
+			segments: map[int64]*SegmentInfo{1003: segment},
+		},
+		channelCPs: newChannelCps(),
+	}
+
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("gc"))
+	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{
+		cli:              cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: 0,
+		dropTolerance:    time.Hour * 24,
+	})
+
+	removedFiles := []string{}
+	mockRemove := mockey.Mock((*storage.LocalChunkManager).Remove).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, filePath string) error {
+			removedFiles = append(removedFiles, filePath)
+			return nil
+		}).Build()
+	defer mockRemove.UnPatch()
+
+	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string, recursive bool, fn storage.ChunkObjectWalkFunc) error {
+			switch {
+			case strings.Contains(prefix, common.TextIndexPath):
+				fn(&storage.ChunkObjectInfo{FilePath: "gc/text_log/501/1/100/10/1003/101/text_file_keep", ModifyTime: time.Now().Add(-time.Hour)})
+				fn(&storage.ChunkObjectInfo{FilePath: "gc/text_log/501/1/100/10/1003/101/text_file_gc", ModifyTime: time.Now().Add(-time.Hour)})
+			case strings.Contains(prefix, common.JSONStatsPath):
+				fn(&storage.ChunkObjectInfo{FilePath: "gc/json_stats/3/503/1/100/10/1003/103/shared_key_index/json_file_keep", ModifyTime: time.Now().Add(-time.Hour)})
+				fn(&storage.ChunkObjectInfo{FilePath: "gc/json_stats/3/503/1/100/10/1003/103/shared_key_index/json_file_gc", ModifyTime: time.Now().Add(-time.Hour)})
+			case strings.Contains(prefix, common.JSONIndexPath):
+				fn(&storage.ChunkObjectInfo{FilePath: "gc/json_key_index_log/502/1/100/10/1003/102/json_file_keep", ModifyTime: time.Now().Add(-time.Hour)})
+				fn(&storage.ChunkObjectInfo{FilePath: "gc/json_key_index_log/502/1/100/10/1003/102/json_file_gc", ModifyTime: time.Now().Add(-time.Hour)})
+			}
+			return nil
+		}).Build()
+	defer mockWalk.UnPatch()
+
+	gc.recycleUnusedBinlogFiles(ctx)
+
+	assert.ElementsMatch(t, []string{
+		"gc/text_log/501/1/100/10/1003/101/text_file_gc",
+		"gc/json_stats/3/503/1/100/10/1003/103/shared_key_index/json_file_gc",
+		"gc/json_key_index_log/502/1/100/10/1003/102/json_file_gc",
+	}, removedFiles)
+}
+
+func TestGarbageCollector_recycleUnusedBinlogFiles_TextAndJSONStats_SegmentNil(t *testing.T) {
+	ctx := context.Background()
+
+	meta := &meta{
+		catalog:      &datacoord.Catalog{},
+		snapshotMeta: &snapshotMeta{},
+		indexMeta:    &indexMeta{},
+		segments: &SegmentsInfo{
+			segments: map[int64]*SegmentInfo{},
+		},
+		channelCPs: newChannelCps(),
+	}
+
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("gc"))
+	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{
+		cli:              cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: 0,
+		dropTolerance:    time.Hour * 24,
+	})
+
+	removedFiles := []string{}
+	mockRemove := mockey.Mock((*storage.LocalChunkManager).Remove).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, filePath string) error {
+			removedFiles = append(removedFiles, filePath)
+			return nil
+		}).Build()
+	defer mockRemove.UnPatch()
+
+	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string, recursive bool, fn storage.ChunkObjectWalkFunc) error {
+			switch {
+			case strings.Contains(prefix, common.TextIndexPath):
+				fn(&storage.ChunkObjectInfo{FilePath: "gc/text_log/501/1/100/10/1003/101/text_file_gc", ModifyTime: time.Now().Add(-time.Hour)})
+			case strings.Contains(prefix, common.JSONStatsPath):
+				fn(&storage.ChunkObjectInfo{FilePath: "gc/json_stats/3/503/1/100/10/1003/103/shared_key_index/json_file_gc", ModifyTime: time.Now().Add(-time.Hour)})
+			case strings.Contains(prefix, common.JSONIndexPath):
+				fn(&storage.ChunkObjectInfo{FilePath: "gc/json_key_index_log/502/1/100/10/1003/102/json_file_gc", ModifyTime: time.Now().Add(-time.Hour)})
+			}
+			return nil
+		}).Build()
+	defer mockWalk.UnPatch()
+
+	gc.recycleUnusedBinlogFiles(ctx)
+
+	assert.ElementsMatch(t, []string{
+		"gc/text_log/501/1/100/10/1003/101/text_file_gc",
+		"gc/json_stats/3/503/1/100/10/1003/103/shared_key_index/json_file_gc",
+		"gc/json_key_index_log/502/1/100/10/1003/102/json_file_gc",
+	}, removedFiles)
+}
+
 func TestGarbageCollector_recycleSnapshots_OrphanCleanup(t *testing.T) {
 	ctx := context.Background()
 
@@ -4203,10 +4348,9 @@ func TestGarbageCollector_recycleDroppedSegment_CtxCanceledBeforeDrop(t *testing
 	assert.NotNil(t, m.GetSegment(context.Background(), segment.ID))
 }
 
-// TestGarbageCollector_removeDroppedSegmentFiles_TextAndJSONLogs covers
-// lines 1062-1063 and 1065-1066 (the for-range loops that merge getTextLogs
-// and getJSONKeyLogs into the file deletion set in the V1/V2 path).
-func TestGarbageCollector_removeDroppedSegmentFiles_TextAndJSONLogs(t *testing.T) {
+// TestGarbageCollector_removeDroppedSegmentFiles_LegacyJSONLogs covers the V1/V2
+// legacy JSON key index path reconstruction in getJSONKeyLogs.
+func TestGarbageCollector_removeDroppedSegmentFiles_LegacyJSONLogs(t *testing.T) {
 	ctx := context.Background()
 	cm := mocks.NewChunkManager(t)
 	cm.EXPECT().RootPath().Return("root").Maybe()
@@ -4234,10 +4378,11 @@ func TestGarbageCollector_removeDroppedSegmentFiles_TextAndJSONLogs(t *testing.T
 			},
 			JsonKeyStats: map[int64]*datapb.JsonKeyStats{
 				102: {
-					FieldID: 102,
-					BuildID: 11,
-					Version: 1,
-					Files:   []string{jsonFile},
+					FieldID:                102,
+					BuildID:                11,
+					Version:                1,
+					Files:                  []string{jsonFile},
+					JsonKeyStatsDataFormat: 1,
 				},
 			},
 		},
@@ -4250,6 +4395,52 @@ func TestGarbageCollector_removeDroppedSegmentFiles_TextAndJSONLogs(t *testing.T
 	mu.Lock()
 	defer mu.Unlock()
 	assert.Contains(t, removed, textFile)
+	assert.Contains(t, removed, expectedJSON)
+	assert.Contains(t, removed, indexFile)
+}
+
+// TestGarbageCollector_removeDroppedSegmentFiles_JSONStatsV2 covers the V1/V2
+// new-format JSON stats path reconstruction under json_stats/{dataFormat}/....
+func TestGarbageCollector_removeDroppedSegmentFiles_JSONStatsV2(t *testing.T) {
+	ctx := context.Background()
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("root").Maybe()
+	var mu sync.Mutex
+	removed := make(map[string]struct{})
+	cm.EXPECT().Remove(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, filePath string) error {
+			mu.Lock()
+			defer mu.Unlock()
+			removed[filePath] = struct{}{}
+			return nil
+		}).Maybe()
+
+	gc := newGarbageCollector(nil, nil, GcOption{cli: cm})
+	const jsonFile = "shared_key_index/inverted_index_0"
+	const indexFile = "idx/extra/file-99"
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:           7001,
+			CollectionID: 100,
+			PartitionID:  10,
+			JsonKeyStats: map[int64]*datapb.JsonKeyStats{
+				102: {
+					FieldID:                102,
+					BuildID:                11,
+					Version:                1,
+					Files:                  []string{jsonFile},
+					JsonKeyStatsDataFormat: 3,
+				},
+			},
+		},
+	}
+
+	indexFiles := map[string]struct{}{indexFile: {}}
+	require.NoError(t, gc.removeDroppedSegmentFiles(ctx, segment, indexFiles))
+
+	expectedJSON := path.Join("root", common.JSONStatsPath, "3", "11", "1", "100", "10", "7001", "102", jsonFile)
+	mu.Lock()
+	defer mu.Unlock()
 	assert.Contains(t, removed, expectedJSON)
 	assert.Contains(t, removed, indexFile)
 }
