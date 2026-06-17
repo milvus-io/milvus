@@ -1,3 +1,4 @@
+import copy
 import json
 import time
 import urllib.parse
@@ -450,13 +451,15 @@ class CollectionClient(Requests):
 
     def collection_create(self, payload, db_name="default"):
         time.sleep(1)  # wait for collection created and in case of rate limit
+        payload = copy.deepcopy(payload)
         c_name = payload.get("collectionName", None)
-        db_name = payload.get("dbName", db_name)
+        if self.db_name is not None:
+            db_name = self.db_name
+        elif db_name == "default":
+            db_name = payload.get("dbName", db_name)
         self.name_list.append((db_name, c_name))
 
         url = f"{self.endpoint}/v2/vectordb/collections/create"
-        if self.db_name is not None:
-            payload["dbName"] = self.db_name
         if db_name != "default":
             payload["dbName"] = db_name
         if not ("params" in payload and "consistencyLevel" in payload["params"]):
