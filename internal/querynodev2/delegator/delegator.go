@@ -82,7 +82,7 @@ type ShardDelegator interface {
 	Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error)
 	QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error)
-	UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema, version uint64) error
+	UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema, schemaBarrierTs uint64) error
 
 	// data
 	ProcessInsert(insertRecords map[int64]*InsertData)
@@ -1250,9 +1250,9 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		),
 		CollectionID: sd.collectionID,
 		Schema:       schema,
-		// SchemaBarrierTs fences stale load results. Schema freshness is carried
-		// by schema.version, so the timestamp barrier must not be used to order
-		// schema updates when schema is present.
+		// SchemaBarrierTs fences stale load results and lets QueryNode refresh
+		// same-version schema payloads such as collection properties. Logical
+		// schema freshness is still guarded by schema.version in collectionManager.
 		SchemaBarrierTs: schVersion,
 	},
 		sealed,
@@ -1279,7 +1279,9 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		return err
 	}
 
-	if err := sd.collectionManager.UpdateSchema(sd.collectionID, schema, schemaVersion); err != nil {
+	// Apply the local collection update with the same barrier used for remote
+	// workers. collectionManager keeps schema.Version as the logical freshness key.
+	if err := sd.collectionManager.UpdateSchema(sd.collectionID, schema, schVersion); err != nil {
 		newFunctionState.Close()
 		return err
 	}

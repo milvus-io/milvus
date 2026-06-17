@@ -1430,7 +1430,8 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		err := s.delegator.UpdateSchema(ctx, &schemapb.CollectionSchema{Version: 10}, 100)
+		schema := newFunctionRuntimeTestSchemaWithVersion(10)
+		err := s.delegator.UpdateSchema(ctx, schema, 100)
 		s.NoError(err)
 	})
 
@@ -2312,7 +2313,7 @@ func TestUpdateSchemaSyncsAdditiveIDFOracleFunctions(t *testing.T) {
 
 	newSchema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema(), newAdditionalBM25FunctionSchema())
 	collectionManager := segments.NewMockCollectionManager(t)
-	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(1)).Return(nil).Once()
+	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(100)).Return(nil).Once()
 	sd.collectionManager = collectionManager
 
 	err := sd.UpdateSchema(context.Background(), newSchema, 100)
@@ -2382,7 +2383,7 @@ func TestUpdateSchemaInitializesIDFOracleWhenBM25Added(t *testing.T) {
 
 	newSchema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema())
 	collectionManager := segments.NewMockCollectionManager(t)
-	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(1)).Return(nil).Once()
+	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(100)).Return(nil).Once()
 	sd.collectionManager = collectionManager
 
 	err := sd.UpdateSchema(context.Background(), newSchema, 100)
@@ -2461,7 +2462,7 @@ func TestUpdateSchemaSyncsFunctionRuntimeMetadata(t *testing.T) {
 
 	newSchema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema(), newMinHashFunctionSchema())
 	collectionManager := segments.NewMockCollectionManager(t)
-	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(1)).Return(nil).Once()
+	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(100)).Return(nil).Once()
 	sd.collectionManager = collectionManager
 
 	err := sd.UpdateSchema(context.Background(), newSchema, 100)

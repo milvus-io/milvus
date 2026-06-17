@@ -582,27 +582,14 @@ func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSche
 
 	log.Info("querynode received update schema request")
 
-	err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema(), updateSchemaVersion(req))
+	// Pass the barrier timestamp through; collectionManager derives the logical
+	// schema version from the schema payload when it is present.
+	err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema(), req.GetSchemaBarrierTs())
 	if err != nil {
 		log.Warn("failed to update schema", zap.Error(err))
 	}
 
 	return merr.Status(err), nil
-}
-
-func updateSchemaVersion(req *querypb.UpdateSchemaRequest) uint64 {
-	// Schema payload is the source of truth for collection schema freshness.
-	// Version 0 is a valid initial collection schema version, so any present
-	// schema wins over the timestamp barrier.
-	if req.GetSchema() != nil {
-		return uint64(req.GetSchema().GetVersion())
-	}
-	// Compatibility fallback for rolling upgrade and replayed legacy requests:
-	// older senders populate the value that new code reads as SchemaBarrierTs.
-	// That value used to be consumed as the collection schema version, although
-	// semantically it is a timestamp barrier. Falling back preserves the old
-	// behavior only when the schema payload is absent.
-	return req.GetSchemaBarrierTs()
 }
 
 // ReleaseCollection clears all data related to this collection on the querynode

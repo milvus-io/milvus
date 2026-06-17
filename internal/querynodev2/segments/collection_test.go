@@ -104,12 +104,37 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 		schemaV7 := mock_segcore.GenTestCollectionSchema("collection_v7", schemapb.DataType_Int64, false)
 		schemaV7.Version = 7
 
-		err = cm.UpdateSchema(10, schemaV7, 7)
+		err = cm.UpdateSchema(10, schemaV7, 200)
 		s.NoError(err)
 
 		updatedSchema, updatedVersion := cm.Get(10).SchemaAndVersion()
 		s.Equal(uint64(8), updatedVersion)
 		s.Same(schemaV8, updatedSchema)
+	})
+
+	s.Run("same_schema_version_with_newer_barrier_updates_properties", func() {
+		cm := NewCollectionManager()
+		baseSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
+		err := cm.PutOrRef(10, baseSchema, mock_segcore.GenTestIndexMeta(10, baseSchema), &querypb.LoadMetaInfo{
+			LoadType:        querypb.LoadType_LoadCollection,
+			SchemaBarrierTs: 50,
+		})
+		s.Require().NoError(err)
+		defer cm.Unref(10, 1)
+
+		updatedSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
+		updatedSchema.Version = baseSchema.GetVersion()
+		updatedSchema.Properties = []*commonpb.KeyValuePair{
+			{Key: common.CollectionTTLFieldKey, Value: "ttl_dynamic"},
+		}
+
+		err = cm.UpdateSchema(10, updatedSchema, 100)
+		s.NoError(err)
+
+		schema, version := cm.Get(10).SchemaAndVersion()
+		s.Equal(uint64(0), version)
+		s.Same(updatedSchema, schema)
+		s.Equal("ttl_dynamic", common.CloneKeyValuePairs(schema.GetProperties()).ToMap()[common.CollectionTTLFieldKey])
 	})
 
 	s.Run("manager_uses_schema_version_from_caller", func() {
@@ -154,7 +179,7 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 func (s *CollectionManagerSuite) TestSchemaAndVersionSnapshot() {
 	coll := s.cm.Get(1)
 	schema := mock_segcore.GenTestCollectionSchema("collection_0", schemapb.DataType_Int64, false)
-	coll.setSchema(schema, 0)
+	coll.setSchema(schema, 0, 0)
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
@@ -183,7 +208,7 @@ func (s *CollectionManagerSuite) TestSchemaAndVersionSnapshot() {
 
 	for i := 1; i <= 1000; i++ {
 		schema := mock_segcore.GenTestCollectionSchema(fmt.Sprintf("collection_%d", i), schemapb.DataType_Int64, false)
-		coll.setSchema(schema, uint64(i))
+		coll.setSchema(schema, uint64(i), uint64(i))
 	}
 	close(stop)
 	wg.Wait()

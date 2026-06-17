@@ -47,8 +47,11 @@ type CollectionManager interface {
 	// returns true if the collection ref count goes 0, or the collection not exists,
 	// return false otherwise
 	Unref(collectionID int64, count uint32) bool
-	// UpdateSchema update the underlying collection schema of the provided collection.
-	UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, version uint64) error
+	// UpdateSchema updates the underlying collection schema of the provided collection.
+	// schemaBarrierTs is the DDL/update barrier timestamp, not the logical schema
+	// version. The manager derives the logical schema version from schema.Version
+	// when a schema payload is present.
+	UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error
 }
 
 type collectionManager struct {
@@ -90,16 +93,21 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	m.mut.Lock()
 	defer m.mut.Unlock()
 	schemaVersion := getLoadMetaSchemaVersion(schema, loadMeta)
+	schemaBarrierTs := loadMeta.GetSchemaBarrierTs()
 	if collection, ok := m.collections[collectionID]; ok {
-		if schemaVersion > collection.SchemaVersion() {
-			if err := collection.ccollection.UpdateSchema(schema, schemaVersion); err != nil {
+		// Existing collections may be reached by a later load result or by a
+		// same-version properties refresh. Keep the Go-side logical schema version
+		// separate from the barrier timestamp so stale schema payloads cannot roll
+		// back fields, while newer properties-only payloads can still refresh.
+		if shouldUpdateCollectionSchema(collection, schemaVersion, schemaBarrierTs) {
+			if err := collection.ccollection.UpdateSchema(schema, segcoreSchemaUpdateToken(schemaVersion, schemaBarrierTs)); err != nil {
 				return err
 			}
-			collection.setSchema(schema, schemaVersion)
+			collection.setSchema(schema, schemaVersion, schemaBarrierTs)
 			log.Info("update collection schema",
 				zap.Int64("collectionID", collectionID),
 				zap.Uint64("schemaVersion", schemaVersion),
-				zap.Uint64("schemaBarrierTs", loadMeta.GetSchemaBarrierTs()),
+				zap.Uint64("schemaBarrierTs", schemaBarrierTs),
 				zap.Any("schema", schema),
 			)
 		}
@@ -127,7 +135,7 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	return nil
 }
 
-func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, schemaVersion uint64) error {
+func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
 	m.mut.Lock()
 	defer m.mut.Unlock()
 
@@ -136,15 +144,62 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 		return merr.WrapErrCollectionNotFound(collectionID, "collection not found in querynode collection manager")
 	}
 
-	if schemaVersion <= collection.SchemaVersion() {
+	schemaVersion := getUpdateSchemaVersion(schema, schemaBarrierTs)
+	// A schema update carries two ordering domains:
+	// - schema.Version is the logical collection schema version and prevents
+	//   older schema payloads from overwriting newer fields/functions.
+	// - schemaBarrierTs is the DDL barrier timestamp and advances for
+	//   properties-only schema snapshots such as ttl_field changes.
+	if !shouldUpdateCollectionSchema(collection, schemaVersion, schemaBarrierTs) {
 		return nil
 	}
 
-	if err := collection.ccollection.UpdateSchema(schema, schemaVersion); err != nil {
+	if err := collection.ccollection.UpdateSchema(schema, segcoreSchemaUpdateToken(schemaVersion, schemaBarrierTs)); err != nil {
 		return err
 	}
-	collection.setSchema(schema, schemaVersion)
+	collection.setSchema(schema, schemaVersion, schemaBarrierTs)
 	return nil
+}
+
+func shouldUpdateCollectionSchema(collection *Collection, schemaVersion uint64, schemaBarrierTs uint64) bool {
+	_, currentVersion, currentBarrierTs := collection.SchemaSnapshot()
+	// Never allow logical schema version rollback, even if the incoming message
+	// has a larger timestamp. This preserves the fix for out-of-order schema
+	// messages across replay/channel delivery.
+	if schemaVersion < currentVersion {
+		return false
+	}
+	// For the same logical schema version, only a newer barrier can update the
+	// payload. This is required for collection properties embedded in schema
+	// snapshots because those updates do not necessarily bump schema.Version.
+	if schemaVersion == currentVersion && schemaBarrierTs <= currentBarrierTs {
+		return false
+	}
+	return true
+}
+
+func getUpdateSchemaVersion(schema *schemapb.CollectionSchema, schemaBarrierTs uint64) uint64 {
+	// QueryNode orders schema freshness by the logical collection schema version
+	// when the schema payload is present. Version 0 is a valid initial schema
+	// version, so presence of schema, not non-zero value, selects this path.
+	if schema != nil {
+		return uint64(schema.GetVersion())
+	}
+	// Compatibility fallback for old or malformed call paths without schema:
+	// the only available ordering value is the barrier timestamp that used to be
+	// consumed as this method's version argument.
+	return schemaBarrierTs
+}
+
+func segcoreSchemaUpdateToken(schemaVersion uint64, schemaBarrierTs uint64) uint64 {
+	// Segcore uses its schema version token to skip non-increasing updates.
+	// Collection properties such as ttl_field can change without bumping the
+	// logical schema version, so pass the DDL barrier timestamp when available.
+	// The Go snapshot above has already rejected logical schema rollback.
+	if schemaBarrierTs != 0 {
+		return schemaBarrierTs
+	}
+	return schemaVersion
 }
 
 // getLoadMetaSchemaVersion seeds a loaded collection's schema freshness version.
@@ -201,8 +256,9 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 }
 
 type collectionSchemaSnapshot struct {
-	schema  *schemapb.CollectionSchema
-	version uint64
+	schema          *schemapb.CollectionSchema
+	version         uint64
+	schemaBarrierTs uint64
 }
 
 // Collection is a wrapper of the underlying C-structure C.CCollection
@@ -252,16 +308,21 @@ func (c *Collection) GetCCollection() *segcore.CCollection {
 	return c.ccollection
 }
 
-func (c *Collection) setSchema(schema *schemapb.CollectionSchema, version uint64) {
-	c.schema.Store(&collectionSchemaSnapshot{schema: schema, version: version})
+func (c *Collection) setSchema(schema *schemapb.CollectionSchema, version uint64, schemaBarrierTs uint64) {
+	c.schema.Store(&collectionSchemaSnapshot{schema: schema, version: version, schemaBarrierTs: schemaBarrierTs})
+}
+
+func (c *Collection) SchemaSnapshot() (*schemapb.CollectionSchema, uint64, uint64) {
+	snapshot := c.schema.Load()
+	if snapshot == nil {
+		return nil, 0, 0
+	}
+	return snapshot.schema, snapshot.version, snapshot.schemaBarrierTs
 }
 
 func (c *Collection) SchemaAndVersion() (*schemapb.CollectionSchema, uint64) {
-	snapshot := c.schema.Load()
-	if snapshot == nil {
-		return nil, 0
-	}
-	return snapshot.schema, snapshot.version
+	schema, version, _ := c.SchemaSnapshot()
+	return schema, version
 }
 
 // Schema returns the schema of collection
@@ -376,7 +437,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	for _, partitionID := range loadMetaInfo.GetPartitionIDs() {
 		coll.partitions.Insert(partitionID)
 	}
-	coll.setSchema(schema, getLoadMetaSchemaVersion(schema, loadMetaInfo))
+	coll.setSchema(schema, getLoadMetaSchemaVersion(schema, loadMetaInfo), loadMetaInfo.GetSchemaBarrierTs())
 
 	return coll, nil
 }
@@ -389,7 +450,7 @@ func NewTestCollection(collectionID int64, loadType querypb.LoadType, schema *sc
 		loadType:   loadType,
 		refCount:   atomic.NewUint32(0),
 	}
-	col.setSchema(schema, 0)
+	col.setSchema(schema, 0, 0)
 	return col
 }
 
@@ -401,7 +462,7 @@ func NewCollectionWithoutSegcoreForTest(collectionID int64, schema *schemapb.Col
 		partitions: typeutil.NewConcurrentSet[int64](),
 		refCount:   atomic.NewUint32(0),
 	}
-	coll.setSchema(schema, 0)
+	coll.setSchema(schema, 0, 0)
 	return coll
 }
 

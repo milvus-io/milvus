@@ -2482,7 +2482,7 @@ func (suite *ServiceSuite) TestUpdateSchema() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	schema := typeutil.Clone(suite.schema)
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 	schema.Version = 100
 	req := &querypb.UpdateSchemaRequest{
 		CollectionID:    suite.collectionID,
@@ -2504,15 +2504,15 @@ func (suite *ServiceSuite) TestUpdateSchema() {
 		suite.NoError(merr.CheckRPCCall(status, err))
 	})
 
-	suite.Run("prefer_schema_version_over_barrier", func() {
-		schema := typeutil.Clone(suite.schema)
+	suite.Run("passes_barrier_to_collection_manager", func() {
+		schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 		schema.Version = 2
 		req := &querypb.UpdateSchemaRequest{
 			CollectionID:    suite.collectionID,
 			Schema:          schema,
 			SchemaBarrierTs: uint64(100),
 		}
-		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(2)).Return(nil).Once()
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(nil).Once()
 
 		status, err := suite.node.UpdateSchema(ctx, req)
 		suite.NoError(merr.CheckRPCCall(status, err))
