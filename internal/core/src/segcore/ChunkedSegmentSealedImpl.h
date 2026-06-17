@@ -638,6 +638,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                       const std::shared_ptr<ChunkedColumnInterface>& column);
 
  private:
+    bool
+    ExternalFieldAvailableInSnapshot(FieldId field_id) const;
+
+    void
+    CheckExternalFieldAvailableInSnapshot(const FieldMeta& field_meta) const;
+
     void
     load_system_field_internal(
         FieldId field_id,
@@ -1436,8 +1442,25 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
  public:
     // Test-only: inject a mock Reader for unit testing take() paths.
     void
-    SetReaderForTesting(std::unique_ptr<milvus_storage::api::Reader> r) {
+    SetReaderForTesting(std::unique_ptr<milvus_storage::api::Reader> r,
+                        bool mark_external_fields_ready = true) {
         reader_ = std::move(r);
+        if (!mark_external_fields_ready || !schema_->is_external_collection()) {
+            return;
+        }
+        std::unique_lock lck(mutex_);
+        for (const auto& [field_id, field_meta] : schema_->get_fields()) {
+            if (!field_meta.is_external_field()) {
+                continue;
+            }
+            auto pos = field_id.get() - START_USER_FIELDID;
+            AssertInfo(pos >= 0, "invalid field id");
+            AssertInfo(
+                static_cast<size_t>(pos) < field_data_ready_bitset_.size(),
+                "field {} is outside ready bitset",
+                field_id.get());
+            field_data_ready_bitset_[pos] = true;
+        }
     }
 
     // Wrappers for protected methods to enable direct unit testing.

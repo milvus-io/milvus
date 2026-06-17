@@ -1352,6 +1352,7 @@ ChunkedSegmentSealedImpl::prefetch_chunks(
     milvus::OpContext* op_ctx,
     FieldId field_id,
     const std::vector<int64_t>& chunk_ids) const {
+    CheckExternalFieldAvailableInSnapshot(schema_->operator[](field_id));
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
@@ -1371,6 +1372,7 @@ ChunkedSegmentSealedImpl::ApplyFieldValidData(
     if (size == 0) {
         return;
     }
+    CheckExternalFieldAvailableInSnapshot(schema_->operator[](field_id));
 
     std::shared_ptr<ChunkedColumnInterface> column;
     {
@@ -1400,6 +1402,7 @@ ChunkedSegmentSealedImpl::ApplyFieldValidDataByOffsets(
     if (count == 0) {
         return;
     }
+    CheckExternalFieldAvailableInSnapshot(schema_->operator[](field_id));
 
     std::shared_ptr<ChunkedColumnInterface> column;
     {
@@ -1431,6 +1434,7 @@ PinWrapper<SpanBase>
 ChunkedSegmentSealedImpl::chunk_data_impl(milvus::OpContext* op_ctx,
                                           FieldId field_id,
                                           int64_t chunk_id) const {
+    CheckExternalFieldAvailableInSnapshot(schema_->operator[](field_id));
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
@@ -1447,6 +1451,7 @@ ChunkedSegmentSealedImpl::chunk_array_view_impl(
     FieldId field_id,
     int64_t chunk_id,
     std::optional<std::pair<int64_t, int64_t>> offset_len) const {
+    CheckExternalFieldAvailableInSnapshot(schema_->operator[](field_id));
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
@@ -1463,6 +1468,7 @@ ChunkedSegmentSealedImpl::chunk_vector_array_view_impl(
     FieldId field_id,
     int64_t chunk_id,
     std::optional<std::pair<int64_t, int64_t>> offset_len) const {
+    CheckExternalFieldAvailableInSnapshot(schema_->operator[](field_id));
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
@@ -1479,6 +1485,7 @@ ChunkedSegmentSealedImpl::chunk_string_view_impl(
     FieldId field_id,
     int64_t chunk_id,
     std::optional<std::pair<int64_t, int64_t>> offset_len) const {
+    CheckExternalFieldAvailableInSnapshot(schema_->operator[](field_id));
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
@@ -1495,6 +1502,7 @@ ChunkedSegmentSealedImpl::chunk_string_views_by_offsets(
     FieldId field_id,
     int64_t chunk_id,
     const FixedVector<int32_t>& offsets) const {
+    CheckExternalFieldAvailableInSnapshot(schema_->operator[](field_id));
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
@@ -1511,6 +1519,7 @@ ChunkedSegmentSealedImpl::chunk_array_views_by_offsets(
     FieldId field_id,
     int64_t chunk_id,
     const FixedVector<int32_t>& offsets) const {
+    CheckExternalFieldAvailableInSnapshot(schema_->operator[](field_id));
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
@@ -1612,6 +1621,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
     AssertInfo(is_system_field_ready(), "System field is not ready");
     auto field_id = search_info.field_id_;
     auto& field_meta = schema_->operator[](field_id);
+    CheckExternalFieldAvailableInSnapshot(field_meta);
 
     AssertInfo(field_meta.is_vector(),
                "The meta type of vector field is not vector type");
@@ -1744,6 +1754,7 @@ ChunkedSegmentSealedImpl::get_vector(milvus::OpContext* op_ctx,
                                      const int64_t* ids,
                                      int64_t count) const {
     auto& field_meta = schema_->operator[](field_id);
+    CheckExternalFieldAvailableInSnapshot(field_meta);
     AssertInfo(field_meta.is_vector(), "vector field is not vector type");
 
     if (!get_bit(index_ready_bitset_, field_id) &&
@@ -1809,6 +1820,7 @@ ChunkedSegmentSealedImpl::get_emb_list(milvus::OpContext* op_ctx,
                                        const FieldMeta& field_meta,
                                        const int64_t* seg_offsets,
                                        int64_t count) const {
+    CheckExternalFieldAvailableInSnapshot(field_meta);
     AssertInfo(field_meta.get_data_type() == DataType::VECTOR_ARRAY,
                "get_emb_list only supports VECTOR_ARRAY");
 
@@ -2755,6 +2767,7 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                          TargetBitmap& valid_map,
                                          bool small_int_raw_type) const {
     auto& field_meta = schema_->operator[](field_id);
+    CheckExternalFieldAvailableInSnapshot(field_meta);
     // DO NOT directly access the column by map like: `fields_.at(field_id)->Data()`,
     // we have to clone the shared pointer, to make sure it won't get released
     // if segment released
@@ -3842,6 +3855,7 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                          const int64_t* seg_offsets,
                                          int64_t count) const {
     auto& field_meta = schema_->operator[](field_id);
+    CheckExternalFieldAvailableInSnapshot(field_meta);
     // if count == 0, return empty data array
     if (count == 0) {
         return fill_with_empty(field_id, count);
@@ -3933,6 +3947,8 @@ ChunkedSegmentSealedImpl::bulk_subscript(
     int64_t count,
     const std::vector<std::string>& dynamic_field_names) const {
     Assert(!dynamic_field_names.empty());
+    auto& field_meta = schema_->operator[](field_id);
+    CheckExternalFieldAvailableInSnapshot(field_meta);
     if (count == 0) {
         return fill_with_empty(field_id, 0);
     }
@@ -3959,6 +3975,43 @@ ChunkedSegmentSealedImpl::bulk_subscript(
         seg_offsets,
         count);
     return ret;
+}
+
+bool
+ChunkedSegmentSealedImpl::ExternalFieldAvailableInSnapshot(
+    FieldId field_id) const {
+    // Do not call FieldAccessible() here. After an external schema reopen, the
+    // field can exist in schema while the currently loaded snapshot bitsets were
+    // built before refresh and may not contain this field position yet.
+    auto field_loaded = has_bit_position(field_data_ready_bitset_, field_id) &&
+                        get_bit(field_data_ready_bitset_, field_id);
+    auto index_loaded = has_bit_position(index_ready_bitset_, field_id) &&
+                        get_bit(index_ready_bitset_, field_id);
+    auto binlog_index_loaded =
+        has_bit_position(binlog_index_bitset_, field_id) &&
+        get_bit(binlog_index_bitset_, field_id);
+    return field_exists_in_schema(schema_, field_id) &&
+           (field_loaded || index_loaded || binlog_index_loaded);
+}
+
+void
+ChunkedSegmentSealedImpl::CheckExternalFieldAvailableInSnapshot(
+    const FieldMeta& field_meta) const {
+    if (!schema_->is_external_collection() || !field_meta.is_external_field()) {
+        return;
+    }
+
+    if (ExternalFieldAvailableInSnapshot(field_meta.get_id())) {
+        return;
+    }
+
+    ThrowInfo(FieldNotLoaded,
+              "external field '{}' (external column '{}') is not available in "
+              "the current loaded external collection snapshot; run "
+              "RefreshExternalCollection and reload the collection before "
+              "accessing this field",
+              field_meta.get_name().get(),
+              field_meta.get_external_field());
 }
 
 bool
@@ -6269,6 +6322,7 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
             continue;
         }
         auto& field_meta = schema_->operator[](field_id);
+        CheckExternalFieldAvailableInSnapshot(field_meta);
         if (!field_meta.is_external_field() &&
             !schema_->is_function_output(field_id) && is_external_collection) {
             continue;
@@ -6531,6 +6585,7 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
     std::vector<std::string> take_column_names;
     for (auto field_id : plan->target_entries_) {
         auto& field_meta = schema_->operator[](field_id);
+        CheckExternalFieldAvailableInSnapshot(field_meta);
         if (!field_meta.is_external_field() &&
             !schema_->is_function_output(field_id) && is_external_collection) {
             continue;

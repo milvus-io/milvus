@@ -2146,11 +2146,6 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
         assert {row["id"] for row in filtered} == {100}
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(
-        reason="https://github.com/milvus-io/milvus/issues/50416: "
-        "querying newly added external field before refresh returns internal QueryNode assert",
-        strict=True,
-    )
     def test_milvus_client_external_table_add_field_without_refresh_not_silent(self, minio_env, external_prefix):
         """
         target: test external table add field without refresh does not silently return wrong data
@@ -2205,7 +2200,7 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
         )[0][0]
         assert [hit["id"] for hit in old_hits] == [hit["id"] for hit in baseline_hits]
 
-        err_check = {ct.err_code: 65535, ct.err_msg: "refresh"}
+        err_check = {ct.err_code: 65535, ct.err_msg: "RefreshExternalCollection"}
         self.query(
             client,
             coll,
@@ -2221,6 +2216,17 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
             filter="score > 0",
             output_fields=["id", "score"],
             limit=10,
+            check_task=CheckTasks.err_res,
+            check_items=err_check,
+        )
+        self.search(
+            client,
+            coll,
+            data=_float_vectors([0], ct.default_dim).tolist(),
+            limit=1,
+            anns_field="embedding",
+            output_fields=["id", "score"],
+            search_params={"metric_type": "L2"},
             check_task=CheckTasks.err_res,
             check_items=err_check,
         )

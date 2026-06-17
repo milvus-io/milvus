@@ -947,6 +947,34 @@ CreateExternalSegment(SegmentSealedUPtr& holder,
     return dynamic_cast<ChunkedSegmentSealedImpl*>(holder.get());
 }
 
+TEST(ExternalFieldAvailabilityTest,
+     RejectsSearchTakeMissingFromLoadedSnapshot) {
+    auto info = BuildExternalSchema();
+    auto table = BuildTestArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema);
+    ASSERT_NE(segment, nullptr);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table),
+                                 false);
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::Plan>(info.schema);
+    plan->target_entries_ = {info.double_id};
+
+    SearchResult results;
+    std::vector<int64_t> offsets = {0, 1};
+
+    try {
+        segment->TestTryTakeForSearch(
+            plan.get(), offsets.data(), offsets.size(), results);
+        FAIL() << "expected missing external field to be rejected";
+    } catch (const std::exception& e) {
+        std::string message = e.what();
+        EXPECT_NE(message.find("double_col"), std::string::npos);
+        EXPECT_NE(message.find("RefreshExternalCollection"), std::string::npos);
+    }
+}
+
 // Mock Reader that always returns an error from take().
 class ErrorMockTakeReader : public milvus_storage::api::Reader {
  public:
