@@ -11,6 +11,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
+// pbRangeShard builds a range-routed schemapb.CollectionShardInfo owning a
+// single [lower, upper) range, for test fixtures.
+func pbRangeShard(state schemapb.ShardState, lastTruncate uint64, lower, upper []byte) *schemapb.CollectionShardInfo {
+	return &schemapb.CollectionShardInfo{
+		LastTruncateTimeTick: lastTruncate,
+		State:                state,
+		Routing: &schemapb.CollectionShardInfo_RangeRouting{
+			RangeRouting: &schemapb.RangeRouting{Ranges: []*schemapb.RoutingKeyRange{{Lower: lower, Upper: upper}}},
+		},
+	}
+}
+
 func newRoutingCollection() *Collection {
 	return &Collection{
 		CollectionID:         1,
@@ -24,17 +36,15 @@ func newRoutingCollection() *Collection {
 				PChannelName:         "p0",
 				VChannelName:         "v0",
 				LastTruncateTimeTick: 7,
-				RoutingKeyLower:      nil,
-				RoutingKeyUpper:      []byte{0x80},
 				State:                schemapb.ShardState_ShardSplitting,
+				Ranges:               []RoutingKeyRange{{Lower: nil, Upper: []byte{0x80}}},
 			},
 			"v1": {
 				PChannelName:         "p1",
 				VChannelName:         "v1",
 				LastTruncateTimeTick: 0,
-				RoutingKeyLower:      []byte{0x80},
-				RoutingKeyUpper:      nil,
 				State:                schemapb.ShardState_ShardCreating,
+				Ranges:               []RoutingKeyRange{{Lower: []byte{0x80}, Upper: nil}},
 			},
 		},
 	}
@@ -46,9 +56,9 @@ func TestCollectionRoutingFieldsMarshalRoundTrip(t *testing.T) {
 	collPb := MarshalCollectionModel(coll)
 	assert.Equal(t, schemapb.RoutingMode_RoutingModeRange, collPb.RoutingMode)
 	assert.Len(t, collPb.ShardInfos, 2)
-	assert.Equal(t, []byte{0x80}, collPb.ShardInfos[0].RoutingKeyUpper)
+	assert.Equal(t, []byte{0x80}, collPb.ShardInfos[0].GetRangeRouting().GetRanges()[0].GetUpper())
 	assert.Equal(t, schemapb.ShardState_ShardSplitting, collPb.ShardInfos[0].State)
-	assert.Equal(t, []byte{0x80}, collPb.ShardInfos[1].RoutingKeyLower)
+	assert.Equal(t, []byte{0x80}, collPb.ShardInfos[1].GetRangeRouting().GetRanges()[0].GetLower())
 	assert.Equal(t, schemapb.ShardState_ShardCreating, collPb.ShardInfos[1].State)
 	assert.Equal(t, uint64(7), collPb.ShardInfos[0].LastTruncateTimeTick)
 
@@ -72,8 +82,7 @@ func TestCollectionRoutingFieldsLegacyDefaults(t *testing.T) {
 	assert.Equal(t, schemapb.RoutingMode_RoutingModeHash, restored.RoutingMode)
 	shard := restored.ShardInfos["v0"]
 	assert.Equal(t, schemapb.ShardState_ShardNormal, shard.State)
-	assert.Nil(t, shard.RoutingKeyLower)
-	assert.Nil(t, shard.RoutingKeyUpper)
+	assert.Nil(t, shard.Ranges)
 }
 
 func TestCollectionRoutingFieldsClone(t *testing.T) {
@@ -87,9 +96,9 @@ func TestCollectionRoutingFieldsClone(t *testing.T) {
 
 	// Clone must deep-copy the routing key bytes: mutating the
 	// original must not leak into the clone.
-	coll.ShardInfos["v0"].RoutingKeyUpper[0] = 0xff
+	coll.ShardInfos["v0"].Ranges[0].Upper[0] = 0xff
 	coll.ShardInfos["v0"].State = schemapb.ShardState_ShardDropped
-	assert.Equal(t, []byte{0x80}, clone.ShardInfos["v0"].RoutingKeyUpper)
+	assert.Equal(t, []byte{0x80}, clone.ShardInfos["v0"].Ranges[0].Upper)
 	assert.Equal(t, schemapb.ShardState_ShardSplitting, clone.ShardInfos["v0"].State)
 }
 
@@ -118,8 +127,8 @@ func TestApplyUpdatesShardSplitRouting(t *testing.T) {
 			RoutingMode:          schemapb.RoutingMode_RoutingModeRange,
 			ShardInfos: []*schemapb.CollectionShardInfo{
 				{State: schemapb.ShardState_ShardSplitting},
-				{RoutingKeyUpper: []byte{0x80}, State: schemapb.ShardState_ShardCreating, LastTruncateTimeTick: 9},
-				{RoutingKeyLower: []byte{0x80}, State: schemapb.ShardState_ShardCreating},
+				pbRangeShard(schemapb.ShardState_ShardCreating, 9, nil, []byte{0x80}),
+				pbRangeShard(schemapb.ShardState_ShardCreating, 0, []byte{0x80}, nil),
 			},
 		},
 	}
@@ -133,10 +142,11 @@ func TestApplyUpdatesShardSplitRouting(t *testing.T) {
 	assert.Len(t, coll.ShardInfos, 3)
 	// the source shard is now Splitting; the targets carry their ranges.
 	assert.Equal(t, schemapb.ShardState_ShardSplitting, coll.ShardInfos["v0"].State)
+	assert.Empty(t, coll.ShardInfos["v0"].Ranges)
 	assert.Equal(t, "p1", coll.ShardInfos["v1"].PChannelName)
 	assert.Equal(t, "v1", coll.ShardInfos["v1"].VChannelName)
-	assert.Equal(t, []byte{0x80}, coll.ShardInfos["v1"].RoutingKeyUpper)
+	assert.Equal(t, []byte{0x80}, coll.ShardInfos["v1"].Ranges[0].Upper)
 	assert.Equal(t, uint64(9), coll.ShardInfos["v1"].LastTruncateTimeTick)
-	assert.Equal(t, []byte{0x80}, coll.ShardInfos["v2"].RoutingKeyLower)
+	assert.Equal(t, []byte{0x80}, coll.ShardInfos["v2"].Ranges[0].Lower)
 	assert.Equal(t, schemapb.ShardState_ShardCreating, coll.ShardInfos["v2"].State)
 }

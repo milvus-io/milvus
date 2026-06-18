@@ -115,6 +115,17 @@ func preparingTask() *datapb.SplitShardTask {
 	}
 }
 
+// pbRangeShard builds a range-routed CollectionShardInfo owning a single
+// [lower, upper) range, for test fixtures.
+func pbRangeShard(state schemapb.ShardState, lower, upper []byte) *schemapb.CollectionShardInfo {
+	return &schemapb.CollectionShardInfo{
+		State: state,
+		Routing: &schemapb.CollectionShardInfo_RangeRouting{
+			RangeRouting: &schemapb.RangeRouting{Ranges: []*schemapb.RoutingKeyRange{{Lower: lower, Upper: upper}}},
+		},
+	}
+}
+
 func fencingTask() *datapb.SplitShardTask {
 	return &datapb.SplitShardTask{
 		TaskId:         100,
@@ -427,8 +438,8 @@ func TestCommitRoutingMultiShard(t *testing.T) {
 		Schema:        &schemapb.CollectionSchema{Name: "col"},
 		VChannelNames: []string{"v0", "v3"},
 		ShardInfos: map[string]*schemapb.CollectionShardInfo{
-			"v0": {RoutingKeyUpper: []byte{0x80}, State: schemapb.ShardState_ShardNormal},
-			"v3": {RoutingKeyLower: []byte{0x80}, State: schemapb.ShardState_ShardNormal},
+			"v0": pbRangeShard(schemapb.ShardState_ShardNormal, nil, []byte{0x80}),
+			"v3": pbRangeShard(schemapb.ShardState_ShardNormal, []byte{0x80}, nil),
 		},
 	}
 	err := manager.commitRouting(fencingTask(), collection,
@@ -445,11 +456,11 @@ func TestCommitRoutingMultiShard(t *testing.T) {
 	assert.Equal(t, schemapb.ShardState_ShardSplitting, got["v0"].GetState())
 	// the unrelated shard v3 keeps its range and state.
 	assert.Equal(t, schemapb.ShardState_ShardNormal, got["v3"].GetState())
-	assert.Equal(t, []byte{0x80}, got["v3"].GetRoutingKeyLower())
+	assert.Equal(t, []byte{0x80}, got["v3"].GetRangeRouting().GetRanges()[0].GetLower())
 	// the targets are Creating with their split ranges.
 	assert.Equal(t, schemapb.ShardState_ShardCreating, got["v1"].GetState())
-	assert.Equal(t, []byte{0x80}, got["v1"].GetRoutingKeyUpper())
-	assert.Equal(t, []byte{0x80}, got["v2"].GetRoutingKeyLower())
+	assert.Equal(t, []byte{0x80}, got["v1"].GetRangeRouting().GetRanges()[0].GetUpper())
+	assert.Equal(t, []byte{0x80}, got["v2"].GetRangeRouting().GetRanges()[0].GetLower())
 }
 
 func TestAdvanceRedistributing(t *testing.T) {

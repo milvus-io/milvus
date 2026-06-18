@@ -47,6 +47,17 @@ func orderNamespaces(a, b string) (low, high string, splitKey []byte) {
 	return b, a, ka
 }
 
+// rangeShardPB builds a range-routed CollectionShardInfo owning a single
+// [lower, upper) range, for test fixtures.
+func rangeShardPB(state schemapb.ShardState, lower, upper []byte) *schemapb.CollectionShardInfo {
+	return &schemapb.CollectionShardInfo{
+		State: state,
+		Routing: &schemapb.CollectionShardInfo_RangeRouting{
+			RangeRouting: &schemapb.RangeRouting{Ranges: []*schemapb.RoutingKeyRange{{Lower: lower, Upper: upper}}},
+		},
+	}
+}
+
 func TestBuildRangeRoutingTable(t *testing.T) {
 	low, high, splitKey := orderNamespaces("tenant-a", "tenant-b")
 
@@ -62,8 +73,8 @@ func TestBuildRangeRoutingTable(t *testing.T) {
 		tbl, err := buildRangeRoutingTable(schemapb.RoutingMode_RoutingModeRange,
 			[]string{"ch0", "ch1"},
 			[]*schemapb.CollectionShardInfo{
-				{RoutingKeyLower: nil, RoutingKeyUpper: splitKey, State: schemapb.ShardState_ShardNormal},
-				{RoutingKeyLower: splitKey, RoutingKeyUpper: nil, State: schemapb.ShardState_ShardNormal},
+				rangeShardPB(schemapb.ShardState_ShardNormal, nil, splitKey),
+				rangeShardPB(schemapb.ShardState_ShardNormal, splitKey, nil),
 			})
 		assert.NoError(t, err)
 		assert.NotNil(t, tbl)
@@ -79,9 +90,9 @@ func TestBuildRangeRoutingTable(t *testing.T) {
 		tbl, err := buildRangeRoutingTable(schemapb.RoutingMode_RoutingModeRange,
 			[]string{"ch0", "ch1", "ch2"},
 			[]*schemapb.CollectionShardInfo{
-				{RoutingKeyLower: nil, RoutingKeyUpper: nil, State: schemapb.ShardState_ShardSplitting},
-				{RoutingKeyLower: nil, RoutingKeyUpper: splitKey, State: schemapb.ShardState_ShardCreating},
-				{RoutingKeyLower: splitKey, RoutingKeyUpper: nil, State: schemapb.ShardState_ShardCreating},
+				{State: schemapb.ShardState_ShardSplitting},
+				rangeShardPB(schemapb.ShardState_ShardCreating, nil, splitKey),
+				rangeShardPB(schemapb.ShardState_ShardCreating, splitKey, nil),
 			})
 		assert.NoError(t, err)
 		assert.NotNil(t, tbl)
@@ -93,9 +104,9 @@ func TestBuildRangeRoutingTable(t *testing.T) {
 		tbl, err = buildRangeRoutingTable(schemapb.RoutingMode_RoutingModeRange,
 			[]string{"ch0", "ch1", "ch2"},
 			[]*schemapb.CollectionShardInfo{
-				{RoutingKeyLower: nil, RoutingKeyUpper: nil, State: schemapb.ShardState_ShardDropped},
-				{RoutingKeyLower: nil, RoutingKeyUpper: splitKey, State: schemapb.ShardState_ShardNormal},
-				{RoutingKeyLower: splitKey, RoutingKeyUpper: nil, State: schemapb.ShardState_ShardNormal},
+				{State: schemapb.ShardState_ShardDropped},
+				rangeShardPB(schemapb.ShardState_ShardNormal, nil, splitKey),
+				rangeShardPB(schemapb.ShardState_ShardNormal, splitKey, nil),
 			})
 		assert.NoError(t, err)
 		assert.Equal(t, 2, tbl.NumShards())
@@ -114,8 +125,8 @@ func TestBuildRangeRoutingTable(t *testing.T) {
 		_, err := buildRangeRoutingTable(schemapb.RoutingMode_RoutingModeRange,
 			[]string{"ch0", "ch1"},
 			[]*schemapb.CollectionShardInfo{
-				{RoutingKeyLower: nil, RoutingKeyUpper: splitKey, State: schemapb.ShardState_ShardNormal},
-				{RoutingKeyLower: gapStart, RoutingKeyUpper: nil, State: schemapb.ShardState_ShardNormal},
+				rangeShardPB(schemapb.ShardState_ShardNormal, nil, splitKey),
+				rangeShardPB(schemapb.ShardState_ShardNormal, gapStart, nil),
 			})
 		assert.Error(t, err)
 	})
@@ -126,8 +137,8 @@ func TestResolveRangeRoutingChannels(t *testing.T) {
 	tbl, err := buildRangeRoutingTable(schemapb.RoutingMode_RoutingModeRange,
 		[]string{"ch0", "ch1"},
 		[]*schemapb.CollectionShardInfo{
-			{RoutingKeyLower: nil, RoutingKeyUpper: splitKey, State: schemapb.ShardState_ShardNormal},
-			{RoutingKeyLower: splitKey, RoutingKeyUpper: nil, State: schemapb.ShardState_ShardNormal},
+			rangeShardPB(schemapb.ShardState_ShardNormal, nil, splitKey),
+			rangeShardPB(schemapb.ShardState_ShardNormal, splitKey, nil),
 		})
 	assert.NoError(t, err)
 
@@ -189,8 +200,8 @@ func TestMetaCache_RangeRoutingSurfaced(t *testing.T) {
 		VirtualChannelNames:  []string{"vch0", "vch1"},
 		RoutingMode:          schemapb.RoutingMode_RoutingModeRange,
 		ShardInfos: []*schemapb.CollectionShardInfo{
-			{RoutingKeyUpper: splitKey, State: schemapb.ShardState_ShardNormal},
-			{RoutingKeyLower: splitKey, State: schemapb.ShardState_ShardNormal},
+			rangeShardPB(schemapb.ShardState_ShardNormal, nil, splitKey),
+			rangeShardPB(schemapb.ShardState_ShardNormal, splitKey, nil),
 		},
 	}, nil).Once()
 
@@ -212,7 +223,7 @@ func TestInsertTask_ShardFencedRefetch(t *testing.T) {
 	// A single-shard range table: the whole key space maps to vch0.
 	tbl, err := buildRangeRoutingTable(schemapb.RoutingMode_RoutingModeRange,
 		[]string{"vch0"},
-		[]*schemapb.CollectionShardInfo{{State: schemapb.ShardState_ShardNormal}})
+		[]*schemapb.CollectionShardInfo{rangeShardPB(schemapb.ShardState_ShardNormal, nil, nil)})
 	assert.NoError(t, err)
 	rangeInfo := &collectionInfo{collID: 100, routingMode: schemapb.RoutingMode_RoutingModeRange, rangeRoutingTable: tbl}
 

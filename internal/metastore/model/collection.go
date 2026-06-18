@@ -61,16 +61,66 @@ type Collection struct {
 	ExternalSpec         string
 }
 
+// RoutingKeyRange is one half-open [Lower, Upper) routing-key range a shard
+// owns. A nil bound is unbounded (Lower nil = -inf, Upper nil = +inf).
+type RoutingKeyRange struct {
+	Lower []byte
+	Upper []byte
+}
+
 type ShardInfo struct {
-	PChannelName         string // the pchannel name of the shard, it is the same with the physical channel name.
-	VChannelName         string // the vchannel name of the shard, it is the same with the virtual channel name.
-	LastTruncateTimeTick uint64 // the last truncate time tick of the shard, if the shard is not truncated, the value is 0.
-	// The routing key range [RoutingKeyLower, RoutingKeyUpper) owned by the shard.
-	// Keys are byte-comparable, nil means unbounded. Only meaningful when the
-	// collection's RoutingMode is RoutingModeRange.
-	RoutingKeyLower []byte
-	RoutingKeyUpper []byte
-	State           schemapb.ShardState // the lifecycle state during shard split, ShardNormal by default.
+	PChannelName         string              // the pchannel name of the shard, it is the same with the physical channel name.
+	VChannelName         string              // the vchannel name of the shard, it is the same with the virtual channel name.
+	LastTruncateTimeTick uint64              // the last truncate time tick of the shard, if the shard is not truncated, the value is 0.
+	State                schemapb.ShardState // the lifecycle state during shard split, ShardNormal by default.
+	// Ranges is the range-routing predicate of the shard: the half-open key
+	// ranges it owns. Usually one range; more than one after a carve-out leaves a
+	// shard with disjoint pieces. Empty for a legacy hash-routed shard. Only
+	// meaningful when the collection's RoutingMode is RoutingModeRange.
+	Ranges []RoutingKeyRange
+}
+
+// cloneRoutingKeyRanges deep-copies a shard's range-routing predicate.
+func cloneRoutingKeyRanges(ranges []RoutingKeyRange) []RoutingKeyRange {
+	if ranges == nil {
+		return nil
+	}
+	out := make([]RoutingKeyRange, len(ranges))
+	for i, r := range ranges {
+		out[i] = RoutingKeyRange{Lower: slices.Clone(r.Lower), Upper: slices.Clone(r.Upper)}
+	}
+	return out
+}
+
+// routingKeyRangesFromPB converts the range-routing ranges of a
+// schemapb.CollectionShardInfo into the model representation.
+func routingKeyRangesFromPB(ranges []*schemapb.RoutingKeyRange) []RoutingKeyRange {
+	if len(ranges) == 0 {
+		return nil
+	}
+	out := make([]RoutingKeyRange, len(ranges))
+	for i, r := range ranges {
+		out[i] = RoutingKeyRange{Lower: r.GetLower(), Upper: r.GetUpper()}
+	}
+	return out
+}
+
+// ToPB builds the schemapb.CollectionShardInfo of a shard; the routing oneof is
+// left unset when the shard owns no range (e.g. a legacy hash-routed shard or a
+// fenced/dropped split source).
+func (s *ShardInfo) ToPB() *schemapb.CollectionShardInfo {
+	si := &schemapb.CollectionShardInfo{
+		LastTruncateTimeTick: s.LastTruncateTimeTick,
+		State:                s.State,
+	}
+	if len(s.Ranges) > 0 {
+		pbRanges := make([]*schemapb.RoutingKeyRange, len(s.Ranges))
+		for i, r := range s.Ranges {
+			pbRanges[i] = &schemapb.RoutingKeyRange{Lower: r.Lower, Upper: r.Upper}
+		}
+		si.Routing = &schemapb.CollectionShardInfo_RangeRouting{RangeRouting: &schemapb.RangeRouting{Ranges: pbRanges}}
+	}
+	return si
 }
 
 func (c *Collection) Available() bool {
@@ -118,9 +168,8 @@ func (c *Collection) Clone() *Collection {
 			VChannelName:         channelName,
 			PChannelName:         shardInfo.PChannelName,
 			LastTruncateTimeTick: shardInfo.LastTruncateTimeTick,
-			RoutingKeyLower:      slices.Clone(shardInfo.RoutingKeyLower),
-			RoutingKeyUpper:      slices.Clone(shardInfo.RoutingKeyUpper),
 			State:                shardInfo.State,
+			Ranges:               cloneRoutingKeyRanges(shardInfo.Ranges),
 		}
 	}
 	return &Collection{
@@ -260,9 +309,8 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 				if i < len(updates.ShardInfos) {
 					si := updates.ShardInfos[i]
 					info.LastTruncateTimeTick = si.GetLastTruncateTimeTick()
-					info.RoutingKeyLower = si.GetRoutingKeyLower()
-					info.RoutingKeyUpper = si.GetRoutingKeyUpper()
 					info.State = si.GetState()
+					info.Ranges = routingKeyRangesFromPB(si.GetRangeRouting().GetRanges())
 				}
 				shardInfos[vchannel] = info
 			}
@@ -297,10 +345,9 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 			shardInfos[channelName] = &ShardInfo{
 				VChannelName:         channelName,
 				PChannelName:         coll.PhysicalChannelNames[idx],
-				LastTruncateTimeTick: coll.ShardInfos[idx].LastTruncateTimeTick,
-				RoutingKeyLower:      coll.ShardInfos[idx].RoutingKeyLower,
-				RoutingKeyUpper:      coll.ShardInfos[idx].RoutingKeyUpper,
-				State:                coll.ShardInfos[idx].State,
+				LastTruncateTimeTick: coll.ShardInfos[idx].GetLastTruncateTimeTick(),
+				State:                coll.ShardInfos[idx].GetState(),
+				Ranges:               routingKeyRangesFromPB(coll.ShardInfos[idx].GetRangeRouting().GetRanges()),
 			}
 		}
 	}
@@ -402,16 +449,9 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 	shardInfos := make([]*schemapb.CollectionShardInfo, len(coll.ShardInfos))
 	for idx, channelName := range coll.VirtualChannelNames {
 		if shard, ok := coll.ShardInfos[channelName]; ok {
-			shardInfos[idx] = &schemapb.CollectionShardInfo{
-				LastTruncateTimeTick: shard.LastTruncateTimeTick,
-				RoutingKeyLower:      shard.RoutingKeyLower,
-				RoutingKeyUpper:      shard.RoutingKeyUpper,
-				State:                shard.State,
-			}
+			shardInfos[idx] = shard.ToPB()
 		} else {
-			shardInfos[idx] = &schemapb.CollectionShardInfo{
-				LastTruncateTimeTick: 0,
-			}
+			shardInfos[idx] = &schemapb.CollectionShardInfo{}
 		}
 	}
 	collectionPb := &pb.CollectionInfo{

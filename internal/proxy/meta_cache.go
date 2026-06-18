@@ -493,15 +493,21 @@ func buildRangeRoutingTable(routingMode schemapb.RoutingMode, vChannels []string
 	// fenced split source (ShardSplitting) and the released source (ShardDropped) are
 	// excluded — their key range is owned by the targets, so excluding them keeps the
 	// included shards a gap-free, non-overlapping cover of the whole key space.
+	// A shard may own more than one disjoint range (e.g. the cold remainder after
+	// a hot tenant is carved out of the middle), so each range becomes its own
+	// entry pointing at the same vchannel; DeriveRange then validates that the
+	// flattened entries tile the whole key space.
 	shards := make([]routing.RangeShard, 0, len(vChannels))
 	for i, vchannel := range vChannels {
 		switch shardInfos[i].GetState() {
 		case schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardCreating:
-			shards = append(shards, routing.RangeShard{
-				Lower:    shardInfos[i].GetRoutingKeyLower(),
-				Upper:    shardInfos[i].GetRoutingKeyUpper(),
-				Vchannel: vchannel,
-			})
+			for _, r := range shardInfos[i].GetRangeRouting().GetRanges() {
+				shards = append(shards, routing.RangeShard{
+					Lower:    r.GetLower(),
+					Upper:    r.GetUpper(),
+					Vchannel: vchannel,
+				})
+			}
 		}
 	}
 	return routing.DeriveRange(shards)

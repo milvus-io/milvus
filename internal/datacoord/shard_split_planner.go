@@ -227,8 +227,12 @@ func (p *rangeSplitPlanner) PlanTargets(ctx context.Context, collection *collect
 	// split of a multi-shard collection).
 	source := routingKeyRange{lower: nil, upper: nil}
 	if info, ok := collection.ShardInfos[sourceVChannel]; ok {
-		source.lower = info.GetRoutingKeyLower()
-		source.upper = info.GetRoutingKeyUpper()
+		// the source being split is a single contiguous range (a fresh collection's
+		// whole space, or a sub-range from an earlier split).
+		if ranges := info.GetRangeRouting().GetRanges(); len(ranges) > 0 {
+			source.lower = ranges[0].GetLower()
+			source.upper = ranges[0].GetUpper()
+		}
 	}
 	return []*datapb.SplitShardTaskTarget{
 		{Vchannel: targetVChannels[0], RoutingKeyLower: source.lower, RoutingKeyUpper: splitKey},
