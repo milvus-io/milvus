@@ -1134,7 +1134,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 
 	// use the passed pk as new pk when autoID == false
 	// automatic generate pk as new pk wehen autoID == true
-	it.result.IDs, it.oldIDs, err = checkUpsertPrimaryFieldData(allFields, it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+	it.result.IDs, it.oldIDs, err = checkUpsertPrimaryFieldData(ctx, allFields, it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
 	if err != nil {
 		log.Warn(ctx, "check primary field data and hash primary key failed when upsert",
 			mlog.Err(err))

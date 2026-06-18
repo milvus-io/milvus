@@ -2243,7 +2243,7 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 	return nil
 }
 
-func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, error) {
+func checkPrimaryFieldData(ctx context.Context, allFields []*schemapb.FieldSchema, schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, error) {
 	log := mlog.With(mlog.String("collectionName", insertMsg.CollectionName))
 	rowNums := uint32(insertMsg.NRows())
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
@@ -2251,13 +2251,13 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 		return nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
 	}
 
-	if err := checkFieldsDataBySchema(context.TODO(), allFields, schema, insertMsg, true); err != nil {
+	if err := checkFieldsDataBySchema(ctx, allFields, schema, insertMsg, true); err != nil {
 		return nil, err
 	}
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
-		log.Error(context.TODO(), "get primary field schema failed", mlog.Any("schema", schema), mlog.Err(err))
+		log.Error(ctx, "get primary field schema failed", mlog.Any("schema", schema), mlog.Err(err))
 		return nil, err
 	}
 	if primaryFieldSchema.GetNullable() {
@@ -2273,7 +2273,7 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 	if !primaryFieldSchema.AutoID || skipAutoIDCheck {
 		primaryFieldData, err = typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), primaryFieldSchema)
 		if err != nil {
-			log.Info(context.TODO(), "get primary field data failed", mlog.Err(err))
+			log.Info(ctx, "get primary field data failed", mlog.Err(err))
 			return nil, err
 		}
 	} else {
@@ -2284,7 +2284,7 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 		// if autoID == true, currently support autoID for int64 and varchar PrimaryField
 		primaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
 		if err != nil {
-			log.Info(context.TODO(), "generate primary field data failed when autoID == true", mlog.Err(err))
+			log.Info(ctx, "generate primary field data failed when autoID == true", mlog.Err(err))
 			return nil, err
 		}
 		// if autoID == true, set the primary field data
@@ -2295,7 +2295,7 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 	// parse primaryFieldData to result.IDs, and as returned primary keys
 	ids, err := parsePrimaryFieldData2IDs(primaryFieldData)
 	if err != nil {
-		log.Warn(context.TODO(), "parse primary field data to IDs failed", mlog.Err(err))
+		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
 		return nil, err
 	}
 
@@ -2380,7 +2380,7 @@ func checkInputUtf8Compatiable(allFields []*schemapb.FieldSchema, insertMsg *msg
 	return nil
 }
 
-func checkUpsertPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, *schemapb.IDs, error) {
+func checkUpsertPrimaryFieldData(ctx context.Context, allFields []*schemapb.FieldSchema, schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, *schemapb.IDs, error) {
 	log := mlog.With(mlog.String("collectionName", insertMsg.CollectionName))
 	rowNums := uint32(insertMsg.NRows())
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
@@ -2388,13 +2388,13 @@ func checkUpsertPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *sche
 		return nil, nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
 	}
 
-	if err := checkFieldsDataBySchema(context.TODO(), allFields, schema, insertMsg, false); err != nil {
+	if err := checkFieldsDataBySchema(ctx, allFields, schema, insertMsg, false); err != nil {
 		return nil, nil, err
 	}
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
-		log.Error(context.TODO(), "get primary field schema failed", mlog.Any("schema", schema), mlog.Err(err))
+		log.Error(ctx, "get primary field schema failed", mlog.Any("schema", schema), mlog.Err(err))
 		return nil, nil, err
 	}
 	if primaryFieldSchema.GetNullable() {
@@ -2414,7 +2414,7 @@ func checkUpsertPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *sche
 				// automatic generate pk as new pk wehen autoID == true
 				newPrimaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
 				if err != nil {
-					log.Info(context.TODO(), "generate new primary field data failed when upsert", mlog.Err(err))
+					log.Info(ctx, "generate new primary field data failed when upsert", mlog.Err(err))
 					return nil, nil, err
 				}
 				insertMsg.FieldsData = append(insertMsg.GetFieldsData()[:i], insertMsg.GetFieldsData()[i+1:]...)
@@ -2431,7 +2431,7 @@ func checkUpsertPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *sche
 	// parse primaryFieldData to result.IDs, and as returned primary keys
 	ids, err := parsePrimaryFieldData2IDs(primaryFieldData)
 	if err != nil {
-		log.Warn(context.TODO(), "parse primary field data to IDs failed", mlog.Err(err))
+		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
 		return nil, nil, err
 	}
 	if !primaryFieldSchema.GetAutoID() {
@@ -2439,7 +2439,7 @@ func checkUpsertPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *sche
 	}
 	newIDs, err := parsePrimaryFieldData2IDs(newPrimaryFieldData)
 	if err != nil {
-		log.Warn(context.TODO(), "parse primary field data to IDs failed", mlog.Err(err))
+		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
 		return nil, nil, err
 	}
 	return newIDs, ids, nil
