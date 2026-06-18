@@ -93,7 +93,11 @@ func (queue *baseTaskQueue) addUnissuedTask(t task) error {
 	if queue.utFull() {
 		return merr.WrapErrTooManyRequests(int32(queue.getMaxTaskNum()))
 	}
-	queue.unissuedTasks.PushBack(t)
+	if t.IsSubTask() {
+		queue.unissuedTasks.PushFront(t)
+	} else {
+		queue.unissuedTasks.PushBack(t)
+	}
 	// utBufChan is an edge-triggered, capacity-1 notifier: a pending token
 	// means "the unissued list is non-empty, wake the scheduler". Concurrent
 	// sends coalesce; the scheduler drains the list on each wake.
@@ -717,9 +721,7 @@ func (sched *taskScheduler) queryLoop() {
 
 	poolSize := paramtable.Get().ProxyCfg.MaxTaskNum.GetAsInt()
 	pool := conc.NewPool[struct{}](poolSize, conc.WithExpiryDuration(time.Minute))
-	subTaskPool := conc.NewPool[struct{}](poolSize, conc.WithExpiryDuration(time.Minute))
 	defer pool.Release()
-	defer subTaskPool.Release()
 
 	for {
 		select {
@@ -728,25 +730,17 @@ func (sched *taskScheduler) queryLoop() {
 		case <-sched.dqQueue.utChan():
 			for t := sched.dqQueue.FrontUnissuedTask(); t != nil; t = sched.dqQueue.FrontUnissuedTask() {
 				task := t
-				p := pool
-				// if task is sub task spawned by another, use sub task pool in case of deadlock
-				if task.IsSubTask() {
-					p = subTaskPool
-				} else if !sched.dqlBackpressure.Acquire(sched.ctx) {
+				if !sched.dqlBackpressure.Acquire(sched.ctx) {
 					return
 				}
 				task = sched.scheduleDqTask()
 				if task == nil {
-					if !t.IsSubTask() {
-						sched.dqlBackpressure.Release()
-					}
+					sched.dqlBackpressure.Release()
 					continue
 				}
 				taskToRun := task
-				p.Submit(func() (struct{}, error) {
-					if !taskToRun.IsSubTask() {
-						defer sched.dqlBackpressure.Release()
-					}
+				pool.Submit(func() (struct{}, error) {
+					defer sched.dqlBackpressure.Release()
 					sched.processTask(taskToRun, sched.dqQueue)
 					return struct{}{}, nil
 				})

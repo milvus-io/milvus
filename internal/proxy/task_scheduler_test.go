@@ -115,6 +115,23 @@ func TestBaseTaskQueue(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestBaseTaskQueue_SubTaskEnqueuePushesFront(t *testing.T) {
+	queue := newBaseTaskQueue(newMockTsoAllocator())
+
+	first := newDefaultMockTask()
+	second := newDefaultMockTask()
+	subTask := newDefaultMockTask()
+	subTask.subTask = true
+
+	require.NoError(t, queue.Enqueue(first))
+	require.NoError(t, queue.Enqueue(second))
+	require.NoError(t, queue.Enqueue(subTask))
+
+	assert.Same(t, subTask, queue.PopUnissuedTask())
+	assert.Same(t, first, queue.PopUnissuedTask())
+	assert.Same(t, second, queue.PopUnissuedTask())
+}
+
 func TestDdTaskQueue(t *testing.T) {
 	var err error
 	var unissuedTask task
@@ -859,4 +876,65 @@ func TestTaskScheduler_QueryLoopLimitsDQLDispatchConcurrency(t *testing.T) {
 		t.Fatalf("second DQL task was not dispatched after first task completed")
 	}
 	assert.NoError(t, second.WaitToFinish())
+}
+
+func TestTaskScheduler_QueryLoopLimitsDQLSubTaskDispatchConcurrency(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sched, err := newTaskScheduler(ctx, newMockTsoAllocator())
+	require.NoError(t, err)
+	sched.dqlBackpressure = newDQLBackpressureController(dqlBackpressureControllerConfig{
+		enabled:                true,
+		maxConcurrency:         1,
+		slowdownMinConcurrency: 1,
+		slowdownRatio:          0.5,
+		recoverInterval:        time.Second,
+	})
+
+	firstStarted := make(chan struct{}, 1)
+	firstContinue := make(chan struct{})
+	first := newDefaultMockDqlTask()
+	first.executeFn = func(context.Context) error {
+		firstStarted <- struct{}{}
+		<-firstContinue
+		return nil
+	}
+	subStarted := make(chan struct{}, 1)
+	subTask := newDefaultMockDqlTask()
+	subTask.subTask = true
+	subTask.executeFn = func(context.Context) error {
+		subStarted <- struct{}{}
+		return nil
+	}
+
+	require.NoError(t, sched.dqQueue.Enqueue(first))
+
+	sched.wg.Add(1)
+	go sched.queryLoop()
+	defer sched.Close()
+
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatalf("first DQL task was not dispatched")
+	}
+
+	require.NoError(t, sched.dqQueue.Enqueue(subTask))
+
+	select {
+	case <-subStarted:
+		t.Fatalf("DQL sub-task should wait for the shared DQL backpressure window")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(firstContinue)
+	assert.NoError(t, first.WaitToFinish())
+
+	select {
+	case <-subStarted:
+	case <-time.After(time.Second):
+		t.Fatalf("DQL sub-task was not dispatched after the shared window was released")
+	}
+	assert.NoError(t, subTask.WaitToFinish())
 }
