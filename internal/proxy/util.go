@@ -1856,7 +1856,7 @@ func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb
 
 	for _, fieldSchema := range allFields {
 		if fieldSchema.AutoID && !fieldSchema.IsPrimaryKey {
-			log.Warn(ctx, "not primary key field, but set autoID true", mlog.String("field", fieldSchema.GetName()))
+			log.Warn(context.TODO(), "not primary key field, but set autoID true", mlog.String("field", fieldSchema.GetName()))
 			return merr.WrapErrParameterInvalidMsg("only primary key could be with AutoID enabled")
 		}
 

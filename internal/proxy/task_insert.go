@@ -112,6 +112,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 
 	collectionName := it.insertMsg.CollectionName
+	log := mlog.With(mlog.String("collectionName", collectionName))
 	if err := validateCollectionName(collectionName); err != nil {
 		log.Warn(ctx, "valid collection name failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
@@ -223,7 +224,6 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	// set rowIDs as primary data if autoID == true
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
 	it.result.IDs, err = checkPrimaryFieldData(allFields, it.schema, it.insertMsg)
-	log := mlog.With(mlog.String("collectionName", collectionName))
 	if err != nil {
 		log.Warn(ctx, "check primary field data and hash primary key failed",
 			mlog.Err(err))

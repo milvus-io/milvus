@@ -1048,6 +1048,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-insertPreExecute")
 	defer sp.End()
 	collectionName := it.upsertMsg.InsertMsg.CollectionName
+	log := mlog.With(mlog.String("collectionName", collectionName))
 	if err := validateCollectionName(collectionName); err != nil {
 		log.Error(ctx, "valid collection name failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
@@ -1134,7 +1135,6 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	// use the passed pk as new pk when autoID == false
 	// automatic generate pk as new pk wehen autoID == true
 	it.result.IDs, it.oldIDs, err = checkUpsertPrimaryFieldData(allFields, it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
-	log := mlog.With(mlog.String("collectionName", it.upsertMsg.InsertMsg.CollectionName))
 	if err != nil {
 		log.Warn(ctx, "check primary field data and hash primary key failed when upsert",
 			mlog.Err(err))
