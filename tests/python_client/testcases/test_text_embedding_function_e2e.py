@@ -27,10 +27,6 @@ fake_en = Faker("en_US")
 pd.set_option("expand_frame_repr", False)
 
 prefix = "text_embedding_collection"
-DROP_TEXT_EMBEDDING_FUNCTION_XFAIL_REASON = (
-    "issue: https://github.com/milvus-io/milvus/issues/50424, "
-    "dropping TextEmbedding function incorrectly removes output vector field"
-)
 
 
 # TEI: https://github.com/huggingface/text-embeddings-inference
@@ -1535,7 +1531,6 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
 
     # ==================== drop_collection_function positive tests ====================
 
-    @pytest.mark.xfail(reason=DROP_TEXT_EMBEDDING_FUNCTION_XFAIL_REASON, strict=True)
     def test_drop_collection_function_verify_crud(self, tei_endpoint):
         """
         target: test CRUD behavior changes after dropping function
@@ -1640,7 +1635,6 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
         res, _ = collection_w.query(expr="id >= 0", output_fields=["id"])
         assert len(res) == 4  # 6 - 2
 
-    @pytest.mark.xfail(reason=DROP_TEXT_EMBEDDING_FUNCTION_XFAIL_REASON, strict=True)
     def test_drop_collection_function_one_of_multiple(self, tei_endpoint):
         """
         target: test drop one function when multiple text embedding functions exist
@@ -1757,7 +1751,6 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
         res, _ = collection_w.query(expr="id >= 0", output_fields=["id"])
         assert len(res) == 3
 
-    @pytest.mark.xfail(reason=DROP_TEXT_EMBEDDING_FUNCTION_XFAIL_REASON, strict=True)
     def test_drop_collection_function_then_add_again(self, tei_endpoint):
         """
         target: test can re-add function after dropping
