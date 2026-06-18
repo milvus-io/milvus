@@ -37,7 +37,7 @@ func newScheduler(policy schedulePolicy) Scheduler {
 		policy:           policy,
 		receiveChan:      make(chan addTaskReq),
 		clearChan:        make(chan clearQueuedReq),
-		execChan:         make(chan Task),
+		execChan:         make(chan *queuedTask),
 		pool:             conc.NewPool[any](maxReadConcurrency, conc.WithPreAlloc(true)),
 		gpuPool:          conc.NewPool[any](paramtable.Get().QueryNodeCfg.MaxGpuReadConcurrency.GetAsInt(), conc.WithPreAlloc(true)),
 		schedulerCounter: schedulerCounter{},
@@ -66,7 +66,7 @@ type scheduler struct {
 	policy      schedulePolicy
 	receiveChan chan addTaskReq
 	clearChan   chan clearQueuedReq
-	execChan    chan Task
+	execChan    chan *queuedTask
 	pool        *conc.Pool[any]
 	gpuPool     *conc.Pool[any]
 
@@ -158,14 +158,10 @@ func (s *scheduler) schedule() {
 	for {
 		s.setupReadyLenMetric()
 
-		var execChan chan Task
-		var execTask Task
+		var execChan chan *queuedTask
 		nq := int64(0)
 		now := time.Now()
 		task, nq, execChan = s.setupExecListener(task, now)
-		if task.valid() {
-			execTask = task.Task
-		}
 
 		select {
 		case req, ok := <-s.receiveChan:
@@ -173,8 +169,7 @@ func (s *scheduler) schedule() {
 				log.Info("receiveChan closed, processing remaining request")
 				// drain policy maintained task
 				for task.valid() {
-					execChan <- task.Task
-					s.recordReadTaskQueueDuration(task, now, readTaskQueueOutcomeScheduled)
+					execChan <- task
 					s.updateWaitingTaskCounter(-1, -nq)
 					task = s.produceExecChan(now)
 				}
@@ -189,8 +184,7 @@ func (s *scheduler) schedule() {
 			var result ClearResult
 			result, task = s.clearQueuedTasks(req.filter, req.reason, task, now)
 			req.resp <- clearQueuedResp{result: result}
-		case execChan <- execTask:
-			s.recordReadTaskQueueDuration(task, now, readTaskQueueOutcomeScheduled)
+		case execChan <- task:
 			// Task sent, drop the ownership of sent task.
 			// Update waiting task counter.
 			s.updateWaitingTaskCounter(-1, -nq)
@@ -259,17 +253,12 @@ func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64, n
 func (s *scheduler) produceExecChan(now time.Time) *queuedTask {
 	var task *queuedTask
 	for {
-		var execChan chan Task
-		var execTask Task
+		var execChan chan *queuedTask
 		nq := int64(0)
 		task, nq, execChan = s.setupExecListener(task, now)
-		if task.valid() {
-			execTask = task.Task
-		}
 
 		select {
-		case execChan <- execTask:
-			s.recordReadTaskQueueDuration(task, now, readTaskQueueOutcomeScheduled)
+		case execChan <- task:
 			// Update waiting task counter.
 			s.updateWaitingTaskCounter(-1, -nq)
 			// Task sent, drop the ownership of sent task.
@@ -285,17 +274,24 @@ func (s *scheduler) exec() {
 	defer s.wg.Done()
 	log.Info("start execute loop")
 	for {
-		t, ok := <-s.execChan
+		queued, ok := <-s.execChan
 		if !ok {
 			log.Info("scheduler execChan closed, worker exit")
 			return
 		}
-		// Skip this task if task is canceled.
-		if err := t.Context().Err(); err != nil {
-			log.Warn("task canceled before executing", zap.Error(err))
-			t.Done(err)
+		now := time.Now()
+		deadlineAdvance := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse()
+		cleanupTime := now.Add(deadlineAdvance)
+		if queued.cleanupReady(cleanupTime) {
+			err := cleanupTaskError(queued)
+			s.recordReadTaskQueueDuration(queued, now, cleanupTaskOutcome(queued))
+			log.Warn("task deadline reached before executing", zap.Error(err))
+			queued.Done(err)
 			continue
 		}
+		s.recordReadTaskQueueDuration(queued, now, readTaskQueueOutcomeScheduled)
+
+		t := queued.Task
 		if err := t.PreExecute(); err != nil {
 			log.Warn("failed to pre-execute task", zap.Error(err))
 			t.Done(err)
@@ -344,27 +340,12 @@ func readTaskExecuteOutcome(err error) string {
 }
 
 // setupExecListener setup the execChan and next task to run.
-func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time) (*queuedTask, int64, chan Task) {
-	var execChan chan Task
+func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time) (*queuedTask, int64, chan *queuedTask) {
+	var execChan chan *queuedTask
 	nq := int64(0)
-	deadlineAdvance := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse()
-	cleanupTime := now.Add(deadlineAdvance)
-	for {
-		if !lastWaitingTask.valid() {
-			// No task is waiting to send to execChan, schedule a new one from queue.
-			lastWaitingTask = s.policy.Pop(now)
-			if !lastWaitingTask.valid() {
-				break
-			}
-		}
-		if !lastWaitingTask.cleanupReady(cleanupTime) {
-			break
-		}
-		err := cleanupTaskError(lastWaitingTask)
-		s.updateWaitingTaskCounter(-1, -lastWaitingTask.NQ())
-		s.recordReadTaskQueueDuration(lastWaitingTask, now, cleanupTaskOutcome(lastWaitingTask))
-		lastWaitingTask.Done(err)
-		lastWaitingTask = nil
+	if !lastWaitingTask.valid() {
+		// No task is waiting to send to execChan, schedule a new one from queue.
+		lastWaitingTask = s.policy.Pop(now)
 	}
 	if lastWaitingTask.valid() {
 		// Try to sent task to execChan if there is a task ready to run.
