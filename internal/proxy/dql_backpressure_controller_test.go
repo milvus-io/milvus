@@ -301,6 +301,8 @@ func TestDQLBackpressureControllerUpdateConfig(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	assert.True(t, controller.Acquire(ctx))
+	assert.Equal(t, int64(1), controller.Inflight())
+	controller.Release()
 	assert.Equal(t, int64(0), controller.Inflight())
 
 	cfg.enabled = true
@@ -309,6 +311,21 @@ func TestDQLBackpressureControllerUpdateConfig(t *testing.T) {
 	assert.Equal(t, int64(1), controller.Inflight())
 	cfg.enabled = false
 	controller.updateConfig(cfg)
+	controller.Release()
+	assert.Equal(t, int64(0), controller.Inflight())
+}
+
+func TestDQLBackpressureControllerDisabledAcquireTracksInflight(t *testing.T) {
+	controller := newDQLBackpressureController(dqlBackpressureControllerConfig{
+		enabled:                false,
+		maxConcurrency:         1,
+		slowdownMinConcurrency: 1,
+		slowdownRatio:          0.5,
+	})
+
+	require.True(t, controller.Acquire(context.Background()))
+	assert.Equal(t, int64(1), controller.Inflight())
+
 	controller.Release()
 	assert.Equal(t, int64(0), controller.Inflight())
 }
@@ -348,6 +365,7 @@ func TestDQLBackpressureControllerDisableWakesBlockedAcquire(t *testing.T) {
 		t.Fatalf("acquire did not resume after backpressure was disabled")
 	}
 
+	controller.Release()
 	controller.Release()
 	assert.Equal(t, int64(0), controller.Inflight())
 }
