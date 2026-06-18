@@ -69,7 +69,7 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	defer C.free(unsafe.Pointer(status.error_msg))
 
 	logMsg := fmt.Sprintf("%s, C Runtime Exception: %s\n", extraInfo, errorMsg)
-	mlog.Warn(logMsg)
+	mlog.Warn(context.TODO(), logMsg)
 	if merr.IsSegcoreSignal(int32(errorCode)) {
 		mlog.Info(context.TODO(), "fake finished the task")
 	}
