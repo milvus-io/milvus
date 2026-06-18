@@ -2283,6 +2283,8 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_TextAndJSONStats(t *testing.T
 		}).Build()
 	defer mockRemove.UnPatch()
 
+	segment.GetTextStatsLogs()[101].Files = []string{"gc/text_log/501/1/100/10/1003/101/text_file_keep"}
+
 	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
 		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string, recursive bool, fn storage.ChunkObjectWalkFunc) error {
 			switch {
