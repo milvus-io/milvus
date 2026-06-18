@@ -917,7 +917,9 @@ class TestMilvusClientTextLOBShared(TestMilvusClientV2Base):
         client = self._client()
         text_match_ids = None
         for field in [CONTENT_FIELD, VARCHAR_TEXT_FIELD]:
-            expected_ids = expected_text_match_ids_by_analyzer(self, client, self.shared_rows, field, "vector database", STANDARD_ANALYZER)
+            expected_ids = expected_text_match_ids_by_analyzer(
+                self, client, self.shared_rows, field, "vector database", STANDARD_ANALYZER
+            )
             rows, _ = self.query(
                 client,
                 SHARED_COLLECTION_NAME,
@@ -951,7 +953,9 @@ class TestMilvusClientTextLOBShared(TestMilvusClientV2Base):
         query = "vector database milvus"
         tokens = analyzer_tokens(self, client, query, STANDARD_ANALYZER)
         for minimum in [1, 2, 3]:
-            expected_ids = expected_text_match_ids_by_analyzer(self, client, self.shared_rows, CONTENT_FIELD, query, STANDARD_ANALYZER, minimum)
+            expected_ids = expected_text_match_ids_by_analyzer(
+                self, client, self.shared_rows, CONTENT_FIELD, query, STANDARD_ANALYZER, minimum
+            )
             rows, _ = self.query(
                 client,
                 SHARED_COLLECTION_NAME,
@@ -980,7 +984,9 @@ class TestMilvusClientTextLOBShared(TestMilvusClientV2Base):
         expected: template result IDs match literal IDs and every ANN hit satisfies the analyzed token filter
         """
         client = self._client()
-        expected_ids = expected_text_match_ids_by_analyzer(self, client, self.shared_rows, CONTENT_FIELD, "vector database", STANDARD_ANALYZER)
+        expected_ids = expected_text_match_ids_by_analyzer(
+            self, client, self.shared_rows, CONTENT_FIELD, "vector database", STANDARD_ANALYZER
+        )
         literal_rows, _ = self.query(
             client,
             SHARED_COLLECTION_NAME,
@@ -1910,7 +1916,6 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
         assert query_by_ids(self, client, collection_name, deleted, [CONTENT_FIELD]) == {}
 
 
-
 class TestMilvusClientTextLOBNegative(TestMilvusClientV2Base):
     """Negative TEXT/BM25 validation coverage for schema, index, insert, and text_match errors."""
 
@@ -1933,30 +1938,65 @@ class TestMilvusClientTextLOBNegative(TestMilvusClientV2Base):
         schema = self._schema_with_base_fields(client)
         schema.add_field(field_name=CONTENT_FIELD, datatype=DataType.TEXT, enable_analyzer=True)
         schema.add_field(field_name=CONTENT_SPARSE_FIELD, datatype=DataType.SPARSE_FLOAT_VECTOR)
-        schema.add_function(Function(name="missing_input", function_type=FunctionType.BM25, input_field_names=["missing"], output_field_names=[CONTENT_SPARSE_FIELD]))
+        schema.add_function(
+            Function(
+                name="missing_input",
+                function_type=FunctionType.BM25,
+                input_field_names=["missing"],
+                output_field_names=[CONTENT_SPARSE_FIELD],
+            )
+        )
         cases.append((schema, "not found"))
 
         schema = self._schema_with_base_fields(client)
         schema.add_field(field_name=CONTENT_FIELD, datatype=DataType.TEXT, enable_analyzer=True)
-        schema.add_function(Function(name="missing_output", function_type=FunctionType.BM25, input_field_names=[CONTENT_FIELD], output_field_names=["missing_sparse"]))
+        schema.add_function(
+            Function(
+                name="missing_output",
+                function_type=FunctionType.BM25,
+                input_field_names=[CONTENT_FIELD],
+                output_field_names=["missing_sparse"],
+            )
+        )
         cases.append((schema, "not found"))
 
         schema = self._schema_with_base_fields(client)
         schema.add_field(field_name=CONTENT_FIELD, datatype=DataType.TEXT, enable_analyzer=False)
         schema.add_field(field_name=CONTENT_SPARSE_FIELD, datatype=DataType.SPARSE_FLOAT_VECTOR)
-        schema.add_function(Function(name="input_without_analyzer", function_type=FunctionType.BM25, input_field_names=[CONTENT_FIELD], output_field_names=[CONTENT_SPARSE_FIELD]))
+        schema.add_function(
+            Function(
+                name="input_without_analyzer",
+                function_type=FunctionType.BM25,
+                input_field_names=[CONTENT_FIELD],
+                output_field_names=[CONTENT_SPARSE_FIELD],
+            )
+        )
         cases.append((schema, "analyzer"))
 
         schema = self._schema_with_base_fields(client)
         schema.add_field(field_name=CONTENT_FIELD, datatype=DataType.TEXT, enable_analyzer=True)
         schema.add_field(field_name=CONTENT_SPARSE_FIELD, datatype=DataType.SPARSE_FLOAT_VECTOR, nullable=True)
-        schema.add_function(Function(name="nullable_output", function_type=FunctionType.BM25, input_field_names=[CONTENT_FIELD], output_field_names=[CONTENT_SPARSE_FIELD]))
+        schema.add_function(
+            Function(
+                name="nullable_output",
+                function_type=FunctionType.BM25,
+                input_field_names=[CONTENT_FIELD],
+                output_field_names=[CONTENT_SPARSE_FIELD],
+            )
+        )
         cases.append((schema, "nullable"))
 
         schema = self._schema_with_base_fields(client)
         schema.add_field(field_name=CONTENT_FIELD, datatype=DataType.TEXT, enable_analyzer=True)
         schema.add_field(field_name=CONTENT_SPARSE_FIELD, datatype=DataType.FLOAT_VECTOR, dim=DIM)
-        schema.add_function(Function(name="wrong_output_type", function_type=FunctionType.BM25, input_field_names=[CONTENT_FIELD], output_field_names=[CONTENT_SPARSE_FIELD]))
+        schema.add_function(
+            Function(
+                name="wrong_output_type",
+                function_type=FunctionType.BM25,
+                input_field_names=[CONTENT_FIELD],
+                output_field_names=[CONTENT_SPARSE_FIELD],
+            )
+        )
         cases.append((schema, "SPARSE_FLOAT_VECTOR"))
 
         for schema, err_msg in cases:
@@ -2072,7 +2112,9 @@ class TestMilvusClientTextLOBNegative(TestMilvusClientV2Base):
         schema.add_field(field_name=CONTENT_FIELD, datatype=DataType.TEXT, enable_analyzer=True, enable_match=False)
         index_params = client.prepare_index_params()
         index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="COSINE")
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params, consistency_level="Strong")
+        self.create_collection(
+            client, collection_name, schema=schema, index_params=index_params, consistency_level="Strong"
+        )
         self.insert(
             client,
             collection_name,
@@ -2324,8 +2366,7 @@ class TestMilvusClientTextLOBEnvironmentGated(TestMilvusClientV2Base):
             3102: make_text(threshold + 1, "inline-threshold-above"),
         }
         rows = [
-            {ID_FIELD: pk, VECTOR_FIELD: vector_for_pk(pk), CONTENT_FIELD: content}
-            for pk, content in payloads.items()
+            {ID_FIELD: pk, VECTOR_FIELD: vector_for_pk(pk), CONTENT_FIELD: content} for pk, content in payloads.items()
         ]
         expected = expected_payloads(rows)
 
