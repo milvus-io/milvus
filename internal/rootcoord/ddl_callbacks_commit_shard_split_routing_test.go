@@ -32,6 +32,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// pbRangeShard builds a range-routed CollectionShardInfo owning a single
+// [lower, upper) range, for test fixtures.
+func pbRangeShard(state schemapb.ShardState, lower, upper []byte) *schemapb.CollectionShardInfo {
+	return &schemapb.CollectionShardInfo{
+		State: state,
+		Routing: &schemapb.CollectionShardInfo_RangeRouting{
+			RangeRouting: &schemapb.RangeRouting{Ranges: []*schemapb.RoutingKeyRange{{Lower: lower, Upper: upper}}},
+		},
+	}
+}
+
 func TestDDLCallbacksCommitShardSplitRouting(t *testing.T) {
 	core := initStreamingSystemAndCore(t)
 	ctx := context.Background()
@@ -72,8 +83,8 @@ func TestDDLCallbacksCommitShardSplitRouting(t *testing.T) {
 			PhysicalChannelNames: []string{funcutil.ToPhysicalChannel(source), funcutil.ToPhysicalChannel(t1), funcutil.ToPhysicalChannel(t2)},
 			ShardInfos: []*schemapb.CollectionShardInfo{
 				{State: sourceState},
-				{RoutingKeyUpper: []byte{0x80}, State: targetState},
-				{RoutingKeyLower: []byte{0x80}, State: targetState},
+				pbRangeShard(targetState, nil, []byte{0x80}),
+				pbRangeShard(targetState, []byte{0x80}, nil),
 			},
 			RoutingMode: schemapb.RoutingMode_RoutingModeRange,
 		}
@@ -87,8 +98,8 @@ func TestDDLCallbacksCommitShardSplitRouting(t *testing.T) {
 		require.Equal(t, sourceState, coll.ShardInfos[source].State)
 		require.Equal(t, targetState, coll.ShardInfos[t1].State)
 		require.Equal(t, targetState, coll.ShardInfos[t2].State)
-		require.Equal(t, []byte{0x80}, coll.ShardInfos[t1].RoutingKeyUpper)
-		require.Equal(t, []byte{0x80}, coll.ShardInfos[t2].RoutingKeyLower)
+		require.Equal(t, []byte{0x80}, coll.ShardInfos[t1].Ranges[0].Upper)
+		require.Equal(t, []byte{0x80}, coll.ShardInfos[t2].Ranges[0].Lower)
 	}
 
 	// write-switch commit: source Splitting, two range targets Creating.

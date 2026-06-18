@@ -1250,10 +1250,7 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	for i, vchannel := range collInfo.VirtualChannelNames {
 		info := &schemapb.CollectionShardInfo{}
 		if shard, ok := collInfo.ShardInfos[vchannel]; ok {
-			info.LastTruncateTimeTick = shard.LastTruncateTimeTick
-			info.RoutingKeyLower = shard.RoutingKeyLower
-			info.RoutingKeyUpper = shard.RoutingKeyUpper
-			info.State = shard.State
+			info = shard.ToPB()
 		}
 		shardInfos[i] = info
 	}

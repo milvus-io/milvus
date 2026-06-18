@@ -407,6 +407,16 @@ func (m *shardSplitManager) taskLogger(task *datapb.SplitShardTask) *log.MLogger
 // and ranges, and every other pre-existing shard is carried through with its
 // current range and state — so splitting one shard of a multi-shard collection
 // leaves the rest untouched.
+// rangeShardInfoPB builds a CollectionShardInfo carrying the range-routing
+// predicate; the routing oneof is left unset when ranges is empty.
+func rangeShardInfoPB(state schemapb.ShardState, lastTruncateTimeTick uint64, ranges []*schemapb.RoutingKeyRange) *schemapb.CollectionShardInfo {
+	si := &schemapb.CollectionShardInfo{State: state, LastTruncateTimeTick: lastTruncateTimeTick}
+	if len(ranges) > 0 {
+		si.Routing = &schemapb.CollectionShardInfo_RangeRouting{RangeRouting: &schemapb.RangeRouting{Ranges: ranges}}
+	}
+	return si
+}
+
 func (m *shardSplitManager) commitRouting(task *datapb.SplitShardTask, collection *collectionInfo, sourceState, targetState schemapb.ShardState) error {
 	targets := task.GetTargets()
 	targetByVChannel := make(map[string]*datapb.SplitShardTaskTarget, len(targets))
@@ -431,25 +441,20 @@ func (m *shardSplitManager) commitRouting(task *datapb.SplitShardTask, collectio
 		pchannels[i] = funcutil.ToPhysicalChannel(vchannel)
 		switch {
 		case vchannel == task.GetSourceVchannel():
+			// the source is fenced (Splitting) then released (Dropped); it owns no
+			// routing range any more, so it carries only the state.
 			shardInfos[i] = &schemapb.CollectionShardInfo{State: sourceState}
 		case targetByVChannel[vchannel] != nil:
 			target := targetByVChannel[vchannel]
-			shardInfos[i] = &schemapb.CollectionShardInfo{
-				RoutingKeyLower: target.GetRoutingKeyLower(),
-				RoutingKeyUpper: target.GetRoutingKeyUpper(),
-				State:           targetState,
-			}
+			shardInfos[i] = rangeShardInfoPB(targetState, 0, []*schemapb.RoutingKeyRange{
+				{Lower: target.GetRoutingKeyLower(), Upper: target.GetRoutingKeyUpper()},
+			})
 		default:
 			// a pre-existing shard that is neither the source nor a target:
-			// carry its current range and state through unchanged so a split of
+			// carry its current ranges and state through unchanged so a split of
 			// a multi-shard collection keeps the other shards' routing intact.
 			if info, ok := collection.ShardInfos[vchannel]; ok {
-				shardInfos[i] = &schemapb.CollectionShardInfo{
-					LastTruncateTimeTick: info.GetLastTruncateTimeTick(),
-					RoutingKeyLower:      info.GetRoutingKeyLower(),
-					RoutingKeyUpper:      info.GetRoutingKeyUpper(),
-					State:                info.GetState(),
-				}
+				shardInfos[i] = rangeShardInfoPB(info.GetState(), info.GetLastTruncateTimeTick(), info.GetRangeRouting().GetRanges())
 			} else {
 				shardInfos[i] = &schemapb.CollectionShardInfo{State: schemapb.ShardState_ShardNormal}
 			}
