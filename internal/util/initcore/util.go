@@ -31,8 +31,6 @@ import (
 	"strings"
 	"unsafe"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -149,9 +147,9 @@ func RegisterArrowIOThreadPoolWatchers(pt *paramtable.ComponentParam, source str
 			newThreads := ResolveArrowIOThreadPoolCapacity()
 			UpdateArrowIOThreadPoolCapacity(newThreads)
 			mlog.Info(context.TODO(), "arrow io thread pool capacity updated",
-				zap.String("source", source),
-				zap.String("trigger", key),
-				zap.Int("threads", newThreads))
+				mlog.String("source", source),
+				mlog.String("trigger", key),
+				mlog.Int("threads", newThreads))
 		}
 	}
 	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key,
@@ -173,13 +171,13 @@ func RegisterArrowReaderConfigWatchers(pt *paramtable.ComponentParam, source str
 		}
 		if err := InitArrowReaderConfig(pt); err != nil {
 			mlog.Warn(context.TODO(), "failed to reconfigure arrow reader params",
-				zap.String("source", source), zap.Error(err))
+				mlog.String("source", source), mlog.Err(err))
 			return
 		}
 		mlog.Info(context.TODO(), "arrow reader params reconfigured",
-			zap.String("source", source),
-			zap.Int64("holeSizeLimitBytes", pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.GetAsInt64()),
-			zap.Int64("rangeSizeLimitBytes", pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.GetAsInt64()))
+			mlog.String("source", source),
+			mlog.Int64("holeSizeLimitBytes", pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.GetAsInt64()),
+			mlog.Int64("rangeSizeLimitBytes", pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.GetAsInt64()))
 	}
 	pt.Watch(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key,
 		config.NewHandler(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, handler))
