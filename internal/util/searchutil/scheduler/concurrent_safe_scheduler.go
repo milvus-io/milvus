@@ -144,6 +144,7 @@ func (s *scheduler) schedule() {
 				// drain policy maintained task
 				for task.valid() {
 					execChan <- task.Task
+					s.recordReadTaskQueueDuration(task, now, readTaskQueueOutcomeScheduled)
 					s.updateWaitingTaskCounter(-1, -nq)
 					task = s.produceExecChan(now)
 				}
@@ -155,6 +156,7 @@ func (s *scheduler) schedule() {
 			// And consume recv chan as much as possible.
 			s.consumeRecvChan(req, maxReceiveChanBatchConsumeNum, now)
 		case execChan <- execTask:
+			s.recordReadTaskQueueDuration(task, now, readTaskQueueOutcomeScheduled)
 			// Task sent, drop the ownership of sent task.
 			// Update waiting task counter.
 			s.updateWaitingTaskCounter(-1, -nq)
@@ -233,6 +235,7 @@ func (s *scheduler) produceExecChan(now time.Time) *queuedTask {
 
 		select {
 		case execChan <- execTask:
+			s.recordReadTaskQueueDuration(task, now, readTaskQueueOutcomeScheduled)
 			// Update waiting task counter.
 			s.updateWaitingTaskCounter(-1, -nq)
 			// Task sent, drop the ownership of sent task.
@@ -310,26 +313,24 @@ func readTaskExecuteOutcome(err error) string {
 func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time) (*queuedTask, int64, chan Task) {
 	var execChan chan Task
 	nq := int64(0)
-	if !lastWaitingTask.valid() {
-		// No task is waiting to send to execChan, schedule a new one from queue.
-		deadlineAdvance := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse()
-		cleanupTime := now.Add(deadlineAdvance)
-		for {
+	deadlineAdvance := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse()
+	cleanupTime := now.Add(deadlineAdvance)
+	for {
+		if !lastWaitingTask.valid() {
+			// No task is waiting to send to execChan, schedule a new one from queue.
 			lastWaitingTask = s.policy.Pop(now)
 			if !lastWaitingTask.valid() {
 				break
 			}
-			if lastWaitingTask.cleanupReady(cleanupTime) {
-				err := cleanupTaskError(lastWaitingTask)
-				s.updateWaitingTaskCounter(-1, -lastWaitingTask.NQ())
-				s.recordReadTaskQueueDuration(lastWaitingTask, now, cleanupTaskOutcome(lastWaitingTask))
-				lastWaitingTask.Done(err)
-				lastWaitingTask = nil
-				continue
-			}
-			s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeScheduled)
+		}
+		if !lastWaitingTask.cleanupReady(cleanupTime) {
 			break
 		}
+		err := cleanupTaskError(lastWaitingTask)
+		s.updateWaitingTaskCounter(-1, -lastWaitingTask.NQ())
+		s.recordReadTaskQueueDuration(lastWaitingTask, now, cleanupTaskOutcome(lastWaitingTask))
+		lastWaitingTask.Done(err)
+		lastWaitingTask = nil
 	}
 	if lastWaitingTask.valid() {
 		// Try to sent task to execChan if there is a task ready to run.
