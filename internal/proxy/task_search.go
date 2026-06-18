@@ -541,6 +541,9 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		t.needRequery = len(t.request.GetOutputFields()) > 0
 	}
 	t.needRequery = t.needRequery || (t.rerankMeta != nil && len(t.rerankMeta.GetInputFieldNames()) > 0)
+	if t.skipRequeryByNamespacePartitionMode() {
+		t.needRequery = false
+	}
 
 	t.SubReqs = make([]*internalpb.SubSearchRequest, len(t.request.GetSubReqs()))
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
@@ -900,6 +903,9 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 			t.needRequery = len(vectorOutputFields) > 0 || len(textOutputFields) > 0
 		}
 	}
+	if t.skipRequeryByNamespacePartitionMode() {
+		t.needRequery = false
+	}
 	var rerankInputFieldIDs []int64
 	if t.rerankMeta != nil {
 		rerankInputFieldIDs = t.rerankMeta.GetInputFieldIDs()
@@ -1033,6 +1039,12 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		zap.Stringer("plan", plan)) // may be very large if large term passed.
 
 	return nil
+}
+
+func (t *searchTask) skipRequeryByNamespacePartitionMode() bool {
+	return t.schema != nil &&
+		t.schema.CollectionSchema != nil &&
+		common.IsNamespaceModePartition(t.schema.GetProperties()...)
 }
 
 // convertPlaceholderIfNeeded converts fp32 vectors to fp16/bf16 if the target field uses lower precision.
