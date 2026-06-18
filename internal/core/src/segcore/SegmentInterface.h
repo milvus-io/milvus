@@ -46,7 +46,6 @@
 #include "common/Schema.h"
 #include "common/Span.h"
 #include "common/SystemProperty.h"
-#include "common/Trace.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/VectorArray.h"
