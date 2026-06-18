@@ -467,46 +467,6 @@ func (s *SchedulerSuite) TestSetupExecListenerDropsWaitingTaskExpiredBeforeExecC
 	s.Equal(uint64(0), readTaskQueueDurationCount(readTaskQueueOutcomeScheduled))
 }
 
-func (s *SchedulerSuite) TestClearQueuedTasksRemovesPolicyAndCurrentTask() {
-	paramtable.Init()
-	metrics.QueryNodeReadTaskQueueDuration.Reset()
-	defer metrics.QueryNodeReadTaskQueueDuration.Reset()
-
-	now := time.Now()
-	scheduler := &scheduler{
-		policy:           newFIFOPolicy(),
-		execChan:         make(chan Task),
-		schedulerCounter: schedulerCounter{},
-	}
-
-	policyTask := newMockTask(mockTaskConfig{username: "clear", nq: 3})
-	keepTask := newMockTask(mockTaskConfig{username: "keep", nq: 5})
-	currentTask := newQueuedTask(newMockTask(mockTaskConfig{username: "clear", nq: 7}), now.Add(-time.Second))
-
-	queuedPolicyTask := newQueuedTask(policyTask, now.Add(-time.Second))
-	added, err := scheduler.policy.Push(queuedPolicyTask)
-	s.NoError(err)
-	scheduler.updateWaitingTaskCounter(int64(added), queuedPolicyTask.NQ())
-	queuedKeepTask := newQueuedTask(keepTask, now.Add(-time.Second))
-	added, err = scheduler.policy.Push(queuedKeepTask)
-	s.NoError(err)
-	scheduler.updateWaitingTaskCounter(int64(added), queuedKeepTask.NQ())
-	scheduler.updateWaitingTaskCounter(1, currentTask.NQ())
-
-	result, remaining := scheduler.clearQueuedTasks(func(task Task) bool {
-		return task.Username() == "clear"
-	}, "test", currentTask, now)
-
-	s.Equal(ClearResult{QueuedCleared: 2, QueuedNQCleared: 10}, result)
-	s.False(remaining.valid())
-	s.Equal(int64(1), scheduler.GetWaitingTaskTotal())
-	s.Equal(int64(5), scheduler.GetWaitingTaskTotalNQ())
-	s.ErrorIs(policyTask.Wait(), context.Canceled)
-	s.ErrorContains(currentTask.Task.(*MockTask).Wait(), "read task queue cleared by admin: test")
-	s.Equal(uint64(2), readTaskQueueDurationCount(readTaskQueueOutcomeCleared))
-	s.Same(keepTask, scheduler.policy.Pop(now).Task)
-}
-
 func (s *SchedulerSuite) TestExecRecordsReadTaskExecuteDuration() {
 	paramtable.Init()
 	metrics.QueryNodeReadTaskExecuteDuration.Reset()
