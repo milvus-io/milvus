@@ -181,8 +181,9 @@ class ResponseChecker:
 
         # code check: pin the stable merr error code. ct.ANY_CODE is the
         # "don't care" sentinel and is skipped, so only tests that name a real
-        # code are pinned to it.
-        if ct.err_code in error_dict and error_dict[ct.err_code] is not ct.ANY_CODE:
+        # code are pinned to it. err_code 0 is also skipped: it means success, so
+        # it can never be a real error code here and is only ever a placeholder.
+        if ct.err_code in error_dict and error_dict[ct.err_code] not in (0, ct.ANY_CODE):
             assert res.code == error_dict[ct.err_code], (
                 f"Response of API {self.func_name} "
                 f"expect get error code {error_dict[ct.err_code]}, "
