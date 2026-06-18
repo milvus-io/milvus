@@ -351,6 +351,92 @@ class TestGroupSearch(TestMilvusClientV2Base):
                         tmp_distances = group_distances
                         group_distances = [res[i][l + 1].distance]
 
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_hybrid_search_group_by_equal_scores_dedup(self):
+        """
+        target: hybrid_search + group_by(strict_group_size) must still de-dup correctly
+                when all candidate scores are equal (ties), including same-group entities
+                spread across multiple sealed segments and the growing segment.
+        method: every row shares one identical vector on every field (so all candidates
+                tie); one group_id is present in two sealed segments and the growing
+                segment; run hybrid_search with group_by + group_size=1 + strict_group_size.
+        expected: each group value appears exactly once AND the output group value matches
+                  the pk prefix (no pk<->group-by-value misalignment).
+        regression: equal-score tie sorting (SortEqualScoresByPks) must permute
+                    group_by_values together with the primary keys; otherwise the
+                    pk<->group binding breaks and strict_group_size is silently violated.
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str("group_equal_scores")
+        dim = 8
+        vec_fields = ["v0", "v1", "v2"]
+        # one identical vector shared by every row and every field -> all scores tie
+        tied_vec = cf.gen_vectors(1, dim=dim, vector_data_type=DataType.FLOAT_VECTOR)[0]
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field("pk", DataType.VARCHAR, is_primary=True, max_length=128)
+        schema.add_field("group_id", DataType.INT64, nullable=False)
+        for vf in vec_fields:
+            schema.add_field(vf, DataType.FLOAT_VECTOR, dim=dim)
+        self.create_collection(client, collection_name, schema=schema)
+
+        groups = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+
+        def rows(gid, ns):
+            out = []
+            for n in ns:
+                row = {"pk": f"{gid}_{n}", "group_id": gid}
+                for vf in vec_fields:
+                    row[vf] = tied_vec
+                out.append(row)
+            return out
+
+        # group 100 spans sealed-A, sealed-B and the growing segment; others are singletons
+        batch_a = rows(100, [0, 1, 2])
+        for g in groups[1:]:
+            batch_a += rows(g, [0])
+        self.insert(client, collection_name, data=batch_a)
+        self.flush(client, collection_name)
+        self.insert(client, collection_name, data=rows(100, [3, 4, 5]))
+        self.flush(client, collection_name)
+        self.insert(client, collection_name, data=rows(100, [6, 7, 8]))  # growing, not flushed
+
+        index_params = self.prepare_index_params(client)[0]
+        for vf in vec_fields:
+            index_params.add_index(field_name=vf, index_type="IVF_FLAT", metric_type="COSINE", params={"nlist": 4})
+        self.create_index(client, collection_name, index_params=index_params)
+        self.load_collection(client, collection_name)
+
+        limit = len(groups)
+        reqs = [
+            AnnSearchRequest(
+                data=[tied_vec], anns_field=vf, param={"metric_type": "COSINE", "params": {"nprobe": 4}}, limit=limit
+            )
+            for vf in vec_fields
+        ]
+        res = self.hybrid_search(
+            client,
+            collection_name,
+            reqs=reqs,
+            ranker=WeightedRanker(0.34, 0.33, 0.33),
+            limit=limit,
+            group_by_field="group_id",
+            group_size=1,
+            strict_group_size=True,
+            output_fields=["group_id"],
+        )[0]
+        hits = res[0]
+        group_values = [h.get("group_id") for h in hits]
+        # group_size=1 + strict_group_size: every group value must be unique
+        assert len(set(group_values)) == len(group_values), f"duplicate group values returned: {group_values}"
+        # pk<->group-by-value binding must hold: output group_id == pk prefix
+        for h in hits:
+            assert h.get("group_id") == int(str(h.id).rsplit("_", 1)[0]), (
+                f"pk/group mismatch: pk={h.id} group_id={h.get('group_id')}"
+            )
+
+        self.drop_collection(client, collection_name)
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_hybrid_search_group_by(self):
         """

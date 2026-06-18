@@ -241,6 +241,16 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
                     search_result->element_level_
                         ? search_result->element_indices_[start + i]
                         : -1;
+                // group_by_values_ must be permuted in lockstep with the pks,
+                // otherwise the pk<->group-by-value binding is broken for
+                // equal-score (tie) entries, defeating group_size/strict_group_size.
+                const bool has_group_by =
+                    search_result->group_by_values_.has_value();
+                GroupByValueType temp_group_by_value;
+                if (has_group_by) {
+                    temp_group_by_value = std::move(
+                        search_result->group_by_values_.value()[start + i]);
+                }
 
                 size_t curr = i;
                 while (indices[curr] != i) {
@@ -253,6 +263,11 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
                         search_result->element_indices_[start + curr] =
                             search_result->element_indices_[start + next];
                     }
+                    if (has_group_by) {
+                        search_result->group_by_values_.value()[start + curr] =
+                            std::move(search_result->group_by_values_
+                                          .value()[start + next]);
+                    }
                     indices[curr] = curr;  // Mark as processed
                     curr = next;
                 }
@@ -262,6 +277,10 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
                 if (search_result->element_level_) {
                     search_result->element_indices_[start + curr] =
                         temp_element_index;
+                }
+                if (has_group_by) {
+                    search_result->group_by_values_.value()[start + curr] =
+                        std::move(temp_group_by_value);
                 }
                 indices[curr] = curr;
             }
