@@ -1,17 +1,17 @@
 package mlog
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
 	"gopkg.in/natefinch/lumberjack.v2"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 var globalP, globalS, globalCleanup atomic.Value
@@ -74,7 +74,7 @@ func InitLoggerWithWriteSyncer(cfg *Config, output zapcore.WriteSyncer, opts ...
 	}
 	err := level.UnmarshalText([]byte(parsedLevel))
 	if err != nil {
-		return nil, nil, fmt.Errorf("initLoggerWithWriteSyncer UnmarshalText cfg.Level err:%w", err)
+		return nil, nil, merr.WrapErrServiceInternalErr(err, "initLoggerWithWriteSyncer UnmarshalText cfg.Level")
 	}
 	var core zapcore.Core
 	if cfg.AsyncWriteEnable {
@@ -99,7 +99,7 @@ func initFileLog(cfg *FileLogConfig) (*lumberjack.Logger, error) {
 	logPath := strings.Join([]string{cfg.RootPath, cfg.Filename}, string(filepath.Separator))
 	if st, err := os.Stat(logPath); err == nil {
 		if st.IsDir() {
-			return nil, errors.New("can't use directory as log file name")
+			return nil, merr.WrapErrServiceInternalMsg("can't use directory as log file name")
 		}
 	}
 	if cfg.MaxSize == 0 {

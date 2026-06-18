@@ -22,10 +22,9 @@ import (
 	"reflect"
 	"time"
 
-	"golang.org/x/time/rate"
-
 	"github.com/cenkalti/backoff/v4"
 	"go.uber.org/atomic"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"

@@ -21,10 +21,9 @@ import (
 	"fmt"
 	"math"
 
-	"golang.org/x/time/rate"
-
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"

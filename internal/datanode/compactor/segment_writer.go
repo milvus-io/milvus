@@ -23,7 +23,6 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/cockroachdb/errors"
-	"github.com/pingcap/log"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 
@@ -216,7 +215,7 @@ func (w *MultiSegmentWriter) rotateWriterOrGrowCurrent() error {
 
 		w.allocator.markSegmentIDBudgetExhausted()
 		writtenUncompressed := w.writer.GetWrittenUncompressed()
-		log.Warn("pre-allocated compaction segment IDs exhausted, continue writing current segment",
+		mlog.Warn(w.ctx, "pre-allocated compaction segment IDs exhausted, continue writing current segment",
 			mlog.Int64("collectionID", w.collectionID),
 			mlog.Int64("partitionID", w.partitionID),
 			mlog.String("channel", w.channel),

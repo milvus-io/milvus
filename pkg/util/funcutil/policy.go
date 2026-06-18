@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"golang.org/x/time/rate"
-
 	"github.com/samber/lo"
+	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 

@@ -35,9 +35,8 @@ import (
 	"time"
 	"unsafe"
 
-	"golang.org/x/time/rate"
-
 	"github.com/cockroachdb/errors"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"

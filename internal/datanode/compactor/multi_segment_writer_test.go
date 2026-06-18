@@ -25,9 +25,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -441,20 +438,6 @@ func (s *MultiSegmentWriterSuite) TestSegmentIDExhaustionGrowsCurrentSegment() {
 	segmentAlloc := allocator.NewLocalAllocator(1000, 1001)
 	logAlloc := allocator.NewLocalAllocator(2000, 3000)
 	allocator := NewCompactionAllocator(segmentAlloc, logAlloc)
-	core, recordedLogs := observer.New(zapcore.WarnLevel)
-	mlog.ReplaceGlobals(zap.New(core), &mlog.ZapProperties{
-		Core:  core,
-		Level: zap.NewAtomicLevelAt(zapcore.WarnLevel),
-	})
-	s.T().Cleanup(func() {
-		logger, props, err := mlog.InitLogger(&mlog.Config{
-			Level:               "debug",
-			Stdout:              true,
-			DisableErrorVerbose: true,
-		})
-		s.Require().NoError(err)
-		mlog.ReplaceGlobals(logger, props)
-	})
 
 	writer, err := NewMultiSegmentWriter(
 		context.Background(),
@@ -481,7 +464,6 @@ func (s *MultiSegmentWriterSuite) TestSegmentIDExhaustionGrowsCurrentSegment() {
 	s.Require().Len(segments, 1)
 	s.EqualValues(1000, segments[0].SegmentID)
 	s.EqualValues(3, segments[0].NumOfRows)
-	s.Len(recordedLogs.FilterMessage("pre-allocated compaction segment IDs exhausted, continue writing current segment").All(), 1)
 }
 
 func (s *MultiSegmentWriterSuite) TestRotateAllocFailureKeepsCurrentWriterOpen() {

@@ -25,13 +25,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"golang.org/x/time/rate"
-
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/time/rate"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 

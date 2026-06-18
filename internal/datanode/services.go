@@ -23,9 +23,8 @@ import (
 	"context"
 	"fmt"
 
-	"golang.org/x/time/rate"
-
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"

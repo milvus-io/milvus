@@ -21,9 +21,8 @@ import (
 	"fmt"
 	"time"
 
-	"golang.org/x/time/rate"
-
 	"github.com/blang/semver/v4"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
