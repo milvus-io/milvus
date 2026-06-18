@@ -375,6 +375,15 @@ func (c *Collection) SchemaAndVersion() (*schemapb.CollectionSchema, uint64) {
 	return schema, version
 }
 
+// SchemaAndSegcoreVersion returns the schema with the monotonic version used
+// by C++ segcore's schema apply gate. This is intentionally separate from
+// SchemaAndVersion: Go-side freshness uses the logical schema version, while
+// segcore segment reopen must stay in the same version domain as CCollection.
+func (c *Collection) SchemaAndSegcoreVersion() (*schemapb.CollectionSchema, uint64) {
+	schema, _, _, segcoreSchemaVersion := c.schemaSnapshotWithSegcoreSchemaVersion()
+	return schema, segcoreSchemaVersion
+}
+
 // Schema returns the schema of collection
 func (c *Collection) Schema() *schemapb.CollectionSchema {
 	schema, _ := c.SchemaAndVersion()
