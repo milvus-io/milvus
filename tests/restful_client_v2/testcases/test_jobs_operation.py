@@ -28,6 +28,19 @@ class NumpyEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
+def write_parquet_with_string_columns(df, file_path, string_columns):
+    table = pa.Table.from_pandas(df, preserve_index=False)
+    for column in string_columns:
+        column_index = table.schema.get_field_index(column)
+        if column_index >= 0:
+            table = table.set_column(
+                column_index,
+                pa.field(column, pa.string()),
+                table[column].cast(pa.string()),
+            )
+    pq.write_table(table, file_path)
+
+
 @pytest.mark.tags(CaseLabel.L0)
 class TestCreateImportJob(TestBase):
     @pytest.mark.parametrize("insert_num", [3000])
@@ -205,7 +218,7 @@ class TestCreateImportJob(TestBase):
         file_path = f"/tmp/{file_name}"
         df = pd.DataFrame(data)
         logger.info(df)
-        df.to_parquet(file_path, engine="pyarrow")
+        write_parquet_with_string_columns(df, file_path, ["book_describe"])
         # upload file to minio storage
         self.storage_client.upload_file(file_path, file_name)
 
@@ -230,8 +243,11 @@ class TestCreateImportJob(TestBase):
 
             while not finished:
                 rsp = self.import_job_client.get_import_job_progress(task_id)
-                if rsp["data"]["state"] == "Completed":
+                state = rsp["data"]["state"]
+                if state == "Completed":
                     finished = True
+                elif state == "Failed":
+                    assert False, f"Import job failed: {rsp}"
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
@@ -666,7 +682,7 @@ class TestCreateImportJob(TestBase):
             # create dir for file path
             Path(file_path).parent.mkdir(parents=True, exist_ok=True)
             df = pd.DataFrame(data)
-            df.to_parquet(file_path, index=False)
+            write_parquet_with_string_columns(df, file_path, ["book_describe"])
             # upload file to minio storage
             self.storage_client.upload_file(file_path, file_name)
             file_names.append([file_name])
@@ -871,7 +887,7 @@ class TestCreateImportJob(TestBase):
             # create dir for file path
             Path(file_path).parent.mkdir(parents=True, exist_ok=True)
             df = pd.DataFrame(data)
-            df.to_parquet(file_path, index=False)
+            write_parquet_with_string_columns(df, file_path, ["book_describe"])
             # upload file to minio storage
             self.storage_client.upload_file(file_path, file_name)
             file_names.append([file_name])
@@ -2364,7 +2380,18 @@ class TestCreateImportJob(TestBase):
         # Save to Parquet
         file_name = f"test_parquet_extra_{uuid4()}.parquet"
         file_path = f"/tmp/{file_name}"
-        df.to_parquet(file_path, engine="pyarrow")
+        pa_schema = pa.schema(
+            [
+                ("id", pa.int64()),
+                ("vector", pa.list_(pa.float32())),
+                ("text", pa.string()),
+                ("extra_column1", pa.int64()),
+                ("extra_column2", pa.string()),
+                ("extra_column3", pa.list_(pa.int64())),
+            ]
+        )
+        table = pa.Table.from_pandas(df, schema=pa_schema, preserve_index=False)
+        pq.write_table(table, file_path)
         self.storage_client.upload_file(file_path, file_name)
 
         # Import should succeed, ignoring extra columns
@@ -3206,7 +3233,9 @@ class TestCreateImportJob(TestBase):
 
         file_name = f"test_parquet_dynamic_{uuid4()}.parquet"
         file_path = f"/tmp/{file_name}"
-        df.to_parquet(file_path, engine="pyarrow")
+        pa_schema = pa.schema([("id", pa.int64()), ("vector", pa.list_(pa.float32())), ("$meta", pa.string())])
+        table = pa.Table.from_pandas(df, schema=pa_schema, preserve_index=False)
+        pq.write_table(table, file_path)
         self.storage_client.upload_file(file_path, file_name)
 
         payload = {"collectionName": name, "files": [[file_name]]}
@@ -4498,7 +4527,6 @@ class TestGetImportJobProgress(TestBase):
 @pytest.mark.tags(CaseLabel.L1)
 class TestGetImportJobProgressNegative(TestBase):
     def test_list_job_with_invalid_job_id(self):
-
         # get import job progress with invalid job id
         job_id_list = ["invalid_job_id", None]
         for job_id in job_id_list:
@@ -4509,7 +4537,6 @@ class TestGetImportJobProgressNegative(TestBase):
                 logger.error(f"get import job progress failed: {e}")
 
     def test_list_job_with_job_id(self):
-
         # get import job progress with invalid job id
         job_id_list = ["invalid_job_id", None]
         for job_id in job_id_list:
