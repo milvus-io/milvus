@@ -158,6 +158,8 @@ func (c *dqlBackpressureController) Acquire(ctx context.Context) bool {
 	for {
 		c.mu.Lock()
 		if !c.enabled {
+			c.inflight++
+			c.updateConcurrencyMetricsLocked()
 			c.mu.Unlock()
 			c.recordWaitDuration(waitStart)
 			return true
