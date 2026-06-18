@@ -42,6 +42,14 @@ JIEBA_ANALYZER = {
 DEFAULT_TEXT = "milvus text lob sentinel vector database"
 EXPLICIT_DEFAULT_TEXT = "explicit default text lob marker atlas"
 TEXT_FIELDS = [CONTENT_FIELD, CONTENT_ZH_FIELD, CONTENT_ALT_FIELD, CONTENT_DEFAULT_FIELD]
+TEXT_USER_DEFINED_INDEX_CASES = [
+    pytest.param("AUTOINDEX", {}, id="AUTOINDEX"),
+    pytest.param("INVERTED", {}, id="INVERTED"),
+    pytest.param("BITMAP", {}, id="BITMAP"),
+    pytest.param("TRIE", {}, id="TRIE"),
+    pytest.param("STL_SORT", {}, id="STL_SORT"),
+    pytest.param("NGRAM", {"params": {"min_gram": 2, "max_gram": 4}}, id="NGRAM"),
+]
 SHARED_COLLECTION_NAME = "test_text_lob" + cf.gen_unique_str("_")
 ANALYZER_TOKEN_CACHE = {}
 
@@ -315,7 +323,7 @@ def build_text_lob_index_params(
     client,
     include_default=True,
     sparse_index_type="SPARSE_INVERTED_INDEX",
-    include_text_index=True,
+    include_varchar_text_index=True,
 ):
     index_params = client.prepare_index_params()
     index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="COSINE")
@@ -327,8 +335,7 @@ def build_text_lob_index_params(
             index_type=sparse_index_type,
             metric_type="BM25",
         )
-    if include_text_index:
-        index_params.add_index(field_name=CONTENT_FIELD, index_type="AUTOINDEX")
+    if include_varchar_text_index:
         index_params.add_index(field_name=VARCHAR_TEXT_FIELD, index_type="AUTOINDEX")
     return index_params
 
@@ -420,7 +427,9 @@ def analyzer_tokens(testcase, client, text, analyzer_params):
     )
     if cache_key in ANALYZER_TOKEN_CACHE:
         return ANALYZER_TOKEN_CACHE[cache_key]
-    res, _ = testcase.run_analyzer(client, text, analyzer_params, with_detail=True, with_hash=True)
+    # Only the token string is consumed below, so skip detail/hash payloads the
+    # server would otherwise compute and serialize (notably for large LOB texts).
+    res, _ = testcase.run_analyzer(client, text, analyzer_params, with_detail=False, with_hash=False)
     tokens = getattr(res, "tokens", res)
     token_values = [token_text(token) for token in tokens if token_text(token)]
     ANALYZER_TOKEN_CACHE[cache_key] = token_values
@@ -908,9 +917,7 @@ class TestMilvusClientTextLOBShared(TestMilvusClientV2Base):
         client = self._client()
         text_match_ids = None
         for field in [CONTENT_FIELD, VARCHAR_TEXT_FIELD]:
-            expected_ids = expected_text_match_ids_by_analyzer(
-                self, client, self.shared_rows, field, "vector database", STANDARD_ANALYZER
-            )
+            expected_ids = expected_text_match_ids_by_analyzer(self, client, self.shared_rows, field, "vector database", STANDARD_ANALYZER)
             rows, _ = self.query(
                 client,
                 SHARED_COLLECTION_NAME,
@@ -944,9 +951,7 @@ class TestMilvusClientTextLOBShared(TestMilvusClientV2Base):
         query = "vector database milvus"
         tokens = analyzer_tokens(self, client, query, STANDARD_ANALYZER)
         for minimum in [1, 2, 3]:
-            expected_ids = expected_text_match_ids_by_analyzer(
-                self, client, self.shared_rows, CONTENT_FIELD, query, STANDARD_ANALYZER, minimum
-            )
+            expected_ids = expected_text_match_ids_by_analyzer(self, client, self.shared_rows, CONTENT_FIELD, query, STANDARD_ANALYZER, minimum)
             rows, _ = self.query(
                 client,
                 SHARED_COLLECTION_NAME,
@@ -975,9 +980,7 @@ class TestMilvusClientTextLOBShared(TestMilvusClientV2Base):
         expected: template result IDs match literal IDs and every ANN hit satisfies the analyzed token filter
         """
         client = self._client()
-        expected_ids = expected_text_match_ids_by_analyzer(
-            self, client, self.shared_rows, CONTENT_FIELD, "vector database", STANDARD_ANALYZER
-        )
+        expected_ids = expected_text_match_ids_by_analyzer(self, client, self.shared_rows, CONTENT_FIELD, "vector database", STANDARD_ANALYZER)
         literal_rows, _ = self.query(
             client,
             SHARED_COLLECTION_NAME,
@@ -1189,7 +1192,7 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
         rows=None,
         load=True,
         sparse_index_type="SPARSE_INVERTED_INDEX",
-        include_text_index=True,
+        include_varchar_text_index=True,
         partition_key_field=None,
         num_partitions=None,
     ):
@@ -1197,12 +1200,12 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
         index_params = build_text_lob_index_params(
             client,
             sparse_index_type=sparse_index_type,
-            include_text_index=include_text_index,
+            include_varchar_text_index=include_varchar_text_index,
         )
         create_kwargs = {
             "schema": schema,
-            "index_params": index_params,
             "consistency_level": "Strong",
+            "load": False,
         }
         if num_partitions is not None:
             create_kwargs["num_partitions"] = num_partitions
@@ -1211,11 +1214,120 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
             collection_name,
             **create_kwargs,
         )
+        self.create_index(client, collection_name, index_params=index_params)
         if rows:
             self.insert(client, collection_name, rows)
             self.flush(client, collection_name)
         if load:
             self.load_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_text_lob_mmap_collection_and_index(self):
+        """
+        target: verify TEXT LOB query/search remains correct when collection and indexes enable mmap
+        method: enable collection and index mmap before loading, insert boundary/large TEXT rows, then query/text_match/BM25
+        expected: mmap properties are visible and TEXT payload checksums/search results remain correct
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        rows = build_text_lob_rows(base_pk=2600, include_boundaries=True, include_one_mib=True)
+        expected = expected_payloads(rows)
+        self.create_text_lob_collection(client, collection_name, rows=None, load=False)
+
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
+        desc, _ = self.describe_collection(client, collection_name)
+        assert desc.get("properties", {}).get("mmap.enabled") == "True"
+
+        for index_name in [
+            VECTOR_FIELD,
+            CONTENT_SPARSE_FIELD,
+            CONTENT_ZH_SPARSE_FIELD,
+            CONTENT_DEFAULT_SPARSE_FIELD,
+            VARCHAR_TEXT_FIELD,
+        ]:
+            self.alter_index_properties(
+                client,
+                collection_name,
+                index_name=index_name,
+                properties={"mmap.enabled": True},
+            )
+            index_info, _ = self.describe_index(client, collection_name, index_name=index_name)
+            assert index_info.get("mmap.enabled") == "True"
+
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        row_ids = [row[ID_FIELD] for row in rows]
+        rows_by_id = query_by_ids(self, client, collection_name, row_ids, [CONTENT_FIELD, CONTENT_ALT_FIELD])
+        assert_rows_payload(rows_by_id, expected, [CONTENT_FIELD, CONTENT_ALT_FIELD])
+
+        expected_text_match_ids = expected_text_match_ids_by_analyzer(
+            self,
+            client,
+            rows,
+            CONTENT_FIELD,
+            "vector database",
+            STANDARD_ANALYZER,
+        )
+        text_match_rows, _ = self.query(
+            client,
+            collection_name,
+            filter=f'text_match({CONTENT_FIELD}, "vector database")',
+            output_fields=[ID_FIELD, CONTENT_FIELD],
+            consistency_level="Strong",
+        )
+        assert {row[ID_FIELD] for row in text_match_rows} == expected_text_match_ids
+
+        res, _ = self.search(
+            client,
+            collection_name,
+            data=["ranking"],
+            anns_field=CONTENT_SPARSE_FIELD,
+            search_params={"metric_type": "BM25", "params": {}},
+            limit=3,
+            output_fields=[ID_FIELD, CONTENT_FIELD],
+            consistency_level="Strong",
+        )
+        assert_search_results(res, nq=1, limit=3, metric="BM25", output_fields=[CONTENT_FIELD], required_ids={2610})
+        assert result_id(res[0][0]) == 2610
+        assert_text_payload(result_entity(res[0][0]).get(CONTENT_FIELD), expected[2610][CONTENT_FIELD])
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("index_type,index_kwargs", TEXT_USER_DEFINED_INDEX_CASES)
+    def test_text_lob_rejects_user_defined_varchar_scalar_index_types(self, index_type, index_kwargs):
+        """
+        target: verify TEXT rejects user-created scalar indexes, including index types supported by VARCHAR
+        method: build a minimal TEXT collection and attempt to create each VARCHAR scalar index type on the TEXT field
+        expected: index creation fails with the TEXT user-created scalar index validation error
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name=ID_FIELD, datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=DIM)
+        schema.add_field(
+            field_name=CONTENT_FIELD,
+            datatype=DataType.TEXT,
+            nullable=True,
+            enable_analyzer=True,
+            enable_match=True,
+            analyzer_params=STANDARD_ANALYZER,
+        )
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name=CONTENT_FIELD, index_type=index_type, **index_kwargs)
+        self.create_index(
+            client,
+            collection_name,
+            index_params=index_params,
+            check_task=CheckTasks.err_res,
+            check_items={
+                ct.err_code: 1100,
+                ct.err_msg: "TEXT field does not support user-created scalar index",
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_text_lob_growing_then_sealed_visibility(self):
@@ -1272,7 +1384,7 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
             build_row(2101, "tm_no_index_miss", "unrelated document"),
             build_row(2102, "tm_no_index_two_tokens", "milvus vector database"),
         ]
-        self.create_text_lob_collection(client, collection_name, rows=rows, load=True, include_text_index=False)
+        self.create_text_lob_collection(client, collection_name, rows=rows, load=True, include_varchar_text_index=False)
         expected_ids = expected_text_match_ids_by_analyzer(
             self, client, rows, CONTENT_FIELD, "vector database", STANDARD_ANALYZER
         )
@@ -1798,6 +1910,7 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
         assert query_by_ids(self, client, collection_name, deleted, [CONTENT_FIELD]) == {}
 
 
+
 class TestMilvusClientTextLOBNegative(TestMilvusClientV2Base):
     """Negative TEXT/BM25 validation coverage for schema, index, insert, and text_match errors."""
 
@@ -1820,65 +1933,30 @@ class TestMilvusClientTextLOBNegative(TestMilvusClientV2Base):
         schema = self._schema_with_base_fields(client)
         schema.add_field(field_name=CONTENT_FIELD, datatype=DataType.TEXT, enable_analyzer=True)
         schema.add_field(field_name=CONTENT_SPARSE_FIELD, datatype=DataType.SPARSE_FLOAT_VECTOR)
-        schema.add_function(
-            Function(
-                name="missing_input",
-                function_type=FunctionType.BM25,
-                input_field_names=["missing"],
-                output_field_names=[CONTENT_SPARSE_FIELD],
-            )
-        )
+        schema.add_function(Function(name="missing_input", function_type=FunctionType.BM25, input_field_names=["missing"], output_field_names=[CONTENT_SPARSE_FIELD]))
         cases.append((schema, "not found"))
 
         schema = self._schema_with_base_fields(client)
         schema.add_field(field_name=CONTENT_FIELD, datatype=DataType.TEXT, enable_analyzer=True)
-        schema.add_function(
-            Function(
-                name="missing_output",
-                function_type=FunctionType.BM25,
-                input_field_names=[CONTENT_FIELD],
-                output_field_names=["missing_sparse"],
-            )
-        )
+        schema.add_function(Function(name="missing_output", function_type=FunctionType.BM25, input_field_names=[CONTENT_FIELD], output_field_names=["missing_sparse"]))
         cases.append((schema, "not found"))
 
         schema = self._schema_with_base_fields(client)
         schema.add_field(field_name=CONTENT_FIELD, datatype=DataType.TEXT, enable_analyzer=False)
         schema.add_field(field_name=CONTENT_SPARSE_FIELD, datatype=DataType.SPARSE_FLOAT_VECTOR)
-        schema.add_function(
-            Function(
-                name="input_without_analyzer",
-                function_type=FunctionType.BM25,
-                input_field_names=[CONTENT_FIELD],
-                output_field_names=[CONTENT_SPARSE_FIELD],
-            )
-        )
+        schema.add_function(Function(name="input_without_analyzer", function_type=FunctionType.BM25, input_field_names=[CONTENT_FIELD], output_field_names=[CONTENT_SPARSE_FIELD]))
         cases.append((schema, "analyzer"))
 
         schema = self._schema_with_base_fields(client)
         schema.add_field(field_name=CONTENT_FIELD, datatype=DataType.TEXT, enable_analyzer=True)
         schema.add_field(field_name=CONTENT_SPARSE_FIELD, datatype=DataType.SPARSE_FLOAT_VECTOR, nullable=True)
-        schema.add_function(
-            Function(
-                name="nullable_output",
-                function_type=FunctionType.BM25,
-                input_field_names=[CONTENT_FIELD],
-                output_field_names=[CONTENT_SPARSE_FIELD],
-            )
-        )
+        schema.add_function(Function(name="nullable_output", function_type=FunctionType.BM25, input_field_names=[CONTENT_FIELD], output_field_names=[CONTENT_SPARSE_FIELD]))
         cases.append((schema, "nullable"))
 
         schema = self._schema_with_base_fields(client)
         schema.add_field(field_name=CONTENT_FIELD, datatype=DataType.TEXT, enable_analyzer=True)
         schema.add_field(field_name=CONTENT_SPARSE_FIELD, datatype=DataType.FLOAT_VECTOR, dim=DIM)
-        schema.add_function(
-            Function(
-                name="wrong_output_type",
-                function_type=FunctionType.BM25,
-                input_field_names=[CONTENT_FIELD],
-                output_field_names=[CONTENT_SPARSE_FIELD],
-            )
-        )
+        schema.add_function(Function(name="wrong_output_type", function_type=FunctionType.BM25, input_field_names=[CONTENT_FIELD], output_field_names=[CONTENT_SPARSE_FIELD]))
         cases.append((schema, "SPARSE_FLOAT_VECTOR"))
 
         for schema, err_msg in cases:
@@ -1924,6 +2002,35 @@ class TestMilvusClientTextLOBNegative(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_text_lob_rejects_partition_key_schema(self):
+        """
+        target: verify TEXT fields cannot be used as partition keys
+        method: create a collection schema whose TEXT field is marked is_partition_key
+        expected: collection creation fails because only Int64 and VarChar are supported partition-key types
+        """
+        client = self._client()
+        schema = self._schema_with_base_fields(client)
+        schema.add_field(
+            field_name=CONTENT_FIELD,
+            datatype=DataType.TEXT,
+            enable_analyzer=True,
+            enable_match=True,
+            analyzer_params=STANDARD_ANALYZER,
+            is_partition_key=True,
+        )
+        self.create_collection(
+            client,
+            cf.gen_collection_name_by_testcase_name(),
+            schema=schema,
+            consistency_level="Strong",
+            check_task=CheckTasks.err_res,
+            check_items={
+                ct.err_code: 1,
+                ct.err_msg: "DataType.INT64 or DataType.VARCHAR",
+            },
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_text_lob_rejects_default_value_schema(self):
         """
         target: verify TEXT fields reject default_value schema definitions
@@ -1965,9 +2072,7 @@ class TestMilvusClientTextLOBNegative(TestMilvusClientV2Base):
         schema.add_field(field_name=CONTENT_FIELD, datatype=DataType.TEXT, enable_analyzer=True, enable_match=False)
         index_params = client.prepare_index_params()
         index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="COSINE")
-        self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params, consistency_level="Strong"
-        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params, consistency_level="Strong")
         self.insert(
             client,
             collection_name,
@@ -2219,7 +2324,8 @@ class TestMilvusClientTextLOBEnvironmentGated(TestMilvusClientV2Base):
             3102: make_text(threshold + 1, "inline-threshold-above"),
         }
         rows = [
-            {ID_FIELD: pk, VECTOR_FIELD: vector_for_pk(pk), CONTENT_FIELD: content} for pk, content in payloads.items()
+            {ID_FIELD: pk, VECTOR_FIELD: vector_for_pk(pk), CONTENT_FIELD: content}
+            for pk, content in payloads.items()
         ]
         expected = expected_payloads(rows)
 
@@ -2329,7 +2435,6 @@ class TestMilvusClientTextLOBEnvironmentGated(TestMilvusClientV2Base):
         index_params = client.prepare_index_params()
         index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="COSINE")
         index_params.add_index(field_name=CONTENT_SPARSE_FIELD, index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
-        index_params.add_index(field_name=CONTENT_FIELD, index_type="AUTOINDEX")
         rows = [
             {
                 ID_FIELD: 3100,
