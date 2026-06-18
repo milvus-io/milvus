@@ -330,23 +330,39 @@ func (r *StructFieldReader) readArrayOfVectorField(chunked *arrow.Chunked) (any,
 				var allVectors []float32
 				for structIdx := startIdx; structIdx < endIdx; structIdx++ {
 					vecStart, vecEnd := fieldArray.ValueOffsets(int(structIdx))
-					if floatArr, ok := fieldArray.ListValues().(*array.Float32); ok {
+					if int(vecEnd-vecStart) != r.dim {
+						return nil, nil, merr.WrapErrImportFailed(
+							fmt.Sprintf("vector dimension mismatch for field '%s': position=%d, actual=%d, expected=%d",
+								r.field.GetName(), structIdx, vecEnd-vecStart, r.dim))
+					}
+					switch floatArr := fieldArray.ListValues().(type) {
+					case *array.Float32:
 						for j := vecStart; j < vecEnd; j++ {
+							if floatArr.IsNull(int(j)) {
+								return nil, nil, WrapNullElementErr(r.field)
+							}
 							allVectors = append(allVectors, floatArr.Value(int(j)))
 						}
+					case *array.Float64:
+						for j := vecStart; j < vecEnd; j++ {
+							if floatArr.IsNull(int(j)) {
+								return nil, nil, WrapNullElementErr(r.field)
+							}
+							allVectors = append(allVectors, float32(floatArr.Value(int(j))))
+						}
+					default:
+						return nil, nil, merr.WrapErrImportFailed(
+							fmt.Sprintf("expected Float32 or Float64 array for FloatVector field '%s', got %T",
+								r.field.GetName(), fieldArray.ListValues()))
 					}
 				}
-				// struct list could be empty, len(allVectors) can be zero
-				// build an empty VectorField if len(allVectors) is zero
-				if len(allVectors) >= 0 {
-					vectorField := &schemapb.VectorField{
-						Dim: int64(r.dim),
-						Data: &schemapb.VectorField_FloatVector{
-							FloatVector: &schemapb.FloatArray{Data: allVectors},
-						},
-					}
-					result = append(result, vectorField)
+				vectorField := &schemapb.VectorField{
+					Dim: int64(r.dim),
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: allVectors},
+					},
 				}
+				result = append(result, vectorField)
 
 			case schemapb.DataType_BinaryVector:
 				return nil, nil, merr.WrapErrImportFailed("ArrayOfVector with BinaryVector element type is not implemented yet")
