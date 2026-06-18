@@ -70,10 +70,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
-	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
@@ -282,8 +282,6 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
 
-	log := mlog.With()
-
 	limiter, err := s.proxy.GetRateLimiter()
 	if err != nil {
 		mlog.Error(context.TODO(), "Get proxy rate limiter failed", mlog.Err(err))
@@ -302,7 +300,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 			proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptor),
 			proxy.UnaryServerHookInterceptor(),
 			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
-			logutil.UnaryTraceLoggerInterceptor,
+			mlog.UnaryServerInterceptor(typeutil.ProxyRole),
 			proxy.RateLimitInterceptor(limiter),
 			accesslog.UnaryUpdateAccessInfoInterceptor,
 			proxy.TraceLogInterceptor,
@@ -417,7 +415,7 @@ func (s *Server) startInternalGrpc(errChan chan error) {
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			otelgrpc.UnaryServerInterceptor(opts...),
-			logutil.UnaryTraceLoggerInterceptor,
+			mlog.UnaryServerInterceptor(typeutil.ProxyRole),
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
 				if s.serverID.Load() == 0 {
@@ -427,6 +425,7 @@ func (s *Server) startInternalGrpc(errChan chan error) {
 			}),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
+			mlog.StreamServerInterceptor(typeutil.ProxyRole),
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
 				if s.serverID.Load() == 0 {
@@ -444,7 +443,6 @@ func (s *Server) startInternalGrpc(errChan chan error) {
 	grpc_health_v1.RegisterHealthServer(s.grpcInternalServer, s)
 	errChan <- nil
 
-	log := mlog.With()
 	mlog.Info(context.TODO(), "create Proxy internal grpc server",
 		mlog.Any("enforcement policy", kaep),
 		mlog.Any("server parameters", kasp))
@@ -468,7 +466,6 @@ func (s *Server) Prepare() error {
 
 // Start start the Proxy Server
 func (s *Server) Run() error {
-	log := mlog.With()
 	mlog.Info(context.TODO(), "init Proxy server")
 	if err := s.init(); err != nil {
 		mlog.Warn(context.TODO(), "init Proxy server failed", mlog.Err(err))
@@ -488,7 +485,6 @@ func (s *Server) Run() error {
 func (s *Server) init() error {
 	etcdConfig := &paramtable.Get().EtcdCfg
 	Params := &paramtable.Get().ProxyGrpcServerCfg
-	log := mlog.With()
 	mlog.Info(context.TODO(), "Proxy init service's parameter table done")
 	HTTPParams := &paramtable.Get().HTTPCfg
 	mlog.Info(context.TODO(), "Proxy init http server's parameter table done")
@@ -578,7 +574,6 @@ func (s *Server) init() error {
 }
 
 func (s *Server) start() error {
-	log := mlog.With()
 	if err := s.proxy.Start(); err != nil {
 		mlog.Warn(context.TODO(), "failed to start Proxy server", mlog.Err(err))
 		return err

@@ -43,7 +43,6 @@ func newListenerManager(ctx context.Context) (l *listenerManager, err error) {
 		}
 	}()
 
-	log := mlog.With()
 	externalGrpcListener, err := netutil.NewListener(
 		netutil.OptIP(paramtable.Get().ProxyGrpcServerCfg.IP),
 		netutil.OptPort(paramtable.Get().ProxyGrpcServerCfg.Port.GetAsInt()),
@@ -76,7 +75,6 @@ func newListenerManager(ctx context.Context) (l *listenerManager, err error) {
 
 // newHTTPListner creates a new http listener
 func newHTTPListner(ctx context.Context, l *listenerManager) error {
-	log := mlog.With()
 	HTTPParams := &paramtable.Get().HTTPCfg
 	if !HTTPParams.Enabled.GetAsBool() {
 		// http server is disabled
@@ -205,7 +203,6 @@ func (l *listenerManager) HTTP2Listener() net.Listener {
 }
 
 func (l *listenerManager) Close() {
-	log := mlog.With()
 	if l.portShareMode {
 		if l.cmux != nil {
 			mlog.Info(context.TODO(), "Proxy close cmux http2 listener")
