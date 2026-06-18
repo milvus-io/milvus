@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // =========================== Test Helper Functions ===========================
@@ -519,6 +520,24 @@ func TestSnapshotReader_ListSnapshots_Success(t *testing.T) {
 	assert.Len(t, snapshots, 2)
 	assert.Equal(t, "snapshot1", snapshots[0].GetName())
 	assert.Equal(t, "snapshot2", snapshots[1].GetName())
+}
+
+func TestSnapshotReader_ListSnapshots_ListFailurePreservesIoError(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	reader := NewSnapshotReader(cm)
+
+	mockList := mockey.Mock(storage.ListAllChunkWithPrefix).Return(
+		nil,
+		nil,
+		fmt.Errorf("list failed"),
+	).Build()
+	defer mockList.UnPatch()
+
+	_, err := reader.ListSnapshots(context.Background(), 100)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrIoFailed)
 }
 
 // =========================== Data Conversion Tests ===========================

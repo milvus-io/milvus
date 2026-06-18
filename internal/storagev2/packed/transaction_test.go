@@ -415,6 +415,21 @@ func TestGetDeltaLogPathsFromManifest(t *testing.T) {
 		assert.Contains(t, paths[0], "_delta/501")
 	})
 
+	t.Run("zero-entry delta log marker is not a readable path", func(t *testing.T) {
+		bp := filepath.Join(dir, "insert_log/1/2/3_zero_delta")
+		manifestPath := createBaseManifest(t, bp, storageConfig)
+
+		deltaFullPath := filepath.Join(bp, "_delta/601")
+		newManifest, err := AddDeltaLogsToManifest(manifestPath, storageConfig, []DeltaLogEntry{
+			{Path: deltaFullPath, NumEntries: 0},
+		})
+		require.NoError(t, err)
+
+		paths, err := GetDeltaLogPathsFromManifest(newManifest, storageConfig)
+		assert.NoError(t, err)
+		assert.Nil(t, paths)
+	})
+
 	t.Run("empty deltaLogs input returns original manifest", func(t *testing.T) {
 		manifestPath := createBaseManifest(t, basePath+"_empty", storageConfig)
 		sameManifest, err := AddDeltaLogsToManifest(manifestPath, storageConfig, []DeltaLogEntry{})
@@ -632,6 +647,46 @@ func TestReadFragmentsFromManifest_MilvusTableCarriesManifestDeltalogs(t *testin
 	require.Len(t, fragments[0].Deltalogs[0].GetBinlogs(), 1)
 	assert.Equal(t, sourceDeltaPath, fragments[0].Deltalogs[0].GetBinlogs()[0].GetLogPath())
 	assert.Equal(t, int64(7), fragments[0].Deltalogs[0].GetBinlogs()[0].GetEntriesNum())
+}
+
+func TestReadFragmentsFromManifest_MilvusTableCarriesZeroEntryDeltalogMarker(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	dir := t.TempDir()
+	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+	})
+
+	storageConfig := &indexpb.StorageConfig{
+		RootPath:    dir,
+		StorageType: "local",
+	}
+	sourceManifest := createBaseManifest(t, filepath.Join(dir, "insert_log/1/2/source"), storageConfig)
+	targetBasePath := filepath.Join(dir, "insert_log/1/2/target")
+	targetManifest, err := CreateMilvusTableManifestFromSegmentManifests(
+		targetBasePath,
+		[]string{"pk", "ts"},
+		[]Fragment{{FilePath: sourceManifest, StartRow: 0, EndRow: 1, RowCount: 1}},
+		storageConfig,
+		ExternalSpecContext{MilvusTablePKMode: MilvusTablePrimaryKeyModeVirtual},
+	)
+	require.NoError(t, err)
+	targetDeltaPath := filepath.Join(targetBasePath, "_delta/702")
+	targetManifest, err = AddDeltaLogsToManifest(targetManifest, storageConfig, []DeltaLogEntry{
+		{Path: targetDeltaPath, NumEntries: 0},
+	})
+	require.NoError(t, err)
+
+	fragments, err := ReadFragmentsFromManifest(targetManifest, storageConfig, []string{"pk"})
+	require.NoError(t, err)
+	require.Len(t, fragments, 1)
+	require.Len(t, fragments[0].Deltalogs, 1)
+	require.Len(t, fragments[0].Deltalogs[0].GetBinlogs(), 1)
+	assert.Equal(t, targetDeltaPath, fragments[0].Deltalogs[0].GetBinlogs()[0].GetLogPath())
+	assert.Equal(t, int64(0), fragments[0].Deltalogs[0].GetBinlogs()[0].GetEntriesNum())
 }
 
 func TestCreateMilvusTableManifestFromSegmentManifests_ImportsSourceBloomFilterStats(t *testing.T) {

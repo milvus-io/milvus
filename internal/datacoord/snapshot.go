@@ -608,7 +608,7 @@ func (r *SnapshotReader) ListSnapshots(ctx context.Context, collectionID int64) 
 	// List all files in the metadata directory
 	files, _, err := storage.ListAllChunkWithPrefix(ctx, r.chunkManager, metadataDir, false)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "failed to list metadata files")
+		return nil, merr.Wrap(storage.ToMilvusIoError(metadataDir, err), "failed to list metadata files")
 	}
 
 	// Read each metadata file and extract SnapshotInfo

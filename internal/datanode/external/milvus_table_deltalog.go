@@ -36,6 +36,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// Batch virtual-PK delete translation to cap delete-event memory while avoiding
+// one full source-fragment PK scan per source deltalog.
+const milvusTableVirtualPKDeltalogBatchSize = 32
+
 // postProcessMilvusTableDeltalogs finalizes deltalog handling after the target
 // segment manifest is built. Real-PK milvus-table segments keep source deltas
 // in the manifest; virtual-PK segments rewrite source-PK deletes into target
@@ -249,38 +253,52 @@ func (t *RefreshExternalCollectionTask) translateMilvusTableDeltalogsToVirtualPK
 	if err != nil {
 		return "", err
 	}
-	deltalogDeletes, deletedSourcePKKeys, err := t.loadMilvusTableSourceDeltalogDeletes(
-		ctx,
-		refs,
-		sourcePKField.GetDataType(),
-	)
-	if err != nil {
-		return "", err
-	}
-	if len(deletedSourcePKKeys) == 0 {
-		return manifestPath, nil
-	}
-	sourcePKOffsets, err := t.loadMilvusTableSourcePKOffsets(ctx, fragments, sourcePKField, deletedSourcePKKeys)
-	if err != nil {
-		return "", err
-	}
 
 	var entries []packed.DeltaLogEntry
-	for _, deletes := range deltalogDeletes {
-		if err := ensureContext(ctx); err != nil {
-			return "", err
+	for batchStart := 0; batchStart < len(refs); batchStart += milvusTableVirtualPKDeltalogBatchSize {
+		batchEnd := batchStart + milvusTableVirtualPKDeltalogBatchSize
+		if batchEnd > len(refs) {
+			batchEnd = len(refs)
 		}
-		entry, ok, err := t.writeMilvusTableVirtualPKDeltalog(
-			ctx,
-			basePath,
-			segmentID,
-			sourcePKOffsets,
-			deletes,
-		)
+		batchRefs := refs[batchStart:batchEnd]
+		batchDeletes := make([]milvusTableSourceDeltalogDeletes, 0, len(batchRefs))
+		deletedSourcePKKeys := make(map[string]struct{})
+		for _, ref := range batchRefs {
+			if err := ensureContext(ctx); err != nil {
+				return "", err
+			}
+			deletes, refDeletedSourcePKKeys, err := t.loadMilvusTableSourceDeltalogDeletes(
+				ctx,
+				ref,
+				sourcePKField.GetDataType(),
+			)
+			if err != nil {
+				return "", err
+			}
+			batchDeletes = append(batchDeletes, deletes)
+			for key := range refDeletedSourcePKKeys {
+				deletedSourcePKKeys[key] = struct{}{}
+			}
+		}
+
+		sourcePKOffsets, err := t.loadMilvusTableSourcePKOffsets(ctx, fragments, sourcePKField, deletedSourcePKKeys)
 		if err != nil {
 			return "", err
 		}
-		if ok {
+		for _, deletes := range batchDeletes {
+			if err := ensureContext(ctx); err != nil {
+				return "", err
+			}
+			entry, err := t.writeMilvusTableVirtualPKDeltalog(
+				ctx,
+				basePath,
+				segmentID,
+				sourcePKOffsets,
+				deletes,
+			)
+			if err != nil {
+				return "", err
+			}
 			entries = append(entries, entry)
 		}
 	}
@@ -393,6 +411,9 @@ func (t *RefreshExternalCollectionTask) loadMilvusTableSourcePKOffsets(
 	deletedSourcePKKeys map[string]struct{},
 ) (map[string][]milvusTableSourcePKOffset, error) {
 	sourcePKOffsets := make(map[string][]milvusTableSourcePKOffset)
+	if len(deletedSourcePKKeys) == 0 {
+		return sourcePKOffsets, nil
+	}
 	var targetStartOffset int64
 	for _, fragment := range fragments {
 		if err := ensureContext(ctx); err != nil {
@@ -515,57 +536,52 @@ func appendMilvusTableSourcePKOffsetsFromRecord(
 	return nil
 }
 
-// loadMilvusTableSourceDeltalogDeletes reads source StorageV3 deltalogs and
-// returns both grouped delete events and the set of source PKs to look up in
-// source data fragments.
+// loadMilvusTableSourceDeltalogDeletes reads one source deltalog and returns
+// its delete events plus the source PKs to look up in source data fragments.
 func (t *RefreshExternalCollectionTask) loadMilvusTableSourceDeltalogDeletes(
 	ctx context.Context,
-	refs []milvusTableDeltalogRef,
+	ref milvusTableDeltalogRef,
 	sourcePKType schemapb.DataType,
-) ([]milvusTableSourceDeltalogDeletes, map[string]struct{}, error) {
-	deltalogDeletes := make([]milvusTableSourceDeltalogDeletes, 0, len(refs))
+) (milvusTableSourceDeltalogDeletes, map[string]struct{}, error) {
 	deletedSourcePKKeys := make(map[string]struct{})
-	for _, ref := range refs {
-		if ref.logID == 0 {
-			return nil, nil, merr.WrapErrServiceInternalMsg("milvus-table source deltalog %s has no allocated log ID", ref.sourcePath)
-		}
-		reader, err := t.newMilvusTableSourceDeltalogReader(ctx, ref, sourcePKType)
-		if err != nil {
-			return nil, nil, merr.WrapErrServiceInternalErr(err, "read milvus-table source deltalog %s", ref.sourcePath)
-		}
-
-		deletes := milvusTableSourceDeltalogDeletes{ref: ref}
-		for {
-			if err := ensureContext(ctx); err != nil {
-				_ = reader.Close()
-				return nil, nil, err
-			}
-			record, err := reader.Next()
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				_ = reader.Close()
-				return nil, nil, merr.WrapErrServiceInternalErr(err, "read milvus-table source deltalog %s", ref.sourcePath)
-			}
-			if err := appendMilvusTableSourceDeleteEventsFromRecord(
-				record,
-				sourcePKType,
-				deletedSourcePKKeys,
-				&deletes.events,
-			); err != nil {
-				record.Release()
-				_ = reader.Close()
-				return nil, nil, err
-			}
-			record.Release()
-		}
-		if err := reader.Close(); err != nil {
-			return nil, nil, err
-		}
-		deltalogDeletes = append(deltalogDeletes, deletes)
+	if ref.logID == 0 {
+		return milvusTableSourceDeltalogDeletes{}, nil, merr.WrapErrServiceInternalMsg("milvus-table source deltalog %s has no allocated log ID", ref.sourcePath)
 	}
-	return deltalogDeletes, deletedSourcePKKeys, nil
+	reader, err := t.newMilvusTableSourceDeltalogReader(ctx, ref, sourcePKType)
+	if err != nil {
+		return milvusTableSourceDeltalogDeletes{}, nil, merr.WrapErrServiceInternalErr(err, "read milvus-table source deltalog %s", ref.sourcePath)
+	}
+
+	deletes := milvusTableSourceDeltalogDeletes{ref: ref}
+	for {
+		if err := ensureContext(ctx); err != nil {
+			_ = reader.Close()
+			return milvusTableSourceDeltalogDeletes{}, nil, err
+		}
+		record, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			_ = reader.Close()
+			return milvusTableSourceDeltalogDeletes{}, nil, merr.WrapErrServiceInternalErr(err, "read milvus-table source deltalog %s", ref.sourcePath)
+		}
+		if err := appendMilvusTableSourceDeleteEventsFromRecord(
+			record,
+			sourcePKType,
+			deletedSourcePKKeys,
+			&deletes.events,
+		); err != nil {
+			record.Release()
+			_ = reader.Close()
+			return milvusTableSourceDeltalogDeletes{}, nil, err
+		}
+		record.Release()
+	}
+	if err := reader.Close(); err != nil {
+		return milvusTableSourceDeltalogDeletes{}, nil, err
+	}
+	return deletes, deletedSourcePKKeys, nil
 }
 
 func (t *RefreshExternalCollectionTask) newMilvusTableSourceDeltalogReader(
@@ -647,16 +663,16 @@ func (t *RefreshExternalCollectionTask) writeMilvusTableVirtualPKDeltalog(
 	segmentID int64,
 	sourcePKOffsets map[string][]milvusTableSourcePKOffset,
 	deletes milvusTableSourceDeltalogDeletes,
-) (packed.DeltaLogEntry, bool, error) {
+) (packed.DeltaLogEntry, error) {
+	targetPath := metautil.BuildDeltaLogPathV3(basePath, deletes.ref.logID)
 	virtualPKs, timestamps := buildMilvusTableVirtualPKDeletes(segmentID, sourcePKOffsets, deletes.events)
 	if len(virtualPKs) == 0 {
-		return packed.DeltaLogEntry{}, false, nil
+		return packed.DeltaLogEntry{Path: targetPath}, nil
 	}
 
-	targetPath := metautil.BuildDeltaLogPathV3(basePath, deletes.ref.logID)
 	record, _, _, err := storage.BuildDeleteRecord(virtualPKs, timestamps)
 	if err != nil {
-		return packed.DeltaLogEntry{}, false, err
+		return packed.DeltaLogEntry{}, err
 	}
 	defer record.Release()
 	// NewDeltalogWriter only implements StorageV1/StorageV2 (StorageV3 returns
@@ -676,7 +692,7 @@ func (t *RefreshExternalCollectionTask) writeMilvusTableVirtualPKDeltalog(
 		storage.WithStorageConfig(t.req.GetStorageConfig()),
 	)
 	if err != nil {
-		return packed.DeltaLogEntry{}, false, merr.WrapErrServiceInternalErr(err, "create milvus-table target deltalog %s", targetPath)
+		return packed.DeltaLogEntry{}, merr.WrapErrServiceInternalErr(err, "create milvus-table target deltalog %s", targetPath)
 	}
 	writerClosed := false
 	defer func() {
@@ -685,17 +701,17 @@ func (t *RefreshExternalCollectionTask) writeMilvusTableVirtualPKDeltalog(
 		}
 	}()
 	if err := writer.Write(record); err != nil {
-		return packed.DeltaLogEntry{}, false, merr.WrapErrServiceInternalErr(err, "write milvus-table target deltalog %s", targetPath)
+		return packed.DeltaLogEntry{}, merr.WrapErrServiceInternalErr(err, "write milvus-table target deltalog %s", targetPath)
 	}
 	if err := writer.Close(); err != nil {
 		writerClosed = true
-		return packed.DeltaLogEntry{}, false, merr.WrapErrServiceInternalErr(err, "write milvus-table target deltalog %s", targetPath)
+		return packed.DeltaLogEntry{}, merr.WrapErrServiceInternalErr(err, "write milvus-table target deltalog %s", targetPath)
 	}
 	writerClosed = true
 	return packed.DeltaLogEntry{
 		Path:       targetPath,
 		NumEntries: int64(len(virtualPKs)),
-	}, true, nil
+	}, nil
 }
 
 // buildMilvusTableVirtualPKDeletes converts source-PK delete events into target

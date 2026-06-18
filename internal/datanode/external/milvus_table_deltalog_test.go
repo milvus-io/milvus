@@ -202,6 +202,193 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_Milvus
 	s.Equal([]int64{100, 100}, tss)
 }
 
+func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_MilvusTableVirtualPKRecordsNoopDeltalogMarker() {
+	ctx := context.Background()
+	paramtable.Init()
+	dir := s.T().TempDir()
+	storageConfig := &indexpb.StorageConfig{RootPath: dir, StorageType: "local"}
+	sourceSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "source_id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+	metadataPath := filepath.Join(dir, "snapshots/10/metadata/20.json")
+	metadataBytes, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(&datapb.SnapshotMetadata{
+		Collection: &datapb.CollectionDescription{
+			Schema: sourceSchema,
+		},
+	})
+	s.Require().NoError(err)
+	s.Require().NoError(packed.WriteFile(storageConfig, metadataPath, metadataBytes))
+
+	sourceManifest := createSourcePKManifest(
+		s.T(),
+		filepath.Join(dir, "insert_log/10/20/30"),
+		storageConfig,
+		[]int64{10, 20, 30},
+	)
+	sourceDeltalogPath := filepath.Join(dir, "insert_log/10/20/30/_delta/9001")
+	writeDeltalog(s.T(), storageConfig, sourceDeltalogPath, schemapb.DataType_Int64,
+		[]storage.PrimaryKey{storage.NewInt64PrimaryKey(999)},
+		[]storage.Timestamp{100})
+
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:   s.collectionID,
+		PartitionID:    2000,
+		ExternalSource: metadataPath,
+		ExternalSpec:   `{"format":"milvus-table"}`,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "__virtual_pk__", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "embedding", DataType: schemapb.DataType_FloatVector},
+			},
+		},
+		StorageConfig: storageConfig,
+	}
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.parsedSpec = &externalspec.ExternalSpec{Format: externalspec.FormatMilvusTable}
+	task.columns = []string{"101"}
+
+	mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		Return("manifest-path", nil).Build()
+	defer mockCreate.UnPatch()
+	var capturedEntries []packed.DeltaLogEntry
+	mockAdd := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).
+		To(func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+			s.Equal("manifest-path", manifestPath)
+			capturedEntries = append([]packed.DeltaLogEntry(nil), deltaLogs...)
+			return "manifest-with-marker", nil
+		}).Build()
+	defer mockAdd.UnPatch()
+
+	manifestPath, err := task.createManifestForSegment(ctx, 3000, []packed.Fragment{{
+		FragmentID: 1,
+		FilePath:   sourceManifest,
+		StartRow:   0,
+		EndRow:     3,
+		RowCount:   3,
+		Deltalogs: []*datapb.FieldBinlog{{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{{
+				LogPath:    sourceDeltalogPath,
+				LogID:      9001,
+				EntriesNum: 1,
+			}},
+		}},
+	}})
+
+	s.Require().NoError(err)
+	s.Equal("manifest-with-marker", manifestPath)
+	s.Equal([]packed.DeltaLogEntry{{
+		Path:       filepath.Join(dir, "insert_log/1000/2000/3000/_delta/9001"),
+		NumEntries: 0,
+	}}, capturedEntries)
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestTranslateMilvusTableDeltalogsToVirtualPKManifest_BatchesSourcePKOffsetScan() {
+	ctx := context.Background()
+	task := NewRefreshExternalCollectionTask(ctx, &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:   s.collectionID,
+		PartitionID:    2000,
+		StorageConfig:  &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource: "s3://source-bucket/snapshots/10/metadata/20.json",
+		ExternalSpec:   `{"format":"milvus-table"}`,
+	})
+	task.milvusTableSourcePKField = &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "source_id",
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+	}
+
+	loadDeletes := mockey.Mock(mockey.GetMethod(task, "loadMilvusTableSourceDeltalogDeletes")).
+		To(func(ctx context.Context, ref milvusTableDeltalogRef, sourcePKType schemapb.DataType) (milvusTableSourceDeltalogDeletes, map[string]struct{}, error) {
+			key := fmt.Sprintf("i:%d", ref.logID)
+			return milvusTableSourceDeltalogDeletes{
+					ref: ref,
+					events: []milvusTableSourceDeleteEvent{{
+						sourcePKKey:     key,
+						deleteTimestamp: 100,
+					}},
+				},
+				map[string]struct{}{key: {}},
+				nil
+		}).Build()
+	defer loadDeletes.UnPatch()
+
+	var offsetCalls int
+	var scannedKeys []map[string]struct{}
+	loadOffsets := mockey.Mock(mockey.GetMethod(task, "loadMilvusTableSourcePKOffsets")).
+		To(func(ctx context.Context, fragments []packed.Fragment, sourcePKField *schemapb.FieldSchema, deletedSourcePKKeys map[string]struct{}) (map[string][]milvusTableSourcePKOffset, error) {
+			offsetCalls++
+			copiedKeys := make(map[string]struct{}, len(deletedSourcePKKeys))
+			offsets := make(map[string][]milvusTableSourcePKOffset, len(deletedSourcePKKeys))
+			for key := range deletedSourcePKKeys {
+				copiedKeys[key] = struct{}{}
+				offsets[key] = []milvusTableSourcePKOffset{{targetOffset: int64(len(offsets) + 1), insertTimestamp: 90}}
+			}
+			scannedKeys = append(scannedKeys, copiedKeys)
+			return offsets, nil
+		}).Build()
+	defer loadOffsets.UnPatch()
+
+	var writeCalls int
+	writeDelta := mockey.Mock(mockey.GetMethod(task, "writeMilvusTableVirtualPKDeltalog")).
+		To(func(ctx context.Context, basePath string, segmentID int64, sourcePKOffsets map[string][]milvusTableSourcePKOffset, deletes milvusTableSourceDeltalogDeletes) (packed.DeltaLogEntry, error) {
+			writeCalls++
+			return packed.DeltaLogEntry{Path: fmt.Sprintf("target/_delta/%d", deletes.ref.logID), NumEntries: int64(len(deletes.events))}, nil
+		}).Build()
+	defer writeDelta.UnPatch()
+
+	var capturedEntries []packed.DeltaLogEntry
+	addDeltas := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).
+		To(func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+			capturedEntries = append([]packed.DeltaLogEntry(nil), deltaLogs...)
+			return "manifest-with-deltas", nil
+		}).Build()
+	defer addDeltas.UnPatch()
+
+	manifestPath, err := task.translateMilvusTableDeltalogsToVirtualPKManifest(
+		ctx,
+		"target",
+		"manifest",
+		3000,
+		[]packed.Fragment{{
+			FilePath: "source-manifest",
+			RowCount: 10,
+			Deltalogs: []*datapb.FieldBinlog{{
+				FieldID: 100,
+				Binlogs: func() []*datapb.Binlog {
+					binlogs := make([]*datapb.Binlog, 0, milvusTableVirtualPKDeltalogBatchSize+1)
+					for i := int64(1); i <= milvusTableVirtualPKDeltalogBatchSize+1; i++ {
+						binlogs = append(binlogs, &datapb.Binlog{
+							LogPath:    fmt.Sprintf("source/_delta/%d", i),
+							LogID:      i,
+							EntriesNum: 1,
+						})
+					}
+					return binlogs
+				}(),
+			}},
+		}},
+	)
+
+	s.Require().NoError(err)
+	s.Equal("manifest-with-deltas", manifestPath)
+	s.Equal(2, offsetCalls)
+	s.Require().Len(scannedKeys, 2)
+	s.Len(scannedKeys[0], milvusTableVirtualPKDeltalogBatchSize)
+	for i := int64(1); i <= milvusTableVirtualPKDeltalogBatchSize; i++ {
+		s.Contains(scannedKeys[0], fmt.Sprintf("i:%d", i))
+	}
+	lastLogID := int64(milvusTableVirtualPKDeltalogBatchSize + 1)
+	s.Equal(map[string]struct{}{fmt.Sprintf("i:%d", lastLogID): {}}, scannedKeys[1])
+	s.Equal(milvusTableVirtualPKDeltalogBatchSize+1, writeCalls)
+	s.Require().Len(capturedEntries, milvusTableVirtualPKDeltalogBatchSize+1)
+	s.Equal(packed.DeltaLogEntry{Path: "target/_delta/1", NumEntries: 1}, capturedEntries[0])
+	s.Equal(packed.DeltaLogEntry{Path: fmt.Sprintf("target/_delta/%d", lastLogID), NumEntries: 1}, capturedEntries[len(capturedEntries)-1])
+}
+
 func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_MilvusTableVirtualPKRejectsUnsupportedDeltalogs() {
 	ctx := context.Background()
 	paramtable.Init()
@@ -784,25 +971,16 @@ func (s *RefreshExternalCollectionTaskSuite) TestAppendMilvusTableSourceDeleteEv
 	s.Empty(events)
 }
 
-func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDeletesEmptyAndMissingLogID() {
+func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDeletesMissingLogID() {
 	task := &RefreshExternalCollectionTask{}
 
 	deletes, keys, err := task.loadMilvusTableSourceDeltalogDeletes(
 		context.Background(),
-		nil,
-		schemapb.DataType_Int64,
-	)
-	s.NoError(err)
-	s.Empty(deletes)
-	s.Empty(keys)
-
-	deletes, keys, err = task.loadMilvusTableSourceDeltalogDeletes(
-		context.Background(),
-		[]milvusTableDeltalogRef{{sourcePath: "source/_delta/0"}},
+		milvusTableDeltalogRef{sourcePath: "source/_delta/0"},
 		schemapb.DataType_Int64,
 	)
 	s.Error(err)
-	s.Nil(deletes)
+	s.Empty(deletes)
 	s.Nil(keys)
 	s.Contains(err.Error(), "has no allocated log ID")
 }
@@ -850,6 +1028,20 @@ func (s *RefreshExternalCollectionTaskSuite) TestGetMilvusTableSourcePKFieldCach
 	s.Equal(1, readCalls)
 }
 
+func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourcePKOffsetsSkipsEmptyDeletedKeys() {
+	task := &RefreshExternalCollectionTask{}
+
+	offsets, err := task.loadMilvusTableSourcePKOffsets(
+		context.Background(),
+		[]packed.Fragment{{RowCount: 10}},
+		&schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+		nil,
+	)
+
+	s.NoError(err)
+	s.Empty(offsets)
+}
+
 func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDeletesReaderBranches() {
 	task := NewRefreshExternalCollectionTask(context.Background(), &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID:   s.collectionID,
@@ -876,18 +1068,17 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 
 		deletes, keys, err := task.loadMilvusTableSourceDeltalogDeletes(
 			context.Background(),
-			[]milvusTableDeltalogRef{ref},
+			ref,
 			schemapb.DataType_Int64,
 		)
 
 		s.NoError(err)
 		s.Equal(map[string]struct{}{"i:20": {}}, keys)
-		s.Require().Len(deletes, 1)
-		s.Equal(ref, deletes[0].ref)
+		s.Equal(ref, deletes.ref)
 		s.Equal([]milvusTableSourceDeleteEvent{
 			{sourcePKKey: "i:20", deleteTimestamp: 100},
 			{sourcePKKey: "i:20", deleteTimestamp: 101},
-		}, deletes[0].events)
+		}, deletes.events)
 	})
 
 	s.Run("legacy_l0_success", func() {
@@ -903,15 +1094,14 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 
 		deletes, keys, err := task.loadMilvusTableSourceDeltalogDeletes(
 			context.Background(),
-			[]milvusTableDeltalogRef{legacyRef},
+			legacyRef,
 			schemapb.DataType_Int64,
 		)
 
 		s.NoError(err)
 		s.Empty(keys)
-		s.Require().Len(deletes, 1)
-		s.Equal(legacyRef, deletes[0].ref)
-		s.Empty(deletes[0].events)
+		s.Equal(legacyRef, deletes.ref)
+		s.Empty(deletes.events)
 	})
 
 	s.Run("open error", func() {
@@ -922,7 +1112,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 
 		_, _, err := task.loadMilvusTableSourceDeltalogDeletes(
 			context.Background(),
-			[]milvusTableDeltalogRef{ref},
+			ref,
 			schemapb.DataType_Int64,
 		)
 
@@ -938,7 +1128,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 
 		_, _, err := task.loadMilvusTableSourceDeltalogDeletes(
 			context.Background(),
-			[]milvusTableDeltalogRef{ref},
+			ref,
 			schemapb.DataType_Int64,
 		)
 
@@ -958,7 +1148,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 
 		_, _, err = task.loadMilvusTableSourceDeltalogDeletes(
 			context.Background(),
-			[]milvusTableDeltalogRef{ref},
+			ref,
 			schemapb.DataType_None,
 		)
 
@@ -975,7 +1165,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 
 		_, _, err := task.loadMilvusTableSourceDeltalogDeletes(
 			context.Background(),
-			[]milvusTableDeltalogRef{ref},
+			ref,
 			schemapb.DataType_Int64,
 		)
 
@@ -992,7 +1182,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 
 		_, _, err := task.loadMilvusTableSourceDeltalogDeletes(
 			ctx,
-			[]milvusTableDeltalogRef{ref},
+			ref,
 			schemapb.DataType_Int64,
 		)
 

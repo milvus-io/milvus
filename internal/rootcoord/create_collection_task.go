@@ -501,20 +501,20 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 		},
 	)
 	if err != nil {
-		return merr.WrapErrServiceInternalErr(err, "read milvus-table snapshot metadata for schema alignment")
+		return merr.Wrap(err, "read milvus-table snapshot metadata for schema alignment")
 	}
 	sourceSchema := metadata.GetCollection().GetSchema()
 	if sourceSchema == nil {
-		return merr.WrapErrServiceInternalMsg("milvus-table snapshot metadata missing collection schema")
+		return merr.WrapErrParameterInvalidMsg("milvus-table snapshot metadata missing collection schema")
 	}
 	if typeutil.IsExternalCollection(sourceSchema) {
 		// Avoid external-table chaining. A chained source would require refresh
 		// and read paths to chase another collection's external source/storage
 		// contract, which is not part of the milvus-table snapshot contract.
-		return merr.WrapErrServiceInternalMsg("milvus-table external collection cannot use an external collection snapshot as source")
+		return merr.WrapErrParameterInvalidMsg("milvus-table external collection cannot use an external collection snapshot as source")
 	}
 	if err := typeutil.ValidateMilvusTableSchemaIdentity(schema, sourceSchema, false); err != nil {
-		return merr.WrapErrServiceInternalErr(err, "milvus-table target schema must match source snapshot schema")
+		return merr.Wrap(err, "milvus-table target schema must match source snapshot schema")
 	}
 
 	sourceFields := milvusTableSourceFieldsByName(sourceSchema)
@@ -535,7 +535,7 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 		}
 		sourceField := sourceFields[field.GetExternalField()]
 		if sourceField == nil {
-			return merr.WrapErrServiceInternalMsg("milvus-table target field %q maps to missing source field %q", field.GetName(), field.GetExternalField())
+			return merr.WrapErrParameterInvalidMsg("milvus-table target field %q maps to missing source field %q", field.GetName(), field.GetExternalField())
 		}
 		field.FieldID = sourceField.GetFieldID()
 	}

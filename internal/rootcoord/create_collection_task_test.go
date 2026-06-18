@@ -1972,6 +1972,7 @@ func TestPrepareMilvusTableSnapshotSchemaErrors(t *testing.T) {
 
 		err := baseTask(baseSchema()).prepareMilvusTableSnapshotSchema(context.Background())
 		require.Error(t, err)
+		assert.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
 		assert.Contains(t, err.Error(), "missing collection schema")
 	})
 
@@ -1992,6 +1993,7 @@ func TestPrepareMilvusTableSnapshotSchemaErrors(t *testing.T) {
 
 		err := baseTask(baseSchema()).prepareMilvusTableSnapshotSchema(context.Background())
 		require.Error(t, err)
+		assert.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
 		assert.Contains(t, err.Error(), "cannot use an external collection snapshot")
 	})
 
@@ -2010,6 +2012,7 @@ func TestPrepareMilvusTableSnapshotSchemaErrors(t *testing.T) {
 
 		err := baseTask(baseSchema()).prepareMilvusTableSnapshotSchema(context.Background())
 		require.Error(t, err)
+		assert.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
 		assert.Contains(t, err.Error(), "target schema must match source snapshot schema")
 	})
 }

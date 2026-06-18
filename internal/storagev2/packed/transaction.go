@@ -145,9 +145,11 @@ func addDeltaLogsToManifest(
 	return newManifestPath, nil
 }
 
-// GetDeltaLogPathsFromManifest extracts delta log file paths from a Loon manifest.
-// It opens a transaction, reads the manifest's delta_logs section, converts relative
-// paths to absolute paths, and returns them.
+// GetDeltaLogPathsFromManifest extracts readable delta log file paths from a
+// Loon manifest. It opens a transaction, reads the manifest's delta_logs
+// section, converts relative paths to absolute paths, and skips zero-entry
+// manifest-only markers because they do not have a file to open. Callers that
+// need marker identity should read the full delta metadata instead.
 func GetDeltaLogPathsFromManifest(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
@@ -162,8 +164,14 @@ func GetDeltaLogPathsFromManifest(
 	var paths []string
 	for _, deltaLog := range deltaLogs {
 		for _, binlog := range deltaLog.GetBinlogs() {
+			if binlog.GetEntriesNum() <= 0 {
+				continue
+			}
 			paths = append(paths, binlog.GetLogPath())
 		}
+	}
+	if len(paths) == 0 {
+		return nil, nil
 	}
 	return paths, nil
 }
