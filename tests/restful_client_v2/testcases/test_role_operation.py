@@ -1,6 +1,6 @@
-from utils.utils import gen_unique_str
-from base.testbase import TestBase
 import pytest
+from base.testbase import TestBase
+from utils.utils import gen_unique_str
 
 
 @pytest.mark.L1
@@ -34,16 +34,20 @@ class TestRoleE2E(TestBase):
         rsp = self.role_client.role_list()
         # create role
         role_name = gen_unique_str("role")
+        role_description = "rest role description"
         payload = {
             "roleName": role_name,
+            "description": role_description,
         }
         rsp = self.role_client.role_create(payload)
+        assert rsp["code"] == 0
         # list role after create
         rsp = self.role_client.role_list()
         assert role_name in rsp['data']
         # describe role
         rsp = self.role_client.role_describe(role_name)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
+        assert rsp.get("description") == role_description
         # grant privilege to role
         payload = {
             "roleName": role_name,
@@ -55,6 +59,8 @@ class TestRoleE2E(TestBase):
         assert rsp['code'] == 0
         # describe role after grant
         rsp = self.role_client.role_describe(role_name)
+        assert rsp["code"] == 0
+        assert rsp.get("description") == role_description
         privileges = []
         for p in rsp['data']:
             privileges.append(p['privilege'])
@@ -67,8 +73,11 @@ class TestRoleE2E(TestBase):
             "privilege": "CreateCollection"
         }
         rsp = self.role_client.role_revoke(payload)
+        assert rsp["code"] == 0
         # describe role after revoke
         rsp = self.role_client.role_describe(role_name)
+        assert rsp["code"] == 0
+        assert rsp.get("description") == role_description
         privileges = []
         for p in rsp['data']:
             privileges.append(p['privilege'])
@@ -80,4 +89,3 @@ class TestRoleE2E(TestBase):
         rsp = self.role_client.role_drop(payload)
         rsp = self.role_client.role_list()
         assert role_name not in rsp['data']
-
