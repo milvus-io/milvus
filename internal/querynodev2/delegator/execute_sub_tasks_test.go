@@ -97,3 +97,41 @@ func TestExecuteSubTasksUsesFirstWorkerErrorAsStatusCode(t *testing.T) {
 	require.ErrorIs(t, roundTripErr, merr.ErrServiceResourceInsufficient)
 	require.NotErrorIs(t, roundTripErr, merr.ErrServiceTooManyRequests)
 }
+
+func TestExecuteSubTasksPrioritizesBackpressureErrorAsStatusCode(t *testing.T) {
+	paramtable.Init()
+	old := paramtable.Get().QueryNodeCfg.PartialResultRequiredDataRatio.SwapTempValue("0")
+	t.Cleanup(func() {
+		paramtable.Get().QueryNodeCfg.PartialResultRequiredDataRatio.SwapTempValue(old)
+	})
+
+	tasks := []subTask[int]{
+		{req: 1, targetID: 1, worker: cluster.NewMockWorker(t)},
+		{req: 2, targetID: 2, worker: cluster.NewMockWorker(t)},
+	}
+
+	_, err := executeSubTasks(
+		context.Background(),
+		tasks,
+		nil,
+		func(_ context.Context, req int, _ cluster.Worker) (*internalpb.RetrieveResults, error) {
+			if req == 1 {
+				return &internalpb.RetrieveResults{
+					Status: merr.Status(errors.New("generic worker failure")),
+				}, nil
+			}
+			return &internalpb.RetrieveResults{
+				Status: merr.Status(merr.WrapErrTooManyRequests(4, "limit by queryNode.scheduler.unsolvedQueueSize")),
+			}, nil
+		},
+		"Search",
+		log.Ctx(context.Background()),
+	)
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+	require.Contains(t, err.Error(), "worker(1) query failed")
+
+	roundTripErr := merr.Error(merr.Status(err))
+	require.ErrorIs(t, roundTripErr, merr.ErrServiceTooManyRequests)
+}
