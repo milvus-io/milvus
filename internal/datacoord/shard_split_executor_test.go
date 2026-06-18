@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -221,6 +222,9 @@ func TestAdvanceFencing(t *testing.T) {
 		task := manager.mustGetTask(100)
 		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, task.GetState())
 		assert.True(t, task.GetFenced())
+		// T_switch (the SplitShard fence message's time tick) is persisted so the
+		// redistribution drain can wait for the flusher to catch up to it.
+		assert.Equal(t, uint64(2000), task.GetSwitchTimeTick())
 		// every target is created with the freshly allocated barrier (1000 from
 		// the mocked allocator), not T_switch.
 		assert.Equal(t, map[string]uint64{"v1": 1000, "v2": 1000}, initialized)
@@ -509,6 +513,32 @@ func TestAdvanceRedistributing(t *testing.T) {
 	manager2, _ := newSplitExecutorManager(t, m2, task2, nil, nil, &fakeSplitPlanner{assignErr: errors.New("mock assign error")})
 	manager2.advanceTasks()
 	assert.Len(t, m2.GetSegmentsByChannel("v9"), 1)
+}
+
+func TestAdvanceRedistributingWaitsForFlushedFence(t *testing.T) {
+	paramtable.Init()
+	task := fencingTask()
+	task.State = datapb.SplitShardTaskState_SplitShardTaskRedistributing
+	task.Fenced = true
+	task.SwitchTimeTick = 100 // T_switch
+
+	// The source shard has no segment and no active import, but the flusher has
+	// not yet flushed the fence-sealed segments to datacoord: the source channel
+	// checkpoint is still below T_switch. The drain must NOT finish, or those
+	// late segments would orphan on the dropped source.
+	m := newSplitTestMeta(true, "v0", map[int64]int64{})
+	m.channelCPs.checkpoints["v0"] = &msgpb.MsgPosition{ChannelName: "v0", Timestamp: 50}
+	manager, catalog := newSplitExecutorManager(t, m, task, nil, nil, &fakeSplitPlanner{})
+	catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	manager.advanceTasks()
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, manager.mustGetTask(100).GetState())
+
+	// Once the flusher catches up to T_switch (every fence-sealed segment is now
+	// reported to datacoord), the drain completes and advances to adopting.
+	m.channelCPs.checkpoints["v0"] = &msgpb.MsgPosition{ChannelName: "v0", Timestamp: 100}
+	manager.advanceTasks()
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, manager.mustGetTask(100).GetState())
 }
 
 func TestAdvanceRedistributingSkipsImportingSegments(t *testing.T) {

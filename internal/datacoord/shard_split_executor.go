@@ -177,7 +177,7 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 		// The append is idempotent — a retry on an already-fenced vchannel
 		// returns ErrSourceVChannelFenced, which is success: the fence holds and
 		// the barrier below is freshly allocated, so no exact T_switch is needed.
-		_, err := streaming.SplitShard(m.ctx, m.wal, streaming.SplitShardParam{
+		result, err := streaming.SplitShard(m.ctx, m.wal, streaming.SplitShardParam{
 			CollectionID:   task.GetCollectionId(),
 			SourceVChannel: task.GetSourceVchannel(),
 			SplitTaskID:    task.GetTaskId(),
@@ -187,10 +187,22 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 			logger.Warn("fence the source vchannel failed", zap.Error(err))
 			return
 		}
+		// On a fresh fence the result carries T_switch (the SplitShard message's
+		// time tick); record it so the redistribution drain can wait for the
+		// flusher to catch up to it. On an already-fenced retry the result is nil
+		// and T_switch stays 0 (the drain then falls back to the segment scan; a
+		// later increment recovers T_switch from the streamingnode on re-fence).
+		var switchTimeTick uint64
+		if result != nil {
+			switchTimeTick = result.SwitchTimeTick
+		}
 		// persist the fenced flag before creating the targets, so a crash here
 		// resumes forward-only (abort is refused once the source is fenced).
 		if err := m.updateTask(task, func(task *datapb.SplitShardTask) {
 			task.Fenced = true
+			if switchTimeTick != 0 {
+				task.SwitchTimeTick = switchTimeTick
+			}
 		}); err != nil {
 			logger.Warn("persist the fenced flag failed", zap.Error(err))
 			return
@@ -267,13 +279,20 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 func (m *shardSplitManager) advanceRedistributing(task *datapb.SplitShardTask) {
 	logger := m.taskLogger(task)
 	segments := m.meta.GetSegmentsByChannel(task.GetSourceVchannel())
-	// The source shard is drained only when both datacoord-local conditions
-	// hold: no segment remains on the source vchannel, AND no active import
-	// job targets it. The second conjunct closes a blind window: a job still
-	// in Pending/PreImporting has registered no segment in meta yet, so the
-	// segment scan cannot see it, and it could otherwise allocate its segments
-	// onto the just-dropped shard after this empty check passed.
-	if len(segments) == 0 && !m.hasActiveImportOnVChannel(task.GetSourceVchannel()) {
+	// The source shard is drained only when three datacoord-local conditions
+	// hold: no segment remains on the source vchannel, the flusher has flushed
+	// the fence-sealed segments up to T_switch, AND no active import job targets
+	// it.
+	//   - fenceFlushed closes the async-flush window: the SplitShard fence only
+	//     appends a message; the streamingnode flusher seals and reports the
+	//     sealed segments to datacoord asynchronously afterwards. Without this
+	//     guard the empty scan can pass before those segments are reported, and
+	//     they would land on the just-dropped source as orphans.
+	//   - the import conjunct closes a second blind window: a job still in
+	//     Pending/PreImporting has registered no segment in meta yet, so the
+	//     segment scan cannot see it, and it could otherwise allocate its
+	//     segments onto the just-dropped shard after this empty check passed.
+	if len(segments) == 0 && m.fenceFlushed(task) && !m.hasActiveImportOnVChannel(task.GetSourceVchannel()) {
 		if err := m.updateTask(task, func(task *datapb.SplitShardTask) {
 			task.State = datapb.SplitShardTaskState_SplitShardTaskAdopting
 		}); err != nil {

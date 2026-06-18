@@ -1841,12 +1841,17 @@ message SplitShardTask {
   SplitShardTaskState state            = 5;
   // fenced is set once the SplitShard fence has been appended to the source
   // vchannel (the append succeeded or returned already-fenced). A fenced task
-  // is forward-only and can no longer be aborted. DataCoord does not record
-  // T_switch: the target vchannels are created with a freshly allocated
-  // barrier (always greater than T_switch), and what is recorded is each
-  // target's consume start position.
+  // is forward-only and can no longer be aborted. The target vchannels are
+  // created with a freshly allocated barrier (always greater than T_switch),
+  // and what is recorded for the redistribution drain is switch_time_tick below.
   bool fenced                          = 6;
   uint64 start_time                    = 7; // unix seconds.
   uint64 end_time                      = 8; // unix seconds.
   string fail_reason                   = 9;
+  // switch_time_tick is T_switch: the time tick of the SplitShard fence
+  // message. The source shard is drained only once its channel checkpoint has
+  // reached this time tick, which proves the flusher has flushed and reported
+  // every segment the fence sealed (all data <= T_switch) to datacoord, so the
+  // redistribution cannot finish before those segments become relabelable.
+  uint64 switch_time_tick              = 10;
 }
