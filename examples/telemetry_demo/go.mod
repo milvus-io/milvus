@@ -118,7 +118,6 @@ require (
 )
 
 replace (
-	github.com/milvus-io/milvus-proto/go-api/v2 => /Users/xiaofanluan/code/milvus-proto/go-api
 	github.com/milvus-io/milvus/client/v2 => ../../client
 	github.com/milvus-io/milvus/pkg/v2 => ../../pkg
 )
