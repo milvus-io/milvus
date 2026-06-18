@@ -1,3 +1,4 @@
+# ruff: noqa: E712,E731,F401,F403,F405,F541,F841,I001,UP031,UP032,W291,W292,W293
 import pytest
 import numpy as np
 
