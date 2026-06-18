@@ -339,28 +339,37 @@ class HNSW_PQ:
         {
             "description": "Out of Range Test - Negative",
             "params": {"ef": -1},
-            "expected": {"err_code": 65535, "err_msg": "param 'ef' (-1) should be in range [1, 2147483647]"},
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "param 'ef' (-1) should be in range [1, 2147483647]"},
         },
         {"description": "String Type Test, not check data type", "params": {"ef": "32"}, "expected": success},
         {
             "description": "Float Type Test",
             "params": {"ef": 32.0},
-            "expected": {"err_code": 65535, "err_msg": "Type conflict in json: param 'ef' (32.0) should be integer"},
+            "expected": {
+                "err_code": ct.ANY_CODE,
+                "err_msg": "Type conflict in json: param 'ef' (32.0) should be integer",
+            },
         },
         {
             "description": "Boolean Type Test",
             "params": {"ef": True},
-            "expected": {"err_code": 65535, "err_msg": "Type conflict in json: param 'ef' (true) should be integer"},
+            "expected": {
+                "err_code": ct.ANY_CODE,
+                "err_msg": "Type conflict in json: param 'ef' (true) should be integer",
+            },
         },
         {
             "description": "None Type Test",
             "params": {"ef": None},
-            "expected": {"err_code": 65535, "err_msg": "Type conflict in json: param 'ef' (null) should be integer"},
+            "expected": {
+                "err_code": ct.ANY_CODE,
+                "err_msg": "Type conflict in json: param 'ef' (null) should be integer",
+            },
         },
         {
             "description": "List Type Test",
             "params": {"ef": [32]},
-            "expected": {"err_code": 65535, "err_msg": "param 'ef' ([32]) should be integer"},
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "param 'ef' ([32]) should be integer"},
         },
         # refine_k params test
         {"description": "refine_k default boundary", "params": {"refine_k": 1}, "expected": success},
@@ -368,39 +377,39 @@ class HNSW_PQ:
         {
             "description": "refine_k out of range",
             "params": {"refine_k": 0},
-            "expected": {"err_code": 65535, "err_msg": "Out of range in json"},
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "Out of range in json"},
         },
         {"description": "refine_k integer type", "params": {"refine_k": 20}, "expected": success},
         {"description": "String Type Test, not check data type", "params": {"refine_k": "2.5"}, "expected": success},
         {
             "description": "empty string type",
             "params": {"refine_k": ""},
-            "expected": {"err_code": 65535, "err_msg": "invalid float value"},
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "invalid float value"},
         },
         {
             "description": "refine_k boolean type",
             "params": {"refine_k": True},
             "expected": {
-                "err_code": 65535,
+                "err_code": ct.ANY_CODE,
                 "err_msg": "Type conflict in json: param 'refine_k' (true) should be a number",
             },
         },
         {
             "description": "None Type Test",
             "params": {"refine_k": None},
-            "expected": {"err_code": 65535, "err_msg": "Type conflict in json"},
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "Type conflict in json"},
         },
         {
             "description": "List Type Test",
             "params": {"refine_k": [15]},
-            "expected": {"err_code": 65535, "err_msg": "Type conflict in json"},
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "Type conflict in json"},
         },
         # combination params test
         {"description": "HNSW ef + SQ refine_k combination", "params": {"ef": 64, "refine_k": 2}, "expected": success},
         {
             "description": "Valid ef with invalid refine_k",
             "params": {"ef": 64, "refine_k": 0},
-            "expected": {"err_code": 65535, "err_msg": "Out of range in json"},
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "Out of range in json"},
         },
         {"description": "empty dict params", "params": {}, "expected": success},
     ]

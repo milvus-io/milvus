@@ -398,5 +398,5 @@ class TestFaissSearchParams(TestFaissBase):
             batch_size=100,
             search_params={},
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 65535, "err_msg": "Failed to create iterators from index"},
+            check_items={"err_code": 2000, "err_msg": "Failed to create iterators from index"},
         )

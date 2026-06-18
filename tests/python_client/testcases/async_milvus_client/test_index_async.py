@@ -1,16 +1,11 @@
-import random
-import time
+import asyncio
+
 import numpy as np
 import pytest
-import asyncio
-from pymilvus.client.types import LoadState, DataType
-from pymilvus import AnnSearchRequest, RRFRanker
-
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_log import test_log as log
 
 pytestmark = pytest.mark.asyncio
 prefix = "async"
@@ -26,8 +21,9 @@ default_vector_field_name = "vector"
 default_float_field_name = ct.default_float_field_name
 default_string_field_name = ct.default_string_field_name
 
+
 class TestAsyncMilvusClientIndexInvalid(TestMilvusClientV2Base):
-    """ Test case of index interface """
+    """Test case of index interface"""
 
     def teardown_method(self, method):
         if self.async_milvus_client_wrap.async_milvus_client is not None:
@@ -60,10 +56,8 @@ class TestAsyncMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params = async_client.prepare_index_params()[0]
         index_params.add_index(field_name="vector")
         # 3. create index
-        error = {ct.err_code: 1100, ct.err_msg: f"collection not found[database=default][collection={name}]"}
-        await async_client.create_index(name, index_params,
-                                        check_task=CheckTasks.err_res, 
-                                        check_items=error)
+        error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection={name}]"}
+        await async_client.create_index(name, index_params, check_task=CheckTasks.err_res, check_items=error)
         # 4. drop action
         await async_client.drop_collection(collection_name)
 
@@ -87,10 +81,8 @@ class TestAsyncMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params = async_client.prepare_index_params()[0]
         index_params.add_index(field_name="vector")
         # 3. create index
-        error = {ct.err_code: 1100, ct.err_msg: f"collection not found[database=default][collection={name}]"}
-        await async_client.create_index(name, index_params,
-                                        check_task=CheckTasks.err_res, 
-                                        check_items=error)
+        error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection={name}]"}
+        await async_client.create_index(name, index_params, check_task=CheckTasks.err_res, check_items=error)
         # 4. drop action
         await async_client.drop_collection(collection_name)
 
@@ -114,11 +106,13 @@ class TestAsyncMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params = async_client.prepare_index_params()[0]
         index_params.add_index(field_name="vector")
         # 3. create index
-        error = {ct.err_code: 100,
-                 ct.err_msg: f"collection not found[database=default][collection={not_existed_collection_name}]"}
-        await async_client.create_index(not_existed_collection_name, index_params,
-                                        check_task=CheckTasks.err_res, 
-                                        check_items=error)
+        error = {
+            ct.err_code: 100,
+            ct.err_msg: f"collection not found[database=default][collection={not_existed_collection_name}]",
+        }
+        await async_client.create_index(
+            not_existed_collection_name, index_params, check_task=CheckTasks.err_res, check_items=error
+        )
         # 4. drop action
         await async_client.drop_collection(collection_name)
 
@@ -142,11 +136,12 @@ class TestAsyncMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params = async_client.prepare_index_params()[0]
         index_params.add_index(field_name="vector", index_type=index)
         # 3. create index
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid parameter[expected=valid index][actual=invalid index type: {index}"}
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: f"invalid parameter[expected=valid index][actual=invalid index type: {index}",
+        }
         # It's good to show what the valid indexes are
-        await async_client.create_index(collection_name, index_params,
-                                        check_task=CheckTasks.err_res, 
-                                        check_items=error)
+        await async_client.create_index(collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
         # 4. drop action
         await async_client.drop_collection(collection_name)
 
@@ -172,9 +167,7 @@ class TestAsyncMilvusClientIndexInvalid(TestMilvusClientV2Base):
         # 3. create index
         error = {ct.err_code: 1100, ct.err_msg: f"float vector index does not support metric type: {metric}"}
         # It's good to show what the valid index params are
-        await async_client.create_index(collection_name, index_params,
-                                        check_task=CheckTasks.err_res, 
-                                        check_items=error)
+        await async_client.create_index(collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
         # 4. drop action
         await async_client.drop_collection(collection_name)
 
@@ -193,13 +186,14 @@ class TestAsyncMilvusClientIndexInvalid(TestMilvusClientV2Base):
         await async_client.create_collection(collection_name, default_dim, consistency_level="Strong")
 
         # 2. drop index
-        error = {ct.err_code: 1100, ct.err_msg: f"vector index cannot be dropped on loaded collection"}
+        error = {ct.err_code: 1100, ct.err_msg: "vector index cannot be dropped on loaded collection"}
         await async_client.drop_index(collection_name, "vector", check_task=CheckTasks.err_res, check_items=error)
         # 3. drop action
         await async_client.drop_collection(collection_name)
 
+
 class TestAsyncMilvusClientIndexValid(TestMilvusClientV2Base):
-    """ Test case of index interface """
+    """Test case of index interface"""
 
     def teardown_method(self, method):
         if self.async_milvus_client_wrap.async_milvus_client is not None:
@@ -215,10 +209,9 @@ class TestAsyncMilvusClientIndexValid(TestMilvusClientV2Base):
     #  The following are valid base cases
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:8],
-                             ct.default_all_indexes_params[:8]))
+    @pytest.mark.parametrize("index, params", zip(ct.all_index_types[:8], ct.default_all_indexes_params[:8]))
     async def test_async_milvus_client_create_drop_index_default(self, index, params, metric_type):
         """
         target: test create and drop index normal case
@@ -233,12 +226,12 @@ class TestAsyncMilvusClientIndexValid(TestMilvusClientV2Base):
         await async_client.create_collection(collection_name, default_dim)
         collections, _ = await async_client.list_collections()
         assert collection_name in collections
-        desc, _ = await async_client.describe_collection(collection_name,
-                                 check_task=CheckTasks.check_describe_collection_property,
-                                 check_items={"collection_name": collection_name,
-                                              "dim": default_dim,
-                                              "consistency_level": 0})
-        
+        desc, _ = await async_client.describe_collection(
+            collection_name,
+            check_task=CheckTasks.check_describe_collection_property,
+            check_items={"collection_name": collection_name, "dim": default_dim, "consistency_level": 0},
+        )
+
         await async_client.release_collection(collection_name)
         await async_client.drop_index(collection_name, "vector")
         res, _ = await async_client.list_indexes(collection_name)
@@ -252,29 +245,40 @@ class TestAsyncMilvusClientIndexValid(TestMilvusClientV2Base):
 
         # 4. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         await async_client.insert(collection_name, rows)
         await async_client.load_collection(collection_name)
-        
+
         tasks = []
         # 5. search
         vectors_to_search = rng.random((1, default_dim))
-        search_task = self.async_milvus_client_wrap. \
-                        search(collection_name, vectors_to_search,
-                               check_task=CheckTasks.check_search_results,
-                               check_items={"enable_milvus_client_api": True,
-                                            "nq": len(vectors_to_search),
-                                            "limit": default_limit,
-                                            "pk_name": default_primary_key_field_name})
+        search_task = self.async_milvus_client_wrap.search(
+            collection_name,
+            vectors_to_search,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "limit": default_limit,
+                "pk_name": default_primary_key_field_name,
+            },
+        )
         tasks.append(search_task)
         # 6. query
-        query_task = self.async_milvus_client_wrap. \
-                        query(collection_name, filter=default_search_exp,
-                              check_task=CheckTasks.check_query_results,
-                              check_items={"exp_res": rows,
-                                           "with_vec": True,
-                                           "pk_name": default_primary_key_field_name})
+        query_task = self.async_milvus_client_wrap.query(
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )
         tasks.append(query_task)
         res = await asyncio.gather(*tasks)
 
