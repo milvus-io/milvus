@@ -60,9 +60,16 @@ type collectionManager struct {
 }
 
 type collectionSchemaUpdatePlan struct {
-	schemaVersion   uint64
+	// logicalSchemaVersion is schema.Version from the accepted schema payload.
+	// It is the Go-side structural schema freshness key.
+	logicalSchemaVersion uint64
+	// schemaBarrierTs fences stale load results and orders same-version schema
+	// payload refreshes such as collection property snapshots.
 	schemaBarrierTs uint64
-	segcoreToken    uint64
+	// segcoreSchemaVersion is only passed to C++ segcore UpdateSchema. Segcore
+	// still has a single increasing version gate, so QueryNode keeps this
+	// independent counter after the Go-side freshness check accepts an update.
+	segcoreSchemaVersion uint64
 }
 
 func NewCollectionManager() *collectionManager {
@@ -98,23 +105,23 @@ func (m *collectionManager) Get(collectionID int64) *Collection {
 func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error {
 	m.mut.Lock()
 	defer m.mut.Unlock()
-	schemaVersion := getLoadMetaSchemaVersion(schema, loadMeta)
+	logicalSchemaVersion := getLoadMetaSchemaVersion(schema, loadMeta)
 	schemaBarrierTs := loadMeta.GetSchemaBarrierTs()
 	if collection, ok := m.collections[collectionID]; ok {
 		// Existing collections may be reached by a later load result or by a
 		// same-version properties refresh. Keep the Go-side logical schema version
 		// separate from the barrier timestamp so stale schema payloads cannot roll
 		// back fields, while newer properties-only payloads can still refresh.
-		if plan, shouldUpdate := prepareCollectionSchemaUpdate(collection, schemaVersion, schemaBarrierTs); shouldUpdate {
-			if err := collection.ccollection.UpdateSchema(schema, plan.segcoreToken); err != nil {
+		if plan, shouldUpdate := prepareCollectionSchemaUpdate(collection, logicalSchemaVersion, schemaBarrierTs); shouldUpdate {
+			if err := collection.ccollection.UpdateSchema(schema, plan.segcoreSchemaVersion); err != nil {
 				return err
 			}
-			collection.setSchema(schema, plan.schemaVersion, plan.schemaBarrierTs)
+			collection.setSchema(schema, plan.logicalSchemaVersion, plan.schemaBarrierTs, plan.segcoreSchemaVersion)
 			log.Info("update collection schema",
 				zap.Int64("collectionID", collectionID),
-				zap.Uint64("schemaVersion", plan.schemaVersion),
+				zap.Uint64("schemaVersion", plan.logicalSchemaVersion),
 				zap.Uint64("schemaBarrierTs", plan.schemaBarrierTs),
-				zap.Uint64("segcoreToken", plan.segcoreToken),
+				zap.Uint64("segcoreSchemaVersion", plan.segcoreSchemaVersion),
 				zap.Any("schema", schema),
 			)
 		}
@@ -151,21 +158,21 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 		return merr.WrapErrCollectionNotFound(collectionID, "collection not found in querynode collection manager")
 	}
 
-	schemaVersion := getUpdateSchemaVersion(schema, schemaBarrierTs)
+	logicalSchemaVersion := getUpdateSchemaVersion(schema, schemaBarrierTs)
 	// A schema update carries two ordering domains:
 	// - schema.Version is the logical collection schema version and prevents
 	//   older schema payloads from overwriting newer fields/functions.
 	// - schemaBarrierTs is the DDL barrier timestamp and advances for
 	//   properties-only schema snapshots such as ttl_field changes.
-	plan, shouldUpdate := prepareCollectionSchemaUpdate(collection, schemaVersion, schemaBarrierTs)
+	plan, shouldUpdate := prepareCollectionSchemaUpdate(collection, logicalSchemaVersion, schemaBarrierTs)
 	if !shouldUpdate {
 		return nil
 	}
 
-	if err := collection.ccollection.UpdateSchema(schema, plan.segcoreToken); err != nil {
+	if err := collection.ccollection.UpdateSchema(schema, plan.segcoreSchemaVersion); err != nil {
 		return err
 	}
-	collection.setSchema(schema, plan.schemaVersion, plan.schemaBarrierTs)
+	collection.setSchema(schema, plan.logicalSchemaVersion, plan.schemaBarrierTs, plan.segcoreSchemaVersion)
 	return nil
 }
 
@@ -177,23 +184,23 @@ func ShouldUpdateCollectionSchema(collection *Collection, schema *schemapb.Colle
 	if collection == nil {
 		return false
 	}
-	schemaVersion := getUpdateSchemaVersion(schema, schemaBarrierTs)
-	_, shouldUpdate := prepareCollectionSchemaUpdate(collection, schemaVersion, schemaBarrierTs)
+	logicalSchemaVersion := getUpdateSchemaVersion(schema, schemaBarrierTs)
+	_, shouldUpdate := prepareCollectionSchemaUpdate(collection, logicalSchemaVersion, schemaBarrierTs)
 	return shouldUpdate
 }
 
-func prepareCollectionSchemaUpdate(collection *Collection, schemaVersion uint64, schemaBarrierTs uint64) (collectionSchemaUpdatePlan, bool) {
-	_, currentVersion, currentBarrierTs := collection.SchemaSnapshot()
+func prepareCollectionSchemaUpdate(collection *Collection, logicalSchemaVersion uint64, schemaBarrierTs uint64) (collectionSchemaUpdatePlan, bool) {
+	_, currentVersion, currentBarrierTs, currentSegcoreSchemaVersion := collection.schemaSnapshotWithSegcoreSchemaVersion()
 	// Never allow logical schema version rollback, even if the incoming message
 	// has a larger timestamp. This preserves the fix for out-of-order schema
 	// messages across replay/channel delivery.
-	if schemaVersion < currentVersion {
+	if logicalSchemaVersion < currentVersion {
 		return collectionSchemaUpdatePlan{}, false
 	}
 	// For the same logical schema version, only a newer barrier can update the
 	// payload. This is required for collection properties embedded in schema
 	// snapshots because those updates do not necessarily bump schema.Version.
-	if schemaVersion == currentVersion && schemaBarrierTs <= currentBarrierTs {
+	if logicalSchemaVersion == currentVersion && schemaBarrierTs <= currentBarrierTs {
 		return collectionSchemaUpdatePlan{}, false
 	}
 
@@ -201,11 +208,10 @@ func prepareCollectionSchemaUpdate(collection *Collection, schemaVersion uint64,
 	if appliedBarrierTs < currentBarrierTs {
 		appliedBarrierTs = currentBarrierTs
 	}
-	segcoreToken := nextSegcoreSchemaUpdateToken(currentVersion, currentBarrierTs, schemaVersion, schemaBarrierTs)
 	return collectionSchemaUpdatePlan{
-		schemaVersion:   schemaVersion,
-		schemaBarrierTs: appliedBarrierTs,
-		segcoreToken:    segcoreToken,
+		logicalSchemaVersion: logicalSchemaVersion,
+		schemaBarrierTs:      appliedBarrierTs,
+		segcoreSchemaVersion: currentSegcoreSchemaVersion + 1,
 	}, true
 }
 
@@ -222,28 +228,6 @@ func getUpdateSchemaVersion(schema *schemapb.CollectionSchema, schemaBarrierTs u
 	return schemaBarrierTs
 }
 
-func nextSegcoreSchemaUpdateToken(currentVersion uint64, currentBarrierTs uint64, schemaVersion uint64, schemaBarrierTs uint64) uint64 {
-	// Segcore only accepts schema updates with an increasing token. Because the
-	// Go side orders schema freshness by logical schema version and separately
-	// allows same-version property refreshes by barrier timestamp, the next
-	// segcore token must be monotonic within this collection rather than simply
-	// echoing either incoming value. This keeps C++ in sync when a high-barrier
-	// same-version refresh is followed by a higher logical schema version that
-	// carries a smaller barrier from another channel/replay path.
-	previousToken := currentVersion
-	if previousToken < currentBarrierTs {
-		previousToken = currentBarrierTs
-	}
-	nextToken := schemaVersion
-	if nextToken < schemaBarrierTs {
-		nextToken = schemaBarrierTs
-	}
-	if nextToken <= previousToken {
-		return previousToken + 1
-	}
-	return nextToken
-}
-
 // getLoadMetaSchemaVersion seeds a loaded collection's schema freshness version.
 // Schema payload is the source of truth whenever it is present, including the
 // valid initial collection schema version 0. The timestamp barrier in load meta
@@ -257,6 +241,16 @@ func getLoadMetaSchemaVersion(schema *schemapb.CollectionSchema, loadMeta *query
 		return 0
 	}
 	return loadMeta.GetSchemaBarrierTs()
+}
+
+func initialSegcoreSchemaVersion(logicalSchemaVersion uint64, schemaBarrierTs uint64) uint64 {
+	// Seed from both domains for rolling/legacy compatibility. Older QueryNode
+	// code used the barrier timestamp as the value passed to segcore, while new
+	// code keeps an independent monotonic segcoreSchemaVersion from this point on.
+	if schemaBarrierTs > logicalSchemaVersion {
+		return schemaBarrierTs
+	}
+	return logicalSchemaVersion
 }
 
 func (m *collectionManager) updateMetric() {
@@ -298,9 +292,13 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 }
 
 type collectionSchemaSnapshot struct {
-	schema          *schemapb.CollectionSchema
-	version         uint64
-	schemaBarrierTs uint64
+	schema               *schemapb.CollectionSchema
+	logicalSchemaVersion uint64
+	schemaBarrierTs      uint64
+	// segcoreSchemaVersion is an internal monotonic version passed to C++
+	// segcore. It is not the logical collection schema version; Go-side schema
+	// freshness is tracked by logicalSchemaVersion and schemaBarrierTs.
+	segcoreSchemaVersion uint64
 }
 
 // Collection is a wrapper of the underlying C-structure C.CCollection
@@ -350,16 +348,26 @@ func (c *Collection) GetCCollection() *segcore.CCollection {
 	return c.ccollection
 }
 
-func (c *Collection) setSchema(schema *schemapb.CollectionSchema, version uint64, schemaBarrierTs uint64) {
-	c.schema.Store(&collectionSchemaSnapshot{schema: schema, version: version, schemaBarrierTs: schemaBarrierTs})
+func (c *Collection) setSchema(schema *schemapb.CollectionSchema, logicalSchemaVersion uint64, schemaBarrierTs uint64, segcoreSchemaVersion uint64) {
+	c.schema.Store(&collectionSchemaSnapshot{
+		schema:               schema,
+		logicalSchemaVersion: logicalSchemaVersion,
+		schemaBarrierTs:      schemaBarrierTs,
+		segcoreSchemaVersion: segcoreSchemaVersion,
+	})
 }
 
 func (c *Collection) SchemaSnapshot() (*schemapb.CollectionSchema, uint64, uint64) {
+	schema, logicalSchemaVersion, schemaBarrierTs, _ := c.schemaSnapshotWithSegcoreSchemaVersion()
+	return schema, logicalSchemaVersion, schemaBarrierTs
+}
+
+func (c *Collection) schemaSnapshotWithSegcoreSchemaVersion() (*schemapb.CollectionSchema, uint64, uint64, uint64) {
 	snapshot := c.schema.Load()
 	if snapshot == nil {
-		return nil, 0, 0
+		return nil, 0, 0, 0
 	}
-	return snapshot.schema, snapshot.version, snapshot.schemaBarrierTs
+	return snapshot.schema, snapshot.logicalSchemaVersion, snapshot.schemaBarrierTs, snapshot.segcoreSchemaVersion
 }
 
 func (c *Collection) SchemaAndVersion() (*schemapb.CollectionSchema, uint64) {
@@ -479,7 +487,9 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	for _, partitionID := range loadMetaInfo.GetPartitionIDs() {
 		coll.partitions.Insert(partitionID)
 	}
-	coll.setSchema(schema, getLoadMetaSchemaVersion(schema, loadMetaInfo), loadMetaInfo.GetSchemaBarrierTs())
+	logicalSchemaVersion := getLoadMetaSchemaVersion(schema, loadMetaInfo)
+	schemaBarrierTs := loadMetaInfo.GetSchemaBarrierTs()
+	coll.setSchema(schema, logicalSchemaVersion, schemaBarrierTs, initialSegcoreSchemaVersion(logicalSchemaVersion, schemaBarrierTs))
 
 	return coll, nil
 }
@@ -492,7 +502,7 @@ func NewTestCollection(collectionID int64, loadType querypb.LoadType, schema *sc
 		loadType:   loadType,
 		refCount:   atomic.NewUint32(0),
 	}
-	col.setSchema(schema, 0, 0)
+	col.setSchema(schema, 0, 0, initialSegcoreSchemaVersion(0, 0))
 	return col
 }
 
@@ -504,7 +514,8 @@ func NewCollectionWithoutSegcoreForTest(collectionID int64, schema *schemapb.Col
 		partitions: typeutil.NewConcurrentSet[int64](),
 		refCount:   atomic.NewUint32(0),
 	}
-	coll.setSchema(schema, uint64(schema.GetVersion()), 0)
+	logicalSchemaVersion := uint64(schema.GetVersion())
+	coll.setSchema(schema, logicalSchemaVersion, 0, initialSegcoreSchemaVersion(logicalSchemaVersion, 0))
 	return coll
 }
 

@@ -704,10 +704,10 @@ func (sd *shardDelegator) withPostLoadLimit(ctx context.Context, fn func() error
 	return fn()
 }
 
-func (sd *shardDelegator) addDistributionIfVersionOK(version uint64, entries ...SegmentEntry) error {
+func (sd *shardDelegator) addDistributionIfSchemaBarrierOK(schemaBarrierTs uint64, entries ...SegmentEntry) error {
 	sd.schemaChangeMutex.RLock()
 	defer sd.schemaChangeMutex.RUnlock()
-	if version < sd.schemaBarrierTs {
+	if schemaBarrierTs < sd.schemaBarrierTs {
 		return merr.WrapErrServiceInternal("schema barrier changed")
 	}
 
@@ -1036,7 +1036,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	// Atomically add to distribution while still holding RLock.
 	// This guarantees no ProcessDelete can run between catch-up and distribution update,
 	// so there is no gap between "deletes applied" and "segment visible".
-	if err := sd.addDistributionIfVersionOK(schemaBarrierTs, entries...); err != nil {
+	if err := sd.addDistributionIfSchemaBarrierOK(schemaBarrierTs, entries...); err != nil {
 		return err
 	}
 	log.Info("load stream delete done")

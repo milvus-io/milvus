@@ -1514,7 +1514,7 @@ func (s *DelegatorSuite) allocFunctionRunnersForTest() {
 	}
 }
 
-func (s *DelegatorSuite) nextSchemaVersionLoadMeta() *querypb.LoadMetaInfo {
+func (s *DelegatorSuite) nextSchemaBarrierLoadMeta() *querypb.LoadMetaInfo {
 	return &querypb.LoadMetaInfo{SchemaBarrierTs: uint64(s.nextSchemaVersion())}
 }
 
@@ -1569,7 +1569,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, s.nextSchemaVersionLoadMeta())
+		}, nil, s.nextSchemaBarrierLoadMeta())
 		s.Require().NoError(err)
 		s.ResetDelegator()
 
@@ -1582,7 +1582,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 	})
 
 	s.Run("standalone field analyzer", func() {
-		err := s.manager.Collection.PutOrRef(s.collectionID, newFunctionRuntimeTestSchemaWithVersion(s.nextSchemaVersion()), nil, s.nextSchemaVersionLoadMeta())
+		err := s.manager.Collection.PutOrRef(s.collectionID, newFunctionRuntimeTestSchemaWithVersion(s.nextSchemaVersion()), nil, s.nextSchemaBarrierLoadMeta())
 		s.Require().NoError(err)
 		s.ResetDelegator()
 
@@ -1638,7 +1638,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, s.nextSchemaVersionLoadMeta())
+		}, nil, s.nextSchemaBarrierLoadMeta())
 		s.Require().NoError(err)
 		s.ResetDelegator()
 
@@ -1696,7 +1696,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, s.nextSchemaVersionLoadMeta())
+		}, nil, s.nextSchemaBarrierLoadMeta())
 		s.Require().NoError(err)
 		s.ResetDelegator()
 
@@ -1757,7 +1757,7 @@ func (s *DelegatorSuite) TestGetHighlight() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, s.nextSchemaVersionLoadMeta())
+		}, nil, s.nextSchemaBarrierLoadMeta())
 		s.Require().NoError(err)
 		s.ResetDelegator()
 
@@ -1780,7 +1780,7 @@ func (s *DelegatorSuite) TestGetHighlight() {
 	})
 
 	s.Run("highlight with standalone analyzer", func() {
-		err := s.manager.Collection.PutOrRef(s.collectionID, newFunctionRuntimeTestSchemaWithVersion(s.nextSchemaVersion()), nil, s.nextSchemaVersionLoadMeta())
+		err := s.manager.Collection.PutOrRef(s.collectionID, newFunctionRuntimeTestSchemaWithVersion(s.nextSchemaVersion()), nil, s.nextSchemaBarrierLoadMeta())
 		s.Require().NoError(err)
 		s.ResetDelegator()
 
@@ -1847,7 +1847,7 @@ func (s *DelegatorSuite) TestGetHighlight() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, s.nextSchemaVersionLoadMeta())
+		}, nil, s.nextSchemaBarrierLoadMeta())
 		s.Require().NoError(err)
 		s.ResetDelegator()
 
@@ -1901,7 +1901,7 @@ func (s *DelegatorSuite) TestGetHighlight() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, s.nextSchemaVersionLoadMeta())
+		}, nil, s.nextSchemaBarrierLoadMeta())
 		s.Require().NoError(err)
 		s.ResetDelegator()
 

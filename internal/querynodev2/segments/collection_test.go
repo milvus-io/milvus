@@ -139,7 +139,7 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 		s.Equal("int64Field", common.CloneKeyValuePairs(schema.GetProperties()).ToMap()[common.CollectionTTLFieldKey])
 	})
 
-	s.Run("higher_schema_version_after_high_barrier_refresh_uses_monotonic_segcore_token", func() {
+	s.Run("higher_schema_version_after_high_barrier_refresh_uses_monotonic_segcore_schema_version", func() {
 		cm := NewCollectionManager()
 		baseSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
 		err := cm.PutOrRef(10, baseSchema, mock_segcore.GenTestIndexMeta(10, baseSchema), &querypb.LoadMetaInfo{
@@ -153,9 +153,18 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 		schemaV1.Version = 1
 		plan, shouldUpdate := prepareCollectionSchemaUpdate(cm.Get(10), uint64(schemaV1.GetVersion()), 80)
 		s.True(shouldUpdate)
-		s.Equal(uint64(1), plan.schemaVersion)
+		s.Equal(uint64(1), plan.logicalSchemaVersion)
 		s.Equal(uint64(100), plan.schemaBarrierTs)
-		s.Equal(uint64(101), plan.segcoreToken)
+		s.Equal(uint64(101), plan.segcoreSchemaVersion)
+
+		cm.Get(10).setSchema(schemaV1, plan.logicalSchemaVersion, plan.schemaBarrierTs, plan.segcoreSchemaVersion)
+		schemaV2 := mock_segcore.GenTestCollectionSchema("collection_v2", schemapb.DataType_Int64, false)
+		schemaV2.Version = 2
+		plan, shouldUpdate = prepareCollectionSchemaUpdate(cm.Get(10), uint64(schemaV2.GetVersion()), 80)
+		s.True(shouldUpdate)
+		s.Equal(uint64(2), plan.logicalSchemaVersion)
+		s.Equal(uint64(100), plan.schemaBarrierTs)
+		s.Equal(uint64(102), plan.segcoreSchemaVersion)
 	})
 
 	s.Run("manager_uses_schema_version_from_caller", func() {
@@ -200,7 +209,7 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 func (s *CollectionManagerSuite) TestSchemaAndVersionSnapshot() {
 	coll := s.cm.Get(1)
 	schema := mock_segcore.GenTestCollectionSchema("collection_0", schemapb.DataType_Int64, false)
-	coll.setSchema(schema, 0, 0)
+	coll.setSchema(schema, 0, 0, initialSegcoreSchemaVersion(0, 0))
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
@@ -229,7 +238,7 @@ func (s *CollectionManagerSuite) TestSchemaAndVersionSnapshot() {
 
 	for i := 1; i <= 1000; i++ {
 		schema := mock_segcore.GenTestCollectionSchema(fmt.Sprintf("collection_%d", i), schemapb.DataType_Int64, false)
-		coll.setSchema(schema, uint64(i), uint64(i))
+		coll.setSchema(schema, uint64(i), uint64(i), initialSegcoreSchemaVersion(uint64(i), uint64(i)))
 	}
 	close(stop)
 	wg.Wait()

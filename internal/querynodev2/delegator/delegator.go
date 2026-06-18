@@ -1203,7 +1203,7 @@ func (sd *shardDelegator) CatchingUpStreamingData() bool {
 	return sd.catchingUpStreamingData.Load()
 }
 
-func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema, schVersion uint64) error {
+func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
 	log := sd.getLogger(ctx)
 	if err := sd.lifetime.Add(sd.IsWorking); err != nil {
 		return err
@@ -1213,16 +1213,16 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	schemaVersion := uint64(schema.GetVersion())
 	log.Info("delegator received update schema event",
 		zap.Uint64("schemaVersion", schemaVersion),
-		zap.Uint64("schemaBarrierTs", schVersion),
+		zap.Uint64("schemaBarrierTs", schemaBarrierTs),
 	)
 
 	sd.schemaChangeMutex.Lock()
 	defer sd.schemaChangeMutex.Unlock()
 
-	if !segments.ShouldUpdateCollectionSchema(sd.collection, schema, schVersion) {
+	if !segments.ShouldUpdateCollectionSchema(sd.collection, schema, schemaBarrierTs) {
 		log.Info("delegator skip stale or no-op schema event",
 			zap.Uint64("schemaVersion", schemaVersion),
-			zap.Uint64("schemaBarrierTs", schVersion),
+			zap.Uint64("schemaBarrierTs", schemaBarrierTs),
 		)
 		return nil
 	}
@@ -1243,8 +1243,8 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	// Keep the load barrier monotonic. A higher logical schema version can be
 	// replayed with a smaller barrier than an earlier same-version property
 	// refresh, but that must not reopen older load results.
-	if sd.schemaBarrierTs < schVersion {
-		sd.schemaBarrierTs = schVersion
+	if sd.schemaBarrierTs < schemaBarrierTs {
+		sd.schemaBarrierTs = schemaBarrierTs
 	}
 
 	sealed, growing, version := sd.distribution.PinOnlineSegments()
@@ -1264,7 +1264,7 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		// SchemaBarrierTs fences stale load results and lets QueryNode refresh
 		// same-version schema payloads such as collection properties. Logical
 		// schema freshness is still guarded by schema.version in collectionManager.
-		SchemaBarrierTs: schVersion,
+		SchemaBarrierTs: schemaBarrierTs,
 	},
 		sealed,
 		growing,
@@ -1292,7 +1292,7 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 
 	// Apply the local collection update with the same barrier used for remote
 	// workers. collectionManager keeps schema.Version as the logical freshness key.
-	if err := sd.collectionManager.UpdateSchema(sd.collectionID, schema, schVersion); err != nil {
+	if err := sd.collectionManager.UpdateSchema(sd.collectionID, schema, schemaBarrierTs); err != nil {
 		newFunctionState.Close()
 		return err
 	}
@@ -1315,7 +1315,7 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	sd.functionState.swap(newFunctionState).Close()
 	log.Info("delegator finished update schema event",
 		zap.Uint64("schemaVersion", schemaVersion),
-		zap.Uint64("schemaBarrierTs", schVersion),
+		zap.Uint64("schemaBarrierTs", schemaBarrierTs),
 		zap.Uint64("loadBarrierTs", sd.schemaBarrierTs),
 		zap.Int("sealedNum", len(sealed)),
 		zap.Int("growingNum", len(growing)),
