@@ -35,6 +35,8 @@ type MsgHandler interface {
 
 	HandleSchemaChange(ctx context.Context, schemaChangeMsg message.ImmutableSchemaChangeMessageV2) error
 
+	HandleSplitShard(splitShardMsg message.ImmutableSplitShardMessageV2) error
+
 	HandleAlterCollection(ctx context.Context, alterCollectionMsg message.ImmutableAlterCollectionMessageV2) error
 
 	HandleTruncateCollection(truncateCollectionMsg message.ImmutableTruncateCollectionMessageV2) error

@@ -174,6 +174,34 @@ func NewSchemaChangeMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, 
 	}, nil
 }
 
+type SplitShardMessageBody struct {
+	*tsMsgImpl
+	SplitShardMessage message.ImmutableSplitShardMessageV2
+}
+
+func (s *SplitShardMessageBody) ID() msgstream.UniqueID {
+	return 0
+}
+
+func NewSplitShardMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
+	splitMsg, err := message.AsImmutableSplitShardMessageV2(msg)
+	if err != nil {
+		return nil, err
+	}
+	return &SplitShardMessageBody{
+		tsMsgImpl: &tsMsgImpl{
+			BaseMsg: msgstream.BaseMsg{
+				BeginTimestamp: msg.TimeTick(),
+				EndTimestamp:   msg.TimeTick(),
+			},
+			ts:      msg.TimeTick(),
+			sz:      msg.EstimateSize(),
+			msgType: MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()),
+		},
+		SplitShardMessage: splitMsg,
+	}, nil
+}
+
 type AlterCollectionMessageBody struct {
 	*tsMsgImpl
 	AlterCollectionMessage message.ImmutableAlterCollectionMessageV2
