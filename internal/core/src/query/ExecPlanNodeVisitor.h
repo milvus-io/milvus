@@ -26,7 +26,7 @@
 #include "common/EasyAssert.h"
 #include "common/OpContext.h"
 #include "common/QueryResult.h"
-#include "common/Trace.h"
+#include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/QueryContext.h"
