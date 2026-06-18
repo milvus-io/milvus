@@ -1982,7 +1982,8 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 		// struct element count of every sub-field.
 		expectedArrayLen := -1
 		for _, subField := range structArrays.StructArrays.Fields {
-			subFieldSchema := subFieldSchemaByName[subField.GetFieldName()]
+			schemaFieldName := typeutil.ConcatStructFieldName(structName, subField.GetFieldName())
+			subFieldSchema := subFieldSchemaByName[schemaFieldName]
 			if subFieldSchema == nil {
 				return merr.WrapErrParameterInvalidMsg("sub-field '%s' not found in struct schema '%s'", subField.GetFieldName(), structName)
 			}

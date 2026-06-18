@@ -3507,12 +3507,14 @@ func BenchmarkCheckVarcharFormat(b *testing.B) {
 
 func TestCheckAndFlattenStructFieldData(t *testing.T) {
 	createTestSchema := func(name string, structFields []*schemapb.StructArrayFieldSchema, normalFields []*schemapb.FieldSchema) *schemapb.CollectionSchema {
-		return &schemapb.CollectionSchema{
+		schema := &schemapb.CollectionSchema{
 			Name:              name,
 			Description:       "test collection with struct array fields",
 			StructArrayFields: structFields,
 			Fields:            normalFields,
 		}
+		assert.NoError(t, transformStructFieldNames(schema))
+		return schema
 	}
 
 	createTestInsertMsg := func(collectionName string, fieldsData []*schemapb.FieldData) *msgstream.InsertMsg {
