@@ -195,3 +195,14 @@ func TestBuildTextLogPaths(t *testing.T) {
 		t.Errorf("BuildTextLogPaths() should keep full path unchanged, got %v", textStatsLogs[100].Files[0])
 	}
 }
+
+func TestBuildStatsFilePaths(t *testing.T) {
+	basePath := BuildTextIndexPrefix("root", 1, 2, 10, 20, 30, 100)
+	fullPath := path.Join(basePath, "file2.txt")
+
+	files := BuildStatsFilePaths(basePath, []string{"file1.txt", fullPath})
+	want := []string{path.Join(basePath, "file1.txt"), fullPath}
+	if !reflect.DeepEqual(files, want) {
+		t.Errorf("BuildStatsFilePaths() Files = %v, want %v", files, want)
+	}
+}

@@ -1061,18 +1061,14 @@ func getTextLogs(sinfo *SegmentInfo) map[string]struct{} {
 func getTextLogPaths(sinfo *SegmentInfo, rootPath string) map[string]struct{} {
 	textLogs := make(map[string]struct{})
 	for _, flog := range sinfo.GetTextStatsLogs() {
-		for _, file := range flog.GetFiles() {
-			if rootPath != "" {
-				file = path.Join(rootPath, common.TextIndexPath,
-					fmt.Sprintf("%d", flog.GetBuildID()),
-					fmt.Sprintf("%d", flog.GetVersion()),
-					fmt.Sprintf("%d", sinfo.GetCollectionID()),
-					fmt.Sprintf("%d", sinfo.GetPartitionID()),
-					fmt.Sprintf("%d", sinfo.GetID()),
-					fmt.Sprintf("%d", flog.GetFieldID()),
-					file,
-				)
-			}
+		files := flog.GetFiles()
+		if rootPath != "" {
+			basePath := metautil.BuildTextIndexPrefix(rootPath,
+				flog.GetBuildID(), flog.GetVersion(),
+				sinfo.GetCollectionID(), sinfo.GetPartitionID(), sinfo.GetID(), flog.GetFieldID())
+			files = metautil.BuildStatsFilePaths(basePath, files)
+		}
+		for _, file := range files {
 			textLogs[file] = struct{}{}
 		}
 	}
