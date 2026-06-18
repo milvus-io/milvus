@@ -132,7 +132,10 @@ func (i *GrpcAccessInfo) Address() string {
 func (i *GrpcAccessInfo) TraceID() string {
 	meta, ok := metadata.FromOutgoingContext(i.ctx)
 	if ok {
-		return meta.Get(ClientRequestIDKey)[0]
+		values := meta.Get(ClientRequestIDKey)
+		if len(values) > 0 {
+			return values[0]
+		}
 	}
 
 	traceID := trace.SpanFromContext(i.ctx).SpanContext().TraceID()
