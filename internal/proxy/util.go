@@ -1494,7 +1494,7 @@ func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache
 	// meanwhile, generating Sha256Password depends on raw password and encrypted password will not cache.
 	credInfo, err := privilege.GetPrivilegeCache().GetCredentialInfo(ctx, username)
 	if err != nil {
-		mlog.Error(ctx, "found no credential", mlog.String("username", username), mlog.Err(err))
+		mlog.Error(context.TODO(), "found no credential", mlog.String("username", username), mlog.Err(err))
 		return false
 	}
 
@@ -1506,13 +1506,13 @@ func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache
 
 	// miss cache, verify against encrypted password from etcd
 	if err := bcrypt.CompareHashAndPassword([]byte(credInfo.EncryptedPassword), []byte(rawPwd)); err != nil {
-		mlog.Error(ctx, "Verify password failed", mlog.Err(err))
+		mlog.Error(context.TODO(), "Verify password failed", mlog.Err(err))
 		return false
 	}
 
 	// update cache after miss cache
 	credInfo.Sha256Password = sha256Pwd
-	mlog.Debug(ctx, "get credential miss cache, update cache with", mlog.Any("credential", credInfo))
+	mlog.Debug(context.TODO(), "get credential miss cache, update cache with", mlog.Any("credential", credInfo))
 	privilegeCache.UpdateCredential(credInfo)
 	return true
 }
@@ -1879,7 +1879,7 @@ func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb
 			}
 
 			if fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
-				log.Warn(ctx, "no corresponding fieldData pass in", mlog.String("fieldSchema", fieldSchema.GetName()))
+				log.Warn(context.TODO(), "no corresponding fieldData pass in", mlog.String("fieldSchema", fieldSchema.GetName()))
 				return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
 			}
 			// when use default_value or has set Nullable
@@ -1894,7 +1894,7 @@ func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb
 	}
 
 	if primaryKeyNum > 1 {
-		log.Warn(ctx, "more than 1 primary keys not supported",
+		log.Warn(context.TODO(), "more than 1 primary keys not supported",
 			mlog.Int64("primaryKeyNum", int64(primaryKeyNum)))
 		return merr.WrapErrParameterInvalidMsg("more than 1 primary keys not supported, got %d", primaryKeyNum)
 	}
@@ -1902,7 +1902,7 @@ func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb
 	actualNum := len(insertMsg.FieldsData) + autoGenFieldNum
 
 	if expectedNum != actualNum {
-		log.Warn(ctx, "the number of fields is not the same as needed", mlog.Int("expected", expectedNum), mlog.Int("actual", actualNum))
+		log.Warn(context.TODO(), "the number of fields is not the same as needed", mlog.Int("expected", expectedNum), mlog.Int("actual", actualNum))
 		return merr.WrapErrParameterInvalid(expectedNum, actualNum, "more fieldData has pass in")
 	}
 
@@ -2257,7 +2257,7 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
-		log.Error(ctx, "get primary field schema failed", mlog.Any("schema", schema), mlog.Err(err))
+		log.Error(context.TODO(), "get primary field schema failed", mlog.Any("schema", schema), mlog.Err(err))
 		return nil, err
 	}
 	if primaryFieldSchema.GetNullable() {
@@ -2273,7 +2273,7 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 	if !primaryFieldSchema.AutoID || skipAutoIDCheck {
 		primaryFieldData, err = typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), primaryFieldSchema)
 		if err != nil {
-			log.Info(ctx, "get primary field data failed", mlog.Err(err))
+			log.Info(context.TODO(), "get primary field data failed", mlog.Err(err))
 			return nil, err
 		}
 	} else {
@@ -2284,7 +2284,7 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 		// if autoID == true, currently support autoID for int64 and varchar PrimaryField
 		primaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
 		if err != nil {
-			log.Info(ctx, "generate primary field data failed when autoID == true", mlog.Err(err))
+			log.Info(context.TODO(), "generate primary field data failed when autoID == true", mlog.Err(err))
 			return nil, err
 		}
 		// if autoID == true, set the primary field data
@@ -2295,7 +2295,7 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 	// parse primaryFieldData to result.IDs, and as returned primary keys
 	ids, err := parsePrimaryFieldData2IDs(primaryFieldData)
 	if err != nil {
-		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
+		log.Warn(context.TODO(), "parse primary field data to IDs failed", mlog.Err(err))
 		return nil, err
 	}
 
@@ -2330,7 +2330,7 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 				continue
 			}
 
-			log.Info(ctx, "no corresponding fieldData pass in", mlog.String("fieldSchema", fieldSchema.GetName()))
+			log.Info(context.TODO(), "no corresponding fieldData pass in", mlog.String("fieldSchema", fieldSchema.GetName()))
 			return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
 		}
 	}
@@ -2394,7 +2394,7 @@ func checkUpsertPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *sche
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
-		log.Error(ctx, "get primary field schema failed", mlog.Any("schema", schema), mlog.Err(err))
+		log.Error(context.TODO(), "get primary field schema failed", mlog.Any("schema", schema), mlog.Err(err))
 		return nil, nil, err
 	}
 	if primaryFieldSchema.GetNullable() {
@@ -2414,7 +2414,7 @@ func checkUpsertPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *sche
 				// automatic generate pk as new pk wehen autoID == true
 				newPrimaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
 				if err != nil {
-					log.Info(ctx, "generate new primary field data failed when upsert", mlog.Err(err))
+					log.Info(context.TODO(), "generate new primary field data failed when upsert", mlog.Err(err))
 					return nil, nil, err
 				}
 				insertMsg.FieldsData = append(insertMsg.GetFieldsData()[:i], insertMsg.GetFieldsData()[i+1:]...)
@@ -2431,7 +2431,7 @@ func checkUpsertPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *sche
 	// parse primaryFieldData to result.IDs, and as returned primary keys
 	ids, err := parsePrimaryFieldData2IDs(primaryFieldData)
 	if err != nil {
-		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
+		log.Warn(context.TODO(), "parse primary field data to IDs failed", mlog.Err(err))
 		return nil, nil, err
 	}
 	if !primaryFieldSchema.GetAutoID() {
@@ -2439,7 +2439,7 @@ func checkUpsertPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *sche
 	}
 	newIDs, err := parsePrimaryFieldData2IDs(newPrimaryFieldData)
 	if err != nil {
-		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
+		log.Warn(context.TODO(), "parse primary field data to IDs failed", mlog.Err(err))
 		return nil, nil, err
 	}
 	return newIDs, ids, nil
@@ -2473,7 +2473,7 @@ func getCollectionProgress(
 		CollectionIDs: []int64{collectionID},
 	})
 	if err != nil {
-		mlog.Warn(ctx, "fail to show collections",
+		mlog.Warn(context.TODO(), "fail to show collections",
 			mlog.Int64("collectionID", collectionID),
 			mlog.Err(err),
 		)
@@ -2482,7 +2482,7 @@ func getCollectionProgress(
 
 	err = merr.Error(resp.GetStatus())
 	if err != nil {
-		mlog.Warn(ctx, "fail to show collections",
+		mlog.Warn(context.TODO(), "fail to show collections",
 			mlog.Int64("collectionID", collectionID),
 			mlog.Err(err))
 		return
@@ -2527,7 +2527,7 @@ func getPartitionProgress(
 		PartitionIDs: partitionIDs,
 	})
 	if err != nil {
-		mlog.Warn(ctx, "fail to show partitions", mlog.Int64("collection_id", collectionID),
+		mlog.Warn(context.TODO(), "fail to show partitions", mlog.Int64("collection_id", collectionID),
 			mlog.String("collection_name", collectionName),
 			mlog.Strings("partition_names", partitionNames),
 			mlog.Err(err))
@@ -2537,7 +2537,7 @@ func getPartitionProgress(
 	err = merr.Error(resp.GetStatus())
 	if err != nil {
 		err = merr.Error(resp.GetStatus())
-		mlog.Warn(ctx, "fail to show partitions",
+		mlog.Warn(context.TODO(), "fail to show partitions",
 			mlog.String("collectionName", collectionName),
 			mlog.Strings("partitionNames", partitionNames),
 			mlog.Err(err))
@@ -2652,7 +2652,7 @@ func ErrWithLog(logger *mlog.Logger, msg string, err error) error {
 		logger.Warn(msg, mlog.Err(err))
 		return wrapErr
 	}
-	mlog.Warn(ctx, msg, mlog.Err(err))
+	mlog.Warn(context.TODO(), msg, mlog.Err(err))
 	return wrapErr
 }
 
@@ -3308,7 +3308,7 @@ func genFunctionFields(ctx context.Context, insertMsg *msgstream.InsertMsg, sche
 	// Since PartialUpdate is supported, the field_data here may not be complete
 	needProcessFunctions, err := typeutil.GetNeedProcessFunctions(fieldIDs, schema.Functions, allowNonBM25Outputs, partialUpdate)
 	if err != nil {
-		mlog.Warn(ctx, "Check upsert field error,", mlog.String("collectionName", schema.Name), mlog.Err(err))
+		mlog.Warn(context.TODO(), "Check upsert field error,", mlog.String("collectionName", schema.Name), mlog.Err(err))
 		return err
 	}
 
