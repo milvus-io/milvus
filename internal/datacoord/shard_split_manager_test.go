@@ -38,6 +38,7 @@ func newSplitTestMeta(enableNamespace bool, vchannel string, namespaceRows map[i
 	m := &meta{
 		segments:    NewSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		channelCPs:  newChannelCps(),
 	}
 	partitions := make([]int64, 0, len(namespaceRows))
 	for partitionID := range namespaceRows {

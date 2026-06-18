@@ -138,6 +138,25 @@ func (m *shardSplitManager) clusterReplicating() bool {
 	return isReplicatingCluster(assignment.ReplicateConfiguration)
 }
 
+// fenceFlushed reports whether the streamingnode flusher has flushed and reported
+// to datacoord every segment the SplitShard fence sealed. The fence sealed all data
+// at or before T_switch, and the source channel checkpoint only advances past a
+// position once the segments holding that data are durably synced and reported (the
+// write buffer holds the checkpoint at the earliest un-synced position). So the
+// checkpoint reaching T_switch proves the fence-sealed set is fully in datacoord
+// meta and relabelable.
+//
+// A task without a recorded T_switch (switch_time_tick == 0, e.g. a crash before it
+// was persisted) does not gate on the checkpoint: the fence already holds, the
+// segment scan is the backstop, and T_switch is restored on a later fence retry.
+func (m *shardSplitManager) fenceFlushed(task *datapb.SplitShardTask) bool {
+	if task.GetSwitchTimeTick() == 0 {
+		return true
+	}
+	cp := m.meta.GetChannelCheckpoint(task.GetSourceVchannel())
+	return cp != nil && cp.GetTimestamp() >= task.GetSwitchTimeTick()
+}
+
 // shardStats is the aggregated statistics of one shard (vchannel).
 type shardStats struct {
 	vchannel       string
