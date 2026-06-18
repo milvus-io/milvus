@@ -917,7 +917,7 @@ func (t *alterIndexTask) Execute(ctx context.Context) error {
 		mlog.Any("deletekeys", t.req.GetDeleteKeys()),
 	)
 
-	mlog.Info(context.TODO(), "alter index")
+	log.Info(ctx, "alter index")
 
 	var err error
 	req := &indexpb.AlterIndexRequest{

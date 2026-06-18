@@ -3104,7 +3104,7 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		mlog.String("role", typeutil.ProxyRole),
 		mlog.Int64("collectionID", collID))
 
-	mlog.Debug(context.TODO(), "loadCollectionTask Execute")
+	log.Debug(ctx, "loadCollectionTask Execute")
 	if err != nil {
 		return err
 	}
@@ -3157,7 +3157,7 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 
 	if len(unindexedVecFields) != 0 {
 		errMsg := fmt.Sprintf("there is no vector index on field: %v, please create index firstly", unindexedVecFields)
-		mlog.Debug(errMsg)
+		log.Debug(ctx, errMsg)
 		return merr.WrapErrParameterInvalidMsg("%s", errMsg)
 	}
 	request := &querypb.LoadCollectionRequest{
@@ -3175,7 +3175,7 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		LoadFields:     loadFields,
 		Priority:       t.GetLoadPriority(),
 	}
-	mlog.Info(context.TODO(), "send LoadCollectionRequest to query coordinator",
+	log.Info(ctx, "send LoadCollectionRequest to query coordinator",
 		mlog.Any("schema", request.Schema),
 		mlog.Int32("priority", int32(request.GetPriority())))
 	t.result, err = t.mixCoord.LoadCollection(ctx, request)

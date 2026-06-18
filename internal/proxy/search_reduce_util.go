@@ -803,17 +803,17 @@ func reduceResults(ctx context.Context, toReduceResults []*internalpb.SearchResu
 	// Decode all search results
 	validSearchResults, err := decodeSearchResults(ctx, toReduceResults)
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to decode search results", mlog.Err(err))
+		log.Warn(ctx, "failed to decode search results", mlog.Err(err))
 		return nil, err
 	}
 
 	if len(validSearchResults) <= 0 {
-		mlog.Debug(context.TODO(), "reduced search results is empty, fill in empty result")
+		log.Debug(ctx, "reduced search results is empty, fill in empty result")
 		return fillInEmptyResult(nq), nil
 	}
 
 	// Reduce all search results
-	mlog.Debug(context.TODO(), "proxy search post execute reduce",
+	log.Debug(ctx, "proxy search post execute reduce",
 		mlog.Int64("collection", collectionID),
 		mlog.Int64s("partitionIDs", partitionIDs),
 		mlog.Int("number of valid search results", len(validSearchResults)))
@@ -823,7 +823,7 @@ func reduceResults(ctx context.Context, toReduceResults []*internalpb.SearchResu
 		WithGroupByFieldIdsFromProto(queryInfo.GetGroupByFieldId(), queryInfo.GetGroupByFieldIds()).
 		WithAdvance(isAdvance).WithSearchAggregation(isSearchAggregation))
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to reduce search results", mlog.Err(err))
+		log.Warn(ctx, "failed to reduce search results", mlog.Err(err))
 		return nil, err
 	}
 	return result, nil

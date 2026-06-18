@@ -1856,7 +1856,7 @@ func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb
 
 	for _, fieldSchema := range allFields {
 		if fieldSchema.AutoID && !fieldSchema.IsPrimaryKey {
-			mlog.Warn(context.TODO(), "not primary key field, but set autoID true", mlog.String("field", fieldSchema.GetName()))
+			log.Warn(ctx, "not primary key field, but set autoID true", mlog.String("field", fieldSchema.GetName()))
 			return merr.WrapErrParameterInvalidMsg("only primary key could be with AutoID enabled")
 		}
 
@@ -1879,7 +1879,7 @@ func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb
 			}
 
 			if fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
-				mlog.Warn(context.TODO(), "no corresponding fieldData pass in", mlog.String("fieldSchema", fieldSchema.GetName()))
+				log.Warn(ctx, "no corresponding fieldData pass in", mlog.String("fieldSchema", fieldSchema.GetName()))
 				return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
 			}
 			// when use default_value or has set Nullable
@@ -1894,7 +1894,7 @@ func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb
 	}
 
 	if primaryKeyNum > 1 {
-		mlog.Warn(context.TODO(), "more than 1 primary keys not supported",
+		log.Warn(ctx, "more than 1 primary keys not supported",
 			mlog.Int64("primaryKeyNum", int64(primaryKeyNum)))
 		return merr.WrapErrParameterInvalidMsg("more than 1 primary keys not supported, got %d", primaryKeyNum)
 	}
@@ -1902,7 +1902,7 @@ func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb
 	actualNum := len(insertMsg.FieldsData) + autoGenFieldNum
 
 	if expectedNum != actualNum {
-		mlog.Warn(context.TODO(), "the number of fields is not the same as needed", mlog.Int("expected", expectedNum), mlog.Int("actual", actualNum))
+		log.Warn(ctx, "the number of fields is not the same as needed", mlog.Int("expected", expectedNum), mlog.Int("actual", actualNum))
 		return merr.WrapErrParameterInvalid(expectedNum, actualNum, "more fieldData has pass in")
 	}
 
@@ -2257,7 +2257,7 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
-		mlog.Error(context.TODO(), "get primary field schema failed", mlog.Any("schema", schema), mlog.Err(err))
+		log.Error(ctx, "get primary field schema failed", mlog.Any("schema", schema), mlog.Err(err))
 		return nil, err
 	}
 	if primaryFieldSchema.GetNullable() {
@@ -2273,7 +2273,7 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 	if !primaryFieldSchema.AutoID || skipAutoIDCheck {
 		primaryFieldData, err = typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), primaryFieldSchema)
 		if err != nil {
-			mlog.Info(context.TODO(), "get primary field data failed", mlog.Err(err))
+			log.Info(ctx, "get primary field data failed", mlog.Err(err))
 			return nil, err
 		}
 	} else {
@@ -2284,7 +2284,7 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 		// if autoID == true, currently support autoID for int64 and varchar PrimaryField
 		primaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
 		if err != nil {
-			mlog.Info(context.TODO(), "generate primary field data failed when autoID == true", mlog.Err(err))
+			log.Info(ctx, "generate primary field data failed when autoID == true", mlog.Err(err))
 			return nil, err
 		}
 		// if autoID == true, set the primary field data
@@ -2295,7 +2295,7 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 	// parse primaryFieldData to result.IDs, and as returned primary keys
 	ids, err := parsePrimaryFieldData2IDs(primaryFieldData)
 	if err != nil {
-		mlog.Warn(context.TODO(), "parse primary field data to IDs failed", mlog.Err(err))
+		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
 		return nil, err
 	}
 
@@ -2330,7 +2330,7 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 				continue
 			}
 
-			mlog.Info(context.TODO(), "no corresponding fieldData pass in", mlog.String("fieldSchema", fieldSchema.GetName()))
+			log.Info(ctx, "no corresponding fieldData pass in", mlog.String("fieldSchema", fieldSchema.GetName()))
 			return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
 		}
 	}
@@ -2394,7 +2394,7 @@ func checkUpsertPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *sche
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
-		mlog.Error(context.TODO(), "get primary field schema failed", mlog.Any("schema", schema), mlog.Err(err))
+		log.Error(ctx, "get primary field schema failed", mlog.Any("schema", schema), mlog.Err(err))
 		return nil, nil, err
 	}
 	if primaryFieldSchema.GetNullable() {
@@ -2414,7 +2414,7 @@ func checkUpsertPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *sche
 				// automatic generate pk as new pk wehen autoID == true
 				newPrimaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
 				if err != nil {
-					mlog.Info(context.TODO(), "generate new primary field data failed when upsert", mlog.Err(err))
+					log.Info(ctx, "generate new primary field data failed when upsert", mlog.Err(err))
 					return nil, nil, err
 				}
 				insertMsg.FieldsData = append(insertMsg.GetFieldsData()[:i], insertMsg.GetFieldsData()[i+1:]...)
@@ -2431,7 +2431,7 @@ func checkUpsertPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *sche
 	// parse primaryFieldData to result.IDs, and as returned primary keys
 	ids, err := parsePrimaryFieldData2IDs(primaryFieldData)
 	if err != nil {
-		mlog.Warn(context.TODO(), "parse primary field data to IDs failed", mlog.Err(err))
+		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
 		return nil, nil, err
 	}
 	if !primaryFieldSchema.GetAutoID() {
@@ -2439,7 +2439,7 @@ func checkUpsertPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *sche
 	}
 	newIDs, err := parsePrimaryFieldData2IDs(newPrimaryFieldData)
 	if err != nil {
-		mlog.Warn(context.TODO(), "parse primary field data to IDs failed", mlog.Err(err))
+		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
 		return nil, nil, err
 	}
 	return newIDs, ids, nil
