@@ -119,7 +119,7 @@ func (s *SchedulerSuite) TestConsumeRecvChan() {
 		scheduler := &scheduler{
 			policy:           newFIFOPolicy(),
 			receiveChan:      ch,
-			execChan:         make(chan Task),
+			execChan:         make(chan *queuedTask),
 			pool:             conc.NewPool[any](10, conc.WithPreAlloc(true)),
 			schedulerCounter: schedulerCounter{},
 			lifetime:         lifetime.NewLifetime(lifetime.Initializing),
@@ -351,39 +351,37 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestAcceptsDeadlineWhenQueueEmpty()
 	s.Equal(int64(1), scheduler.GetWaitingTaskTotal())
 }
 
-func (s *SchedulerSuite) TestSetupExecListenerRecordsPoppedExpiredTask() {
+func (s *SchedulerSuite) TestExecDropsExpiredTaskBeforePreExecute() {
 	paramtable.Init()
 	metrics.QueryNodeReadTaskQueueDuration.Reset()
 	defer metrics.QueryNodeReadTaskQueueDuration.Reset()
 
 	now := time.Now()
 	scheduler := &scheduler{
-		policy:           newFIFOPolicy(),
-		execChan:         make(chan Task),
+		execChan:         make(chan *queuedTask),
 		schedulerCounter: schedulerCounter{},
 	}
+	scheduler.wg.Add(1)
+	go scheduler.exec()
+	defer func() {
+		close(scheduler.execChan)
+		scheduler.wg.Wait()
+	}()
 
 	expiredCtx, cancelExpired := context.WithDeadline(context.Background(), now.Add(-time.Millisecond))
 	defer cancelExpired()
 	expiredTask := newMockTask(mockTaskConfig{ctx: expiredCtx, nq: 1})
 	queued := newQueuedTask(expiredTask, now.Add(-time.Second))
-	added, err := scheduler.policy.Push(queued)
-	s.NoError(err)
-	scheduler.updateWaitingTaskCounter(int64(added), queued.NQ())
 
-	task, nq, execChan := scheduler.setupExecListener(nil, now)
+	scheduler.execChan <- queued
 
-	s.False(task.valid())
-	s.Zero(nq)
-	s.Nil(execChan)
-	s.Equal(int64(0), scheduler.GetWaitingTaskTotal())
 	s.ErrorIs(expiredTask.Wait(), context.DeadlineExceeded)
 	s.Equal(uint64(1), readTaskQueueDurationCount(readTaskQueueOutcomeExpired))
 	s.Equal(uint64(0), readTaskQueueDurationCount(readTaskQueueOutcomeDeadlineAdvance))
 	s.Equal(uint64(0), readTaskQueueDurationCount(readTaskQueueOutcomeScheduled))
 }
 
-func (s *SchedulerSuite) TestSetupExecListenerDropsPoppedTaskNearDeadline() {
+func (s *SchedulerSuite) TestExecDropsNearDeadlineTaskBeforePreExecute() {
 	paramtable.Init()
 	metrics.QueryNodeReadTaskQueueDuration.Reset()
 	defer metrics.QueryNodeReadTaskQueueDuration.Reset()
@@ -392,78 +390,26 @@ func (s *SchedulerSuite) TestSetupExecListenerDropsPoppedTaskNearDeadline() {
 
 	now := time.Now()
 	scheduler := &scheduler{
-		policy:           newFIFOPolicy(),
-		execChan:         make(chan Task),
+		execChan:         make(chan *queuedTask),
 		schedulerCounter: schedulerCounter{},
 	}
+	scheduler.wg.Add(1)
+	go scheduler.exec()
+	defer func() {
+		close(scheduler.execChan)
+		scheduler.wg.Wait()
+	}()
 
 	nearDeadlineCtx, cancelNearDeadline := context.WithDeadline(context.Background(), now.Add(30*time.Millisecond))
 	defer cancelNearDeadline()
 	nearDeadlineTask := newMockTask(mockTaskConfig{ctx: nearDeadlineCtx, nq: 1})
 	queued := newQueuedTask(nearDeadlineTask, now.Add(-time.Second))
-	added, err := scheduler.policy.Push(queued)
-	s.NoError(err)
-	scheduler.updateWaitingTaskCounter(int64(added), queued.NQ())
 
-	task, nq, execChan := scheduler.setupExecListener(nil, now)
+	scheduler.execChan <- queued
 
-	s.False(task.valid())
-	s.Zero(nq)
-	s.Nil(execChan)
-	s.Equal(int64(0), scheduler.GetWaitingTaskTotal())
-	select {
-	case err := <-nearDeadlineTask.(*MockTask).notifier:
-		s.ErrorIs(err, context.DeadlineExceeded)
-	default:
-		s.Fail("near-deadline task was not dropped before execution")
-	}
+	s.ErrorIs(nearDeadlineTask.Wait(), context.DeadlineExceeded)
 	s.Equal(uint64(0), readTaskQueueDurationCount(readTaskQueueOutcomeExpired))
 	s.Equal(uint64(1), readTaskQueueDurationCount(readTaskQueueOutcomeDeadlineAdvance))
-	s.Equal(uint64(0), readTaskQueueDurationCount(readTaskQueueOutcomeScheduled))
-}
-
-func (s *SchedulerSuite) TestSetupExecListenerDropsWaitingTaskExpiredBeforeExecChanSend() {
-	paramtable.Init()
-	metrics.QueryNodeReadTaskQueueDuration.Reset()
-	defer metrics.QueryNodeReadTaskQueueDuration.Reset()
-	oldDeadlineAdvance := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.SwapTempValue("0ms")
-	defer paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.SwapTempValue(oldDeadlineAdvance)
-
-	now := time.Now()
-	scheduler := &scheduler{
-		policy:           newFIFOPolicy(),
-		execChan:         make(chan Task),
-		schedulerCounter: schedulerCounter{},
-	}
-
-	ctx, cancel := context.WithDeadline(context.Background(), now.Add(time.Millisecond))
-	defer cancel()
-	waitingTask := newMockTask(mockTaskConfig{ctx: ctx, nq: 1})
-	queued := newQueuedTask(waitingTask, now.Add(-time.Second))
-	added, err := scheduler.policy.Push(queued)
-	s.NoError(err)
-	scheduler.updateWaitingTaskCounter(int64(added), queued.NQ())
-
-	task, nq, execChan := scheduler.setupExecListener(nil, now)
-	s.True(task.valid())
-	s.Equal(int64(1), nq)
-	s.NotNil(execChan)
-	s.Equal(uint64(0), readTaskQueueDurationCount(readTaskQueueOutcomeScheduled))
-
-	time.Sleep(2 * time.Millisecond)
-	task, nq, execChan = scheduler.setupExecListener(task, time.Now())
-
-	s.False(task.valid())
-	s.Zero(nq)
-	s.Nil(execChan)
-	s.Equal(int64(0), scheduler.GetWaitingTaskTotal())
-	select {
-	case err := <-waitingTask.(*MockTask).notifier:
-		s.ErrorIs(err, context.DeadlineExceeded)
-	case <-time.After(time.Second):
-		s.Fail("waiting task was not notified after expiring before execChan send")
-	}
-	s.Equal(uint64(1), readTaskQueueDurationCount(readTaskQueueOutcomeExpired))
 	s.Equal(uint64(0), readTaskQueueDurationCount(readTaskQueueOutcomeScheduled))
 }
 
