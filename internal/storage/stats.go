@@ -25,8 +25,6 @@ import (
 	"math"
 	"path"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/bloomfilter"
@@ -131,7 +129,7 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 	if bfMessage, ok := messageMap["bf"]; ok && bfMessage != nil {
 		bf, err := bloomfilter.UnmarshalJSON(*bfMessage, bfType)
 		if err != nil {
-			mlog.Warn(context.TODO(), "Failed to unmarshal bloom filter, use AlwaysTrueBloomFilter instead of return err", zap.Error(err))
+			mlog.Warn(context.TODO(), "Failed to unmarshal bloom filter, use AlwaysTrueBloomFilter instead of return err", mlog.Err(err))
 			bf = bloomfilter.AlwaysTrueBloomFilter
 		}
 		stats.BF = bf

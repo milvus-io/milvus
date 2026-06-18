@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher/flusherimpl"
@@ -94,12 +93,12 @@ func (o *openerAdaptorImpl) Open(ctx context.Context, opt *wal.OpenOption) (wal.
 		return nil, err
 	}
 
-	logger := mlog.With(zap.String("channel", opt.Channel.String()), zap.Stringer("walName", walName))
+	logger := mlog.With(mlog.String("channel", opt.Channel.String()), mlog.Stringer("walName", walName))
 
 	// Get or create the underlying walimpls.OpenerImpls for this walName
 	openerImpl, err := o.getOrCreateOpenerImpl(ctx, walName)
 	if err != nil {
-		logger.Warn(ctx, "get or create underlying wal impls opener failed", zap.Error(err))
+		logger.Warn(ctx, "get or create underlying wal impls opener failed", mlog.Err(err))
 		return nil, err
 	}
 
@@ -108,7 +107,7 @@ func (o *openerAdaptorImpl) Open(ctx context.Context, opt *wal.OpenOption) (wal.
 		Channel: opt.Channel,
 	})
 	if err != nil {
-		logger.Warn(ctx, "open wal impls failed", zap.Error(err))
+		logger.Warn(ctx, "open wal impls failed", mlog.Err(err))
 		return nil, err
 	}
 
@@ -122,10 +121,10 @@ func (o *openerAdaptorImpl) Open(ctx context.Context, opt *wal.OpenOption) (wal.
 		panic("unknown access mode")
 	}
 	if err != nil {
-		logger.Warn(ctx, "open wal failed", zap.Error(err))
+		logger.Warn(ctx, "open wal failed", mlog.Err(err))
 		return nil, err
 	}
-	logger.Info(ctx, "open wal done", zap.Stringer("walName", walName), zap.String("pchannel", opt.Channel.Name))
+	logger.Info(ctx, "open wal done", mlog.Stringer("walName", walName), mlog.String("pchannel", opt.Channel.Name))
 	return wal, nil
 }
 
@@ -140,11 +139,11 @@ func (o *openerAdaptorImpl) determineWALName(ctx context.Context, opt *wal.OpenO
 	if cpProto != nil {
 		checkpoint := utility.NewWALCheckpointFromProto(cpProto)
 		mlog.Info(ctx, "get checkpoint from catalog",
-			zap.String("channel", opt.Channel.Name),
-			zap.Stringer("checkpoint", checkpoint.MessageID),
-			zap.Uint64("checkpointTimeTick", checkpoint.TimeTick),
-			zap.Stringer("currentWAL", checkpoint.MessageID.WALName()),
-			zap.Any("AlterWalState", checkpoint.AlterWalState))
+			mlog.String("channel", opt.Channel.Name),
+			mlog.Stringer("checkpoint", checkpoint.MessageID),
+			mlog.Uint64("checkpointTimeTick", checkpoint.TimeTick),
+			mlog.Stringer("currentWAL", checkpoint.MessageID.WALName()),
+			mlog.Any("AlterWalState", checkpoint.AlterWalState))
 		walName = checkpoint.MessageID.WALName()
 	}
 
@@ -181,7 +180,7 @@ func (o *openerAdaptorImpl) getOrCreateOpenerImpl(ctx context.Context, walName m
 	}
 
 	o.openerCache[walName] = opener
-	mlog.Info(ctx, "created and cached new walimpls opener", zap.Stringer("walName", walName))
+	mlog.Info(ctx, "created and cached new walimpls opener", mlog.Stringer("walName", walName))
 	return opener, nil
 }
 
@@ -228,7 +227,7 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 	// Load salvage checkpoints from etcd (one per source cluster that was force-promoted from).
 	var salvageCheckpoints []*utility.ReplicateCheckpoint
 	if salvageCPProtos, err := resource.Resource().StreamingNodeCatalog().GetSalvageCheckpoint(ctx, param.ChannelInfo.Name); err != nil {
-		mlog.Info(ctx, "failed to load salvage checkpoints", zap.Error(err))
+		mlog.Info(ctx, "failed to load salvage checkpoints", mlog.Err(err))
 	} else {
 		for _, proto := range salvageCPProtos {
 			salvageCheckpoints = append(salvageCheckpoints, utility.NewReplicateCheckpointFromProto(proto))
@@ -284,12 +283,12 @@ func (o *openerAdaptorImpl) handleAlterWAL(ctx context.Context, l walimpls.WALIm
 	roWAL *roWALAdaptorImpl, param *interceptors.InterceptorBuildParam, rs recovery.RecoveryStorage, snapshot *recovery.RecoverySnapshot,
 ) (wal.WAL, error) {
 	mlog.Info(ctx, "detected alter WAL message in snapshot",
-		zap.String("channel", opt.Channel.String()),
-		zap.Bool("foundAlterWAL", snapshot.AlterWALInfo.FoundAlterWALMsg),
-		zap.Stringer("targetWAL", snapshot.AlterWALInfo.TargetWALName),
-		zap.String("checkpointMessageID", snapshot.Checkpoint.MessageID.String()),
-		zap.Uint64("checkpointTimeTick", snapshot.Checkpoint.TimeTick),
-		zap.Any("alterWALConfig", snapshot.AlterWALInfo.AlterWALConfig))
+		mlog.String("channel", opt.Channel.String()),
+		mlog.Bool("foundAlterWAL", snapshot.AlterWALInfo.FoundAlterWALMsg),
+		mlog.Stringer("targetWAL", snapshot.AlterWALInfo.TargetWALName),
+		mlog.String("checkpointMessageID", snapshot.Checkpoint.MessageID.String()),
+		mlog.Uint64("checkpointTimeTick", snapshot.Checkpoint.TimeTick),
+		mlog.Any("alterWALConfig", snapshot.AlterWALInfo.AlterWALConfig))
 
 	if snapshot.Checkpoint.AlterWalState != nil && snapshot.Checkpoint.AlterWalState.Stage == streamingpb.AlterWALStage_FLUSHING {
 		flushingErr := o.handleAlterWALFlushingStage(ctx, opt, roWAL, param, rs, snapshot)
@@ -331,8 +330,8 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 	targetTimeTick := snapshot.AlterWALInfo.AlterWALTs
 	targetWALName := snapshot.AlterWALInfo.TargetWALName
 	mlog.Info(ctx, "waiting for flush completion before WAL switch",
-		zap.String("channel", opt.Channel.Name),
-		zap.Uint64("targetTimeTick", targetTimeTick))
+		mlog.String("channel", opt.Channel.Name),
+		mlog.Uint64("targetTimeTick", targetTimeTick))
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -351,27 +350,27 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 			}
 			if flusherCP.TimeTick >= targetTimeTick {
 				mlog.Info(ctx, "flush completed, ready for WAL switch",
-					zap.String("channel", opt.Channel.Name),
-					zap.Uint64("flusherCheckpointTS", flusherCP.TimeTick),
-					zap.Uint64("targetTimeTick", targetTimeTick),
-					zap.Stringer("targetWAL", targetWALName))
+					mlog.String("channel", opt.Channel.Name),
+					mlog.Uint64("flusherCheckpointTS", flusherCP.TimeTick),
+					mlog.Uint64("targetTimeTick", targetTimeTick),
+					mlog.Stringer("targetWAL", targetWALName))
 				break
 			}
 			remaining := targetTimeTick - flusherCP.TimeTick
 			mlog.Info(ctx, "flush in progress",
-				zap.String("channel", opt.Channel.Name),
-				zap.Uint64("currentTS", flusherCP.TimeTick),
-				zap.Uint64("targetTS", targetTimeTick),
-				zap.Uint64("remainingTS", remaining))
+				mlog.String("channel", opt.Channel.Name),
+				mlog.Uint64("currentTS", flusherCP.TimeTick),
+				mlog.Uint64("targetTS", targetTimeTick),
+				mlog.Uint64("remainingTS", remaining))
 		case <-time.After(defaultWALSwitchFlushTimeout):
 			mlog.Warn(ctx, "timeout waiting for flush completion",
-				zap.String("channel", opt.Channel.Name),
-				zap.Duration("timeout", defaultWALSwitchFlushTimeout))
+				mlog.String("channel", opt.Channel.Name),
+				mlog.Duration("timeout", defaultWALSwitchFlushTimeout))
 			return status.NewInner("timeout waiting for flush completion during WAL switch")
 		case <-ctx.Done():
 			mlog.Warn(ctx, "context canceled while waiting for flush completion",
-				zap.String("channel", opt.Channel.Name),
-				zap.Error(ctx.Err()))
+				mlog.String("channel", opt.Channel.Name),
+				mlog.Err(ctx.Err()))
 			return errors.Wrap(ctx.Err(), "context canceled during WAL switch flush waiting")
 		}
 	}
@@ -391,15 +390,15 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 	catalog := resource.Resource().StreamingNodeCatalog()
 	if err := catalog.SaveConsumeCheckpoint(ctx, opt.Channel.Name, snapshot.Checkpoint.IntoProto()); err != nil {
 		mlog.Warn(ctx, "failed to persist checkpoint after flushing stage",
-			zap.String("channel", opt.Channel.Name),
-			zap.Error(err))
+			mlog.String("channel", opt.Channel.Name),
+			mlog.Err(err))
 		return errors.Wrap(err, "failed to persist checkpoint after flushing stage")
 	}
 
 	mlog.Info(ctx, "checkpoint stage updated to ADVANCE_CHECKPOINT",
-		zap.String("channel", opt.Channel.Name),
-		zap.String("checkpoint", snapshot.Checkpoint.MessageID.String()),
-		zap.Uint64("checkpointTS", snapshot.Checkpoint.TimeTick))
+		mlog.String("channel", opt.Channel.Name),
+		mlog.String("checkpoint", snapshot.Checkpoint.MessageID.String()),
+		mlog.Uint64("checkpointTS", snapshot.Checkpoint.TimeTick))
 	return nil
 }
 
@@ -447,33 +446,33 @@ func (o *openerAdaptorImpl) handleAlterWALAdvanceCheckpointsStage(ctx context.Co
 		resp, err := mixCoordClient.UpdateChannelCheckpoint(ctx, req)
 		if err = merr.CheckRPCCall(resp, err); err != nil {
 			mlog.Warn(ctx, "failed to update vchannel checkpoints",
-				zap.String("channel", opt.Channel.Name),
-				zap.Int("vchannelCount", len(channelCheckpoints)),
-				zap.Error(err))
+				mlog.String("channel", opt.Channel.Name),
+				mlog.Int("vchannelCount", len(channelCheckpoints)),
+				mlog.Err(err))
 			return errors.Wrap(err, "failed to update vchannel checkpoints")
 		}
 
 		mlog.Info(ctx, "vchannel checkpoints updated to new WAL initial position",
-			zap.String("channel", opt.Channel.Name),
-			zap.Int("vchannelCount", len(channelCheckpoints)),
-			zap.Uint64("newWALInitialTS", newWALInitialTimeTick))
+			mlog.String("channel", opt.Channel.Name),
+			mlog.Int("vchannelCount", len(channelCheckpoints)),
+			mlog.Uint64("newWALInitialTS", newWALInitialTimeTick))
 
 		// Verify checkpoint updates
 		for _, vchannel := range vchannels {
 			resp2, err2 := mixCoordClient.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{Vchannel: vchannel.Vchannel})
 			if err2 != nil {
 				mlog.Warn(ctx, "failed to verify vchannel checkpoint update",
-					zap.String("vchannel", vchannel.Vchannel),
-					zap.Error(err2))
+					mlog.String("vchannel", vchannel.Vchannel),
+					mlog.Err(err2))
 				return errors.Wrap(err2, "failed to verify vchannel checkpoint update")
 			}
 			mlog.Info(ctx, "verified vchannel checkpoint update",
-				zap.String("vchannel", vchannel.Vchannel),
-				zap.Binary("seekPositionMsgID", resp2.Info.SeekPosition.MsgID))
+				mlog.String("vchannel", vchannel.Vchannel),
+				mlog.Binary("seekPositionMsgID", resp2.Info.SeekPosition.MsgID))
 		}
 	} else {
 		mlog.Info(ctx, "no vchannels found, skipping vchannel checkpoint update",
-			zap.String("channel", opt.Channel.Name))
+			mlog.String("channel", opt.Channel.Name))
 	}
 
 	// Update pchannel checkpoint: reset alterWALState and set position to new WAL initial position
@@ -487,8 +486,8 @@ func (o *openerAdaptorImpl) handleAlterWALAdvanceCheckpointsStage(ctx context.Co
 	// Persist final checkpoint to catalog
 	if err := catalog.SaveConsumeCheckpoint(ctx, opt.Channel.Name, finalCheckpoint.IntoProto()); err != nil {
 		mlog.Warn(ctx, "failed to persist checkpoint after advance checkpoint stage",
-			zap.String("channel", opt.Channel.Name),
-			zap.Error(err))
+			mlog.String("channel", opt.Channel.Name),
+			mlog.Err(err))
 		return errors.Wrap(err, "failed to persist checkpoint after advance checkpoint stage")
 	}
 
@@ -496,10 +495,10 @@ func (o *openerAdaptorImpl) handleAlterWALAdvanceCheckpointsStage(ctx context.Co
 	message.RegisterDefaultWALName(finalCheckpoint.MessageID.WALName())
 
 	mlog.Info(ctx, "pchannel checkpoint updated to new WAL initial position",
-		zap.String("channel", opt.Channel.Name),
-		zap.String("newCheckpoint", finalCheckpoint.MessageID.String()),
-		zap.String("newWAL", finalCheckpoint.MessageID.WALName().String()),
-		zap.Uint64("newCheckpointTS", finalCheckpoint.TimeTick))
+		mlog.String("channel", opt.Channel.Name),
+		mlog.String("newCheckpoint", finalCheckpoint.MessageID.String()),
+		mlog.String("newWAL", finalCheckpoint.MessageID.WALName().String()),
+		mlog.Uint64("newCheckpointTS", finalCheckpoint.TimeTick))
 
 	return nil
 }
@@ -528,7 +527,7 @@ func (o *openerAdaptorImpl) Close() {
 		l.Close()
 		o.Logger().Info(context.TODO(),
 
-			"close wal by opener", zap.Int64("id", id), zap.String("channel", l.Channel().String()))
+			"close wal by opener", mlog.Int64("id", id), mlog.String("channel", l.Channel().String()))
 		return true
 	})
 
@@ -538,7 +537,7 @@ func (o *openerAdaptorImpl) Close() {
 	for walName, opener := range o.openerCache {
 		o.Logger().Info(context.TODO(),
 
-			"closing underlying walimpls opener", zap.Stringer("walName", walName))
+			"closing underlying walimpls opener", mlog.Stringer("walName", walName))
 		opener.Close()
 	}
 	o.openerCache = nil

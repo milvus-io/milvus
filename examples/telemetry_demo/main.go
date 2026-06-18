@@ -1,7 +1,8 @@
 // Telemetry Demo - end-to-end telemetry flow with HTTP API and WebUI.
 //
 // Usage:
-//   go run main.go
+//
+//	go run main.go
 //
 // Prerequisites:
 //   - Milvus standalone or cluster running
@@ -12,10 +13,10 @@
 //   - MILVUS_HTTP_ADDRESS (default: http://localhost:9091)
 //
 // Features:
-//   1. Multiple collections with different schemas
-//   2. Random requests to different collections during heartbeat
-//   3. Client-side metrics push verification
-//   4. Rich filtering dimensions (collection, operation, database)
+//  1. Multiple collections with different schemas
+//  2. Random requests to different collections during heartbeat
+//  3. Client-side metrics push verification
+//  4. Rich filtering dimensions (collection, operation, database)
 package main
 
 import (

@@ -21,7 +21,6 @@ import (
 	"sort"
 	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -88,7 +87,7 @@ func (m *externalCollectionRefreshMeta) reloadFromKV() error {
 	// Load jobs
 	jobs, err := m.catalog.ListExternalCollectionRefreshJobs(m.ctx)
 	if err != nil {
-		mlog.Error(m.ctx, "failed to load external collection refresh jobs", zap.Error(err))
+		mlog.Error(m.ctx, "failed to load external collection refresh jobs", mlog.Err(err))
 		return err
 	}
 	for _, job := range jobs {
@@ -99,7 +98,7 @@ func (m *externalCollectionRefreshMeta) reloadFromKV() error {
 	// Load tasks
 	tasks, err := m.catalog.ListExternalCollectionRefreshTasks(m.ctx)
 	if err != nil {
-		mlog.Error(m.ctx, "failed to load external collection refresh tasks", zap.Error(err))
+		mlog.Error(m.ctx, "failed to load external collection refresh tasks", mlog.Err(err))
 		return err
 	}
 	for _, task := range tasks {
@@ -108,9 +107,9 @@ func (m *externalCollectionRefreshMeta) reloadFromKV() error {
 	}
 
 	mlog.Info(m.ctx, "externalCollectionRefreshMeta reloadFromKV done",
-		zap.Int("jobCount", len(jobs)),
-		zap.Int("taskCount", len(tasks)),
-		zap.Duration("duration", record.ElapseSpan()))
+		mlog.Int("jobCount", len(jobs)),
+		mlog.Int("taskCount", len(tasks)),
+		mlog.Duration("duration", record.ElapseSpan()))
 	return nil
 }
 
@@ -172,14 +171,14 @@ func (m *externalCollectionRefreshMeta) AddJob(job *datapb.ExternalCollectionRef
 	defer m.jobLock.Unlock(job.GetCollectionId())
 
 	mlog.Info(m.ctx, "add refresh job",
-		zap.Int64("jobID", job.GetJobId()),
-		zap.Int64("collectionID", job.GetCollectionId()),
-		zap.String("collectionName", job.GetCollectionName()))
+		mlog.Int64("jobID", job.GetJobId()),
+		mlog.Int64("collectionID", job.GetCollectionId()),
+		mlog.String("collectionName", job.GetCollectionName()))
 
 	if err := m.catalog.SaveExternalCollectionRefreshJob(m.ctx, job); err != nil {
 		mlog.Warn(m.ctx, "save refresh job failed",
-			zap.Int64("jobID", job.GetJobId()),
-			zap.Error(err))
+			mlog.Int64("jobID", job.GetJobId()),
+			mlog.Err(err))
 		return err
 	}
 
@@ -187,8 +186,8 @@ func (m *externalCollectionRefreshMeta) AddJob(job *datapb.ExternalCollectionRef
 	m.addToCollectionJobs(job)
 
 	mlog.Info(m.ctx, "add refresh job success",
-		zap.Int64("jobID", job.GetJobId()),
-		zap.Int64("collectionID", job.GetCollectionId()))
+		mlog.Int64("jobID", job.GetJobId()),
+		mlog.Int64("collectionID", job.GetCollectionId()))
 	return nil
 }
 
@@ -319,8 +318,8 @@ func (m *externalCollectionRefreshMeta) mutateJob(
 	if err := m.catalog.SaveExternalCollectionRefreshJob(m.ctx, cloneJob); err != nil {
 		mlog.Warn(m.ctx,
 			opName+" failed",
-			zap.Int64("jobID", jobID),
-			zap.Error(err))
+			mlog.Int64("jobID", jobID),
+			mlog.Err(err))
 		return false, err
 	}
 
@@ -350,9 +349,9 @@ func (m *externalCollectionRefreshMeta) UpdateJobState(jobID int64, state indexp
 		if job.GetState() == indexpb.JobState_JobStateFinished ||
 			job.GetState() == indexpb.JobState_JobStateFailed {
 			mlog.Info(m.ctx, "skip update job state, already in terminal state",
-				zap.Int64("jobID", jobID),
-				zap.String("currentState", job.GetState().String()),
-				zap.String("requestedState", state.String()))
+				mlog.Int64("jobID", jobID),
+				mlog.String("currentState", job.GetState().String()),
+				mlog.String("requestedState", state.String()))
 			return true, nil
 		}
 
@@ -368,8 +367,8 @@ func (m *externalCollectionRefreshMeta) UpdateJobState(jobID int64, state indexp
 	})
 	if applied {
 		mlog.Info(m.ctx, "update job state success",
-			zap.Int64("jobID", jobID),
-			zap.String("state", state.String()))
+			mlog.Int64("jobID", jobID),
+			mlog.String("state", state.String()))
 	}
 	return applied, err
 }
@@ -401,9 +400,9 @@ func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 	if job.GetState() == indexpb.JobState_JobStateFinished ||
 		job.GetState() == indexpb.JobState_JobStateFailed {
 		mlog.Info(m.ctx, "skip update job state with pre-apply, already in terminal state",
-			zap.Int64("jobID", jobID),
-			zap.String("currentState", job.GetState().String()),
-			zap.String("requestedState", state.String()))
+			mlog.Int64("jobID", jobID),
+			mlog.String("currentState", job.GetState().String()),
+			mlog.String("requestedState", state.String()))
 		return false, nil
 	}
 
@@ -415,15 +414,15 @@ func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 			cloneJob.EndTime = time.Now().UnixMilli()
 			if saveErr := m.catalog.SaveExternalCollectionRefreshJob(m.ctx, cloneJob); saveErr != nil {
 				mlog.Warn(m.ctx, "update job state after pre-apply failed",
-					zap.Int64("jobID", jobID),
-					zap.Error(saveErr))
+					mlog.Int64("jobID", jobID),
+					mlog.Err(saveErr))
 				return false, merr.Wrapf(err, "pre-apply failed; additionally failed to persist Failed job state: %v", saveErr)
 			}
 			m.jobs.Insert(jobID, cloneJob)
 			m.addToCollectionJobs(cloneJob)
 			mlog.Info(m.ctx, "update job state success",
-				zap.Int64("jobID", jobID),
-				zap.String("state", indexpb.JobState_JobStateFailed.String()))
+				mlog.Int64("jobID", jobID),
+				mlog.String("state", indexpb.JobState_JobStateFailed.String()))
 			return true, err
 		}
 	}
@@ -440,16 +439,16 @@ func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 
 	if err := m.catalog.SaveExternalCollectionRefreshJob(m.ctx, cloneJob); err != nil {
 		mlog.Warn(m.ctx, "update job state with pre-apply failed",
-			zap.Int64("jobID", jobID),
-			zap.Error(err))
+			mlog.Int64("jobID", jobID),
+			mlog.Err(err))
 		return false, err
 	}
 
 	m.jobs.Insert(jobID, cloneJob)
 	m.addToCollectionJobs(cloneJob)
 	mlog.Info(m.ctx, "update job state success",
-		zap.Int64("jobID", jobID),
-		zap.String("state", state.String()))
+		mlog.Int64("jobID", jobID),
+		mlog.String("state", state.String()))
 	return true, nil
 }
 
@@ -475,7 +474,7 @@ func (m *externalCollectionRefreshMeta) AddTaskIDToJob(jobID int64, taskID int64
 func (m *externalCollectionRefreshMeta) DropJob(ctx context.Context, jobID int64) error {
 	job, ok := m.jobs.Get(jobID)
 	if !ok {
-		mlog.Info(ctx, "drop job success, job already not exist", zap.Int64("jobID", jobID))
+		mlog.Info(ctx, "drop job success, job already not exist", mlog.Int64("jobID", jobID))
 		return nil
 	}
 
@@ -485,7 +484,7 @@ func (m *externalCollectionRefreshMeta) DropJob(ctx context.Context, jobID int64
 	// Re-fetch after lock
 	job, ok = m.jobs.Get(jobID)
 	if !ok {
-		mlog.Info(ctx, "drop job success, job already not exist", zap.Int64("jobID", jobID))
+		mlog.Info(ctx, "drop job success, job already not exist", mlog.Int64("jobID", jobID))
 		return nil
 	}
 
@@ -495,9 +494,9 @@ func (m *externalCollectionRefreshMeta) DropJob(ctx context.Context, jobID int64
 		taskMap.Range(func(taskID int64, _ *datapb.ExternalCollectionRefreshTask) bool {
 			if err := m.catalog.DropExternalCollectionRefreshTask(ctx, taskID); err != nil {
 				mlog.Warn(ctx, "drop task failed during job drop",
-					zap.Int64("jobID", jobID),
-					zap.Int64("taskID", taskID),
-					zap.Error(err))
+					mlog.Int64("jobID", jobID),
+					mlog.Int64("taskID", taskID),
+					mlog.Err(err))
 				dropErr = err
 				return false
 			}
@@ -513,8 +512,8 @@ func (m *externalCollectionRefreshMeta) DropJob(ctx context.Context, jobID int64
 	// Drop job
 	if err := m.catalog.DropExternalCollectionRefreshJob(ctx, jobID); err != nil {
 		mlog.Warn(ctx, "drop job failed",
-			zap.Int64("jobID", jobID),
-			zap.Error(err))
+			mlog.Int64("jobID", jobID),
+			mlog.Err(err))
 		return err
 	}
 
@@ -522,8 +521,8 @@ func (m *externalCollectionRefreshMeta) DropJob(ctx context.Context, jobID int64
 	m.removeFromCollectionJobs(job.GetCollectionId(), jobID)
 
 	mlog.Info(ctx, "drop job success",
-		zap.Int64("jobID", jobID),
-		zap.Int64("collectionID", job.GetCollectionId()))
+		mlog.Int64("jobID", jobID),
+		mlog.Int64("collectionID", job.GetCollectionId()))
 	return nil
 }
 
@@ -535,14 +534,14 @@ func (m *externalCollectionRefreshMeta) AddTask(task *datapb.ExternalCollectionR
 	defer m.taskLock.Unlock(task.GetJobId())
 
 	mlog.Info(m.ctx, "add refresh task",
-		zap.Int64("taskID", task.GetTaskId()),
-		zap.Int64("jobID", task.GetJobId()),
-		zap.Int64("collectionID", task.GetCollectionId()))
+		mlog.Int64("taskID", task.GetTaskId()),
+		mlog.Int64("jobID", task.GetJobId()),
+		mlog.Int64("collectionID", task.GetCollectionId()))
 
 	if err := m.catalog.SaveExternalCollectionRefreshTask(m.ctx, task); err != nil {
 		mlog.Warn(m.ctx, "save refresh task failed",
-			zap.Int64("taskID", task.GetTaskId()),
-			zap.Error(err))
+			mlog.Int64("taskID", task.GetTaskId()),
+			mlog.Err(err))
 		return err
 	}
 
@@ -550,8 +549,8 @@ func (m *externalCollectionRefreshMeta) AddTask(task *datapb.ExternalCollectionR
 	m.addToJobTasks(task)
 
 	mlog.Info(m.ctx, "add refresh task success",
-		zap.Int64("taskID", task.GetTaskId()),
-		zap.Int64("jobID", task.GetJobId()))
+		mlog.Int64("taskID", task.GetTaskId()),
+		mlog.Int64("jobID", task.GetJobId()))
 	return nil
 }
 
@@ -638,8 +637,8 @@ func (m *externalCollectionRefreshMeta) mutateTask(
 	if err := m.catalog.SaveExternalCollectionRefreshTask(m.ctx, cloneTask); err != nil {
 		mlog.Warn(m.ctx,
 			opName+" failed",
-			zap.Int64("taskID", taskID),
-			zap.Error(err))
+			mlog.Int64("taskID", taskID),
+			mlog.Err(err))
 		return false, nil, err
 	}
 
@@ -660,8 +659,8 @@ func (m *externalCollectionRefreshMeta) UpdateTaskState(taskID int64, state inde
 	})
 	if applied {
 		mlog.Info(m.ctx, "update task state success",
-			zap.Int64("taskID", taskID),
-			zap.String("state", state.String()))
+			mlog.Int64("taskID", taskID),
+			mlog.String("state", state.String()))
 	}
 	return err
 }
@@ -696,10 +695,10 @@ func (m *externalCollectionRefreshMeta) UpdateTaskResult(
 	})
 	if applied {
 		mlog.Info(m.ctx, "update task result success",
-			zap.Int64("taskID", taskID),
-			zap.String("state", state.String()),
-			zap.Int("keptSegments", len(cloned.GetKeptSegments())),
-			zap.Int("updatedSegments", len(cloned.GetUpdatedSegments())))
+			mlog.Int64("taskID", taskID),
+			mlog.String("state", state.String()),
+			mlog.Int("keptSegments", len(cloned.GetKeptSegments())),
+			mlog.Int("updatedSegments", len(cloned.GetUpdatedSegments())))
 	}
 	return err
 }
@@ -718,8 +717,8 @@ func (m *externalCollectionRefreshMeta) ClearTaskResult(taskID int64) error {
 	})
 	if applied {
 		mlog.Info(m.ctx, "clear task result success",
-			zap.Int64("taskID", taskID),
-			zap.String("state", cloned.GetState().String()))
+			mlog.Int64("taskID", taskID),
+			mlog.String("state", cloned.GetState().String()))
 	}
 	return err
 }
@@ -743,9 +742,9 @@ func (m *externalCollectionRefreshMeta) UpdateTaskVersion(taskID, nodeID int64) 
 	})
 	if applied {
 		mlog.Info(m.ctx, "update task version success",
-			zap.Int64("taskID", taskID),
-			zap.Int64("nodeID", nodeID),
-			zap.Int64("newVersion", cloned.GetVersion()))
+			mlog.Int64("taskID", taskID),
+			mlog.Int64("nodeID", nodeID),
+			mlog.Int64("newVersion", cloned.GetVersion()))
 	}
 	return err
 }
@@ -754,7 +753,7 @@ func (m *externalCollectionRefreshMeta) UpdateTaskVersion(taskID, nodeID int64) 
 func (m *externalCollectionRefreshMeta) DropTask(ctx context.Context, taskID int64) error {
 	task, ok := m.tasks.Get(taskID)
 	if !ok {
-		mlog.Info(ctx, "drop task success, task already not exist", zap.Int64("taskID", taskID))
+		mlog.Info(ctx, "drop task success, task already not exist", mlog.Int64("taskID", taskID))
 		return nil
 	}
 
@@ -763,14 +762,14 @@ func (m *externalCollectionRefreshMeta) DropTask(ctx context.Context, taskID int
 
 	task, ok = m.tasks.Get(taskID)
 	if !ok {
-		mlog.Info(ctx, "drop task success, task already not exist", zap.Int64("taskID", taskID))
+		mlog.Info(ctx, "drop task success, task already not exist", mlog.Int64("taskID", taskID))
 		return nil
 	}
 
 	if err := m.catalog.DropExternalCollectionRefreshTask(ctx, taskID); err != nil {
 		mlog.Warn(ctx, "drop task failed",
-			zap.Int64("taskID", taskID),
-			zap.Error(err))
+			mlog.Int64("taskID", taskID),
+			mlog.Err(err))
 		return err
 	}
 
@@ -778,8 +777,8 @@ func (m *externalCollectionRefreshMeta) DropTask(ctx context.Context, taskID int
 	m.removeFromJobTasks(task.GetJobId(), taskID)
 
 	mlog.Info(ctx, "drop task success",
-		zap.Int64("taskID", taskID),
-		zap.Int64("jobID", task.GetJobId()))
+		mlog.Int64("taskID", taskID),
+		mlog.Int64("jobID", task.GetJobId()))
 	return nil
 }
 

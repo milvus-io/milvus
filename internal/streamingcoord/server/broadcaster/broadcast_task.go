@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sync"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
@@ -531,9 +530,9 @@ func (b *broadcastTask) saveTaskIfDirty(ctx context.Context, logger *mlog.Logger
 		return nil
 	}
 	b.dirty = false
-	logger = logger.With(zap.String("state", b.task.State.String()), zap.Int("ackedVChannelCount", ackedCount(b.task)))
+	logger = logger.With(mlog.String("state", b.task.State.String()), mlog.Int("ackedVChannelCount", ackedCount(b.task)))
 	if err := resource.Resource().StreamingCatalog().SaveBroadcastTask(ctx, b.header().BroadcastID, b.task); err != nil {
-		logger.Warn(ctx, "save broadcast task failed", zap.Error(err))
+		logger.Warn(ctx, "save broadcast task failed", mlog.Err(err))
 		if ctx.Err() == nil {
 			panic("critical error: the save broadcast task is failed before the context is done")
 		}

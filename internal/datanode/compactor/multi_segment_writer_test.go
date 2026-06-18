@@ -36,7 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -442,18 +442,18 @@ func (s *MultiSegmentWriterSuite) TestSegmentIDExhaustionGrowsCurrentSegment() {
 	logAlloc := allocator.NewLocalAllocator(2000, 3000)
 	allocator := NewCompactionAllocator(segmentAlloc, logAlloc)
 	core, recordedLogs := observer.New(zapcore.WarnLevel)
-	log.ReplaceGlobals(zap.New(core), &log.ZapProperties{
+	mlog.ReplaceGlobals(zap.New(core), &mlog.ZapProperties{
 		Core:  core,
 		Level: zap.NewAtomicLevelAt(zapcore.WarnLevel),
 	})
 	s.T().Cleanup(func() {
-		logger, props, err := log.InitLogger(&log.Config{
+		logger, props, err := mlog.InitLogger(&mlog.Config{
 			Level:               "debug",
 			Stdout:              true,
 			DisableErrorVerbose: true,
 		})
 		s.Require().NoError(err)
-		log.ReplaceGlobals(logger, props)
+		mlog.ReplaceGlobals(logger, props)
 	})
 
 	writer, err := NewMultiSegmentWriter(

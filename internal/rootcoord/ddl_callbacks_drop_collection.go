@@ -20,8 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -124,7 +122,7 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 				streaming.WAL().ControlChannel(): result,
 			}); err != nil {
 				mlog.Warn(ctx, "best-effort drop collection snapshots failed, will be cleaned up by GC",
-					zap.Int64("collectionID", collectionID), zap.Error(err))
+					mlog.Int64("collectionID", collectionID), mlog.Err(err))
 			}
 
 			// 3. drop the collection meta itself.
@@ -152,7 +150,7 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 		OpType: int32(typeutil.CacheRefresh),
 	}); err != nil {
 		mlog.Warn(ctx, "failed to refresh RBAC policy cache after collection drop, skipping",
-			zap.Int64("collectionID", header.CollectionId), zap.Error(err))
+			mlog.Int64("collectionID", header.CollectionId), mlog.Err(err))
 	}
 	// expire the collection meta cache on proxy.
 	return c.ExpireCaches(ctx, ce.NewBuilder().WithLegacyProxyCollectionMetaCache(

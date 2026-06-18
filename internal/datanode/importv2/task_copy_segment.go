@@ -22,8 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -360,19 +358,19 @@ func (t *CopySegmentTask) Execute() []*conc.Future[any] {
 //   - error: Error if validation fails or copy operation fails
 func (t *CopySegmentTask) copySingleSegment(source *datapb.CopySegmentSource, target *datapb.CopySegmentTarget) (any, error) {
 	logFields := WrapLogFields(t,
-		zap.Int64("sourceCollectionID", source.GetCollectionId()),
-		zap.Int64("sourcePartitionID", source.GetPartitionId()),
-		zap.Int64("sourceSegmentID", source.GetSegmentId()),
-		zap.Int64("targetCollectionID", target.GetCollectionId()),
-		zap.Int64("targetPartitionID", target.GetPartitionId()),
-		zap.Int64("targetSegmentID", target.GetSegmentId()),
-		zap.Int("insertBinlogFields", len(source.GetInsertBinlogs())),
-		zap.Int("statsBinlogFields", len(source.GetStatsBinlogs())),
-		zap.Int("deltaBinlogFields", len(source.GetDeltaBinlogs())),
-		zap.Int("bm25BinlogFields", len(source.GetBm25Binlogs())),
-		zap.Int("vectorScalarIndexInfoCount", len(source.GetIndexFiles())),
-		zap.Int("textIndexFieldCount", len(source.GetTextIndexFiles())),
-		zap.Int("jsonKeyIndexFieldCount", len(source.GetJsonKeyIndexFiles())),
+		mlog.Int64("sourceCollectionID", source.GetCollectionId()),
+		mlog.Int64("sourcePartitionID", source.GetPartitionId()),
+		mlog.Int64("sourceSegmentID", source.GetSegmentId()),
+		mlog.Int64("targetCollectionID", target.GetCollectionId()),
+		mlog.Int64("targetPartitionID", target.GetPartitionId()),
+		mlog.Int64("targetSegmentID", target.GetSegmentId()),
+		mlog.Int("insertBinlogFields", len(source.GetInsertBinlogs())),
+		mlog.Int("statsBinlogFields", len(source.GetStatsBinlogs())),
+		mlog.Int("deltaBinlogFields", len(source.GetDeltaBinlogs())),
+		mlog.Int("bm25BinlogFields", len(source.GetBm25Binlogs())),
+		mlog.Int("vectorScalarIndexInfoCount", len(source.GetIndexFiles())),
+		mlog.Int("textIndexFieldCount", len(source.GetTextIndexFiles())),
+		mlog.Int("jsonKeyIndexFieldCount", len(source.GetJsonKeyIndexFiles())),
 	)
 
 	mlog.Info(t.ctx, "start copying single segment", logFields...)
@@ -412,7 +410,7 @@ func (t *CopySegmentTask) copySingleSegment(source *datapb.CopySegmentSource, ta
 	t.manager.Update(t.GetTaskID(), UpdateSegmentResult(segmentResult))
 
 	mlog.Info(t.ctx, "successfully copied single segment",
-		append(logFields, zap.Int("copiedFileCount", len(copiedFiles)))...)
+		append(logFields, mlog.Int("copiedFileCount", len(copiedFiles)))...)
 	return nil, nil
 }
 
@@ -476,14 +474,14 @@ func (t *CopySegmentTask) CleanupCopiedFiles() {
 
 	// Step 2: Early return if no files to cleanup
 	if len(files) == 0 {
-		mlog.Info(t.ctx, "no files to cleanup", zap.Int64("taskID", t.taskID))
+		mlog.Info(t.ctx, "no files to cleanup", mlog.Int64("taskID", t.taskID))
 		return
 	}
 
 	mlog.Info(t.ctx, "cleaning up copied files for failed task",
-		zap.Int64("taskID", t.taskID),
-		zap.Int64("jobID", t.jobID),
-		zap.Int("fileCount", len(files)))
+		mlog.Int64("taskID", t.taskID),
+		mlog.Int64("jobID", t.jobID),
+		mlog.Int("fileCount", len(files)))
 
 	// Step 3: Delete all copied files with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -492,14 +490,14 @@ func (t *CopySegmentTask) CleanupCopiedFiles() {
 	if err := t.cm.MultiRemove(ctx, files); err != nil {
 		// Cleanup failure is logged but doesn't block task removal
 		mlog.Error(t.ctx, "failed to cleanup copied files",
-			zap.Int64("taskID", t.taskID),
-			zap.Int64("jobID", t.jobID),
-			zap.Int("fileCount", len(files)),
-			zap.Error(err))
+			mlog.Int64("taskID", t.taskID),
+			mlog.Int64("jobID", t.jobID),
+			mlog.Int("fileCount", len(files)),
+			mlog.Err(err))
 	} else {
 		mlog.Info(t.ctx, "successfully cleaned up copied files",
-			zap.Int64("taskID", t.taskID),
-			zap.Int64("jobID", t.jobID),
-			zap.Int("fileCount", len(files)))
+			mlog.Int64("taskID", t.taskID),
+			mlog.Int64("jobID", t.jobID),
+			mlog.Int("fileCount", len(files)))
 	}
 }

@@ -77,8 +77,8 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	}
 	if msg == nil {
 		// load config unchanged, the collection is already loaded as requested.
-		log.Ctx(ctx).Info("load collection ignored, load config is unchanged",
-			zap.Int64("collectionID", req.GetCollectionID()))
+		mlog.Info(ctx, "load collection ignored, load config is unchanged",
+			mlog.Int64("collectionID", req.GetCollectionID()))
 		return nil
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)

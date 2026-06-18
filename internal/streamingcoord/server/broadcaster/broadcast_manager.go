@@ -5,8 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -235,14 +233,14 @@ func (bm *broadcastTaskManager) LegacyAck(ctx context.Context, broadcastID uint6
 	if !ok {
 		bm.Logger().Warn(ctx,
 
-			"broadcast task not found, it may already acked, ignore the request", zap.Uint64("broadcastID", broadcastID), zap.String("vchannel", vchannel))
+			"broadcast task not found, it may already acked, ignore the request", mlog.Uint64("broadcastID", broadcastID), mlog.String("vchannel", vchannel))
 		return nil
 	}
 	msg := task.GetImmutableMessageFromVChannel(vchannel)
 	if msg == nil {
 		task.Logger().Warn(ctx,
 
-			"vchannel is already acked, ignore the ack request", zap.String("vchannel", vchannel))
+			"vchannel is already acked, ignore the ack request", mlog.String("vchannel", vchannel))
 		return nil
 	}
 	return bm.Ack(ctx, msg)
@@ -260,8 +258,8 @@ func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMe
 		bm.Logger().Debug(ctx,
 
 			"task is tombstone, ignored the ack request",
-			zap.Uint64("broadcastID", msg.BroadcastHeader().BroadcastID),
-			zap.String("vchannel", msg.VChannel()))
+			mlog.Uint64("broadcastID", msg.BroadcastHeader().BroadcastID),
+			mlog.String("vchannel", msg.VChannel()))
 		return nil
 	}
 	return t.Ack(ctx, msg)
@@ -278,7 +276,7 @@ func (bm *broadcastTaskManager) DropTombstone(ctx context.Context, broadcastID u
 	if !ok {
 		bm.Logger().Debug(ctx,
 
-			"task is not found, ignored the drop tombstone request", zap.Uint64("broadcastID", broadcastID))
+			"task is not found, ignored the drop tombstone request", mlog.Uint64("broadcastID", broadcastID))
 		return nil
 	}
 	if err := t.DropTombstone(ctx); err != nil {

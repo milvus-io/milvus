@@ -19,6 +19,7 @@
 package hookutil
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -27,7 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -72,7 +73,7 @@ func initHook() error {
 
 	path := paramtable.Get().ProxyCfg.SoPath.GetValue()
 	if path == "" {
-		log.Info("empty so path, skip to load plugin")
+		mlog.Info(context.TODO(), "empty so path, skip to load plugin")
 		return nil
 	}
 
@@ -86,13 +87,13 @@ func initHook() error {
 	}
 	storeHook((hookVal))
 	paramtable.GetHookParams().WatchHookWithPrefix("watch_hook", "", func(event *config.Event) {
-		log.Info("receive the hook refresh event", zap.Any("event", event))
+		mlog.Info(context.TODO(), "receive the hook refresh event", zap.Any("event", event))
 		go func() {
 			hookVal := GetHook()
 			soConfig := paramtable.GetHookParams().SoConfig.GetValue()
-			log.Info("refresh hook configs", zap.Any("config", soConfig))
+			mlog.Info(context.TODO(), "refresh hook configs", zap.Any("config", soConfig))
 			if err = hookVal.Init(soConfig); err != nil {
-				log.Panic("fail to init configs for the hook when refreshing", zap.Error(err))
+				mlog.Panic(context.TODO(), "fail to init configs for the hook when refreshing", zap.Error(err))
 			}
 			storeHook(hookVal)
 		}()
@@ -110,9 +111,9 @@ func initHook() error {
 func SetHook(connectionManager any) {
 	hookVal := GetHook()
 	if setter, ok := hookVal.(hookSetter); ok {
-		setter.SetZapLogger(log.L())
+		setter.SetZapLogger(mlog.L())
 		setter.SetClientInfoProvider(connectionManager)
-		log.Info("hook setter injected")
+		mlog.Info(context.TODO(), "hook setter injected")
 	}
 }
 
@@ -122,9 +123,9 @@ func InitOnceHook() {
 		if err != nil {
 			soPath := paramtable.Get().ProxyCfg.SoPath.GetValue()
 			if paramtable.Get().CommonCfg.PanicWhenPluginFail.GetAsBool() {
-				log.Panic(fmt.Sprintf("fail to init hook, so_path=%s, error=%v", soPath, err))
+				mlog.Panic(context.TODO(), fmt.Sprintf("fail to init hook, so_path=%s, error=%v", soPath, err))
 			}
-			log.Warn("fail to init hook", zap.String("so_path", soPath), zap.Error(err))
+			mlog.Warn(context.TODO(), "fail to init hook", mlog.String("so_path", soPath), mlog.Err(err))
 		}
 	})
 }

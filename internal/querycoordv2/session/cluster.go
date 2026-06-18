@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -430,7 +429,7 @@ func (c *clients) close(nodeID int64) {
 	defer c.Unlock()
 	if cli, ok := c.clients[nodeID]; ok {
 		if err := cli.Close(); err != nil {
-			mlog.Warn(context.TODO(), "error occurred during stopping client", zap.Int64("nodeID", nodeID), zap.Error(err))
+			mlog.Warn(context.TODO(), "error occurred during stopping client", mlog.Int64("nodeID", nodeID), mlog.Err(err))
 		}
 		delete(c.clients, nodeID)
 	}
@@ -441,7 +440,7 @@ func (c *clients) closeAll() {
 	defer c.Unlock()
 	for nodeID, cli := range c.clients {
 		if err := cli.Close(); err != nil {
-			mlog.Warn(context.TODO(), "error occurred during stopping client", zap.Int64("nodeID", nodeID), zap.Error(err))
+			mlog.Warn(context.TODO(), "error occurred during stopping client", mlog.Int64("nodeID", nodeID), mlog.Err(err))
 		}
 	}
 }

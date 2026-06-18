@@ -26,14 +26,13 @@ package packed
 import "C"
 
 import (
+	"context"
 	"net/url"
 	"sort"
 	"strings"
 	"unsafe"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -272,9 +271,9 @@ func ExploreFilesReturnManifestPath(
 	// NormalizeFileInfos doc for the index-drift bug this prevents.
 	fileInfos, skipped := NormalizeFileInfos(fileInfos, format)
 	if skipped > 0 {
-		log.Info("Skipped files with non-matching format during explore",
-			zap.Int("skippedCount", skipped),
-			zap.String("format", format))
+		mlog.Info(context.TODO(), "Skipped files with non-matching format during explore",
+			mlog.Int("skippedCount", skipped),
+			mlog.String("format", format))
 	}
 
 	return fileInfos, manifestPath, nil

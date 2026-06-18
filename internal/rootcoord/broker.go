@@ -19,8 +19,6 @@ package rootcoord
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -70,7 +68,7 @@ func newServerBroker(s *Core) *ServerBroker {
 }
 
 func (b *ServerBroker) ReleaseCollection(ctx context.Context, collectionID UniqueID) error {
-	mlog.Info(ctx, "releasing collection", zap.Int64("collection", collectionID))
+	mlog.Info(ctx, "releasing collection", mlog.Int64("collection", collectionID))
 
 	resp, err := b.s.mixCoord.ReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{
 		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ReleaseCollection)),
@@ -85,7 +83,7 @@ func (b *ServerBroker) ReleaseCollection(ctx context.Context, collectionID Uniqu
 		return merr.Error(resp)
 	}
 
-	mlog.Info(ctx, "done to release collection", zap.Int64("collection", collectionID))
+	mlog.Info(ctx, "done to release collection", mlog.Int64("collection", collectionID))
 	return nil
 }
 
@@ -93,7 +91,7 @@ func (b *ServerBroker) ReleasePartitions(ctx context.Context, collectionID Uniqu
 	if len(partitionIDs) == 0 {
 		return nil
 	}
-	log := mlog.With(zap.Int64("collection", collectionID), zap.Int64s("partitionIDs", partitionIDs))
+	log := mlog.With(mlog.Int64("collection", collectionID), mlog.Int64s("partitionIDs", partitionIDs))
 	log.Info(ctx, "releasing partitions")
 	resp, err := b.s.mixCoord.ReleasePartitions(ctx, &querypb.ReleasePartitionsRequest{
 		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ReleasePartitions)),
@@ -113,7 +111,7 @@ func (b *ServerBroker) ReleasePartitions(ctx context.Context, collectionID Uniqu
 }
 
 func (b *ServerBroker) SyncNewCreatedPartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID) error {
-	log := mlog.With(zap.Int64("collection", collectionID), zap.Int64("partitionID", partitionID))
+	log := mlog.With(mlog.Int64("collection", collectionID), mlog.Int64("partitionID", partitionID))
 	log.Info(ctx, "begin to sync new partition")
 	resp, err := b.s.mixCoord.SyncNewCreatedPartition(ctx, &querypb.SyncNewCreatedPartitionRequest{
 		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ReleasePartitions)),
@@ -165,7 +163,7 @@ func toMap(pairs []*commonpb.KeyDataPair) map[string][]byte {
 }
 
 func (b *ServerBroker) WatchChannels(ctx context.Context, info *watchInfo) error {
-	mlog.Info(ctx, "watching channels", zap.Uint64("ts", info.ts), zap.Int64("collection", info.collectionID), zap.Strings("vChannels", info.vChannels))
+	mlog.Info(ctx, "watching channels", mlog.Uint64("ts", info.ts), mlog.Int64("collection", info.collectionID), mlog.Strings("vChannels", info.vChannels))
 
 	resp, err := b.s.mixCoord.WatchChannels(ctx, &datapb.WatchChannelsRequest{
 		CollectionID:    info.collectionID,
@@ -183,7 +181,7 @@ func (b *ServerBroker) WatchChannels(ctx context.Context, info *watchInfo) error
 		return merr.Error(resp.GetStatus())
 	}
 
-	mlog.Info(ctx, "done to watch channels", zap.Uint64("ts", info.ts), zap.Int64("collection", info.collectionID), zap.Strings("vChannels", info.vChannels))
+	mlog.Info(ctx, "done to watch channels", mlog.Uint64("ts", info.ts), mlog.Int64("collection", info.collectionID), mlog.Strings("vChannels", info.vChannels))
 	return nil
 }
 
@@ -197,7 +195,7 @@ func (b *ServerBroker) GetSegmentStates(ctx context.Context, req *datapb.GetSegm
 }
 
 func (b *ServerBroker) DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
-	mlog.Info(ctx, "dropping collection index", zap.Int64("collection", collID), zap.Int64s("partitions", partIDs))
+	mlog.Info(ctx, "dropping collection index", mlog.Int64("collection", collID), mlog.Int64s("partitions", partIDs))
 
 	rsp, err := b.s.mixCoord.DropIndex(ctx, &indexpb.DropIndexRequest{
 		CollectionID: collID,
@@ -212,7 +210,7 @@ func (b *ServerBroker) DropCollectionIndex(ctx context.Context, collID UniqueID,
 		return merr.Error(rsp)
 	}
 
-	mlog.Info(ctx, "done to drop collection index", zap.Int64("collection", collID), zap.Int64s("partitions", partIDs))
+	mlog.Info(ctx, "done to drop collection index", mlog.Int64("collection", collID), mlog.Int64s("partitions", partIDs))
 
 	return nil
 }
@@ -235,7 +233,7 @@ func (b *ServerBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID
 
 func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, collectionID UniqueID) error {
 	mlog.Info(ctx, "broadcasting request to alter collection",
-		zap.Int64("collectionID", collectionID))
+		mlog.Int64("collectionID", collectionID))
 
 	colMeta, err := b.s.meta.GetCollectionByID(ctx, "", collectionID, typeutil.MaxTimestamp, false)
 	if err != nil {
@@ -269,9 +267,9 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, collectio
 		return merr.Error(resp)
 	}
 	mlog.Info(ctx, "done to broadcast request to alter collection",
-		zap.String("collectionName", colMeta.Name), zap.Int64("collectionID", dcReq.GetCollectionID()),
-		zap.Any("props", colMeta.Properties), zap.Any("fields", colMeta.Fields),
-		zap.Int32("schemaVersion", colMeta.SchemaVersion))
+		mlog.String("collectionName", colMeta.Name), mlog.Int64("collectionID", dcReq.GetCollectionID()),
+		mlog.Any("props", colMeta.Properties), mlog.Any("fields", colMeta.Fields),
+		mlog.Int32("schemaVersion", colMeta.SchemaVersion))
 	return nil
 }
 
@@ -292,18 +290,18 @@ func (b *ServerBroker) ShowResourceGroups(ctx context.Context) ([]string, error)
 }
 
 func (b *ServerBroker) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool {
-	log := mlog.With(zap.Int64("collection", collectionID), zap.Int64("partition", partitionID))
+	log := mlog.With(mlog.Int64("collection", collectionID), mlog.Int64("partition", partitionID))
 
 	req := &datapb.GcConfirmRequest{CollectionId: collectionID, PartitionId: partitionID}
 	resp, err := b.s.mixCoord.GcConfirm(ctx, req)
 	if err != nil {
-		log.Warn(ctx, "gc is not finished", zap.Error(err))
+		log.Warn(ctx, "gc is not finished", mlog.Err(err))
 		return false
 	}
 
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn(ctx, "gc is not finished", zap.String("code", resp.GetStatus().GetErrorCode().String()),
-			zap.String("reason", resp.GetStatus().GetReason()))
+		log.Warn(ctx, "gc is not finished", mlog.String("code", resp.GetStatus().GetErrorCode().String()),
+			mlog.String("reason", resp.GetStatus().GetReason()))
 		return false
 	}
 

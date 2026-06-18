@@ -25,14 +25,13 @@ import (
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -291,14 +290,14 @@ func (s *SegmentManager) genLastExpireTsForSegments() (Timestamp, error) {
 	allocateErr := retry.Do(context.Background(), func() error {
 		ts, tryErr := s.genExpireTs(context.Background())
 		if tryErr != nil {
-			log.Warn("failed to get ts from rootCoord for globalLastExpire", zap.Error(tryErr))
+			mlog.Warn(context.TODO(), "failed to get ts from rootCoord for globalLastExpire", mlog.Err(tryErr))
 			return tryErr
 		}
 		latestTs = ts
 		return nil
 	}, retry.Attempts(Params.DataCoordCfg.AllocLatestExpireAttempt.GetAsUint()), retry.Sleep(200*time.Millisecond))
 	if allocateErr != nil {
-		log.Warn("cannot allocate latest lastExpire from rootCoord", zap.Error(allocateErr))
+		mlog.Warn(context.TODO(), "cannot allocate latest lastExpire from rootCoord", mlog.Err(allocateErr))
 		return 0, merr.WrapErrServiceInternalMsg("global max expire ts is unavailable for segment manager")
 	}
 	return latestTs, nil
@@ -308,11 +307,6 @@ func (s *SegmentManager) genLastExpireTsForSegments() (Timestamp, error) {
 func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID,
 	partitionID UniqueID, channelName string, requestRows int64, storageVersion int64,
 ) ([]*Allocation, error) {
-	log := log.Ctx(ctx).
-		With(zap.Int64("collectionID", collectionID)).
-		With(zap.Int64("partitionID", partitionID)).
-		With(zap.String("channelName", channelName)).
-		With(zap.Int64("requestRows", requestRows))
 	_, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "Alloc-Segment")
 	defer sp.End()
 
@@ -325,7 +319,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	growing.Range(func(segmentID int64) bool {
 		segment := s.meta.GetHealthySegment(ctx, segmentID)
 		if segment == nil {
-			log.Warn("failed to get segment, remove it", zap.String("channel", channelName), zap.Int64("segmentID", segmentID))
+			mlog.Warn(context.TODO(), "failed to get segment, remove it", mlog.String("channel", channelName), mlog.Int64("segmentID", segmentID))
 			growing.Remove(segmentID)
 			return true
 		}
@@ -352,7 +346,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	for _, allocation := range newSegmentAllocations {
 		segment, err := s.openNewSegment(ctx, collectionID, partitionID, channelName, storageVersion)
 		if err != nil {
-			log.Error("Failed to open new segment for segment allocation")
+			mlog.Error(context.TODO(), "Failed to open new segment for segment allocation")
 			return nil, err
 		}
 		allocation.ExpireTime = expireTs
@@ -365,7 +359,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	for _, allocation := range existedSegmentAllocations {
 		allocation.ExpireTime = expireTs
 		if err := s.meta.AddAllocation(allocation.SegmentID, allocation); err != nil {
-			log.Error("Failed to add allocation to existed segment", zap.Int64("segmentID", allocation.SegmentID))
+			mlog.Error(context.TODO(), "Failed to add allocation to existed segment", mlog.Int64("segmentID", allocation.SegmentID))
 			return nil, err
 		}
 	}
@@ -393,12 +387,11 @@ func (s *SegmentManager) AllocNewGrowingSegment(ctx context.Context, req AllocNe
 }
 
 func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string, storageVersion int64) (*SegmentInfo, error) {
-	log := log.Ctx(ctx)
 	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "open-Segment")
 	defer sp.End()
 	id, err := s.allocator.AllocID(ctx)
 	if err != nil {
-		log.Error("failed to open new segment while AllocID", zap.Error(err))
+		mlog.Error(context.TODO(), "failed to open new segment while AllocID", mlog.Err(err))
 		return nil, err
 	}
 	return s.openNewSegmentWithGivenSegmentID(ctx, AllocNewGrowingSegmentRequest{
@@ -417,7 +410,7 @@ func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, r
 		var err error
 		maxNumOfRows, err = s.estimateMaxNumOfRows(req.CollectionID)
 		if err != nil {
-			log.Error("failed to open new segment while estimateMaxNumOfRows", zap.Error(err))
+			mlog.Error(context.TODO(), "failed to open new segment while estimateMaxNumOfRows", mlog.Err(err))
 			return nil, err
 		}
 	}
@@ -446,17 +439,17 @@ func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, r
 	}
 	segment := NewSegmentInfo(segmentInfo)
 	if err := s.meta.AddSegment(ctx, segment); err != nil {
-		log.Error("failed to add segment to DataCoord", zap.Error(err))
+		mlog.Error(context.TODO(), "failed to add segment to DataCoord", mlog.Err(err))
 		return nil, err
 	}
 	growing, _ := s.channel2Growing.GetOrInsert(req.ChannelName, typeutil.NewUniqueSet())
 	growing.Insert(req.SegmentID)
-	log.Info("datacoord: estimateTotalRows: ",
-		zap.Int64("CollectionID", segmentInfo.CollectionID),
-		zap.Int64("SegmentID", segmentInfo.ID),
-		zap.String("Channel", segmentInfo.InsertChannel),
-		zap.Bool("IsCreatedByStreaming", segmentInfo.IsCreatedByStreaming),
-		zap.Int32("SchemaVersion", segmentInfo.SchemaVersion),
+	mlog.Info(context.TODO(), "datacoord: estimateTotalRows: ",
+		mlog.Int64("CollectionID", segmentInfo.CollectionID),
+		mlog.Int64("SegmentID", segmentInfo.ID),
+		mlog.String("Channel", segmentInfo.InsertChannel),
+		mlog.Bool("IsCreatedByStreaming", segmentInfo.IsCreatedByStreaming),
+		mlog.Int32("SchemaVersion", segmentInfo.SchemaVersion),
 	)
 
 	return segment, s.helper.afterCreateSegment(segmentInfo)
@@ -488,7 +481,7 @@ func (s *SegmentManager) DropSegment(ctx context.Context, channel string, segmen
 
 	segment := s.meta.GetHealthySegment(ctx, segmentID)
 	if segment == nil {
-		log.Warn("Failed to get segment", zap.Int64("id", segmentID))
+		mlog.Warn(context.TODO(), "Failed to get segment", mlog.Int64("id", segmentID))
 		return
 	}
 	s.meta.SetAllocations(segmentID, []*Allocation{})
@@ -585,7 +578,7 @@ func (s *SegmentManager) ExpireAllocations(ctx context.Context, channel string, 
 	growing.Range(func(id int64) bool {
 		segment := s.meta.GetHealthySegment(ctx, id)
 		if segment == nil {
-			log.Warn("failed to get segment, remove it", zap.String("channel", channel), zap.Int64("segmentID", id))
+			mlog.Warn(context.TODO(), "failed to get segment, remove it", mlog.String("channel", channel), mlog.Int64("segmentID", id))
 			growing.Remove(id)
 			return true
 		}
@@ -609,29 +602,29 @@ func (s *SegmentManager) CleanZeroSealedSegmentsOfChannel(ctx context.Context, c
 
 	sealed, ok := s.channel2Sealed.Get(channel)
 	if !ok {
-		log.Info("try remove empty sealed segment after channel cp updated failed to get channel", zap.String("channel", channel))
+		mlog.Info(context.TODO(), "try remove empty sealed segment after channel cp updated failed to get channel", mlog.String("channel", channel))
 		return
 	}
 	sealed.Range(func(id int64) bool {
 		segment := s.meta.GetHealthySegment(ctx, id)
 		if segment == nil {
-			log.Warn("try remove empty sealed segment, failed to get segment, remove it in channel2Sealed", zap.String("channel", channel), zap.Int64("segmentID", id))
+			mlog.Warn(context.TODO(), "try remove empty sealed segment, failed to get segment, remove it in channel2Sealed", mlog.String("channel", channel), mlog.Int64("segmentID", id))
 			sealed.Remove(id)
 			return true
 		}
 		// Check if segment is empty
 		if segment.GetLastExpireTime() > 0 && segment.GetLastExpireTime() < cpTs && segment.GetNumOfRows() == 0 {
-			log.Info("try remove empty sealed segment after channel cp updated",
-				zap.Int64("collection", segment.CollectionID), zap.Int64("segment", id),
-				zap.String("channel", channel), zap.Any("cpTs", cpTs))
+			mlog.Info(context.TODO(), "try remove empty sealed segment after channel cp updated",
+				mlog.Int64("collection", segment.CollectionID), mlog.Int64("segment", id),
+				mlog.String("channel", channel), mlog.Any("cpTs", cpTs))
 			if err := s.meta.SetState(ctx, id, commonpb.SegmentState_Dropped); err != nil {
-				log.Warn("try remove empty sealed segment after channel cp updated, failed to set segment state to dropped", zap.String("channel", channel),
-					zap.Int64("segmentID", id), zap.Error(err))
+				mlog.Warn(context.TODO(), "try remove empty sealed segment after channel cp updated, failed to set segment state to dropped", mlog.String("channel", channel),
+					mlog.Int64("segmentID", id), mlog.Err(err))
 			} else {
 				sealed.Remove(id)
-				log.Info("succeed to remove empty sealed segment",
-					zap.Int64("collection", segment.CollectionID), zap.Int64("segment", id),
-					zap.String("channel", channel), zap.Any("cpTs", cpTs), zap.Any("expireTs", segment.GetLastExpireTime()))
+				mlog.Info(context.TODO(), "succeed to remove empty sealed segment",
+					mlog.Int64("collection", segment.CollectionID), mlog.Int64("segment", id),
+					mlog.String("channel", channel), mlog.Any("cpTs", cpTs), mlog.Any("expireTs", segment.GetLastExpireTime()))
 			}
 		}
 		return true
@@ -659,7 +652,7 @@ func (s *SegmentManager) tryToSealSegment(ctx context.Context, ts Timestamp, cha
 		// change shouldSeal to segment seal policy logic
 		for _, policy := range s.segmentSealPolicies {
 			if shouldSeal, reason := policy.ShouldSeal(info, ts); shouldSeal {
-				log.Info("Seal Segment for policy matched", zap.Int64("segmentID", info.GetID()), zap.String("reason", reason))
+				mlog.Info(context.TODO(), "Seal Segment for policy matched", mlog.Int64("segmentID", info.GetID()), mlog.String("reason", reason))
 				if err := s.meta.SetState(ctx, id, commonpb.SegmentState_Sealed); err != nil {
 					setStateErr = err
 					return false
@@ -686,8 +679,8 @@ func (s *SegmentManager) tryToSealSegment(ctx context.Context, ts Timestamp, cha
 			if err := s.meta.SetState(ctx, info.GetID(), commonpb.SegmentState_Sealed); err != nil {
 				return err
 			}
-			log.Info("seal segment for channel seal policy matched",
-				zap.Int64("segmentID", info.GetID()), zap.String("channel", channel), zap.String("reason", reason))
+			mlog.Info(context.TODO(), "seal segment for channel seal policy matched",
+				mlog.Int64("segmentID", info.GetID()), mlog.String("channel", channel), mlog.String("reason", reason))
 			sealedSegments[info.GetID()] = struct{}{}
 			sealed.Insert(info.GetID())
 			growing.Remove(info.GetID())
@@ -709,7 +702,7 @@ func (s *SegmentManager) DropSegmentsOfChannel(ctx context.Context, channel stri
 	growing.Range(func(sid int64) bool {
 		segment := s.meta.GetHealthySegment(ctx, sid)
 		if segment == nil {
-			log.Warn("failed to get segment, remove it", zap.String("channel", channel), zap.Int64("segmentID", sid))
+			mlog.Warn(context.TODO(), "failed to get segment, remove it", mlog.String("channel", channel), mlog.Int64("segmentID", sid))
 			growing.Remove(sid)
 			return true
 		}
@@ -729,9 +722,9 @@ func (s *SegmentManager) DropSegmentsOfPartition(ctx context.Context, channel st
 		for sid := range growing {
 			segment := s.meta.GetHealthySegment(ctx, sid)
 			if segment == nil {
-				log.Warn("failed to get segment, remove it",
-					zap.String("channel", channel),
-					zap.Int64("segmentID", sid))
+				mlog.Warn(context.TODO(), "failed to get segment, remove it",
+					mlog.String("channel", channel),
+					mlog.Int64("segmentID", sid))
 				growing.Remove(sid)
 				continue
 			}
@@ -750,9 +743,9 @@ func (s *SegmentManager) DropSegmentsOfPartition(ctx context.Context, channel st
 		for sid := range sealed {
 			segment := s.meta.GetHealthySegment(ctx, sid)
 			if segment == nil {
-				log.Warn("failed to get segment, remove it",
-					zap.String("channel", channel),
-					zap.Int64("segmentID", sid))
+				mlog.Warn(context.TODO(), "failed to get segment, remove it",
+					mlog.String("channel", channel),
+					mlog.Int64("segmentID", sid))
 				sealed.Remove(sid)
 				continue
 			}

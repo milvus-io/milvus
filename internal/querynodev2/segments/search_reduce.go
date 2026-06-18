@@ -167,7 +167,7 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 		}
 
 		// if realTopK != -1 && realTopK != j {
-		// 	log.Warn("Proxy Reduce Search Result", mlog.Err(errors.New("the length (topk) between all result of query is different")))
+		// 	log.Warn(ctx, "Proxy Reduce Search Result", mlog.Err(errors.New("the length (topk) between all result of query is different")))
 		// 	// return nil, errors.New("the length (topk) between all result of query is different")
 		// }
 		ret.Topks = append(ret.Topks, j)

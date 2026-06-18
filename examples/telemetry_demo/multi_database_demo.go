@@ -2,17 +2,18 @@
 // with database-targeted command push support.
 //
 // Usage:
-//   go run multi_database_demo.go
+//
+//	go run multi_database_demo.go
 //
 // Prerequisites:
 //   - Milvus standalone or cluster running
 //   - Proxy HTTP server enabled (default: http://localhost:9091)
 //
 // Features:
-//   1. Two concurrent clients, each connected to a different database
-//   2. Database-targeted command push (push_config only to specific database)
-//   3. Verification that commands are received by the correct client only
-//   4. Database filtering in telemetry API
+//  1. Two concurrent clients, each connected to a different database
+//  2. Database-targeted command push (push_config only to specific database)
+//  3. Verification that commands are received by the correct client only
+//  4. Database filtering in telemetry API
 package main
 
 import (
@@ -52,8 +53,8 @@ var databases = []databaseConfig{
 			ErrorMaxCount:     50,
 		},
 		retryRateLimit: &milvusclient.RetryRateLimitOption{
-			MaxRetry:   100,              // More retries for critical database
-			MaxBackoff: 5 * time.Second,  // Longer backoff
+			MaxRetry:   100,             // More retries for critical database
+			MaxBackoff: 5 * time.Second, // Longer backoff
 		},
 	},
 	{
@@ -66,8 +67,8 @@ var databases = []databaseConfig{
 			ErrorMaxCount:     200,
 		},
 		retryRateLimit: &milvusclient.RetryRateLimitOption{
-			MaxRetry:   50,               // Fewer retries
-			MaxBackoff: 2 * time.Second,  // Shorter backoff
+			MaxRetry:   50,              // Fewer retries
+			MaxBackoff: 2 * time.Second, // Shorter backoff
 		},
 	},
 	{

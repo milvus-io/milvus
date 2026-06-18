@@ -21,8 +21,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -72,11 +70,11 @@ func InitPrivilegeCache(ctx context.Context, mixCoord types.MixCoordClient) erro
 	cacheInst.Store(privilegeCache)
 	resp, err := mixCoord.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
-		mlog.Error(ctx, "fail to init meta cache", zap.Error(err))
+		mlog.Error(ctx, "fail to init meta cache", mlog.Err(err))
 		return err
 	}
 	privilegeCache.InitPolicyInfo(resp.PolicyInfos, resp.UserRoles)
-	mlog.Info(ctx, "success to init privilege cache", zap.Strings("policy_infos", resp.PolicyInfos))
+	mlog.Info(ctx, "success to init privilege cache", mlog.Strings("policy_infos", resp.PolicyInfos))
 	return nil
 }
 
@@ -144,7 +142,7 @@ func (m *privilegeCache) InitPolicyInfo(info []string, userRoles []string) {
 	defer func() {
 		err := GetEnforcer().LoadPolicy()
 		if err != nil {
-			mlog.Error(context.TODO(), "failed to load policy after RefreshPolicyInfo", zap.Error(err))
+			mlog.Error(context.TODO(), "failed to load policy after RefreshPolicyInfo", mlog.Err(err))
 		}
 		CleanPrivilegeCache()
 	}()
@@ -158,7 +156,7 @@ func (m *privilegeCache) unsafeInitPolicyInfo(info []string, userRoles []string)
 	for _, userRole := range userRoles {
 		user, role, err := funcutil.DecodeUserRoleCache(userRole)
 		if err != nil {
-			mlog.Warn(context.TODO(), "invalid user-role key", zap.String("user-role", userRole), zap.Error(err))
+			mlog.Warn(context.TODO(), "invalid user-role key", mlog.String("user-role", userRole), mlog.Err(err))
 			continue
 		}
 		if m.userToRoles[user] == nil {
@@ -187,7 +185,7 @@ func (m *privilegeCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 		if err == nil {
 			le := GetEnforcer().LoadPolicy()
 			if le != nil {
-				mlog.Error(context.TODO(), "failed to load policy after RefreshPolicyInfo", zap.Error(le))
+				mlog.Error(context.TODO(), "failed to load policy after RefreshPolicyInfo", mlog.Err(le))
 			}
 			CleanPrivilegeCache()
 		}
@@ -243,14 +241,14 @@ func (m *privilegeCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 	case typeutil.CacheRefresh:
 		resp, err := m.mixCoord.ListPolicy(context.Background(), &internalpb.ListPolicyRequest{})
 		if err != nil {
-			mlog.Error(context.TODO(), "fail to init meta cache", zap.Error(err))
+			mlog.Error(context.TODO(), "fail to init meta cache", mlog.Err(err))
 			return err
 		}
 
 		if !merr.Ok(resp.GetStatus()) {
 			mlog.Error(context.TODO(), "fail to init meta cache",
-				zap.String("error_code", resp.GetStatus().GetErrorCode().String()),
-				zap.String("reason", resp.GetStatus().GetReason()))
+				mlog.String("error_code", resp.GetStatus().GetErrorCode().String()),
+				mlog.String("reason", resp.GetStatus().GetReason()))
 			return merr.Error(resp.Status)
 		}
 

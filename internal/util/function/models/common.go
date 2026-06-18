@@ -31,12 +31,10 @@ import (
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -241,9 +239,9 @@ func ParseTimeoutMs(params []*commonpb.KeyValuePair, defaultTimeoutMs int64) int
 
 		timeoutMs, err := strconv.ParseInt(param.Value, 10, 64)
 		if err != nil || timeoutMs <= 0 {
-			log.Warn("invalid function timeout_ms param, falling back to default",
-				zap.String("value", param.Value),
-				zap.Int64("defaultMs", defaultTimeoutMs))
+			mlog.Warn(context.TODO(), "invalid function timeout_ms param, falling back to default",
+				mlog.String("value", param.Value),
+				mlog.Int64("defaultMs", defaultTimeoutMs))
 			return defaultTimeoutMs
 		}
 		return timeoutMs

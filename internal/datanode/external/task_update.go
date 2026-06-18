@@ -48,7 +48,6 @@ import (
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -56,7 +55,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -128,9 +127,9 @@ func (t *RefreshExternalCollectionTask) Name() string {
 
 func (t *RefreshExternalCollectionTask) OnEnqueue(ctx context.Context) error {
 	t.tr.RecordSpan()
-	log.Ctx(ctx).Info("RefreshExternalCollectionTask enqueued",
-		zap.Int64("taskID", t.req.GetTaskID()),
-		zap.Int64("collectionID", t.req.GetCollectionID()))
+	mlog.Info(ctx, "RefreshExternalCollectionTask enqueued",
+		mlog.Int64("taskID", t.req.GetTaskID()),
+		mlog.Int64("collectionID", t.req.GetCollectionID()))
 	return nil
 }
 
@@ -159,9 +158,9 @@ func (t *RefreshExternalCollectionTask) PreExecute(ctx context.Context) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
-	log.Ctx(ctx).Info("RefreshExternalCollectionTask PreExecute",
-		zap.Int64("taskID", t.req.GetTaskID()),
-		zap.Int64("collectionID", t.req.GetCollectionID()))
+	mlog.Info(ctx, "RefreshExternalCollectionTask PreExecute",
+		mlog.Int64("taskID", t.req.GetTaskID()),
+		mlog.Int64("collectionID", t.req.GetCollectionID()))
 
 	if t.req == nil {
 		return merr.WrapErrParameterInvalidMsg("request is nil")
@@ -191,10 +190,9 @@ func (t *RefreshExternalCollectionTask) Execute(ctx context.Context) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
-	log := log.Ctx(ctx)
-	log.Info("RefreshExternalCollectionTask Execute",
-		zap.Int64("taskID", t.req.GetTaskID()),
-		zap.Int64("collectionID", t.req.GetCollectionID()))
+	mlog.Info(context.TODO(), "RefreshExternalCollectionTask Execute",
+		mlog.Int64("taskID", t.req.GetTaskID()),
+		mlog.Int64("collectionID", t.req.GetCollectionID()))
 
 	// Initialize pre-allocated segment IDs from request
 	if t.req.GetPreAllocatedSegmentIds() == nil {
@@ -204,10 +202,10 @@ func (t *RefreshExternalCollectionTask) Execute(ctx context.Context) error {
 	t.preallocatedIDRange = t.req.GetPreAllocatedSegmentIds()
 	t.nextAllocID = t.preallocatedIDRange.Begin
 
-	log.Info("Initialized pre-allocated segment ID range",
-		zap.Int64("idBegin", t.preallocatedIDRange.Begin),
-		zap.Int64("idEnd", t.preallocatedIDRange.End),
-		zap.Int64("count", t.preallocatedIDRange.End-t.preallocatedIDRange.Begin))
+	mlog.Info(context.TODO(), "Initialized pre-allocated segment ID range",
+		mlog.Int64("idBegin", t.preallocatedIDRange.Begin),
+		mlog.Int64("idEnd", t.preallocatedIDRange.End),
+		mlog.Int64("count", t.preallocatedIDRange.End-t.preallocatedIDRange.Begin))
 
 	// Fetch fragments from external source
 	newFragments, err := t.fetchFragmentsFromExternalSource(ctx)
@@ -238,10 +236,10 @@ func (t *RefreshExternalCollectionTask) fetchFragmentsFromExternalSource(ctx con
 		return nil, merr.WrapErrParameterMissingMsg("explore manifest path is required but not provided")
 	}
 
-	log.Ctx(ctx).Info("reading file list from explore manifest",
-		zap.String("manifestPath", manifestPath),
-		zap.Int64("fileIndexBegin", t.req.GetFileIndexBegin()),
-		zap.Int64("fileIndexEnd", t.req.GetFileIndexEnd()))
+	mlog.Info(ctx, "reading file list from explore manifest",
+		mlog.String("manifestPath", manifestPath),
+		mlog.Int64("fileIndexBegin", t.req.GetFileIndexBegin()),
+		mlog.Int64("fileIndexEnd", t.req.GetFileIndexEnd()))
 
 	targetRowsPerSegment := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
 
@@ -266,10 +264,10 @@ func (t *RefreshExternalCollectionTask) PostExecute(ctx context.Context) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
-	log.Ctx(ctx).Info("RefreshExternalCollectionTask PostExecute",
-		zap.Int64("taskID", t.req.GetTaskID()),
-		zap.Int64("collectionID", t.req.GetCollectionID()),
-		zap.Int("updatedSegments", len(t.updatedSegments)))
+	mlog.Info(ctx, "RefreshExternalCollectionTask PostExecute",
+		mlog.Int64("taskID", t.req.GetTaskID()),
+		mlog.Int64("collectionID", t.req.GetCollectionID()),
+		mlog.Int("updatedSegments", len(t.updatedSegments)))
 	return nil
 }
 
@@ -306,7 +304,6 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 	if err := ensureContext(ctx); err != nil {
 		return nil, err
 	}
-	log := log.Ctx(ctx)
 	t.keptSegmentIDs = nil
 	t.updatedSegments = nil
 
@@ -346,19 +343,19 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 			key := fragmentKey(f)
 			if _, exists := newFragmentMap[key]; !exists {
 				allFragmentsExist = false
-				log.Info("Fragment removed from segment",
-					zap.Int64("segmentID", seg.GetID()),
-					zap.String("filePath", f.FilePath),
-					zap.Int64("startRow", f.StartRow),
-					zap.Int64("endRow", f.EndRow))
+				mlog.Info(context.TODO(), "Fragment removed from segment",
+					mlog.Int64("segmentID", seg.GetID()),
+					mlog.String("filePath", f.FilePath),
+					mlog.Int64("startRow", f.StartRow),
+					mlog.Int64("endRow", f.EndRow))
 				break
 			}
 		}
 
 		if !allFragmentsExist {
 			// Segment invalidated - its remaining fragments become orphans
-			log.Info("Segment invalidated due to removed fragments",
-				zap.Int64("segmentID", seg.GetID()))
+			mlog.Info(context.TODO(), "Segment invalidated due to removed fragments",
+				mlog.Int64("segmentID", seg.GetID()))
 			continue
 		}
 
@@ -370,9 +367,9 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 			}
 			if !hasOutputs {
 				reusableSegment = false
-				log.Info("Segment invalidated due to missing function output columns",
-					zap.Int64("segmentID", seg.GetID()),
-					zap.String("manifestPath", seg.GetManifestPath()))
+				mlog.Info(context.TODO(), "Segment invalidated due to missing function output columns",
+					mlog.Int64("segmentID", seg.GetID()),
+					mlog.String("manifestPath", seg.GetManifestPath()))
 			}
 		}
 
@@ -391,17 +388,17 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 		if len(missingColumns) == 0 {
 			// Keep this segment unchanged
 			keptSegments = append(keptSegments, seg)
-			log.Debug("Segment kept unchanged",
-				zap.Int64("segmentID", seg.GetID()))
+			mlog.Debug(context.TODO(), "Segment kept unchanged",
+				mlog.Int64("segmentID", seg.GetID()))
 		} else {
 			patchedSegment, err := t.patchSegmentForMissingColumns(ctx, seg, fragments, missingColumns)
 			if err != nil {
 				return nil, err
 			}
 			patchedSegments = append(patchedSegments, patchedSegment)
-			log.Info("Segment patched with missing external columns",
-				zap.Int64("segmentID", seg.GetID()),
-				zap.Strings("missingColumns", missingColumns))
+			mlog.Info(context.TODO(), "Segment patched with missing external columns",
+				mlog.Int64("segmentID", seg.GetID()),
+				mlog.Strings("missingColumns", missingColumns))
 		}
 	}
 
@@ -435,10 +432,10 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 	// Visible result contains unchanged kept segments plus upsert segments.
 	result := append(keptSegments, updatedSegments...)
 
-	log.Info("Segment organization complete",
-		zap.Int("keptSegments", len(keptSegments)),
-		zap.Int("newSegments", len(createdSegments)),
-		zap.Int("totalSegments", len(result)))
+	mlog.Info(context.TODO(), "Segment organization complete",
+		mlog.Int("keptSegments", len(keptSegments)),
+		mlog.Int("newSegments", len(createdSegments)),
+		mlog.Int("totalSegments", len(result)))
 
 	return result, nil
 }
@@ -608,8 +605,6 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 		return nil, err
 	}
 
-	log := log.Ctx(ctx)
-
 	// Calculate total rows
 	var totalRows int64
 	for _, f := range fragments {
@@ -640,11 +635,11 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 
 	avgRowsPerSegment := totalRows / numSegments
 
-	log.Info("Balancing fragments to segments",
-		zap.Int("numFragments", len(fragments)),
-		zap.Int64("totalRows", totalRows),
-		zap.Int64("numSegments", numSegments),
-		zap.Int64("avgRowsPerSegment", avgRowsPerSegment))
+	mlog.Info(context.TODO(), "Balancing fragments to segments",
+		mlog.Int("numFragments", len(fragments)),
+		mlog.Int64("totalRows", totalRows),
+		mlog.Int64("numSegments", numSegments),
+		mlog.Int64("avgRowsPerSegment", avgRowsPerSegment))
 
 	// Sort fragments by row count descending for better bin-packing
 	sortedFragments := make([]packed.Fragment, len(fragments))
@@ -706,8 +701,8 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 		})
 	}
 
-	log.Info("Allocated segment IDs, starting manifest creation",
-		zap.Int("numSegments", len(works)))
+	mlog.Info(context.TODO(), "Allocated segment IDs, starting manifest creation",
+		mlog.Int("numSegments", len(works)))
 
 	// Phase 2: Create manifests concurrently with a fixed-size worker pool.
 	const createManifestWorkers = 16
@@ -759,10 +754,10 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 	}
 
 	manifestDuration := time.Since(manifestStart)
-	log.Info("CreateManifest phase completed",
-		zap.Int("numSegments", len(works)),
-		zap.Int("workers", workers),
-		zap.Duration("duration", manifestDuration))
+	mlog.Info(context.TODO(), "CreateManifest phase completed",
+		mlog.Int("numSegments", len(works)),
+		mlog.Int("workers", workers),
+		mlog.Duration("duration", manifestDuration))
 
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -818,9 +813,9 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			t.req.GetStorageConfig(),
 		)
 		if err != nil {
-			log.Warn("failed to sample external field sizes",
-				zap.String("manifestPath", manifestPath),
-				zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to sample external field sizes",
+				mlog.String("manifestPath", manifestPath),
+				mlog.Err(err))
 			recordErr(err)
 			return 0, false
 		}
@@ -831,9 +826,9 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			// zero can come from (a) a schema with no ExternalField-mapped
 			// fields, or (b) a Parquet file whose sampled rows really are
 			// empty — both are degenerate and must not feed QN a zero.
-			log.Warn("external field size sample produced non-positive total",
-				zap.String("manifestPath", manifestPath),
-				zap.Int64("total", total))
+			mlog.Warn(context.TODO(), "external field size sample produced non-positive total",
+				mlog.String("manifestPath", manifestPath),
+				mlog.Int64("total", total))
 			recordErr(merr.WrapErrParameterInvalidMsg("sampled field sizes sum to %d (schema may have no external_field mappings, or sampled rows are empty)", total))
 			return 0, false
 		}
@@ -850,9 +845,9 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 					}
 				}
 			}
-			log.Info("per-segment sampling complete",
-				zap.Int("numSegments", len(manifestPaths)),
-				zap.Int64("fallbackAvgBytesPerRow", fallbackAvg))
+			mlog.Info(context.TODO(), "per-segment sampling complete",
+				mlog.Int("numSegments", len(manifestPaths)),
+				mlog.Int64("fallbackAvgBytesPerRow", fallbackAvg))
 		} else {
 			if avg, ok := sampleOne(manifestPaths[0]); ok {
 				fallbackAvg = avg
@@ -860,8 +855,8 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 					segmentAvgBytes[i] = avg
 				}
 			}
-			log.Info("single-sample complete",
-				zap.Int64("avgBytesPerRow", fallbackAvg))
+			mlog.Info(context.TODO(), "single-sample complete",
+				mlog.Int64("avgBytesPerRow", fallbackAvg))
 		}
 		// If every sample failed, fail the task rather than emitting
 		// zero-MemorySize fake binlogs that would collapse QueryNode's
