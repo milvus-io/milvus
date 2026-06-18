@@ -511,12 +511,6 @@ func (node *DataNode) DropImport(ctx context.Context, req *datapb.DropImportRequ
 }
 
 func (node *DataNode) CopySegment(ctx context.Context, req *datapb.CopySegmentRequest) (*commonpb.Status, error) {
-	// Extract collection ID from first target (all targets should have same collection)
-	var collectionID int64
-	if len(req.GetTargets()) > 0 {
-		collectionID = req.GetTargets()[0].GetCollectionId()
-	}
-
 	mlog.Info(context.TODO(), "datanode receive copy segment request")
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
