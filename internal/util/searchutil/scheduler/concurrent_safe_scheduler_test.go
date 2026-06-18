@@ -422,6 +422,51 @@ func (s *SchedulerSuite) TestSetupExecListenerDropsPoppedTaskNearDeadline() {
 	s.Equal(uint64(0), readTaskQueueDurationCount(readTaskQueueOutcomeScheduled))
 }
 
+func (s *SchedulerSuite) TestSetupExecListenerDropsWaitingTaskExpiredBeforeExecChanSend() {
+	paramtable.Init()
+	metrics.QueryNodeReadTaskQueueDuration.Reset()
+	defer metrics.QueryNodeReadTaskQueueDuration.Reset()
+	oldDeadlineAdvance := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.SwapTempValue("0ms")
+	defer paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.SwapTempValue(oldDeadlineAdvance)
+
+	now := time.Now()
+	scheduler := &scheduler{
+		policy:           newFIFOPolicy(),
+		execChan:         make(chan Task),
+		schedulerCounter: schedulerCounter{},
+	}
+
+	ctx, cancel := context.WithDeadline(context.Background(), now.Add(time.Millisecond))
+	defer cancel()
+	waitingTask := newMockTask(mockTaskConfig{ctx: ctx, nq: 1})
+	queued := newQueuedTask(waitingTask, now.Add(-time.Second))
+	added, err := scheduler.policy.Push(queued)
+	s.NoError(err)
+	scheduler.updateWaitingTaskCounter(int64(added), queued.NQ())
+
+	task, nq, execChan := scheduler.setupExecListener(nil, now)
+	s.True(task.valid())
+	s.Equal(int64(1), nq)
+	s.NotNil(execChan)
+	s.Equal(uint64(0), readTaskQueueDurationCount(readTaskQueueOutcomeScheduled))
+
+	time.Sleep(2 * time.Millisecond)
+	task, nq, execChan = scheduler.setupExecListener(task, time.Now())
+
+	s.False(task.valid())
+	s.Zero(nq)
+	s.Nil(execChan)
+	s.Equal(int64(0), scheduler.GetWaitingTaskTotal())
+	select {
+	case err := <-waitingTask.(*MockTask).notifier:
+		s.ErrorIs(err, context.DeadlineExceeded)
+	case <-time.After(time.Second):
+		s.Fail("waiting task was not notified after expiring before execChan send")
+	}
+	s.Equal(uint64(1), readTaskQueueDurationCount(readTaskQueueOutcomeExpired))
+	s.Equal(uint64(0), readTaskQueueDurationCount(readTaskQueueOutcomeScheduled))
+}
+
 func (s *SchedulerSuite) TestClearQueuedTasksRemovesPolicyAndCurrentTask() {
 	paramtable.Init()
 	metrics.QueryNodeReadTaskQueueDuration.Reset()
