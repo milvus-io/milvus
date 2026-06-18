@@ -1019,11 +1019,22 @@ func wrapSubTaskErrors(errs []error) error {
 		return errs[0]
 	}
 
+	causeIndex := 0
+	for i, err := range errs {
+		if errors.Is(err, merr.ErrServiceTooManyRequests) || errors.Is(err, merr.ErrServiceResourceInsufficient) {
+			causeIndex = i
+			break
+		}
+	}
+
 	messages := make([]string, 0, len(errs)-1)
-	for _, err := range errs[1:] {
+	for i, err := range errs {
+		if i == causeIndex {
+			continue
+		}
 		messages = append(messages, err.Error())
 	}
-	return errors.Wrapf(errs[0], "other worker errors: %s", strings.Join(messages, "; "))
+	return errors.Wrapf(errs[causeIndex], "other worker errors: %s", strings.Join(messages, "; "))
 }
 
 // speedupGuranteeTS returns the guarantee timestamp for strong consistency search.
