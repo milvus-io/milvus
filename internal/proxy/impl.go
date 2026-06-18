@@ -521,9 +521,6 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		mixCoord:                node.mixCoord,
 	}
 
-	// avoid data race
-	lenOfSchema := len(request.Schema)
-
 	mlog.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(cct); err != nil {
@@ -4205,18 +4202,18 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 
 	logger := mlog.With(mlog.String("role", typeutil.ProxyRole))
 
-	logger.Debug(rpcReceived(method))
+	logger.Debug(ctx, rpcReceived(method))
 
 	if err := node.sched.dcQueue.Enqueue(ft); err != nil {
-		logger.Warn(rpcFailedToEnqueue(method), mlog.Err(err))
+		logger.Warn(ctx, rpcFailedToEnqueue(method), mlog.Err(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
-	logger.Debug(rpcEnqueued(method))
+	logger.Debug(ctx, rpcEnqueued(method))
 
 	if err := ft.WaitToFinish(); err != nil {
-		logger.Warn(
+		logger.Warn(ctx,
 			rpcFailedToWaitToFinish(method),
 			mlog.Err(err))
 
@@ -4224,7 +4221,7 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 		return resp, nil
 	}
 
-	logger.Debug(rpcDone(method), mlog.FieldMessages(message.MilvusMessagesToImmutableMessages(lo.Values(ft.result.GetFlushAllMsgs()))))
+	logger.Debug(ctx, rpcDone(method), mlog.FieldMessages(message.MilvusMessagesToImmutableMessages(lo.Values(ft.result.GetFlushAllMsgs()))))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return ft.result, nil
@@ -5845,14 +5842,14 @@ func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealt
 		defer sp.End()
 
 		if err != nil {
-			mlog.Warn(context.TODO(), "check health fail",
+			mlog.Warn(ctx, "check health fail",
 				mlog.Err(err))
 			errReasons = append(errReasons, fmt.Sprintf("check health fail for %s", role))
 			return err
 		}
 
 		if !resp.IsHealthy {
-			mlog.Warn(context.TODO(), "check health fail")
+			mlog.Warn(ctx, "check health fail")
 			errReasons = append(errReasons, resp.Reasons...)
 		}
 		return nil
