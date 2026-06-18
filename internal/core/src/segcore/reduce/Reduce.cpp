@@ -209,6 +209,16 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
                 PkType temp_pk =
                     std::move(search_result->primary_keys_[start + i]);
                 int64_t temp_offset = search_result->seg_offsets_[start + i];
+                // group_by_values_ must be permuted in lockstep with the pks,
+                // otherwise the pk<->group-by-value binding is broken for
+                // equal-score (tie) entries, defeating group_size/strict_group_size.
+                const bool has_group_by =
+                    search_result->group_by_values_.has_value();
+                GroupByValueType temp_group_by_value;
+                if (has_group_by) {
+                    temp_group_by_value = std::move(
+                        search_result->group_by_values_.value()[start + i]);
+                }
 
                 size_t curr = i;
                 while (indices[curr] != i) {
@@ -217,12 +227,21 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
                         std::move(search_result->primary_keys_[start + next]);
                     search_result->seg_offsets_[start + curr] =
                         search_result->seg_offsets_[start + next];
+                    if (has_group_by) {
+                        search_result->group_by_values_.value()[start + curr] =
+                            std::move(search_result->group_by_values_
+                                          .value()[start + next]);
+                    }
                     indices[curr] = curr;  // Mark as processed
                     curr = next;
                 }
 
                 search_result->primary_keys_[start + curr] = std::move(temp_pk);
                 search_result->seg_offsets_[start + curr] = temp_offset;
+                if (has_group_by) {
+                    search_result->group_by_values_.value()[start + curr] =
+                        std::move(temp_group_by_value);
+                }
                 indices[curr] = curr;
             }
         }
