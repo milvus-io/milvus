@@ -435,9 +435,9 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 				mlog.String("reason", status.GetReason()),
 			)
 			if errType == merr.InputError {
-				logger.Info(req.Context(), "restful request returned an input error")
+				logger.Info(ctx, "restful request returned an input error")
 			} else {
-				logger.Warn(req.Context(), "restful request returned a system error")
+				logger.Warn(ctx, "restful request returned a system error")
 			}
 		}
 	}

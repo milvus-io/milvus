@@ -2649,7 +2649,7 @@ func assignPartitionKeys(ctx context.Context, dbName string, collName string, ke
 func ErrWithLog(logger *mlog.Logger, msg string, err error) error {
 	wrapErr := errors.Wrap(err, msg)
 	if logger != nil {
-		logger.Warn(msg, mlog.Err(err))
+		logger.Warn(context.TODO(), msg, mlog.Err(err))
 		return wrapErr
 	}
 	mlog.Warn(context.TODO(), msg, mlog.Err(err))
