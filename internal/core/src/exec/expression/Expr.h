@@ -2447,8 +2447,9 @@ class SegmentExpr : public Expr {
     void
     WaitPrefetch() override {
         if (prefetch_future_.has_value()) {
-            std::move(*prefetch_future_).wait();
+            auto future = std::move(*prefetch_future_);
             prefetch_future_.reset();
+            std::move(future).get();
             return;
         }
         EnsureExecPathDetermined();

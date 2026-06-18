@@ -10,17 +10,36 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include <folly/executors/CPUThreadPoolExecutor.h>
+#include <algorithm>
+#include <cstdint>
 #include <memory>
-namespace milvus {
 
-inline std::shared_ptr<folly::CPUThreadPoolExecutor>
-GetPrefetchThreadPool() {
+#include <folly/executors/CPUThreadPoolExecutor.h>
+#include <folly/executors/thread_factory/NamedThreadFactory.h>
+
+namespace milvus {
+namespace detail {
+
+inline std::shared_ptr<folly::CPUThreadPoolExecutor>&
+PrefetchThreadPool() {
     static std::shared_ptr<folly::CPUThreadPoolExecutor> pool =
         std::make_shared<folly::CPUThreadPoolExecutor>(
-            24,
+            1,
             folly::CPUThreadPoolExecutor::makeDefaultPriorityQueue(1),
             std::make_shared<folly::NamedThreadFactory>("MILVUS_PREFETCH_"));
     return pool;
+}
+
+}  // namespace detail
+
+inline std::shared_ptr<folly::CPUThreadPoolExecutor>
+GetPrefetchThreadPool() {
+    return detail::PrefetchThreadPool();
+}
+
+inline void
+SetPrefetchThreadPoolSize(uint32_t num_threads) {
+    detail::PrefetchThreadPool()->setNumThreads(
+        std::max<uint32_t>(1, num_threads));
 }
 }  // namespace milvus

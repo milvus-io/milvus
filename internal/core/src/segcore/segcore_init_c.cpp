@@ -25,6 +25,7 @@
 #include "pthread.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/segcore_init_c.h"
+#include "storage/PrefetchThreadPool.h"
 
 namespace milvus::segcore {
 
@@ -184,6 +185,11 @@ SegcoreSetKnowhereSearchThreadPoolNum(const uint32_t num_threads) {
 extern "C" void
 SegcoreSetKnowhereFetchThreadPoolNum(const uint32_t num_threads) {
     milvus::config::KnowhereInitFetchThreadPool(num_threads);
+}
+
+extern "C" void
+SegcoreSetPrefetchThreadPoolNum(const uint32_t num_threads) {
+    milvus::SetPrefetchThreadPoolSize(num_threads);
 }
 
 extern "C" void
