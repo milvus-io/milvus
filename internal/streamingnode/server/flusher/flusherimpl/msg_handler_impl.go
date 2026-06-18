@@ -130,6 +130,14 @@ func (impl *msgHandlerImpl) HandleSchemaChange(ctx context.Context, msg message.
 	return impl.wbMgr.SealSegments(context.Background(), msg.VChannel(), msg.Header().FlushedSegmentIds)
 }
 
+// HandleSplitShard seals the growing segments the SplitShard fence sealed (their
+// ids are embedded in the message header), so the source shard's data up to
+// T_switch is flushed and reported to datacoord; the redistribution drain waits
+// for that before declaring the source shard drained.
+func (impl *msgHandlerImpl) HandleSplitShard(msg message.ImmutableSplitShardMessageV2) error {
+	return impl.wbMgr.SealSegments(context.Background(), msg.VChannel(), msg.Header().FlushedSegmentIds)
+}
+
 func (impl *msgHandlerImpl) HandleAlterCollection(ctx context.Context, putCollectionMsg message.ImmutableAlterCollectionMessageV2) error {
 	return impl.wbMgr.SealSegments(context.Background(), putCollectionMsg.VChannel(), putCollectionMsg.Header().FlushedSegmentIds)
 }

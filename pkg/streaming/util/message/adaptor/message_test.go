@@ -89,6 +89,29 @@ func TestNewMsgPackFromCreateSegmentMessage(t *testing.T) {
 	assert.Equal(t, tt, pack.EndTs)
 }
 
+func TestNewMsgPackFromSplitShardMessage(t *testing.T) {
+	id := rmq.NewRmqID(1)
+
+	tt := uint64(time.Now().UnixNano())
+	mutableMsg, err := message.NewSplitShardMessageBuilderV2().
+		WithHeader(&message.SplitShardMessageHeader{FlushedSegmentIds: []int64{1, 2}}).
+		WithBody(&message.SplitShardMessageBody{}).
+		WithVChannel("v1").
+		BuildMutable()
+	assert.NoError(t, err)
+	// the SplitShard message must convert to a msgpack (a SplitShardMessageBody)
+	// instead of panicking, so the flusher can consume it and seal the fence
+	// segments.
+	immutableSplitMsg := mutableMsg.WithTimeTick(tt).WithLastConfirmedUseMessageID().IntoImmutableMessage(id)
+	pack, err := NewMsgPackFromMessage(immutableSplitMsg)
+	assert.NoError(t, err)
+	assert.NotNil(t, pack)
+	assert.Equal(t, tt, pack.BeginTs)
+	assert.Equal(t, tt, pack.EndTs)
+	assert.Len(t, pack.Msgs, 1)
+	assert.IsType(t, &SplitShardMessageBody{}, pack.Msgs[0])
+}
+
 func TestNewMsgPackFromCreateIndexMessage(t *testing.T) {
 	id := rmq.NewRmqID(1)
 
