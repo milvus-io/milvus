@@ -6297,7 +6297,8 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 
 	db := GetCurDBNameFromContextOrDefault(ctx)
 	logsToBePrinted := append(connection.ZapClientInfo(request.GetClientInfo()), mlog.String("db", db))
-	mlog.Info(context.TODO(), "connect received")
+	logger := mlog.With(logsToBePrinted...)
+	logger.Info(ctx, "connect received")
 
 	resp, err := node.mixCoord.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -6309,14 +6310,14 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 	}
 
 	if err != nil {
-		mlog.Info(context.TODO(), "connect failed, failed to list databases", mlog.Err(err))
+		logger.Info(ctx, "connect failed, failed to list databases", mlog.Err(err))
 		return &milvuspb.ConnectResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
 	if !funcutil.SliceContain(resp.GetDbNames(), db) {
-		mlog.Info(context.TODO(), "connect failed, target database not exist")
+		logger.Info(ctx, "connect failed, target database not exist")
 		// db is the caller-supplied database name; this Connect handshake builds
 		// the not-found directly (it does not go through GetDatabaseInfo's marking
 		// chokepoint), so stamp InputError here.
@@ -6327,7 +6328,7 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 
 	ts, err := node.tsoAllocator.AllocOne(ctx)
 	if err != nil {
-		mlog.Info(context.TODO(), "connect failed, failed to allocate timestamp", mlog.Err(err))
+		logger.Info(ctx, "connect failed, failed to allocate timestamp", mlog.Err(err))
 		return &milvuspb.ConnectResponse{
 			Status: merr.Status(err),
 		}, nil
