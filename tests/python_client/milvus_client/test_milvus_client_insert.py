@@ -281,7 +281,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
              default_binary_vec_field_name: binary_vectors[i]} for i in range(default_nb)]
 
         error = {ct.err_code: 65536,
-                 ct.err_msg: f"of field data(binary_vector) is not equal to schema dim ({default_dim})"}
+                 ct.err_msg: f"of all bits should divide the dim({default_dim})"}
         self.insert(client, collection_name, data=rows,
                     check_task=CheckTasks.err_res, check_items=error)
 

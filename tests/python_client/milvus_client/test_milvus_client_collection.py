@@ -4259,10 +4259,13 @@ class TestMilvusClientDescribeCollectionValid(TestMilvusClientV2Base):
             "aliases": [],
             "consistency_level": 0,
             "consistency_level_name": "Strong",
-            "properties": {"timezone": "UTC", "max_field_id": "102"},
+            "properties": {'max_field_id': '102',
+                           'namespace.sharding.enabled': 'false',
+                           'timezone': 'UTC'},
             "num_partitions": 1,
             "enable_dynamic_field": True,
             "enable_namespace": False,
+            'schema_version': 0
         }
         # Get actual description
         res = self.describe_collection(client, collection_name)[0]

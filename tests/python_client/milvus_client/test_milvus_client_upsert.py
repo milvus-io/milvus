@@ -367,7 +367,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
 
         # 3. Verify error on upsert
-        error = {ct.err_code: 1100, ct.err_msg: f"the dim ({dim}) of field data(binary_vector) is not equal to schema dim ({default_dim})"}
+        error = {ct.err_code: 1100, ct.err_msg: f"of all bits should divide the dim({default_dim})"}
         self.upsert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
         self.drop_collection(client, collection_name)
