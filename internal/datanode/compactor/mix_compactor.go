@@ -158,8 +158,6 @@ func (t *mixCompactionTask) mergeSplit(
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "MergeSplit")
 	defer span.End()
 
-	log := mlog.With(mlog.Int64("planID", t.GetPlanID()))
-
 	if err := t.initLOBCompactionContext(ctx); err != nil {
 		return nil, err
 	}
@@ -419,10 +417,6 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return nil, err
 	}
 
-	log := mlog.With(mlog.Int64("planID", t.GetPlanID()),
-		mlog.Int64("collectionID", t.collectionID),
-		mlog.Int64("partitionID", t.partitionID))
-
 	ctxTimeout, cancelAll := context.WithCancel(ctx)
 	defer cancelAll()
 
@@ -553,8 +547,6 @@ func (t *mixCompactionTask) applyLOBCompaction(ctx context.Context, outputSegmen
 		return nil
 	}
 
-	log := mlog.With(mlog.Int64("planID", t.GetPlanID()))
-
 	if !t.lobContext.HasReuseAllFields() {
 		mlog.Info(context.TODO(), "all TEXT fields use REWRITE_ALL, no LOB file merging needed")
 		return nil
@@ -617,10 +609,6 @@ func (t *mixCompactionTask) initLOBCompactionContext(ctx context.Context) error 
 		return nil // no manifest-based segments, nothing to do
 	}
 
-	log := mlog.With(
-		mlog.Int64("planID", t.GetPlanID()),
-		mlog.Int64s("textFieldIDs", textFieldIDs),
-	)
 	mlog.Info(context.TODO(), "initializing LOB compaction context for TEXT columns")
 
 	// collect source segment manifests

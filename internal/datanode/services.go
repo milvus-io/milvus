@@ -184,7 +184,6 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 // CompactionV2 handles compaction request from DataCoord
 // returns status as long as compaction task enqueued or invalid
 func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
-	log := mlog.With(mlog.Int64("planID", req.GetPlanID()))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		mlog.Warn(context.TODO(), "DataNode.Compaction failed", mlog.Int64("nodeId", node.GetNodeID()), mlog.Err(err))
 		return merr.Status(err), nil
@@ -364,14 +363,6 @@ func (node *DataNode) FlushChannels(ctx context.Context, req *datapb.FlushChanne
 }
 
 func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportRequest) (*commonpb.Status, error) {
-	log := mlog.With(mlog.Int64("taskID", req.GetTaskID()),
-		mlog.Int64("jobID", req.GetJobID()),
-		mlog.Int64("taskSlot", req.GetTaskSlot()),
-		mlog.Int64("collectionID", req.GetCollectionID()),
-		mlog.Int64s("partitionIDs", req.GetPartitionIDs()),
-		mlog.Strings("vchannels", req.GetVchannels()),
-		mlog.Any("files", req.GetImportFiles()))
-
 	mlog.Info(context.TODO(), "datanode receive preimport request")
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -400,18 +391,6 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 }
 
 func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (*commonpb.Status, error) {
-	log := mlog.With(mlog.Int64("taskID", req.GetTaskID()),
-		mlog.Int64("jobID", req.GetJobID()),
-		mlog.Int64("taskSlot", req.GetTaskSlot()),
-		mlog.Int64("collectionID", req.GetCollectionID()),
-		mlog.Int64s("partitionIDs", req.GetPartitionIDs()),
-		mlog.Strings("vchannels", req.GetVchannels()),
-		mlog.Uint64("ts", req.GetTs()),
-		mlog.Int64("idBegin", req.GetIDRange().GetBegin()),
-		mlog.Int64("idEnd", req.GetIDRange().GetEnd()),
-		mlog.Any("segments", req.GetRequestSegments()),
-		mlog.Any("files", req.GetFiles()))
-
 	mlog.Info(context.TODO(), "datanode receive import request")
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -439,8 +418,6 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 }
 
 func (node *DataNode) QueryPreImport(ctx context.Context, req *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error) {
-	log := mlog.With()
-
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &datapb.QueryPreImportResponse{Status: merr.Status(err)}, nil
 	}
@@ -477,8 +454,6 @@ func (node *DataNode) QueryPreImport(ctx context.Context, req *datapb.QueryPreIm
 }
 
 func (node *DataNode) QueryImport(ctx context.Context, req *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
-	log := mlog.With()
-
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &datapb.QueryImportResponse{Status: merr.Status(err)}, nil
 	}
@@ -524,10 +499,6 @@ func (node *DataNode) QueryImport(ctx context.Context, req *datapb.QueryImportRe
 }
 
 func (node *DataNode) DropImport(ctx context.Context, req *datapb.DropImportRequest) (*commonpb.Status, error) {
-	log := mlog.With(mlog.Int64("taskID", req.GetTaskID()),
-		mlog.Int64("jobID", req.GetJobID()),
-		mlog.Int64("nodeID", node.GetNodeID()))
-
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -545,14 +516,6 @@ func (node *DataNode) CopySegment(ctx context.Context, req *datapb.CopySegmentRe
 	if len(req.GetTargets()) > 0 {
 		collectionID = req.GetTargets()[0].GetCollectionId()
 	}
-
-	log := mlog.With(
-		mlog.Int64("taskID", req.GetTaskID()),
-		mlog.Int64("jobID", req.GetJobID()),
-		mlog.Int64("collectionID", collectionID),
-		mlog.Int("sourceSegmentCount", len(req.GetSources())),
-		mlog.Int("targetSegmentCount", len(req.GetTargets())),
-	)
 
 	mlog.Info(context.TODO(), "datanode receive copy segment request")
 
@@ -578,8 +541,6 @@ func (node *DataNode) CopySegment(ctx context.Context, req *datapb.CopySegmentRe
 }
 
 func (node *DataNode) QueryCopySegment(ctx context.Context, req *datapb.QueryCopySegmentRequest) (*datapb.QueryCopySegmentResponse, error) {
-	log := mlog.With()
-
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &datapb.QueryCopySegmentResponse{Status: merr.Status(err)}, nil
 	}
@@ -624,12 +585,6 @@ func (node *DataNode) QueryCopySegment(ctx context.Context, req *datapb.QueryCop
 }
 
 func (node *DataNode) DropCopySegment(ctx context.Context, req *datapb.DropCopySegmentRequest) (*commonpb.Status, error) {
-	log := mlog.With(
-		mlog.Int64("taskID", req.GetTaskID()),
-		mlog.Int64("jobID", req.GetJobID()),
-		mlog.Int64("nodeID", node.GetNodeID()),
-	)
-
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -1006,7 +961,6 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 }
 
 func (node *DataNode) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
-	log := mlog.With(mlog.Uint64("version", req.GetVersion()))
 	mlog.Info(context.TODO(), "sync file resource", mlog.Any("resources", req.Resources))
 
 	if !node.isHealthy() {
@@ -1026,12 +980,6 @@ func (node *DataNode) SyncFileResource(ctx context.Context, req *internalpb.Sync
 // clusterID is the caller's cluster identifier (from CreateTask properties),
 // used as the task key so that QueryTask from the same caller can locate the result.
 func (node *DataNode) createRefreshExternalCollectionTask(ctx context.Context, clusterID string, req *datapb.RefreshExternalCollectionTaskRequest) (*commonpb.Status, error) {
-	log := mlog.With(
-		mlog.Int64("taskID", req.GetTaskID()),
-		mlog.Int64("collectionID", req.GetCollectionID()),
-		mlog.String("clusterID", clusterID),
-	)
-
 	mlog.Info(context.TODO(), "createRefreshExternalCollectionTask received",
 		mlog.Int("currentSegments", len(req.GetCurrentSegments())),
 		mlog.String("externalSource", req.GetExternalSource()))

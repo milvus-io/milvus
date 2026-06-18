@@ -117,7 +117,6 @@ func (t *LevelZeroCompactionTask) GetCollection() int64 {
 func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, "L0Compact")
 	defer span.End()
-	log := mlog.With(mlog.Int64("planID", t.plan.GetPlanID()), mlog.String("type", t.plan.GetType().String()))
 	mlog.Info(context.TODO(), "L0 compaction", mlog.Duration("wait in queue elapse", t.tr.RecordSpan()))
 
 	if !funcutil.CheckCtxValid(ctx) {
@@ -437,13 +436,6 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, l0MemSize int64, 
 
 	batchSize := getMaxBatchSize(float64(allDelta.Size()), memLimit)
 	batch := int(math.Ceil(float64(len(targetSegments)) / float64(batchSize)))
-	log := mlog.With(
-		mlog.Int64("planID", t.plan.GetPlanID()),
-		mlog.Int("max conc segment counts", batchSize),
-		mlog.Int("total segment counts", len(targetSegments)),
-		mlog.Int("total batch", batch),
-	)
-
 	results := make([]*datapb.CompactionSegment, 0)
 	for i := 0; i < batch; i++ {
 		left, right := i*batchSize, (i+1)*batchSize

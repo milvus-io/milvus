@@ -41,11 +41,6 @@ import (
 
 // CreateJob is CreateIndex
 func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequest) (*commonpb.Status, error) {
-	log := mlog.With(
-		mlog.String("clusterID", req.GetClusterID()),
-		mlog.Int64("indexBuildID", req.GetBuildID()),
-	)
-
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		mlog.Warn(context.TODO(), "index node not ready",
 			mlog.Err(err),
@@ -119,9 +114,6 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 }
 
 func (node *DataNode) QueryJobs(ctx context.Context, req *workerpb.QueryJobsRequest) (*workerpb.QueryJobsResponse, error) {
-	log := mlog.With(
-		mlog.String("clusterID", req.GetClusterID()),
-	)
 	if err := node.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
 		mlog.Warn(context.TODO(), "index node not ready", mlog.Err(err))
 		return &workerpb.QueryJobsResponse{
@@ -229,11 +221,6 @@ func (node *DataNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStats
 
 // Deprecated: use CreateTask instead, keep for compatibility
 func (node *DataNode) CreateJobV2(ctx context.Context, req *workerpb.CreateJobV2Request) (*commonpb.Status, error) {
-	log := mlog.With(
-		mlog.String("clusterID", req.GetClusterID()), mlog.Int64("TaskID", req.GetTaskID()),
-		mlog.String("jobType", req.GetJobType().String()),
-	)
-
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		mlog.Warn(context.TODO(), "index node not ready",
 			mlog.Err(err),
@@ -425,10 +412,6 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 
 // Deprecated: use QueryTask instead, keep for compatibility
 func (node *DataNode) QueryJobsV2(ctx context.Context, req *workerpb.QueryJobsV2Request) (*workerpb.QueryJobsV2Response, error) {
-	log := mlog.With(
-		mlog.String("clusterID", req.GetClusterID()), mlog.Int64s("taskIDs", req.GetTaskIDs()),
-	)
-
 	if err := node.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
 		mlog.Warn(context.TODO(), "DataNode not ready", mlog.Err(err))
 		return &workerpb.QueryJobsV2Response{
@@ -462,10 +445,6 @@ func (node *DataNode) QueryJobsV2(ctx context.Context, req *workerpb.QueryJobsV2
 }
 
 func (node *DataNode) queryIndexTask(ctx context.Context, req *workerpb.QueryJobsRequest) (*workerpb.QueryJobsV2Response, error) {
-	log := mlog.With(
-		mlog.String("clusterID", req.GetClusterID()), mlog.Int64s("taskIDs", req.GetTaskIDs()),
-	)
-
 	infos := make(map[typeutil.UniqueID]*index.IndexTaskInfo)
 	node.taskManager.ForeachIndexTaskInfo(func(ClusterID string, buildID typeutil.UniqueID, info *index.IndexTaskInfo) {
 		if ClusterID == req.GetClusterID() {
@@ -496,10 +475,6 @@ func (node *DataNode) queryIndexTask(ctx context.Context, req *workerpb.QueryJob
 }
 
 func (node *DataNode) queryStatsTask(ctx context.Context, req *workerpb.QueryJobsRequest) (*workerpb.QueryJobsV2Response, error) {
-	log := mlog.With(
-		mlog.String("clusterID", req.GetClusterID()), mlog.Int64s("taskIDs", req.GetTaskIDs()),
-	)
-
 	results := make([]*workerpb.StatsResult, 0, len(req.GetTaskIDs()))
 	for _, taskID := range req.GetTaskIDs() {
 		info := node.taskManager.GetStatsTaskInfo(req.GetClusterID(), taskID)
@@ -525,10 +500,6 @@ func (node *DataNode) queryStatsTask(ctx context.Context, req *workerpb.QueryJob
 }
 
 func (node *DataNode) queryAnalyzeTask(ctx context.Context, req *workerpb.QueryJobsRequest) (*workerpb.QueryJobsV2Response, error) {
-	log := mlog.With(
-		mlog.String("clusterID", req.GetClusterID()), mlog.Int64s("taskIDs", req.GetTaskIDs()),
-	)
-
 	results := make([]*workerpb.AnalyzeResult, 0, len(req.GetTaskIDs()))
 	for _, taskID := range req.GetTaskIDs() {
 		info := node.taskManager.GetAnalyzeTaskInfo(req.GetClusterID(), taskID)
@@ -560,11 +531,6 @@ func (node *DataNode) queryAnalyzeTask(ctx context.Context, req *workerpb.QueryJ
 
 // Deprecated: use DropTask instead, keep for compatibility
 func (node *DataNode) DropJobsV2(ctx context.Context, req *workerpb.DropJobsV2Request) (*commonpb.Status, error) {
-	log := mlog.With(mlog.String("clusterID", req.GetClusterID()),
-		mlog.Int64s("taskIDs", req.GetTaskIDs()),
-		mlog.String("jobType", req.GetJobType().String()),
-	)
-
 	if err := node.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
 		mlog.Warn(context.TODO(), "DataNode not ready", mlog.Err(err))
 		return merr.Status(err), nil

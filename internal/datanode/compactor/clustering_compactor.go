@@ -260,7 +260,6 @@ func (t *clusteringCompactionTask) init() error {
 func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, fmt.Sprintf("clusteringCompaction-%d", t.GetPlanID()))
 	defer span.End()
-	log := mlog.With(mlog.Int64("planID", t.plan.GetPlanID()), mlog.String("type", t.plan.GetType().String()))
 	// 0, verify and init
 	err := t.init()
 	if err != nil {
@@ -464,7 +463,6 @@ func (t *clusteringCompactionTask) switchPolicyForVectorPlan(ctx context.Context
 func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) error {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("getVectorAnalyzeResult-%d", t.GetPlanID()))
 	defer span.End()
-	log := mlog.With()
 	analyzeResultPath := t.plan.AnalyzeResultPath
 	centroidFilePath := path.Join(analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID), common.Centroids)
 	offsetMappingFiles := make(map[int64]string, 0)
@@ -497,8 +495,6 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 	defer span.End()
 	inputSegments := t.plan.GetSegmentBinlogs()
 	mapStart := time.Now()
-	log := mlog.With()
-
 	futures := make([]*conc.Future[any], 0, len(inputSegments))
 	for _, segment := range inputSegments {
 		segmentClone := &datapb.CompactionSegmentBinlogs{
@@ -569,10 +565,6 @@ func (t *clusteringCompactionTask) mappingSegment(
 ) error {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("mappingSegment-%d-%d", t.GetPlanID(), segment.GetSegmentID()))
 	defer span.End()
-	log := mlog.With(mlog.Int64("planID", t.GetPlanID()),
-		mlog.Int64("collectionID", t.GetCollection()),
-		mlog.Int64("partitionID", t.partitionID),
-		mlog.Int64("segmentID", segment.GetSegmentID()))
 	mlog.Info(context.TODO(), "mapping segment start")
 	processStart := time.Now()
 	var remained int64 = 0
@@ -891,7 +883,6 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 ) (map[interface{}]int64, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("scalarAnalyzeSegment-%d-%d", t.GetPlanID(), segment.GetSegmentID()))
 	defer span.End()
-	log := mlog.With(mlog.Int64("planID", t.GetPlanID()), mlog.Int64("segmentID", segment.GetSegmentID()))
 	processStart := time.Now()
 
 	// Get the number of field binlog files from non-empty segment
@@ -1124,10 +1115,6 @@ func (t *clusteringCompactionTask) initLOBCompactionContext(ctx context.Context)
 		return nil // no manifest-based segments, nothing to do
 	}
 
-	log := mlog.With(
-		mlog.Int64("planID", t.GetPlanID()),
-		mlog.Int64s("textFieldIDs", textFieldIDs),
-	)
 	mlog.Info(context.TODO(), "initializing LOB compaction context for TEXT columns (clustering compaction)")
 
 	// create LOB compaction context
