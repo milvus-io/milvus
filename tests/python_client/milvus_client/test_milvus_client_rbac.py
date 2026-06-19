@@ -264,9 +264,13 @@ class TestMilvusClientRbacBase(TrackedRbacTestBase):
         res = self.list_databases(client)[0]
         assert res == []
         self.close(client)
-        self.init_milvus_client(uri=uri, user=user_name, password=password,
-                                check_task=CheckTasks.err_res,
-                                check_items={ct.err_code: 0, ct.err_msg: "illegal connection params"})
+        self.init_milvus_client(
+            uri=uri,
+            user=user_name,
+            password=password,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 0, ct.err_msg: "illegal connection params"},
+        )
 
     def test_milvus_client_list_users(self, host, port):
         """
@@ -507,8 +511,12 @@ class TestMilvusClientRbacInvalid(TrackedRbacTestBase):
         """
         uri = f"http://{host}:{port}"
         wrong_token = root_token + "kk"
-        self.init_milvus_client(uri=uri, token=wrong_token, check_task=CheckTasks.err_res,
-                                check_items={ct.err_code: 0, ct.err_msg: "illegal connection params"})
+        self.init_milvus_client(
+            uri=uri,
+            token=wrong_token,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 0, ct.err_msg: "illegal connection params"},
+        )
 
     def test_milvus_client_init_username_invalid(self, host, port):
         """
@@ -519,8 +527,12 @@ class TestMilvusClientRbacInvalid(TrackedRbacTestBase):
         uri = f"http://{host}:{port}"
         invalid_user_name = ct.default_user + "nn"
         self.init_milvus_client(
-            uri=uri, user=invalid_user_name, password=ct.default_password, check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 0, ct.err_msg: "illegal connection params"})
+            uri=uri,
+            user=invalid_user_name,
+            password=ct.default_password,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 0, ct.err_msg: "illegal connection params"},
+        )
 
     def test_milvus_client_init_password_invalid(self, host, port):
         """
@@ -531,8 +543,12 @@ class TestMilvusClientRbacInvalid(TrackedRbacTestBase):
         uri = f"http://{host}:{port}"
         wrong_password = ct.default_password + "kk"
         self.init_milvus_client(
-            uri=uri, user=ct.default_user, password=wrong_password, check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 0, ct.err_msg: "illegal connection params"})
+            uri=uri,
+            user=ct.default_user,
+            password=wrong_password,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 0, ct.err_msg: "illegal connection params"},
+        )
 
     @pytest.mark.parametrize("invalid_name", ["", "0", "n@me", "h h"])
     def test_milvus_client_create_user_value_invalid(self, host, port, invalid_name):
@@ -563,7 +579,7 @@ class TestMilvusClientRbacInvalid(TrackedRbacTestBase):
             invalid_name,
             ct.default_password,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 0, ct.err_msg: "illegal"}
+            check_items={ct.err_code: 0, ct.err_msg: "illegal"},
         )
 
     def test_milvus_client_create_user_exist(self, host, port):
