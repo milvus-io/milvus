@@ -108,6 +108,11 @@ func TestOptimizeLikePattern(t *testing.T) {
 		{"a\\_bc", planpb.OpType_Equal, "a_bc", true},
 		{"abc_", planpb.OpType_Invalid, "", false},
 
+		// escaped trailing % is a literal, not a wildcard (issue #43864)
+		{"a\\%", planpb.OpType_Equal, "a%", true},
+		{"%abc\\%", planpb.OpType_PostfixMatch, "abc%", true},
+		{"a\\\\%", planpb.OpType_PrefixMatch, "a\\\\", true},
+
 		// null pattern
 		{"", planpb.OpType_Equal, "", true},
 	}
