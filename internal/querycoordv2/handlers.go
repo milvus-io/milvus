@@ -181,7 +181,6 @@ func (s *Server) balanceChannels(ctx context.Context,
 	sync bool,
 	copyMode bool,
 ) error {
-
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	policy := balancer.GetAssignPolicy()
 	plans := policy.AssignChannel(ctx, collectionID, channels, dstNodes, true)
@@ -258,7 +257,7 @@ func getMetrics[T any](ctx context.Context, s *Server, req *milvuspb.GetMetricsR
 		errorGroup.Go(func() error {
 			resp, err := s.cluster.GetMetrics(ctx, node.ID(), req)
 			if err := merr.CheckRPCCall(resp, err); err != nil {
-				mlog.Warn(context.TODO(), "failed to get metric from QueryNode", mlog.Int64("nodeID", node.ID()))
+				mlog.Warn(ctx, "failed to get metric from QueryNode", mlog.Int64("nodeID", node.ID()))
 				return err
 			}
 
@@ -460,7 +459,7 @@ func (s *Server) tryGetNodesMetrics(ctx context.Context, req *milvuspb.GetMetric
 
 			resp, err := s.cluster.GetMetrics(ctx, node.ID(), req)
 			if err != nil {
-				mlog.Warn(context.TODO(), "failed to get metric from QueryNode",
+				mlog.Warn(ctx, "failed to get metric from QueryNode",
 					mlog.Int64("nodeID", node.ID()))
 				return
 			}

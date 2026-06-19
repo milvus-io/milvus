@@ -108,7 +108,6 @@ func (t *clusteringCompactionTask) retryOnError(err error) {
 }
 
 func (t *clusteringCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
-
 	var err error
 	defer func() {
 		t.retryOnError(err)
@@ -748,7 +747,6 @@ func (t *clusteringCompactionTask) doAnalyze() error {
 }
 
 func (t *clusteringCompactionTask) doCompact(nodeID int64, cluster session.Cluster) error {
-
 	var err error
 	t.plan, err = t.BuildCompactionRequest()
 	if err != nil {

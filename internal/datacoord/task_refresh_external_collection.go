@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -213,7 +212,7 @@ func applyExternalCollectionSegmentUpdate(
 	collectionID int64,
 	keptSegmentIDs []int64,
 	updatedSegments []*datapb.SegmentInfo,
-	logFields ...zap.Field,
+	logFields ...mlog.Field,
 ) error {
 	if mt == nil {
 		return merr.WrapErrServiceInternalMsg("meta is nil, cannot update segments")

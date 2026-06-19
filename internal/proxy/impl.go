@@ -237,11 +237,11 @@ func (node *Proxy) InvalidateShardLeaderCache(ctx context.Context, request *prox
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-InvalidateShardLeaderCache")
 	defer sp.End()
-	mlog.Info(context.TODO(), "received request to invalidate shard leader cache", mlog.Int64s("collectionIDs", request.GetCollectionIDs()))
+	mlog.Info(ctx, "received request to invalidate shard leader cache", mlog.Int64s("collectionIDs", request.GetCollectionIDs()))
 
 	node.shardMgr.InvalidateShardLeaderCache(request.GetCollectionIDs())
 
-	mlog.Info(context.TODO(), "complete to invalidate shard leader cache", mlog.Int64s("collectionIDs", request.GetCollectionIDs()))
+	mlog.Info(ctx, "complete to invalidate shard leader cache", mlog.Int64s("collectionIDs", request.GetCollectionIDs()))
 
 	return merr.Success(), nil
 }
@@ -4514,7 +4514,7 @@ func (node *Proxy) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkR
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RegisterLink")
 	defer sp.End()
 
-	mlog.Debug(context.TODO(), "RegisterLink")
+	mlog.Debug(ctx, "RegisterLink")
 
 	if err := merr.CheckHealthy(code); err != nil {
 		return &milvuspb.RegisterLinkResponse{
@@ -5057,7 +5057,7 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-InvalidateCredentialCache")
 	defer sp.End()
 
-	mlog.Debug(context.TODO(), "received request to invalidate credential cache")
+	mlog.Debug(ctx, "received request to invalidate credential cache")
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -5067,7 +5067,7 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 	if priCache != nil {
 		priCache.RemoveCredential(username) // no need to return error, though credential may be not cached
 	}
-	mlog.Debug(context.TODO(), "complete to invalidate credential cache")
+	mlog.Debug(ctx, "complete to invalidate credential cache")
 
 	return merr.Success(), nil
 }
@@ -5077,7 +5077,7 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-UpdateCredentialCache")
 	defer sp.End()
 
-	mlog.Debug(context.TODO(), "received request to update credential cache")
+	mlog.Debug(ctx, "received request to update credential cache")
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -5779,7 +5779,7 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RefreshPolicyInfoCache")
 	defer sp.End()
 
-	mlog.Debug(context.TODO(), "RefreshPrivilegeInfoCache",
+	mlog.Debug(ctx, "RefreshPrivilegeInfoCache",
 		mlog.Any("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -5792,12 +5792,12 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 			OpKey:  req.OpKey,
 		})
 		if err != nil {
-			mlog.Warn(context.TODO(), "fail to refresh policy info",
+			mlog.Warn(ctx, "fail to refresh policy info",
 				mlog.Err(err))
 			return merr.Status(err), nil
 		}
 	}
-	mlog.Debug(context.TODO(), "RefreshPrivilegeInfoCache success")
+	mlog.Debug(ctx, "RefreshPrivilegeInfoCache success")
 
 	return merr.Success(), nil
 }
@@ -6295,7 +6295,7 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 	}
 
 	db := GetCurDBNameFromContextOrDefault(ctx)
-	logsToBePrinted := append(connection.ZapClientInfo(request.GetClientInfo()), mlog.String("db", db))
+	logsToBePrinted := append(connection.ClientInfoFields(request.GetClientInfo()), mlog.String("db", db))
 	logger := mlog.With(logsToBePrinted...)
 	logger.Info(ctx, "connect received")
 

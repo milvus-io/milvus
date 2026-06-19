@@ -28,7 +28,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc/metadata"
@@ -85,7 +84,7 @@ const (
 	DefaultStringIndexType = indexparamcheck.IndexINVERTED
 )
 
-var logger = mlog.L().WithOptions(zap.Fields(mlog.String("role", typeutil.ProxyRole)))
+var logger = mlog.With(mlog.String("role", typeutil.ProxyRole))
 
 // transformStructFieldNames transforms struct field names to structName[fieldName] format
 // This ensures global uniqueness while allowing same field names across different structs

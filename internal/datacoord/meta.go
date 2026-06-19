@@ -2304,10 +2304,8 @@ func getCompactionFallbackPositions(compactFromSegInfos []*SegmentInfo) (fallbac
 }
 
 func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
-
 	metricMutation := &segMetricMutation{stateChange: make(segmentMetricStateChange)}
 	compactFromSegIDs := make([]int64, 0)
-	compactToSegIDs := make([]int64, 0)
 	compactFromSegInfos := make([]*SegmentInfo, 0)
 	compactToSegInfos := make([]*SegmentInfo, 0)
 
@@ -2363,7 +2361,6 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 		}
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
-		compactToSegIDs = append(compactToSegIDs, segment.GetID())
 		metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetIsSorted(), segment.GetStorageVersion(), segmentMetricFormatLabel(segment), segment.GetNumOfRows())
 	}
 
@@ -2393,7 +2390,6 @@ func (m *meta) completeMixCompactionMutation(
 	t *datapb.CompactionTask,
 	result *datapb.CompactionPlanResult,
 ) ([]*SegmentInfo, *segMetricMutation, error) {
-
 	metricMutation := &segMetricMutation{stateChange: make(segmentMetricStateChange)}
 	var compactFromSegIDs []int64
 	var compactFromSegInfos []*SegmentInfo
@@ -2775,7 +2771,6 @@ func (m *meta) MarkChannelCheckpointDropped(ctx context.Context, channel string)
 
 // UpdateChannelCheckpoints updates and saves channel checkpoints.
 func (m *meta) UpdateChannelCheckpoints(ctx context.Context, positions []*msgpb.MsgPosition) error {
-
 	// Clamp each position to not advance beyond min growing segment checkpoint.
 	for i, pos := range positions {
 		if pos == nil || pos.GetChannelName() == "" {
@@ -3116,7 +3111,6 @@ func (m *meta) completeSortCompactionMutation(
 	t *datapb.CompactionTask,
 	result *datapb.CompactionPlanResult,
 ) ([]*SegmentInfo, *segMetricMutation, error) {
-
 	metricMutation := &segMetricMutation{stateChange: make(segmentMetricStateChange)}
 	compactFromSegID := t.GetInputSegments()[0]
 	oldSegment := m.segments.GetSegment(compactFromSegID)
@@ -3222,7 +3216,6 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	t *datapb.CompactionTask,
 	result *datapb.CompactionPlanResult,
 ) ([]*SegmentInfo, *segMetricMutation, error) {
-
 	metricMutation := &segMetricMutation{stateChange: make(segmentMetricStateChange)}
 
 	// Schema bump compaction has one input and one result.

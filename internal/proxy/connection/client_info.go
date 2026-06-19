@@ -14,7 +14,7 @@ type clientInfo struct {
 }
 
 func (c *clientInfo) GetLogger() []mlog.Field {
-	fields := ZapClientInfo(c.ClientInfo)
+	fields := ClientInfoFields(c.ClientInfo)
 	fields = append(fields,
 		mlog.Int64("identifier", c.identifier),
 		mlog.Time("last_active_time", c.lastActiveTime),

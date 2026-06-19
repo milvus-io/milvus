@@ -796,7 +796,7 @@ func (w *sessionWatcher) start(ctx context.Context) {
 			case wresp, ok := <-w.rch:
 				if !ok {
 					w.closeEventCh()
-					mlog.Warn(context.TODO(), "session watch channel closed")
+					mlog.Warn(ctx, "session watch channel closed")
 					return
 				}
 				w.handleWatchResponse(wresp)

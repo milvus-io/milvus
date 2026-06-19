@@ -81,7 +81,6 @@ func (t *mixCompactionTask) GetTaskVersion() int64 {
 }
 
 func (t *mixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
-
 	plan, err := t.BuildCompactionRequest()
 	if err != nil {
 		mlog.Warn(context.TODO(), "mixCompactionTask failed to build compaction request", mlog.Err(err))

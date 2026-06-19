@@ -22,7 +22,6 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -444,7 +443,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			}
 		} else { // behavior change after 2.2.9, adapt autoindex logic here.
 			useAutoIndex := func(autoIndexConfig map[string]string) {
-				fields := make([]zap.Field, 0, len(autoIndexConfig))
+				fields := make([]mlog.Field, 0, len(autoIndexConfig))
 				for k, v := range autoIndexConfig {
 					indexParamsMap[k] = v
 					fields = append(fields, mlog.String(k, v))

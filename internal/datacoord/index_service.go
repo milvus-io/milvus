@@ -1059,7 +1059,6 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 
 // GetIndexInfos gets the index file paths for segment from DataCoord.
 func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
-
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		mlog.Warn(ctx, msgDataCoordIsUnhealthy(paramtable.GetNodeID()), mlog.Err(err))
 		return &indexpb.GetIndexInfoResponse{
@@ -1129,7 +1128,6 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 
 // ListIndexes returns all indexes created on provided collection.
 func (s *Server) ListIndexes(ctx context.Context, req *indexpb.ListIndexesRequest) (*indexpb.ListIndexesResponse, error) {
-
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		mlog.Warn(ctx, msgDataCoordIsUnhealthy(paramtable.GetNodeID()), mlog.Err(err))
 		return &indexpb.ListIndexesResponse{

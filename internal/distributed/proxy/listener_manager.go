@@ -95,7 +95,7 @@ func newHTTPListner(ctx context.Context, l *listenerManager) error {
 			mlog.Warn(context.TODO(), "can not initialize http listener", mlog.Err(err))
 			return err
 		}
-		mlog.Info(context.TODO(), "Proxy server(http) and external grpc server share the same port")
+		mlog.Info(ctx, "Proxy server(http) and external grpc server share the same port")
 		l.portShareMode = true
 		l.cmux = cmux.New(l.externalGrpcListener)
 		l.cmuxClosed = make(chan struct{})
@@ -104,10 +104,10 @@ func newHTTPListner(ctx context.Context, l *listenerManager) error {
 		go func() {
 			defer close(l.cmuxClosed)
 			if err := l.cmux.Serve(); err != nil && !errors.Is(err, net.ErrClosed) {
-				mlog.Warn(context.TODO(), "Proxy cmux server closed", mlog.Err(err))
+				mlog.Warn(ctx, "Proxy cmux server closed", mlog.Err(err))
 				return
 			}
-			mlog.Info(context.TODO(), "Proxy tcp server exited")
+			mlog.Info(ctx, "Proxy tcp server exited")
 		}()
 		return nil
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"strconv"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
@@ -15,8 +14,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func ZapClientInfo(info *commonpb.ClientInfo) []zap.Field {
-	fields := []zap.Field{
+func ClientInfoFields(info *commonpb.ClientInfo) []mlog.Field {
+	fields := []mlog.Field{
 		mlog.String("sdk_type", info.GetSdkType()),
 		mlog.String("sdk_version", info.GetSdkVersion()),
 		mlog.String("local_time", info.GetLocalTime()),

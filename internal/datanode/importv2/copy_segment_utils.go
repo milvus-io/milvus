@@ -22,7 +22,6 @@ import (
 	"strconv"
 	"strings"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/compaction"
@@ -365,7 +364,7 @@ func CopySegmentAndIndexFiles(
 	cm storage.ChunkManager,
 	source *datapb.CopySegmentSource,
 	target *datapb.CopySegmentTarget,
-	logFields []zap.Field,
+	logFields []mlog.Field,
 ) (*datapb.CopySegmentResult, []string, error) {
 	segmentID := source.GetSegmentId()
 	useManifest := source.GetStorageVersion() >= storage.StorageV3
@@ -396,7 +395,7 @@ func CopySegmentAndIndexFiles(
 			mlog.String("dst", dst))
 
 		if err := copyFile(ctx, cm, src, dst); err != nil {
-			fields := make([]zap.Field, 0, len(logFields)+3)
+			fields := make([]mlog.Field, 0, len(logFields)+3)
 			fields = append(fields, logFields...)
 			fields = append(fields, mlog.String("src", src), mlog.String("dst", dst), mlog.Err(err))
 			mlog.Warn(context.TODO(), "failed to copy file", fields...)

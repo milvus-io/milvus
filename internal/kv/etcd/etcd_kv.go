@@ -24,7 +24,6 @@ import (
 
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
@@ -663,10 +662,10 @@ func (kv *etcdKV) CompareVersionAndSwapBytes(ctx context.Context, key string, so
 }
 
 // CheckElapseAndWarn checks the elapsed time and warns if it is too long.
-func CheckElapseAndWarn(ctx context.Context, start time.Time, message string, fields ...zap.Field) bool {
+func CheckElapseAndWarn(ctx context.Context, start time.Time, message string, fields ...mlog.Field) bool {
 	elapsed := time.Since(start)
 	if elapsed.Milliseconds() > 2000 {
-		mlog.Warn(ctx, message, append([]zap.Field{mlog.String("time spent", elapsed.String())}, fields...)...)
+		mlog.Warn(ctx, message, append([]mlog.Field{mlog.String("time spent", elapsed.String())}, fields...)...)
 		return true
 	}
 	return false

@@ -19,11 +19,11 @@ package accesslog
 import (
 	"context"
 	"io"
+	"os"
 	"sync"
 	"time"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
 	configEvent "github.com/milvus-io/milvus/pkg/v3/config"
@@ -199,15 +199,10 @@ func initWriter(logCfg *paramtable.AccessLogConfig, minioCfg *paramtable.MinioCo
 	}
 
 	// wirte to stdout when filename = ""
-	stdout, _, err := zap.Open([]string{"stdout"}...)
-	if err != nil {
-		return nil, err
-	}
-
 	if logCfg.CacheSize.GetAsInt() > 0 {
-		lg := NewCacheWriter(stdout, logCfg.CacheSize.GetAsInt(), logCfg.CacheFlushInterval.GetAsDuration(time.Second))
+		lg := NewCacheWriter(os.Stdout, logCfg.CacheSize.GetAsInt(), logCfg.CacheFlushInterval.GetAsDuration(time.Second))
 		return lg, nil
 	}
 
-	return stdout, nil
+	return os.Stdout, nil
 }

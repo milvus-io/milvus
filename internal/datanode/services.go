@@ -23,7 +23,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
@@ -429,7 +428,7 @@ func (node *DataNode) QueryPreImport(ctx context.Context, req *datapb.QueryPreIm
 	fileStats := task.(interface {
 		GetFileStats() []*datapb.ImportFileStats
 	}).GetFileStats()
-	logFields := []zap.Field{
+	logFields := []mlog.Field{
 		mlog.Int64("taskID", task.GetTaskID()),
 		mlog.Int64("jobID", task.GetJobID()),
 		mlog.String("state", task.GetState().String()),
@@ -475,7 +474,7 @@ func (node *DataNode) QueryImport(ctx context.Context, req *datapb.QueryImportRe
 	segmentsInfo := task.(interface {
 		GetSegmentsInfo() []*datapb.ImportSegmentInfo
 	}).GetSegmentsInfo()
-	logFields := []zap.Field{
+	logFields := []mlog.Field{
 		mlog.Int64("taskID", task.GetTaskID()),
 		mlog.Int64("jobID", task.GetJobID()),
 		mlog.String("state", task.GetState().String()),
@@ -545,7 +544,7 @@ func (node *DataNode) QueryCopySegment(ctx context.Context, req *datapb.QueryCop
 		}, nil
 	}
 
-	logFields := []zap.Field{
+	logFields := []mlog.Field{
 		mlog.Int64("taskID", task.GetTaskID()),
 		mlog.Int64("jobID", task.GetJobID()),
 		mlog.String("state", task.GetState().String()),
