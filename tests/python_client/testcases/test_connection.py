@@ -8,6 +8,33 @@ from pymilvus import DefaultConfig
 # CONNECT_TIMEOUT = 12
 
 
+def _connection_params(host, port):
+    return {"uri": cf.param_info.param_uri} if cf.param_info.param_uri else {"host": host, "port": port}
+
+
+def _connect_with_optional_token(connection_wrap, alias, check_task=ct.CheckTasks.ccr, **connection_params):
+    res, is_connected = connection_wrap.connect(
+        alias=alias,
+        check_task=ct.CheckTasks.check_nothing,
+        **connection_params,
+    )
+    if not is_connected and cf.param_info.param_token:
+        res, is_connected = connection_wrap.connect(
+            alias=alias,
+            token=cf.param_info.param_token,
+            check_task=ct.CheckTasks.check_nothing,
+            **connection_params,
+        )
+    assert is_connected, f"Failed to connect with params {connection_params}: {res}"
+    if check_task == ct.CheckTasks.ccr:
+        connection_wrap.has_connection(
+            alias=alias,
+            check_task=ct.CheckTasks.ccr,
+            check_items={ct.value_content: ct.Connect_Object_Name},
+        )
+    return res, is_connected
+
+
 class TestConnectionParams(TestcaseBase):
     """
     Test case of connections interface
@@ -392,8 +419,10 @@ class TestConnectionOperation(TestcaseBase):
         expected: add_connection failed
         """
 
+        connection_params = _connection_params(host, port)
+
         # create connection that param of alias is not exist
-        self.connection_wrap.connect(alias="test_alias_name", host=host, port=port, check_task=ct.CheckTasks.ccr)
+        _connect_with_optional_token(self.connection_wrap, alias="test_alias_name", **connection_params)
 
         # add connection with diff params after that alias has been created
         err_msg = cem.ConnDiffConf % "test_alias_name"
@@ -404,7 +433,7 @@ class TestConnectionOperation(TestcaseBase):
         )
 
         # add connection with the same params
-        self.connection_wrap.add_connection(test_alias_name={"host": host, "port": port})
+        self.connection_wrap.add_connection(test_alias_name=connection_params)
 
     @pytest.mark.tags(ct.CaseLabel.L1)
     def test_connection_add_after_default_connect(self, host, port):
@@ -414,10 +443,10 @@ class TestConnectionOperation(TestcaseBase):
                 2. add_connection with the same alias but different params
         expected: add_connection failed
         """
+        connection_params = _connection_params(host, port)
+
         # create connection that param of alias is default
-        self.connection_wrap.connect(
-            alias=DefaultConfig.DEFAULT_USING, host=host, port=port, check_task=ct.CheckTasks.ccr
-        )
+        _connect_with_optional_token(self.connection_wrap, alias=DefaultConfig.DEFAULT_USING, **connection_params)
 
         # add connection after that alias has been created
         err_msg = cem.ConnDiffConf % DefaultConfig.DEFAULT_USING
@@ -428,7 +457,7 @@ class TestConnectionOperation(TestcaseBase):
         )
 
         # add connection with the same params
-        self.connection_wrap.add_connection(test_alias_name={"host": host, "port": port})
+        self.connection_wrap.add_connection(default=connection_params)
 
     @pytest.mark.tags(ct.CaseLabel.L1)
     def test_connection_add_after_disconnect(self, host, port):
@@ -439,8 +468,10 @@ class TestConnectionOperation(TestcaseBase):
         expected: re-add_connection successfully with new params
         """
 
+        connection_params = _connection_params(host, port)
+
         # add a new connection and connect
-        self.connection_wrap.connect(alias="test_alias_name", host=host, port=port, check_task=ct.CheckTasks.ccr)
+        _connect_with_optional_token(self.connection_wrap, alias="test_alias_name", **connection_params)
 
         # disconnect the connection
         self.connection_wrap.disconnect(alias="test_alias_name")
@@ -471,8 +502,10 @@ class TestConnectionOperation(TestcaseBase):
         expected: add_connection by the same alias with different params successfully
         """
 
+        connection_params = _connection_params(host, port)
+
         # create connection that param of alias is not exist
-        self.connection_wrap.connect(alias="test_alias_name", host=host, port=port, check_task=ct.CheckTasks.ccr)
+        _connect_with_optional_token(self.connection_wrap, alias="test_alias_name", **connection_params)
 
         # disconnect alias is exist
         self.connection_wrap.remove_connection(alias="test_alias_name")
@@ -560,12 +593,13 @@ class TestConnectionOperation(TestcaseBase):
                 3. list connections and get connection address
         expected: 1. add connection, connect, list and get connection address successfully
         """
+        connection_params = _connection_params(host, port)
 
         # add a valid default connection
-        self.connection_wrap.add_connection(default={"host": host, "port": port})
+        self.connection_wrap.add_connection(default=connection_params)
 
         # successfully created default connection
-        self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr)
+        _connect_with_optional_token(self.connection_wrap, alias=DefaultConfig.DEFAULT_USING, **connection_params)
 
         # list all connections and check the response
         self.connection_wrap.list_connections(
@@ -588,11 +622,13 @@ class TestConnectionOperation(TestcaseBase):
         expected: return the same object of connect
         """
 
+        connection_params = _connection_params(host, port)
+
         # add a valid default connection
-        self.connection_wrap.add_connection(default={"host": host, "port": port})
+        self.connection_wrap.add_connection(default=connection_params)
 
         # successfully created default connection
-        self.connection_wrap.connect(alias=connect_name, check_task=ct.CheckTasks.ccr)
+        _connect_with_optional_token(self.connection_wrap, alias=connect_name, **connection_params)
 
         # get the object of alias
         res_obj1 = self.connection_wrap.has_connection(
@@ -600,7 +636,7 @@ class TestConnectionOperation(TestcaseBase):
         )[0]
 
         # connect twice with the same params
-        self.connection_wrap.connect(alias=connect_name, host=host, port=port, check_task=ct.CheckTasks.ccr)
+        _connect_with_optional_token(self.connection_wrap, alias=connect_name, **connection_params)
 
         # get the object of alias
         res_obj2 = self.connection_wrap.has_connection(
@@ -629,8 +665,10 @@ class TestConnectionOperation(TestcaseBase):
         expected: response of connect is Milvus object
         """
 
+        connection_params = _connection_params(host, port)
+
         # successfully created default connection
-        self.connection_wrap.connect(alias=connect_name, host=host, port=port, check_task=ct.CheckTasks.ccr)
+        _connect_with_optional_token(self.connection_wrap, alias=connect_name, **connection_params)
 
         # get the object of alias
         self.connection_wrap.has_connection(
@@ -726,12 +764,13 @@ class TestConnectionOperation(TestcaseBase):
                 6. list connections and get connection address
         expected: the connection was successfully terminated
         """
+        connection_params = _connection_params(host, port)
 
         # add a valid default connection
-        self.connection_wrap.add_connection(default={"host": host, "port": port})
+        self.connection_wrap.add_connection(default=connection_params)
 
         # successfully created default connection
-        self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr)
+        _connect_with_optional_token(self.connection_wrap, alias=DefaultConfig.DEFAULT_USING, **connection_params)
 
         # get the object of alias
         self.connection_wrap.has_connection(
@@ -773,12 +812,13 @@ class TestConnectionOperation(TestcaseBase):
         expected: the connection was successfully terminated
         """
         test_alias_name = "test_alias_name"
+        connection_params = _connection_params(host, port)
 
         # add a valid default connection
-        self.connection_wrap.add_connection(test_alias_name={"host": host, "port": port})
+        self.connection_wrap.add_connection(test_alias_name=connection_params)
 
         # successfully created default connection
-        self.connection_wrap.connect(alias=test_alias_name, host=host, port=port, check_task=ct.CheckTasks.ccr)
+        _connect_with_optional_token(self.connection_wrap, alias=test_alias_name, **connection_params)
 
         # list all connections and check the response
         self.connection_wrap.list_connections(
@@ -848,8 +888,10 @@ class TestConnectionOperation(TestcaseBase):
         expected: addr is None, response of list_connection still included that configure
         """
 
+        connection_params = _connection_params(host, port)
+
         # successfully created default connection
-        self.connection_wrap.connect(alias=connect_name, host=host, port=port, check_task=ct.CheckTasks.ccr)
+        _connect_with_optional_token(self.connection_wrap, alias=connect_name, **connection_params)
 
         # remove the connection that is not exist
         self.connection_wrap.remove_connection(alias=connect_name)
@@ -871,9 +913,10 @@ class TestConnectionOperation(TestcaseBase):
         method: remove connection after disconnect
         expected: response of list_connection not included that configure
         """
+        connection_params = _connection_params(host, port)
 
         # successfully created default connection
-        self.connection_wrap.connect(alias=connect_name, host=host, port=port, check_task=ct.CheckTasks.ccr)
+        _connect_with_optional_token(self.connection_wrap, alias=connect_name, **connection_params)
 
         # disconnect alias is exist
         self.connection_wrap.disconnect(alias=connect_name)
@@ -914,11 +957,10 @@ class TestConnectionOperation(TestcaseBase):
         method: connection, init collection, then disconnection
         expected: check result
         """
+        connection_params = _connection_params(host, port)
 
         # successfully created default connection
-        self.connection_wrap.connect(
-            alias=DefaultConfig.DEFAULT_USING, host=host, port=port, check_task=ct.CheckTasks.ccr
-        )
+        _connect_with_optional_token(self.connection_wrap, alias=DefaultConfig.DEFAULT_USING, **connection_params)
 
         # init collection successfully
         collection_name = cf.gen_unique_str("connection_test_")
@@ -934,9 +976,7 @@ class TestConnectionOperation(TestcaseBase):
         )
 
         # successfully created default connection
-        self.connection_wrap.connect(
-            alias=DefaultConfig.DEFAULT_USING, host=host, port=port, check_task=ct.CheckTasks.ccr
-        )
+        _connect_with_optional_token(self.connection_wrap, alias=DefaultConfig.DEFAULT_USING, **connection_params)
 
         # drop collection success
         self.collection_wrap.drop()
@@ -955,8 +995,10 @@ class TestConnect(TestcaseBase):
         method: disconnect a connected client, disconnect again
         expected: status ok after disconnected
         """
+        connection_params = _connection_params(host, port)
+
         # successfully created default connection
-        self.connection_wrap.connect(alias=connect_name, host=host, port=port, check_task=ct.CheckTasks.ccr)
+        _connect_with_optional_token(self.connection_wrap, alias=connect_name, **connection_params)
 
         # disconnect alias is exist
         self.connection_wrap.disconnect(alias=connect_name)
@@ -974,8 +1016,8 @@ class TestConnect(TestcaseBase):
         expected: connected is True
         """
 
-        uri = f"{protocol}://{host}:{port}"
-        self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.ccr)
+        uri = cf.param_info.param_uri or f"{protocol}://{host}:{port}"
+        _connect_with_optional_token(self.connection_wrap, alias=connect_name, uri=uri)
 
     @pytest.mark.tags(ct.CaseLabel.L2)
     @pytest.mark.parametrize("protocol", ["ftp"])
@@ -1007,7 +1049,7 @@ class TestConnect(TestcaseBase):
         expected: connected is True
         """
         address = f"{host}:{port}"
-        self.connection_wrap.connect(alias=connect_name, address=address, check_task=ct.CheckTasks.ccr)
+        _connect_with_optional_token(self.connection_wrap, alias=connect_name, address=address)
 
     @pytest.mark.tags(ct.CaseLabel.RBAC)
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
