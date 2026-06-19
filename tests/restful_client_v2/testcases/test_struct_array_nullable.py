@@ -267,10 +267,6 @@ class TestRestfulStructArrayNullable(TestBase):
         assert rsp["code"] != 0
         assert "Struct" in rsp["message"]
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="REST v2 schema.structFields nullable=true is silently ignored instead of preserved in describe output",
-    )
     def test_rest_v2_nullable_struct_array_schema_propagation(self):
         """
         target: test REST v2 nullable propagation for Struct Array
