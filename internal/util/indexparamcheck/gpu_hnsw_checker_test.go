@@ -95,11 +95,11 @@ func Test_gpuHnswChecker_CheckTrain(t *testing.T) {
 		{p1, true},
 		{p2, true},
 		{p3, true},
-		{p4, false},  // HAMMING not supported for float vectors
-		{p5, false},  // JACCARD not supported for float vectors
-		{p6, false},  // SUBSTRUCTURE not supported
-		{p7, false},  // SUPERSTRUCTURE not supported
-		{p8, true},   // 384-d COSINE
+		{p4, false}, // HAMMING not supported for float vectors
+		{p5, false}, // JACCARD not supported for float vectors
+		{p6, false}, // SUBSTRUCTURE not supported
+		{p7, false}, // SUPERSTRUCTURE not supported
+		{p8, true},  // 384-d COSINE
 	}
 
 	c, err := GetIndexCheckerMgrInstance().GetChecker("GPU_HNSW")

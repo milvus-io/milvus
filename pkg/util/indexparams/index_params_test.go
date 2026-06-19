@@ -631,8 +631,8 @@ func TestAppendPrepareLoadParams_OverrideIndexType(t *testing.T) {
 
 		indexParams := map[string]string{
 			common.IndexTypeKey: "HNSW",
-			"M":                "16",
-			"efConstruction":   "200",
+			"M":                 "16",
+			"efConstruction":    "200",
 		}
 
 		err := AppendPrepareLoadParams(&params, indexParams)
@@ -651,7 +651,7 @@ func TestAppendPrepareLoadParams_OverrideIndexType(t *testing.T) {
 
 		indexParams := map[string]string{
 			common.IndexTypeKey: "HNSW_int8",
-			"M":                "16",
+			"M":                 "16",
 		}
 
 		err := AppendPrepareLoadParams(&params, indexParams)
@@ -667,7 +667,7 @@ func TestAppendPrepareLoadParams_OverrideIndexType(t *testing.T) {
 
 		indexParams := map[string]string{
 			common.IndexTypeKey: "IVF_FLAT",
-			"nlist":            "1024",
+			"nlist":             "1024",
 		}
 
 		err := AppendPrepareLoadParams(&params, indexParams)
@@ -684,7 +684,7 @@ func TestAppendPrepareLoadParams_OverrideIndexType(t *testing.T) {
 
 		indexParams := map[string]string{
 			common.IndexTypeKey: "HNSW",
-			"M":                "16",
+			"M":                 "16",
 		}
 
 		err := AppendPrepareLoadParams(&params, indexParams)
