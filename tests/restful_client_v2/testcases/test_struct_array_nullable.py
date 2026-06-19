@@ -1,5 +1,6 @@
 import pytest
 from base.testbase import TestBase
+from utils.constant import CaseLabel
 from utils.utils import gen_collection_name
 
 REST_VECTOR_DIM = 8
@@ -20,7 +21,7 @@ def assert_profile_equal(actual, expected):
     assert actual == expected
 
 
-@pytest.mark.L1
+@pytest.mark.tags(CaseLabel.L1)
 class TestRestfulStructArrayNullable(TestBase):
     dim = REST_VECTOR_DIM
 
